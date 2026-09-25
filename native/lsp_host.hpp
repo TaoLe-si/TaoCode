@@ -43,6 +43,7 @@ public:
     void set_configuration(Json settings);
     void did_open(std::string uri, std::string language_id, int version, std::string text);
     void did_change(std::string uri, int version, std::string full_text);
+    void did_close(std::string uri);
     void request(std::string_view method, Json params, Client::Handler on_result);
 
 private:

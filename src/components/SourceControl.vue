@@ -47,7 +47,14 @@ async function act(operation: () => Promise<unknown>) {
   error.value = ''
   try { await operation(); await load() }
   catch (caught) { error.value = errorText(caught) }
-  finally { busy.value = false }
+  finally {
+    busy.value = false
+    // Any git operation can change the commit history and the branch comparison:
+    // invalidate both so the next render reflects the new repo state.
+    commits.value = []
+    compared.value = []
+    void loadTags()
+  }
 }
 const stage = (path: string) => act(() => request('git.stage', { path }))
 const unstage = (path: string) => act(() => request('git.unstage', { path }))
@@ -146,7 +153,15 @@ function clearCompare() {
 }
 
 onMounted(load)
-watch(() => [props.root, props.active] as const, () => { if (props.active) void load() })
+watch(() => [props.root, props.active] as const, () => {
+  if (!props.active) return
+  // Switching projects invalidates the per-project comparison and history panel.
+  compareBase.value = ''
+  compareTo.value = ''
+  compared.value = []
+  commits.value = []
+  void load()
+})
 </script>
 
 <template>

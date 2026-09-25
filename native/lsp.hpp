@@ -82,7 +82,13 @@ public:
     // Feed one parsed message received from the server.
     void receive(const Json& message);
 
+    // When the host's reader thread bails (server died, protocol error), the host
+    // calls this so any request the client is still expecting gets a clear error
+    // instead of silently hanging.
+    void fail_pending(const std::string& code);
+
 private:
+    std::mutex mutex_;
     std::int64_t next_id_ = 1;
     State state_ = State::fresh;
     Writer writer_;

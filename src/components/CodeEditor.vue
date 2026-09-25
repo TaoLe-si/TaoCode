@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { basicSetup } from 'codemirror'
 import { Compartment, EditorSelection, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
 import { Decoration, EditorView, hoverTooltip, keymap, rectangularSelection, crosshairCursor, WidgetType, type Command } from '@codemirror/view'
-import { HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language'
+import { HighlightStyle, bracketMatching, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { autocompletion, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/lint'
 import { tags } from '@lezer/highlight'
@@ -20,6 +20,7 @@ const language = new Compartment()
 const appearance = new Compartment()
 const options = new Compartment()
 const lsp = new Compartment()
+const indentGuides = new Compartment()
 let view: EditorView | undefined
 // Above this many characters the editor drops syntax highlighting, linting, LSP
 // and word wrap so a big file stays responsive; CodeMirror itself virtualises the
@@ -77,6 +78,44 @@ const breakField = StateField.define<{ lines: number[]; debug: number; marks: nu
   }),
 })
 function syncBreakDeco() { view?.dispatch({ effects: setBreakDeco.of({ lines: (props.breakpoints ?? []).map(point => point.line), debug: props.debugLine ?? 0, marks: props.bookmarks ?? [] }) }) }
+// IDEA's "Show indent guides": a faint vertical rule at each indent level so the
+// user can tell which block owns the current line. Toggled by the editor settings.
+const setIndentGuides = StateEffect.define<boolean>()
+const indentGuideField = StateField.define<boolean>({
+  create: () => props.settings.showIndentGuides,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setIndentGuides)) return e.value
+    return value
+  },
+  provide: f => EditorView.decorations.compute([f, EditorView.scrollMargins], state => {
+    if (!state.field(f)) return Decoration.none
+    const tabSize = props.settings.tabSize
+    const builder = new RangeSetBuilder<Decoration>()
+    let lineNo = 1
+    let iter = state.doc.iterLines()
+    while (true) {
+      const next = iter.next()
+      if (next.done) break
+      const text = next.value
+      const indent = text.match(/^[ \t]*/)?.[0] ?? ''
+      const cols = Math.floor(indent.replace(/\t/g, ' '.repeat(tabSize)).length / tabSize)
+      if (cols > 1) {
+        const from = state.doc.line(lineNo).from
+        for (let c = 1; c < cols; ++c)
+          builder.add(from + c * tabSize - 1, from + c * tabSize, Decoration.widget({ widget: new (class extends WidgetType { toDOM() { const el = document.createElement('span'); el.className = 'cm-indent-guide'; return el } })(), side: -1 }))
+      }
+      ++lineNo
+      iter = next
+    }
+    return builder.finish()
+  }),
+})
+const indentGuidesExtension = [
+  indentGuideField,
+  EditorView.theme({
+    '& .cm-indent-guide': { display: 'inline-block', width: '1px', height: '1em', background: 'var(--border)', opacity: '0.55' },
+  }),
+]
 // Same-symbol highlighting: on caret move (debounced) ask documentHighlight and mark
 // every occurrence. Sorted + non-overlapping so the decoration builder never throws.
 const setHighlights = StateEffect.define<{ from: number; to: number }[]>()
@@ -450,17 +489,19 @@ function lspExtensions(): Extension[] {
     hoverSource,
     autocompletion({ override: [templateCompletion, lspCompletion] }),
     keymap.of([
-      { key: 'F12', preventDefault: true, run: editor => { void revealDefinition(editor.state.selection.main.head); return true } },
-      { key: 'F2', preventDefault: true, run: emitSemantic('rename') },
-      { key: 'Shift-F12', preventDefault: true, run: emitSemantic('references') },
+      // $default.xml: GotoDeclaration Ctrl+B (+ ctrl-click), RenameElement Shift+F6,
+      // FindUsages Alt+F7, ParameterInfo Ctrl+P; ReformatCode Ctrl+Alt+L;
+      // GotoImplementation Ctrl+Alt+B, Call/TypeHierarchy Ctrl+Alt+H / Ctrl+Shift+H.
+      { key: 'Ctrl-b', preventDefault: true, run: editor => { void revealDefinition(editor.state.selection.main.head); return true } },
+      { key: 'Shift-f6', preventDefault: true, run: emitSemantic('rename') },
+      { key: 'Alt-f7', preventDefault: true, run: emitSemantic('references') },
       { key: 'Alt-Enter', preventDefault: true, run: emitSemantic('codeAction') },
-      { key: 'Shift-Alt-f', preventDefault: true, run: emitSemantic('format') },
       { key: 'Ctrl-Alt-l', preventDefault: true, run: emitSemantic('format') },
       { key: 'Ctrl-Alt-b', preventDefault: true, run: emitSemantic('implementation') },
       { key: 'Ctrl-Alt-h', preventDefault: true, run: emitSemantic('callHierarchy') },
       { key: 'Ctrl-Shift-h', preventDefault: true, run: emitSemantic('typeHierarchy') },
       { key: 'Alt-F8', preventDefault: true, run: emitEvaluate },
-      { key: 'Ctrl-Shift-Space', preventDefault: true, run: emitSemantic('signature') },
+      { key: 'Ctrl-p', preventDefault: true, run: emitSemantic('signature') },
       { key: 'Mod-w', preventDefault: true, run: () => adjustSelection(true) },
       { key: 'Mod-Shift-w', preventDefault: true, run: () => adjustSelection(false) },
     ]),
@@ -578,6 +619,10 @@ onMounted(() => {
         columnMode.of([]),
         // IDEA's read-only status table: a locked file edits nowhere.
         readOnlyMode.of(props.readOnly ? EditorState.readOnly.of(true) : []),
+        // Settings → "Show indent guides": the editor draws a thin vertical rule at
+        // every column boundary of `indentUnit`. Disabled by default to match the
+        // previous look; toggled live by reconfigure(indentGuides).
+        indentGuides.of(props.settings.showIndentGuides ? indentGuidesExtension : []),
         breakField,
         highlightField,
         hintField,
@@ -615,7 +660,7 @@ watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }
 })
 watch(() => props.theme, () => view?.dispatch({ effects: appearance.reconfigure(editorAppearance()) }))
-watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorAppearance()), options.reconfigure(editorOptions())] }), { deep: true })
+watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorAppearance()), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? indentGuidesExtension : []), setIndentGuides.of(props.settings.showIndentGuides)] }), { deep: true })
 watch(() => props.lspEnabled, enabled => {
   view?.dispatch({ effects: lsp.reconfigure(enabled ? lspExtensions() : []) })
   if (!enabled) { view?.dispatch({ effects: [setHighlights.of([]), setHints.of([])] }); rangeStack = null; return }

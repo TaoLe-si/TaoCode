@@ -450,19 +450,23 @@ std::string Session::to_uri(const std::string& path) const {
     return "file:///" + encoded;
 }
 
-std::string Session::to_path(const std::string& uri) const {
+std::string uri_to_relative(const std::string& uri, const std::filesystem::path& root) {
     std::string tail = uri;
     const std::string scheme = "file:///";
     if (tail.rfind(scheme, 0) == 0) tail = tail.substr(scheme.size());
     else if (tail.rfind("file://", 0) == 0) tail = tail.substr(7);
     auto decoded = percent_decode(tail);
-    const std::string root = u8_path(root_);
-    if (root.size() > 1 && decoded.size() >= root.size() && lower(decoded.substr(0, root.size())) == lower(root)) {
-        auto relative = decoded.substr(root.size());
+    const std::string base = u8_path(root);
+    if (base.size() > 1 && decoded.size() >= base.size() && lower(decoded.substr(0, base.size())) == lower(base)) {
+        auto relative = decoded.substr(base.size());
         while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) relative.erase(relative.begin());
         return relative;
     }
     return decoded;
+}
+
+std::string Session::to_path(const std::string& uri) const {
+    return uri_to_relative(uri, root_);
 }
 
 Host& Session::ensure(const std::string& language) {
@@ -472,27 +476,34 @@ Host& Session::ensure(const std::string& language) {
     if (config == config_.end()) throw WorkspaceError("LSP_UNAVAILABLE", "no server configured for " + language);
 
     auto host = std::make_unique<Host>();
-    host->set_diagnostics([this, language](Json params) {
-        if (!params.is_object() || !params.contains("uri")) return;
-        std::string path;
+    // The root is snapshotted when the host is created and never changes while it
+    // lives (reset_lsp shuts every host down before set_root), so the reader-thread
+    // callback below can map URIs without touching mutable Session state.
+    const auto root_snapshot = root_;
+    host->set_diagnostics([this, root_snapshot](Json params) {
+        if (!params.is_object()) return;
+        const auto uri = string_at(params, "uri");
+        if (uri.empty()) return;
+        // This runs on the Host reader thread with Host::io_mutex_ held. It must not
+        // take Session::mutex_ (Session->Host is the other lock order) and it must
+        // never throw: a malformed payload escaping here would terminate the process.
+        const std::string path = uri_to_relative(uri, root_snapshot);
         Json diagnostics = Json::array();
-        {
-            std::lock_guard lock(mutex_);
-            path = to_path(params.at("uri").get<std::string>());
-            if (params.contains("diagnostics") && params.at("diagnostics").is_array()) {
-                for (const auto& item : params.at("diagnostics")) {
-                    if (!item.is_object() || !item.contains("range")) continue;
-                    const auto& start = item.at("range").at("start");
-                    Json entry{{"line", start.value("line", 0)}, {"character", start.value("character", 0)},
-                               {"message", item.value("message", std::string())}, {"severity", item.value("severity", 1)}};
-                    if (item.at("range").contains("end")) {
-                        const auto& end = item.at("range").at("end");
-                        entry["endLine"] = end.value("line", 0);
-                        entry["endCharacter"] = end.value("character", 0);
-                    }
-                    if (item.contains("source")) entry["source"] = item.at("source");
-                    diagnostics.push_back(std::move(entry));
+        if (params.contains("diagnostics") && params.at("diagnostics").is_array()) {
+            for (const auto& item : params.at("diagnostics")) {
+                if (!item.is_object() || !item.contains("range") || !item.at("range").is_object()) continue;
+                const auto& range = item.at("range");
+                const auto start = range_corner(range, "start");
+                Json entry{{"line", int_at(start, "line")}, {"character", int_at(start, "character")},
+                           {"message", string_at(item, "message")}, {"severity", int_at(item, "severity")}};
+                if (entry.at("severity").get<int>() == 0) entry["severity"] = 1;
+                if (range.contains("end") && range.at("end").is_object()) {
+                    const auto end = range_corner(range, "end");
+                    entry["endLine"] = int_at(end, "line");
+                    entry["endCharacter"] = int_at(end, "character");
                 }
+                if (item.contains("source")) entry["source"] = item.at("source");
+                diagnostics.push_back(std::move(entry));
             }
         }
         if (on_diagnostics_) on_diagnostics_(path, std::move(diagnostics));
@@ -595,6 +606,22 @@ void Session::change(const std::string& path, const std::string& text) {
 }
 
 void Session::close(const std::string& path) {
+    Host* host = nullptr;
+    std::string uri;
+    {
+        std::lock_guard lock(mutex_);
+        const auto document = documents_.find(path);
+        if (document == documents_.end()) return;
+        uri = document->second.uri;
+        const auto found = hosts_.find(document->second.language);
+        if (found != hosts_.end() && document->second.opened) {
+            host = found->second.get();
+            document->second.opened = false;
+        }
+    }
+    // Inform the server the document is closed (LSP lifecycle); not doing so leaves
+    // stale diagnostics on JDT/TS after a tab closes. Then drop local state.
+    if (host) host->did_close(uri);
     std::lock_guard lock(mutex_);
     documents_.erase(path);
     pending_actions_.erase(path);
@@ -627,13 +654,20 @@ void Session::request(const std::string& kind, const std::string& path, int line
                 if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
                 Json locations = Json::array();
                 const auto add = [this, &locations](const Json& item) {
+                    if (!item.is_object()) return;
                     std::string target_uri;
                     const Json* range = nullptr;
-                    if (item.contains("uri")) { target_uri = item.at("uri").get<std::string>(); range = &item.at("range"); }
-                    else if (item.contains("targetUri")) { target_uri = item.at("targetUri").get<std::string>(); range = &item.at("targetSelectionRange"); }
+                    if (item.contains("uri") && item.at("uri").is_string()) {
+                        target_uri = item.at("uri").get<std::string>();
+                        if (item.contains("range") && item.at("range").is_object()) range = &item.at("range");
+                    } else if (item.contains("targetUri") && item.at("targetUri").is_string()) {
+                        target_uri = item.at("targetUri").get<std::string>();
+                        if (item.contains("targetSelectionRange") && item.at("targetSelectionRange").is_object())
+                            range = &item.at("targetSelectionRange");
+                    }
                     if (target_uri.empty() || !range || !range->contains("start")) return;
-                    const auto& start = range->at("start");
-                    locations.push_back({{"path", to_path(target_uri)}, {"line", start.value("line", 0)}, {"character", start.value("character", 0)}});
+                    const auto start = range_corner(*range, "start");
+                    locations.push_back({{"path", to_path(target_uri)}, {"line", int_at(start, "line")}, {"character", int_at(start, "character")}});
                 };
                 if (result.is_array()) for (const auto& item : result) add(item);
                 else if (result.is_object() && (result.contains("uri") || result.contains("targetUri"))) add(result);

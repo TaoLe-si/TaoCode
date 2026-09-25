@@ -93,13 +93,25 @@ async function stop() { busy.value = true; try { await dapTerminate(); frames.va
 async function refreshStack() {
   if (!dapState.running) { frames.value = []; dapSetCurrentLocation(null); return }
   try {
-    void dapThreads().then(result => { threads.value = result.threads }).catch(() => undefined)
+    void dapThreads().then(result => { threads.value = result.threads }).catch(caught => { error.value = message(caught); threads.value = [] })
     frames.value = (await dapStackTrace()).frames
     const top = frames.value[0]
     if (top) dapSetCurrentLocation({ path: top.path ?? props.activePath, line: top.line }); else dapSetCurrentLocation(null)
     await refreshScopes(frames.value[0]?.id)
     await refreshWatches()
-  } catch { frames.value = []; dapSetCurrentLocation(null) }
+  } catch (caught) { error.value = message(caught); frames.value = []; dapSetCurrentLocation(null) }
+}
+// Switching threads is the IDEA Threads dropdown's primary action; we just ask the
+// adapter for the chosen thread's frames and reuse the same stack UI.
+async function selectThread(id: number) {
+  error.value = ''
+  if (!dapState.running) return
+  try {
+    frames.value = (await dapStackTrace(id)).frames
+    const top = frames.value[0]
+    if (top) dapSetCurrentLocation({ path: top.path ?? props.activePath, line: top.line }); else dapSetCurrentLocation(null)
+    await refreshScopes(frames.value[0]?.id)
+  } catch (caught) { error.value = message(caught) }
 }
 async function refreshScopes(frameId?: number) {
   scopes.value = []
@@ -108,10 +120,11 @@ async function refreshScopes(frameId?: number) {
   try {
     scopes.value = (await dapScopes(frameId)).scopes
     for (const scope of scopes.value) if (!scope.expensive) await loadScope(scope.reference)
-  } catch { /* adapter closed mid-refresh */ }
+  } catch (caught) { error.value = message(caught) }
 }
 async function loadScope(reference: number) {
-  try { values[reference] = (await dapVariables(reference)).variables } catch { values[reference] = [] }
+  try { values[reference] = (await dapVariables(reference)).variables }
+  catch (caught) { values[reference] = []; error.value = message(caught) }
 }
 function toggleScope(index: number, scope: DapScope) {
   const key = `s${index}`
@@ -146,7 +159,7 @@ function setCondition(line: number, condition: string) {
 }
 function message(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 
-watch(() => dapState.paused, paused => { if (paused) void refreshStack() })
+watch(() => dapState.paused, paused => { if (paused) void refreshStack() }, { immediate: true })
 watch(() => dapState.running, live => { if (!live) { frames.value = []; scopes.value = []; threads.value = [] } })
 // IDEA's Watches: every stop re-evaluates the list against the new top frame.
 async function refreshWatches() {
@@ -214,11 +227,11 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
     </div>
 
     <div class="debug-toolbar">
-      <button class="debug-btn" :disabled="!stopped || busy" title="继续 (F5)" @click="step('continue')"><Play :size="13" />继续</button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="继续 (F9)" @click="step('continue')"><Play :size="13" />继续</button>
       <button class="debug-btn" :disabled="!running || stopped || busy" title="暂停" @click="step('pause')"><Pause :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳过" @click="step('next')"><StepForward :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步进入" @click="step('stepIn')"><ChevronDown :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳出" @click="step('stepOut')"><ChevronRight :size="13" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳过 (F8)" @click="step('next')"><StepForward :size="13" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步进入 (F7)" @click="step('stepIn')"><ChevronDown :size="13" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳出 (Shift+F8)" @click="step('stepOut')"><ChevronRight :size="13" /></button>
       <button class="debug-btn" :disabled="!running || busy" title="停止" @click="stop"><Square :size="13" /></button>
     </div>
 
@@ -245,10 +258,10 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 
     <div class="debug-section-title">线程 <span v-if="threads.length">· {{ threads.length }}</span></div>
     <div class="debug-stack">
-      <div v-for="thread in threads" :key="thread.id" class="debug-frame" :class="{ active: thread.id === dapState.threadId }" title="点击切换当前线程">
+      <button v-for="thread in threads" :key="thread.id" class="debug-frame" :class="{ active: thread.id === dapState.threadId }" :title="`切换到线程 ${thread.name}`" @click="selectThread(thread.id)">
         <span class="debug-frame-name">#{{ thread.id }} {{ thread.name }}</span>
         <span v-if="thread.id === dapState.threadId" class="debug-frame-loc">当前</span>
-      </div>
+      </button>
       <div v-if="!threads.length" class="debug-empty">停止时在此显示线程列表。</div>
     </div>
 

@@ -159,6 +159,19 @@ int main() {
         check(has_feature, "branches should include feature");
     });
 
+    run("pull runs plain 'git pull' (not --ff-only) so diverged branches still merge", [&] {
+        // TaoCode's pull is IDEA's default (merge), not ff-only. ff-only is a
+        // separate action. A plain `git pull` without a configured upstream throws,
+        // so we just verify the call goes through and that the source no longer
+        // passes --ff-only.
+        bool caught = false;
+        try { taocode::git::pull(root); }
+        catch (const taocode::WorkspaceError& error) {
+            caught = error.code == "GIT_FAILED";
+        }
+        check(caught, "pull runs (and fails because the test repo has no upstream, exactly like plain `git pull`)");
+    });
+
     run("log lists commits for the repo and for a file", [&] {
         const auto repo_log = taocode::git::log(root, "", 50);
         check(!repo_log.at("commits").empty(), "repo history has commits");

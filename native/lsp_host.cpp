@@ -79,7 +79,7 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
     pipe_->thread = info.hThread;
 
     alive_ = true;
-    reader_ = std::thread([this]() {
+reader_ = std::thread([this]() {
         std::vector<char> buffer(16384);
         MessageReader stream;
         for (;;) {
@@ -93,10 +93,21 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
             const auto want = available > buffer.size() ? buffer.size() : available;
             DWORD got = 0;
             if (!ReadFile(pipe_->stdout_read, buffer.data(), static_cast<DWORD>(want), &got, nullptr) || !got) break;
-            std::lock_guard io(io_mutex_);
-            stream.feed({buffer.data(), got});
-            while (const auto message = stream.next()) client_.receive(*message);
+            try {
+                std::lock_guard io(io_mutex_);
+                stream.feed({buffer.data(), got});
+                while (const auto message = stream.next()) client_.receive(*message);
+            } catch (const WorkspaceError&) {
+                // A malformed frame aborts the reader. Lock order matters: io_mutex_
+                // is released by this scope before fail_pending acquires client.mutex_.
+                break;
+            }
         }
+        // The server pipe went EOF (server exited) or we hit a protocol error.
+        // Mark the host dead so subsequent requests fail with a clear error rather
+        // than silently dropping their write.
+        alive_ = false;
+        client_.fail_pending("LSP_CLOSED");
     });
 
     client_.start(std::move(initialize_params), [handler = std::move(on_ready)](Json result, Json error) {
@@ -147,6 +158,11 @@ void Host::did_open(std::string uri, std::string language_id, int version, std::
 void Host::did_change(std::string uri, int version, std::string full_text) {
     std::lock_guard lock(io_mutex_);
     if (alive_) client_.did_change(uri, version, full_text);
+}
+
+void Host::did_close(std::string uri) {
+    std::lock_guard lock(io_mutex_);
+    if (alive_) client_.did_close(uri);
 }
 
 void Host::request(std::string_view method, Json params, Client::Handler on_result) {

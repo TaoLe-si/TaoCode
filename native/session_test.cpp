@@ -83,6 +83,13 @@ int main() {
         check(sessions.load(R"(D:\proj\c2)").at("state").at("tabs").at(0).at("draft").get<std::string>() == "second", "root two keeps its draft");
     });
 
+    run("an empty tab path is rejected with no UB", [&] {
+        // Regression: path.front() on an empty string is undefined behaviour.
+        expect_code("INVALID_SESSION", [&] {
+            sessions.save(R"(D:\proj\empty)", Json{{"tabs", Json::array({Json{{"path", ""}}})}, {"active", {""}}, {"orientation", "none"}, {"focused", 0}});
+        });
+    });
+
     run("invalid states are rejected before anything is written", [&] {
         expect_code("INVALID_SESSION", [&] { sessions.save(R"(D:\proj\d)", Json{{"tabs", "not-an-array"}}); });
         expect_code("INVALID_SESSION", [&] { sessions.save(R"(D:\proj\d)", Json{{"tabs", Json::array({Json{{"line", 1}}})}}); });

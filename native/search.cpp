@@ -363,7 +363,8 @@ Json replace(const fs::path& root, const Options& options) {
               options.regex ? build_query_pattern(options) : std::regex{}, options.regex};
 
     std::size_t files = 0, replacements = 0;
-    walk(root, scan, [&](const fs::path& path, const std::string&, const std::string& content) {
+    bool truncated = false;
+    const bool complete = walk(root, scan, [&](const fs::path& path, const std::string&, const std::string& content) {
         std::string result;
         result.reserve(content.size());
         std::size_t last = 0, hits = 0;
@@ -382,7 +383,8 @@ Json replace(const fs::path& root, const Options& options) {
         ++files;
         replacements += hits;
     });
-    return {{"files", files}, {"replacements", replacements}};
+    if (!complete) truncated = true;
+    return {{"files", files}, {"replacements", replacements}, {"truncated", truncated}};
 }
 
 }  // namespace taocode::search

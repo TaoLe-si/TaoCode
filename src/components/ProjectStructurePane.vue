@@ -190,6 +190,12 @@ function save() {
         </div>
         <p v-if="invalidPatterns" class="ps-error" role="alert">每条标记都要有标记文字和说明，且标记不能重复。</p>
       </fieldset>
+      <!-- Without an explicit submit button the browser silently drops Enter in the
+           various inputs; add one so the form is actually saveable. -->
+      <div class="ps-actions">
+        <button type="submit" :form="`${id}-form`" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存项目结构' }}</button>
+        <button type="reset" :form="`${id}-form`" class="subtle-button" :disabled="busy">还原</button>
+      </div>
     </form>
   </div>
 </template>
@@ -232,6 +238,7 @@ function save() {
 .ps-todo-pattern { flex: 1 1 45%; }
 .ps-todo-desc { flex: 1 1 55%; font-family: var(--font-ui) !important; }
 .ps-todo-add { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-1); }
+.ps-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
 @media (max-width: 560px) {
   .ps-row { grid-template-columns: minmax(0, 1fr); }
   .ps-label { text-align: left; }

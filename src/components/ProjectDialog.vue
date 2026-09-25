@@ -152,6 +152,7 @@ onBeforeUnmount(() => {
           <label :for="`${id}-template`">项目模板</label>
           <select :id="`${id}-template`" :value="form.template" :aria-describedby="`${id}-template-hint`" @change="updateField('template', ($event.target as HTMLSelectElement).value as ProjectForm['template'])">
             <option value="empty">空项目</option>
+            <option value="cpp">C++ 项目（CMake）</option>
             <option value="java">Java 项目</option>
             <option value="spring-boot">Spring Boot 项目</option>
             <option value="maven">Maven 项目</option>

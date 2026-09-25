@@ -25,7 +25,7 @@ export interface TodoPattern { pattern: string; description: string }
 export interface JavaProjectSettings { jdkHome: string; jdkName: string; sourcePaths: string[]; outputPath: string; referencedLibraries: string[] }
 export const defaultJavaProjectSettings: JavaProjectSettings = { jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] }
 export interface ProjectSettings { excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string> }
-export interface ProjectForm { parent: string; name: string; template: 'empty' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
+export interface ProjectForm { parent: string; name: string; template: 'empty' | 'cpp' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
 export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
 export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, restoreLastProject: false, syncOnFocus: true, autoSave: false, showIndentGuides: true, bracketMatching: true, tabLimit: 30 }
 export const defaultProjectSettings: ProjectSettings = {
@@ -328,7 +328,7 @@ export function subscribeTerm(id: number, onBytes: (bytes: Uint8Array) => void):
   }
 }
 export const term = {
-  create: (cols: number, rows: number) => request<TermCreateResult>('term.create', { cols, rows }),
+  create: (cols: number, rows: number, cwd?: string) => request<TermCreateResult>('term.create', { cols, rows, cwd }),
   resize: (id: number, cols: number, rows: number) => request<{ ok: true }>('term.resize', { id, cols, rows }),
   kill: (id: number) => request<{ ok: true }>('term.kill', { id }),
   // Keystrokes are fire-and-forget (no per-character Trace entry). The unmatched
@@ -483,7 +483,15 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
       const patch = params.settings as Record<string, unknown>
       if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
       for (const [key, value] of Object.entries(patch)) {
-        if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32 : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number' : !['wordWrap', 'lineNumbers', 'restoreLastProject', 'syncOnFocus', 'autoSave'].includes(key) || typeof value !== 'boolean') throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
+        const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
+          key === 'lineNumbers' || key === 'restoreLastProject' || key === 'syncOnFocus' ||
+          key === 'autoSave' || key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit'
+        if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
+        if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
+          : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'
+          : key === 'tabLimit' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
+          : typeof value !== 'boolean')
+          throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
       }
       Object.assign(previewState.settings, patch)
       return { ...previewState.settings }

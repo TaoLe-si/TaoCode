@@ -6,7 +6,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { BridgeError, isDesktop, subscribeTerm, term } from '../bridge'
 
-const props = defineProps<{ active: boolean }>()
+const props = defineProps<{ active: boolean; cwd?: string }>()
+const emit = defineEmits<{ focusTerminal: [] }>()
 
 interface Pane { id: number; label: string; view: HTMLDivElement; instance: Terminal; fit: FitAddon; off: () => void; group: number }
 
@@ -46,17 +47,21 @@ function layout() {
   refit()
 }
 
-async function spawn(group?: number) {
+async function spawn(group?: number, cwdOverride?: string) {
   if (!isDesktop) { note.value = '浏览器预览不能开本地终端，请运行桌面端。'; return }
   if (busy.value) return
   busy.value = true
   note.value = ''
+  // IDE-03's "Open Terminal Here": cwd falls back to the prop, then the bridge
+  // default (workspace root). Pass nothing when neither applies so the native
+  // session spawns at its own default.
+  const requested = cwdOverride ?? props.cwd
   let id = 0
   let pane: Pane | undefined
   let view: HTMLDivElement | undefined
   let instance: Terminal | undefined
   try {
-    id = (await term.create(80, 24)).id
+    id = (await term.create(80, 24, requested)).id
     if (disposed) { await term.kill(id); return }
     view = document.createElement('div')
     view.className = 'terminal-view'
@@ -100,6 +105,15 @@ function select(pane: Pane) {
   layout()
   pane.instance.focus()
 }
+
+// Exposed so the menu's "Open Terminal Here" can spawn a panel in a chosen
+// directory. The caller (App.vue) handles switching to the terminal tab first;
+// the function spawns the panel and the panel stays subscribed to its output.
+async function openIn(dir: string) {
+  emit('focusTerminal')
+  await spawn(undefined, dir)
+}
+defineExpose({ openIn })
 
 async function close(pane: Pane) {
   const rest = panes.value.filter(other => other !== pane)

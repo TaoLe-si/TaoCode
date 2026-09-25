@@ -16,11 +16,13 @@ const filter = ref('')
 const tree = computed(() => treeOf(props.symbols))
 const rows = computed(() => arrange(tree.value, { sort: sortByName.value, flat: flatView.value, filter: filter.value }))
 
+// LSP SymbolKind enum (1-based per the spec; previously we mapped it as if it
+// started at 0, which swapped Class/Method/Constructor/Enum with each other).
 const KIND: Record<number, string> = {
   1: '文件', 2: '模块', 3: '命名空间', 4: '类', 5: '方法', 6: '属性', 7: '字段', 8: '构造器',
-  9: '枚举', 10: '接口', 11: '函数', 12: '函数', 13: '变量', 14: '常量', 15: '结构体',
+  9: '枚举', 10: '接口', 11: '函数', 12: '方法', 13: '变量', 14: '常量', 15: '结构体',
   16: '数值', 17: '枚举成员', 18: '字符串', 19: '布尔', 20: '数组', 21: '对象', 22: '键',
-  23: '字段', 24: '常量', 25: '类型', 26: '类',
+  23: '结构体', 24: '常量', 25: '类型', 26: '类',
 }
 const label = (symbol: LspDocumentSymbol) => `${KIND[symbol.kind] ?? '符号'} · ${symbol.name}`
 </script>

@@ -130,9 +130,22 @@ void Client::respond(const Json& id, Json result, Json error) {
 
 std::int64_t Client::send_request(std::string_view method, Json params, Handler on_result) {
     const std::int64_t id = next_id_++;
-    pending_.emplace(id, std::move(on_result));
+    {
+        std::lock_guard lock(mutex_);
+        pending_.emplace(id, std::move(on_result));
+    }
     send(make_request(id, method, std::move(params)));
     return id;
+}
+
+void Client::fail_pending(const std::string& code) {
+    std::unordered_map<std::int64_t, Handler> victims;
+    {
+        std::lock_guard lock(mutex_);
+        victims.swap(pending_);
+    }
+    Json error{{"code", -32001}, {"message", code}};
+    for (auto& [id, handler] : victims) handler(Json(nullptr), error);
 }
 
 void Client::start(Json initialize_params, Handler on_result) {
@@ -189,10 +202,14 @@ void Client::receive(const Json& message) {
     if (is_response(message)) {
         if (!message.at("id").is_number_integer()) return;  // we only issue integer ids
         const auto id = message.at("id").get<std::int64_t>();
-        const auto pending = pending_.find(id);
-        if (pending == pending_.end()) return;
-        Handler handler = std::move(pending->second);
-        pending_.erase(pending);
+        Handler handler;
+        {
+            std::lock_guard lock(mutex_);
+            const auto pending = pending_.find(id);
+            if (pending == pending_.end()) return;
+            handler = std::move(pending->second);
+            pending_.erase(pending);
+        }
         Json error = message.contains("error") ? message.at("error") : Json(nullptr);
         Json result = message.contains("result") ? message.at("result") : Json(nullptr);
         handler(std::move(result), std::move(error));

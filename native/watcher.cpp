@@ -81,6 +81,7 @@ void Watcher::loop() {
     overlapped_ = overlapped;
     std::vector<std::string> pending;
     auto last_change = std::chrono::steady_clock::now();
+    auto batch_started = last_change;
     bool pending_read = false;
 
     const auto flush = [&] {
@@ -142,7 +143,10 @@ void Watcher::loop() {
                 reinterpret_cast<char*>(record) + record->NextEntryOffset);
         }
         last_change = std::chrono::steady_clock::now();
-        if (std::chrono::steady_clock::now() - last_change > max_batch_delay) flush();
+        if (pending.empty()) batch_started = last_change;
+        // A single batch must not sit forever: the max_batch_delay ceiling flushes
+        // even if more changes keep arriving inside the debounce window.
+        if (std::chrono::steady_clock::now() - batch_started > max_batch_delay) flush();
     }
     flush();
     if (pending_read) { DWORD ignored = 0; GetOverlappedResult(directory_, overlapped, &ignored, FALSE); }

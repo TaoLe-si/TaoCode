@@ -12,6 +12,10 @@ const expanded = reactive(new Set<string>())
 const loading = reactive(new Set<string>())
 const children = reactive(new Map<string, Entry[]>())
 async function activate(entry: Entry) {
+  // Synthetic library leaves (path starts with "\u0000lib:") never exist on disk;
+  // the row is a glob string and clicking it must not try to open a workspace
+  // file. The owning App layer renders the actual glob path in the row tooltip.
+  if (entry.path.startsWith('\u0000')) return
   if (entry.kind === 'file') { emit('open', entry.path); return }
   if (loading.has(entry.path)) return
   if (expanded.has(entry.path)) { expanded.delete(entry.path); return }

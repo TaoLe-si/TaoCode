@@ -343,6 +343,10 @@ struct App {
     }
 
     void reset_lsp(const std::string& root) {
+        // Tear down any prior project's language servers before reconfiguring;
+        // otherwise hosts and documents from the old root survive under the new root,
+        // and URI mappings silently mix two projects.
+        if (lsp) lsp->shutdown_all();
         configure_lsp();
         lsp->set_root(root.empty() ? fs::path() : fs::path(wide(root)));
     }
@@ -813,8 +817,13 @@ struct App {
             else if (method == "dap.terminate") { stop_dap(); result = {{"ok", true}}; }
             else if (method == "dap.disconnect") { if (dap) { dap->disconnect({}); dap->shutdown(); } result = {{"ok", true}}; }
             else if (method == "term.create") {
-                result = {{"id", terminals->create(params.value("cols", 80), params.value("rows", 24),
-                                                   current_root.empty() ? std::wstring() : wide(current_root),
+                // The cwd defaults to the workspace root when the caller omits it
+                // (IDEA's "Open Terminal Here" needs a per-directory cwd).
+                std::wstring cwd;
+                if (params.contains("cwd") && params.at("cwd").is_string() && !params.at("cwd").get<std::string>().empty())
+                    cwd = wide(params.at("cwd").get<std::string>());
+                else if (!current_root.empty()) cwd = wide(current_root);
+                result = {{"id", terminals->create(params.value("cols", 80), params.value("rows", 24), cwd,
                                                    [this](int id, std::string_view bytes) {
                                                        queue_term({{"event", "term.output"}, {"id", id}, {"dataB64", base64_encode(bytes)}});
                                                    })}};

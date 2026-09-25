@@ -54,7 +54,7 @@ void validate_state(const Json& state) {
         if (!tab.is_object() || !tab.contains("path") || !tab.at("path").is_string())
             reject("INVALID_SESSION", "每个会话条目都需要 path。");
         const auto& path = tab.at("path").get_ref<const std::string&>();
-        if (path.size() > max_path_chars || path.front() == '/' || path.front() == '\\' ||
+        if (path.empty() || path.size() > max_path_chars || path.front() == '/' || path.front() == '\\' ||
             path.find(':') != std::string::npos || path.find("..") != std::string::npos ||
             !valid_utf8(path))
             reject("INVALID_SESSION", "会话路径必须是工作区相对路径。");
@@ -124,8 +124,11 @@ Json SessionStore::load(const std::string& root) {
         const Json state = Json::parse(stream);
         validate_state(state);
         return {{"found", true}, {"state", state}};
+    } catch (const WorkspaceError&) {
+        // A structurally-valid but shape-rejected state must report corrupt, not
+        // surface as a programmer-facing exception.
+        return {{"found", true}, {"corrupt", true}};
     } catch (const Json::exception&) {
-        // A torn or corrupt session file is reported, never partially applied.
         return {{"found", true}, {"corrupt", true}};
     }
 }

@@ -28,7 +28,13 @@ std::vector<std::string> parse_patterns(const std::string& text);
 // with workspace-relative '/'-separated paths and 1-based line/column.
 Json run(const std::filesystem::path& root, const Options& options);
 
-// Returns { files, replacements } after rewriting every matching file in place.
+// Searches files; `truncated` is true when the walk hit max_scanned_files or
+// max_results, so the visible matches are not the full set.
+Json run(const std::filesystem::path& root, const Options& options);
+
+// Returns { files, replacements, truncated } after rewriting every matching file
+// in place; `truncated` mirrors the run truncation so a partial rewrite is
+// reported instead of silently reported as complete.
 Json replace(const std::filesystem::path& root, const Options& options);
 
 }  // namespace taocode::search

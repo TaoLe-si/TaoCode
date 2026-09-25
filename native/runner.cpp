@@ -33,6 +33,24 @@ Runner::~Runner() {
 void Runner::start(const Spec& spec, Output on_output, Done on_done) {
     std::lock_guard lock(mutex_);
     if (running_) throw WorkspaceError("RUNNING", "已有构建/运行任务在进行中。");
+    // A second start() on a Runner whose previous run already finished would assign
+    // a fresh std::thread to a joinable one (operator= on joinable thread calls
+    // std::terminate) and leak the old pipes/job/process handles. main.cpp builds a
+    // new Runner per run, but stay defensive.
+    if (reader_.joinable()) reader_.join();
+    if (stdin_write_) CloseHandle(reinterpret_cast<HANDLE>(stdin_write_));
+    if (stdout_read_) CloseHandle(reinterpret_cast<HANDLE>(stdout_read_));
+    if (process_) CloseHandle(reinterpret_cast<HANDLE>(process_));
+    if (thread_) CloseHandle(reinterpret_cast<HANDLE>(thread_));
+    if (job_) CloseHandle(reinterpret_cast<HANDLE>(job_));
+    stdin_write_ = nullptr;
+    stdout_read_ = nullptr;
+    process_ = nullptr;
+    thread_ = nullptr;
+    job_ = nullptr;
+    running_ = false;
+    on_output_ = nullptr;
+    on_done_ = nullptr;
     on_output_ = std::move(on_output);
     on_done_ = std::move(on_done);
 

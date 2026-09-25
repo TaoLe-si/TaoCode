@@ -358,7 +358,10 @@ Json log_full(const fs::path& repo, int limit) {
     return {{"commits", std::move(commits)}};
 }
 
-void pull(const fs::path& repo) { require_ok(run(repo, {L"pull", L"--ff-only"}), "拉取"); }
+// IDEA's Git.Pull defaults to merge (not --ff-only); ff-only is an opt-in variant
+// reachable through a separate action. Plain `git pull` here matches what happens
+// when the user just clicks Pull.
+void pull(const fs::path& repo) { require_ok(run(repo, {L"pull"}), "拉取"); }
 void push(const fs::path& repo) { require_ok(run(repo, {L"push"}), "推送"); }
 
 Json stash_list(const fs::path& repo) {

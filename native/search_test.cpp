@@ -149,6 +149,7 @@ int main() {
         const auto result = taocode::search::replace(root, options);
         check(result.at("replacements").get<int>() == 1, "one standalone beta replaced");
         check(result.at("files").get<int>() == 1, "one file changed");
+        check(result.contains("truncated") && result.at("truncated").get<bool>() == false, "a tiny scan is not truncated");
         check(grab(root / "note.txt") == "alpha\nB alpha\nbetabox\n", "betabox must be left intact");
     });
 

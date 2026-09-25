@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { GitGraph, RefreshCw, Search, Copy, ExternalLink, GitPullRequestArrow } from 'lucide-vue-next'
+import { GitGraph, RefreshCw, Search, Copy, GitPullRequestArrow } from 'lucide-vue-next'
 import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitRef } from '../bridge'
 
 const props = defineProps<{ root: string; active: boolean }>()
-const emit = defineEmits<{ openDiff: [payload: { hash: string }] }>()
 
 const commits = ref<GitFullCommit[]>([])
 const loading = ref(false)

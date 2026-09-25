@@ -263,6 +263,40 @@ int main() {
         check(h.client.state() == lsp::Client::State::stopped, "client reaches stopped");
     });
 
+    run("did_close writes a textDocument/didClose notification", [&] {
+        // Editor lifecycle: closing a tab must send didClose so the server drops
+        // its stale buffer and diagnostics (matches LSP spec, IDEA's Session.close).
+        Harness h;
+        h.client.start(Json::object(), [](Json, Json) {});
+        h.drain();
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 1}, {"result", Json::object()}});
+        h.drain();
+        h.client.did_close("file:///workspace/Main.java");
+        auto written = h.drain();
+        check(written.size() == 1 && written[0].at("method") == "textDocument/didClose", "didClose is sent");
+        check(written[0].at("params").at("textDocument").at("uri").get<std::string>() == "file:///workspace/Main.java",
+              "the closing uri is the document's, not the workspace's");
+    });
+
+run("fail_pending answers pending requests when the server dies", [&] {
+        // Regression: an unreadable or exited server must not leave pending_ entries
+        // that no one will ever resolve; every outstanding request gets an error
+        // immediately rather than hanging the bridge forever.
+        Harness h;
+        h.client.start(Json::object(), [](Json, Json) {});
+        h.drain();
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 1}, {"result", Json::object()}});
+        h.drain();
+        std::vector<std::pair<Json, bool>> delivered;
+        for (int i = 0; i < 3; ++i) {
+            h.client.request("test/feature/" + std::to_string(i), Json::object(),
+                [&delivered](Json result, Json error) { delivered.push_back({result, error.is_null()}); });
+        }
+        h.client.fail_pending("LSP_CLOSED");
+        check(delivered.size() == 3, "every pending request was answered (got " + std::to_string(delivered.size()) + ")");
+        for (auto& [_, ok] : delivered) check(!ok, "the answers report failure, not success");
+    });
+
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;
 }

@@ -17,7 +17,7 @@ import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
 import ProjectDialog from './components/ProjectDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
-import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, isDesktop, lspDiagnostics, request, runOutput, runState, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type RecentProject, type RunConfig, type SaveResult, type TemplateSettings, type TodoPattern, type Workspace } from './bridge'
+import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, isDesktop, lspDiagnostics, request, runOutput, runState, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type RecentProject, type RunConfig, type SaveResult, type TemplateSettings, type TodoPattern, type Workspace } from './bridge'
 import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
 import { rankCommands } from './commandSearch'
 import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
@@ -54,8 +54,6 @@ const focusedPane = computed({
   get: () => splitModel.focused,
   set: value => { splitModel.focused = value },
 })
-const primary = computed(() => groups[0])
-const secondary = computed(() => groups[1])
 const allTabs = computed(() => [...groups[0].tabs, ...groups[1].tabs.filter(tab => !groups[0].tabs.includes(tab))])
 function findTab(path: string) { return allTabs.value.find(tab => tab.path === path) }
 function hasTabPath(path: string) { return groups[0].tabs.some(tab => tab.path === path) || groups[1].tabs.some(tab => tab.path === path) }
@@ -96,6 +94,7 @@ const runInput = ref<HTMLInputElement>()
 const runLog = ref<HTMLElement>()
 const treeVersion = ref(0)
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
+const terminalPanelRef = ref<InstanceType<typeof TerminalPanel> | null>(null)
 const theme = ref<Theme>(initialTheme())
 const panelSizes = reactive({ explorer: 240, trace: 300, output: 180 })
 const resizing = ref(false)
@@ -681,12 +680,17 @@ async function activateWorkspace(result: Workspace) {
 // scratch/ folder. Both stay empty when the folder/globs do not exist.
 const syntheticNodes = ref<SyntheticNode[]>([])
 async function refreshSyntheticNodes() {
+  // IDEA's Project view "External Libraries" shows glob strings as leaves (they
+  // do not exist on disk to expand), so the synthetic rows must report kind:'file'
+  // to stop FileTree from recursively listing them. The "Scratches and Consoles"
+  // list under the scratch/ folder keeps the real entries; the leading "scratch/"
+  // prefix is added by workspace.list itself, not here.
   const nodes: SyntheticNode[] = [{ path: '\u0000libraries', label: '外部库', icon: 'libraries', entries: [] }]
   for (const glob of projectSettings.value.java.referencedLibraries)
-    nodes[0]!.entries.push({ name: glob, path: `\u0000lib:${glob}`, kind: 'directory' })
+    nodes[0]!.entries.push({ name: glob, path: `\u0000lib:${glob}`, kind: 'file' })
   try {
     const scratches = await request<Entry[]>('workspace.list', { path: 'scratch' })
-    nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: 'scratches', entries: scratches.map(item => ({ ...item, path: `scratch/${item.path}` })) })
+    nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: 'scratches', entries: scratches.map(item => ({ ...item, path: item.path })) })
   } catch { /* scratch/ may not exist yet */ }
   syntheticNodes.value = nodes
 }
@@ -870,7 +874,7 @@ async function openFile(path: string, internal = false, options?: { preview?: bo
   try {
     const doc = await request<DocumentData>('file.read', { path })
     if (epoch !== workspaceEpoch) return
-    const tab: Tab = { ...doc, saving: false, dirty: false, line: 1, column: 1, lspRunning: false }
+    const tab: Tab = { ...doc, saving: false, dirty: false, line: 1, column: 1, lspRunning: false, readOnly: doc.readOnly }
     // IDEA opens tree selections as preview (italic) tabs that the next preview replaces.
     if (options?.preview) { const previous = groups[focusedPane.value].tabs.find(item => item.preview); if (previous) void closeTabIn(focusedPane.value, previous) }
     tab.preview = options?.preview === true
@@ -882,6 +886,7 @@ async function openFile(path: string, internal = false, options?: { preview?: bo
     // A freshly opened file sits at its first line until the caret says otherwise.
     rememberPlace({ kind: '文件', path, line: 0, label: path })
     palette.value = false
+    if (doc.readOnly) await nextTick(), editorFor(path)?.setReadOnly(true)
     if (isDesktop) await startLsp(tab)
   } catch (error) { notify(errorMessage(error), true) }
   finally { opening.delete(path) }
@@ -911,6 +916,7 @@ function onEditorChange(tab: Tab) {
   rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true })
   if (markdownPreviewOn.value && tab.path === activePath.value) refreshMarkdownSoon()
   scheduleAutoSave()
+  scheduleSessionSave()  // drafts change on every keystroke, not just on dirty-flip
 }
 // IDEA's "Last Edit Location" is project-wide (JumpToLastChangeAction reads
 // IdeDocumentHistory.changePlaces), so Ctrl+Shift+Backspace follows edits across
@@ -1785,7 +1791,6 @@ const templateQuery = ref('')
 const templateIndex = ref(0)
 const templateInput = ref<HTMLInputElement>()
 interface TemplateChoice { id: string; title: string; keywords: string; template: Template }
-interface TemplateChoice { id: string; title: string; keywords: string; template: Template }
 const templateChoices = computed<TemplateChoice[]>(() => {
   const path = active.value?.path ?? ''
   // rankCommands matches title+keywords (IDEA's Find Action rules), so each entry is
@@ -1825,6 +1830,26 @@ watch(templateQuery, () => { templateIndex.value = 0 })
 // list follows the workspace instead of the machine: `project.settings.*` owns it.
 const runConfigs = computed<RunConfig[]>(() => projectSettings.value.runConfigs)
 const runConfigName = ref('')
+// IDEA's Alt+Shift+F10 "Choose Run Configuration" popup: pick the config to run or
+// debug without hunting through the Run tab's select.
+const configChooser = ref<{ debug: boolean } | null>(null)
+const configIndex = ref(0)
+function openConfigChooser(debug = false) {
+  if (!runConfigs.value.length) { notify('还没有运行配置：在“运行”面板里保存一个配置。', true); return }
+  configIndex.value = Math.max(0, runConfigs.value.findIndex(config => config.name === runConfigName.value))
+  configChooser.value = { debug }
+}
+function moveConfig(delta: number) {
+  const count = runConfigs.value.length
+  if (!count) return
+  configIndex.value = (configIndex.value + delta + count) % count
+}
+function applyConfigChoice(config: RunConfig) {
+  const debug = configChooser.value?.debug ?? false
+  configChooser.value = null
+  pickConfig(config.name)
+  if (debug) void runSelectedConfig(true); else void runSelectedConfig(false)
+}
 function selectRunConfig(name?: string) {
   const wanted = name ?? runConfigName.value
   const found = runConfigs.value.find(config => config.name === wanted) ?? runConfigs.value[0]
@@ -2166,7 +2191,14 @@ async function findUsagesOf(path: string) {
   await openFile(path)
   if (!findTab(path)) return
   await refreshOutline(path)
-  void onSemantic({ kind: 'references', path, line: outline.value[0]?.startLine ?? 0, character: outline.value[0]?.startChar ?? 0 })
+  // IDEA's FindUsages on a file targets the class the file declares: pick the
+  // class-like symbol named after the file stem, else the first symbol.
+  const stem = (path.split('/').pop() ?? '').replace(/\.[^.]+$/, '')
+  const classKinds = new Set([5, 11, 23, 26])  // class, interface, struct, enum per LSP
+  const target = outline.value.find(symbol => symbol.name === stem && classKinds.has(symbol.kind))
+    ?? outline.value.find(symbol => classKinds.has(symbol.kind))
+    ?? outline.value[0]
+  void onSemantic({ kind: 'references', path, line: target?.startLine ?? 0, character: target?.startChar ?? 0 })
 }
 function beginCreate(mode: 'createFile' | 'createDir') { const entry = treeMenu.value?.entry; if (!entry) return; const dir = entry.kind === 'directory' ? entry.path : parentOf(entry.path); treeMenu.value = null; nameDialog.value = { mode, dir, value: '', template: '' }; void nextTick(() => nameInput.value?.focus()) }
 function beginRename() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; nameDialog.value = { mode: 'rename', dir: parentOf(entry.path), entry, value: baseName(entry.path) }; void nextTick(() => { nameInput.value?.focus(); nameInput.value?.select() }) }
@@ -2177,8 +2209,12 @@ function openInTerminal() {
   if (!entry || !isDesktop || !workspace.value) return
   treeMenu.value = null
   const dir = entry.kind === 'directory' ? entry.path : parentOf(entry.path)
+  // Bring the terminal tab up first so the panel is mounted; then ask the panel
+  // (via defineExpose) to spawn the shell in the chosen directory. Sending the
+  // cwd to the bridge directly would create an orphan terminal with no xterm
+  // subscribed to its output stream.
   showOutput('terminal')
-  void request('term.create', { cwd: dir }).catch(() => notify('无法打开终端。', true))
+  void terminalPanelRef.value?.openIn(dir)
 }
 // The menus drive the very functions the keymap binds: `runEditor` asks the active
 // CodeEditor instance, `showView` moves the left dock. `null` from the editor means
@@ -2231,7 +2267,7 @@ const toolWindow = (view: typeof leftView.value, title: string, keywords: string
 const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRow[] }[] = [
   { menu: 'file', label: '文件', rows: [
     { id: 'project.new', title: '新建项目…', keywords: 'new create project 新建', enabled: () => !working.value, run: () => beginProject('create') },
-    { id: 'project.open', title: '打开项目…', keys: 'Ctrl Shift O', keywords: 'open project 打开', enabled: () => !working.value, run: () => void openWorkspace() },
+    { id: 'project.open', title: '打开项目…', keywords: 'open project 打开', enabled: () => !working.value, run: () => void openWorkspace() },
     { id: 'project.clone', title: '克隆仓库…', keywords: 'clone checkout vcs 克隆', enabled: () => !working.value, run: () => beginProject('clone') },
     { id: 'project.recentSection', section: '最近项目' },
     { id: 'project.recentList', recent: true },
@@ -2239,7 +2275,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'file.rule1', rule: true },
     { id: 'file.save', title: '保存文件', keys: 'Ctrl S', keywords: 'save write 保存', enabled: () => Boolean(active.value?.dirty) && !working.value, run: () => void save() },
     { id: 'file.saveAll', title: '全部保存', keys: 'Ctrl Shift S', keywords: 'save all 全部保存', enabled: () => dirty.value && !working.value, run: () => void saveAll() },
-    { id: 'file.scratch', title: '新建临时文件', keys: 'Ctrl Alt Shift N', keywords: 'scratch temp buffer 临时文件', enabled: () => Boolean(workspace.value) && !working.value, run: () => void createScratch() },
+    { id: 'file.scratch', title: '新建临时文件', keys: 'Ctrl Alt Shift Insert', keywords: 'scratch temp buffer 临时文件', enabled: () => Boolean(workspace.value) && !working.value, run: () => void createScratch() },
     { id: 'file.closeTab', title: '关闭当前文件', keywords: 'close tab editor 关闭标签', enabled: () => Boolean(active.value) && !working.value, run: () => { const tab = active.value; if (tab) void closeTab(tab) } },
     { id: 'file.reopenClosedTab', title: '重新打开已关闭的标签页', keys: 'Ctrl Shift F4', keywords: 'reopen closed tab restore editor 恢复关闭标签', enabled: () => closedTabsPerPane[focusedPane.value].length > 0, run: () => void reopenClosedTab() },
     { id: 'file.closeAllTabs', title: '关闭所有文件', keywords: 'close all tabs editors 全部关闭', enabled: () => allTabs.value.length > 0 && !working.value, run: () => { void closeAllTabsIn(focusedPane.value) } },
@@ -2248,6 +2284,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: hasEditor, run: () => openEncoding() },
     { id: 'file.rule3', rule: true },
     { id: 'app.settings', title: '设置…', keys: 'Ctrl Alt S', keywords: 'settings preferences config keymap 设置', enabled: () => !working.value, run: () => void openSettings() },
+    { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void request('app.quit').catch(() => undefined) } },
   ] },
   { menu: 'edit', label: '编辑', rows: [
     { id: 'edit.sectionFind', section: '查找' },
@@ -2285,17 +2322,17 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'edit.columnSelect', title: '列选择模式', keys: 'Alt Shift Insert', keywords: 'column selection block selection rectangular 列选择 块选择', enabled: hasEditor, run: () => runEditor('column.select') },
   ] },
   { menu: 'view', label: '视图', rows: [
-    { id: 'view.explorer', title: () => `${explorer.value ? '隐藏' : '显示'}文件面板`, keys: 'Ctrl B', keywords: 'project view files tool window 文件面板', run: () => { explorer.value = !explorer.value } },
+    { id: 'view.explorer', title: () => `${explorer.value ? '隐藏' : '显示'}文件面板`, keywords: 'project view files tool window 文件面板', run: () => { explorer.value = !explorer.value } },
     { id: 'view.trace', title: () => `${activity.value ? '隐藏' : '显示'}处理记录`, keywords: 'activity trace bridge 处理记录', run: () => { activity.value = !activity.value } },
     { id: 'view.output', title: () => `${bottom.value ? '隐藏' : '显示'}输出面板`, keywords: 'output bottom tool window 输出面板', run: () => { bottom.value = !bottom.value } },
-    { id: 'view.zenMode', title: () => `${zenMode.value ? '退出' : '进入'} Zen Mode`, keys: 'Ctrl Shift F12', keywords: 'zen distraction free fullscreen immersive 禅模式 免打扰', run: () => toggleZenMode() },
+    { id: 'view.zenMode', title: () => `${zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen distraction free fullscreen immersive 禅模式 免打扰', run: () => toggleZenMode() },
     { id: 'view.rule0', rule: true },
-    { id: 'view.splitH', title: '向右拆分并移动', keys: 'Shift Enter', keywords: 'split right move tab opposite group 分屏 右拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'horizontal') },
-    { id: 'view.splitV', title: '向下拆分并移动', keys: 'Ctrl Shift Enter', keywords: 'split down move tab opposite group 分屏 下拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'vertical') },
+    { id: 'view.splitH', title: '向右拆分并移动', keywords: 'split right move tab opposite group 分屏 右拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'horizontal') },
+    { id: 'view.splitV', title: '向下拆分并移动', keywords: 'split down move tab opposite group 分屏 下拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'vertical') },
     { id: 'view.unsplit', title: '取消拆分', keywords: 'unsplit close split 取消拆分', enabled: () => splitOrientation.value !== 'none', run: () => unsplit() },
     { id: 'view.unsplitAll', title: '取消所有拆分', keywords: 'unsplit all 取消所有拆分', enabled: () => splitOrientation.value !== 'none', run: () => unsplitAll() },
     { id: 'view.changeOrientation', title: '更改拆分方向', keywords: 'change orientation rotate split 切换拆分方向', enabled: () => splitOrientation.value !== 'none', run: changeSplitOrientation },
-    { id: 'view.maximizeEditor', title: '最大化编辑器 / 显示全部工具窗口', keys: 'Ctrl Shift F1', keywords: 'maximize editor hide all tool windows 隐藏工具窗口', enabled: () => Boolean(workspace.value), run: toggleMaximizeEditor },
+    { id: 'view.maximizeEditor', title: '最大化编辑器 / 显示全部工具窗口', keys: 'Ctrl Shift F12', keywords: 'hide all tool windows maximize editor 隐藏工具窗口', enabled: () => Boolean(workspace.value), run: toggleMaximizeEditor },
     { id: 'view.rule1', rule: true },
     { id: 'view.sectionWindows', section: '工具窗口' },
     toolWindow('files', '项目文件', 'project files tree explorer 项目文件'),
@@ -2333,13 +2370,13 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // IDEA's "Jump to Line/Character" (Ctrl+L) opens the same line prompt as Go to
     // Line:Column. Select Changed Text has no keymap entry in \$default.xml, so only
     // the jump row appears here.
-    { id: 'navigate.back', title: '上一步', keys: 'Alt ←', keywords: 'back navigate history 后退', enabled: () => Boolean(navBack.value.length), run: () => void goBack() },
-    { id: 'navigate.forward', title: '下一步', keys: 'Alt →', keywords: 'forward navigate history 前进', enabled: () => Boolean(navForward.value.length), run: () => void goForward() },
+    { id: 'navigate.back', title: '上一步', keys: 'Ctrl Alt ←', keywords: 'back navigate history 后退', enabled: () => Boolean(navBack.value.length), run: () => void goBack() },
+    { id: 'navigate.forward', title: '下一步', keys: 'Ctrl Alt →', keywords: 'forward navigate history 前进', enabled: () => Boolean(navForward.value.length), run: () => void goForward() },
     { id: 'navigate.rule2', rule: true },
     { id: 'navigate.bookmark', title: '切换书签', keys: 'F11', keywords: 'bookmark toggle 书签', enabled: hasEditor, run: () => toggleBookmark() },
     { id: 'navigate.bookmarkMnemonic', title: '为书签编号…', keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: hasEditor, run: openMnemonicPrompt },
-    { id: 'navigate.bookmarkNext', title: '下一个书签', keys: 'Alt F11', keywords: 'next bookmark project wide 下一个书签', run: () => cycleBookmark(false) },
-    { id: 'navigate.bookmarkPrevious', title: '上一个书签', keys: 'Alt Shift F11', keywords: 'previous bookmark project wide 上一个书签', run: () => cycleBookmark(true) },
+    { id: 'navigate.bookmarkNext', title: '下一个书签', keywords: 'next bookmark project wide 下一个书签', run: () => cycleBookmark(false) },
+    { id: 'navigate.bookmarkPrevious', title: '上一个书签', keywords: 'previous bookmark project wide 上一个书签', run: () => cycleBookmark(true) },
     { id: 'navigate.selectInProject', title: '在项目中选中', keys: 'Alt F1 1', keywords: 'select in project view tree reveal 在项目中选中 定位文件', enabled: () => Boolean(active.value), run: selectInTree },
     { id: 'view.bookmarks', title: '书签窗口', keys: 'Shift F11', keywords: 'bookmarks tool window list 书签窗口', enabled: () => Boolean(workspace.value), run: () => showView('bookmarks') },
   ] },
@@ -2352,13 +2389,13 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // ActionsBundle: ShowIntentionActions is "Show Context Actions" (Alt+Enter).
     semantic('codeAction', '显示上下文操作', 'Alt Enter', 'intent quick fix refactor code action 意图 上下文操作'),
     { id: 'code.rule1', rule: true },
-    semantic('definition', '跳转到定义', 'F12', 'goto definition 定义'),
+    semantic('definition', '跳转到定义', 'Ctrl B', 'goto definition 定义'),
     semantic('implementation', '跳转到实现', 'Ctrl Alt B', 'goto implementation 实现'),
-    semantic('references', '查找用法', 'Shift F12', 'find usages references 用法'),
+    semantic('references', '查找用法', 'Alt F7', 'find usages references 用法'),
     semantic('callHierarchy', '调用层次', 'Ctrl Alt H', 'call hierarchy incoming outgoing 调用层次'),
     semantic('typeHierarchy', '类型层次', 'Ctrl Shift H', 'type hierarchy supertypes subtypes 类型层次'),
-    semantic('rename', '重命名', 'F2', 'rename refactor symbol 重命名'),
-    semantic('signature', '参数信息', 'Ctrl Shift Space', 'signature parameter help 参数信息'),
+    semantic('rename', '重命名', 'Shift F6', 'rename refactor symbol 重命名'),
+    semantic('signature', '参数信息', 'Ctrl P', 'signature parameter info 参数信息'),
     { id: 'code.quickDoc', title: '快速文档', keys: 'Ctrl Q', keywords: 'quick documentation hover 快速文档 文档', enabled: () => Boolean(active.value) && lspReady.value, run: () => void showQuickDoc() },
     { id: 'code.copyRef', title: '复制引用', keys: 'Ctrl Alt Shift C', keywords: 'copy reference qualified name 复制引用 复制路径', enabled: () => Boolean(active.value), run: () => void copyReference() },
     { id: 'code.rule2', rule: true },
@@ -2366,7 +2403,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     semantic('selection.shrink', '缩小语法选区', 'Ctrl Shift W', 'shrink selection syntax 缩小选区'),
     semantic('format', '重新格式化', 'Ctrl Alt L', 'format code reformat 格式化'),
     { id: 'code.rule3', rule: true },
-    { id: 'code.blame', title: 'Git 追溯（Annotate）', keys: 'Ctrl Shift G', keywords: 'blame annotate git history 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
+    { id: 'code.blame', title: 'Git 追溯（Annotate）', keywords: 'blame annotate git history 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
     { id: 'code.compareClipboard', title: '与剪贴板比较', keywords: 'compare clipboard diff 与剪贴板比较', enabled: () => Boolean(active.value), run: () => void compareWithClipboard() },
     { id: 'code.copyPath', title: '复制文件路径', keywords: 'copy file path absolute 复制文件路径', enabled: () => Boolean(active.value), run: () => void copyFilePath() },
     // ActionsBundle: "Toggle Read-Only Attribute" (synonyms Make File Writable /
@@ -2400,7 +2437,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   // plus Stop Build. TaoCode builds through the configured shell command.
   { menu: 'build', label: '构建', rows: [
     { id: 'build.project', title: '构建项目', keys: 'Ctrl F9', keywords: 'build project make compile 构建', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void startBuild(false) },
-    { id: 'build.rebuild', title: '重新构建项目', keywords: 'rebuild project clean 重新构建', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void startBuild(true) },
+    { id: 'build.rebuild', title: '重新构建项目', keys: 'Ctrl Shift F9', keywords: 'rebuild project clean 重新构建', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void startBuild(true) },
     { id: 'build.stop', title: '停止构建', keywords: 'stop build cancel 停止构建', enabled: () => runState.running, run: () => void stopRun() },
     { id: 'build.rule1', rule: true },
     { id: 'build.output', title: '构建结果窗口', keywords: 'build tab view tool window 构建输出', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
@@ -2408,6 +2445,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   { menu: 'run', label: '运行', rows: [
     { id: 'run.start', title: '运行', keys: 'Shift F10', keywords: 'run build execute task 运行', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void runSelectedConfig(false) },
     { id: 'run.debug', title: '调试', keys: 'Shift F9', keywords: 'debug start breakpoint dap 调试', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => void runSelectedConfig(true) },
+    { id: 'run.debugContext', title: '调试当前上下文配置', keys: 'Ctrl Shift F9', keywords: 'debug contextual configuration 调试上下文', enabled: () => isDesktop && Boolean(active.value) && !dapState.running, run: () => void runContextConfiguration(true) },
     { id: 'run.pickConfig', title: '选择运行/调试配置', keys: 'Alt Shift F10', keywords: 'select run configuration choose active edit 选择配置', enabled: () => Boolean(workspace.value), run: () => { bottom.value = true; bottomTab.value = 'run'; menu.value = null } },
     { id: 'run.stop', title: '停止', keys: 'Ctrl F2', keywords: 'stop terminate kill 停止', enabled: () => runState.running, run: () => void stopRun() },
     // RunClass in the default keymap: run whatever is under the caret.
@@ -2439,7 +2477,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'git.unstash', title: '取出储藏（Unstash）', keywords: 'unstash pop shelf 弹出储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.pop') },
     { id: 'git.log', title: '显示日志', keys: 'Alt Shift C', keywords: 'show log history graph 日志', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('vcslog') },
     toolWindow('history', '本地历史', 'local history snapshot 本地历史', true),
-    { id: 'code.blame.git', title: '追溯当前文件', keys: 'Ctrl Shift G', keywords: 'blame annotate 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
+    { id: 'code.blame.git', title: '追溯当前文件', keywords: 'blame annotate 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
     { id: 'git.rule3', rule: true },
     { id: 'git.clone', title: '从版本控制系统检出…', keywords: 'checkout from version control clone vcs 检出', enabled: () => !working.value, run: () => beginProject('clone') },
     { id: 'app.settings.git', title: '版本控制与编辑器设置…', keys: 'Ctrl Alt S', keywords: 'vcs git settings 版本控制设置', enabled: () => isDesktop, run: () => void openSettings() },
@@ -2457,7 +2495,7 @@ const windowMenuRows: MenuRow[] = [
   toolWindow('files', '激活 项目 工具窗口', 'activate project tool window 项目'),
   toolWindow('git', '激活 本地更改 工具窗口', 'activate commit changes tool window 本地更改'),
   toolWindow('search', '激活 查找 工具窗口', 'activate find in files tool window 查找'),
-  toolWindow('structure' as typeof leftView.value, '激活 结构 工具窗口', 'activate structure tool window 结构'),
+  toolWindow('outline', '激活 结构 工具窗口', 'activate structure tool window 结构'),
   toolWindow('todo', '激活 待办事项 工具窗口', 'activate todo tool window 待办'),
   toolWindow('bookmarks', '激活 书签 工具窗口', 'activate bookmarks tool window 书签'),
   toolWindow('debug', '激活 调试 工具窗口', 'activate debug tool window 调试', true),
@@ -2465,7 +2503,7 @@ const windowMenuRows: MenuRow[] = [
   { id: 'window.activateTerminal', title: '激活 终端 工具窗口', keys: 'Alt F12', keywords: 'activate terminal tool window 终端', enabled: () => Boolean(workspace.value), run: () => showOutput('terminal') },
   { id: 'window.activateOutput', title: '激活 输出 工具窗口', keywords: 'activate output tool window 输出', enabled: () => Boolean(workspace.value), run: () => showOutput('output') },
   { id: 'window.activateProblems', title: '激活 问题 工具窗口', keywords: 'activate problems tool window 问题', enabled: () => allProblems.value.length > 0, run: () => showOutput('problems') },
-  { id: 'window.hideAllWindows', title: '隐藏所有工具窗口', keys: 'Ctrl Shift F1', keywords: 'hide all tool windows maximize editor 隐藏全部', enabled: () => Boolean(workspace.value), run: toggleMaximizeEditor },
+  { id: 'window.hideAllWindows', title: '隐藏所有工具窗口', keys: 'Ctrl Shift F12', keywords: 'hide all tool windows maximize editor 隐藏全部', enabled: () => Boolean(workspace.value), run: toggleMaximizeEditor },
   { id: 'window.rule3', rule: true },
   { id: 'window.configureTabs', title: '编辑器标签页选项…', keywords: 'editor tabs configure pin tab placement 标签页设置', run: () => openSettings('editor') },
   { id: 'window.activeToolList', title: '配置工具按钮列表…', keywords: 'configure buttons active tool list 工具按钮', run: () => openSettings('appearance') },
@@ -2624,9 +2662,18 @@ async function runSelectedConfig(debug: boolean) {
   explorer.value = true
   leftView.value = 'debug'
   try {
-    await dapStart({ command: '', args: tokens.slice(1), kind: 'cppvsdbg', program, cwd: '.', stopOnEntry: false })
+    await dapStart({ command: '', args: tokens.slice(1), kind: debugKindFor(program), program, cwd: '.', stopOnEntry: false })
     notify(`已在调试 ${program}`)
   } catch (error) { notify(`无法启动调试：${errorMessage(error)}`, true) }
+}
+// The DAP kind selects the adapter entry from TaoCode.dap.json; guessing cppvsdbg
+// for a Java or Python program would launch the wrong debugger.
+function debugKindFor(program: string): string {
+  const lower = program.toLowerCase()
+  if (/\.jar$/.test(lower) || /(^|[\\/])(java|javaw)(\.exe)?$/.test(lower) || lower === 'java' || lower === 'javaw') return 'java'
+  if (/\.py$/.test(lower) || lower === 'python' || lower === 'python3') return 'debugpy'
+  if (/\.dll$/.test(lower)) return 'cppvsdbg'
+  return 'cppvsdbg'
 }
 // RunClass ("run the configuration belonging to the context"): TaoCode's context is
 // the active file; a same-named `<basename>.exe` next to the configured output dir
@@ -2645,7 +2692,7 @@ async function runContextConfiguration(debug: boolean) {
     if (debug) {
       explorer.value = true
       leftView.value = 'debug'
-      try { await dapStart({ command: '', args: [], kind: 'cppvsdbg', program: candidate, cwd: '.', stopOnEntry: false }); notify(`已在调试 ${candidate}`) }
+      try { await dapStart({ command: '', args: [], kind: debugKindFor(candidate), program: candidate, cwd: '.', stopOnEntry: false }); notify(`已在调试 ${candidate}`) }
       catch (error) { notify(`无法启动调试：${errorMessage(error)}`, true) }
     } else {
       runCommand.value = candidate
@@ -2676,9 +2723,6 @@ async function startBuild(rebuild: boolean) {
   if (runState.running) { notify('已有任务在运行，请先停止。', true); return }
   const command = runCommand.value.trim() || 'cmake --build build'
   if (!await saveAll()) { notify('请先保存修改再构建。', true); return }
-  if (rebuild && command.startsWith('cmake')) {
-    try { await request('file.delete', { path: 'build' }) } catch { /* nothing to clean */ }
-  }
   beginRun()
   bottom.value = true
   bottomTab.value = 'run'
@@ -2711,23 +2755,63 @@ function onKey(event: KeyboardEvent) {
     else if (quickDoc.value) quickDoc.value = null
     else if (recentPrompt.value) recentPrompt.value = false
     else if (placesPrompt.value) placesPrompt.value = false
+    else if (configChooser.value) configChooser.value = null
     else if (signaturePopup.value) closeSignaturePopup()
     else if (templateChooser.value) templateChooser.value = false
     return
   }
   const digit = /^Digit([0-9])$/.exec(event.code)?.[1]
   if (digit !== undefined && mnemonicPrompt.value) { event.preventDefault(); pickMnemonic(Number(digit)); return }
-  if (projectMode.value || settingsOpen.value || leavePrompt.value || renamePrompt.value || symbolPrompt.value || actionPrompt.value || actionSearch.value || surroundPrompt.value || mnemonicPrompt.value || goLinePrompt.value || encodingPrompt.value || conflictPrompt.value || quickDoc.value || recentPrompt.value || placesPrompt.value) return
-  // IDEA: F9 toggles a line breakpoint, Shift+F9 starts the Debug action.
+  // RecentLocations popup owns the keyboard while open (IDEA's popup list: Up/Down
+  // move, Enter jumps, Delete drops the place, Ctrl+E toggles the edited filter).
+  if (placesPrompt.value) {
+    if (event.key === 'ArrowDown') { event.preventDefault(); movePlace(1); return }
+    if (event.key === 'ArrowUp') { event.preventDefault(); movePlace(-1); return }
+    if (event.key === 'Enter') { event.preventDefault(); const place = placesFiltered.value[placesIndex.value]; if (place) openPlace(place); return }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      const place = placesFiltered.value[placesIndex.value]
+      if (place) { places.value = places.value.filter(item => item !== place); changePlaces.value = changePlaces.value.filter(item => item !== place) }
+      return
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === 'e') { event.preventDefault(); placesEditedOnly.value = !placesEditedOnly.value; return }
+    return
+  }
+  // Choose Run/Debug Configuration popup (Alt+Shift+F10 / Alt+Shift+F9).
+  if (configChooser.value) {
+    if (event.key === 'ArrowDown') { event.preventDefault(); moveConfig(1); return }
+    if (event.key === 'ArrowUp') { event.preventDefault(); moveConfig(-1); return }
+    if (event.key === 'Enter') { event.preventDefault(); const config = runConfigs.value[configIndex.value]; if (config) applyConfigChoice(config); return }
+    return
+  }
+  if (projectMode.value || settingsOpen.value || leavePrompt.value || renamePrompt.value || symbolPrompt.value || actionPrompt.value || actionSearch.value || surroundPrompt.value || mnemonicPrompt.value || goLinePrompt.value || encodingPrompt.value || conflictPrompt.value || quickDoc.value || recentPrompt.value || templateChooser.value) return
+  // --- Debugger/build transport, from $default.xml ---
+  // F9 Resume, F8 Step Over, F7 Step Into, Shift+F8 Step Out, Ctrl+F8 Toggle Line
+  // Breakpoint, Shift+F9 Debug, Ctrl+F9 Build, Ctrl+Shift+F9 Rebuild.
   if (event.key === 'F9' && event.ctrlKey && !event.shiftKey) { event.preventDefault(); void startBuild(false); return }
-  if (event.key === 'F9' && !event.shiftKey && !event.ctrlKey && active.value && isDesktop) { event.preventDefault(); void toggleBreakpointAt(activePath.value, active.value.line); return }
-  if (event.key === 'F9' && event.shiftKey && isDesktop && workspace.value) { event.preventDefault(); void runSelectedConfig(true); return }
-  if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); void goBack(); return }
-  if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); void goForward(); return }
+  if (event.key === 'F9' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void startBuild(true); return }
+  if (event.key === 'F8' && event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void toggleBreakpointAt(activePath.value, active.value.line); return }
+  if (event.key === 'F9' && !event.shiftKey && !event.ctrlKey && dapState.paused) { event.preventDefault(); void dapStep('continue'); return }
+  if (event.key === 'F9' && event.shiftKey && isDesktop && workspace.value && !dapState.running) { event.preventDefault(); void runSelectedConfig(true); return }
+  if (dapState.paused && !event.ctrlKey && !event.altKey) {
+    if (event.key === 'F8' && !event.shiftKey) { event.preventDefault(); void dapStep('next'); return }
+    if (event.key === 'F7' && !event.shiftKey) { event.preventDefault(); void dapStep('stepIn'); return }
+    if (event.key === 'F8' && event.shiftKey) { event.preventDefault(); void dapStep('stepOut'); return }
+  }
+  if (event.key === 'F2' && event.ctrlKey && runState.running) { event.preventDefault(); void stopRun(); return }
+  // Shift+F10 Run, Alt+Shift+F10 Choose Run Configuration, Alt+Shift+F9 Choose Debug
+  // Configuration, Ctrl+Shift+F10 Run Context Configuration.
+  if (event.key === 'F10' && event.shiftKey && event.altKey && workspace.value) { event.preventDefault(); openConfigChooser(); return }
+  if (event.key === 'F9' && event.shiftKey && event.altKey && isDesktop && workspace.value) { event.preventDefault(); openConfigChooser(); return }
+  if (event.key === 'F10' && event.shiftKey && !event.altKey && isDesktop && workspace.value && !runState.running) { event.preventDefault(); void runSelectedConfig(false); return }
+  if (event.key === 'F10' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void runContextConfiguration(false); return }
+  // --- Navigation, from $default.xml ---
+  // Back/Forward = Ctrl+Alt+Left/Right.
+  if (event.ctrlKey && event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); void goBack(); return }
+  if (event.ctrlKey && event.altKey && event.key === 'ArrowRight') { event.preventDefault(); void goForward(); return }
   if (event.key === 'F11') {
     event.preventDefault()
-    if (event.altKey) cycleBookmark(event.shiftKey)
-    else if (event.ctrlKey) openMnemonicPrompt()
+    if (event.ctrlKey) openMnemonicPrompt()
     else if (event.shiftKey) showView('bookmarks')
     else toggleBookmark()
     return
@@ -2737,68 +2821,60 @@ function onKey(event: KeyboardEvent) {
     if (event.shiftKey) toggleBookmark(Number(digit)); else jumpMnemonic(Number(digit))
     return
   }
-  // RecentLocations' own list navigation: the popup keeps a highlighted row, Enter
-  // jumps and Delete drops the place from the ring.
-  if (placesPrompt.value) {
-    if (event.key === 'ArrowDown') { event.preventDefault(); movePlace(1); return }
-    if (event.key === 'ArrowUp') { event.preventDefault(); movePlace(-1); return }
-    if (event.key === 'Enter') { event.preventDefault(); const place = placesFiltered.value[placesIndex.value]; if (place) openPlace(place); return }
-    if (event.key === 'Delete' || event.key === 'Backspace') {
+  // Ctrl+Shift+Backspace = Jump to Last Change (project-wide).
+  if (event.key === 'Backspace' && event.ctrlKey && event.shiftKey && active.value) { event.preventDefault(); jumpLastEditLocation(); return }
+  // Alt+Insert Generate, Ctrl+Alt+Shift+Insert New Scratch File.
+  if (event.key === 'Insert' && event.altKey && !event.ctrlKey && !event.shiftKey && workspace.value) { event.preventDefault(); void openGeneratePopup(); return }
+  if (event.key === 'Insert' && event.altKey && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void createScratch(); return }
+  // Alt+F1 Select In (project view), Alt+F12 Terminal, Alt+0/1/3/7/9 tool windows.
+  if (event.key === 'F1' && event.altKey && !event.ctrlKey && !event.shiftKey && active.value) { event.preventDefault(); selectInTree(); return }
+  if (event.key === 'F12' && event.altKey && !event.ctrlKey && workspace.value) { event.preventDefault(); showOutput('terminal'); return }
+  if (digit !== undefined && event.altKey && !event.ctrlKey && workspace.value) {
+    const toolWindows: Record<string, typeof leftView.value | 'terminal'> = { '0': 'git', '1': 'files', '3': 'search', '7': 'outline', '9': 'git' }
+    const target = toolWindows[digit]
+    if (target) {
       event.preventDefault()
-      const place = placesFiltered.value[placesIndex.value]
-      if (!place) return
-      places.value = places.value.filter(item => item !== place)
-      changePlaces.value = changePlaces.value.filter(item => item !== place)
+      if (target === 'terminal') showOutput('terminal'); else showView(target)
       return
     }
   }
-  // IDEA's own run shortcuts; the menubar advertises exactly these.
-  // IDEA's Reopen Closed Tab on the Windows/Linux default keymap.
+  if (event.key === 'Backquote' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); showView('git'); return }
+  if (event.key === 'Backquote' && event.altKey && workspace.value) { event.preventDefault(); showView('git'); return }
+  // --- VCS, from VcsActions.xml (Ctrl+K Commit) and dvcs-impl (Ctrl+Shift+K Push) ---
+  if (event.key.toLowerCase() === 'k' && event.ctrlKey && event.shiftKey && workspace.value && gitAvailable.value) { event.preventDefault(); void gitMenuAction('git.push'); return }
+  if (event.key.toLowerCase() === 'k' && event.ctrlKey && workspace.value && gitAvailable.value) { event.preventDefault(); showView('git'); return }
+  if (!(event.ctrlKey || event.metaKey) && !event.altKey) return
+  // --- Files / actions / search / refactor, from $default.xml ---
   if (event.key === 'F4' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void reopenClosedTab(); return }
-  if (event.key === 'F2' && event.ctrlKey && runState.running) { event.preventDefault(); void stopRun(); return }
-  // IDEA's default keymap: Ctrl+Shift+F9 is "Debug Context Configuration". F2 keeps
-  // its Rename binding; the Stop action stays reachable from the Run menu.
-  if (event.key === 'F9' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void runContextConfiguration(true); return }
-  // Project-wide "Jump to Last Change" (Ctrl+Shift+BackSpace in $default.xml). The
-  // editor's own handler stops propagation, so intercept it here.
-  if (event.key === 'Backspace' && event.ctrlKey && event.shiftKey && active.value) { event.preventDefault(); jumpLastEditLocation(); return }
-  if (event.key === 'F10' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void runContextConfiguration(false); return }
-  if (projectMode.value || settingsOpen.value || leavePrompt.value || renamePrompt.value || symbolPrompt.value || actionPrompt.value || actionSearch.value || surroundPrompt.value || mnemonicPrompt.value || goLinePrompt.value || encodingPrompt.value || conflictPrompt.value || quickDoc.value || recentPrompt.value || placesPrompt.value || !(event.ctrlKey || event.metaKey)) return
-  if (event.key.toLowerCase() === 's' && event.altKey) { event.preventDefault(); void openSettings(); return }
-  // IDEA's Find Action: one keystroke to any command in the registry below.
   if (event.key.toLowerCase() === 'a' && event.shiftKey) { event.preventDefault(); openActionSearch(); return }
+  if (event.key.toLowerCase() === 's' && event.altKey) { event.preventDefault(); void openSettings(); return }
   if (event.key.toLowerCase() === 's') { event.preventDefault(); void (event.shiftKey ? saveAll() : save()) }
-  // IDEA's default keymap: Ctrl+Shift+N file, Ctrl+N class, Ctrl+Shift+Alt+N symbol.
-  // Ctrl+P/Ctrl+T stay as aliases so muscle memory from the old build keeps working.
+  // Ctrl+Shift+N file, Ctrl+N class, Ctrl+Shift+Alt+N symbol.
   if (event.key.toLowerCase() === 'n' && event.shiftKey && event.altKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
   if (event.key.toLowerCase() === 'n' && event.shiftKey && workspace.value) { event.preventDefault(); openPalette(); return }
   if (event.key.toLowerCase() === 'n' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
-  if (event.key.toLowerCase() === 'p' && workspace.value) { event.preventDefault(); openPalette() }
-  if (event.key.toLowerCase() === 't' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global') }
   if (event.key === 'F12' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('file'); return }
-  if (event.key === 'F1' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); toggleMaximizeEditor(); return }
-  // Search Everywhere: IDEA's default double-Shift. Consecutive Shift presses within
-  // 400 ms open Find Action; a lone Shift never triggers anything.
+  if (event.key === 'F12' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); toggleMaximizeEditor(); return }
   if (event.key === 'Shift' && !event.repeat) {
     const now = event.timeStamp
     if (now - lastShiftAt < 400) { lastShiftAt = 0; event.preventDefault(); openActionSearch(); return }
     lastShiftAt = now
   }
-  if (event.key === 'F12' && event.ctrlKey && event.shiftKey) { event.preventDefault(); toggleZenMode(); return }
-  if (event.key.toLowerCase() === 'o' && event.shiftKey) { event.preventDefault(); void openWorkspace() }
-  if (event.key.toLowerCase() === 'b' && workspace.value) { event.preventDefault(); explorer.value = !explorer.value }
-  // IDEA's actual split defaults: Shift+Enter splits the selected tab right;
-  // Ctrl+Shift+Enter splits it down (checked first).
-  if (event.key === 'Enter' && event.shiftKey && active.value) {
-    event.preventDefault()
-    splitTabOut(active.value, event.ctrlKey ? 'vertical' : 'horizontal')
-    return
-  }
-  if (event.key.toLowerCase() === 'g' && event.shiftKey && active.value && isDesktop) { event.preventDefault(); void showBlame(); return }
-  if (event.key.toLowerCase() === 'g' && active.value) { event.preventDefault(); openGoLine(); return }
+  // Ctrl+Shift+F Find in Path, Ctrl+E recent files / Ctrl+Shift+E recent locations,
+  // Ctrl+G Goto Line.
   if (event.key.toLowerCase() === 'f' && event.shiftKey && workspace.value) { event.preventDefault(); showView('search'); return }
-  if (event.key.toLowerCase() === 'e' && workspace.value) { event.preventDefault(); if (placesPrompt.value) placesEditedOnly.value = !placesEditedOnly.value; else if (event.shiftKey) openRecentPlaces(); else openRecentFiles(); return }
-  if (event.key.toLowerCase() === 'q' && active.value && lspReady.value) { event.preventDefault(); void showQuickDoc(); return }
+  if (event.key.toLowerCase() === 'e' && workspace.value) { event.preventDefault(); if (event.shiftKey) openRecentPlaces(); else openRecentFiles(); return }
+  if (event.key.toLowerCase() === 'g' && !event.shiftKey && active.value) { event.preventDefault(); openGoLine(); return }
+  // Introduce/Extract/Inline, from $default.xml (Ctrl+Alt+V/C/M/N).
+  if (event.altKey && event.ctrlKey && !event.shiftKey) {
+    if (event.key.toLowerCase() === 'v') { event.preventDefault(); extractVariable(); return }
+    if (event.key.toLowerCase() === 'c') { event.preventDefault(); extractConstant(); return }
+    if (event.key.toLowerCase() === 'm') { event.preventDefault(); extractMethod(); return }
+    if (event.key.toLowerCase() === 'n') { event.preventDefault(); inlineVariable(); return }
+  }
+  // Run Inspection (Ctrl+Shift+Alt+I), Quick Documentation (Ctrl+Q), Copy Reference.
+  if (event.key.toLowerCase() === 'i' && event.ctrlKey && event.shiftKey && event.altKey && lspReady.value && active.value) { event.preventDefault(); void openCodeActions(caretPayload(), true); return }
+  if (event.key.toLowerCase() === 'q' && !event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void showQuickDoc(); return }
   if (event.key.toLowerCase() === 'c' && event.altKey && event.shiftKey && active.value) { event.preventDefault(); void copyReference(); return }
 }
 function onUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
@@ -3114,7 +3190,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-else-if="bottomTab === 'about'" class="workspace-about"><p><strong>工作区</strong>{{ workspace?.root ?? '尚未打开' }}</p><p><strong>文件支持</strong>UTF-8 文本（含 BOM），单文件最多 16 MiB；保留换行符；大文件自动降级语法高亮与语言服务以保持流畅。</p><p><strong>保存策略</strong>核对磁盘版本后原子替换；外部变更会阻止覆盖。</p><p><strong>范围</strong>支持项目管理、文件编辑、Git 克隆、语言服务、全局搜索/替换、重构与符号、集成终端与调试器。</p></div>
-          <div v-show="bottomTab === 'terminal'" class="terminal-host-wrap"><TerminalPanel :active="bottomTab === 'terminal' && bottom" /></div>
+          <div v-show="bottomTab === 'terminal'" class="terminal-host-wrap"><TerminalPanel ref="terminalPanelRef" :active="bottomTab === 'terminal' && bottom" @focus-terminal="showOutput('terminal')" /></div>
         </section>
       </main>
 
@@ -3375,6 +3451,6 @@ onBeforeUnmount(() => {
     <div v-if="actionPrompt" class="modal-backdrop" @click.self="actionPrompt = null">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="15" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
     </div>
-    <div v-if="help" class="modal-backdrop" @click.self="help = false"><section class="help-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode" @keydown="trapFocus"><button ref="helpClose" class="icon-button help-close" aria-label="关闭说明" @click="help = false"><X :size="18" /></button><h2>TaoCode <span>0.1 · Foundation</span></h2><p>Vue 3 界面 + CodeMirror 编辑器 + C++20 文件核心。<br />Windows 原生宿主复用系统 WebView2，不捆绑 Electron。</p><div class="help-grid"><span>打开文件夹</span><kbd>Ctrl Shift O</kbd><span>保存当前文件</span><kbd>Ctrl S</kbd><span>转到文件</span><kbd>Ctrl Shift N</kbd><span>转到类</span><kbd>Ctrl N</kbd><span>查找操作</span><kbd>Ctrl Shift A</kbd><span>转到行</span><kbd>Ctrl G</kbd><span>当前文件内查找</span><kbd>Ctrl F</kbd><span>转到定义</span><kbd>F12</kbd><span>重命名符号</span><kbd>F2</kbd><span>查找引用</span><kbd>Shift F12</kbd><span>智能补全</span><kbd>Ctrl Space</kbd><span>代码操作</span><kbd>Alt Enter</kbd><span>用模板包裹</span><kbd>Ctrl Alt T</kbd><span>格式化（可带选区）</span><kbd>Ctrl Alt L</kbd><span>智能选区</span><kbd>Ctrl W</kbd><span>书签</span><kbd>F11</kbd><span>书签编号 / 跳转</span><kbd>Ctrl F11 · Ctrl 0-9</kbd><span>断点</span><kbd>F9</kbd><span>运行 / 调试配置</span><kbd>Shift F10 · Shift F9</kbd><span>运行 / 调试上下文</span><kbd>Ctrl Shift F10 · Ctrl Shift F9</kbd><span>重新打开已关闭标签页</span><kbd>Ctrl Shift F4</kbd><span>拆分并移动 / 向下拆分</span><kbd>Shift Enter · Ctrl Shift Enter</kbd><span>最大化编辑器</span><kbd>Ctrl Shift F1</kbd><span>Git 追溯</span><kbd>Ctrl Shift G</kbd><span>切换资源管理器</span><kbd>Ctrl B</kbd></div><div class="help-note">当前已接通项目创建、打开、克隆、设置，桌面端语言服务（诊断、悬停、转到定义/实现/类型、补全、重命名、查找引用、符号大纲、代码操作含 resolve 解析、格式化与选区格式化、签名信息、文档内同符号高亮、智能选区、内联提示）、操作查找（Ctrl+Shift+A）、书签与 0-9 编号跳转、模板包裹（Ctrl+Alt+T）、随项目保存的运行配置、全局查找/替换、本地历史快照与回滚、Git 状态/暂存/提交/改写上次提交/分支/日志/储藏/拉取/推送/与分支比较与文件追溯、集成终端（ConPTY + xterm）与调试器（DAP 客户端，需在 exe 旁 TaoCode.dap.json 配置本机调试适配器）；浏览器预览无语言服务、终端与调试器。尚无 AI Agent / 模型执行。处理记录仅保留当前会话，不是持久审计日志。</div></section></div>
+    <div v-if="help" class="modal-backdrop" @click.self="help = false"><section class="help-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode" @keydown="trapFocus"><button ref="helpClose" class="icon-button help-close" aria-label="关闭说明" @click="help = false"><X :size="18" /></button><h2>TaoCode <span>0.1 · Foundation</span></h2><p>Vue 3 界面 + CodeMirror 编辑器 + C++20 文件核心。<br />Windows 原生宿主复用系统 WebView2，不捆绑 Electron。</p><div class="help-grid"><span>打开文件夹</span><kbd>Ctrl Shift O</kbd><span>保存当前文件</span><kbd>Ctrl S</kbd><span>转到文件</span><kbd>Ctrl Shift N</kbd><span>转到类</span><kbd>Ctrl N</kbd><span>查找操作</span><kbd>Ctrl Shift A</kbd><span>转到行</span><kbd>Ctrl G</kbd><span>当前文件内查找</span><kbd>Ctrl F</kbd><span>转到定义</span><kbd>Ctrl B</kbd><span>重命名符号</span><kbd>Shift F6</kbd><span>查找用法</span><kbd>Alt F7</kbd><span>智能补全</span><kbd>Ctrl Space</kbd><span>代码操作</span><kbd>Alt Enter</kbd><span>用模板包裹</span><kbd>Ctrl Alt T</kbd><span>格式化（可带选区）</span><kbd>Ctrl Alt L</kbd><span>智能选区</span><kbd>Ctrl W</kbd><span>书签</span><kbd>F11</kbd><span>书签编号 / 跳转</span><kbd>Ctrl F11 · Ctrl 0-9</kbd><span>行断点</span><kbd>Ctrl F8</kbd><span>运行 / 调试配置</span><kbd>Shift F10 · Shift F9</kbd><span>运行 / 调试上下文</span><kbd>Ctrl Shift F10 · Ctrl Shift F9</kbd><span>重新打开已关闭标签页</span><kbd>Ctrl Shift F4</kbd><span>隐藏全部工具窗口</span><kbd>Ctrl Shift F12</kbd><span>最大化编辑器</span><kbd>Ctrl Shift F1</kbd><span>Git 追溯</span><kbd>Ctrl Shift G</kbd><span>后退 / 前进</span><kbd>Ctrl Alt ← · Ctrl Alt →</kbd></div><div class="help-note">当前已接通项目创建、打开、克隆、设置，桌面端语言服务（诊断、悬停、转到定义/实现/类型、补全、重命名、查找引用、符号大纲、代码操作含 resolve 解析、格式化与选区格式化、签名信息、文档内同符号高亮、智能选区、内联提示）、操作查找（Ctrl+Shift+A）、书签与 0-9 编号跳转、模板包裹（Ctrl+Alt+T）、随项目保存的运行配置、全局查找/替换、本地历史快照与回滚、Git 状态/暂存/提交/改写上次提交/分支/日志/储藏/拉取/推送/与分支比较与文件追溯、集成终端（ConPTY + xterm）与调试器（DAP 客户端，需在 exe 旁 TaoCode.dap.json 配置本机调试适配器）；浏览器预览无语言服务、终端与调试器。尚无 AI Agent / 模型执行。处理记录仅保留当前会话，不是持久审计日志。</div></section></div>
   </div>
 </template>
