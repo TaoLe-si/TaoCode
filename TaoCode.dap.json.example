@@ -1,0 +1,21 @@
+{
+  "_comment": "复制为 TaoCode.dap.json 放在 TaoCode.exe 同目录。TaoCode 不捆绑任何调试器，只启动你本机安装并在此配置的适配器。command 用绝对路径最稳妥（CreateProcessW 对裸名解析不可靠）。program/cwd 可留空由界面填写；相对路径按工作区根解析。",
+  "_coordinate_note": "DAP 的行/列一律 1 起；界面据此在 0 起的编辑器缓冲区上 +1。",
+  "cppvsdbg": {
+    "command": "C:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/bin/OpenDebugAD7.exe",
+    "args": [],
+    "request": "launch",
+    "note": "占位。本机若未安装“打开 AD7 调试程序 / C++ DAP”，请改装 VS 桌面 C++ 的调试组件，或改用下面的 lldb-dap。"
+  },
+  "lldb-dap": {
+    "command": "C:/Program Files/LLVM/bin/lldb-dap.exe",
+    "args": [],
+    "request": "launch",
+    "note": "本机可用：LLVM 自带 lldb-dap + clang++。调试示例：program 填 build/TaoCode.exe，或任意 clang 生成的 exe。"
+  },
+  "fake": {
+    "command": "",
+    "args": [],
+    "note": "把 command 指向随测试构建的 dap_fake_adapter.exe 可离线跑通整套 UI（脚本化 initialize/launch/setBreakpoints/stackTrace/variables/events）。"
+  }
+}

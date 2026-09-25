@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.tools/
+.vs/
+*.user
+*.log
+*.tsbuildinfo
+third_party/

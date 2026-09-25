@@ -1,0 +1,147 @@
+/* Design tokens.
+   Three layers, top to bottom:
+     1. Scale primitives (radius / space / shadow / motion) — theme-independent.
+     2. Palette primitives + semantic aliases — re-declared per theme so components
+        only ever read the semantic names below.
+   Components must use var(--semantic); raw hex belongs here only. */
+:root {
+  color-scheme: light;
+  --font-ui: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  --font-brand: 'Bahnschrift', 'Segoe UI', sans-serif;
+  --font-mono: 'Cascadia Code', Consolas, monospace;
+
+  /* 1 · Scale primitives */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 9px;
+  --radius-pill: 999px;
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 220ms;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  --menu-radius: 6px;
+  --menu-row-height: 28px;
+  --chrome-height: 40px;
+  --ctrl-height-sm: 24px;
+  --ctrl-height: 28px;
+  --ctrl-height-lg: 32px;
+  --panel-heading-h: 32px;
+  --tab-h: 34px;
+
+  /* 2 · Palette: light */
+  --editor: #ffffff;
+  --panel: #f7f8fa;
+  --rail: #eef0f3;
+  --elevated: #ffffff;
+  --hover: #e9ecf1;
+  --selected: #e0eafa;
+  --selection: #b6d5ff;
+  --selection-inactive: #d3dfef;
+  --active-line: #3268b20a;
+  --symbol-highlight: #3268b21f;
+  --debug-line: #b67c1626;
+  --gutter: #fafbfc;
+  --search-match: #f5e3ae;
+  --line: #e1e4e9;
+  --line-strong: #c9ced8;
+  --text: #303644;
+  --bright: #202530;
+  --secondary: #555e6d;
+  --muted: #626d7e;
+  --accent: #3268b2;
+  --accent-hover: #285996;
+  --accent-soft: #edf3fc;
+  --on-accent: #ffffff;
+  --scrollbar: #b6becb;
+  --shadow: #20273526;
+  --backdrop: #20273566;
+
+  /* Layered elevation: soft ambient + tight contact shadow. */
+  --shadow-1: 0 1px 2px #2027350a;
+  --shadow-2: 0 2px 4px #2027350a, 0 6px 16px #20273512;
+  --shadow-3: 0 4px 10px #2027350d, 0 16px 40px #2027351f;
+  --menu-shadow: 0 1px 3px #20273510, 0 6px 18px #2027351f;
+  --ring: 0 0 0 2px var(--editor), 0 0 0 4px var(--accent);
+
+  --success: #1f6b4a;
+  --success-bg: #e4f2ea;
+  --warning: #7a560d;
+  --warning-bg: #faf0d8;
+  --error: #9a3434;
+  --error-bg: #fbeaea;
+
+  --syntax-keyword: #8b269e;
+  --syntax-string: #15713c;
+  --syntax-comment: #647287;
+  --syntax-number: #a54800;
+  --syntax-type: #006d80;
+  --syntax-function: #075dba;
+  --syntax-meta: #805300;
+  --syntax-property: #7750a8;
+  --syntax-operator: #48576d;
+}
+
+[data-theme='light'] { color-scheme: light; }
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --editor: #1b1d23;
+  --panel: #22252c;
+  --rail: #272a32;
+  --elevated: #292d35;
+  --hover: #343a46;
+  --selected: #303f58;
+  --selection: #365e92;
+  --selection-inactive: #35435b;
+  --active-line: #88b4f30c;
+  --symbol-highlight: #88b4f326;
+  --debug-line: #e6c68f26;
+  --gutter: #1f2229;
+  --search-match: #4d4228;
+  --line: #343943;
+  --line-strong: #4c5463;
+  --text: #d3d7df;
+  --bright: #f1f3f7;
+  --secondary: #b0b8c7;
+  --muted: #9aa5b7;
+  --accent: #88b4f3;
+  --accent-hover: #aacaf7;
+  --accent-soft: #2b3548;
+  --on-accent: #142237;
+  --scrollbar: #535c6c;
+  --shadow: #00000052;
+  --backdrop: #0b0d137a;
+
+  --shadow-1: 0 1px 2px #00000047, 0 1px 1px #0000002e;
+  --shadow-2: 0 2px 6px #00000059, 0 8px 20px #00000042;
+  --shadow-3: 0 12px 32px #00000066, 0 2px 6px #00000033;
+  --menu-shadow: 0 1px 3px #00000033, 0 8px 24px #00000052;
+
+  --success: #a9d5bb;
+  --success-bg: #1f3a2e;
+  --warning: #e6c68f;
+  --warning-bg: #403625;
+  --error: #f0b9b4;
+  --error-bg: #472c30;
+
+  --syntax-keyword: #ffab70;
+  --syntax-string: #a4d580;
+  --syntax-comment: #929fb3;
+  --syntax-number: #85c5ff;
+  --syntax-type: #6edbd0;
+  --syntax-function: #ffd479;
+  --syntax-meta: #c99af0;
+  --syntax-property: #baa7ff;
+  --syntax-operator: #b9c6da;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

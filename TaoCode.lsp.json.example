@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy this file next to TaoCode.exe as 'TaoCode.lsp.json'. Each key is a language id (see native/lsp_session.cpp). TaoCode does not bundle any language server; it launches whatever you install and reference here. Example paths are Windows; adjust to your install.",
+  "java": {
+    "_how": "Eclipse JDT Language Server. Match the jdt.ls release to an installed JDK: the current snapshot needs Java 25, 1.44-era needs Java 21, 1.40-era needs Java 17. Point command at that JDK's java.exe.",
+    "command": "java",
+    "args": [
+      "-jar",
+      "C:\\tools\\jdt-language-server\\plugins\\org.eclipse.equinox.launcher_1.8.0.v20260804-1928.jar",
+      "-configuration",
+      "C:\\tools\\jdt-language-server\\config_win",
+      "-data",
+      "C:\\tools\\jdt-language-server\\workspace-data"
+    ]
+  },
+  "cpp": {
+    "_how": "clangd ships with LLVM. Optional --compile-commands-dir for a build directory.",
+    "command": "clangd",
+    "args": ["--background-index", "--header-insertion=never"]
+  },
+  "typescript": {
+    "_how": "npm install -g typescript typescript-language-server ; the wrapper resolves node from PATH.",
+    "command": "typescript-language-server",
+    "args": ["--stdio"]
+  },
+  "javascript": {
+    "command": "typescript-language-server",
+    "args": ["--stdio"]
+  }
+}
