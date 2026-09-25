@@ -25,6 +25,7 @@
 #include "terminal.hpp"
 #include "history.hpp"
 #include "session.hpp"
+#include "watcher.hpp"
 #include "history.hpp"
 
 using Microsoft::WRL::Callback;
@@ -40,6 +41,7 @@ constexpr UINT lsp_event_message = WM_APP + 2;
 constexpr UINT run_event_message = WM_APP + 3;
 constexpr UINT dap_event_message = WM_APP + 4;
 constexpr UINT term_event_message = WM_APP + 5;
+constexpr UINT watch_event_message = WM_APP + 6;
 
 std::string utf8(const std::wstring& value) {
     if (value.empty()) return {};
@@ -153,6 +155,43 @@ struct App {
 
     std::unique_ptr<taocode::history::History> history;  // per-project local history, recreated on open
     std::unique_ptr<taocode::session::SessionStore> sessions;  // crash-recovery drafts, per profile
+
+    // IDE-03 file watching: one recursive ReadDirectoryChangesW thread per open
+    // workspace; batches are debounced natively and forwarded as fs.changed.
+    std::unique_ptr<taocode::watcher::Watcher> watcher;
+    std::mutex watch_mutex;
+    std::deque<Json> watch_events;
+
+    void queue_watch(Json payload) {
+        {
+            std::lock_guard lock(watch_mutex);
+            watch_events.push_back(std::move(payload));
+            if (watch_events.size() > 256) watch_events.pop_front();
+        }
+        PostMessageW(window, watch_event_message, 0, 0);
+    }
+
+    void drain_watch() {
+        std::deque<Json> events;
+        { std::lock_guard lock(watch_mutex); events.swap(watch_events); }
+        if (webview) for (const auto& event : events) post_json(event);
+    }
+
+    void start_watcher() {
+        if (current_root.empty()) return;
+        watcher = std::make_unique<taocode::watcher::Watcher>();
+        try {
+            watcher->start(fs::path(wide(current_root)), [this](std::vector<std::string> changed) {
+                queue_watch({{"event", "fs.changed"}, {"paths", changed}});
+            });
+        } catch (const taocode::WorkspaceError&) {
+            watcher.reset();  // watching is an enhancement, never a blocker
+        }
+    }
+
+    void stop_watcher() noexcept {
+        if (watcher) { watcher->stop(); watcher.reset(); }
+    }
 
     void queue_term(Json payload) {
         {
@@ -366,6 +405,7 @@ struct App {
             fs::create_directories(store, ec);
             history = std::make_unique<taocode::history::History>(store);
         } catch (...) { history.reset(); }
+        start_watcher();
         const auto title = wide(result.at("name").get<std::string>() + " — TaoCode");
         SetWindowTextW(window, title.c_str());
         return result;
@@ -482,6 +522,7 @@ struct App {
                 result = path.is_null() ? Json(nullptr) : open_project(fs::path(wide(path.get<std::string>())));
             } else if (method == "workspace.close") {
                 projects->closed();
+                stop_watcher();
                 stop_lsp();
                 stop_dap();
                 terminals->kill_all();
@@ -918,6 +959,9 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         case term_event_message:
             app->drain_term();
             return 0;
+        case watch_event_message:
+            app->drain_watch();
+            return 0;
         case WM_CLOSE:
             if (!app->closing_after_clone && app->dirty && MessageBoxW(window, L"有未保存的修改。确定放弃修改并关闭？", L"TaoCode", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
             if (app->clone_active) {
@@ -929,6 +973,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
             app->stop_lsp();  // reap language-server children before teardown
             app->stop_run();  // kill any running build/process tree
             app->stop_dap();  // never orphan a debug adapter or its debuggee
+            app->stop_watcher();  // join the directory-watcher thread
             app->terminals->kill_all();  // no shell outlives the window
             if (app->controller) app->controller->Close();
             DestroyWindow(window);

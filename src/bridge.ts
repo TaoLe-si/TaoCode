@@ -139,7 +139,7 @@ export interface Trace {
 }
 interface Reply {
   id: number; ok?: boolean; result?: unknown; event?: string; message?: string
-  path?: string; diagnostics?: unknown; chunk?: string; code?: number; payload?: DapEvent; dataB64?: string
+  path?: string; paths?: unknown; diagnostics?: unknown; chunk?: string; code?: number; payload?: DapEvent; dataB64?: string
   error?: { code: string; message: string }; durationMs?: number
 }
 interface WebView {
@@ -154,10 +154,19 @@ export const traces = reactive<Trace[]>([])
 export const cloneProgress = reactive<string[]>([])
 export const lspDiagnostics = reactive(new Map<string, LspDiagnostic[]>())
 export const runOutput = reactive<string[]>([])
+// IDE-03 file watching: the native watcher's debounced batches. `version` bumps on
+// every batch so a single watcher can refresh whatever the UI needs; `paths` is
+// workspace-relative ('/'-joined), empty meaning "everything changed (overflow)".
+export const fsChanges = reactive<{ version: number; paths: string[] }>({ version: 0, paths: [] })
 export const runState = reactive<{ running: boolean; exit: number | null }>({ running: false, exit: null })
 let nextId = 0
 const pending = new Map<number, { resolve: (reply: Reply) => void }>()
 webview?.addEventListener('message', ({ data }) => {
+  if (data?.event === 'fs.changed' && Array.isArray(data.paths)) {
+    fsChanges.paths = data.paths
+    fsChanges.version++
+    return
+  }
   if (data?.event === 'lsp.diagnostics' && typeof data.path === 'string') {
     lspDiagnostics.set(data.path, Array.isArray(data.diagnostics) ? data.diagnostics as LspDiagnostic[] : [])
     return

@@ -17,7 +17,7 @@ import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
 import ProjectDialog from './components/ProjectDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
-import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, isDesktop, lspDiagnostics, request, runOutput, runState, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type RecentProject, type RunConfig, type SaveResult, type TemplateSettings, type TodoPattern, type Workspace } from './bridge'
+import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, isDesktop, lspDiagnostics, request, runOutput, runState, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type RecentProject, type RunConfig, type SaveResult, type TemplateSettings, type TodoPattern, type Workspace } from './bridge'
 import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
 import { rankCommands } from './commandSearch'
 import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
@@ -2835,6 +2835,26 @@ async function syncFromDisk() {
 }
 function onWindowFocus() { void syncFromDisk() }
 function onVisibility() { if (document.visibilityState === 'visible') void syncFromDisk() }
+// IDE-03 live file watching: the native watcher already debounced the OS noise, so
+// this handler only coalesces UI work — refresh the tree once per batch and let
+// syncFromDisk pull the changed buffers (dirty ones are never touched).
+let fsWatchTimer: number | undefined
+let lastFsVersion = 0
+async function onFsChanges() {
+  if (!isDesktop || !workspace.value) return
+  if (fsWatchTimer !== undefined) return
+  fsWatchTimer = window.setTimeout(async () => {
+    fsWatchTimer = undefined
+    if (!workspace.value) return
+    // Ignore our own writes: the version snapshot only changes for external edits.
+    try {
+      workspace.value = { ...workspace.value, entries: await request<Entry[]>('workspace.list', { path: '' }) }
+      treeVersion.value++
+    } catch { /* the project may have closed mid-flight */ }
+    await syncFromDisk()
+  }, 400)
+}
+watch(() => fsChanges.version, value => { if (value !== lastFsVersion) { lastFsVersion = value; void onFsChanges() } })
 function trapFocus(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
   const controls = (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')
@@ -2887,6 +2907,7 @@ onBeforeUnmount(() => {
   if (bookmarkSave) window.clearTimeout(bookmarkSave)
   if (sessionTimer) { window.clearTimeout(sessionTimer); sessionTimer = undefined }
   if (markdownTimer !== undefined) { window.clearTimeout(markdownTimer); markdownTimer = undefined }
+  if (fsWatchTimer !== undefined) { window.clearTimeout(fsWatchTimer); fsWatchTimer = undefined }
   if (gitStatusTimer !== undefined) { window.clearInterval(gitStatusTimer); gitStatusTimer = undefined }
 })
 </script>
