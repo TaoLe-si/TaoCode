@@ -34,9 +34,31 @@ std::string text(const fs::path& path) {
     return {reinterpret_cast<const char*>(value.data()), value.size()};
 }
 
+std::string read_text(const fs::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
 void git(const fs::path& repo, const std::wstring& args) {
     const auto code = _wsystem((L"git -C \"" + repo.native() + L"\" " + args + L" >NUL 2>NUL").c_str());
     if (code != 0) throw std::runtime_error("git " + text(args) + " failed");
+}
+
+std::wstring wide_from(const std::string& value) {
+    return std::wstring(value.begin(), value.end());
+}
+
+// Default branch name (master or main, depending on the installed Git).
+std::wstring default_branch(const fs::path& repo) {
+    const auto command = L"git -C \"" + repo.native() + L"\" symbolic-ref --short HEAD 2>NUL";
+    FILE* pipe = _wpopen(command.c_str(), L"r");
+    if (!pipe) return L"master";
+    std::string out;
+    char buffer[64];
+    while (fgets(buffer, sizeof(buffer), pipe)) out += buffer;
+    _pclose(pipe);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return wide_from(out.empty() ? "master" : out);
 }
 }  // namespace
 
@@ -238,6 +260,112 @@ int main() {
         check(lines[0].at("line").get<int>() == 1, "blame lines are 1-based");
         check(lines[0].at("hash").get<std::string>().size() == 8, "blame reports the short sha");
         check(lines[0].at("author").get<std::string>() == "Test", "blame reports the commit author");
+    });
+
+    run("tags list, create at a target and delete", [&] {
+        check(taocode::git::tag_list(root).at("tags").empty(), "a fresh repo has no tags");
+        taocode::git::tag_create(root, "v1.0", "");
+        put(root / "tagged.txt", "tagged\n");
+        git(root, L"add tagged.txt");
+        git(root, L"commit -q -m tagged");
+        taocode::git::tag_create(root, "v1.1", "HEAD");
+        const auto tags = taocode::git::tag_list(root).at("tags");
+        check(tags.size() == 2, "both tags are listed");
+        check(tags[0].get<std::string>() == "v1.0" && tags[1].get<std::string>() == "v1.1", "tags keep order");
+        taocode::git::tag_delete(root, "v1.0");
+        check(taocode::git::tag_list(root).at("tags").size() == 1, "delete removes the tag");
+        try {
+            taocode::git::tag_create(root, "", "");
+            check(false, "an empty tag name must be rejected");
+        } catch (const taocode::WorkspaceError& error) {
+            check(std::string(error.code) == "INVALID_REQUEST", "tag validation error code");
+        }
+    });
+
+    run("cherry_pick applies a commit from another branch", [&] {
+        const auto trunk = default_branch(root);
+        git(root, L"checkout -q -b cherry-src");
+        put(root / "cherry.txt", "picked\n");
+        git(root, L"add cherry.txt");
+        git(root, L"commit -q -m cherry-source");
+        const auto hash = taocode::git::log(root, "cherry.txt", 1).at("commits")[0].at("hash").get<std::string>();
+        git(root, L"checkout -q " + trunk);
+        taocode::git::cherry_pick(root, hash);
+        const auto picked = taocode::git::log(root, "cherry.txt", 1);
+        check(picked.at("commits").size() == 1, "the cherry-picked file exists on this branch");
+        git(root, L"branch -D cherry-src");
+    });
+
+    run("rebase replays commits on top of another branch", [&] {
+        const auto trunk = default_branch(root);
+        git(root, L"add -A");
+        git(root, L"commit -q -m pre-rebase 2>NUL");  // settle any leftovers; no-op when clean
+        git(root, L"checkout -q -b rebase-base");
+        put(root / "rebase.txt", "base\n");
+        git(root, L"add rebase.txt");
+        git(root, L"commit -q -m rebase-base");
+        const auto base = taocode::git::log(root, "", 1).at("commits")[0].at("hash").get<std::string>();
+        git(root, L"checkout -q " + trunk);
+        put(root / "after.txt", "after\n");
+        git(root, L"add after.txt");
+        git(root, L"commit -q -m after-base");
+        taocode::git::rebase(root, "rebase-base");
+        const auto commits = taocode::git::log(root, "", 2).at("commits");
+        check(commits.size() == 2, "two commits after the rebase");
+        check(commits[1].at("hash").get<std::string>() == base, "the replayed commit sits on top of the base");
+        git(root, L"branch -D rebase-base");
+    });
+
+    run("delete_branch removes a merged branch and refuses the current one", [&] {
+        git(root, L"branch -q to-delete");
+        taocode::git::delete_branch(root, "to-delete");
+        const auto branches = taocode::git::branches(root);
+        check(std::find(branches.begin(), branches.end(), "to-delete") == branches.end(), "branch is gone");
+        const auto head = taocode::git::head(root);
+        bool refused = false;
+        try { taocode::git::delete_branch(root, head); }
+        catch (const taocode::WorkspaceError&) { refused = true; }
+        check(refused, "git refuses deleting the checked-out branch");
+    });
+
+    run("ignore_path appends once and only once", [&] {
+        taocode::git::ignore_path(root, "build-output");
+        taocode::git::ignore_path(root, "build-output");
+        const auto ignored = read_text(root / ".gitignore");
+        check(ignored == "build-output\n", "one line, no duplicate: got " + ignored);
+        // The new entry takes effect: the ignored path no longer shows as untracked.
+        put(root / "build-output", "x");
+        for (const auto& change : taocode::git::status(root))
+            check(change.path != "build-output", ".gitignore hides the entry");
+    });
+
+    run("hunks split, stage partially and unstage partially", [&] {
+        put(root / "hunks.txt", "one\n");
+        git(root, L"add hunks.txt");
+        git(root, L"commit -q -m hunks-base");
+        put(root / "hunks.txt", "one\nTWO\n");
+        const auto parts = taocode::git::diff_hunks(root, "hunks.txt", false);
+        const auto& hunks = parts.at("hunks");
+        check(hunks.size() == 1, "a single added line is one hunk");
+        check(hunks[0].at("additions").get<int>() == 1, "the hunk counts one addition");
+        taocode::git::apply_hunks(root, "hunks.txt", false, {0}, false);
+        bool staged_seen = false;
+        for (const auto& change : taocode::git::status(root))
+            if (change.path == "hunks.txt" && change.staged) staged_seen = true;
+        check(staged_seen, "the selected hunk moved to the index");
+        const auto staged_parts = taocode::git::diff_hunks(root, "hunks.txt", true);
+        check(staged_parts.at("hunks").size() == 1, "the staged side has the hunk");
+        taocode::git::apply_hunks(root, "hunks.txt", true, {0}, true);
+        bool still_staged = false;
+        for (const auto& change : taocode::git::status(root))
+            if (change.path == "hunks.txt" && change.staged) still_staged = true;
+        check(!still_staged, "the reverse apply unstaged the hunk");
+        try {
+            taocode::git::apply_hunks(root, "hunks.txt", false, {99}, false);
+            check(false, "an out-of-range hunk index must be rejected");
+        } catch (const taocode::WorkspaceError& error) {
+            check(std::string(error.code) == "INVALID_REQUEST", "hunk range validation error code");
+        }
     });
 
     fs::remove_all(root, ec);

@@ -49,12 +49,32 @@ Json log(const std::filesystem::path& repo, const std::string& path, int limit);
 Json log_full(const std::filesystem::path& repo, int limit);
 void pull(const std::filesystem::path& repo);
 void push(const std::filesystem::path& repo);
+// Git.Fetch: refresh remote refs without touching the working tree.
+void fetch(const std::filesystem::path& repo);
+// Git.Rebase: rebase onto the upstream (empty branch) or a named branch.
+void rebase(const std::filesystem::path& repo, const std::string& branch);
+// Cherry-pick a commit hash onto HEAD (IDEA's VCS Log popup row).
+void cherry_pick(const std::filesystem::path& repo, const std::string& commit);
 Json stash_list(const std::filesystem::path& repo);
 void stash_save(const std::filesystem::path& repo, const std::string& message);
 void stash_pop(const std::filesystem::path& repo);
 void create_branch(const std::filesystem::path& repo, const std::string& name, bool checkout);
+void delete_branch(const std::filesystem::path& repo, const std::string& name);
 void merge(const std::filesystem::path& repo, const std::string& branch);
 Json ahead_behind(const std::filesystem::path& repo);
+// Git.Tag dialog: list / create (optionally at a target ref) / delete tags.
+Json tag_list(const std::filesystem::path& repo);                     // {tags:[name]}
+void tag_create(const std::filesystem::path& repo, const std::string& name, const std::string& target);
+void tag_delete(const std::filesystem::path& repo, const std::string& name);
+// IDEA's "Add to .gitignore": append the path as one line (creating the file).
+void ignore_path(const std::filesystem::path& repo, const std::string& path);
+
+// Partial staging (IDEA's commit diff viewer stage/unstage hunks): `diff_hunks`
+// splits the unified diff into selectable hunks; `apply_hunks` re-applies only the
+// chosen ones to the index (`--cached`, reversed to unstage).
+Json diff_hunks(const std::filesystem::path& repo, const std::string& path, bool staged);
+void apply_hunks(const std::filesystem::path& repo, const std::string& path, bool staged,
+                 const std::vector<int>& hunks, bool reverse);
 
 // Per-line origin for `path` via `git blame --line-porcelain`:
 // {lines:[{line, hash, author, content}]} with 1-BASED line numbers.

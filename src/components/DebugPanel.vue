@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, nextTick } from 'vue'
-import { Bug, ChevronDown, ChevronRight, Pause, Play, StepForward, Square, X } from 'lucide-vue-next'
+import { Bug, ChevronDown, ChevronRight, Pause, Play, StepForward, Square, X, Crosshair } from 'lucide-vue-next'
 import {
   dapBreakpoints, dapConsole, dapEvaluate, dapScopes, dapSetBreakpoints, dapSetCurrentLocation, dapStart, dapState, dapStep,
-  dapStackTrace, dapTerminate, dapVariables,
-  type DapBreakpoint, type DapFrame, type DapScope, type DapVariable,
+  dapStackTrace, dapTerminate, dapThreads, dapSetExceptionBreakpoints, dapVariables,
+  type DapBreakpoint, type DapExceptionFilter, type DapFrame, type DapScope, type DapThread, type DapVariable,
 } from '../bridge'
 
 const props = defineProps<{ activePath: string; ready: boolean; evaluateRequest?: { text: string; nonce: number } | null }>()
@@ -13,6 +13,7 @@ const emit = defineEmits<{ jump: [target: { path?: string; line: number }] }>()
 const kind = ref('lldb-dap')
 const program = ref('')
 const cwd = ref('.')
+const attachId = ref('')
 const frames = ref<DapFrame[]>([])
 const scopes = ref<DapScope[]>([])
 const values = reactive<Record<number, DapVariable[]>>({})   // variablesReference -> children
@@ -21,18 +22,66 @@ const busy = ref(false)
 const error = ref('')
 const newBreak = ref<number | null>(null)
 const consoleBox = ref<HTMLElement>()
+const threads = ref<DapThread[]>([])
+// IDEA's breakpoints dialog exception rows: the adapter's filter list plus the
+// checked subset, remembered across sessions through the native client.
+const exceptionFilters = ref<DapExceptionFilter[]>([])
+const exceptionChecked = ref<Set<string>>(new Set())
+// IDEA's Watches view: expressions re-evaluated against the current top frame on
+// every stop, kept for the whole session.
+interface Watch { text: string; value: string }
+const watches = ref<Watch[]>([])
+const newWatch = ref('')
 
 const activeBreaks = computed(() => (props.activePath ? dapBreakpoints.get(props.activePath) ?? [] : []))
 const stopped = computed(() => dapState.running && dapState.paused)
 const running = computed(() => dapState.running)
 
+function rememberFilters(capabilities: Record<string, unknown> | undefined) {
+  const raw = capabilities?.exceptionBreakpointFilters
+  if (!Array.isArray(raw)) return
+  const parsed: DapExceptionFilter[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || typeof (item as DapExceptionFilter).filter !== 'string') continue
+    parsed.push(item as DapExceptionFilter)
+  }
+  exceptionFilters.value = parsed
+  const wanted = new Set(exceptionChecked.value)
+  for (const filter of parsed) if (filter.default && !exceptionChecked.value.size) wanted.add(filter.filter)
+  exceptionChecked.value = wanted
+}
+
 async function start() {
   error.value = ''
   if (!program.value.trim()) { error.value = '请填写要调试的程序路径。'; return }
   try {
-    await dapStart({ command: '', args: [], kind: kind.value.trim() || 'cppvsdbg', program: program.value.trim(), cwd: cwd.value.trim() || '.', stopOnEntry: false })
+    const result = await dapStart({ command: '', args: [], kind: kind.value.trim() || 'cppvsdbg', program: program.value.trim(), cwd: cwd.value.trim() || '.', stopOnEntry: false })
+    rememberFilters(result.capabilities)
+    if (exceptionChecked.value.size) await dapSetExceptionBreakpoints([...exceptionChecked.value]).catch(() => undefined)
     await refreshStack()
   } catch (caught) { error.value = message(caught) }
+}
+// IDEA's Attach to Process: no program of our own, the adapter joins a running one
+// via its selector (processId for cppvsdbg/lldb-dap, pipeName for others).
+async function attach() {
+  error.value = ''
+  const selector = attachId.value.trim()
+  if (!selector) { error.value = '请填写要附加的进程 PID 或管道名。'; return }
+  const numeric = /^\d+$/.test(selector)
+  try {
+    const configuration = numeric ? { processId: Number(selector) } : { pipeName: selector }
+    const result = await dapStart({ command: '', args: [], kind: kind.value.trim() || 'cppvsdbg', program: '', cwd: cwd.value.trim() || '.', stopOnEntry: false, configuration: { request: 'attach', ...configuration } })
+    rememberFilters(result.capabilities)
+    if (exceptionChecked.value.size) await dapSetExceptionBreakpoints([...exceptionChecked.value]).catch(() => undefined)
+    await refreshStack()
+  } catch (caught) { error.value = message(caught) }
+}
+async function toggleExceptionFilter(filter: string) {
+  const next = new Set(exceptionChecked.value)
+  if (next.has(filter)) next.delete(filter); else next.add(filter)
+  exceptionChecked.value = next
+  try { await dapSetExceptionBreakpoints([...next]) }
+  catch (caught) { error.value = message(caught) }
 }
 async function step(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut') {
   error.value = ''; busy.value = true
@@ -40,14 +89,16 @@ async function step(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut'
   catch (caught) { error.value = message(caught) }
   finally { busy.value = false }
 }
-async function stop() { busy.value = true; try { await dapTerminate(); frames.value = []; scopes.value = [] } finally { busy.value = false } }
+async function stop() { busy.value = true; try { await dapTerminate(); frames.value = []; scopes.value = []; threads.value = [] } finally { busy.value = false } }
 async function refreshStack() {
   if (!dapState.running) { frames.value = []; dapSetCurrentLocation(null); return }
   try {
+    void dapThreads().then(result => { threads.value = result.threads }).catch(() => undefined)
     frames.value = (await dapStackTrace()).frames
     const top = frames.value[0]
     if (top) dapSetCurrentLocation({ path: top.path ?? props.activePath, line: top.line }); else dapSetCurrentLocation(null)
     await refreshScopes(frames.value[0]?.id)
+    await refreshWatches()
   } catch { frames.value = []; dapSetCurrentLocation(null) }
 }
 async function refreshScopes(frameId?: number) {
@@ -96,7 +147,26 @@ function setCondition(line: number, condition: string) {
 function message(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 
 watch(() => dapState.paused, paused => { if (paused) void refreshStack() })
-watch(() => dapState.running, live => { if (!live) { frames.value = []; scopes.value = [] } })
+watch(() => dapState.running, live => { if (!live) { frames.value = []; scopes.value = []; threads.value = [] } })
+// IDEA's Watches: every stop re-evaluates the list against the new top frame.
+async function refreshWatches() {
+  if (!stopped.value) return
+  const frame = frames.value[0]?.id ?? 0
+  for (const watch of watches.value) {
+    try {
+      const result = await dapEvaluate(watch.text, 'watch', frame)
+      watch.value = `${result.result}${result.type ? ` : ${result.type}` : ''}`
+    } catch (caught) { watch.value = caught instanceof Error ? caught.message : String(caught) }
+  }
+}
+function addWatch() {
+  const text = newWatch.value.trim()
+  if (!text || watches.value.some(watch => watch.text === text)) return
+  watches.value.push({ text, value: '' })
+  newWatch.value = ''
+  void refreshWatches()
+}
+function removeWatch(text: string) { watches.value = watches.value.filter(watch => watch.text !== text) }
 // IDEA's Evaluate Expression (Alt+F8): the editor hands over the selection, the panel
 // runs it against the frame the debugger is stopped in.
 const expr = ref('')
@@ -127,7 +197,20 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
       <label class="debug-field"><span>kind</span><input v-model="kind" class="debug-input" aria-label="调试适配器 kind" placeholder="cppvsdbg" spellcheck="false" /></label>
       <label class="debug-field"><span>program</span><input v-model="program" class="debug-input" aria-label="被调试程序" placeholder="build/Demo.exe 或绝对路径" spellcheck="false" /></label>
       <label class="debug-field"><span>cwd</span><input v-model="cwd" class="debug-input" aria-label="工作目录" placeholder="." spellcheck="false" /></label>
-      <button class="debug-btn primary" :disabled="!ready || busy || running" title="启动调试会话（command 取自 TaoCode.dap.json 对应 kind）" @click="start"><Bug :size="13" />启动</button>
+      <div class="debug-config-buttons">
+        <button class="debug-btn primary" :disabled="!ready || busy || running" title="启动调试会话（command 取自 TaoCode.dap.json 对应 kind）" @click="start"><Bug :size="13" />启动</button>
+        <!-- IDEA's Attach to Process: the same handshake with the `attach` request. -->
+        <button class="debug-btn" :disabled="!ready || busy || running" title="附加到正在运行的进程（进程 PID 或管道名）" @click="attach"><Crosshair :size="13" />附加</button>
+      </div>
+      <label class="debug-field"><span>附加到</span><input v-model="attachId" class="debug-input" aria-label="要附加的进程 PID 或管道名" placeholder="PID（如 4242）或 pipeName" spellcheck="false" @keydown.enter.prevent="attach" /></label>
+    </div>
+
+    <div v-if="exceptionFilters.length" class="debug-exceptions">
+      <span class="debug-exceptions-title">异常断点</span>
+      <label v-for="filter in exceptionFilters" :key="filter.filter" class="debug-exception" :title="filter.description">
+        <input type="checkbox" :checked="exceptionChecked.has(filter.filter)" @change="toggleExceptionFilter(filter.filter)" />
+        {{ filter.label ?? filter.filter }}
+      </label>
     </div>
 
     <div class="debug-toolbar">
@@ -160,6 +243,15 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
       </span>
     </div>
 
+    <div class="debug-section-title">线程 <span v-if="threads.length">· {{ threads.length }}</span></div>
+    <div class="debug-stack">
+      <div v-for="thread in threads" :key="thread.id" class="debug-frame" :class="{ active: thread.id === dapState.threadId }" title="点击切换当前线程">
+        <span class="debug-frame-name">#{{ thread.id }} {{ thread.name }}</span>
+        <span v-if="thread.id === dapState.threadId" class="debug-frame-loc">当前</span>
+      </div>
+      <div v-if="!threads.length" class="debug-empty">停止时在此显示线程列表。</div>
+    </div>
+
     <div class="debug-section-title">调用堆栈</div>
     <div class="debug-stack">
       <button v-for="(frame, index) in frames" :key="frame.id" class="debug-frame" :class="{ active: index === 0 }"
@@ -168,6 +260,18 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
         <span class="debug-frame-loc">{{ frame.path ? frame.path.split('/').pop() + ':' : '' }}{{ frame.line }}</span>
       </button>
       <div v-if="!frames.length" class="debug-empty">停止时在此显示调用堆栈。</div>
+    </div>
+
+    <div class="debug-section-title">监视（Watches）</div>
+    <div class="debug-watches">
+      <div v-for="watch in watches" :key="watch.text" class="debug-row">
+        <button class="chip-x" :aria-label="`移除监视 ${watch.text}`" @click="removeWatch(watch.text)"><X :size="10" /></button>
+        <span class="debug-name">{{ watch.text }}</span>
+        <span class="debug-value">{{ watch.value || '—' }}</span>
+      </div>
+      <div class="debug-watch-add">
+        <input v-model="newWatch" class="debug-input" aria-label="新监视表达式" placeholder="监视表达式，回车添加" spellcheck="false" @keydown.enter.prevent="addWatch" />
+      </div>
     </div>
 
     <div class="debug-section-title">变量</div>
@@ -210,6 +314,12 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 <style scoped>
 .debug-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; font-size: 12px; color: var(--text); }
 .debug-config { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+.debug-config-buttons { display: flex; gap: var(--space-1); }
+.debug-exceptions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
+.debug-exceptions-title { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.debug-exception { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); }
+.debug-watches { border-top: 1px solid var(--line); padding: var(--space-1) 0; }
+.debug-watch-add { padding: 2px var(--space-3); }
 .debug-field { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: 11px; color: var(--muted); }
 .debug-field > span { flex-shrink: 0; width: 48px; }
 .debug-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px/1.4 var(--font-mono); }

@@ -527,3 +527,17 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .editor-stage.has-md-preview .code-editor { width: 50%; }
 .md-split { width: 50%; min-width: 220px; border-left: 1px solid var(--line); }
 .md-toggle.active { color: var(--accent); border-color: var(--accent); }
+
+/* IDEA Tag dialog chips and commit-viewer hunk rows (SourceControl) */
+.sc-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.sc-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border: 1px solid var(--warning); border-radius: var(--radius-pill); color: var(--warning); font-size: 10px; line-height: 16px; }
+.sc-tag-x { display: inline-flex; padding: 0; background: none; border: 0; color: inherit; cursor: pointer; }
+.sc-hunks { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+.sc-hunk-hint { margin-left: auto; color: var(--muted); font-size: 11px; }
+.sc-hunk-list { max-height: 140px; overflow: auto; border-bottom: 1px solid var(--line); }
+.sc-hunk { display: flex; align-items: center; gap: var(--space-2); padding: 3px var(--space-3); font-size: 11px; }
+.sc-hunk-header { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); }
+.sc-hunk-counts { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+/* IDEA Problems view toolbar (batch code cleanup entry point) */
+.problems-toolbar { display: flex; justify-content: flex-end; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); }

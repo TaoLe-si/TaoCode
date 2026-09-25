@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { GitGraph, RefreshCw, Search, Copy, ExternalLink } from 'lucide-vue-next'
+import { GitGraph, RefreshCw, Search, Copy, ExternalLink, GitPullRequestArrow } from 'lucide-vue-next'
 import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitRef } from '../bridge'
 
 const props = defineProps<{ root: string; active: boolean }>()
@@ -12,6 +12,7 @@ const loaded = ref(false)
 const error = ref('')
 const filter = ref('')
 const selected = ref('')
+const busy = ref(false)
 
 const palette = ['#4FC1E9', '#A0D468', '#FFCE54', '#FC6E51', '#ED5565', '#AC92EC', '#48CFAD', '#EC87C0', '#5D9CEC', '#E8636F']
 const refColor = (ref: GitRef) => ref.type === 'tag' ? 'var(--warning)' : ref.type === 'remote' ? 'var(--secondary)' : 'var(--accent)'
@@ -91,6 +92,19 @@ async function copyHash() {
   try { await navigator.clipboard.writeText(selectedCommit.value.hash) } catch { /* fallback: no-op */ }
 }
 
+// IDEA's VCS log popup: Cherry-Pick applies the selected commit onto the current
+// branch (git cherry-pick); failures surface verbatim (conflicts, dirty tree).
+async function cherryPick() {
+  if (!selectedCommit.value || busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await request('git.cherryPick', { commit: selectedCommit.value.hash })
+    await load()
+  } catch (caught) { error.value = caught instanceof Error ? caught.message : String(caught) }
+  finally { busy.value = false }
+}
+
 function shortDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -145,6 +159,7 @@ onMounted(() => { if (props.active) void load() })
         <div class="vcslog-detail-header">
           <span class="vcslog-detail-hash">{{ selectedCommit.shortHash }}</span>
           <button class="icon-button" title="复制完整哈希" @click="copyHash"><Copy :size="13" /></button>
+          <button class="icon-button" :disabled="busy" title="摘取该提交到当前分支（cherry-pick）" aria-label="摘取提交" @click="cherryPick"><GitPullRequestArrow :size="13" /></button>
         </div>
         <h3 class="vcslog-detail-subject">{{ selectedCommit.subject }}</h3>
         <dl class="vcslog-detail-meta">

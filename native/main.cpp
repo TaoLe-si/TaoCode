@@ -646,12 +646,26 @@ struct App {
             else if (method == "git.log") result = taocode::git::log(fs::path(wide(require_repo_root())), params.value("path", std::string()), params.value("limit", 100));
             else if (method == "git.logFull") result = taocode::git::log_full(fs::path(wide(require_repo_root())), params.value("limit", 200));
             else if (method == "git.pull") { taocode::git::pull(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
+            else if (method == "git.fetch") { taocode::git::fetch(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
             else if (method == "git.push") { taocode::git::push(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
+            else if (method == "git.rebase") { taocode::git::rebase(fs::path(wide(require_repo_root())), params.value("branch", std::string())); result = {{"ok", true}}; }
+            else if (method == "git.cherryPick") { taocode::git::cherry_pick(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; }
             else if (method == "git.stash") result = taocode::git::stash_list(fs::path(wide(require_repo_root())));
             else if (method == "git.stash.save") { taocode::git::stash_save(fs::path(wide(require_repo_root())), params.value("message", std::string())); result = {{"ok", true}}; }
             else if (method == "git.stash.pop") { taocode::git::stash_pop(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
             else if (method == "git.branch.create") { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; }
+            else if (method == "git.branch.delete") { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
             else if (method == "git.merge") { taocode::git::merge(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>()); result = {{"ok", true}}; }
+            else if (method == "git.tags") result = taocode::git::tag_list(fs::path(wide(require_repo_root())));
+            else if (method == "git.tag.create") { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; }
+            else if (method == "git.tag.delete") { taocode::git::tag_delete(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
+            else if (method == "git.ignore") { taocode::git::ignore_path(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; }
+            else if (method == "git.diffHunks") result = taocode::git::diff_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("staged", false));
+            else if (method == "git.applyHunks") {
+                taocode::git::apply_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(),
+                                          params.value("staged", false), params.at("hunks").get<std::vector<int>>(), params.value("reverse", false));
+                result = {{"ok", true}};
+            }
             else if (method == "git.aheadBehind") result = taocode::git::ahead_behind(fs::path(wide(require_repo_root())));
             else if (method == "git.blame") result = taocode::git::blame(fs::path(wide(require_repo_root())), params.at("path").get<std::string>());
             else if (method == "search.run" || method == "search.replace") {
@@ -747,6 +761,14 @@ struct App {
                 return;
             }
             else if (method == "dap.breakpoints") { result = {{"breakpoints", dap ? dap->breakpoint_map() : Json::object()}}; }
+            else if (method == "dap.setExceptionBreakpoints") {
+                require_dap().set_exception_breakpoints(params.at("filters"), [this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;  // async; delivered through drain_dap
+            }
+            else if (method == "dap.threads") {
+                require_dap().threads([this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;  // async; delivered through drain_dap
+            }
             else if (method == "dap.terminate") { stop_dap(); result = {{"ok", true}}; }
             else if (method == "dap.disconnect") { if (dap) { dap->disconnect({}); dap->shutdown(); } result = {{"ok", true}}; }
             else if (method == "term.create") {

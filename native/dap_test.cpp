@@ -541,6 +541,46 @@ void scenario_framing_and_paths() {
     check(!to_utf8(adapter_path()).empty(), "the fake adapter is locatable beside the test");
 }
 
+// IDEA's Attach to Process: the same handshake with the `attach` request; the
+// scripted adapter answers with its "attaching to <selector>" output event.
+void scenario_attach_and_exception_filters() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+
+    // Exception filters chosen before the session are remembered and re-applied by
+    // start (same rule as line breakpoints).
+    Waiter deferred_filters;
+    client.set_exception_breakpoints(Json::array({"all"}), deferred_filters.reply());
+    check(deferred_filters.await_for(), "setExceptionBreakpoints before start never replied");
+    check(flag_at(deferred_filters.result, "deferred"), "offline exception filters must report deferred=true");
+
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter attached;
+    client.start_debugging("fake-adapter", Json{{"request", "attach"}, {"processId", 4242}},
+                           attached.reply());
+    check(attached.await_for(), "attach sequence never replied");
+    check(attached.ok(), "attach sequence failed: " + attached.failure_text());
+    Json output;
+    expect_event(recorder, [](const Json& e) { return is_event(e, "output"); }, "attach output event", &output);
+    check(output.at("text").get<std::string>().find("4242") != std::string::npos,
+          "attach must forward the process selector: " + output.at("text").get<std::string>());
+    Json stopped;
+    expect_event(recorder, [](const Json& e) { return is_event(e, "stopped"); }, "attach stopped event", &stopped);
+
+    // The thread list the debugger's Threads view shows.
+    Waiter threads;
+    client.threads(threads.reply());
+    check(threads.await_for(), "threads never replied");
+    check(threads.ok(), "threads failed: " + threads.failure_text());
+    const auto& list = threads.result.at("threads");
+    check(list.is_array() && list.size() == 2, "threads must list the scripted pair: " + threads.result.dump());
+    check(number_at(list[0], "id") == 1, "thread ids preserved");
+
+    client.shutdown();
+}
+
 }  // namespace
 
 int main() {
@@ -561,6 +601,7 @@ int main() {
     run("out-of-order responses correlate by request_seq", scenario_out_of_order_correlation);
     run("shutdown reaps the adapter and the client is reusable", scenario_shutdown_reaps_the_adapter);
     run("conditional breakpoints normalize, reach the adapter and are remembered", scenario_conditional_breakpoints);
+    run("attach handshake, remembered exception filters and the thread list", scenario_attach_and_exception_filters);
 
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;

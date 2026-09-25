@@ -814,21 +814,17 @@ void Client::initialize(const std::string& adapter_id, Reply on_reply) {
          });
 }
 
-void Client::launch(Json configuration, Reply on_reply) {
-    Json arguments = configuration.is_object() ? configuration : Json::object();
-    std::string kind;
-    {
-        std::lock_guard lock(mutex_);
-        kind = adapter_id_;
-    }
+// Shared launch/attach normalization: type/name defaults, env list→object, and
+// workspace-relative paths absolutised for the adapter.
+Json normalize_configuration(const Client& client, Json configuration, const char* request) {
+    Json arguments = configuration.is_object() ? std::move(configuration) : Json::object();
     const auto type = text_of(arguments, "type");
-    if (type.empty()) arguments["type"] = kind;
-    arguments["request"] = "launch";
+    if (type.empty()) arguments["type"] = "taocode";
+    arguments["request"] = request;
     if (text_of(arguments, "name").empty()) arguments["name"] = "TaoCode";
-    // The bridge speaks workspace-relative; the adapter needs real paths.
     for (const auto& key : path_configuration_keys) {
         const auto found = arguments.find(std::string(key));
-        if (found != arguments.end() && found->is_string()) *found = to_native(found->get<std::string>());
+        if (found != arguments.end() && found->is_string()) *found = client.to_native(found->get<std::string>());
     }
     // `env` is accepted as an object or as ["KEY=value", ...] from the bridge.
     if (arguments.contains("env") && arguments.at("env").is_array()) {
@@ -842,7 +838,56 @@ void Client::launch(Json configuration, Reply on_reply) {
         }
         arguments["env"] = std::move(env);
     }
+    return arguments;
+}
+
+void Client::launch(Json configuration, Reply on_reply) {
+    std::string kind;
+    {
+        std::lock_guard lock(mutex_);
+        kind = adapter_id_;
+    }
+    Json arguments = normalize_configuration(*this, std::move(configuration), "launch");
+    if (text_of(arguments, "type").empty() || text_of(arguments, "type") == "taocode") arguments["type"] = kind;
     send("launch", std::move(arguments), std::move(on_reply));
+}
+
+// `attach` joins an already-running process (IDEA's Attach to Process); the
+// configuration carries adapter-specific selectors like processId or pipeName.
+void Client::attach(Json configuration, Reply on_reply) {
+    std::string kind;
+    {
+        std::lock_guard lock(mutex_);
+        kind = adapter_id_;
+    }
+    Json arguments = normalize_configuration(*this, std::move(configuration), "attach");
+    if (text_of(arguments, "type").empty() || text_of(arguments, "type") == "taocode") arguments["type"] = kind;
+    send("attach", std::move(arguments), std::move(on_reply));
+}
+
+void Client::set_exception_breakpoints(const Json& filters, Reply on_reply) {
+    Json list = Json::array();
+    if (filters.is_array()) for (const auto& item : filters) if (item.is_string()) list.push_back(item);
+    {
+        std::lock_guard lock(mutex_);
+        exception_filters_ = list;  // remembered, so a restart re-applies it
+    }
+    if (!running_.load()) {
+        if (on_reply) on_reply(Json{{"ok", true}, {"filters", list}, {"deferred", true}}, Json(nullptr));
+        return;
+    }
+    send("setExceptionBreakpoints", Json{{"filters", list}}, wrap_ok(std::move(on_reply)));
+}
+
+void Client::threads(Reply on_reply) {
+    send("threads", Json::object(),
+         shaped(std::move(on_reply), [](const Json& body) {
+             Json threads = Json::array();
+             if (body.contains("threads") && body.at("threads").is_array())
+                 for (const auto& thread : body.at("threads"))
+                     threads.push_back({{"id", thread.value("id", 0)}, {"name", thread.value("name", std::string())}});
+             return Json{{"threads", std::move(threads)}};
+         }));
 }
 
 void Client::set_configuration_done(Reply on_reply) {
@@ -920,13 +965,17 @@ void Client::start_debugging(const std::string& adapter_id, Json launch_configur
     startup->adapter_id = adapter_id;
     startup->configuration = launch_configuration.is_object() ? std::move(launch_configuration) : Json::object();
     startup->done = std::move(on_reply);
-    initialize(adapter_id, [this, startup](Json capabilities, Json error) {
+    const bool attach_mode = text_of(startup->configuration, "request") == "attach";
+    initialize(adapter_id, [this, startup, attach_mode](Json capabilities, Json error) {
         if (!error.is_null()) { settle(startup, Json(nullptr), std::move(error)); return; }
         startup->capabilities = std::move(capabilities);
-        launch(startup->configuration, [this, startup](Json, Json error) {
+        // IDEA's Attach to Process is the same handshake with the `attach` request.
+        auto connect = [this, startup](Json, Json error) {
             if (!error.is_null()) { settle(startup, Json(nullptr), std::move(error)); return; }
             apply_remembered_breakpoints(startup);
-        });
+        };
+        if (attach_mode) attach(startup->configuration, connect);
+        else launch(startup->configuration, connect);
     });
 }
 
@@ -934,9 +983,11 @@ void Client::start_debugging(const std::string& adapter_id, Json launch_configur
 // are in. One failing file is reported inside `breakpoints` but never aborts.
 void Client::apply_remembered_breakpoints(std::shared_ptr<Startup> startup) {
     std::vector<std::pair<std::string, Json>> remembered;
+    Json exception_filters = Json::array();
     {
         std::lock_guard lock(mutex_);
         remembered.assign(breakpoints_.begin(), breakpoints_.end());
+        exception_filters = exception_filters_;
     }
     {
         std::lock_guard lock(startup->lock);
@@ -955,6 +1006,10 @@ void Client::apply_remembered_breakpoints(std::shared_ptr<Startup> startup) {
             settle(startup, success_payload(startup), Json(nullptr));
         });
     };
+    // Exception breakpoints ride on the same handshake, before configurationDone;
+    // a failure is ignored the same way a failing file breakpoint is.
+    if (exception_filters.is_array() && !exception_filters.empty())
+        set_exception_breakpoints(exception_filters, [startup](Json, Json) {});
     if (remembered.empty()) { advance(); return; }
     for (const auto& [path, lines] : remembered) {
         set_breakpoints(path, lines, [startup, path, advance](Json result, Json error) {            Json report;

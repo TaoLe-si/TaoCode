@@ -12,6 +12,8 @@
 
 #include <array>
 #include <cctype>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -433,6 +435,143 @@ Json blame(const fs::path& repo, const std::string& path) {
         if (line.rfind("author ", 0) == 0) { author = line.substr(7); continue; }
     }
     return {{"lines", std::move(lines)}};
+}
+
+void fetch(const fs::path& repo) { require_ok(run(repo, {L"fetch", L"--all", L"--prune"}), "获取"); }
+
+void rebase(const fs::path& repo, const std::string& branch) {
+    if (branch.empty()) require_ok(run(repo, {L"rebase"}), "变基");
+    else require_ok(run(repo, {L"rebase", utf8_to_wide(branch)}), "变基");
+}
+
+void cherry_pick(const fs::path& repo, const std::string& commit) {
+    if (commit.empty()) throw WorkspaceError("INVALID_REQUEST", "要摘取的提交不能为空。");
+    require_ok(run(repo, {L"cherry-pick", utf8_to_wide(commit)}), "摘取提交");
+}
+
+void delete_branch(const fs::path& repo, const std::string& name) {
+    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的分支不能为空。");
+    require_ok(run(repo, {L"branch", L"-D", utf8_to_wide(name)}), "删除分支");
+}
+
+Json tag_list(const fs::path& repo) {
+    const auto result = run(repo, {L"tag", L"--list"});
+    require_ok(result, "读取标签");
+    Json tags = Json::array();
+    std::istringstream stream(result.out);
+    std::string name;
+    while (std::getline(stream, name)) {
+        if (!name.empty() && name.back() == '\r') name.pop_back();
+        if (!name.empty()) tags.push_back(name);
+    }
+    return {{"tags", std::move(tags)}};
+}
+
+void tag_create(const fs::path& repo, const std::string& name, const std::string& target) {
+    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "标签名不能为空。");
+    std::vector<std::wstring> arguments{L"tag", utf8_to_wide(name)};
+    if (!target.empty()) arguments.push_back(utf8_to_wide(target));
+    require_ok(run(repo, arguments), "新建标签");
+}
+
+void tag_delete(const fs::path& repo, const std::string& name) {
+    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的标签不能为空。");
+    require_ok(run(repo, {L"tag", L"-d", utf8_to_wide(name)}), "删除标签");
+}
+
+void ignore_path(const fs::path& repo, const std::string& path) {
+    if (path.empty() || path.find('\n') != std::string::npos || path.find('\r') != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "要忽略的路径无效。");
+    const auto ignore = repo / ".gitignore";
+    std::string existing;
+    {
+        std::ifstream stream(ignore, std::ios::binary);
+        if (stream) existing = std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+    }
+    for (std::size_t start = 0, end; start < existing.size(); start = end + 1) {
+        end = existing.find('\n', start);
+        const auto line = existing.substr(start, (end == std::string::npos ? existing.size() : end) - start);
+        const auto comparable = !line.empty() && line.back() == '\r' ? line.substr(0, line.size() - 1) : line;
+        if (comparable == path) return;  // already ignored
+        if (end == std::string::npos) break;
+    }
+    std::ofstream stream(ignore, std::ios::binary | std::ios::app);
+    if (!stream) throw WorkspaceError("IO_ERROR", "无法写入 .gitignore。");
+    if (!existing.empty() && existing.back() != '\n') stream << '\n';
+    stream << path << '\n';
+}
+
+namespace {
+
+struct DiffHunk { int index; std::string header; std::string body; };
+
+// Split a unified diff (as produced by git diff [--cached] -- <path>) into the
+// file header plus each "@@" hunk. Header lines are everything before the first @@.
+std::pair<std::string, std::vector<DiffHunk>> split_hunks(const std::string& unified) {
+    std::string header;
+    std::vector<DiffHunk> hunks;
+    std::istringstream stream(unified);
+    std::string line;
+    bool in_header = true;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (in_header && line.rfind("@@", 0) == 0) in_header = false;
+        if (in_header) { header += line + "\n"; continue; }
+        if (line.rfind("@@", 0) == 0) hunks.push_back({static_cast<int>(hunks.size()), line + "\n", ""});
+        else if (!hunks.empty()) hunks.back().body += line + "\n";
+    }
+    return {header, hunks};
+}
+
+}  // namespace
+
+Json diff_hunks(const fs::path& repo, const std::string& path, bool staged) {
+    const auto unified = diff(repo, path, staged);
+    const auto [header, hunks] = split_hunks(unified);
+    Json list = Json::array();
+    for (const auto& hunk : hunks) {
+        int additions = 0, deletions = 0;
+        std::istringstream body(hunk.body);
+        std::string line;
+        while (std::getline(body, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (!line.empty() && line[0] == '+') ++additions;
+            else if (!line.empty() && line[0] == '-') ++deletions;
+        }
+        list.push_back({{"index", hunk.index}, {"header", hunk.header},
+                        {"body", hunk.body}, {"additions", additions}, {"deletions", deletions}});
+    }
+    return {{"hunks", std::move(list)}, {"header", header}};
+}
+
+void apply_hunks(const fs::path& repo, const std::string& path, bool staged,
+                 const std::vector<int>& hunks, bool reverse) {
+    if (hunks.empty()) throw WorkspaceError("INVALID_REQUEST", "没有选择任何改动块。");
+    if (hunks.size() > 512) throw WorkspaceError("INVALID_REQUEST", "单次应用的改动块过多。");
+    const auto unified = diff(repo, path, staged);
+    const auto [header, available] = split_hunks(unified);
+    std::string patch = header;
+    for (const int wanted : hunks) {
+        if (wanted < 0 || static_cast<std::size_t>(wanted) >= available.size())
+            throw WorkspaceError("INVALID_REQUEST", "所选改动块不在当前差异中（差异可能已变化，请刷新）。");
+        patch += available[static_cast<std::size_t>(wanted)].header + available[static_cast<std::size_t>(wanted)].body;
+    }
+    // The patch is fed through a file inside .git so it never shows up as an
+    // untracked change in the very status this staging is about to affect.
+    const auto patch_file = repo / ".git" / "taocode-apply.patch";
+    {
+        std::ofstream stream(patch_file, std::ios::binary | std::ios::trunc);
+        if (!stream) throw WorkspaceError("IO_ERROR", "无法写入补丁临时文件。");
+        stream.write(patch.data(), static_cast<std::streamsize>(patch.size()));
+        if (!stream) throw WorkspaceError("IO_ERROR", "写入补丁临时文件失败。");
+    }
+    std::vector<std::wstring> arguments{L"apply", L"--cached", L"--recount"};
+    if (reverse) arguments.push_back(L"--reverse");
+    arguments.push_back(L".git/taocode-apply.patch");
+    const auto result = run(repo, arguments);
+    std::error_code ignored;
+    fs::remove(patch_file, ignored);
+    require_ok(result, reverse ? "按块取消暂存" : "按块暂存");
 }
 
 }  // namespace git

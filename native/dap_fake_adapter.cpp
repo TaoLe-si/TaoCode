@@ -163,6 +163,7 @@ int main() {
 
     std::string breakpoint_source;  // source.path echoed back in stack frames
     std::vector<std::int64_t> breakpoint_lines;
+    std::vector<std::string> exception_filters;  // last setExceptionBreakpoints body
     int control_steps = 0;
     // `variables` with reference 555 is answered only after the *next* request has
     // been, so the client sees responses out of order and must correlate strictly
@@ -199,7 +200,24 @@ int main() {
                                            {"supportsVariableType", true},
                                            {"supportsEvaluateForHovers", false},
                                            {"supportsSetVariable", false},
-                                           {"exceptionBreakpointFilters", Json::array()}});
+                                           {"exceptionBreakpointFilters", Json::array({
+                                               Json{{"filter", "all"}, {"label", "All Exceptions"}},
+                                               Json{{"filter", "uncaught"}, {"label", "Uncaught Exceptions"}},
+                                           })}});
+            } else if (command == "attach") {
+                // Same scripted flow as launch, echoing the selector it received.
+                respond(seq, command, Json::object());
+                std::string target = "unknown";
+                if (arguments.contains("processId")) target = arguments.at("processId").dump();
+                else if (arguments.contains("pipeName")) target = text(arguments, "pipeName");
+                event("output", Json{{"category", "console"}, {"output", "fake-adapter: attaching to " + target}});
+                event("stopped", Json{{"reason", "entry"}, {"threadId", 1}, {"allThreadsStopped", true}, {"description", "attached"}});
+            } else if (command == "setExceptionBreakpoints") {
+                exception_filters.clear();
+                if (arguments.contains("filters") && arguments.at("filters").is_array())
+                    for (const auto& filter : arguments.at("filters"))
+                        if (filter.is_string()) exception_filters.push_back(filter.get<std::string>());
+                respond(seq, command, Json::object());
             } else if (command == "launch") {
                 respond(seq, command, Json::object());
                 event("output", Json{{"category", "console"},

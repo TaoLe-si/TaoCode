@@ -42,7 +42,7 @@ export const defaultProjectSettings: ProjectSettings = {
   java: structuredClone(defaultJavaProjectSettings),
   fileAssociations: {},
 }
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'settings.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'run.start' | 'run.write' | 'run.stop' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.pull' | 'git.push' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.merge' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.compare' | 'search.run' | 'search.replace' | 'dap.start' | 'dap.setBreakpoints' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides'
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'settings.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'run.start' | 'run.write' | 'run.stop' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'search.run' | 'search.replace' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides'
 export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string }
 export interface GitStatus { available: boolean; head?: string; branches?: string[]; changes?: GitChange[] }
 export interface GitDiff { diff: string }
@@ -54,6 +54,10 @@ export interface GitFullLog { commits: GitFullCommit[] }
 export interface GitStashEntry { ref: string; message: string }
 export interface GitStash { entries: GitStashEntry[] }
 export interface GitAheadBehind { available: boolean; ahead: number; behind: number }
+// One selectable hunk of a unified diff (IDEA's commit-viewer stage/unstage rows).
+export interface GitHunk { index: number; header: string; body: string; additions: number; deletions: number }
+export interface GitHunks { hunks: GitHunk[]; header: string }
+export interface GitTags { tags: string[] }
 export interface GitCompareFile { status: string; path: string }
 export interface GitCompare { base: string; files: GitCompareFile[] }
 export interface GitBlameLine { line: number; hash: string; author: string; content: string }
@@ -112,6 +116,10 @@ export interface DapScope { name: string; reference: number; variablesReference:
 export interface DapVariable { name: string; value: string; reference: number; named: boolean; type?: string; evaluateName?: string }
 export interface DapBreakpointReport { path: string; verifiedLines: number[]; error?: string }
 export interface DapStartResult { ok: boolean; capabilities?: Record<string, unknown>; breakpoints?: DapBreakpointReport[] }
+// One entry of the adapter's exceptionBreakpointFilters capability: the checkbox
+// rows IDEA's breakpoints dialog shows for caught/uncaught exceptions.
+export interface DapExceptionFilter { filter: string; label?: string; description?: string; default?: boolean }
+export interface DapThread { id: number; name: string }
 // A gutter breakpoint: 1-based line plus the optional DAP attributes. `condition` is
 // evaluated by the adapter each time the line is reached.
 export interface DapBreakpoint { line: number; condition?: string; hitCondition?: string }
@@ -269,6 +277,8 @@ export async function dapSetBreakpoints(path: string, breakpoints: DapBreakpoint
 export const dapStep = (kind: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut', all = false) =>
   request<DapOk>(`dap.${kind}`, all && kind === 'continue' ? { all: true } : { threadId: dapCurrentThread() })
 export const dapStackTrace = (threadId = dapCurrentThread()) => request<{ frames: DapFrame[]; totalFrames: number }>('dap.stackTrace', { threadId })
+export const dapThreads = () => request<{ threads: DapThread[] }>('dap.threads')
+export const dapSetExceptionBreakpoints = (filters: string[]) => request<DapOk>('dap.setExceptionBreakpoints', { filters })
 export const dapScopes = (frameId: number) => request<{ scopes: DapScope[] }>('dap.scopes', { frameId })
 export const dapVariables = (reference: number) => request<{ variables: DapVariable[] }>('dap.variables', { reference })
 // `evaluate` (IDEA's Evaluate Expression / hover inspect). The body comes back from

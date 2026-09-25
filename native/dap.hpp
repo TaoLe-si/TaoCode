@@ -144,6 +144,14 @@ public:
     // except that path_configuration_keys are absolutised and type/request/name
     // defaults are filled in.
     void launch(Json configuration, Reply on_reply);
+    // `attach`: the same handshake for an already-running process (IDEA's Attach
+    // to Process); selectors like processId/pipeName pass through untouched.
+    void attach(Json configuration, Reply on_reply);
+    // `setExceptionBreakpoints`. The chosen filters are remembered and re-applied
+    // by the next start; with no live adapter the call only stores them.
+    void set_exception_breakpoints(const Json& filters, Reply on_reply);
+    // `threads`: {threads:[{id, name}]} for the debugger's thread list.
+    void threads(Reply on_reply);
     void set_configuration_done(Reply on_reply);
     // `setBreakpoints`. `requested` is [{line, condition?, hitCondition?, logMessage?}]
     // with 1-based lines; the valid subset is remembered (so a restart re-applies it,
@@ -204,6 +212,7 @@ private:
     std::int64_t seq_ = 1;
     std::unordered_map<std::int64_t, Pending> pending_;
     std::map<std::string, Json> breakpoints_;   // path -> [{line, condition?, ...}]
+    Json exception_filters_ = Json::array();    // remembered setExceptionBreakpoints filters
     std::filesystem::path root_;
     std::string adapter_id_;
     EventCb on_event_;

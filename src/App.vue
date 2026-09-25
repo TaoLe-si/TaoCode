@@ -1146,6 +1146,41 @@ function navigateSignature(delta: number) {
   const total = signaturePopup.value.signatures.length
   signaturePopup.value.activeIndex = (signaturePopup.value.activeIndex + delta + total) % total
 }
+// IDEA's Code Cleanup / batch quick-fix: walk the file's diagnostics and apply the
+// single unambiguous preferred fix per problem, looping while new diagnostics with
+// fixes keep appearing (bounded, so a fixer that keeps re-triggering cannot loop).
+const batchFixBusy = ref(false)
+async function fixAllInFile() {
+  const tab = active.value
+  if (!tab || !lspOn(tab) || batchFixBusy.value) { notify('批量修复需要语言服务。', true); return }
+  batchFixBusy.value = true
+  let applied = 0
+  try {
+    for (let pass = 0; pass < 25; ++pass) {
+      const problems = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.severity <= 2)
+      if (!problems.length) break
+      let fixedThisPass = 0
+      for (const problem of problems) {
+        const diagnostics = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.line === problem.line).map(item => ({
+          range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
+          severity: item.severity, message: item.message, ...(item.source ? { source: item.source } : {}) }))
+        const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: tab.path, line: problem.line, character: problem.character, diagnostics })
+        const fixes = (result.actions ?? []).filter(action => action.preferred || action.linkedDiagnostics)
+        if (fixes.length !== 1) continue  // ambiguous or nothing: leave for Alt+Enter
+        actionPrompt.value = { path: tab.path }
+        codeActions.value = fixes
+        await applyCodeAction(fixes[0]!)
+        actionPrompt.value = null
+        ++fixedThisPass
+        break  // diagnostics shifted under us; restart the pass from the new state
+      }
+      if (!fixedThisPass) break
+      applied += fixedThisPass
+    }
+    notify(applied ? `批量修复：已应用 ${applied} 处修复，剩余问题可在 Alt+Enter 中逐个处理。` : '没有可自动应用的快速修复（存在需要人工选择的操作）。')
+  } catch (error) { notify(errorMessage(error), true) }
+  finally { batchFixBusy.value = false }
+}
 async function openCodeActions(payload: { path: string; line: number; character: number }, onlyFixes = false) {
   const diagnostics = (lspDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line).map(item => ({
     range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
@@ -2393,9 +2428,12 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'git.push', title: '推送…', keys: 'Ctrl Shift K', keywords: 'push remote upload 推送', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.push') },
     { id: 'git.update', title: '更新项目', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
     { id: 'git.pull', title: '拉取（Pull）', keywords: 'pull fetch integrate 拉取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
+    { id: 'git.fetch', title: '获取（Fetch）', keywords: 'fetch remote refs prune 获取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.fetch') },
     { id: 'git.rule1', rule: true },
+    { id: 'git.rebase', title: '变基当前分支到上游（Rebase）', keywords: 'rebase upstream onto 变基', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.rebase') },
     { id: 'git.branches', title: '分支…', keys: 'Ctrl Shift `', keywords: 'branches popup checkout switch widget 分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
     { id: 'git.newBranch', title: '新建分支…', keywords: 'new branch create checkout 新建分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
+    { id: 'git.tag', title: '标签…（Tag）', keywords: 'tag create delete lightweight 标签', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
     { id: 'git.rule2', rule: true },
     { id: 'git.stash', title: '储藏（Stash）', keywords: 'stash shelve save changes 储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.save') },
     { id: 'git.unstash', title: '取出储藏（Unstash）', keywords: 'unstash pop shelf 弹出储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.pop') },
@@ -2624,12 +2662,12 @@ async function runContextConfiguration(debug: boolean) {
 // The Git menu drives the same bridge methods as the 源代码管理 tool window. Stash
 // without a message would use git's default; keep IDEA's "Stash" dialog out of scope
 // and pass a timestamped label instead.
-async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.stash.save' | 'git.stash.pop') {
+async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.fetch' | 'git.rebase' | 'git.stash.save' | 'git.stash.pop') {
   if (!workspace.value || !isDesktop) return
   try {
     if (method === 'git.stash.save') await request(method, { message: `TaoCode 储藏 ${new Date().toISOString().slice(0, 19).replace('T', ' ')}` })
     else await request(method)
-    notify(method === 'git.push' ? '已推送。' : method === 'git.pull' ? '已拉取（--ff-only）。' : method === 'git.stash.save' ? '已储藏当前更改。' : '已弹出最近的储藏。')
+    notify(method === 'git.push' ? '已推送。' : method === 'git.pull' ? '已拉取（--ff-only）。' : method === 'git.fetch' ? '已获取远端引用（未合并）。' : method === 'git.rebase' ? '已变基到上游。' : method === 'git.stash.save' ? '已储藏当前更改。' : '已弹出最近的储藏。')
     showView('git')
   } catch (error) { notify(errorMessage(error), true) }
 }
@@ -3007,7 +3045,10 @@ onBeforeUnmount(() => {
             <div v-if="runState.running" class="run-stdin"><span>$</span><input ref="runInput" aria-label="向进程发送输入" placeholder="输入一行发送到进程 stdin，回车确认" @keydown.enter.prevent="sendRunInput" /></div>
           </div>
           <div v-else-if="bottomTab === 'problems'" class="problems-list" role="list" aria-label="问题">
-            <p v-if="!allProblems.length" class="ref-empty">没有问题。LSP 报告的编译错误与警告会汇总在这里。</p>
+            <div class="problems-toolbar">
+              <p v-if="!allProblems.length" class="ref-empty">没有问题。LSP 报告的编译错误与警告会汇总在这里。</p>
+              <button v-else class="subtle-button" :disabled="batchFixBusy || !lspReady" title="对当前文件逐条应用无歧义的快速修复（Code Cleanup）" @click="fixAllInFile">{{ batchFixBusy ? '修复中…' : '批量修复当前文件' }}</button>
+            </div>
             <button v-for="(p, index) in allProblems" :key="`${p.path}:${p.line}:${p.character}:${index}`" class="ref-item problem-row" @click="revealLocation({ path: p.path, line: p.line })"><span class="problem-sev" :class="severityClass(p.severity)">{{ severityLabel(p.severity) }}</span><span class="ref-path" :title="p.path">{{ p.path }}</span><span class="ref-pos">{{ p.line + 1 }}:{{ p.character + 1 }}</span><span class="problem-msg">{{ p.message }}</span><span v-if="p.source" class="problem-src">{{ p.source }}</span></button>
           </div>
           <div v-else-if="bottomTab === 'references'" class="ref-list" role="list" aria-label="符号引用">
