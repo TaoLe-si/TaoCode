@@ -38,11 +38,19 @@ public:
     Json write(const std::string& relative, const std::string& content,
                const std::string& expectedVersion, const std::string& encoding = "utf-8", bool bom = false);
     // Tree mutations, all confined to the workspace root by the same relative-path
-    // guards as read/write (no absolute paths, no '..', no reparse points). remove
-    // deletes a regular file or an EMPTY directory only — never a populated tree.
+    // guards as read/write (no absolute paths, no '..', no reparse points).
+    // IDEA's $Delete on a project-view selection confirms, then removes a populated
+    // directory tree as well ("Delete "X" and all of its contents?"), so remove()
+    // recurses with the same reparse/size guards the rest of the layer uses.
     Json create(const std::string& relative, bool directory, const std::string& template_kind = "");
     Json rename(const std::string& from, const std::string& to);
     Json remove(const std::string& relative);
+    // IDEA's project-view Copy + Paste: duplicate a file or a whole directory tree
+    // under a new name; the copy is writable (the read-only bit is not carried over).
+    Json copy(const std::string& from, const std::string& to);
+    // RevealInAction ("Show in Explorer"): opens an Explorer window with the entry
+    // selected. Read-only; confined by the same relative-path guards.
+    Json reveal(const std::string& relative);
     bool is_open() const;
 
 private:

@@ -99,6 +99,44 @@ export function closeTabInPane<T>(model: SplitModel<T>, pathOf: (tab: T) => stri
   return !model.groups[0].tabs.includes(tab) && !model.groups[1].tabs.includes(tab)
 }
 
+// IDEA's tab drag & drop: dropping a tab onto the tab strip of its own group
+// reorders it before the tab under the pointer; dropping onto the other group's
+// strip moves it there (when split) and selects it. The same transitions back the
+// tab-context "Move Right/Down" rows, so drag and menu can never disagree.
+export function dropTabOnGroup<T>(model: SplitModel<T>, pathOf: (tab: T) => string, fromPane: Pane, tab: T, toPane: Pane, targetPath?: string): void {
+  const from = model.groups[fromPane]
+  if (!from.tabs.includes(tab)) return
+  if (toPane === fromPane) {
+    // Dropping a tab onto itself only selects it; the order must not move.
+    if (targetPath !== undefined && targetPath === pathOf(tab)) {
+      from.activePath = pathOf(tab)
+      return
+    }
+    const index = from.tabs.indexOf(tab)
+    from.tabs.splice(index, 1)
+    let insert = targetPath === undefined ? from.tabs.length : from.tabs.findIndex(item => pathOf(item) === targetPath)
+    if (insert < 0) insert = from.tabs.length
+    from.tabs.splice(insert, 0, tab)
+    from.activePath = pathOf(tab)
+    return
+  }
+  const to = model.groups[toPane]
+  if (model.orientation === 'none') {
+    // No split yet: a cross-group drop is IDEA's "split & move" via drag.
+    splitTabOutIn(model, pathOf, tab, 'horizontal')
+    return
+  }
+  from.tabs.splice(from.tabs.indexOf(tab), 1)
+  if (!to.tabs.includes(tab)) {
+    let insert = targetPath === undefined ? to.tabs.length : to.tabs.findIndex(item => pathOf(item) === targetPath)
+    if (insert < 0) insert = to.tabs.length
+    to.tabs.splice(insert, 0, tab)
+  }
+  to.activePath = pathOf(tab)
+  from.activePath = from.tabs[0] ? pathOf(from.tabs[0]) : ''
+  model.focused = toPane
+}
+
 // EditorWindow.closeNewFileUnderTabsLimit: once the group is over the limit, files
 // are closed in IDEA's order — untouched tabs first (everything outside the selection
 // history), then least-recently-selected, and never the just-opened or modified ones.

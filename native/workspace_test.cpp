@@ -458,12 +458,40 @@ int main() {
             check(!fs::exists(root / "created.txt"), "deleted file is gone");
             workspace.remove("newdir");
             check(!fs::exists(root / "newdir"), "an empty directory can be deleted");
-            fs::create_directory(root / "nonempty");
+            // IDEA's $Delete removes a populated directory tree after its confirm
+            // dialog, so remove() recurses (reparse points still refused elsewhere).
+            fs::create_directories(root / "nonempty" / "nested");
             put(root / "nonempty" / "inner.txt", "x");
-            expect_error("IO_ERROR", [&] { workspace.remove("nonempty"); });
-            check(fs::exists(root / "nonempty" / "inner.txt"), "a failed directory delete must not touch contents");
+            put(root / "nonempty" / "nested" / "deep.txt", "y");
+            workspace.remove("nonempty");
+            check(!fs::exists(root / "nonempty"), "a populated directory tree is removed");
             expect_error("NOT_FOUND", [&] { workspace.remove("gone.txt"); });
             expect_error("INVALID_PATH", [&] { workspace.remove(".."); });
+        });
+
+        run("copy duplicates files and directory trees inside the root", [&] {
+            put(root / "copysrc.txt", "copy me");
+            check(workspace.copy("copysrc.txt", "copydst.txt").at("copied").get<bool>() == true, "copy reports success");
+            check(get(root / "copydst.txt") == "copy me", "the copy carries the content");
+            check(fs::exists(root / "copysrc.txt"), "the source survives a copy");
+            expect_error("EXISTS", [&] { workspace.copy("copysrc.txt", "copydst.txt"); });
+            expect_error("NOT_FOUND", [&] { workspace.copy("missing.txt", "nowhere.txt"); });
+            expect_error("INVALID_PATH", [&] { workspace.copy("copysrc.txt", "../outside.txt"); });
+
+            fs::create_directories(root / "treecopy" / "inner");
+            put(root / "treecopy" / "top.txt", "T");
+            put(root / "treecopy" / "inner" / "deep.txt", "D");
+            workspace.copy("treecopy", "treecopy-clone");
+            check(get(root / "treecopy-clone" / "top.txt") == "T", "tree copy keeps nested files");
+            check(get(root / "treecopy-clone" / "inner" / "deep.txt") == "D", "tree copy recurses");
+            check(fs::is_directory(root / "treecopy" / "inner"), "the source tree survives");
+
+            // A read-only source must still produce a writable copy (IDEA's paste).
+            put(root / "ro-src.txt", "locked");
+            workspace.set_read_only("ro-src.txt", true);
+            workspace.copy("ro-src.txt", "ro-dst.txt");
+            check((GetFileAttributesW((root / "ro-dst.txt").c_str()) & FILE_ATTRIBUTE_READONLY) == 0,
+                  "a copied file never inherits the read-only bit");
         });
 
         run("read-only attribute round-trips through read and file.readOnly", [&] {

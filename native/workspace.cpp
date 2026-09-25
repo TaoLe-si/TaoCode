@@ -8,6 +8,7 @@
 #endif
 #include <windows.h>
 #include <bcrypt.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <array>
@@ -1008,6 +1009,133 @@ Json Workspace::rename(const std::string& from, const std::string& to) {
     });
 }
 
+namespace {
+
+// Recursive remove for IDEA's $Delete on a populated directory: the tree is walked
+// with the same FindFirstFileW enumeration the listing uses, refusing reparse
+// points and bounded so a pathological tree can never loop the caller. Excluded
+// names (node_modules, .git) are NOT pruned — IDEA's delete removes everything
+// under the selection; exclusions only affect listing and indexing.
+void remove_tree(const fs::path& directory, const fs::path& root, std::size_t& budget) {
+    WIN32_FIND_DATAW data{};
+    const HANDLE search = FindFirstFileW(api_path(directory / L"*").c_str(), &data);
+    if (search == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES)
+            win_error("无法枚举要删除的目录", error);
+        return;
+    }
+    struct FindGuard { HANDLE handle; ~FindGuard() { FindClose(handle); } } guard{search};
+    std::vector<fs::path> nested;
+    do {
+        const std::wstring_view name(data.cFileName);
+        if (name == L"." || name == L"..") continue;
+        const auto child = directory / data.cFileName;
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            fail("REPARSE_POINT", "不允许删除重解析点。");
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) nested.push_back(child);
+        else {
+            if (budget-- == 0) fail("TOO_MANY_FILES", "目录内容过多，删除已中止。");
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+                SetFileAttributesW(api_path(child).c_str(), data.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
+            if (!DeleteFileW(api_path(child).c_str())) win_error("无法删除文件");
+        }
+    } while (FindNextFileW(search, &data));
+    for (const auto& child : nested) {
+        if (budget-- == 0) fail("TOO_MANY_FILES", "目录内容过多，删除已中止。");
+        remove_tree(child, root, budget);
+        if (!RemoveDirectoryW(api_path(child).c_str())) win_error("无法删除目录");
+    }
+}
+
+// Recursive copy for the project-view Paste: content-identical copy of a file or
+// tree. CopyFileW preserves attributes, so the read-only bit is cleared afterwards
+// — IDEA's pasted copies stay editable.
+void copy_tree(const fs::path& source, const fs::path& target, const fs::path& root,
+               std::size_t& budget) {
+    const auto attributes = GetFileAttributesW(api_path(source).c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) win_error("无法读取要复制的项目属性");
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        fail("REPARSE_POINT", "不允许复制符号链接或联接点。");
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+        if (!CreateDirectoryW(api_path(target).c_str(), nullptr)) {
+            const auto error = GetLastError();
+            if (error == ERROR_ALREADY_EXISTS) fail("EXISTS", "同名目录已存在。");
+            win_error("无法创建复制目标目录", error);
+        }
+        WIN32_FIND_DATAW data{};
+        const HANDLE search = FindFirstFileW(api_path(source / L"*").c_str(), &data);
+        if (search == INVALID_HANDLE_VALUE) {
+            const auto error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES)
+                win_error("无法枚举要复制的目录", error);
+            return;
+        }
+        struct FindGuard { HANDLE handle; ~FindGuard() { FindClose(handle); } } guard{search};
+        do {
+            const std::wstring_view name(data.cFileName);
+            if (name == L"." || name == L"..") continue;
+            if (budget-- == 0) fail("TOO_MANY_FILES", "复制内容过多，操作已中止。");
+            copy_tree(source / name, target / name, root, budget);
+        } while (FindNextFileW(search, &data));
+        return;
+    }
+    if (budget-- == 0) fail("TOO_MANY_FILES", "复制内容过多，操作已中止。");
+    if (!CopyFileW(api_path(source).c_str(), api_path(target).c_str(), TRUE)) {
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) fail("EXISTS", "同名文件已存在。");
+        win_error("无法复制文件", error);
+    }
+    if (attributes & FILE_ATTRIBUTE_READONLY)
+        SetFileAttributesW(api_path(target).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+}
+
+}  // namespace
+
+Json Workspace::copy(const std::string& from, const std::string& to) {
+    return boundary([&]() -> Json {
+        std::lock_guard lock(mutex_);
+        require_open(root_);
+        const auto source = parse_relative(from);
+        const auto destination = parse_relative(to);
+        if (source.empty() || destination.empty()) fail("INVALID_PATH", "复制需要一个明确的源和目标。");
+        if (source == destination) return {{"path", utf8_path(destination)}, {"copied", false}};
+        const auto source_full = root_ / source;
+        if (GetFileAttributesW(api_path(source_full).c_str()) == INVALID_FILE_ATTRIBUTES)
+            fail("NOT_FOUND", "要复制的项目不存在。");
+        const auto pinned = pin_directory(root_ / destination.parent_path(), root_);
+        const auto target_full = pinned.path / destination.filename();
+        if (GetFileAttributesW(api_path(target_full).c_str()) != INVALID_FILE_ATTRIBUTES)
+            fail("EXISTS", "目标名称已存在。");
+        std::size_t budget = 20000;
+        copy_tree(source_full, target_full, root_, budget);
+        return {{"path", utf8_path(destination)}, {"copied", true}};
+    });
+}
+
+// RevealInAction: Explorer with the entry selected. The path is re-resolved through
+// the same guards as read, so a reparse point or an escaping path never reaches the
+// shell.
+Json Workspace::reveal(const std::string& relative) {
+    return boundary([&]() -> Json {
+        std::lock_guard lock(mutex_);
+        require_open(root_);
+        const auto path = parse_relative(relative);
+        const fs::path target = path.empty() ? root_ : root_ / path;
+        const auto attributes = GetFileAttributesW(api_path(target).c_str());
+        if (path.empty()) {
+            if (attributes == INVALID_FILE_ATTRIBUTES) fail("NOT_FOUND", "工作区目录不存在。");
+        } else if (attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            fail("NOT_FOUND", "要显示的项目不存在。");
+        }
+        std::wstring argument = L"/select,\"" + target.native() + L"\"";
+        const auto instance = ShellExecuteW(nullptr, L"open", L"explorer.exe", argument.c_str(), nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<int>(instance) <= 32)
+            fail("IO_ERROR", "无法打开资源管理器。");
+        return {{"path", utf8_path(path)}, {"revealed", true}};
+    });
+}
+
 Json Workspace::remove(const std::string& relative) {
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
@@ -1020,9 +1148,15 @@ Json Workspace::remove(const std::string& relative) {
         if (attr == INVALID_FILE_ATTRIBUTES) fail("NOT_FOUND", "要删除的项目不存在。");
         if (attr & FILE_ATTRIBUTE_REPARSE_POINT) fail("REPARSE_POINT", "不允许删除重解析点。");
         if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+            // IDEA's $Delete removes a populated tree after the "and all of its
+            // contents?" confirmation — everything under the selection goes.
+            std::size_t budget = 200000;
+            remove_tree(target, root_, budget);
             if (!RemoveDirectoryW(api_path(target).c_str()))
-                win_error("无法删除目录（只能删除空目录）");
+                win_error("无法删除目录");
         } else {
+            if (attr & FILE_ATTRIBUTE_READONLY)
+                SetFileAttributesW(api_path(target).c_str(), attr & ~FILE_ATTRIBUTE_READONLY);
             if (!DeleteFileW(api_path(target).c_str())) win_error("无法删除文件");
         }
         return {{"path", utf8_path(path)}, {"deleted", true}};

@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
 // The module is TypeScript; strip types the way node 24 does for .ts imports.
-const { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, otherPane, tabClosingOrder } =
+const { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, otherPane, tabClosingOrder } =
   await import('../src/editorGroups.ts')
 
 const pathOf = tab => tab.path
@@ -116,4 +116,52 @@ test('tabs outside the history close before least-recent history entries', () =>
   const fresh = { path: 'fresh' }, old1 = { path: 'old1' }, old2 = { path: 'old2' }, active = { path: 'act' }
   const order = tabClosingOrder([old2, old1, fresh, active], 'act', ['old1', 'old2'], pathOf, dirtyOf)
   assert.deepEqual(order.map(pathOf), ['fresh', 'old2', 'old1'])
+})
+
+// --- dropTabOnGroup: IDEA's tab drag & drop transitions ---
+
+test('dropping a tab before another tab in the same group reorders it', () => {
+  const model = modelWith('a', 'b', 'c')
+  const tab = model.groups[0].tabs.find(item => item.path === 'c')
+  dropTabOnGroup(model, pathOf, 0, tab, 0, 'a')
+  assert.deepEqual(model.groups[0].tabs.map(item => item.path), ['c', 'a', 'b'])
+  assert.equal(model.groups[0].activePath, 'c')
+})
+
+test('dropping onto the strip end appends and selects', () => {
+  const model = modelWith('a', 'b', 'c')
+  const tab = model.groups[0].tabs.find(item => item.path === 'a')
+  dropTabOnGroup(model, pathOf, 0, tab, 0)
+  assert.deepEqual(model.groups[0].tabs.map(item => item.path), ['b', 'c', 'a'])
+  assert.equal(model.groups[0].activePath, 'a')
+})
+
+test('dropping a tab onto the other group while split moves and selects it', () => {
+  const model = modelWith('a', 'b')
+  splitTabOutIn(model, pathOf, model.groups[0].tabs[0], 'horizontal')
+  const moved = model.groups[0].tabs[0]
+  const from = model.groups[0].tabs.includes(moved) ? 0 : 1
+  const to = otherPane(from)
+  const before = model.groups[from].tabs.length
+  dropTabOnGroup(model, pathOf, from, moved, to)
+  assert.ok(!model.groups[from].tabs.includes(moved), 'the tab left the source group')
+  assert.ok(model.groups[to].tabs.includes(moved), 'the tab arrived in the target group')
+  assert.equal(model.groups[to].activePath, moved.path)
+  assert.equal(model.focused, to)
+  assert.equal(model.groups[from].tabs.length, before - 1)
+})
+
+test('a cross-group drop without a split splits first (IDEA drag-to-split)', () => {
+  const model = modelWith('a', 'b')
+  const tab = model.groups[0].tabs.find(item => item.path === 'b')
+  dropTabOnGroup(model, pathOf, 0, tab, 1)
+  assert.equal(model.orientation, 'horizontal')
+  assert.equal(model.groups[1].activePath, 'b')
+})
+
+test('dropping onto itself leaves the order unchanged', () => {
+  const model = modelWith('a', 'b', 'c')
+  const tab = model.groups[0].tabs.find(item => item.path === 'b')
+  dropTabOnGroup(model, pathOf, 0, tab, 0, 'b')
+  assert.deepEqual(model.groups[0].tabs.map(item => item.path), ['a', 'b', 'c'])
 })

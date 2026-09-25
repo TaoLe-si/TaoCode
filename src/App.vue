@@ -13,6 +13,7 @@ import TodoPanel from './components/TodoPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
+import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
 import ProjectDialog from './components/ProjectDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
@@ -20,7 +21,7 @@ import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoin
 import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
 import { rankCommands } from './commandSearch'
 import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
-import { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, tabClosingOrder, type Pane, type SplitModel } from './editorGroups'
+import { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, tabClosingOrder, type Pane, type SplitModel } from './editorGroups'
 import { locationSnippet } from './recentLocations'
 import { effectiveTemplates, type Template } from './templates'
 import { surroundTemplates, type SurroundTemplate } from './surround'
@@ -262,6 +263,91 @@ async function closeTabIn(pane: Pane, tab: Tab) {
 }
 const closedTabsPerPane = reactive<[ClosedTab[], ClosedTab[]]>([[], []])
 interface ClosedTab { path: string; line: number; index: number }
+// --- Crash recovery (IDEA's workspace.xml editor state + unsaved drafts) ---
+// The snapshot covers the split layout, each group's tabs and selections and, for
+// dirty buffers only, the draft text. It is saved debounced after any layout or
+// dirty change and cleared on a clean project close, so the restore prompt only
+// appears after a crash or an abandoned exit.
+interface SessionState { tabs: Array<{ path: string; line: number; column: number; pane: number; draft?: string }>; active: [string, string]; orientation: 'none' | 'horizontal' | 'vertical'; focused: Pane }
+const restorePrompt = ref<{ state: SessionState; drafts: number } | null>(null)
+let sessionTimer: number | undefined
+function sessionKey() {
+  return JSON.stringify([splitModel.orientation, splitModel.focused,
+    groups.map(group => [group.activePath, group.tabs.map(tab => `${tab.path}${tab.dirty ? '*' : ''}`)])])
+}
+function snapshotSession(): SessionState {
+  const tabs: SessionState['tabs'] = []
+  for (const pane of [0, 1] as const)
+    for (const tab of groups[pane].tabs) {
+      if (pane === 1 && groups[0].tabs.includes(tab)) continue  // shared buffer, already listed
+      const draft = tab.dirty ? editorFor(tab.path)?.text() ?? tab.content : undefined
+      tabs.push({ path: tab.path, line: tab.line, column: tab.column, pane, ...(draft !== undefined ? { draft } : {}) })
+    }
+  return { tabs, active: [groups[0].activePath, groups[1].activePath], orientation: splitModel.orientation, focused: splitModel.focused }
+}
+function scheduleSessionSave() {
+  if (!isDesktop || !workspace.value) return
+  if (sessionTimer) window.clearTimeout(sessionTimer)
+  sessionTimer = window.setTimeout(() => {
+    sessionTimer = undefined
+    if (!workspace.value) return
+    void request('session.save', { state: snapshotSession() }).catch(() => undefined)
+  }, 1500)
+}
+watch(sessionKey, () => scheduleSessionSave())
+async function offerSessionRestore() {
+  if (!isDesktop) return
+  try {
+    const saved = await request<{ found: boolean; corrupt?: boolean; state?: SessionState }>('session.load')
+    if (!saved.found) return
+    if (saved.corrupt || !saved.state) {
+      notify('上次会话的恢复数据已损坏，无法恢复未保存内容。', true)
+      void request('session.clear').catch(() => undefined)
+      return
+    }
+    const tabs = saved.state.tabs ?? []
+    if (!tabs.length) { void request('session.clear').catch(() => undefined); return }
+    // IDEA reopens a project's editors from workspace.xml silently; unsaved drafts
+    // only exist after a crash, and those are what deserve the prompt.
+    const drafts = tabs.filter(tab => tab.draft !== undefined).length
+    if (!drafts) { await restoreSession({ state: saved.state, drafts: 0 }); return }
+    restorePrompt.value = { state: saved.state, drafts }
+  } catch { /* sessions are best-effort */ }
+}
+async function restoreSession(prompt: { state: SessionState; drafts: number }) {
+  restorePrompt.value = null
+  const epoch = workspaceEpoch
+  const restored: Tab[] = []
+  for (const entry of prompt.state.tabs) {
+    try {
+      const doc = await request<DocumentData>('file.read', { path: entry.path })
+      if (epoch !== workspaceEpoch) return
+      const tab: Tab = { ...doc, saving: false, dirty: false, line: Math.max(1, entry.line), column: Math.max(1, entry.column) }
+      if (entry.draft !== undefined && entry.draft !== doc.content) { tab.content = entry.draft; tab.dirty = true }
+      const pane = entry.pane === 1 ? 1 : 0
+      if (!groups[pane].tabs.some(item => item.path === tab.path)) groups[pane].tabs.push(tab)
+      restored.push(tab)
+    } catch { /* the file vanished since the crash; skip it */ }
+  }
+  if (epoch !== workspaceEpoch) return
+  splitModel.orientation = prompt.state.orientation
+  splitModel.focused = prompt.state.focused
+  groups[0].activePath = groups[0].tabs.some(tab => tab.path === prompt.state.active[0]) ? prompt.state.active[0] : groups[0].tabs[0]?.path ?? ''
+  groups[1].activePath = groups[1].tabs.some(tab => tab.path === prompt.state.active[1]) ? prompt.state.active[1] : groups[1].tabs[0]?.path ?? ''
+  for (const tab of restored) {
+    touchHistory(tab.path)
+    rememberRecent(tab.path)
+    if (tab.dirty) await nextTick(), editorFor(tab.path)?.setDraft(tab.content)
+    if (isDesktop) void startLsp(tab)
+  }
+  const first = findTab(groups[splitModel.focused].activePath) ?? restored[0]
+  if (first) reveal.value = { path: first.path, line: Math.max(0, first.line - 1) }
+  notify(`已恢复 ${restored.length} 个文件${prompt.drafts ? `（含 ${prompt.drafts} 个未保存草稿）` : ''}`)
+}
+function discardSession() {
+  restorePrompt.value = null
+  void request('session.clear').catch(() => undefined)
+}
 // ReopenClosedTabAction (Windows/Linux default: Ctrl+Shift+F4): restore the focused
 // window's most recently closed file at its old tab position and selection.
 async function reopenClosedTab() {
@@ -292,6 +378,40 @@ function moveTabToOtherPane(pane: Pane, tab: Tab) {
   to.activePath = tab.path
   from.activePath = from.tabs[Math.min(index, from.tabs.length - 1)]?.path ?? ''
   splitModel.focused = otherPane(pane)
+}
+// IDEA's tab drag & drop: the strip itself is the drop target (reorder before the
+// tab under the pointer); dropping on the other group's strip moves the tab there.
+const dragTab = ref<{ pane: Pane; path: string } | null>(null)
+function onTabDragStart(pane: Pane, tab: Tab, event: DragEvent) {
+  dragTab.value = { pane, path: tab.path }
+  event.dataTransfer?.setData('text/plain', tab.path)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function onTabDragOver(pane: Pane, event: DragEvent) {
+  if (!dragTab.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+function onTabDrop(pane: Pane, path: string, event: DragEvent) {
+  const dragged = dragTab.value
+  dragTab.value = null
+  if (!dragged) return
+  event.preventDefault()
+  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
+  if (!tab) return
+  if (dragged.pane === pane && dragged.path === path) return
+  dropTabOnGroup(splitModel, (tab: Tab) => tab.path, dragged.pane, tab, pane, path)
+}
+// Dropping on the strip's empty tail (or the pane body) appends at the group's end.
+function onTabStripDrop(pane: Pane, event: DragEvent) {
+  if (event.defaultPrevented) return  // a tab row already handled this drop
+  const dragged = dragTab.value
+  dragTab.value = null
+  if (!dragged) return
+  event.preventDefault()
+  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
+  if (!tab) return
+  dropTabOnGroup(splitModel, (tab: Tab) => tab.path, dragged.pane, tab, pane)
 }
 // IDEA maps a file to its type by extension; a project can override that mapping
 // ("Associate with File Type…"), and the override drives both the status-bar label
@@ -553,6 +673,7 @@ async function activateWorkspace(result: Workspace) {
     selectRunConfig()
   } catch (error) { notify(`项目已打开，但读取设置失败：${errorMessage(error)}`, true) }
   await refreshSyntheticNodes()
+  void offerSessionRestore()
 }
 // IDEA's Project view keeps two synthetic nodes below the module (ProjectFileNodeImpl):
 // "External Libraries" and "Scratches and Consoles". TaoCode has no SDK index, so the
@@ -586,6 +707,10 @@ async function closeWorkspace() {
   if (working.value || !await confirmLeave('关闭项目并返回欢迎页')) return
   busy.value = true
   try {
+    // The user settled every dirty buffer on the way out (save or discard), so the
+    // crash-recovery session must not survive as a phantom prompt. Cleared before
+    // workspace.close empties the native root.
+    if (isDesktop) void request('session.clear').catch(() => undefined)
     await request('workspace.close')
     resetLsp()
     resetHierarchy()
@@ -784,6 +909,7 @@ function onEditorChange(tab: Tab) {
   // IdeDocumentHistory.placeChanged(EditorEvent.DocumentChange): every user edit
   // pushes the caret line onto the "changed places" ring.
   rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true })
+  if (markdownPreviewOn.value && tab.path === activePath.value) refreshMarkdownSoon()
   scheduleAutoSave()
 }
 // IDEA's "Last Edit Location" is project-wide (JumpToLastChangeAction reads
@@ -1328,6 +1454,29 @@ async function closeTab(tab: Tab) {
 }
 // Zen mode: IDEA's View → Appearance → Zen Mode hides every chrome element.
 function toggleZenMode() { zenMode.value = !zenMode.value }
+// IDEA's Markdown preview: a split beside the editor, toggled per file; the toggle
+// button only exists for .md buffers and the preview follows the live text.
+const markdownPreviewOn = ref(false)
+const markdownCapable = computed(() => /\.md$/i.test(active.value?.path ?? ''))
+const markdownSource = ref('')
+let markdownTimer: number | undefined
+function refreshMarkdownNow() {
+  const path = activePath.value
+  markdownSource.value = path && /\.md$/i.test(path) ? editorFor(path)?.text() ?? findTab(path)?.content ?? '' : ''
+}
+function refreshMarkdownSoon() {
+  if (!markdownPreviewOn.value) return
+  if (markdownTimer !== undefined) return
+  markdownTimer = window.setTimeout(() => { markdownTimer = undefined; refreshMarkdownNow() }, 300)
+}
+function toggleMarkdownPreview() {
+  markdownPreviewOn.value = !markdownPreviewOn.value
+  if (markdownPreviewOn.value) refreshMarkdownNow()
+}
+watch(activePath, () => {
+  if (!markdownCapable.value) markdownPreviewOn.value = false
+  else if (markdownPreviewOn.value) refreshMarkdownNow()
+})
 async function refreshTree() {
   if (!workspace.value || busy.value) return
   busy.value = true
@@ -1352,6 +1501,67 @@ function openBreadcrumb(segmentIndex: number) {
   fileTreeRef.value?.reveal(dir)
 }
 const treeMenu = ref<{ entry: Entry; x: number; y: number } | null>(null)
+// IDEA's project-view popup nests groups (WeighingNewGroup, AssociateWithFileType,
+// VersionControlsGroup); the submenu id tracks which one is unfolded.
+const treeSubmenu = ref<'new' | 'filetype' | null>(null)
+// IDEA's Cut/Copy/Paste on project-view selections: an internal clipboard, because
+// the WebView sandbox cannot carry CF_HDROP. Cut pastes as a move, copy as a copy;
+// a name collision pastes as "<stem> copy<ext>", then "copy 2", "copy 3"…
+const fileClipboard = ref<{ mode: 'cut' | 'copy'; entry: Entry } | null>(null)
+function copyCollisionName(existing: (name: string) => boolean, name: string): string {
+  if (!existing(name)) return name
+  const dot = name.lastIndexOf('.')
+  const stem = dot <= 0 ? name : name.slice(0, dot)
+  const extension = dot <= 0 ? '' : name.slice(dot)
+  let candidate = `${stem} copy${extension}`
+  for (let index = 2; existing(candidate); ++index) candidate = `${stem} copy ${index}${extension}`
+  return candidate
+}
+async function pasteFromClipboard() {
+  const clip = fileClipboard.value
+  const target = treeMenu.value?.entry
+  treeMenu.value = null
+  if (!clip || !workspace.value || !isDesktop) return
+  const dir = target ? (target.kind === 'directory' ? target.path : parentOf(target.path)) : ''
+  try {
+    // Probe the destination listing to pick a collision-free name (IDEA's pasted
+    // duplicates become "X copy.ext"); the native layer still guards EXISTS races.
+    let siblings: Entry[] = []
+    try { siblings = await request<Entry[]>('workspace.list', { path: dir }) } catch { /* empty/new dir */ }
+    const taken = (name: string) => siblings.some(entry => entry.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0)
+    const finalName = copyCollisionName(taken, baseName(clip.entry.path))
+    const destination = dir ? `${dir}/${finalName}` : finalName
+    if (clip.mode === 'copy') await request('file.copy', { from: clip.entry.path, to: destination })
+    else {
+      await request('file.rename', { from: clip.entry.path, to: destination })
+      await retitleTab(clip.entry.path, destination)
+    }
+    await refreshTree()
+    notify(clip.mode === 'copy' ? `已粘贴为 ${destination}` : `已移动到 ${destination}`)
+    if (clip.mode === 'cut') fileClipboard.value = null
+  } catch (error) { notify(errorMessage(error), true) }
+}
+function cutTreeEntry() {
+  const entry = treeMenu.value?.entry
+  treeMenu.value = null
+  if (!entry) return
+  fileClipboard.value = { mode: 'cut', entry }
+  notify(`已剪切 ${entry.path}（在目标目录上右键粘贴）`)
+}
+function copyTreeEntry() {
+  const entry = treeMenu.value?.entry
+  treeMenu.value = null
+  if (!entry) return
+  fileClipboard.value = { mode: 'copy', entry }
+  notify(`已复制 ${entry.path}（在目标目录上右键粘贴）`)
+}
+async function revealInExplorer() {
+  const entry = treeMenu.value?.entry
+  treeMenu.value = null
+  if (!entry || !isDesktop) return
+  try { await request('file.reveal', { path: entry.path }) }
+  catch (error) { notify(errorMessage(error), true) }
+}
 // IDEA's EditorTabPopup (ActionsBundle "Close All but Pinned", tab pinning): right-
 // click on a tab opens the group-scoped actions for that tab.
 const tabMenu = ref<{ pane: Pane; path: string; x: number; y: number } | null>(null)
@@ -1912,7 +2122,17 @@ async function associateFileType(path: string, choice: string) {
     notify(choice === 'auto' ? `已恢复按扩展名识别 .${ext}` : `*.${ext} 已关联到 ${languageLabels[choice] ?? choice}`)
   } catch (error) { notify(errorMessage(error), true) }
 }
-function onTreeContext(payload: { entry: Entry; x: number; y: number }) { if (isSyntheticPath(payload.entry.path)) return; treeMenu.value = payload; menu.value = null }
+function onTreeContext(payload: { entry: Entry; x: number; y: number }) { if (isSyntheticPath(payload.entry.path)) return; treeMenu.value = payload; treeSubmenu.value = null; menu.value = null }
+// FindUsages from the tree: open the file first (usages ride on the LSP document),
+// then ask at its first symbol line.
+async function findUsagesOf(path: string) {
+  treeMenu.value = null
+  treeSubmenu.value = null
+  await openFile(path)
+  if (!findTab(path)) return
+  await refreshOutline(path)
+  void onSemantic({ kind: 'references', path, line: outline.value[0]?.startLine ?? 0, character: outline.value[0]?.startChar ?? 0 })
+}
 function beginCreate(mode: 'createFile' | 'createDir') { const entry = treeMenu.value?.entry; if (!entry) return; const dir = entry.kind === 'directory' ? entry.path : parentOf(entry.path); treeMenu.value = null; nameDialog.value = { mode, dir, value: '', template: '' }; void nextTick(() => nameInput.value?.focus()) }
 function beginRename() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; nameDialog.value = { mode: 'rename', dir: parentOf(entry.path), entry, value: baseName(entry.path) }; void nextTick(() => { nameInput.value?.focus(); nameInput.value?.select() }) }
 function beginDelete() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; deleteTarget.value = entry }
@@ -2627,6 +2847,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
   clearAutoSave()
   if (bookmarkSave) window.clearTimeout(bookmarkSave)
+  if (sessionTimer) { window.clearTimeout(sessionTimer); sessionTimer = undefined }
+  if (markdownTimer !== undefined) { window.clearTimeout(markdownTimer); markdownTimer = undefined }
   if (gitStatusTimer !== undefined) { window.clearInterval(gitStatusTimer); gitStatusTimer = undefined }
 })
 </script>
@@ -2724,8 +2946,8 @@ onBeforeUnmount(() => {
             <div class="resize-handle split-divider" :class="splitOrientation === 'horizontal' ? 'resize-split-h' : 'resize-split-v'" role="separator" :aria-label="splitOrientation === 'horizontal' ? '调整左右分屏宽度' : '调整上下分屏高度'" :aria-orientation="splitOrientation === 'horizontal' ? 'vertical' : 'horizontal'" tabindex="0" @pointerdown="startSplitResize($event)" @keydown="resizeSplitKey($event)" />
           </template>
           <div v-if="pane === 0 || splitOrientation !== 'none'" class="editor-pane" :class="[pane === 0 ? 'primary-pane' : 'secondary-pane', { 'pane-focused': focusedPane === pane }]" :style="pane === 1 ? (splitOrientation === 'horizontal' ? { flex: `0 1 ${splitSize}px`, minWidth: '160px' } : { flex: `0 1 ${splitSize}px`, minHeight: '160px' }) : undefined" @pointerdown.capture="focusPane(pane)">
-            <div class="editor-tabs" role="tablist" :aria-label="pane === 0 ? '编辑器标签组' : '第二标签组'">
-              <div v-for="tab in groups[pane].tabs" :key="`${pane}:${tab.path}`" class="file-tab" :class="{ selected: groups[pane].activePath === tab.path, pinned: tab.pinned, preview: tab.preview && groups[pane].activePath !== tab.path }" @contextmenu="onTabContext(pane, tab, $event)">
+            <div class="editor-tabs" role="tablist" :aria-label="pane === 0 ? '编辑器标签组' : '第二标签组'" @dragover="onTabDragOver(pane, $event)" @drop="onTabStripDrop(pane, $event)">
+              <div v-for="tab in groups[pane].tabs" :key="`${pane}:${tab.path}`" class="file-tab" :class="{ selected: groups[pane].activePath === tab.path, pinned: tab.pinned, preview: tab.preview && groups[pane].activePath !== tab.path, dragging: dragTab?.pane === pane && dragTab.path === tab.path }" draggable="true" @dragstart="onTabDragStart(pane, tab, $event)" @dragend="dragTab = null" @dragover="onTabDragOver(pane, $event)" @drop="onTabDrop(pane, tab.path, $event)" @contextmenu="onTabContext(pane, tab, $event)">
                 <button class="tab-select" role="tab" :aria-selected="groups[pane].activePath === tab.path" :title="tab.path" @click="switchTabIn(pane, tab)"><FileCode2 :size="14" /><span>{{ tab.path.split('/').pop() }}</span><Pin v-if="tab.pinned" :size="11" class="pin-mark" aria-label="已固定" /><span v-if="tab.dirty" class="dirty-dot" aria-label="未保存" /></button>
                 <button class="tab-close" :aria-label="`关闭 ${tab.path}`" :disabled="tab.saving" @click="closeTabIn(pane, tab)"><X :size="12" /></button>
               </div>
@@ -2744,9 +2966,10 @@ onBeforeUnmount(() => {
                 </template>
               </div>
             </div>
-            <div v-if="groupActive(pane)" class="breadcrumbs"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span><span class="editor-save-state">{{ groupActive(pane)!.saving ? '保存中…' : groupActive(pane)!.dirty ? '有未保存修改' : isDesktop ? '已读取磁盘版本' : '内存示例' }}</span></div>
-            <div class="editor-stage">
+            <div v-if="groupActive(pane)" class="breadcrumbs"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span><span class="editor-save-state">{{ groupActive(pane)!.saving ? '保存中…' : groupActive(pane)!.dirty ? '有未保存修改' : isDesktop ? '已读取磁盘版本' : '内存示例' }}</span><button v-if="markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="status-chip md-toggle" :class="{ active: markdownPreviewOn }" title="切换 Markdown 预览" aria-label="切换 Markdown 预览" @click="toggleMarkdownPreview">预览</button></div>
+            <div class="editor-stage" :class="{ 'has-md-preview': markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath }">
               <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" />
+              <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" />
               <div v-if="!groups[pane].tabs.length && pane === 0" class="welcome-screen">
                 <div class="welcome-symbol"><FolderOpen :size="28" :stroke-width="1.3" /></div>
                 <h1>{{ workspace.name }}</h1>
@@ -2926,17 +3149,44 @@ onBeforeUnmount(() => {
     <div v-if="recentPrompt" class="modal-backdrop" @click.self="recentPrompt = false">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="最近文件" @keydown="trapFocus"><div class="palette-input"><FileCode2 :size="18" /><input ref="recentInput" v-model="recentQuery" placeholder="最近打开的文件…（回车打开第一个）" aria-label="最近文件" @keydown.enter="recentFiltered[0] && openRecent(recentFiltered[0]!)" /><button class="icon-button" aria-label="关闭最近文件" @click="recentPrompt = false"><X :size="16" /></button></div><div class="palette-results"><button v-for="path in recentFiltered" :key="path" @click="openRecent(path)"><FileCode2 :size="15" /><span>{{ path }}</span><ArrowRight :size="14" /></button><p v-if="!recentFiltered.length" class="palette-empty">暂无最近文件记录。</p></div></section>
     </div>
-    <div v-if="treeMenu" class="tree-menu-backdrop" @pointerdown="treeMenu = null" @contextmenu.prevent="treeMenu = null">
-      <div class="tree-menu" :style="{ left: `${Math.min(treeMenu.x, viewport.width - 184)}px`, top: `${Math.min(treeMenu.y, viewport.height - 210)}px` }" @pointerdown.stop>
-        <button @click="beginCreate('createFile')">新建文件…</button>
-        <button @click="beginCreate('createDir')">新建文件夹…</button>
+    <div v-if="treeMenu" class="tree-menu-backdrop" @pointerdown="treeMenu = null; treeSubmenu = null" @contextmenu.prevent="treeMenu = null; treeSubmenu = null">
+      <div class="tree-menu" :style="{ left: `${Math.min(treeMenu.x, viewport.width - 216)}px`, top: `${Math.min(treeMenu.y, viewport.height - 330)}px` }" @pointerdown.stop>
+        <!-- IDEA ProjectViewPopupMenu order: WeighingNewGroup, AssociateWithFileType |
+             CutCopyPasteGroup, EditSource | FindUsages, FindInPath, ReplaceInPath |
+             RenameElement | ModifyGroup ($Delete) | SplitRevealGroup, VersionControlsGroup,
+             SynchronizeCurrentFile. -->
+        <button class="has-sub" @click="treeSubmenu = treeSubmenu === 'new' ? null : 'new'">新建 ▸</button>
+        <template v-if="treeSubmenu === 'new'">
+          <button class="sub-item" @click="beginCreate('createFile')">文件…</button>
+          <button class="sub-item" @click="beginCreate('createDir')">目录…</button>
+        </template>
+        <template v-if="treeMenu.entry.kind === 'file'">
+          <button class="has-sub" @click="treeSubmenu = treeSubmenu === 'filetype' ? null : 'filetype'">关联文件类型 ▸</button>
+          <template v-if="treeSubmenu === 'filetype'">
+            <button v-for="[choice, label] in languageChoices" :key="choice" class="sub-item" @click="associateFileType(treeMenu.entry.path, choice)">{{ label }}</button>
+            <button class="sub-item" @click="associateFileType(treeMenu.entry.path, 'auto')">自动（按扩展名）</button>
+          </template>
+        </template>
+        <div class="menu-rule" />
+        <button @click="cutTreeEntry()">剪切</button>
+        <button @click="copyTreeEntry()">复制</button>
+        <button @click="copyPath()">复制路径</button>
+        <button :disabled="!fileClipboard" @click="pasteFromClipboard()">粘贴</button>
+        <div class="menu-rule" />
+        <button v-if="treeMenu.entry.kind === 'file'" @click="openFile(treeMenu.entry.path); treeMenu = null; treeSubmenu = null">打开</button>
+        <div class="menu-rule" />
+        <button v-if="treeMenu.entry.kind === 'file'" :disabled="!lspReady" @click="findUsagesOf(treeMenu.entry.path)">查找用法…</button>
+        <button @click="treeMenu = null; treeSubmenu = null; explorer = true; leftView = 'search'">在路径中查找…</button>
         <div class="menu-rule" />
         <button @click="beginRename()">重命名…</button>
-        <button @click="copyPath()">复制路径</button>
-        <button v-if="isDesktop" :disabled="!workspace" @click="openInTerminal()">在终端中打开</button>
-        <button v-if="isDesktop && treeMenu.entry.kind === 'file'" @click="showFileProperties()">{{ findTab(treeMenu.entry.path)?.readOnly ? '去掉只读属性' : '设为只读' }}</button>
         <div class="menu-rule" />
         <button class="menu-danger" @click="beginDelete()">删除…</button>
+        <div class="menu-rule" />
+        <button v-if="isDesktop && treeMenu.entry.kind === 'file'" @click="showFileProperties()">{{ findTab(treeMenu.entry.path)?.readOnly ? '去掉只读属性' : '设为只读' }}</button>
+        <button v-if="isDesktop" :disabled="!workspace" @click="openInTerminal()">在终端中打开</button>
+        <button v-if="isDesktop" @click="revealInExplorer()">在资源管理器中显示</button>
+        <div class="menu-rule" />
+        <button @click="treeMenu = null; refreshTree()">刷新目录</button>
       </div>
     </div>
     <div v-if="tabMenu" class="tree-menu-backdrop" @pointerdown="tabMenu = null" @contextmenu.prevent="tabMenu = null">
@@ -3007,10 +3257,20 @@ onBeforeUnmount(() => {
       </section>
     </div>
     <div v-if="deleteTarget" class="modal-backdrop" @click.self="deleteTarget = null">
-      <section class="help-dialog leave-dialog" role="dialog" aria-modal="true" aria-label="删除确认" @keydown="trapFocus">
-        <h2>删除 {{ baseName(deleteTarget.path) }}？</h2>
-        <p>{{ deleteTarget.kind === 'directory' ? '只能删除空目录；若其下有已打开的标签会被一并关闭。' : '该文件将从磁盘删除；如需找回可用「本地历史」回滚旧版本。' }}</p>
+      <section class="help-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-label="删除确认" @keydown="trapFocus">
+        <!-- universal.file.chooser.action.delete.confirm: Delete "X"? /
+             Delete "X" and all of its contents? -->
+        <h2>删除 “{{ deleteTarget.path }}”{{ deleteTarget.kind === 'directory' ? ' 及其全部内容？' : '？' }}</h2>
+        <p>{{ deleteTarget.kind === 'directory' ? '目录及其所有子项都会从磁盘移除，无法在 TaoCode 内撤销。' : '该文件将从磁盘删除；如需找回可用「本地历史」回滚旧版本。' }}</p>
         <div class="leave-actions"><button ref="leaveCancel" class="subtle-button" @click="deleteTarget = null">取消</button><button class="primary-button menu-danger-solid" @click="confirmDelete">删除</button></div>
+      </section>
+    </div>
+    <div v-if="restorePrompt" class="modal-backdrop">
+      <section class="help-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="restore-title" @keydown="trapFocus">
+        <h2 id="restore-title">恢复上次会话？</h2>
+        <p>检测到 {{ restorePrompt.drafts }} 个文件有未保存的修改（上次可能未正常退出）。恢复后这些草稿会以未保存状态打开，不会写入磁盘。</p>
+        <ul class="unsaved-files"><li v-for="tab in restorePrompt.state.tabs.filter(item => item.draft !== undefined)" :key="tab.path">{{ tab.path }}</li></ul>
+        <div class="leave-actions"><button ref="leaveCancel" class="subtle-button" @click="discardSession">放弃草稿</button><button class="primary-button" @click="restoreSession(restorePrompt)">恢复会话</button></div>
       </section>
     </div>
     <div v-if="renamePrompt" class="modal-backdrop" @click.self="renamePrompt = null">

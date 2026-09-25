@@ -170,3 +170,15 @@ test('file associations map an extension to a language and patch independently',
   assert.deepEqual((await preview.request('project.settings.get')).fileAssociations, { conf: 'typescript', h: 'cpp' },
     'rejected writes change nothing')
 })
+
+test('tree mutations, sessions and reveal stay desktop-only in the preview', async () => {
+  for (const call of [
+    () => preview.request('file.copy', { from: 'a.txt', to: 'b.txt' }),
+    () => preview.request('file.reveal', { path: 'a.txt' }),
+    () => preview.request('session.save', { state: { tabs: [] } }),
+    () => preview.request('session.load'),
+    () => preview.request('session.clear'),
+  ]) {
+    await assert.rejects(call, error => error.code === 'DESKTOP_REQUIRED')
+  }
+})

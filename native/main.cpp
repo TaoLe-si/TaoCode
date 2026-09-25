@@ -24,6 +24,7 @@
 #include "dap.hpp"
 #include "terminal.hpp"
 #include "history.hpp"
+#include "session.hpp"
 #include "history.hpp"
 
 using Microsoft::WRL::Callback;
@@ -151,6 +152,7 @@ struct App {
     std::deque<Json> term_events;
 
     std::unique_ptr<taocode::history::History> history;  // per-project local history, recreated on open
+    std::unique_ptr<taocode::session::SessionStore> sessions;  // crash-recovery drafts, per profile
 
     void queue_term(Json payload) {
         {
@@ -529,6 +531,18 @@ struct App {
             else if (method == "file.lineSeparators") result = workspace->convert_line_separators(params.at("path").get<std::string>(), params.at("separator").get<std::string>(), params.at("content").get<std::string>(), params.at("expectedVersion").get<std::string>());
             else if (method == "file.rename") result = workspace->rename(params.at("from").get<std::string>(), params.at("to").get<std::string>());
             else if (method == "file.delete") result = workspace->remove(params.at("path").get<std::string>());
+            else if (method == "file.copy") result = workspace->copy(params.at("from").get<std::string>(), params.at("to").get<std::string>());
+            else if (method == "file.reveal") result = workspace->reveal(params.at("path").get<std::string>());
+            else if (method == "session.save") {
+                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                result = sessions->save(current_root, params.at("state"));
+            } else if (method == "session.load") {
+                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                result = sessions->load(current_root);
+            } else if (method == "session.clear") {
+                if (!current_root.empty()) result = sessions->clear(current_root);
+                else result = {{"cleared", true}, {"removed", false}};
+            }
             else if (method == "lsp.open") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 result = lsp ? lsp->open(params.at("path").get<std::string>(), params.value("text", std::string()))
@@ -921,6 +935,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             CoTaskMemFree(local);
             fs::create_directories(app.profile);
             app.projects = std::make_unique<taocode::ProjectStore>(app.profile / L"projects.json");
+            app.sessions = std::make_unique<taocode::session::SessionStore>(app.profile / L"sessions");
             PWSTR documents{};
             if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents))) {
                 app.default_parent = utf8(documents);
