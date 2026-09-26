@@ -2,7 +2,7 @@
 // Case, plus the single map the keymap AND the 编辑 menu both read from, so a menu
 // entry can never point at something the keyboard does not do.
 import {
-  addCursorAbove, addCursorBelow, copyLineDown, deleteLine, moveLineDown, moveLineUp,
+  addCursorAbove, addCursorBelow, copyLineDown, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp,
   redo, selectAll, toggleBlockComment, toggleLineComment, undo,
 } from '@codemirror/commands'
 import { foldCode, unfoldCode, foldAll, unfoldAll } from '@codemirror/language'
@@ -72,4 +72,7 @@ export const editingCommands: Record<string, Command> = {
   'replace.all': replaceAll,
   'comment.line': toggleLineComment, 'comment.block': toggleBlockComment,
   fold: foldCode, unfold: unfoldCode, foldAll, unfoldAll,
+  // IDEA's Code menu: 自动缩进 (Auto Indent, Ctrl+Alt+I) re-indents the selection
+  // by one step per CodeMirror's indentUnit.
+  'indent.selection': indentMore, 'indent.selection.less': indentLess,
 }

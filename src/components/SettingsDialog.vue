@@ -20,7 +20,7 @@ const props = defineProps<{
   theme: Theme
   busy: boolean
   error: string
-  initialSection?: 'editor' | 'appearance' | null
+  initialSection?: 'editor' | 'appearance' | 'structure' | null
   /** IDEA's commit-message inspections (Settings › Version Control › Commit). */
   commitMessageSettings: CommitMessageInspectionSettings
 }>()
@@ -63,7 +63,7 @@ const nodes: SettingsNode[] = [
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'group:vcs', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
 ]
 const expanded = ref(new Set<string>(groups.map(group => group.key)))
-const section = ref<PageKey>(props.initialSection === 'editor' ? 'editor' : props.initialSection === 'appearance' ? 'appearance' : 'appearance')
+const section = ref<PageKey>(props.initialSection && ['editor', 'appearance', 'structure'].includes(props.initialSection) ? props.initialSection : 'appearance')
 
 // IDEA's "new options" dot (SettingsNewBadgeState.kt:19-56 + SettingsTreeView.java:791): a page
 // that carries newly added options shows a dot in the tree until it has been shown once, and the

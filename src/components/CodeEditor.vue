@@ -19,7 +19,7 @@ const props = defineProps<{ content: string; path: string; language?: string; th
 const emit = defineEmits<{
   columnMode: [active: boolean]
   selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
-  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: [] }>()
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: [] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
@@ -559,7 +559,7 @@ function emitEvaluate(editor: EditorView) {
   emit('evaluate', editor.state.sliceDoc(span.from, span.to))
   return true
 }
-function emitSemantic(kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy') {
+function emitSemantic(kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition') {
   return (editor: EditorView) => {
     const state = editor.state
     const head = state.selection.main.head
@@ -598,6 +598,9 @@ const editorActions: Record<string, Command> = {
   implementation: emitSemantic('implementation'),
   callHierarchy: emitSemantic('callHierarchy'),
   typeHierarchy: emitSemantic('typeHierarchy'),
+  // Navigate › 类型声明 (IDEA GotoTypeDeclaration, Ctrl+Shift+B); the LSP
+  // typeDefinition request feeds the same references list as implementation.
+  typeDeclaration: emitSemantic('typeDefinition'),
   evaluate: emitEvaluate,
   'template.expand': expandTemplate,
   'column.select': () => { toggleColumnSelection(); return true },
@@ -638,9 +641,14 @@ function lspExtensions(): Extension[] {
       { key: 'Alt-f7', preventDefault: true, run: emitSemantic('references') },
       { key: 'Alt-Enter', preventDefault: true, run: emitSemantic('codeAction') },
       { key: 'Ctrl-Alt-l', preventDefault: true, run: emitSemantic('format') },
+      // IDEA Code menu: 自动缩进 (Auto-Indent, Ctrl+Alt+I).
+      { key: 'Ctrl-Alt-i', preventDefault: true, run: editingCommands['indent.selection']! },
       { key: 'Ctrl-Alt-b', preventDefault: true, run: emitSemantic('implementation') },
       { key: 'Ctrl-Alt-h', preventDefault: true, run: emitSemantic('callHierarchy') },
-      { key: 'Ctrl-Shift-h', preventDefault: true, run: emitSemantic('typeHierarchy') },
+      // IDEA Navigate: 类型层次 = Ctrl+H ($default.xml TypeHierarchy); 方法层次
+      // Ctrl+Shift+H has no LSP equivalent, so that chord stays unbound here.
+      { key: 'Ctrl-h', preventDefault: true, run: emitSemantic('typeHierarchy') },
+      { key: 'Ctrl-Shift-b', preventDefault: true, run: emitSemantic('typeDefinition') },
       { key: 'Alt-F8', preventDefault: true, run: emitEvaluate },
       { key: 'Ctrl-p', preventDefault: true, run: emitSemantic('signature') },
       { key: 'Mod-w', preventDefault: true, run: () => adjustSelection(true) },

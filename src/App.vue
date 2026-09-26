@@ -1745,8 +1745,8 @@ async function cancelProject() {
 }
 // IDEA remembers the last-edited configurable (project.structure.last.edited); the
 // Window menu jumps straight into a section, so the dialog needs the hint.
-const settingsSectionHint = ref<'editor' | 'appearance' | null>(null)
-async function openSettings(section?: 'editor' | 'appearance') {
+const settingsSectionHint = ref<'editor' | 'appearance' | 'structure' | null>(null)
+async function openSettings(section?: 'editor' | 'appearance' | 'structure') {
   settingsSectionHint.value = section ?? null
   menu.value = null
   if (working.value) return
@@ -2200,7 +2200,7 @@ async function refreshOutline(path: string) {
     outline.value = result.available ? result.symbols ?? [] : []
   } catch { outline.value = [] }
 }
-async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }) {
+async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }) {
   const tab = findTab(payload.path)
   if (!tab || !lspOn(tab)) { notify('该文件未启用语言服务。', true); return }
   if (payload.kind === 'rename') {
@@ -2327,6 +2327,23 @@ function caretPayload() {
   const tab = active.value!
   const cursor = editorFor(tab.path)?.getCursor() ?? { line: tab.line - 1, ch: 0 }
   return { path: tab.path, line: cursor.line, character: cursor.ch }
+}
+// IDEA's Code › 优化导入 (Optimize Imports, Ctrl+Alt+O): JDT/TS publish it as a
+// `source.organizeImports` code action; apply the first one directly.
+async function runOrganizeImports() {
+  const tab = active.value
+  if (!tab || !lspReady.value) { notify('优化导入需要语言服务。', true); return }
+  const payload = caretPayload()
+  try {
+    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: payload.path, line: payload.line, character: payload.character, diagnostics: [] })
+    const action = (result.actions ?? []).find(item =>
+      item.kind === 'source.organizeImports' || item.kind?.startsWith('source.organizeImports') ||
+      /organize\s*imports|优化导入/i.test(item.title))
+    if (!action) { notify('语言服务没有提供可用的导入优化。'); return }
+    actionPrompt.value = { path: payload.path }
+    await applyCodeAction(action)
+    actionPrompt.value = null
+  } catch (error) { notify(errorMessage(error), true) }
 }
 async function applyCodeAction(action: LspCodeAction) {
   const path = actionPrompt.value?.path ?? activePath.value
@@ -3357,6 +3374,45 @@ function copyFilePath() {
   void navigator.clipboard?.writeText(fullPath)
   notify(`已复制路径：${fullPath}`)
 }
+// IDEA RefactorMenu: 移动文件 (Move File, F6) relocates the active file into
+// another directory — file.rename moves across directories, open tabs are
+// retitled, and the LSP document is re-opened by retitleTab.
+async function moveActiveFile() {
+  const tab = active.value
+  if (!tab || !workspace.value) { notify('请先打开一个文件。', true); return }
+  const target = window.prompt(`移动 ${tab.path} 到目录（工作区相对路径，如 src/main）：`, parentOf(tab.path))
+  if (target === null) return
+  const dir = target.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!dir || dir === parentOf(tab.path)) return
+  if (dir.startsWith('/') || dir.includes('..')) { notify('目录必须是工作区内相对路径。', true); return }
+  try {
+    await request('file.create', { path: dir, directory: true })
+  } catch { /* the directory may already exist */ }
+  const destination = `${dir}/${baseName(tab.path)}`
+  try {
+    await request('file.rename', { from: tab.path, to: destination })
+    await retitleTab(tab.path, destination)
+    await refreshTree()
+    notify(`已移动到 ${destination}`)
+  } catch (error) { notify(errorMessage(error), true) }
+}
+// IDEA RefactorMenu: 复制文件 (Copy File, F5) — the copy lands next to the
+// original under an IDEA-style "X copy.ext" name unless the user types one.
+async function copyActiveFile() {
+  const tab = active.value
+  if (!tab || !workspace.value || !isDesktop) { notify('复制文件需要桌面端。', true); return }
+  const suggested = copyCollisionName(name => workspace.value!.entries.some(entry => entry.path === `${parentOf(tab.path)}/${name}`), baseName(tab.path))
+  const input = window.prompt(`复制为（${parentOf(tab.path) || '项目根'} 下）：`, suggested)
+  if (input === null) return
+  const name = input.trim()
+  if (!name || name === baseName(tab.path)) return
+  const destination = parentOf(tab.path) ? `${parentOf(tab.path)}/${name}` : name
+  try {
+    await request('file.copy', { from: tab.path, to: destination })
+    await refreshTree()
+    notify(`已复制为 ${destination}`)
+  } catch (error) { notify(errorMessage(error), true) }
+}
 // IDEA's Generate popup (Alt+Insert) filters the code actions down to source
 // generations — constructors, getters/setters, toString, overrides, …; JDT LS
 // publishes exactly those under kind `source.*`.
@@ -3568,6 +3624,10 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'plugin.manage', title: '插件…', keywords: 'plugin extension 插件 扩展', enabled: () => isDesktop, run: () => void openPlugins() },
     { id: 'file.rule3', rule: true },
     { id: 'app.settings', title: '设置…', keys: 'Ctrl Alt S', keywords: 'settings preferences config keymap 设置', enabled: () => !working.value, run: () => void openSettings() },
+    // IDEA File menu (real 2026.2 UI): 项目结构 (Ctrl+Alt+Shift+S) sits next to
+    // 设置, and 从磁盘全部重新加载 (Ctrl+Alt+Y) sits next to 全部保存.
+    { id: 'app.projectStructure', title: '项目结构…', keys: 'Ctrl Alt Shift S', keywords: 'project structure sdk modules 项目结构', enabled: () => !working.value && Boolean(workspace.value), run: () => void openSettings('structure') },
+    { id: 'file.reloadFromDisk', title: '从磁盘全部重新加载', keys: 'Ctrl Alt Y', keywords: 'reload from disk synchronize 从磁盘重新加载 刷新', enabled: () => Boolean(workspace.value) && isDesktop, run: () => void forceReloadFromDisk() },
     { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void request('app.quit').catch(() => undefined) } },
   ] },
   { menu: 'edit', label: '编辑', rows: [
@@ -3594,6 +3654,9 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     editable('line.delete', '删除行', 'Ctrl Y', 'delete line 删除行'),
     editable('line.moveUp', '上移行', 'Alt Shift ↑', 'move line up 上移行'),
     editable('line.moveDown', '下移行', 'Alt Shift ↓', 'move line down 下移行'),
+    // IDEA Edit menu: 缩进选区 (Tab) / 反缩进或缩进选区 (Shift+Tab).
+    editable('indent.selection', '缩进选区', 'Tab', 'indent selection 缩进'),
+    editable('indent.selection.less', '反缩进选区', 'Shift Tab', 'outdent selection 反缩进'),
     { id: 'edit.rule4', rule: true },
     editable('comment.line', '行注释', 'Ctrl /', 'comment line 行注释'),
     editable('comment.block', '块注释', 'Ctrl Shift /', 'comment block 块注释'),
@@ -3669,8 +3732,12 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // IDEA's RecentLocations is Ctrl+Shift+E in $default.xml; inside the popup the
     // same Ctrl+E toggles "Show edited only" (SwitcherRecentEditedChangedToggleCheckBox).
     { id: 'navigate.places', title: '最近位置', keys: 'Ctrl Shift E', keywords: 'recent places locations 最近位置', enabled: () => Boolean(workspace.value), run: () => openRecentPlaces() },
-    { id: 'navigate.everywhere', title: '查找操作（Shift Shift）', keys: 'Shift Shift', keywords: 'search everywhere find action 查找操作', run: openActionSearch },
+    // IDEA Navigate menu (real 2026.2 UI): 随处搜索 (Shift+Shift) opens Search
+    // Everywhere; the row keeps its honest title here.
+    { id: 'navigate.everywhere', title: '随处搜索', keys: 'Shift Shift', keywords: 'search everywhere 随处搜索 搜索', run: openActionSearch },
     { id: 'navigate.declaration', title: '转到声明/定义', keys: 'Ctrl B', keywords: 'go to declaration definition 转到声明', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('definition') },
+    // IDEA Navigate: 类型声明 (GotoTypeDeclaration, Ctrl+Shift+B).
+    { id: 'navigate.typeDeclaration', title: '转到类型声明', keys: 'Ctrl Shift B', keywords: 'goto type declaration 类型声明', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('typeDeclaration') },
     { id: 'navigate.rule1', rule: true },
     // IDEA's "Jump to Line/Character" (Ctrl+L) opens the same line prompt as Go to
     // Line:Column. Select Changed Text has no keymap entry in \$default.xml, so only
@@ -3696,7 +3763,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     semantic('implementation', '跳转到实现', 'Ctrl Alt B', 'goto implementation 实现'),
     semantic('references', '查找用法', 'Alt F7', 'find usages references 用法'),
     semantic('callHierarchy', '调用层次', 'Ctrl Alt H', 'call hierarchy incoming outgoing 调用层次'),
-    semantic('typeHierarchy', '类型层次', 'Ctrl Shift H', 'type hierarchy supertypes subtypes 类型层次'),
+    semantic('typeHierarchy', '类型层次', 'Ctrl H', 'type hierarchy supertypes subtypes 类型层次'),
     semantic('rename', '重命名', 'Shift F6', 'rename refactor symbol 重命名'),
     semantic('signature', '参数信息', 'Ctrl P', 'signature parameter info 参数信息'),
     { id: 'code.quickDoc', title: '快速文档', keys: 'Ctrl Q', keywords: 'quick documentation hover 快速文档 文档', enabled: () => Boolean(active.value) && lspReady.value, run: () => void showQuickDoc() },
@@ -3705,6 +3772,10 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     semantic('selection.grow', '扩展到上一级语法单元', 'Ctrl W', 'extend selection syntax 扩展选区'),
     semantic('selection.shrink', '缩小语法选区', 'Ctrl Shift W', 'shrink selection syntax 缩小选区'),
     semantic('format', '重新格式化', 'Ctrl Alt L', 'format code reformat 格式化'),
+    // IDEA Code menu: 自动缩进 (Auto-Indent, Ctrl+Alt+I) and 优化导入 (Optimize
+    // Imports, Ctrl+Alt+O — a source.organizeImports code action).
+    editable('indent.selection', '自动缩进', 'Ctrl Alt I', 'auto indent selection 自动缩进'),
+    { id: 'code.optimizeImports', title: '优化导入', keys: 'Ctrl Alt O', keywords: 'optimize imports organize 优化导入', enabled: () => Boolean(active.value) && lspReady.value, run: () => void runOrganizeImports() },
     { id: 'code.rule3', rule: true },
     { id: 'code.blame', title: 'Git 追溯（Annotate）', keywords: 'blame annotate git history 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
     { id: 'code.compareClipboard', title: '与剪贴板比较', keywords: 'compare clipboard diff 与剪贴板比较', enabled: () => Boolean(active.value), run: () => void compareWithClipboard() },
@@ -3713,11 +3784,16 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // Read-Only); no default shortcut in $default.xml.
   ] },
   { menu: 'refactor', label: '重构', rows: [
+    // IDEA RefactorMenu: 重构... (Refactor This, Ctrl+Alt+Shift+T) first.
+    { id: 'refactor.this', title: '重构…', keys: 'Ctrl Alt Shift T', keywords: 'refactor this 重构', enabled: () => Boolean(active.value) && lspReady.value, run: () => void openCodeActions(caretPayload()) },
     { id: 'refactor.extractVariable', title: '提取变量', keys: 'Ctrl Alt V', keywords: 'extract variable local 提取变量', enabled: () => Boolean(active.value) && lspReady.value, run: extractVariable },
     { id: 'refactor.ExtractConstant', title: '提取常量', keys: 'Ctrl Alt C', keywords: 'extract constant field 提取常量', enabled: () => Boolean(active.value) && lspReady.value, run: extractConstant },
     { id: 'refactor.ExtractMethod', title: '提取方法', keys: 'Ctrl Alt M', keywords: 'extract method function 提取方法', enabled: () => Boolean(active.value) && lspReady.value, run: extractMethod },
     { id: 'refactor.rule1', rule: true },
     semantic('rename', '重命名', 'Shift F6', 'rename refactor symbol 重命名'),
+    // IDEA RefactorMenu file rows: 移动文件 F6 / 复制文件 F5 (real 2026.2 UI).
+    { id: 'refactor.moveFile', title: '移动文件…', keys: 'F6', keywords: 'move file refactor 移动文件', enabled: () => Boolean(active.value) && isDesktop, run: () => void moveActiveFile() },
+    { id: 'refactor.copyFile', title: '复制文件…', keys: 'F5', keywords: 'copy file refactor 复制文件', enabled: () => Boolean(active.value) && isDesktop, run: () => void copyActiveFile() },
     { id: 'refactor.inline', title: '内联', keys: 'Ctrl Alt N', keywords: 'inline variable method constant 内联', enabled: () => Boolean(active.value) && lspReady.value, run: inlineVariable },
     { id: 'refactor.rule2', rule: true },
     semantic('format', '重新格式化代码', 'Ctrl Alt L', 'format code reformat 格式化'),
@@ -3751,6 +3827,11 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // RunClass in the default keymap: run whatever is under the caret.
     { id: 'run.context', title: '运行当前上下文配置', keys: 'Ctrl Shift F10', keywords: 'run contextual configuration run class 运行上下文', enabled: () => isDesktop && Boolean(active.value) && !runState.running, run: () => void runContextConfiguration(false) },
     { id: 'run.rule1', rule: true },
+    // IDEA Run menu (real 2026.2 UI): 附加到进程 Ctrl+Alt+F5, 查看断点 Ctrl+Shift+F8,
+    // 编辑配置 — the rows route to the debug/run panels that own those editors.
+    { id: 'run.attach', title: '附加到进程…', keys: 'Ctrl Alt F5', keywords: 'attach to process debug 附加进程', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => { explorer.value = true; leftView.value = 'debug'; notify('在调试面板填写进程 PID 或管道名后点“附加”。') } },
+    { id: 'run.viewBreakpoints', title: '查看断点…', keys: 'Ctrl Shift F8', keywords: 'view breakpoints 断点 查看', enabled: () => isDesktop && Boolean(workspace.value), run: () => { explorer.value = true; leftView.value = 'debug' } },
+    { id: 'run.editConfigs', title: '编辑配置…', keywords: 'edit configurations run debug 配置 编辑', enabled: () => Boolean(workspace.value), run: () => { showOutput('run'); notify('在“运行”面板编辑配置后点“存为配置”保存。') } },
     { id: 'run.output', title: '显示运行输出', keywords: 'run console output 运行输出', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
     { id: 'run.log', title: '显示操作输出', keywords: 'trace bridge log 操作输出', enabled: () => Boolean(workspace.value), run: () => showOutput('output') },
     toolWindow('debug', '显示调试面板', 'debug debugger tool window 调试面板', true),
@@ -3763,11 +3844,13 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   { menu: 'git', label: 'Git', rows: [
     { id: 'git.commit', title: '提交项目…', keys: 'Ctrl K', keywords: 'commit checkin message 提交', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('git') },
     { id: 'git.push', title: '推送…', keys: 'Ctrl Shift K', keywords: 'push remote upload 推送', enabled: () => isDesktop && gitAvailable.value, run: () => void pushWithConfirm() },
-    { id: 'git.update', title: '更新项目', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void updateProject() },
+    { id: 'git.update', title: '更新项目', keys: 'Ctrl T', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void updateProject() },
     { id: 'git.pull', title: '拉取（Pull）', keywords: 'pull fetch integrate 拉取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
     { id: 'git.fetch', title: '获取（Fetch）', keywords: 'fetch remote refs prune 获取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.fetch') },
     { id: 'git.rule1', rule: true },
     { id: 'git.rebase', title: '变基当前分支到上游（Rebase）', keywords: 'rebase upstream onto 变基', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.rebase') },
+    // IDEA Git menu (real 2026.2 UI): 重置 HEAD… follows 新建标记.
+    { id: 'git.resetHead', title: '重置 HEAD…', keywords: 'reset head soft mixed hard 重置', enabled: () => isDesktop && gitAvailable.value, run: () => void resetHeadDialog() },
     { id: 'git.branches', title: '分支…', keys: 'Ctrl Shift `', keywords: 'branches popup checkout switch widget 分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
     { id: 'git.newBranch', title: '新建分支…', keywords: 'new branch create checkout 新建分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
     { id: 'git.tag', title: '标签…（Tag）', keywords: 'tag create delete lightweight 标签', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
@@ -4254,6 +4337,24 @@ async function updateProject() {
     showView('git')
   } catch (error) { notify(errorMessage(error), true) }
 }
+// IDEA Git menu: 重置 HEAD… (Reset Current Branch). The two IDEA-visible choices
+// are the mode and the target; a hard reset gets a second confirm because it
+// discards commits and edits alike.
+async function resetHeadDialog() {
+  if (!workspace.value || !isDesktop) return
+  const target = window.prompt('重置到哪个提交？（分支名、哈希或 HEAD~N）', 'HEAD~1')
+  if (!target?.trim()) return
+  const mode = window.prompt('重置模式：\n  soft — 保留更改在暂存区\n  mixed — 保留更改在工作区\n  hard — 丢弃全部更改', 'mixed')
+  const chosen = (mode ?? '').trim().toLowerCase()
+  if (!chosen) return
+  if (!['soft', 'mixed', 'hard'].includes(chosen)) { notify('模式只能是 soft、mixed 或 hard。', true); return }
+  if (chosen === 'hard' && !window.confirm(`硬重置将丢弃 ${target.trim()} 之后的全部提交与未提交修改，且无法撤销。继续？`)) return
+  try {
+    const result = await request<{ head: string }>('git.reset', { target: target.trim(), mode: chosen })
+    notify(`已重置到 ${result.head}（${chosen}）。`)
+    showView('git')
+  } catch (error) { notify(errorMessage(error), true) }
+}
 // IDEA's Push dialog confirms before any remote write; the confirm names the
 // branch so a push to the wrong remote is at least visible.
 async function pushWithConfirm() {
@@ -4380,6 +4481,18 @@ function onKey(event: KeyboardEvent) {
   }
   if (event.key === 'F2' && event.ctrlKey && runState.running) { event.preventDefault(); void stopRun(); return }
   if (event.key === 'F5' && event.ctrlKey && !event.shiftKey && !event.altKey && lastRunParams && !runState.running) { event.preventDefault(); void rerunLast(); return }
+  // IDEA Run menu: 附加到进程 Ctrl+Alt+F5, 查看断点 Ctrl+Shift+F8 (real 2026.2 UI).
+  if (event.key === 'F5' && event.ctrlKey && event.altKey && !event.shiftKey && workspace.value) { event.preventDefault(); explorer.value = true; leftView.value = 'debug'; return }
+  if (event.key === 'F8' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); explorer.value = true; leftView.value = 'debug'; return }
+  // IDEA Git menu: 更新项目 = Ctrl+T (Vcs.UpdateProject).
+  if (event.key.toLowerCase() === 't' && event.ctrlKey && !event.shiftKey && !event.altKey && workspace.value && gitAvailable.value) { event.preventDefault(); void updateProject(); return }
+  // IDEA File menu: 项目结构 Ctrl+Alt+Shift+S, 从磁盘全部重新加载 Ctrl+Alt+Y.
+  if (event.key.toLowerCase() === 's' && event.ctrlKey && event.altKey && event.shiftKey && workspace.value) { event.preventDefault(); void openSettings('structure'); return }
+  if (event.key.toLowerCase() === 'y' && event.ctrlKey && event.altKey && !event.shiftKey && workspace.value) { event.preventDefault(); void forceReloadFromDisk(); return }
+  // IDEA Refactor menu: 重构… Ctrl+Alt+Shift+T, 移动文件 F6, 复制文件 F5.
+  if (event.key.toLowerCase() === 't' && event.ctrlKey && event.altKey && event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void openCodeActions(caretPayload()); return }
+  if (event.key === 'F6' && !event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void moveActiveFile(); return }
+  if (event.key === 'F5' && !event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void copyActiveFile(); return }
   // Shift+F10 Run, Alt+Shift+F10 Choose Run Configuration, Alt+Shift+F9 Choose Debug
   // Configuration, Ctrl+Shift+F10 Run Context Configuration.
   if (event.key === 'F10' && event.shiftKey && event.altKey && workspace.value) { event.preventDefault(); openConfigChooser(); return }
@@ -4520,6 +4633,14 @@ async function syncFromDisk() {
 }
 function onWindowFocus() { void syncFromDisk() }
 function onVisibility() { if (document.visibilityState === 'visible') void syncFromDisk() }
+// IDEA File menu: 从磁盘全部重新加载 (Reload All from Disk, Ctrl+Alt+Y). The same
+// sync as frame activation, plus an explicit confirmation toast.
+async function forceReloadFromDisk() {
+  if (!isDesktop || !workspace.value) { notify('请先打开一个项目。', true); return }
+  await syncFromDisk()
+  await refreshTree()
+  notify('已从磁盘重新加载全部未修改文件。')
+}
 // IDE-03 live file watching: the native watcher already debounced the OS noise, so
 // this handler only coalesces UI work — refresh the tree once per batch and let
 // syncFromDisk pull the changed buffers (dirty ones are never touched).
@@ -5000,8 +5121,8 @@ onBeforeUnmount(() => {
           <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
           <div v-else class="explorer-empty"><FolderOpen :size="26" /><p>尚未打开工作区</p><button class="subtle-button" @click="openWorkspace()">选择文件夹</button></div>
         </div>
-        <div class="explorer-footer"><ShieldCheck :size="14" /><span>文件操作限定在工作区内</span></div>
-        <div class="tree-note">排除目录：{{ projectSettings.excludedDirs.join(' / ') || '无' }}<br />不跟随符号链接与目录联接</div>
+        <!-- IDEA's Project view has no explanatory footer; the exclusion list lives
+             in Settings › Project, so the dev-note block is gone from the panel. -->
         </template>
         <!-- IDEA "Side-by-side layout on the left": the project view stays visible
              below the active left tool window instead of being replaced by it. -->
