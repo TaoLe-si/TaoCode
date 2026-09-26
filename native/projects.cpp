@@ -903,14 +903,27 @@ Json validate_document(Json value) {
             if (!value["settings"].contains(entry.key())) value["settings"][entry.key()] = entry.value();
         std::vector<std::string> paths;
         for (auto& recent : value.at("recentProjects")) {
-            known_keys(recent, {"name", "path", "lastOpened", "available"}, "STATE_CORRUPT");
+            known_keys(recent, {"name", "path", "lastOpened", "available", "displayName",
+                                "projectName", "activationTimestamp", "branchName"}, "STATE_CORRUPT");
             if (!recent.contains("name") || !recent.at("name").is_string() ||
                 recent.at("name").get_ref<const std::string&>().empty() ||
                 !valid_utf8(recent.at("name").get_ref<const std::string&>()) ||
                 !recent.contains("path") || !recent.contains("lastOpened") ||
                 !recent.at("lastOpened").is_string() ||
                 !valid_timestamp(recent.at("lastOpened").get_ref<const std::string&>()) ||
-                (recent.contains("available") && !recent.at("available").is_boolean()))
+                (recent.contains("available") && !recent.at("available").is_boolean()) ||
+                (recent.contains("displayName") &&
+                 (!recent.at("displayName").is_string() ||
+                  !valid_utf8(recent.at("displayName").get_ref<const std::string&>()))) ||
+                (recent.contains("projectName") &&
+                 (!recent.at("projectName").is_string() ||
+                  !valid_utf8(recent.at("projectName").get_ref<const std::string&>()))) ||
+                (recent.contains("activationTimestamp") &&
+                 (!recent.at("activationTimestamp").is_number_integer() ||
+                  recent.at("activationTimestamp").get<int64_t>() < 0)) ||
+                (recent.contains("branchName") &&
+                 (!recent.at("branchName").is_string() ||
+                  !valid_utf8(recent.at("branchName").get_ref<const std::string&>()))))
                 fail("STATE_CORRUPT", "A saved recent project is invalid.");
             const auto path = stored_path(recent.at("path"));
             for (const auto& existing : paths) {
@@ -1065,6 +1078,18 @@ std::string existing_project_key(const Json& projects, const std::string& root) 
 }
 
 } // namespace
+
+// Source: RecentProjectMetaInfo.activationTimestamp / projectName - the meta fields
+// surface in the public state so the welcome screen can sort and label without
+// re-reading the project directory.
+std::int64_t utc_now_epoch() {
+    FILETIME file{};
+    GetSystemTimeAsFileTime(&file);
+    ULARGE_INTEGER ticks{};
+    ticks.LowPart = file.dwLowDateTime;
+    ticks.HighPart = file.dwHighDateTime;
+    return static_cast<std::int64_t>(ticks.QuadPart / 10000000ULL) - 11644473600LL;
+}
 
 // Public mirror of the internal defaults (projects.hpp): tests and any future caller
 // assert against the real defaults instead of a hand-copied snapshot that drifts.
@@ -1480,7 +1505,29 @@ void ProjectStore::opened(const Json& workspace) {
         const auto root = utf8_path(pinned.path);
         auto loaded = load_state(state_file_);
         auto next = loaded.document;
-        Json recents = Json::array({{{"name", workspace.at("name")}, {"path", root}, {"lastOpened", utc_now()}}});
+        // Source: RecentProjectMetaInfo + RecentProjectsManagerBase.addRecentProject
+        // sets activationTimestamp and displayName when the project is opened. We
+        // stamp both here so the welcome screen can render branch/title without
+        // re-reading the .idea directory (and so a future sync with a non-local
+        // path - WSL or remote - keeps the cached fields).
+        Json activation = Json::object();
+        activation["name"] = workspace.at("name");
+        activation["path"] = root;
+        activation["lastOpened"] = utc_now();
+        activation["activationTimestamp"] = static_cast<int64_t>(utc_now_epoch());
+        if (workspace.contains("displayName") && workspace.at("displayName").is_string()
+            && !workspace.at("displayName").get<std::string>().empty()) {
+            activation["displayName"] = workspace.at("displayName");
+        }
+        if (workspace.contains("projectName") && workspace.at("projectName").is_string()
+            && !workspace.at("projectName").get<std::string>().empty()) {
+            activation["projectName"] = workspace.at("projectName");
+        }
+        if (workspace.contains("branch") && workspace.at("branch").is_string()
+            && !workspace.at("branch").get<std::string>().empty()) {
+            activation["branchName"] = workspace.at("branch");
+        }
+        Json recents = Json::array({activation});
         for (const auto& recent : next.at("recentProjects")) {
             if (recents.size() < recent_limit && !same_path(recent.at("path").get<std::string>(), root))
                 recents.push_back(recent);

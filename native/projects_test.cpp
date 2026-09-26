@@ -323,6 +323,10 @@ int main() {
             const auto root_b = opened_b.at("root").get<std::string>();
             auto recent = store.state().at("recentProjects");
             check(recent.size() == 2 && recent[0].at("path") == root_b && recent[1].at("path") == root_a, "Most recently opened must be first");
+            check(recent[0].contains("activationTimestamp") && recent[0].at("activationTimestamp").is_number_integer()
+                  && recent[0].at("activationTimestamp").get<int64_t>() > 0, "RecentProjectMetaInfo.activationTimestamp must be set on open");
+            check(!recent[0].contains("displayName") || recent[0].at("displayName").is_string(),
+                  "displayName is optional but must be a string when present");
             store.opened(open_result(path_from(upper_ascii(root_a))));
             auto state = store.state();
             recent = state.at("recentProjects");
@@ -333,6 +337,8 @@ int main() {
                 check(path.is_absolute() && item.at("path").get<std::string>().find('\\') == std::string::npos, "Recent paths must be absolute canonical UTF-8 with portable separators");
                 check(timestamp.size() == 20 && timestamp[10] == 'T' && timestamp.back() == 'Z', "lastOpened must be UTC ISO8601");
                 check(item.at("available") == true, "Existing projects must be available");
+                check(item.contains("activationTimestamp") && item.at("activationTimestamp").is_number_integer(),
+                      "Every saved recent must carry activationTimestamp");
             }
             check(ProjectStore(file).state() == state, "Recents must survive reconstruction");
             store.closed();
@@ -378,6 +384,26 @@ int main() {
             check(empty.at("recentProjects").size() == 1, "forget_many with an empty set is a no-op");
             const auto case_variant = store.forget_many({ upper_ascii(rc) });
             check(case_variant.at("recentProjects").empty() && case_variant.at("lastProject").is_null(), "forget_many clears lastProject when it is in the removal set");
+        });
+
+        run("RecentProjectMetaInfo fields round-trip on disk", [&] {
+            const auto file = temporary.path / "meta.json";
+            ProjectStore store(file);
+            const auto path = create_project(temporary.path, "meta-1", "empty");
+            Json opened = open_result(path);
+            opened["displayName"] = "Meta One — combined";
+            opened["projectName"] = "meta-1-custom";
+            opened["branch"] = "feature/MetaInfo";
+            store.opened(opened);
+            const auto recent = store.state().at("recentProjects").at(0);
+            check(recent.at("displayName") == "Meta One — combined", "displayName must persist on open");
+            check(recent.at("projectName") == "meta-1-custom", "projectName (customProjectName) must persist");
+            check(recent.at("branchName") == "feature/MetaInfo", "branchName must persist");
+            check(recent.at("activationTimestamp").get<int64_t>() > 0, "activationTimestamp must be a positive epoch");
+            const auto reloaded = ProjectStore(file).state().at("recentProjects").at(0);
+            check(reloaded.at("displayName") == "Meta One — combined", "displayName must survive a reload");
+            check(reloaded.at("projectName") == "meta-1-custom", "projectName must survive a reload");
+            check(reloaded.at("branchName") == "feature/MetaInfo", "branchName must survive a reload");
         });
 
         run("recents are capped at thirty and invalid opens are transactional", [&] {

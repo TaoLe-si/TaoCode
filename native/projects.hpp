@@ -16,6 +16,10 @@ Json java_lsp_settings(const Json& java);
 // against the real defaults instead of a copy that drifts.
 Json editor_defaults();
 
+// Source: RecentProjectMetaInfo.activationTimestamp — wall-clock seconds since
+// the Unix epoch in UTC, mirroring what IDEA stores next to displayName.
+std::int64_t utc_now_epoch();
+
 // Publishes a project template without replacing anything; does not open/record it.
 fs::path create_project(const fs::path& parent, const std::string& name,
                         const std::string& kind);

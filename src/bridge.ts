@@ -16,7 +16,25 @@ export const encodingLabels: Record<EncodingKey, string> = {
 export const encodingKeys = Object.keys(encodingLabels) as EncodingKey[]
 export interface DocumentData { path: string; content: string; version: string; encoding: EncodingKey; bom: boolean; readOnly?: boolean }
 export interface SaveResult { version: string; bytes: number; encoding?: EncodingKey; bom?: boolean }
-export interface RecentProject { name: string; path: string; lastOpened: string; available: boolean }
+export interface RecentProject {
+  name: string;
+  path: string;
+  lastOpened: string;
+  available: boolean;
+  // Source: RecentProjectMetaInfo.displayName (RecentProjectsManagerBase.kt:99-101).
+  // Falls back to the directory name when missing; RecentProjectListActionProvider
+  // builds `projectNameToDisplay` from it.
+  displayName?: string;
+  // Source: RecentProjectMetaInfo.customProjectName (RecentProjectsManagerBase.kt:108-110)
+  // — cached .idea/.name to avoid I/O on non-local paths.
+  projectName?: string;
+  // Source: RecentProjectMetaInfo.activationTimestamp — epoch seconds used by
+  // RecentProjectListActionProvider to sort the recent projects pop-up.
+  activationTimestamp?: number;
+  // Source: RecentProjectsBranchesProvider.getCurrentBranch — populated by the
+  // welcome screen when a branch is known, otherwise undefined.
+  branchName?: string;
+}
 // uiZoomPercent / compactMode / fullPathsInWindowHeader mirror IDEA's
 // AppearanceConfigurable (IdeScaleTransformer bounds 50-400, compact mode, full
 // paths in the window header). They are appearance state but ride the same
