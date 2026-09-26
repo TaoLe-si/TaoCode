@@ -27,6 +27,7 @@ public:
     void opened(const Json& workspace);
     void closed();
     Json forget(const std::string& path); // Returns the public state; keeps project files/settings.
+    Json forget_many(const std::vector<std::string>& paths); // Mirrors RecentProjectsManagerBase.removePathsFromGroups + removePath fan-out.
     Json update_settings(const Json& patch); // Returns the complete editor settings.
     Json project_settings(const std::string& root);
     Json update_project_settings(const std::string& root, const Json& patch);

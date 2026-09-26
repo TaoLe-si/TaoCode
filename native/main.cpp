@@ -1021,6 +1021,11 @@ struct App {
             } else if (method == "project.clone") { begin_clone(request["id"], params); return; }
             else if (method == "project.clone.cancel") { result = {{"requested", clone_active && clone_thread.request_stop()}}; }
             else if (method == "projects.forget") result = projects->forget(params.at("path").get<std::string>());
+            else if (method == "projects.forgetMany") {
+                std::vector<std::string> paths;
+                for (const auto& entry : params.at("paths")) paths.push_back(entry.get<std::string>());
+                result = projects->forget_many(paths);
+            }
             else if (method == "settings.update") {
                 result = projects->update_settings(params.at("settings"));
                 // "Always show full path in window header" applies live, like every

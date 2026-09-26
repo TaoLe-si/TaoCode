@@ -350,6 +350,35 @@ int main() {
             check(store.forget(root_b).at("recentProjects").empty(), "Unavailable projects can be forgotten");
         });
 
+        run("forget_many mirrors removePath fan-out under one stateLock", [&] {
+            const auto file = temporary.path / "forget-many.json";
+            ProjectStore store(file);
+            const auto a = create_project(temporary.path, "batch-a", "empty");
+            const auto b = create_project(temporary.path, "batch-b", "empty");
+            const auto c = create_project(temporary.path, "batch-c", "empty");
+            store.opened(open_result(a));
+            store.opened(open_result(b));
+            store.opened(open_result(c));
+            const auto ra = open_result(a).at("root").get<std::string>();
+            const auto rb = open_result(b).at("root").get<std::string>();
+            const auto rc = open_result(c).at("root").get<std::string>();
+            put(a / "keep.txt", "user data");
+            put(b / "keep.txt", "user data");
+            put(c / "keep.txt", "user data");
+            auto initial = store.state().at("recentProjects");
+            check(initial.size() == 3, "Three recents before removal");
+            const auto result = store.forget_many({ upper_ascii(ra), rb });
+            const auto& remaining = result.at("recentProjects");
+            check(remaining.size() == 1 && remaining[0].at("path") == rc, "forget_many drops both and keeps the unmentioned entry");
+            check(result.at("lastProject").is_string() && fs::equivalent(path_from(result.at("lastProject").get<std::string>()), c), "lastProject survives when not in the removal set");
+            check(get(a / "keep.txt") == "user data" && get(b / "keep.txt") == "user data" && get(c / "keep.txt") == "user data", "forget_many never deletes user files");
+            check(ProjectStore(file).state().at("recentProjects").size() == 1, "forget_many persists");
+            const auto empty = store.forget_many({});
+            check(empty.at("recentProjects").size() == 1, "forget_many with an empty set is a no-op");
+            const auto case_variant = store.forget_many({ upper_ascii(rc) });
+            check(case_variant.at("recentProjects").empty() && case_variant.at("lastProject").is_null(), "forget_many clears lastProject when it is in the removal set");
+        });
+
         run("recents are capped at thirty and invalid opens are transactional", [&] {
             const auto file = temporary.path / "cap.json";
             ProjectStore store(file);

@@ -25,6 +25,7 @@ const emit = defineEmits<{
   clone: []
   settings: []
   forget: [path: string]
+  'forget-batch': [paths: string[]]
   refresh: []
   help: []
   plugins: []
@@ -66,19 +67,36 @@ function avatarTone(path: string) {
 // IDEA's RecentProjectPanel shows each project's git branch under the path; the
 // branch was recorded by the IDE the last time the project was open (see the
 // gitHead watch in App.vue), so it costs nothing on the welcome page.
-// IDEA's RecentProjectPanel asks before it drops a record (the path itself is never
-// touched, but the user should not lose it by a stray click).
-function confirmForget(project: RecentProject) {
-  if (!window.confirm(`仅从最近项目列表移除「${project.name}」？磁盘上的文件不会被删除。`)) return
+// RemoveSelectedProjectsAction.kt mirrors the IDE's recent-project delete UX: the
+// action always confirms before it drops a record; the path itself is never touched.
+// The IDE bundle ships two dialog strings — `dialog.title.remove.recent.project`
+// (singular) and `dialog.title.remove.recent.project.plural` — and two messages,
+// one of which names the project, while the plural form says "selected projects".
+// We mirror the same branching so the wording matches across one and many items.
+function confirmForget(projects: RecentProject[]) {
+  if (projects.length === 0) return
+  const title = projects.length === 1
+    ? `从最近项目列表移除「${projects[0]!.name}」？`
+    : '从最近项目列表移除所选项目？'
+  const body = projects.length === 1
+    ? `磁盘上的文件不会被删除。`
+    : `共 ${projects.length} 项，磁盘上的文件不会被删除。`
+  if (!window.confirm(`${title}\n${body}`)) return
   menuPath.value = ''
-  emit('forget', project.path)
+  // Emit one batch signal so the native side can mirror RecentProjectsManagerBase.removePath
+  // on every entry in a single state-mutation pass.
+  emit('forget-batch', projects.map(project => project.path))
 }
+// RecentProjectsManagerBase.kt:270-279 calls removePath per path and fires a single
+// change event at the end, so the page batches here.
+function forgetSingle(project: RecentProject) { confirmForget([project]) }
 // IDEA's RecentProjectPanel binds DELETE / BACK_SPACE on the list to remove the
 // selected record (still going through the confirmation).
 function onRowKeydown(project: RecentProject, event: KeyboardEvent) {
   if (event.key !== 'Delete' && event.key !== 'Backspace') return
   event.preventDefault()
-  confirmForget(project)
+  if (selectedPaths.value.has(project.path)) confirmForget(selectedProjects.value)
+  else confirmForget([project])
 }
 function branchOf(path: string): string {
   if (!props.isDesktop) return ''
@@ -160,6 +178,44 @@ function toggleMenu(path: string) {
 // ALT+DELETE to "remove it"; the tree selection is what those keys act on, so the page keeps track
 // of the focused row and falls back to the first visible project.
 const focusedPath = ref('')
+// IDEA's recent-project list is multi-selectable: RecentProjectFilteringTree wires
+// SHIFT and CTRL mouse presses into the tree's selection model, and
+// RemoveSelectedProjectsAction removes *the selection*, not just the focused row.
+const selectedPaths = ref<Set<string>>(new Set())
+const lastClickedPath = ref('')
+const selectedProjects = computed(() => filteredProjects.value.filter(project => selectedPaths.value.has(project.path)))
+function clearSelection() {
+  if (selectedPaths.value.size === 0) return
+  selectedPaths.value = new Set()
+}
+function onRowClick(project: RecentProject, event: MouseEvent) {
+  // Focus row regardless of modifier.
+  focusedPath.value = project.path
+  if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (selectedPaths.value.size > 0) clearSelection()
+    lastClickedPath.value = project.path
+    return
+  }
+  const list = filteredProjects.value.map(item => item.path)
+  if (event.shiftKey && lastClickedPath.value && list.includes(lastClickedPath.value)) {
+    const lastIndex = list.indexOf(lastClickedPath.value)
+    const currentIndex = list.indexOf(project.path)
+    if (lastIndex !== -1 && currentIndex !== -1) {
+      const [start, end] = lastIndex < currentIndex ? [lastIndex, currentIndex] : [currentIndex, lastIndex]
+      const next = new Set(selectedPaths.value)
+      for (let i = start; i <= end; i += 1) next.add(list[i]!)
+      selectedPaths.value = next
+      return
+    }
+  }
+  // CTRL/CMD toggles a single row.
+  const next = new Set(selectedPaths.value)
+  if (next.has(project.path)) next.delete(project.path)
+  else next.add(project.path)
+  selectedPaths.value = next
+  lastClickedPath.value = project.path
+}
+watch(() => props.projects, () => { clearSelection() })
 const activeProject = computed(() => filteredProjects.value.find(project => project.path === focusedPath.value)
   ?? filteredProjects.value[0])
 function openProject(project: RecentProject) {
@@ -313,6 +369,13 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
             >
               <GitBranch :size="16" aria-hidden="true" />克隆仓库
             </button>
+            <button
+              v-if="selectedPaths.size > 1" type="button" class="subtle-button action-button"
+              :disabled="busy" :title="`仅移除选中的 ${selectedPaths.size} 项记录`"
+              @click="confirmForget(selectedProjects)"
+            >
+              <X :size="16" aria-hidden="true" />移除所选 {{ selectedPaths.size }} 项
+            </button>
           </div>
         </header>
 
@@ -346,7 +409,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <span class="recent-group-count">{{ group.projects.length }}</span>
               </header>
               <ul v-show="!groupCollapsed.has(group.name)" class="recent-group-list">
-            <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除`" @focus="focusedPath = project.path" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path }">
+            <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除${selectedPaths.value.has(project.path) ? '（已选中）' : ''}`" :aria-selected="selectedPaths.value.has(project.path)" @focus="focusedPath = project.path" @click="onRowClick(project, $event)" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path, 'is-selected': selectedPaths.value.has(project.path) }">
               <button
                 type="button" class="recent-open" :disabled="busy || !project.available"
                 :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
@@ -391,7 +454,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <button v-for="group in groups" :key="group.name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === group.name" @click="moveToGroup(project, group.name)">移入「{{ group.name }}」</button>
                 <button type="button" class="menu-button row-menu-item" role="menuitem" @click="createGroupWith(project)">新建分组并移入…</button>
                 <div class="menu-rule" role="separator" />
-                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="confirmForget(project)">
+                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="forgetSingle(project)">
                   <X :size="14" aria-hidden="true" />仅从列表移除
                 </button>
               </div>
@@ -506,6 +569,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .recent-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 .recent-group-list { list-style: none; margin: 0; padding: 0; }
 .recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.recent-row.is-selected { background: var(--selected); }
 .recent-row.menu-open .recent-open { background: var(--selected); }
 .recent-open { display: grid; align-items: center; grid-template-columns: 26px minmax(11rem, 26%) minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: baseline; flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }

@@ -21,6 +21,7 @@
 #include <set>
 #include <string_view>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 namespace taocode {
@@ -1515,6 +1516,40 @@ Json ProjectStore::forget(const std::string& path) {
         next["recentProjects"] = std::move(recents);
         if (next.at("lastProject").is_string() && same_path(next.at("lastProject").get<std::string>(), key))
             next["lastProject"] = nullptr;
+        auto result = public_state(next);
+        save_state(state_file_, loaded, next);
+        return result;
+    });
+}
+
+// Source: RecentProjectsManagerBase.removePath (line 270-279) plus
+// removePathsFromGroups (line 288-301). The IDE calls removePath once per path
+// under one stateLock and fires fireChangeEvent() at the end; we replicate that
+// by computing the removal set up front, applying the diff in a single state
+// mutation, and returning the public state once. The path on disk is never
+// touched — IDE's removePath also never deletes the directory.
+Json ProjectStore::forget_many(const std::vector<std::string>& paths) {
+    return boundary([&] {
+        std::lock_guard lock(store_mutex);
+        auto loaded = load_state(state_file_);
+        auto next = loaded.document;
+        std::unordered_set<std::string> keys;
+        keys.reserve(paths.size());
+        for (const auto& path : paths) {
+            keys.insert(utf8_path(absolute_path(from_utf8(path), true)));
+        }
+        if (keys.empty()) {
+            return public_state(next);
+        }
+        Json recents = Json::array();
+        for (const auto& recent : next.at("recentProjects")) {
+            if (!keys.count(recent.at("path").get<std::string>())) recents.push_back(recent);
+        }
+        next["recentProjects"] = std::move(recents);
+        if (next.at("lastProject").is_string()
+            && keys.count(next.at("lastProject").get<std::string>())) {
+            next["lastProject"] = nullptr;
+        }
         auto result = public_state(next);
         save_state(state_file_, loaded, next);
         return result;

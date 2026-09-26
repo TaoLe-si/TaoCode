@@ -45,21 +45,30 @@ const editor = ref<EditorSettings>({ ...props.settings })
 // (Settings › Version Control › Commit, CommitDialogConfigurable.kt:56-101).
 const commitMessage = ref<CommitMessageInspectionSettings>({ ...props.commitMessageSettings })
 
-// IDEA's ConfigurablesListPanel: a tree of configurables. Only pages with a real
-// backend exist here — a category without one is not rendered as an empty shell.
-// 外观与行为 → 外观；编辑器；项目 → 项目结构 / 实时模板；版本控制 → 提交.
+// IDEA's ConfigurableListPanel reads the groups from intellij.platform.ide.impl.xml
+// groupConfigurable entries (lines 575-608); weight descends, so order is
+// appearance 70 > editor 60 > project 40 > build 30 > language 20 > tools 10 >
+// other -10; proofread is a child of editor, profiler of build. Display names come
+// from OptionsBundle.properties `configurable.group.<id>.settings.display.name`
+// (Appearance & Behavior / Editor / Default Project / Build, Execution,
+// Deployment / Languages & Frameworks / Tools / Other Settings / Natural
+// Languages). Only pages whose configurables are wired up render content;
+// others do not show as empty shells.
 interface SettingsNode { key: PageKey; label: string; icon: typeof Palette; parent: string | null; keywords: string }
+// Only pages whose real configurables exist in the source are listed. IDE's
+// full tree (Appearance/Editor/Plugins/...) appears once TaoCode port those
+// Java classes; until then the tree shows only what the project has today.
 type PageKey = 'appearance' | 'editor' | 'structure' | 'templates' | 'commit'
 const groups = [
   { key: 'group:appearance', label: '外观与行为' },
-  { key: 'group:project', label: '项目' },
+  { key: 'group:project', label: '默认项目' },
   { key: 'group:vcs', label: '版本控制' },
 ]
 const nodes: SettingsNode[] = [
-  { key: 'appearance', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 theme' },
-  { key: 'editor', label: '编辑器', icon: SlidersHorizontal, parent: null, keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor' },
-  { key: 'structure', label: '项目结构', icon: FolderTree, parent: 'group:project', keywords: 'JDK 输出目录 排除目录 源代码根 测试根 项目 structure' },
+  { key: 'appearance', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 缩放 theme scale' },
+  { key: 'editor', label: '编辑器', icon: SlidersHorizontal, parent: null, keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor font indent' },
   { key: 'templates', label: '实时模板', icon: Braces, parent: 'group:project', keywords: '模板 缩写 实时 展开 template' },
+  { key: 'structure', label: '项目结构', icon: FolderTree, parent: 'group:project', keywords: 'JDK 输出目录 排除目录 源代码根 测试根 项目 structure' },
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'group:vcs', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
 ]
 const expanded = ref(new Set<string>(groups.map(group => group.key)))

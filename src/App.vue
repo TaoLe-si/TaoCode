@@ -1694,12 +1694,21 @@ async function closeWorkspace() {
   finally { busy.value = false }
 }
 async function forgetProject(path: string) {
-  if (working.value) return
+  return forgetProjects([path])
+}
+// Source: RecentProjectsManagerBase.removePath + removePathsFromGroups
+// (platform-impl/.../RecentProjectsManagerBase.kt:270-301). IDEA fires one
+// fireChangeEvent() per call; RemoveSelectedProjectsAction drives a batch call
+// here, and the bridge wraps the loop into a single state mutation.
+async function forgetProjects(paths: string[]) {
+  if (working.value || paths.length === 0) return
   busy.value = true
   try {
-    const state = await request<AppState>('projects.forget', { path })
+    const state = await request<AppState>('projects.forgetMany', { paths })
     recentProjects.value = state.recentProjects
-    notify('已从最近项目列表移除，磁盘文件未删除。')
+    notify(paths.length === 1
+      ? '已从最近项目列表移除，磁盘文件未删除。'
+      : `已从最近项目列表移除 ${paths.length} 项，磁盘文件未删除。`)
   } catch (error) { appError.value = errorMessage(error) }
   finally { busy.value = false }
 }
@@ -5060,7 +5069,7 @@ onBeforeUnmount(() => {
     <p v-if="editorSettings.supportScreenReaders" class="sr-live" role="status" aria-live="polite">{{ notice ?? '' }}</p>
     <div v-if="!isDesktop && !zenMode" class="preview-banner"><span class="preview-dot" />浏览器预览<span class="preview-description">示例文件仅保存在内存。运行 C++ 桌面端以访问本地工作区。</span><span class="banner-right">Vue 3 / WebView2 / C++20</span></div>
 
-    <WelcomePage v-if="!workspace" :projects="recentProjects" :busy="working" :error="appError" :git-available="gitAvailable" :is-desktop="isDesktop" :plugin-count="pluginList.length" :theme="theme" :settings="editorSettings" :notices="noticeLog" @open="openWorkspace" @create="beginProject('create')" @clone="beginProject('clone')" @settings="openSettings()" @forget="forgetProject" @refresh="refreshRecent" @help="help = true" @plugins="openPlugins" @theme="changeTheme" @settings-change="saveSettingsPatch" @clear-notices="clearNotices" />
+    <WelcomePage v-if="!workspace" :projects="recentProjects" :busy="working" :error="appError" :git-available="gitAvailable" :is-desktop="isDesktop" :plugin-count="pluginList.length" :theme="theme" :settings="editorSettings" :notices="noticeLog" @open="openWorkspace" @create="beginProject('create')" @clone="beginProject('clone')" @settings="openSettings()" @forget="forgetProject" @forget-batch="forgetProjects" @refresh="refreshRecent" @help="help = true" @plugins="openPlugins" @theme="changeTheme" @settings-change="saveSettingsPatch" @clear-notices="clearNotices" />
 
     <div v-else class="workbench" :class="{ 'zen-workbench': zenMode, 'tool-maximized': maximizedSide !== null }">
       <aside v-if="explorer && !zenMode" class="activity-bar" aria-label="工具栏">
