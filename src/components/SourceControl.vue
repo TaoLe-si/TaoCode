@@ -149,6 +149,14 @@ async function act(operation: () => Promise<unknown>, onFailure?: (message: stri
   }
 }
 const stage = (path: string) => act(() => request('git.stage', { path }))
+// IDEA's Rollback (ChangesView.Rollback): discard the working-tree changes of one
+// path. Rollback is destructive, so it carries IDEA's confirm dialog
+// (VcsBundle rollback.confirm.text) before touching anything.
+const rollback = (path: string) => act(() => request('git.revert', { path }))
+function rollbackConfirm(path: string) {
+  if (window.confirm(`回滚 ${path} 的工作区改动？
+未暂存的修改将丢失，无法撤销。`)) rollback(path)
+}
 const unstage = (path: string) => act(() => request('git.unstage', { path }))
 // IDEA's commit check (NonModalCommitWorkflowHandler.checkCommit, :177-184) records which
 // precondition is missing and CommitProgressPanel.buildErrorText() (:321-328) prints that
@@ -630,6 +638,7 @@ watch(() => [props.root, props.active] as const, () => {
           <h3>更改 <span class="sc-count">{{ unstaged.length }}</span></h3>
           <div v-for="change in unstaged" :key="'u' + change.path" class="sc-row">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.untracked ? '?' : change.workStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
+            <button v-if="!change.untracked" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="14" /></button>
             <button v-if="change.untracked" class="icon-button" title="加入 .gitignore" aria-label="加入 .gitignore" :disabled="busy" @click="ignore(change.path)"><Ban :size="13" /></button>
             <button class="icon-button" title="暂存" aria-label="暂存" :disabled="busy" @click="stage(change.path)"><Plus :size="14" /></button>
           </div>

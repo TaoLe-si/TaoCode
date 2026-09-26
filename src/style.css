@@ -883,3 +883,6 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .settings-crumb-backdrop { position: fixed; inset: 0; z-index: 20; }
 .settings-spotlight { outline: 2px solid var(--spotlight); outline-offset: 2px; border-radius: var(--radius-xs); }
 .settings-spotlight-on .settings-panel :is(.checkbox-row, .input-row, .theme-option):not(.settings-spotlight) { opacity: 0.4; }
+
+/* IDEA per-page reset (Settings → Editor → 恢复默认) */
+.editor-page-head { display: flex; justify-content: flex-end; margin: 0 0 var(--space-2); }

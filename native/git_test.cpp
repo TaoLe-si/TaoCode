@@ -81,6 +81,7 @@ int main() {
         git(root, L"init -q");
         git(root, L"config user.email test@example.com");
         git(root, L"config user.name Test");
+        git(root, L"config core.autocrlf false");  // keep LF bytes exactly as written
         git(root, L"config commit.gpgsign false");
         put(root / "a.txt", "hello\n");
         git(root, L"add a.txt");
@@ -399,6 +400,58 @@ int main() {
         put(root / "build-output", "x");
         for (const auto& change : taocode::git::status(root))
             check(change.path != "build-output", ".gitignore hides the entry");
+    });
+
+    run("revert discards working-tree changes but refuses untracked files", [&] {
+        put(root / "revert-me.txt", "committed\n");
+        git(root, L"add revert-me.txt");
+        git(root, L"commit -q -m revert-base");
+        put(root / "revert-me.txt", "changed\n");
+        taocode::git::revert(root, "revert-me.txt");
+        check(read_text(root / "revert-me.txt") == "committed\n", "rollback restores the committed content");
+        // Untracked files have nothing to roll back to; IDEA hides the action and
+        // the backend refuses rather than deleting the file.
+        put(root / "fresh.txt", "new\n");
+        bool refused = false;
+        try { taocode::git::revert(root, "fresh.txt"); }
+        catch (const taocode::WorkspaceError& error) { refused = error.code == std::string("INVALID_REQUEST"); }
+        check(refused, "an untracked path must be refused, not deleted");
+        check(read_text(root / "fresh.txt") == "new\n", "the untracked file survives");
+    });
+
+    run("reset moves HEAD with soft/mixed/hard semantics", [&] {
+        put(root / "reset.txt", "v1\n");
+        git(root, L"add reset.txt");
+        git(root, L"commit -q -m reset-v1");
+        const auto base = taocode::git::log(root, "reset.txt", 1).at("commits")[0].at("hash").get<std::string>();
+        put(root / "reset.txt", "v2\n");
+        git(root, L"add reset.txt");
+        git(root, L"commit -q -m reset-v2");
+        const auto tip = taocode::git::log(root, "reset.txt", 1).at("commits")[0].at("hash").get<std::string>();
+        check(base != tip, "two distinct commits exist");
+
+        // hard: the working tree goes back to v1 and the commit is gone.
+        const auto hard = taocode::git::reset(root, base, "hard");
+        check(hard.at("mode").get<std::string>() == "hard", "reset reports the mode");
+        check(read_text(root / "reset.txt") == "v1\n", "hard reset restores the old content");
+        bool tip_gone = true;
+        for (const auto& entry : taocode::git::log(root, "reset.txt", 5).at("commits"))
+            if (entry.at("hash").get<std::string>() == tip) tip_gone = false;
+        check(tip_gone, "hard reset removes the tip commit from history");
+
+        // soft: HEAD moves but the changes stay staged.
+        put(root / "reset.txt", "v2\n");
+        git(root, L"add reset.txt");
+        git(root, L"commit -q -m reset-v2-again");
+        put(root / "reset.txt", "v3\n");
+        git(root, L"add reset.txt");
+        const auto soft = taocode::git::reset(root, "HEAD~1", "soft");
+        check(soft.at("mode").get<std::string>() == "soft", "soft reports its mode");
+        bool staged_after_soft = false;
+        for (const auto& change : taocode::git::status(root))
+            if (change.path == "reset.txt" && change.staged) staged_after_soft = true;
+        check(staged_after_soft, "soft keeps the changes staged");
+        taocode::git::reset(root, "HEAD", "hard");  // settle back to a clean tree
     });
 
     run("hunks split, stage partially and unstage partially", [&] {

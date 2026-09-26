@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { languageFor } from '../templates'
+import { defaultEditorSettings } from '../bridge'
 import { isNameHit, matchesOption, optionMatches, resolveSettingsPath, settingsPath } from '../settingsSearch'
 import { RIGHT_MARGIN_MAX, RIGHT_MARGIN_MIN, type CommitMessageInspectionSettings } from '../commitMessageInspection'
 import { addHistoryEntry, formatHistory, parseHistory, popupHistory, SEARCH_HISTORY_LABEL, SETTINGS_SEARCH_HISTORY_KEY, stepHistory, type HistoryDirection } from '../searchHistory'
@@ -364,6 +365,12 @@ watch(() => props.commitMessageSettings, value => {
 function applyEditor(close = false) {
   if (!props.busy && validEditor.value && editorForm.value?.reportValidity()) emit('save', { ...editor.value }, close)
 }
+// IDEA's per-page reset: every option on the editor page returns to the shipped
+// default. Nothing is persisted until the user saves, matching the dialog's
+// staged-edit model.
+function resetEditorPage() {
+  editor.value = { ...defaultEditorSettings }
+}
 function applyCommitMessage(close = false) {
   if (!props.busy && validCommitMessage.value) emit('saveCommitMessage', { ...commitMessage.value }, close)
 }
@@ -718,6 +725,9 @@ defineExpose({ handleEscape })
           role="tabpanel" :aria-labelledby="`${id}-tab-editor`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
           <h3>编辑器</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“保存编辑器设置”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
           <p class="section-description">这些设置应用于编辑器。修改后点击“应用”或“确定”。</p>
           <fieldset class="settings-fields" :disabled="busy">
             <div class="input-row">

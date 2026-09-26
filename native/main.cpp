@@ -1244,6 +1244,8 @@ struct App {
             else if (method == "git.stash.pop") { taocode::git::stash_pop(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
             else if (method == "git.branch.create") { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; }
             else if (method == "git.branch.delete") { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
+            else if (method == "git.revert") { taocode::git::revert(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; }
+            else if (method == "git.reset") result = taocode::git::reset(fs::path(wide(require_repo_root())), params.at("target").get<std::string>(), params.value("mode", std::string("mixed")));
             else if (method == "git.merge") { taocode::git::merge(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>()); result = {{"ok", true}}; }
             else if (method == "git.tags") result = taocode::git::tag_list(fs::path(wide(require_repo_root())));
             else if (method == "git.tag.create") { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; }

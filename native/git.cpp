@@ -971,5 +971,23 @@ void submodule_update(const fs::path& repo, bool init, bool recursive) {
     require_ok(result, "更新子模块");
 }
 
+void revert(const fs::path& repo, const std::string& path) {
+    if (path.empty()) throw WorkspaceError("INVALID_REQUEST", "要回滚的文件不能为空。");
+    // Untracked files have no committed content to roll back to; IDEA's Rollback
+    // simply doesn't offer the action for them.
+    for (const auto& change : git::status(repo))
+        if (change.path == path && change.untracked)
+            throw WorkspaceError("INVALID_REQUEST", "该文件未被 Git 跟踪，没有可回滚的版本。");
+    require_ok(run(repo, {L"checkout", L"--", utf8_to_wide(path)}), "回滚文件");
+}
+
+Json reset(const fs::path& repo, const std::string& target, const std::string& mode) {
+    if (target.empty()) throw WorkspaceError("INVALID_REQUEST", "要重置到的提交不能为空。");
+    if (mode != "soft" && mode != "mixed" && mode != "hard")
+        throw WorkspaceError("INVALID_REQUEST", "重置模式只能是 soft、mixed 或 hard。");
+    require_ok(run(repo, {L"reset", L"--" + std::wstring(mode.begin(), mode.end()), utf8_to_wide(target)}), "重置分支");
+    return {{"head", head(repo)}, {"mode", mode}, {"target", target}};
+}
+
 }  // namespace git
 }  // namespace taocode

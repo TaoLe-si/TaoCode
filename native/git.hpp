@@ -99,6 +99,17 @@ Json diff_hunks(const std::filesystem::path& repo, const std::string& path, bool
 void apply_hunks(const std::filesystem::path& repo, const std::string& path, bool staged,
                  const std::vector<int>& hunks, bool reverse);
 
+// IDEA's Rollback: discard the working-tree changes of one path (`git checkout --
+// <path>`), so a botched edit returns to the index/HEAD content without touching
+// any other file. Refuses untracked paths (there is nothing to roll back to).
+void revert(const std::filesystem::path& repo, const std::string& path);
+
+// IDEA's "Reset Current Branch to…" with the three IDEA-visible modes:
+// soft (keep changes staged), mixed (keep changes unstaged), hard (discard all).
+// `target` is any commit-ish (a hash, a branch, HEAD~n). The branch name is
+// reported back so the UI can confirm what moved.
+Json reset(const std::filesystem::path& repo, const std::string& target, const std::string& mode);
+
 // Per-line origin for `path` via `git blame --line-porcelain`:
 // {lines:[{line, hash, author, content}]} with 1-BASED line numbers.
 Json blame(const std::filesystem::path& repo, const std::string& path);

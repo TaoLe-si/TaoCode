@@ -5328,10 +5328,10 @@ onBeforeUnmount(() => {
             <button @click="convertLineSeparators('lf', findTab(menu.path))">转换为 Unix and macOS (LF) 行尾</button>
           </template>
           <div class="menu-rule" />
-          <button @click="splitFromTabMenu(menu.pane, menu.path, 'horizontal')">向右拆分</button>
-          <button @click="splitFromTabMenu(menu.pane, menu.path, 'vertical')">向下拆分</button>
-          <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'horizontal') }; tabMenu = null">移动标签页到右侧</button>
-          <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'vertical') }; tabMenu = null">移动标签页到下方</button>
+          <button @click="splitFromTabMenu(menu.pane, menu.path, 'horizontal')">向右拆分（Split Right）</button>
+          <button @click="splitFromTabMenu(menu.pane, menu.path, 'vertical')">向下拆分（Split Down）</button>
+          <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'horizontal') }; tabMenu = null">拆分并移动到右侧（Split and Move Right）</button>
+          <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'vertical') }; tabMenu = null">拆分并移动到下方（Split and Move Down）</button>
           <button @click="openInOppositeGroup(menu.path); tabMenu = null">在另一侧编辑器组中打开</button>
           <button :disabled="splitModel.orientation === 'none'" @click="changeSplitOrientation(); tabMenu = null">更改拆分方向</button>
           <button :disabled="splitModel.orientation === 'none'" @click="unsplit(); tabMenu = null">取消拆分</button>
