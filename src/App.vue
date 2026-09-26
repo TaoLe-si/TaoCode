@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { AnimatePresence, motion, useReducedMotion } from 'motion-v'
-import { ArrowLeft, ArrowRight, Braces, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Braces, FlaskConical, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
 import FileTree, { type SyntheticNode } from './components/FileTree.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import SourceControl from './components/SourceControl.vue'
@@ -11,6 +11,7 @@ import DebugPanel from './components/DebugPanel.vue'
 import DiffView from './components/DiffView.vue'
 import TodoPanel from './components/TodoPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import TestRunnerPanel from './components/TestRunnerPanel.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import MarkdownPreview from './components/MarkdownPreview.vue'
@@ -102,7 +103,7 @@ let workspaceEpoch = 0
 // Bumped when a buffer must be rebuilt from its text (line-separator conversion).
 const bufferEpoch = ref(0)
 const explorer = ref(window.innerWidth >= 700)
-const leftView = ref<'files' | 'git' | 'vcslog' | 'search' | 'todo' | 'outline' | 'bookmarks' | 'debug' | 'history'>('files')
+const leftView = ref<'files' | 'git' | 'vcslog' | 'search' | 'todo' | 'outline' | 'bookmarks' | 'debug' | 'history' | 'tests'>('files')
 const activity = ref(false)
 const bottom = ref(false)
 // IDEA's ToolWindowAnchor: every tool window remembers the stripe it lives on
@@ -114,7 +115,7 @@ type ToolWindowId = typeof leftView.value
 type Anchor = 'left' | 'right' | 'bottom'
 const toolAnchors = reactive<Record<ToolWindowId, Anchor>>({
   files: 'left', git: 'left', vcslog: 'left', search: 'left', todo: 'left',
-  outline: 'left', bookmarks: 'left', debug: 'left', history: 'left',
+  outline: 'left', bookmarks: 'left', debug: 'left', history: 'left', tests: 'left',
 })
 try {
   const saved = JSON.parse(localStorage.getItem('taocode.toolAnchors') ?? '{}') as Partial<Record<ToolWindowId, Anchor>>
@@ -152,11 +153,11 @@ watch([activeAnchor, explorer], () => {
 // IDEA tool-window titles (UIBundle tool.window.name.*); TaoCode names its own.
 const toolTitles: Record<ToolWindowId, string> = {
   files: '资源管理器', git: '源代码管理', vcslog: 'VCS 日志', search: '搜索', todo: '任务',
-  outline: '结构', bookmarks: '书签', debug: '调试', history: '本地历史',
+  outline: '结构', bookmarks: '书签', debug: '调试', history: '本地历史', tests: '测试',
 }
 const toolIcons: Record<ToolWindowId, unknown> = {
   files: Files, git: GitBranch, vcslog: GitGraph, search: Search, todo: ListChecks,
-  outline: FolderTree, bookmarks: BookmarkIcon, debug: Bug, history: History,
+  outline: FolderTree, bookmarks: BookmarkIcon, debug: Bug, history: History, tests: FlaskConical,
 }
 // IDEA binds Alt+<digit> to a tool window through the *keymap* — ActivateToolWindowAction
 // .Manager.getMnemonicForToolWindow reads the shortcut of `Activate<Id>ToolWindow`
@@ -165,7 +166,7 @@ const toolIcons: Record<ToolWindowId, unknown> = {
 // its position on the stripe: dragging stripe buttons around must not renumber anything.
 // TaoCode keeps one stable order for the mnemonics, separate from the draggable
 // `toolOrder` that only decides where a button is drawn.
-const toolWindowOrder: ToolWindowId[] = ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'history']
+const toolWindowOrder: ToolWindowId[] = ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'history', 'tests']
 // IDEA's keymap also binds Alt+0 to the Commit tool window; TaoCode's 源代码管理 panel
 // *is* the commit tool window (message box + changes + commit actions), so it answers
 // Alt+0 in addition to its own stripe number (ActivateToolWindowAction.kt:88-111).
@@ -613,6 +614,7 @@ const runLog = ref<HTMLElement>()
 const treeVersion = ref(0)
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const terminalPanelRef = ref<InstanceType<typeof TerminalPanel> | null>(null)
+const testRunnerRef = ref<InstanceType<typeof TestRunnerPanel> | null>(null)
 const theme = ref<Theme>(initialTheme())
 const panelSizes = reactive({ explorer: 240, trace: 300, output: 180 })
 const resizing = ref(false)
@@ -4698,7 +4700,21 @@ watch(query, () => { paletteIndex.value = 0 })
 watch(palette, async value => { if (value) { paletteIndex.value = 0; await nextTick(); queryInput.value?.focus() } })
 watch(help, async value => { if (value) { await nextTick(); helpClose.value?.focus() } })
 watch(leavePrompt, async value => { if (value) { await nextTick(); leaveCancel.value?.focus() } })
-watch(() => runOutput.length, async () => { await nextTick(); if (runLog.value) runLog.value.scrollTop = runLog.value.scrollHeight })
+watch(() => runOutput.length, async () => {
+  await nextTick(); if (runLog.value) runLog.value.scrollTop = runLog.value.scrollHeight
+  // Feed the streamed lines to the test runner so per-test results accumulate
+  // (IDEA's test tree fills while the process runs, not after it exits).
+  for (const line of runOutput.slice(pumpedRunLines)) testRunnerRef.value?.ingest(line)
+  pumpedRunLines = runOutput.length
+})
+let pumpedRunLines = 0
+// Run an arbitrary command from a panel (e.g. the test runner's rerun command).
+async function startRunWith(command: string) {
+  if (!command.trim() || runState.running) return
+  beginRun(); showOutput('run')
+  try { await request('run.start', { command, shell: true }) }
+  catch (error) { endRun(); notify(`无法启动：${errorMessage(error)}`, true) }
+}
 // Build-output navigation: the parsers live in src/buildOutput.ts (unit-tested
 // against MSVC, GCC/Clang/Rust, javac and CMake shapes); this only adapts them to
 // the live console and the workspace root.
@@ -4888,6 +4904,9 @@ onBeforeUnmount(() => {
         <template v-else-if="leftView === 'history'">
           <HistoryPanel :key="`hist:${activePath}:${historyEpoch}`" :path="activePath" :ready="isDesktop && Boolean(workspace)" @revert="revertHistory" />
         </template>
+        <template v-else-if="leftView === 'tests'">
+          <TestRunnerPanel ref="testRunnerRef" :active-path="activePath" :file-text="active ? editorFor(active.path)?.text() ?? active.content : ''" :root="workspace?.root ?? ''" :ready="isDesktop && Boolean(workspace)" @jump="({ path, line }) => revealLocation({ path, line: Math.max(0, line - 1) })" @run-command="command => void startRunWith(command)" />
+        </template>
         <template v-else-if="leftView === 'git'">
           <SourceControl :root="workspace?.root ?? ''" :active="explorer && leftView === 'git'" :todo-patterns="projectSettings.todoPatterns" :commit-settings="commitMessageSettings" @notify="notifyFromPanel" />
         </template>
@@ -4944,6 +4963,9 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="leftView === 'history'">
           <HistoryPanel :key="`hist:${activePath}:${historyEpoch}`" :path="activePath" :ready="isDesktop && Boolean(workspace)" @revert="revertHistory" />
+        </template>
+        <template v-else-if="leftView === 'tests'">
+          <TestRunnerPanel ref="testRunnerRef" :active-path="activePath" :file-text="active ? editorFor(active.path)?.text() ?? active.content : ''" :root="workspace?.root ?? ''" :ready="isDesktop && Boolean(workspace)" @jump="({ path, line }) => revealLocation({ path, line: Math.max(0, line - 1) })" @run-command="command => void startRunWith(command)" />
         </template>
         <template v-else-if="leftView === 'git'">
           <SourceControl :root="workspace?.root ?? ''" :active="explorer && leftView === 'git'" :todo-patterns="projectSettings.todoPatterns" :commit-settings="commitMessageSettings" @notify="notifyFromPanel" />
