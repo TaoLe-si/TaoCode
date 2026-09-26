@@ -612,6 +612,26 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
   .welcome-boundary { margin-top: 14px; padding-top: 10px; }
 }
 
+/* ManageRecentProjectsAction.java (PlatformActions.xml:386) — the IDE renders a
+   JBPopup with a recent-project tree, a search field, and the same multi-select
+   remove behaviour as RemoveSelectedProjectsAction. TaoCode mirrors that with a
+   focused dialog of the same 300x485 dimensions. */
+.manage-recents-dialog { width: 480px; max-height: 70vh; padding: 18px; display: flex; flex-direction: column; gap: var(--space-2); }
+.manage-recents-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.manage-recents-head h2 { font: 18px var(--font-brand); color: var(--bright); margin: 0; }
+.manage-recents-search { width: 100%; padding: 8px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: 13px var(--font-brand); }
+.manage-recents-search:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
+.manage-recents-list { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
+.manage-recents-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--line); cursor: pointer; color: var(--secondary); }
+.manage-recents-row:last-child { border-bottom: none; }
+.manage-recents-row.is-selected { background: var(--selected); color: var(--bright); }
+.manage-recents-row:hover { background: var(--hover); }
+.manage-recents-name { color: var(--bright); font-weight: 600; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manage-recents-path { color: var(--muted); font: 11px var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manage-recents-row .subtle-button { padding: 2px 8px; font-size: 11px; }
+.manage-recents-empty { padding: var(--space-3); color: var(--muted); text-align: center; font-size: 12px; }
+.manage-recents-foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-1); border-top: 1px solid var(--line); }
+
 @keyframes surface-enter {
   from { opacity: 0; transform: translateY(7px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }

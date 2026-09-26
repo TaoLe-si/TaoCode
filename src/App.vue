@@ -637,6 +637,64 @@ const queryInput = ref<HTMLInputElement>()
 const helpClose = ref<HTMLButtonElement>()
 const menu = ref<'file' | 'edit' | 'view' | 'navigate' | 'code' | 'refactor' | 'analyze' | 'build' | 'run' | 'tools' | 'git' | 'window' | null>(null)
 const help = ref(false)
+// ManageRecentProjectsAction mirrors JBPopupFactory.createComponentPopupBuilder:
+// a focused modal that hosts the recent-project tree, search field, and the same
+// multi-select remove behaviour. The popup is centred in the current window when
+// it is created; TaoCode reuses the welcome-screen list inside a centered dialog.
+const manageRecentsOpen = ref(false)
+function openManageRecents() {
+  menu.value = null
+  manageRecentsOpen.value = true
+}
+function closeManageRecents() { manageRecentsOpen.value = false }
+// RecentProjectFilteringTree + SearchTextField: same filter rules as the welcome
+// screen (case-insensitive name/path match, empty query keeps everything). The
+// ManageRecentProjectsAction source builds the tree with the same data, so the
+// user sees an identical list inside the popup.
+const manageRecentsQuery = ref('')
+const manageRecentsSelection = ref<Set<string>>(new Set())
+const manageRecentsInput = ref<HTMLInputElement>()
+const manageRecentsFiltered = computed(() => {
+  const q = manageRecentsQuery.value.trim().toLowerCase()
+  if (!q) return recentProjects.value
+  return recentProjects.value.filter(project =>
+    project.name.toLowerCase().includes(q)
+    || project.path.toLowerCase().includes(q)
+    || (project.displayName ?? '').toLowerCase().includes(q)
+  )
+})
+const manageRecentsSelectedProjects = computed(() => recentProjects.value.filter(project => manageRecentsSelection.value.has(project.path)))
+function toggleManageRecentsSelection(project: RecentProject, event: MouseEvent) {
+  if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (manageRecentsSelection.value.size > 0) manageRecentsSelection.value = new Set()
+    return
+  }
+  const next = new Set(manageRecentsSelection.value)
+  if (next.has(project.path)) next.delete(project.path)
+  else next.add(project.path)
+  manageRecentsSelection.value = next
+}
+function openManageRecentsProject(project: RecentProject) {
+  if (working.value || !project.available) return
+  closeManageRecents()
+  void openWorkspace(project.path)
+}
+function confirmForgetManage(projects: RecentProject[]) {
+  if (projects.length === 0) return
+  const ok = window.confirm(projects.length === 1
+    ? `从最近项目列表移除「${projects[0]!.name}」？\n磁盘上的文件不会被删除。`
+    : `从最近项目列表移除 ${projects.length} 项？\n磁盘上的文件不会被删除。`)
+  if (!ok) return
+  void forgetProjects(projects.map(project => project.path))
+    .then(() => { manageRecentsSelection.value = new Set() })
+}
+watch(manageRecentsOpen, open => {
+  if (open) {
+    manageRecentsQuery.value = ''
+    manageRecentsSelection.value = new Set()
+    nextTick(() => manageRecentsInput.value?.focus())
+  }
+})
 const loading = ref(true)
 const appError = ref('')
 const recentProjects = ref<RecentProject[]>([])
@@ -3613,6 +3671,13 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'project.clone', title: '克隆仓库…', keywords: 'clone checkout vcs 克隆', enabled: () => !working.value, run: () => beginProject('clone') },
     { id: 'project.recentSection', section: '最近项目' },
     { id: 'project.recentList', recent: true },
+    // ManageRecentProjectsAction.java (PlatformActions.xml:386): opens a JBPopup
+    // with the filtered recent-projects tree and a search field; the popup also
+    // delegates to RemoveSelectedProjectsAction for the same Delete / multi-select
+    // behaviour the welcome screen exposes. TaoCode mirrors this with a focused
+    // modal dialog that reuses the welcome-screen list, so the user can manage
+    // recents without leaving the current project.
+    { id: 'project.manageRecent', title: '管理最近项目…', keywords: 'manage recent projects popup dialog 管理最近项目', enabled: () => recentProjects.value.length > 0 && !working.value, run: () => openManageRecents() },
     { id: 'project.close', title: '关闭项目，返回欢迎页', keywords: 'close project 关闭', enabled: () => !working.value, run: () => void closeWorkspace() },
     { id: 'file.rule1', rule: true },
     // IDEA's FileMenu carries exactly one save action (SaveAll, Ctrl+S).
@@ -5421,6 +5486,34 @@ onBeforeUnmount(() => {
         <h2 id="leave-title">{{ leavePrompt.title }}</h2><p>以下文件尚未保存；保存失败时不会继续关闭或切换。</p>
         <ul class="unsaved-files"><li v-for="path in leavePrompt.paths" :key="path">{{ path }}</li></ul>
         <div class="leave-actions"><button ref="leaveCancel" class="subtle-button" @click="answerLeave('cancel')">取消</button><button class="subtle-button" @click="answerLeave('discard')">放弃修改并继续</button><button class="primary-button" @click="answerLeave('save')">保存并继续</button></div>
+      </section>
+    </div>
+
+    <!-- ManageRecentProjectsAction.java (PlatformActions.xml:386): the IDE's
+         File → Open Recent → Manage Recent Projects popup. TaoCode's equivalent
+         is a centred dialog with the same filtered list + search field + the
+         same Delete-key/multi-select remove behaviour as RemoveSelectedProjectsAction. -->
+    <div v-if="manageRecentsOpen" class="modal-backdrop" @click.self="closeManageRecents">
+      <section class="help-dialog manage-recents-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-recents-title" @keydown.esc="closeManageRecents">
+        <header class="manage-recents-head">
+          <h2 id="manage-recents-title">管理最近项目</h2>
+          <button type="button" class="icon-button" aria-label="关闭" title="关闭" @click="closeManageRecents"><X :size="15" /></button>
+        </header>
+        <input ref="manageRecentsInput" v-model="manageRecentsQuery" type="search" class="manage-recents-search" placeholder="按名称或路径搜索…" aria-label="搜索最近项目" autocomplete="off" spellcheck="false" @keydown.esc="closeManageRecents" />
+        <ul class="manage-recents-list" role="listbox" aria-label="最近项目">
+          <li v-for="project in manageRecentsFiltered" :key="project.path" class="manage-recents-row" tabindex="-1" :class="{ 'is-selected': manageRecentsSelection.has(project.path) }" role="option" :aria-selected="manageRecentsSelection.has(project.path)" @click="toggleManageRecentsSelection(project, $event)">
+            <FolderOpen :size="14" aria-hidden="true" />
+            <span class="manage-recents-name">{{ project.name }}</span>
+            <span class="manage-recents-path" :title="project.path">{{ project.path }}</span>
+            <button type="button" class="subtle-button" :disabled="working || !project.available" @click.stop="openManageRecentsProject(project)">打开</button>
+            <button type="button" class="subtle-button" :disabled="working" @click.stop="confirmForgetManage([project])">移除</button>
+          </li>
+          <li v-if="!manageRecentsFiltered.length" class="manage-recents-empty">没有匹配的项目。</li>
+        </ul>
+        <footer class="manage-recents-foot">
+          <button type="button" class="subtle-button" :disabled="working || manageRecentsSelection.size === 0" @click="confirmForgetManage(manageRecentsSelectedProjects)">移除所选 {{ manageRecentsSelection.size }} 项</button>
+          <button type="button" class="subtle-button" @click="closeManageRecents">关闭</button>
+        </footer>
       </section>
     </div>
 
