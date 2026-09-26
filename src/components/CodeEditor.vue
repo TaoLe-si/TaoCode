@@ -743,6 +743,10 @@ onMounted(() => {
           { key: 'Alt-Shift-ArrowDown', preventDefault: true, run: editingCommands['line.moveDown']! },
           { key: 'Mod-Shift-j', preventDefault: true, run: editingCommands['line.join']! },
           { key: 'Mod-Shift-u', preventDefault: true, run: editingCommands['case.toggle']! },
+          // FindNext/FindPrevious = F3 / Shift+F3 ($default.xml:707-713); the 编辑
+          // menu advertises exactly these, so the editor must answer them.
+          { key: 'F3', preventDefault: true, run: editingCommands['find.next']! },
+          { key: 'Shift-F3', preventDefault: true, run: editingCommands['find.previous']! },
           { key: 'Ctrl-Alt-Shift-Up', preventDefault: true, run: editingCommands['cursor.above']! },
           { key: 'Ctrl-Alt-Shift-Down', preventDefault: true, run: editingCommands['cursor.below']! },
           { key: 'Alt-j', preventDefault: true, run: editingCommands['occurrence.next']! },
