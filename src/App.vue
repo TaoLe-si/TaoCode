@@ -655,13 +655,19 @@ const manageRecentsQuery = ref('')
 const manageRecentsSelection = ref<Set<string>>(new Set())
 const manageRecentsInput = ref<HTMLInputElement>()
 const manageRecentsFiltered = computed(() => {
+  // Source: RecentProjectFilteringTree uses the parent FilteringTree's predicate
+  // (FilteringTree.kt), which accepts a node when the search text matches any of
+  // the strings its renderer prints. RecentProjectTreeItem.displayName() returns
+  // `projectNameToDisplay`, which ReopenProjectAction.kt:140-148 builds from
+  // displayName plus an optional branchName template
+  // ("action.reopen.project.display.name.with.branch"). Mirror that here.
   const q = manageRecentsQuery.value.trim().toLowerCase()
   if (!q) return recentProjects.value
-  return recentProjects.value.filter(project =>
-    project.name.toLowerCase().includes(q)
-    || project.path.toLowerCase().includes(q)
-    || (project.displayName ?? '').toLowerCase().includes(q)
-  )
+  return recentProjects.value.filter(project => {
+    const haystacks = [project.name, project.path, project.displayName ?? '']
+    if (project.branchName) haystacks.push(project.branchName)
+    return haystacks.some(text => text.toLowerCase().includes(q))
+  })
 })
 const manageRecentsSelectedProjects = computed(() => recentProjects.value.filter(project => manageRecentsSelection.value.has(project.path)))
 function toggleManageRecentsSelection(project: RecentProject, event: MouseEvent) {
@@ -5496,10 +5502,10 @@ onBeforeUnmount(() => {
     <div v-if="manageRecentsOpen" class="modal-backdrop" @click.self="closeManageRecents">
       <section class="help-dialog manage-recents-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-recents-title" @keydown.esc="closeManageRecents">
         <header class="manage-recents-head">
-          <h2 id="manage-recents-title">管理最近项目</h2>
+          <h2 id="manage-recents-title">Recent Projects</h2>
           <button type="button" class="icon-button" aria-label="关闭" title="关闭" @click="closeManageRecents"><X :size="15" /></button>
         </header>
-        <input ref="manageRecentsInput" v-model="manageRecentsQuery" type="search" class="manage-recents-search" placeholder="按名称或路径搜索…" aria-label="搜索最近项目" autocomplete="off" spellcheck="false" @keydown.esc="closeManageRecents" />
+        <input ref="manageRecentsInput" v-model="manageRecentsQuery" type="search" class="manage-recents-search" placeholder="Search projects" aria-label="Search projects" autocomplete="off" spellcheck="false" @keydown.esc="closeManageRecents" />
         <ul class="manage-recents-list" role="listbox" aria-label="最近项目">
           <li v-for="project in manageRecentsFiltered" :key="project.path" class="manage-recents-row" tabindex="-1" :class="{ 'is-selected': manageRecentsSelection.has(project.path) }" role="option" :aria-selected="manageRecentsSelection.has(project.path)" @click="toggleManageRecentsSelection(project, $event)">
             <FolderOpen :size="14" aria-hidden="true" />
