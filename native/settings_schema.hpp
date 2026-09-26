@@ -19,7 +19,10 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     "showToolWindowNumbers", "keepPopupsForToggles", "dndWithPressedAltOnly", "powerSaveMode",
     "useContrastScrollbars", "colorBlindness", "uiFontFamily", "uiFontSize", "backgroundImagePath",
     "backgroundImageOpacity", "backgroundImageFill", "backgroundImageKeepRatio",
-    "presentationMode", "presentationModeFontSize", "mainMenuDisplayMode"
+    "presentationMode", "presentationModeFontSize", "mainMenuDisplayMode",
+    // AppearanceConfigurable cdDifferentiateProjects / cdExpandNodesWithSingleClick
+    // (UISettingsState.differentiateProjects / :141 expandNodesWithSingleClick).
+    "differentiateProjects", "expandNodesWithSingleClick"
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {

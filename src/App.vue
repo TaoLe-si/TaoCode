@@ -898,6 +898,21 @@ async function togglePowerSave() {
 }
 // The welcome page's 自定义 tab writes single settings through the same channel the
 // Settings dialog uses (IDEA: one settings model, several entry points).
+// Source: AppearanceConfigurable.kt cdDifferentiateProjects — the main toolbar wears
+// the project colour; TaoCode derives it from the same 9-gradient palette that
+// RecentProjectIconHelper.kt:289-326 assigns by abs(path.hashCode()) % 9.
+const PROJECT_TINTS: ReadonlyArray<readonly [string, string]> = [
+  ['#DB3D3C', '#FF8E42'], ['#F57236', '#FCBA3F'], ['#2BC8BB', '#36EBAE'],
+  ['#359AF2', '#57DBFF'], ['#8379FB', '#85A8FF'], ['#7E54B5', '#9486FF'],
+  ['#D63CC8', '#F582B9'], ['#954294', '#C87DFF'], ['#E75371', '#FF78B5'],
+]
+function projectTint(root: string): string {
+  let hash = 0
+  for (let i = 0; i < root.length; i += 1) hash = (hash * 31 + root.charCodeAt(i)) | 0
+  const [from, to] = PROJECT_TINTS[Math.abs(hash) % PROJECT_TINTS.length]!
+  return `linear-gradient(90deg, ${from}26, ${to}1A)`
+}
+
 async function saveSettingsPatch(patch: Partial<EditorSettings>) {
   if (settingsBusy.value) return
   settingsBusy.value = true
@@ -5485,7 +5500,10 @@ onBeforeUnmount(() => {
       <filter id="cb-tritanopia"><feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0" /></filter>
     </defs>
   </svg>
-  <div class="ide-shell" :class="{ 'is-resizing': resizing }" :style="{ '--explorer-width': `${panelSizes.explorer}px`, '--trace-width': `${panelSizes.trace}px`, '--output-height': `${panelSizes.output}px` }" @pointerdown.capture="dismissMenu" @focusin="noteDockFocus">
+  <!-- AppearanceConfigurable cdDifferentiateProjects: a per-project toolbar tint
+       ("Use project colours in the main toolbar"); the palette reuses the
+       RecentProjectIconHelper gradient assigned by path hash. -->
+  <div class="ide-shell" :class="{ 'is-resizing': resizing }" :style="{ '--explorer-width': `${panelSizes.explorer}px`, '--trace-width': `${panelSizes.trace}px`, '--output-height': `${panelSizes.output}px`, ...(editorSettings.differentiateProjects && workspace ? { '--project-tint': projectTint(workspace.root) } : {}) }" @pointerdown.capture="dismissMenu" @focusin="noteDockFocus">
     <header v-if="workspace && !zenMode" class="topbar">
       <div class="brand">TaoCode</div>
       <button v-if="editorSettings.mainMenuDisplayMode === 'hamburger'" class="icon-button hamburger-button" :aria-expanded="hamburgerOpen" aria-haspopup="menu" title="主菜单（汉堡按钮）" aria-label="打开主菜单" @click.stop="hamburgerOpen = !hamburgerOpen"><Menu :size="17" /></button>
@@ -5651,7 +5669,7 @@ onBeforeUnmount(() => {
              duplicate 资源管理器 title row is gone; actions merged into the name row. -->
         <div v-if="workspace" class="workspace-heading" :title="workspace.root"><ChevronDown :size="13" /><span>{{ workspace.name }}</span><span class="local-tag">{{ isDesktop ? '本地' : '示例' }}</span><div class="heading-actions"><button class="icon-button" title="全部折叠" aria-label="全部折叠" :disabled="!workspace" @click="fileTreeRef?.collapseAll()"><ChevronsDownUp :size="15" /></button><button class="icon-button" title="全部展开" aria-label="全部展开" :disabled="!workspace" @click="fileTreeRef?.expandAll()"><ChevronsUpDown :size="15" /></button><button class="icon-button" title="刷新目录" aria-label="刷新目录" :disabled="!workspace || busy" @click="refreshTree"><RefreshCw :size="14" /></button></div></div>
         <div class="tree-scroll">
-          <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
+          <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
           <div v-else class="explorer-empty"><FolderOpen :size="26" /><p>尚未打开工作区</p><button class="subtle-button" @click="openWorkspace()">选择文件夹</button></div>
         </div>
         <!-- IDEA's Project view has no explanatory footer; the exclusion list lives
@@ -5663,7 +5681,7 @@ onBeforeUnmount(() => {
           <div class="dock-split" aria-hidden="true" />
           <div class="panel-heading"><span>资源管理器</span></div>
           <div class="tree-scroll side-by-side-tree">
-            <FileTree :key="`side:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
+            <FileTree :key="`side:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
           </div>
         </template>
       </aside>
@@ -5711,13 +5729,13 @@ onBeforeUnmount(() => {
           <div class="panel-heading"><span>资源管理器</span></div>
           <div v-if="workspace" class="workspace-heading" :title="workspace.root"><ChevronDown :size="13" /><span>{{ workspace.name }}</span></div>
           <div class="tree-scroll">
-            <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
+            <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
           </div>
           <template v-if="rightSideBySide && leftView !== 'files'">
             <div class="dock-split" aria-hidden="true" />
             <div class="panel-heading"><span>资源管理器</span></div>
             <div class="tree-scroll side-by-side-tree">
-              <FileTree :key="`side-r:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
+              <FileTree :key="`side-r:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
             </div>
           </template>
         </template>

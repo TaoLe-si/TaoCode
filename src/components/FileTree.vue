@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { ChevronRight, Folder, FileCode2, FileText, Package, NotebookPen } from 'lucide-vue-next'
 import { request, type Entry } from '../bridge'
 
 // Synthetic nodes (ProjectFileNodeImpl: "External Libraries", "Scratches and
 // Consoles") carry a fixed pseudo-path so they expand like real directories.
 export interface SyntheticNode { path: string; label: string; icon: 'libraries' | 'scratches'; entries: Entry[] }
-const props = defineProps<{ entries: Entry[]; active?: string; depth?: number; synthetic?: SyntheticNode[]; indentGuides?: boolean; compactIndents?: boolean }>()
+const props = defineProps<{ entries: Entry[]; active?: string; depth?: number; synthetic?: SyntheticNode[]; indentGuides?: boolean; compactIndents?: boolean; expandWithSingleClick?: boolean }>()
+// IDEA TreeUI: with UISettings.expandNodesWithSingleClick off (the default,
+// UISettingsState.kt:141) a single click only selects a node and the second
+// click expands a directory; with it on, one click expands right away.
 // IDEA's "Use smaller indents" (compactTreeIndents) shrinks the per-level step;
 // the base keeps room for the chevron either way.
 const step = () => (props.compactIndents ? 11 : 15)
@@ -18,6 +21,7 @@ const guideStyle = () => ({
 })
 const emit = defineEmits<{ open: [path: string]; error: [message: string]; context: [payload: { entry: Entry; x: number; y: number }] }>()
 const expanded = reactive(new Set<string>())
+const selected = ref('')
 const loading = reactive(new Set<string>())
 const children = reactive(new Map<string, Entry[]>())
 // `entries` is replaced whenever another project becomes active or the tree is
@@ -39,8 +43,21 @@ async function activate(entry: Entry) {
   // file. The owning App layer renders the actual glob path in the row tooltip.
   if (entry.path.startsWith('\u0000')) return
   if (entry.kind === 'file') { emit('open', entry.path); return }
+  if (!props.expandWithSingleClick && !expanded.has(entry.path)) { selected.value = entry.path; return }
   if (loading.has(entry.path)) return
   if (expanded.has(entry.path)) { expanded.delete(entry.path); return }
+  try {
+    loading.add(entry.path)
+    await loadChildren(entry.path, epoch)
+    expanded.add(entry.path)
+  } catch (error) { emit('error', error instanceof Error ? error.message : String(error)) }
+  finally { loading.delete(entry.path) }
+}
+// Double click expands a directory without selecting-opening it (the IDE's
+// default project-view behaviour when expandNodesWithSingleClick is off).
+async function expandEntry(entry: Entry) {
+  if (entry.kind !== 'directory' || loading.has(entry.path)) return
+  if (expanded.has(entry.path)) return
   try {
     loading.add(entry.path)
     await loadChildren(entry.path, epoch)
@@ -116,7 +133,7 @@ defineExpose({ collapseAll, expandAll, reveal })
     <ul class="tree-list" role="tree" aria-label="项目文件">
       <li v-for="entry in entries" :key="entry.path" role="none">
         <button
-          class="tree-entry" role="treeitem" aria-level="1" :class="{ selected: active === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @contextmenu="showMenu(entry, $event)"
+          class="tree-entry" role="treeitem" aria-level="1" :class="{ selected: active === entry.path || selected === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @dblclick="expandEntry(entry)" @contextmenu="showMenu(entry, $event)"
         >
           <ChevronRight v-if="entry.kind === 'directory'" :size="12" class="tree-chevron" :class="{ expanded: expanded.has(entry.path) }" />
           <span v-else class="tree-spacer" />
@@ -143,7 +160,7 @@ defineExpose({ collapseAll, expandAll, reveal })
   <ul v-else class="tree-list" role="group">
     <li v-for="entry in entries" :key="entry.path" role="none">
       <button
-        class="tree-entry" role="treeitem" :aria-level="(depth ?? 0) + 1" :class="{ selected: active === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(depth ?? 0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @contextmenu="showMenu(entry, $event)"
+        class="tree-entry" role="treeitem" :aria-level="(depth ?? 0) + 1" :class="{ selected: active === entry.path || selected === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(depth ?? 0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @dblclick="expandEntry(entry)" @contextmenu="showMenu(entry, $event)"
       >
         <ChevronRight v-if="entry.kind === 'directory'" :size="12" class="tree-chevron" :class="{ expanded: expanded.has(entry.path) }" />
         <span v-else class="tree-spacer" />

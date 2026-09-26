@@ -809,6 +809,10 @@ defineExpose({ handleEscape })
             <p :id="`${id}-tree-guides-hint`" class="field-hint restore-hint">在项目树的每个层级边界画一条垂直参考线，随“应用”立即生效。</p>
             <label class="checkbox-row"><input v-model="editor.compactTreeIndents" type="checkbox" :aria-describedby="`${id}-tree-indent-hint`" /><span>使用更小的缩进</span></label>
             <p :id="`${id}-tree-indent-hint`" class="field-hint restore-hint">项目树每层缩进从 15 像素缩小到 11 像素，深层目录少占横向空间。</p>
+            <!-- cdExpandNodesWithSingleClick (UISettingsState.kt:141, default false);
+                 bundle: checkbox.expand.node.with.single.click + ".comment". -->
+            <label class="checkbox-row"><input v-model="editor.expandNodesWithSingleClick" type="checkbox" :aria-describedby="`${id}-expand-single-hint`" /><span>单击展开节点</span></label>
+            <p :id="`${id}-expand-single-hint`" class="field-hint restore-hint">开启后单击目录立即展开；关闭时（IDEA 默认）单击只选中，双击展开。部分树可能忽略此设置。</p>
           </fieldset>
           <h4 class="settings-group-title">UI 选项</h4>
           <fieldset class="settings-fields" :disabled="busy">
@@ -820,6 +824,10 @@ defineExpose({ handleEscape })
             <p :id="`${id}-dnd-hint`" class="field-hint restore-hint">未按住 Alt 时拖动标签页不会开始拖放，避免误操作重排标签。</p>
             <label class="checkbox-row"><input v-model="editor.showIconsInMenus" type="checkbox" :aria-describedby="`${id}-menuicons-hint`" /><span>在菜单项中显示图标</span></label>
             <p :id="`${id}-menuicons-hint`" class="field-hint restore-hint">关闭后菜单项左侧的图标列隐藏，标题左移。</p>
+            <!-- cdDifferentiateProjects; bundle: checkbox.use.solution.colors.in.main.toolbar
+                 + text.use.solution.colors.in.main.toolbar. -->
+            <label class="checkbox-row"><input v-model="editor.differentiateProjects" type="checkbox" :aria-describedby="`${id}-diff-projects-hint`" /><span>在主工具栏中使用项目颜色</span></label>
+            <p :id="`${id}-diff-projects-hint`" class="field-hint restore-hint">用不同的工具栏颜色一眼区分不同项目（每个项目按路径哈希取 RecentProjectIconHelper 的 9 色渐变之一）。</p>
           </fieldset>
           <h4 class="settings-group-title">工具窗口</h4>
           <fieldset class="settings-fields" :disabled="busy">

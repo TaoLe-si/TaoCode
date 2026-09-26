@@ -15,10 +15,7 @@ namespace taocode {
 namespace {
 
 constexpr std::size_t max_todo_patterns = 20;
-
-[[noreturn]] void fail(const char* code, const std::string& message) {
-    throw WorkspaceError(code, message);
-}
+constexpr std::size_t max_run_configs = 40;
 
 }} // namespace
 
@@ -168,7 +165,10 @@ Json editor_defaults_impl() {
             {"backgroundImageFill", "scale"}, {"backgroundImageKeepRatio", true},
             {"presentationMode", false}, {"presentationModeFontSize", 24},
             // Main menu placement + screen-reader support (IDEA defaults).
-            {"mainMenuDisplayMode", "merged"}};
+            {"mainMenuDisplayMode", "merged"},
+            // UISettingsState defaults: both AppearanceConfigurable extras ship off.
+            {"differentiateProjects", false},
+            {"expandNodesWithSingleClick", false}};  // UISettingsState.kt:141
 }
 
 // The markers IDEA ships: TODO, FIXME and the two conventional warning tags.

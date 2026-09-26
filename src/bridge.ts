@@ -87,6 +87,14 @@ export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: b
   // IDEA UISettingsState.mainMenuDisplayMode: UNDER_HAMBURGER_BUTTON /
   // MERGED_WITH_MAIN_TOOLBAR / SEPARATE_TOOLBAR -> the three top-bar layouts.
   mainMenuDisplayMode: 'hamburger' | 'merged' | 'separate';
+  // IDEA UISettingsState.differentiateProjects: tint the main toolbar with a
+  // per-project colour so projects are distinguishable at a glance
+  // (AppearanceConfigurable cdDifferentiateProjects + its comment).
+  differentiateProjects: boolean;
+  // IDEA UISettingsState.expandNodesWithSingleClick (UISettingsState.kt:141,
+  // default false): when off, project-view directories expand on double click and
+  // single click only selects (FileTree honours both modes).
+  expandNodesWithSingleClick: boolean;
 }
 // IDEA GeneralSettings.isSupportScreenReaders moved to GeneralSettingsState: the state lives
 // in ide.general.xml and AppearanceConfigurable.kt:363-372 is the row that edits it.
@@ -164,7 +172,7 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   supportScreenReaders: false,
   autoShowProcessPopup: false,
 }
-export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'merged' }
+export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'merged', differentiateProjects: false, expandNodesWithSingleClick: false }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
@@ -1052,7 +1060,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           key === 'useContrastScrollbars' || key === 'colorBlindness' || key === 'uiFontFamily' || key === 'uiFontSize' ||
           key === 'backgroundImagePath' || key === 'backgroundImageOpacity' || key === 'backgroundImageFill' ||
           key === 'backgroundImageKeepRatio' || key === 'presentationMode' || key === 'presentationModeFontSize' ||
-          key === 'mainMenuDisplayMode'
+          key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick'
         if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
         if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
           : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'
