@@ -193,12 +193,13 @@ export interface SearchPreviewMatch extends SearchMatch { before: string; after:
 // the reply arrives quickly with `cancelled` set instead of blocking to the end.
 export interface SearchCancelled { cancelled: true }
 export interface SearchOptions { query: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean; include: string; exclude: string }
-export interface SearchResult { matches: SearchMatch[]; truncated: boolean; fileCount: number; cancelled?: boolean }
+export interface SearchResult { matches: SearchMatch[]; truncated: boolean; fileCount: number; cancelled?: boolean; skippedNonUtf8?: number }
 export interface SearchPreviewResult { matches: SearchPreviewMatch[]; truncated: boolean; fileCount: number; cancelled?: boolean }
 // `skippedFiles` counts the files the user ticked that the walk never reached because
 // it hit the 100k-file ceiling. A replace that skipped files is NOT a complete
-// replace, so it must not be reported as one.
-export interface SearchReplaceResult { files: number; replacements: number; truncated?: boolean; skippedFiles?: number }
+// replace, so it must not be reported as one. `skippedNonUtf8` counts files whose
+// bytes survive neither UTF-8 nor GBK decoding — reported, not silently absent.
+export interface SearchReplaceResult { files: number; replacements: number; truncated?: boolean; skippedFiles?: number; skippedNonUtf8?: number }
 export interface BinaryView { path: string; size: number; truncated: boolean; bytes: number; base64: string; kind: string; readOnly?: boolean }
 export interface UsageHit { path: string; line: number; column: number; preview: string }
 // `scope`/`kind` are sent by the native side on purpose: usages_of() is a
@@ -316,6 +317,9 @@ export const gitProgress = reactive({ running: false, queued: 0 })
 export const lspEdited = reactive({ path: '', version: 0 })
 export const termOpened = reactive({ id: 0, cwd: '', version: 0 })
 export const watchStopped = reactive({ reason: '', restarting: false, attempt: 0, version: 0 })
+// Local-history snapshot failures reported by file.write (best-effort, never
+// blocking the save — but never silent either).
+export const historyNotes = reactive<Array<{ path: string; message: string; at: string }>>([])
 let nextId = 0
 const pending = new Map<number, { resolve: (reply: Reply) => void }>()
 webview?.addEventListener('message', ({ data }) => {
@@ -386,6 +390,15 @@ webview?.addEventListener('message', ({ data }) => {
     watchStopped.restarting = data.restarting === true
     watchStopped.attempt = typeof data.attempt === 'number' ? data.attempt : 0
     watchStopped.version++
+    return
+  }
+  if (data?.event === 'history.note') {
+    // A local-history snapshot failed for one save: non-blocking, but the restore
+    // timeline now has a gap the user should know about.
+    const path = typeof data.path === 'string' ? data.path : ''
+    const message = typeof data.message === 'string' ? data.message : ''
+    historyNotes.push({ path, message, at: new Date().toLocaleTimeString('zh-CN', { hour12: false }) })
+    if (historyNotes.length > 50) historyNotes.shift()
     return
   }
   if (data?.event === 'git.progress') {

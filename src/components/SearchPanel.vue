@@ -4,6 +4,8 @@ import { ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from 'lucide-
 import { isDesktop, request, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
 
 const props = defineProps<{ root: string; active: boolean }>()
+const replaceInput = ref<HTMLInputElement>()
+defineExpose({ focusReplace: () => replaceInput.value?.focus() })
 // `open` jumps the editor to an occurrence; `replaced` carries the files a replace
 // just rewrote, so the shell re-reads them and an open buffer stops showing old text.
 const emit = defineEmits<{ open: [payload: { path: string; line: number }]; replaced: [payload: { paths: string[] }] }>()
@@ -87,6 +89,12 @@ function applyResult(result: SearchPreviewResult) {
   matches.value = Array.isArray(result.matches) ? result.matches : []
   fileCount.value = result.fileCount ?? 0
   truncated.value = result.truncated === true
+  // GBK 等编码现在会被尝试解码，但仍有无法识别的文件时必须明说，而不是把
+  // "0 命中"当成完整答案。
+  const undecodable = Math.max(0, Math.trunc((result as { skippedNonUtf8?: number }).skippedNonUtf8 ?? 0))
+  if (undecodable > 0 && matches.value.length === 0) {
+    note.value = `有 ${undecodable} 个文件因编码无法识别未参与搜索；结果可能不完整。`
+  }
   searched.value = true
   selected.clear()
   for (const match of matches.value) if (!skipped.has(keyOf(match))) selected.add(keyOf(match))
@@ -165,11 +173,13 @@ function replaceSelected() { void replaceOccurrences(matches.value.filter(pendin
 // old "已替换 N 处" line alone would have been a lie.
 function incompleteNote(result: SearchReplaceResult): string {
   const skipped = Math.max(0, Math.trunc(result.skippedFiles ?? 0))
+  const undecodable = Math.max(0, Math.trunc(result.skippedNonUtf8 ?? 0))
   const reasons: string[] = []
   if (skipped > 0) reasons.push(`有 ${skipped} 个勾选的文件因扫描上限未被处理`)
   else if (result.truncated === true) reasons.push('扫描被截断，可能还有未列出的匹配')
+  if (undecodable > 0) reasons.push(`${undecodable} 个文件的编码无法识别，未参与搜索/替换`)
   if (!reasons.length) return ''
-  return `⚠ 替换不完整：${reasons.join('；')}。请缩小搜索范围后重做。`
+  return `⚠ 替换不完整：${reasons.join('；')}。请检查相关文件后重做。`
 }
 function replaceFile(group: Group) { void replaceOccurrences(group.matches.filter(pending)) }
 function replaceOne(match: SearchPreviewMatch) { void replaceOccurrences([match]) }
@@ -298,7 +308,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         <label class="fs-filter"><span>排除</span><input v-model="exclude" type="text" placeholder="build/**" aria-label="排除这些文件" spellcheck="false" /></label>
       </div>
       <div class="fs-row">
-        <input v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" />
+        <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" />
         <button class="fs-replace" :class="{ 'fs-confirm': confirmAll }" :disabled="!canSearch || busy" :title="confirmAll ? '再次点击以确认替换工作区内全部匹配' : '替换工作区内全部匹配（Ctrl+Enter）'" @click="replaceAllOnDisk">{{ confirmAll ? '确认全部替换' : '全部替换' }}</button>
       </div>
     </div>

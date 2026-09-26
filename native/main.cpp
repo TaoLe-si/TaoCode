@@ -258,6 +258,7 @@ struct App {
 
     void start_watcher() {
         if (current_root.empty()) return;
+        watch_restarts = 0;  // the budget belongs to this watcher, not the session
         watcher = std::make_unique<taocode::watcher::Watcher>();
         // A watcher that dies on its own used to do so in silence: the root was
         // renamed away, or ReadDirectoryChangesW failed, and the file tree simply
@@ -284,8 +285,11 @@ struct App {
                 queue_watch({{"event", "fs.changed"}, {"paths", std::move(paths)}, {"changes", std::move(changes)}});
             });
             watch_started = std::chrono::steady_clock::now();
-        } catch (const taocode::WorkspaceError&) {
+        } catch (const taocode::WorkspaceError& error) {
             watcher.reset();  // watching is an enhancement, never a blocker
+            // But silence would hide a tree that never refreshes: the death notice
+            // already has a UI path (fs.watchStopped -> 文件监听已停止 notice).
+            queue_watch({{"event", "fs.watchStopped"}, {"reason", error.code == "WATCH_FAILED" ? std::string("无法监听该目录（权限或网络盘）") : error.what()}, {"restarting", false}});
         }
     }
 
@@ -831,6 +835,10 @@ struct App {
             fs::create_directories(store, ec);
             history = std::make_unique<taocode::history::History>(store);
         } catch (...) { history.reset(); }
+        // workspace.open doubles as a project switch: stop A's build and Find-in-
+        // Files first, or a queued before-launch step would run against B's root.
+        stop_run();
+        stop_search();
         start_watcher();
         // IDEA's "Always show full path in window header": the title shows the
         // project root instead of just the folder name, so two same-named projects
@@ -990,6 +998,7 @@ struct App {
                 result = path.is_null() ? Json(nullptr) : open_project(fs::path(wide(path.get<std::string>())));
             } else if (method == "workspace.close") {
                 projects->closed();
+                stop_run();      // a build must not outlive its project
                 stop_search();
                 stop_git();
                 // Breakpoints belong to a project: leaving them behind would make the
@@ -1052,7 +1061,14 @@ struct App {
                 const auto content = params.at("content").get<std::string>();
                 result = workspace->write(path, content, params.at("expectedVersion").get<std::string>(),
                                           params.value("encoding", std::string("utf-8")), params.value("bom", false));
-                if (history) { try { history->record(path, content, "save"); } catch (const taocode::WorkspaceError&) { /* history is best-effort; never blocks a save */ } }
+                if (history) {
+                    try { history->record(path, content, "save"); }
+                    catch (const taocode::WorkspaceError& error) {
+                        // History is best-effort and never blocks a save, but silence
+                        // would hide a gap in the restore timeline the panel exists for.
+                        queue_watch({{"event", "history.note"}, {"path", path}, {"message", std::string(error.what())}});
+                    }
+                }
             }
             else if (method == "file.create") result = workspace->create(params.at("path").get<std::string>(), params.value("directory", false), params.value("template", std::string()));
             else if (method == "file.readOnly") result = workspace->set_read_only(params.at("path").get<std::string>(), params.value("readOnly", true));
@@ -1535,6 +1551,7 @@ struct App {
             "git.user", "git.authors", "git.diff", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
             "git.log", "git.logFull", "git.showCommit", "git.blame", "git.fileHistory",
             "git.checkout", "git.branch.create", "git.branch.delete", "git.merge",
+            "git.revert", "git.reset",
             "git.tags", "git.tag.create", "git.tag.delete", "git.ignore",
             "git.fetch", "git.pull", "git.push", "git.aheadBehind",
             "git.stash", "git.stash.save", "git.stash.pop",

@@ -233,6 +233,13 @@ std::string Watcher::pump() {
                 batch_started = std::chrono::steady_clock::now();
                 continue;
             }
+            if (GetLastError() == ERROR_OPERATION_ABORTED && !running_.load()) {
+                // stop() cancelled the pending read (CancelIoEx) — a deliberate
+                // stop, not a death. Reporting it as a dead root made the host
+                // restart a watcher the user just closed.
+                reason = "监听已停止";
+                break;
+            }
             // The usual cause is the root being deleted or renamed away mid-read.
             reason = "工作目录已不存在";
             break;

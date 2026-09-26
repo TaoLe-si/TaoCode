@@ -270,7 +270,7 @@ onMounted(() => { if (props.active) void load() })
           <dt>日期</dt><dd>{{ shortDate(selectedCommit.date) }}</dd>
           <dt>提交</dt><dd class="vcslog-mono">{{ selectedCommit.hash }}</dd>
           <dt>父提交</dt><dd class="vcslog-mono">{{ selectedCommit.parents.length ? selectedCommit.parents.map(p => p.slice(0, 8)).join(', ') : '（根提交）' }}</dd>
-          <dt v-if="selectedCommit.refs.length">标签</dt>
+          <dt v-if="selectedCommit.refs.length">引用</dt>
           <dd v-if="selectedCommit.refs.length">
             <span v-for="r in selectedCommit.refs" :key="r.name" class="vcslog-ref" :class="r.type" :style="{ borderColor: refColor(r) }">{{ r.name }}</span>
           </dd>

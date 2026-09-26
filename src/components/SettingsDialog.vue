@@ -600,7 +600,7 @@ defineExpose({ handleEscape })
               <label :for="`${id}-zoom`">缩放</label>
               <div class="zoom-row">
                 <select :id="`${id}-zoom`" v-model.number="editor.uiZoomPercent" :aria-describedby="`${id}-zoom-hint`">
-                  <option v-for="percent in [50, 70, 80, 90, 100, 110, 125, 150, 175, 200]" :key="percent" :value="percent">{{ percent }}%</option>
+                  <option v-for="percent in [50, 70, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 350, 400]" :key="percent" :value="percent">{{ percent }}%</option>
                 </select>
                 <button type="button" class="subtle-button" :disabled="editor.uiZoomPercent === 100" title="重置为默认缩放" @click="editor.uiZoomPercent = 100">重置</button>
               </div>

@@ -20,7 +20,7 @@ import ProjectDialog from './components/ProjectDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import ToolWindowHeader from './components/ToolWindowHeader.vue'
 import NoticeList from './components/NoticeList.vue'
-import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace } from './bridge'
+import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, historyNotes, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace } from './bridge'
 import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
 import { parseAnyIssue } from './buildOutput'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings, type CommitMessageInspectionSettings } from './commitMessageInspection'
@@ -615,6 +615,12 @@ const treeVersion = ref(0)
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
 const terminalPanelRef = ref<InstanceType<typeof TerminalPanel> | null>(null)
 const testRunnerRef = ref<InstanceType<typeof TestRunnerPanel> | null>(null)
+const searchPanelRef = ref<InstanceType<typeof SearchPanel> | null>(null)
+function openReplaceInPath() {
+  explorer.value = true
+  leftView.value = 'search'
+  void nextTick(() => searchPanelRef.value?.focusReplace())
+}
 const theme = ref<Theme>(initialTheme())
 const panelSizes = reactive({ explorer: 240, trace: 300, output: 180 })
 const resizing = ref(false)
@@ -1024,7 +1030,9 @@ async function restoreSession(prompt: { state: SessionState; drafts: number }) {
 }
 function discardSession() {
   restorePrompt.value = null
-  void request('session.clear').catch(() => undefined)
+  void request<{ cleared: boolean }>('session.clear')
+    .then(reply => { if (reply && reply.cleared === false) notify('恢复草稿未能从磁盘清除，下次启动仍会提示。', true) })
+    .catch(() => undefined)
 }
 // ReopenClosedTabAction (Windows/Linux default: Ctrl+Shift+F4): restore the focused
 // window's most recently closed file at its old tab position and selection.
@@ -3520,8 +3528,8 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'project.recentList', recent: true },
     { id: 'project.close', title: '关闭项目，返回欢迎页', keywords: 'close project 关闭', enabled: () => !working.value, run: () => void closeWorkspace() },
     { id: 'file.rule1', rule: true },
-    { id: 'file.save', title: '保存文件', keys: 'Ctrl S', keywords: 'save write 保存', enabled: () => Boolean(active.value?.dirty) && !working.value, run: () => void save() },
-    { id: 'file.saveAll', title: '全部保存', keys: 'Ctrl Shift S', keywords: 'save all 全部保存', enabled: () => dirty.value && !working.value, run: () => void saveAll() },
+    // IDEA's FileMenu carries exactly one save action (SaveAll, Ctrl+S).
+    { id: 'file.saveAll', title: '全部保存', keys: 'Ctrl S', keywords: 'save all write 保存', enabled: () => dirty.value && !working.value, run: () => void saveAll() },
     { id: 'file.scratch', title: '新建临时文件', keys: 'Ctrl Alt Shift Insert', keywords: 'scratch temp buffer 临时文件', enabled: () => Boolean(workspace.value) && !working.value, run: () => void createScratch() },
     { id: 'file.closeTab', title: '关闭当前文件', keywords: 'close tab editor 关闭标签', enabled: () => Boolean(active.value) && !working.value, run: () => { const tab = active.value; if (tab) void closeTab(tab) } },
     { id: 'file.reopenClosedTab', title: '重新打开已关闭的标签页', keywords: 'reopen closed tab restore editor 恢复关闭标签', enabled: () => closedTabsPerPane[focusedPane.value].length > 0, run: () => void reopenClosedTab() },
@@ -3529,6 +3537,11 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'file.closeOthers', title: '关闭其他文件', keywords: 'close other tabs 关闭其他', enabled: () => Boolean(active.value) && groups[focusedPane.value].tabs.length > 1, run: () => { const tab = active.value; if (tab) void closeOtherTabsIn(focusedPane.value, tab) } },
     { id: 'file.rule2', rule: true },
     { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: hasEditor, run: () => openEncoding() },
+    // FilePropertiesGroup (PlatformActions.xml:407-422): encoding, read-only and
+    // the line-separator converters live in the File menu together.
+    { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(active.value) && isDesktop, run: () => void toggleReadOnly(activePath.value) },
+    { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('crlf') },
+    { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('lf') },
     { id: 'file.openBinary', title: '以二进制/十六进制方式打开', keywords: 'binary hex image 二进制 十六进制 图片', enabled: () => isDesktop && Boolean(activePath.value || workspace.value), run: () => { const path = activePath.value; if (path) void openBinary(path); else notify('请先选中一个文件。', true) } },
     { id: 'plugin.manage', title: '插件…', keywords: 'plugin extension 插件 扩展', enabled: () => isDesktop, run: () => void openPlugins() },
     { id: 'file.rule3', rule: true },
@@ -3536,6 +3549,13 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void request('app.quit').catch(() => undefined) } },
   ] },
   { menu: 'edit', label: '编辑', rows: [
+    // IDEA EditMenu order (PlatformActions.xml:446-518): Undo/Redo first, then the
+    // find group, selection, and the smart group ending ToggleCase -> JoinLines ->
+    // Duplicate. MoveLineUp/Down use Alt+Shift ($default.xml keeps Ctrl+Shift for
+    // MoveStatement, which TaoCode does not ship).
+    editable('undo', '撤销', 'Ctrl Z', 'undo revert 撤销'),
+    editable('redo', '重做', 'Ctrl Shift Z', 'redo 重做'),
+    { id: 'edit.rule1', rule: true },
     { id: 'edit.sectionFind', section: '查找' },
     editable('find', '在文件中查找与替换', 'Ctrl F', 'find replace search 查找'),
     editable('find.next', '查找下一个', 'F3', 'find next 下一个'),
@@ -3543,19 +3563,16 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     editable('replace.next', '替换下一个', undefined, 'replace next 替换'),
     editable('replace.all', '替换全部', undefined, 'replace all 全部替换'),
     toolWindow('search', '全局搜索与替换', 'search in files find in files global 全局搜索'),
-    { id: 'edit.rule1', rule: true },
-    { id: 'edit.sectionEdit', section: '编辑' },
-    editable('undo', '撤销', 'Ctrl Z', 'undo revert 撤销'),
-    editable('redo', '重做', 'Ctrl Shift Z', 'redo 重做'),
     { id: 'edit.rule2', rule: true },
     editable('selectAll', '全选', 'Ctrl A', 'select all 全选'),
+    { id: 'edit.rule3', rule: true },
+    editable('case.toggle', '切换大小写', 'Ctrl Shift U', 'case upper lower 大小写'),
+    editable('line.join', '合并行', 'Ctrl Shift J', 'join lines 合并行'),
     editable('line.duplicate', '复制行', 'Ctrl D', 'duplicate copy line 复制行'),
     editable('line.delete', '删除行', 'Ctrl Y', 'delete line 删除行'),
-    editable('line.moveUp', '上移行', 'Ctrl Shift ↑', 'move up line 上移行'),
-    editable('line.moveDown', '下移行', 'Ctrl Shift ↓', 'move down line 下移行'),
-    editable('line.join', '合并行', 'Ctrl Shift J', 'join lines 合并行'),
-    editable('case.toggle', '切换大小写', 'Ctrl Shift U', 'case upper lower 大小写'),
-    { id: 'edit.rule3', rule: true },
+    editable('line.moveUp', '上移行', 'Alt Shift ↑', 'move line up 上移行'),
+    editable('line.moveDown', '下移行', 'Alt Shift ↓', 'move line down 下移行'),
+    { id: 'edit.rule4', rule: true },
     editable('comment.line', '行注释', 'Ctrl /', 'comment line 行注释'),
     editable('comment.block', '块注释', 'Ctrl Shift /', 'comment block 块注释'),
     { id: 'edit.rule4', rule: true },
@@ -3607,6 +3624,10 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'theme.dark', title: '暗色主题', keywords: 'dark theme 暗色', checked: () => theme.value === 'dark', run: () => changeTheme('dark') },
   ] },
   { menu: 'navigate', label: '导航', rows: [
+    // GoToMenu opens with Back/Forward (PlatformActions.xml:600-604).
+    { id: 'navigate.back', title: '上一步', keys: 'Ctrl Alt ←', keywords: 'back navigate history 后退', enabled: () => Boolean(navBack.value.length), run: () => void goBack() },
+    { id: 'navigate.forward', title: '下一步', keys: 'Ctrl Alt →', keywords: 'forward navigate history 前进', enabled: () => Boolean(navForward.value.length), run: () => void goForward() },
+    { id: 'navigate.rule0', rule: true },
     { id: 'navigate.actions', title: '查找操作…', keys: 'Ctrl Shift A', keywords: 'find action commands shortcuts keymap all actions 查找操作 命令', run: openActionSearch },
     { id: 'navigate.file', title: '转到文件…', keys: 'Ctrl Shift N', keywords: 'goto file search everywhere 转到文件', enabled: () => Boolean(workspace.value), run: openPalette },
     // IDEA's default keymap: Go to Class = Ctrl+N, Go to Symbol = Ctrl+Shift+Alt+N.
@@ -3626,14 +3647,12 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // IDEA's RecentLocations is Ctrl+Shift+E in $default.xml; inside the popup the
     // same Ctrl+E toggles "Show edited only" (SwitcherRecentEditedChangedToggleCheckBox).
     { id: 'navigate.places', title: '最近位置', keys: 'Ctrl Shift E', keywords: 'recent places locations 最近位置', enabled: () => Boolean(workspace.value), run: () => openRecentPlaces() },
-    { id: 'navigate.everywhere', title: '搜索任何地方', keys: 'Shift Shift', keywords: 'search everywhere 搜索任何地方', run: openActionSearch },
+    { id: 'navigate.everywhere', title: '查找操作（Shift Shift）', keys: 'Shift Shift', keywords: 'search everywhere find action 查找操作', run: openActionSearch },
     { id: 'navigate.declaration', title: '转到声明/定义', keys: 'Ctrl B', keywords: 'go to declaration definition 转到声明', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('definition') },
     { id: 'navigate.rule1', rule: true },
     // IDEA's "Jump to Line/Character" (Ctrl+L) opens the same line prompt as Go to
     // Line:Column. Select Changed Text has no keymap entry in \$default.xml, so only
     // the jump row appears here.
-    { id: 'navigate.back', title: '上一步', keys: 'Ctrl Alt ←', keywords: 'back navigate history 后退', enabled: () => Boolean(navBack.value.length), run: () => void goBack() },
-    { id: 'navigate.forward', title: '下一步', keys: 'Ctrl Alt →', keywords: 'forward navigate history 前进', enabled: () => Boolean(navForward.value.length), run: () => void goForward() },
     { id: 'navigate.rule2', rule: true },
     { id: 'navigate.bookmark', title: '切换书签', keys: 'F11', keywords: 'bookmark toggle 书签', enabled: hasEditor, run: () => toggleBookmark() },
     { id: 'navigate.bookmarkMnemonic', title: '为书签编号…', keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: hasEditor, run: openMnemonicPrompt },
@@ -3645,7 +3664,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   { menu: 'code', label: '代码', rows: [
     editable('completion', '代码补全', 'Ctrl Space', 'completion autocomplete suggest 补全'),
     editable('template.expand', '展开实时模板', 'Ctrl Alt J', 'live template postfix expand 模板'),
-    { id: 'code.templateChooser', title: '实时模板列表…', keys: 'Ctrl Alt Shift J', keywords: 'live template list chooser insert 模板列表', enabled: hasEditor, run: openTemplateChooser },
+    { id: 'code.templateChooser', title: '实时模板列表…', keys: 'Ctrl J', keywords: 'live template list chooser insert 模板列表', enabled: hasEditor, run: openTemplateChooser },
     { id: 'code.surround', title: '用模板包裹选中代码', keys: 'Ctrl Alt T', keywords: 'surround wrap try if block 包裹 模板', enabled: hasEditor, run: openSurround },
     { id: 'code.generate', title: '生成…', keys: 'Alt Insert', keywords: 'generate constructor getter setter toString override 生成 构造器', enabled: () => Boolean(active.value) && lspReady.value, run: openGeneratePopup },
     // ActionsBundle: ShowIntentionActions is "Show Context Actions" (Alt+Enter).
@@ -3670,10 +3689,6 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'code.copyPath', title: '复制文件路径', keywords: 'copy file path absolute 复制文件路径', enabled: () => Boolean(active.value), run: () => void copyFilePath() },
     // ActionsBundle: "Toggle Read-Only Attribute" (synonyms Make File Writable /
     // Read-Only); no default shortcut in $default.xml.
-    { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(active.value) && isDesktop, run: () => void toggleReadOnly(activePath.value) },
-    // ApplicationBundle "combobox.crlf.windows"/"crlf.unix"; IDEA's action titles.
-    { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('crlf') },
-    { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('lf') },
   ] },
   { menu: 'refactor', label: '重构', rows: [
     { id: 'refactor.extractVariable', title: '提取变量', keys: 'Ctrl Alt V', keywords: 'extract variable local 提取变量', enabled: () => Boolean(active.value) && lspReady.value, run: extractVariable },
@@ -3707,8 +3722,8 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   { menu: 'run', label: '运行', rows: [
     { id: 'run.start', title: '运行', keys: 'Shift F10', keywords: 'run build execute task 运行', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void runSelectedConfig(false) },
     { id: 'run.debug', title: '调试', keys: 'Shift F9', keywords: 'debug start breakpoint dap 调试', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => void runSelectedConfig(true) },
-    { id: 'run.debugContext', title: '调试当前上下文配置', keys: 'Ctrl Shift F9', keywords: 'debug contextual configuration 调试上下文', enabled: () => isDesktop && Boolean(active.value) && !dapState.running, run: () => void runContextConfiguration(true) },
-    { id: 'run.pickConfig', title: '选择运行/调试配置', keys: 'Alt Shift F10', keywords: 'select run configuration choose active edit 选择配置', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
+    { id: 'run.debugContext', title: '调试当前上下文配置', keywords: 'debug contextual configuration 调试上下文', enabled: () => isDesktop && Boolean(active.value) && !dapState.running, run: () => void runContextConfiguration(true) },
+    { id: 'run.pickConfig', title: '选择运行/调试配置', keys: 'Alt Shift F10', keywords: 'select run configuration choose active edit 选择配置', enabled: () => Boolean(workspace.value), run: () => openConfigChooser(false) },
     { id: 'run.rerun', title: '重新运行', keys: 'Ctrl F5', keywords: 'rerun relaunch last 重新运行', enabled: () => Boolean(lastRunParams) && !runState.running, run: () => void rerunLast() },
     { id: 'run.stop', title: '停止', keys: 'Ctrl F2', keywords: 'stop terminate kill 停止', enabled: () => runState.running, run: () => void stopRun() },
     // RunClass in the default keymap: run whatever is under the caret.
@@ -3725,8 +3740,8 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
   // here (Fetch, Rebase, Tag dialog, Reset) are omitted rather than faked.
   { menu: 'git', label: 'Git', rows: [
     { id: 'git.commit', title: '提交项目…', keys: 'Ctrl K', keywords: 'commit checkin message 提交', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('git') },
-    { id: 'git.push', title: '推送…', keys: 'Ctrl Shift K', keywords: 'push remote upload 推送', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.push') },
-    { id: 'git.update', title: '更新项目', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
+    { id: 'git.push', title: '推送…', keys: 'Ctrl Shift K', keywords: 'push remote upload 推送', enabled: () => isDesktop && gitAvailable.value, run: () => void pushWithConfirm() },
+    { id: 'git.update', title: '更新项目', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void updateProject() },
     { id: 'git.pull', title: '拉取（Pull）', keywords: 'pull fetch integrate 拉取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
     { id: 'git.fetch', title: '获取（Fetch）', keywords: 'fetch remote refs prune 获取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.fetch') },
     { id: 'git.rule1', rule: true },
@@ -3737,7 +3752,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'git.rule2', rule: true },
     { id: 'git.stash', title: '储藏（Stash）', keywords: 'stash shelve save changes 储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.save') },
     { id: 'git.unstash', title: '取出储藏（Unstash）', keywords: 'unstash pop shelf 弹出储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.pop') },
-    { id: 'git.log', title: '显示日志', keys: 'Alt Shift C', keywords: 'show log history graph 日志', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('vcslog') },
+    { id: 'git.log', title: '显示日志', keywords: 'show log history graph 日志', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('vcslog') },
     { id: 'git.fileHistory', title: '当前文件的历史（--follow）', keywords: 'file history follow rename log 文件历史', enabled: () => isDesktop && gitAvailable.value && Boolean(activePath.value), run: () => { const path = activePath.value; if (path) void showFileHistory(path) } },
     { id: 'git.worktrees', title: '管理工作树…', keywords: 'worktree linked checkout 工作树', enabled: () => isDesktop && gitAvailable.value, run: () => void openWorktrees() },
     { id: 'git.submodules', title: '管理子模块…', keywords: 'submodule update init 子模块', enabled: () => isDesktop && gitAvailable.value, run: () => void openSubmodules() },
@@ -3779,12 +3794,10 @@ const layoutMenuRows = computed<MenuRow[]>(() => {
 // IDEA's Window menu (ActionsBundle: "Search Everywhere…", "Store Current Selection
 // as a Bookmark", the Activate-* tool-window actions, "Editor Tabs"). Same registry
 // rows the Find Action popup reads, so titles and keys can never drift.
+// IDEA's Window menu (PlatformActions.xml WindowMenu): layout switcher first,
+// then the activate-* tool-window rows, editor-tabs group, notifications. Rows
+// for search-everywhere/bookmarks live in Navigate/Code, not here.
 const windowMenuRows: MenuRow[] = [
-  { id: 'window.searchEverywhere', title: '搜索任何地方', keys: 'Shift Shift', keywords: 'search everywhere goto file symbol action 搜索任何地方', run: openActionSearch },
-  { id: 'window.rule1', rule: true },
-  { id: 'window.bookmarkSelection', title: '将当前选择存为书签', keys: 'F11', keywords: 'store selection bookmark 存书签', enabled: hasEditor, run: () => toggleBookmark() },
-  { id: 'window.toggleBookmark', title: '切换书签（不跳转）', keys: 'Ctrl F11', keywords: 'toggle bookmark mnemonic 书签编号', enabled: hasEditor, run: openMnemonicPrompt },
-  { id: 'window.rule2', rule: true },
   toolWindow('files', '激活 项目 工具窗口', 'activate project tool window 项目'),
   toolWindow('git', '激活 本地更改 工具窗口', 'activate commit changes tool window 本地更改'),
   toolWindow('search', '激活 查找 工具窗口', 'activate find in files tool window 查找'),
@@ -4208,6 +4221,32 @@ async function runContextConfiguration(debug: boolean) {
 // The Git menu drives the same bridge methods as the 源代码管理 tool window. Stash
 // without a message would use git's default; keep IDEA's "Stash" dialog out of scope
 // and pass a timestamped label instead.
+// Vcs.UpdateProject: refresh remotes first, then integrate (pull). Distinct from
+// Git.Pull, which just integrates.
+async function updateProject() {
+  if (!workspace.value || !isDesktop) return
+  try {
+    await request('git.fetch')
+    await request('git.pull')
+    notify('已获取远端并合并到当前分支。')
+    showView('git')
+  } catch (error) { notify(errorMessage(error), true) }
+}
+// IDEA's Push dialog confirms before any remote write; the confirm names the
+// branch so a push to the wrong remote is at least visible.
+async function pushWithConfirm() {
+  if (!workspace.value || !isDesktop) return
+  try {
+    const status = await request<{ head?: string }>('git.status')
+    const ahead = await request<GitAheadBehind>('git.aheadBehind')
+    const branch = status.head || '（游离 HEAD）'
+    const count = ahead.available ? ahead.ahead : 0
+    if (!window.confirm(`确认推送 ${branch} 到远端？${ahead.available ? `（领先 ${count} 个提交）` : '（未跟踪上游，将推送并设置上游）'}`)) return
+    await request('git.push')
+    notify('已推送。')
+    showView('git')
+  } catch (error) { notify(errorMessage(error), true) }
+}
 async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.fetch' | 'git.rebase' | 'git.stash.save' | 'git.stash.pop') {
   if (!workspace.value || !isDesktop) return
   try {
@@ -4390,13 +4429,13 @@ function onKey(event: KeyboardEvent) {
   if (event.key === 'F4' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); closeActiveTab(); return }
   if (event.key.toLowerCase() === 'a' && event.shiftKey) { event.preventDefault(); openActionSearch(); return }
   if (event.key.toLowerCase() === 's' && event.altKey) { event.preventDefault(); void openSettings(); return }
-  if (event.key.toLowerCase() === 's') { event.preventDefault(); void (event.shiftKey ? saveAll() : save()) }
+  if (event.key.toLowerCase() === 's') { event.preventDefault(); void (workspace.value ? saveAll() : save()) }
   // Ctrl+Shift+N file, Ctrl+N class, Ctrl+Shift+Alt+N symbol.
   if (event.key.toLowerCase() === 'n' && event.shiftKey && event.altKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
   if (event.key.toLowerCase() === 'n' && event.shiftKey && workspace.value) { event.preventDefault(); openPalette(); return }
   if (event.key.toLowerCase() === 'o' && event.shiftKey && !event.altKey) { event.preventDefault(); void openWorkspace(); return }
   if (event.key.toLowerCase() === 'g' && event.shiftKey && !event.altKey && active.value) { event.preventDefault(); void showBlame(); return }
-  if (event.key.toLowerCase() === 'n' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
+  if (event.key.toLowerCase() === 'n' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('class'); return }
   // Ctrl+Shift+F12 is HideAllWindows ($default.xml:870-872) and must be tested before the
   // Ctrl+F12 branch, which used to swallow it because it did not look at Shift.
   if (event.key === 'F12' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); toggleMaximizeEditor(); return }
@@ -4512,6 +4551,12 @@ watch(() => watchStopped.version, () => {
   notify(watchStopped.restarting
     ? `文件监听已重启（原因：${watchStopped.reason}，第 ${watchStopped.attempt} 次）。`
     : `文件监听已停止：${watchStopped.reason}。文件树不再自动刷新，重新打开项目可恢复。`, !watchStopped.restarting)
+})
+// Local-history snapshot failures arrive as events (file.write must not block on
+// them); surface the newest one as a non-error toast.
+watch(() => historyNotes.length, () => {
+  const note = historyNotes[historyNotes.length - 1]
+  if (note) notify(`本地历史快照失败（${note.path}）：${note.message}。本次保存不受影响。`, true)
 })
 function trapFocus(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
@@ -4900,7 +4945,7 @@ onBeforeUnmount(() => {
           @menu="toolMenu = $event ? leftView : null"
         />
         <template v-if="leftView === 'search'">
-          <SearchPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
+          <SearchPanel ref="searchPanelRef" :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
         </template>
         <template v-else-if="leftView === 'todo'">
           <TodoPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'todo'" :patterns="projectSettings.todoPatterns" :source="todoSource" @open="onSearchOpen" />
@@ -4960,7 +5005,7 @@ onBeforeUnmount(() => {
           @menu="toolMenu = $event ? leftView : null"
         />
         <template v-if="leftView === 'search'">
-          <SearchPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
+          <SearchPanel ref="searchPanelRef" :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
         </template>
         <template v-else-if="leftView === 'todo'">
           <TodoPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'todo'" :patterns="projectSettings.todoPatterns" :source="todoSource" @open="onSearchOpen" />
@@ -5044,7 +5089,7 @@ onBeforeUnmount(() => {
             <div v-if="groupActive(pane)" class="breadcrumbs"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span><span class="editor-save-state">{{ groupActive(pane)!.saving ? '保存中…' : groupActive(pane)!.dirty ? '有未保存修改' : isDesktop ? '已读取磁盘版本' : '内存示例' }}</span><button v-if="markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="status-chip md-toggle" :class="{ active: markdownPreviewOn }" title="切换 Markdown 预览" aria-label="切换 Markdown 预览" @click="toggleMarkdownPreview">预览</button></div>
             <div class="editor-stage" :class="{ 'has-md-preview': markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath }">
               <BinaryViewer v-if="binaryView && pane === focusedPane" :path="binaryView.path" :data="binaryView.data" @close="closeBinary" @reveal="revealBinary" />
-              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" />
+              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @template-chooser="openTemplateChooser" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" />
               <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" @open="path => void openFile(path, false, { preview: true })" @error="message => notify(message, true)" />
               <div v-if="!groups[pane].tabs.length && !binaryView && pane === 0" class="welcome-screen">
                 <div class="welcome-symbol"><FolderOpen :size="28" :stroke-width="1.3" /></div>
@@ -5306,6 +5351,7 @@ onBeforeUnmount(() => {
         <div class="menu-rule" />
         <button v-if="treeMenu.entry.kind === 'file'" :disabled="!lspReady" @click="findUsagesOf(treeMenu.entry.path)">查找用法…</button>
         <button @click="treeMenu = null; treeSubmenu = null; explorer = true; leftView = 'search'">在路径中查找…</button>
+        <button @click="treeMenu = null; treeSubmenu = null; openReplaceInPath()">在路径中替换…（Replace in Path）</button>
         <div class="menu-rule" />
         <button @click="beginRename()">重命名…</button>
         <div class="menu-rule" />
@@ -5343,10 +5389,14 @@ onBeforeUnmount(() => {
             <button @click="convertLineSeparators('lf', findTab(menu.path))">转换为 Unix and macOS (LF) 行尾</button>
           </template>
           <div class="menu-rule" />
+          <!-- IDEA EditorTabPopupMenu (PlatformActions.xml:907-915) alternates
+               Split Right / Split-and-Move Right / Split Down / Split-and-Move
+               Down, then the opposite-group pair and the unsplit pair. -->
           <button @click="splitFromTabMenu(menu.pane, menu.path, 'horizontal')">向右拆分（Split Right）</button>
-          <button @click="splitFromTabMenu(menu.pane, menu.path, 'vertical')">向下拆分（Split Down）</button>
           <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'horizontal') }; tabMenu = null">拆分并移动到右侧（Split and Move Right）</button>
+          <button @click="splitFromTabMenu(menu.pane, menu.path, 'vertical')">向下拆分（Split Down）</button>
           <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, 'vertical') }; tabMenu = null">拆分并移动到下方（Split and Move Down）</button>
+          <button @click="const tab = findTab(menu.path); if (tab) { focusPane(menu.pane); moveTabToOtherPane(menu.pane, tab, splitModel.orientation === 'vertical' ? 'vertical' : 'horizontal') }; tabMenu = null">移动到另一侧编辑器组</button>
           <button @click="openInOppositeGroup(menu.path); tabMenu = null">在另一侧编辑器组中打开</button>
           <button :disabled="splitModel.orientation === 'none'" @click="changeSplitOrientation(); tabMenu = null">更改拆分方向</button>
           <button :disabled="splitModel.orientation === 'none'" @click="unsplit(); tabMenu = null">取消拆分</button>

@@ -445,7 +445,13 @@ function toggleHunk(index: number) {
   // Set mutation needs a fresh Set to stay reactive for the checkbox binding.
   diff.value.hunkPicked = new Set(diff.value.hunkPicked)
 }
-const stash = () => act(() => request('git.stash.save', { message: message.value.trim() || 'TaoCode 储藏' }))
+const stash = () => {
+  // IDEA's Stash Changes dialog owns its message field; borrowing the commit box
+  // would silently rename stashes after whatever the user was about to commit.
+  const text = window.prompt('储藏信息（Stash Changes）：', `TaoCode 储藏 ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`)
+  if (text === null) return
+  void act(() => request('git.stash.save', { message: text.trim() || 'TaoCode 储藏' }))
+}
 const stashPop = () => act(() => request('git.stash.pop'))
 const createBranch = () => { const name = newBranch.value.trim(); if (!name) return; void act(async () => { await request('git.branch.create', { name, checkout: true }); newBranch.value = '' }) }
 const mergeBranchInto = () => { const name = mergeBranch.value.trim(); if (!name) return; void act(() => request('git.merge', { branch: name })) }

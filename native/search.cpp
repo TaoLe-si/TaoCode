@@ -8,6 +8,8 @@
 #endif
 #include <windows.h>
 
+#include <algorithm>
+
 #include <cctype>
 #include <atomic>
 #include <functional>
@@ -34,6 +36,11 @@ constexpr std::size_t max_matches = 5000;        // hard ceiling on returned hit
 constexpr std::size_t max_scanned_files = 100000;  // ceiling on the walk itself
 constexpr std::size_t max_preview_bytes = 1024;  // long lines are clipped here
 constexpr std::size_t max_globs = 64;
+
+// Files skipped this scan because their bytes survive neither UTF-8 nor GBK
+// decoding. Surfaced in the results so "0 hits" is never presented as the whole
+// truth for a scan that could not read everything.
+std::atomic<std::size_t> skipped_non_utf8{0};
 
 const std::vector<std::string> default_excluded_dirs = {
     ".git", ".svn", ".hg", ".bzr", "node_modules", "bower_components",
@@ -219,7 +226,22 @@ std::optional<std::string> read_text_file(const fs::path& path) {
         if (static_cast<std::size_t>(stream.gcount()) != content.size()) return std::nullopt;
     }
     if (content.find('\0') != std::string::npos) return std::nullopt;  // binary
-    if (!valid_utf8(content)) return std::nullopt;
+    if (!valid_utf8(content)) {
+        // Not UTF-8: try GBK (CP936) like the workspace layer does, so a GBK
+        // workspace is searchable instead of silently reporting "0 hits". Bytes
+        // that survive neither decoding are counted as skipped.
+        const int gbk = MultiByteToWideChar(936, MB_ERR_INVALID_CHARS, content.data(),
+                                            static_cast<int>(content.size()), nullptr, 0);
+        if (gbk <= 0) { skipped_non_utf8.fetch_add(1); return std::nullopt; }
+        std::wstring wide(static_cast<std::size_t>(gbk), L'\0');
+        MultiByteToWideChar(936, MB_ERR_INVALID_CHARS, content.data(),
+                            static_cast<int>(content.size()), wide.data(), gbk);
+        const int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), gbk, nullptr, 0, nullptr, nullptr);
+        if (utf8_len <= 0) { skipped_non_utf8.fetch_add(1); return std::nullopt; }
+        std::string decoded(static_cast<std::size_t>(utf8_len), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wide.data(), gbk, decoded.data(), utf8_len, nullptr, nullptr);
+        return decoded;
+    }
     return content;
 }
 
@@ -329,6 +351,7 @@ std::vector<std::string> parse_patterns(const std::string& text) {
 
 Json run(const fs::path& root, const Options& options) {
     if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
+    skipped_non_utf8.store(0);
     if (!options.regex && options.query.empty())
         return {{"matches", Json::array()}, {"truncated", false}, {"fileCount", 0}};
     Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
@@ -364,15 +387,17 @@ Json run(const fs::path& root, const Options& options) {
     // max_scanned_files; the ceiling path must be reported too, otherwise the UI
     // presents a partial result as the whole answer.
     if (!complete) truncated = true;
-    return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files}};
+    return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files},
+            {"skippedNonUtf8", skipped_non_utf8.load()}};
 }
 
 Json replace(const fs::path& root, const Options& options) {
     if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
     if (!options.regex && options.query.empty())
-        return {{"files", 0}, {"replacements", 0}};
+        return {{"files", 0}, {"replacements", 0}, {"skippedNonUtf8", 0}};
     Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
               options.regex ? build_query_pattern(options) : std::regex{}, options.regex, options.cancelled};
+    skipped_non_utf8.store(0);
 
     std::size_t files = 0, replacements = 0;
     bool truncated = false;
@@ -399,7 +424,8 @@ Json replace(const fs::path& root, const Options& options) {
     // A walk cut short by max_scanned_files leaves files below the ceiling
     // untouched: the rewrite is partial, so it must not come back as complete.
     if (!complete) truncated = true;
-    return {{"files", files}, {"replacements", replacements}, {"truncated", truncated}};
+    return {{"files", files}, {"replacements", replacements}, {"truncated", truncated},
+            {"skippedNonUtf8", skipped_non_utf8.load()}};
 }
 
 // The text a single occurrence becomes: regex replacement applies $1/$& through
@@ -443,8 +469,11 @@ Json preview(const fs::path& root, const Options& options) {
                     {"column", static_cast<std::int64_t>(code_points(content, line_start, pos) + 1)},
                     {"length", static_cast<std::int64_t>(code_points(content, pos, pos + len))},
                     {"before", content.substr(pos, len)},
+                    // A regex may match across newlines (LF, [\s\S]): len can then
+                    // reach past this line's end, so the tail index is clamped —
+                    // the preview shows the first line of the substitution.
                     {"after", clip_preview(line_text.substr(0, pos - line_start) + inserted +
-                                           line_text.substr(pos - line_start + len))},
+                                           line_text.substr(std::min(pos - line_start + len, line_text.size())))},
                     {"preview", clip_preview(std::string_view(line_text))},
                 });
                 return matches.size() < max_matches;

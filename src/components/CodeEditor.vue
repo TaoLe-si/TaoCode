@@ -19,7 +19,7 @@ const props = defineProps<{ content: string; path: string; language?: string; th
 const emit = defineEmits<{
   columnMode: [active: boolean]
   selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
-  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: [] }>()
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: [] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
@@ -737,8 +737,10 @@ onMounted(() => {
           { key: 'Mod-Shift-slash', preventDefault: true, run: editingCommands['comment.block']! },
           { key: 'Mod-d', preventDefault: true, run: editingCommands['line.duplicate']! },
           { key: 'Mod-y', preventDefault: true, run: editingCommands['line.delete']! },
-          { key: 'Ctrl-Shift-Up', preventDefault: true, run: editingCommands['line.moveUp']! },
-          { key: 'Ctrl-Shift-Down', preventDefault: true, run: editingCommands['line.moveDown']! },
+          // MoveLineUp/Down = Alt+Shift+Up/Down ($default.xml keeps Ctrl+Shift for
+          // MoveStatement, which TaoCode does not ship).
+          { key: 'Alt-Shift-ArrowUp', preventDefault: true, run: editingCommands['line.moveUp']! },
+          { key: 'Alt-Shift-ArrowDown', preventDefault: true, run: editingCommands['line.moveDown']! },
           { key: 'Mod-Shift-j', preventDefault: true, run: editingCommands['line.join']! },
           { key: 'Mod-Shift-u', preventDefault: true, run: editingCommands['case.toggle']! },
           { key: 'Ctrl-Alt-Shift-Up', preventDefault: true, run: editingCommands['cursor.above']! },
@@ -754,6 +756,8 @@ onMounted(() => {
           // the command returns false and normal indentation (or accepting a completion)
           // proceeds.
           { key: 'Ctrl-Alt-j', preventDefault: true, run: expandTemplate },
+          // InsertLiveTemplate = Ctrl+J ($default.xml:438-440).
+          { key: 'Ctrl-j', preventDefault: true, run: () => { emit('templateChooser'); return true } },
           { key: 'Ctrl-Alt-t', preventDefault: true, run: () => { emit('surround'); return true } },
           // Tab first feeds a pending live-template slot; otherwise it indents.
           // (A snippet inserted by a completion owns Tab through @codemirror/autocomplete's

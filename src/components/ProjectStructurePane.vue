@@ -158,7 +158,7 @@ function save() {
         </div>
 
         <div class="ps-row">
-          <label class="ps-label" :for="`${id}-level`">语言级别：</label>
+          <label class="ps-label" :for="`${id}-level`">JDK / 语言级别：</label>
           <div class="ps-cell">
             <select :id="`${id}-level`" v-model="languageLevel" class="ps-level">
               <option value="_DEFAULT_">SDK 默认</option>
