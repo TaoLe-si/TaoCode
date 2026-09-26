@@ -21,7 +21,6 @@
 #include <set>
 #include <string_view>
 #include <utility>
-#include <unordered_set>
 #include <vector>
 
 namespace taocode {
@@ -1533,21 +1532,34 @@ Json ProjectStore::forget_many(const std::vector<std::string>& paths) {
         std::lock_guard lock(store_mutex);
         auto loaded = load_state(state_file_);
         auto next = loaded.document;
-        std::unordered_set<std::string> keys;
+        // Canonicalise each input to its preferred form before comparing, then
+        // match with the same_path predicate used by ProjectStore::forget so a
+        // Windows drive-letter or casing variant still drops the right entry.
+        std::vector<std::string> keys;
         keys.reserve(paths.size());
         for (const auto& path : paths) {
-            keys.insert(utf8_path(absolute_path(from_utf8(path), true)));
+            if (path.empty()) continue;
+            try {
+                keys.push_back(utf8_path(absolute_path(from_utf8(path), true)));
+            } catch (const WorkspaceError&) {
+                // Bad path -> skip; the singular forget() fails the whole call,
+                // but the batch call has to tolerate one bad entry.
+            }
         }
+        auto matches_any = [&](const std::string& candidate) {
+            for (const auto& key : keys) if (same_path(candidate, key)) return true;
+            return false;
+        };
         if (keys.empty()) {
             return public_state(next);
         }
         Json recents = Json::array();
         for (const auto& recent : next.at("recentProjects")) {
-            if (!keys.count(recent.at("path").get<std::string>())) recents.push_back(recent);
+            if (!matches_any(recent.at("path").get<std::string>())) recents.push_back(recent);
         }
         next["recentProjects"] = std::move(recents);
         if (next.at("lastProject").is_string()
-            && keys.count(next.at("lastProject").get<std::string>())) {
+            && matches_any(next.at("lastProject").get<std::string>())) {
             next["lastProject"] = nullptr;
         }
         auto result = public_state(next);

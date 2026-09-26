@@ -369,7 +369,8 @@ int main() {
             check(initial.size() == 3, "Three recents before removal");
             const auto result = store.forget_many({ upper_ascii(ra), rb });
             const auto& remaining = result.at("recentProjects");
-            check(remaining.size() == 1 && remaining[0].at("path") == rc, "forget_many drops both and keeps the unmentioned entry");
+            check(remaining.size() == 1 && remaining[0].at("path") == rc,
+                  "forget_many drops both and keeps the unmentioned entry");
             check(result.at("lastProject").is_string() && fs::equivalent(path_from(result.at("lastProject").get<std::string>()), c), "lastProject survives when not in the removal set");
             check(get(a / "keep.txt") == "user data" && get(b / "keep.txt") == "user data" && get(c / "keep.txt") == "user data", "forget_many never deletes user files");
             check(ProjectStore(file).state().at("recentProjects").size() == 1, "forget_many persists");

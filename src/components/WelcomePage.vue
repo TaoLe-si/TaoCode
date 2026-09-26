@@ -90,8 +90,17 @@ function confirmForget(projects: RecentProject[]) {
 // RecentProjectsManagerBase.kt:270-279 calls removePath per path and fires a single
 // change event at the end, so the page batches here.
 function forgetSingle(project: RecentProject) { confirmForget([project]) }
-// IDEA's RecentProjectPanel binds DELETE / BACK_SPACE on the list to remove the
-// selected record (still going through the confirmation).
+// ReopenProjectAction.showReopenDialog (ReopenProjectAction.kt:84-94): when the path
+// disappeared, the IDE offers two buttons — OK (closes the dialog, project stays on
+// the list) and "Remove from list" (calls removePath). We mirror the same choice.
+function showReopenDialog(project: RecentProject) {
+  const choice = window.prompt(
+    `路径「${project.path}」不存在或不可访问。\n` +
+    '点击「确定」继续，点击「取消」从最近项目列表移除（磁盘文件不会被删除）。',
+    '继续'
+  )
+  if (choice === null) confirmForget([project])
+}
 function onRowKeydown(project: RecentProject, event: KeyboardEvent) {
   if (event.key !== 'Delete' && event.key !== 'Backspace') return
   event.preventDefault()
@@ -218,6 +227,15 @@ function onRowClick(project: RecentProject, event: MouseEvent) {
 watch(() => props.projects, () => { clearSelection() })
 const activeProject = computed(() => filteredProjects.value.find(project => project.path === focusedPath.value)
   ?? filteredProjects.value[0])
+// ReopenProjectAction.actionPerformed first normalises the path; if `Files.notExists`
+// fires, it calls showReopenDialog. We mirror the same split: the row button emits
+// "open" for live paths, and `tryOpen` short-circuits to showReopenDialog for the
+// missing ones so the user gets the same "Remove from list" choice.
+function tryOpen(project: RecentProject) {
+  menuPath.value = ''
+  if (project.available) emit('open', project.path)
+  else showReopenDialog(project)
+}
 function openProject(project: RecentProject) {
   menuPath.value = ''
   emit('open', project.path)
@@ -260,7 +278,7 @@ function onSearchKeydown(event: KeyboardEvent) {
   }
   if (event.key === 'Delete' && event.altKey) {
     event.preventDefault()
-    confirmForget(project)
+    confirmForget([project])
   }
 }
 // selectLastOpenedProject() — RecentProjectFilteringTree.kt:236-254, called while the Projects tab
@@ -409,11 +427,11 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <span class="recent-group-count">{{ group.projects.length }}</span>
               </header>
               <ul v-show="!groupCollapsed.has(group.name)" class="recent-group-list">
-            <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除${selectedPaths.value.has(project.path) ? '（已选中）' : ''}`" :aria-selected="selectedPaths.value.has(project.path)" @focus="focusedPath = project.path" @click="onRowClick(project, $event)" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path, 'is-selected': selectedPaths.value.has(project.path) }">
+            <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除${selectedPaths.has(project.path) ? '（已选中）' : ''}`" :aria-selected="selectedPaths.has(project.path)" @focus="focusedPath = project.path" @click="onRowClick(project, $event)" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path, 'is-selected': selectedPaths.has(project.path) }">
               <button
-                type="button" class="recent-open" :disabled="busy || !project.available"
+                type="button" class="recent-open" :disabled="busy"
                 :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
-                @click="emit('open', project.path)"
+                @click="tryOpen(project)"
               >
                 <span class="project-avatar" :class="`avatar-${avatarTone(project.path)}`" aria-hidden="true">{{ [...project.name.trim()][0]?.toLocaleUpperCase() || '项' }}</span>
                 <span class="project-details">
