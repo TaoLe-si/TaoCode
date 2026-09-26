@@ -61,8 +61,44 @@ function openedDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '时间未知' : dateFormat.format(date)
 }
-function avatarTone(path: string) {
-  return [...path].reduce((sum, character) => sum + character.codePointAt(0)!, 0) % 3
+// Source: RecentProjectIconHelper.kt:289-326 (ProjectIconPalette.gradients).
+// Nine gradient pairs ordered from warm red through cool purple. Indexing into
+// them via abs(path.hashCode()) % 9 mirrors ProjectIconPalette.gradient(path) and
+// getGeneratedNonLocalProjectIcon's `abs(id.hashCode() % 9)`. The RecentProjects
+// welcome list is the only TaoCode surface that needs a project icon today, so
+// the palette lives here next to the renderer.
+const RECENT_PROJECT_GRADIENTS: ReadonlyArray<readonly [string, string]> = [
+  ['#DB3D3C', '#FF8E42'], // Color1.Avatar
+  ['#F57236', '#FCBA3F'], // Color2
+  ['#2BC8BB', '#36EBAE'], // Color3
+  ['#359AF2', '#57DBFF'], // Color4
+  ['#8379FB', '#85A8FF'], // Color5
+  ['#7E54B5', '#9486FF'], // Color6
+  ['#D63CC8', '#F582B9'], // Color7
+  ['#954294', '#C87DFF'], // Color8
+  ['#E75371', '#FF78B5'], // Color9
+]
+function avatarTone(path: string): number {
+  let hash = 0
+  for (let i = 0; i < path.length; i += 1) hash = (hash * 31 + path.charCodeAt(i)) | 0
+  return Math.abs(hash) % RECENT_PROJECT_GRADIENTS.length
+}
+function avatarGradient(path: string): readonly [string, string] {
+  return RECENT_PROJECT_GRADIENTS[avatarTone(path)]!
+}
+// Source: RecentProjectIconHelper.iconTextForCommaSeparatedName and
+// AvatarUtils.initials. The IDE takes the first letter of each of the first
+// two comma-separated segments and uppercases them ("First, Second" → "FS").
+// Single-segment names fall back to the first non-whitespace character.
+function avatarInitials(name: string): string {
+  const segments = name.split(',').slice(0, 2)
+  const letters: string[] = []
+  for (const segment of segments) {
+    for (const ch of segment) {
+      if (!/\s/.test(ch)) { letters.push(ch); break }
+    }
+  }
+  return (letters.join('') || name.trim()[0] || '项').toLocaleUpperCase()
 }
 // IDEA's RecentProjectPanel shows each project's git branch under the path; the
 // branch was recorded by the IDE the last time the project was open (see the
@@ -487,7 +523,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
                 @click="tryOpen(project)"
               >
-                <span class="project-avatar" :class="`avatar-${avatarTone(project.path)}`" aria-hidden="true">{{ [...project.name.trim()][0]?.toLocaleUpperCase() || '项' }}</span>
+                <span class="project-avatar" :class="`avatar-${avatarTone(project.path)}`" :style="{ backgroundImage: `linear-gradient(135deg, ${avatarGradient(project.path)[0]}, ${avatarGradient(project.path)[1]})` }" :title="`${project.name} 图标（${avatarTone(project.path) + 1}/9）`" aria-hidden="true">{{ avatarInitials(project.displayName || project.projectName || project.name) }}</span>
                 <span class="project-details">
                   <span class="project-title"><strong>{{ project.name }}</strong><span v-if="!isDesktop" class="memory-tag">内存示例</span></span>
                   <span class="project-path" :title="project.path">{{ project.path }}</span>
@@ -646,9 +682,10 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .recent-open { display: grid; align-items: center; grid-template-columns: 26px minmax(11rem, 26%) minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: baseline; flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
-.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex-shrink: 0; align-self: center; border-radius: var(--radius-sm); background: var(--selected); color: var(--accent); font: 600 12px var(--font-brand); }
-.avatar-1 { color: var(--syntax-keyword); background: var(--panel); }
-.avatar-2 { color: var(--syntax-type); background: var(--rail); }
+.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex-shrink: 0; align-self: center; border-radius: var(--radius-sm); background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: #fff; font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+/* RecentProjectIconHelper generates gradient avatars (ProjectIconPalette) for
+   reachable paths and a desaturated version when the path is gone. The CSS
+   gradient lives inline so the JS palette stays the single source of truth. */
 .project-details { display: contents; }
 .project-title { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; white-space: nowrap; }
 .project-title strong { min-width: 0; color: var(--bright); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -664,6 +701,9 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .row-menu-item { justify-content: flex-start; gap: var(--space-2); }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .missing-tag { padding: 2px var(--space-1); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 10px; }
+/* Source: IconUtil.desaturate in RecentProjectIconHelper when isProjectValid=false.
+   CSS filter keeps the gradient visible while signalling the missing path. */
+.recent-row .recent-open:disabled .project-avatar { filter: grayscale(0.85) opacity(0.65); }
 .project-empty { padding: 42px var(--space-3); text-align: center; color: var(--muted); }
 .empty-actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .empty-action { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 168px; justify-content: flex-start; }

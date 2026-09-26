@@ -4798,6 +4798,9 @@ watch(theme, value => {
 // IDEA mainMenuDisplayMode: one markup, three layouts — the menu bar stays where it
 // is and CSS decides whether it sits inline, wraps to its own row, or is hidden
 // behind a hamburger button.
+// IDEA's hamburger menu: one button that opens every menu group in a single popup.
+const hamburgerOpen = ref(false)
+const hamburgerGroup = ref<string | null>(null)
 watch(() => editorSettings.value.mainMenuDisplayMode, mode => {
   document.documentElement.dataset.mainMenu = mode || 'merged'
   if (mode !== 'hamburger') hamburgerOpen.value = false
@@ -4833,9 +4836,6 @@ watch(() => editorSettings.value.supportScreenReaders, on => {
   screenReaderObserver.observe(document.body, { childList: true, subtree: true })
 }, { immediate: true })
 onBeforeUnmount(() => screenReaderObserver?.disconnect())
-// IDEA's hamburger menu: one button that opens every menu group in a single popup.
-const hamburgerOpen = ref(false)
-const hamburgerGroup = ref<string | null>(null)
 // IDEA's "Bracket matching highlight" (editor setting): CodeMirror's basicSetup
 // keeps the matcher installed, so the setting controls the highlight itself —
 // switching it off removes the matching-bracket emphasis in every editor.
