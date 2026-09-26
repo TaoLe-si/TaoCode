@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { FlaskConical, Play, RefreshCw, RotateCcw } from 'lucide-vue-next'
-import { isDesktop, request, type Entry } from '../bridge'
+import { isDesktop, request, runState, type Entry } from '../bridge'
 import { discover, FailedSet, parseResultLine, rerunCommand, type TestResult } from '../testRunner'
 
 // IDEA's Test Runner tool window: a tree of discovered tests, Run / Rerun Failed
@@ -15,7 +15,9 @@ const tests = ref<TestRow[]>([])
 const selected = ref<Set<string>>(new Set())
 const results = ref<Map<string, TestResult>>(new Map())
 const failed = new FailedSet()
-const running = ref(false)
+// Busy state is the shared run state — the panel's commands go through the app's
+// run pipeline, so a build started anywhere also disables these buttons.
+const running = computed(() => runState.running)
 const error = ref('')
 const lastBase = ref('')
 
@@ -84,18 +86,14 @@ async function rerunFailed() {
   if (!failed.size) { error.value = '没有失败的测试可重跑。'; return }
   await launch(rerunCommand((tests.value[0]?.framework ?? 'npm') as 'npm' | 'ctest' | 'junit' | 'pytest', lastBase.value || await runBase(), failed.names()))
 }
-// Runs the framework command through the bridge and folds the streamed output
-// into per-test results. run.output/run.exit land in the shared run state, so
-// this reads the same console the Run tool window shows.
+// Runs the framework command through the app's run pipeline (emit → startRunWith)
+// so the output streams into the shared Run console and the per-test parser; a
+// direct run.start here would fork the pipeline and hide the console.
 async function launch(base: string) {
   if (!props.ready || running.value) return
-  running.value = true
   error.value = ''
   lastBase.value = base
-  try {
-    await request('run.start', { command: base, shell: true })
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : String(caught) }
-  finally { running.value = false }
+  emit('runCommand', base)
 }
 function ingest(line: string) {
   const result = parseResultLine(line)
