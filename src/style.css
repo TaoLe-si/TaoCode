@@ -886,3 +886,8 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 
 /* IDEA per-page reset (Settings → Editor → 恢复默认) */
 .editor-page-head { display: flex; justify-content: flex-end; margin: 0 0 var(--space-2); }
+
+/* Save-conflict dialog: side-by-side preview of disk vs buffer (IDEA shows the
+   differences before the user picks Reload/Keep). */
+.conflict-dialog { max-width: min(920px, 92vw); }
+.conflict-diff { margin-top: var(--space-3); max-height: 46vh; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }

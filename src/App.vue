@@ -2479,9 +2479,25 @@ async function save(tab = active.value): Promise<boolean> {
   } finally { tab.saving = false }
 }
 const conflictPrompt = ref<{ path: string } | null>(null)
+// IDEA's conflict dialog shows what actually differs before you choose; this
+// preview is the disk version (left) against the live buffer (right).
+const conflictDiff = ref<{ rows: DiffRow[]; unified: string } | null>(null)
+async function showConflictDiff() {
+  const target = conflictPrompt.value
+  if (!target) return
+  const tab = findTab(target.path)
+  if (!tab) return
+  try {
+    const doc = await request<DocumentData>('file.read', { path: target.path, encoding: tab.encoding })
+    const diskLines = doc.content.split('\n')
+    const bufferLines = (editorFor(target.path)?.text() ?? tab.content).split('\n')
+    conflictDiff.value = { rows: buildDiffRows(diskLines, bufferLines), unified: generateUnifiedDiff(diskLines, bufferLines) }
+  } catch (error) { notify(errorMessage(error), true) }
+}
 async function resolveConflictReload() {
   const target = conflictPrompt.value
   conflictPrompt.value = null
+  conflictDiff.value = null
   if (!target) return
   const tab = findTab(target.path)
   if (!tab || !isDesktop) return
@@ -2497,6 +2513,7 @@ async function resolveConflictReload() {
 function resolveConflictKeep() {
   const target = conflictPrompt.value
   conflictPrompt.value = null
+  conflictDiff.value = null
   if (target) notify(`已保留 ${target.path} 的当前修改；外部改动不会被覆盖，下次保存前请先自行核对。`)
 }
 async function saveAll() {
@@ -3277,30 +3294,35 @@ async function compareWithClipboard() {
     if (!clipText) { notify('剪贴板为空或非文本。', true); return }
     const currentLines = tab.content.split('\n')
     const clipLines = clipText.split('\n')
-    const lcs = computeLCS(currentLines, clipLines)
-    const rows: DiffRow[] = []
-    let ci = 0, ki = 0, li = 0
-    while (ci < currentLines.length || ki < clipLines.length) {
-      if (li < lcs.length && ci < lcs[li].from && ki < lcs[li].to) {
-        rows.push({ kind: 'change', left: { no: ci + 1, text: currentLines[ci] }, right: { no: ki + 1, text: clipLines[ki] } })
-        ci++; ki++
-      } else if (li < lcs.length && ci < lcs[li].from) {
-        rows.push({ kind: 'delete', left: { no: ci + 1, text: currentLines[ci] } })
-        ci++
-      } else if (li < lcs.length && ki < lcs[li].to) {
-        rows.push({ kind: 'insert', right: { no: ki + 1, text: clipLines[ki] } })
-        ki++
-      } else if (li < lcs.length) {
-        rows.push({ kind: 'equal', left: { no: ci + 1, text: currentLines[ci] }, right: { no: ki + 1, text: clipLines[ki] } })
-        ci++; ki++; li++
-      } else {
-        if (ci < currentLines.length) rows.push({ kind: 'delete', left: { no: ci + 1, text: currentLines[ci] } })
-        if (ki < clipLines.length) rows.push({ kind: 'insert', right: { no: ki + 1, text: clipLines[ki] } })
-        ci++; ki++
-      }
-    }
-    clipboardDiff.value = { path: tab.path, rows, unified: generateUnifiedDiff(currentLines, clipLines) }
+    clipboardDiff.value = { path: tab.path, rows: buildDiffRows(currentLines, clipLines), unified: generateUnifiedDiff(currentLines, clipLines) }
   } catch { notify('无法读取剪贴板。', true) }
+}
+// Line-level diff rows shared by the clipboard compare and the save-conflict
+// preview (left/right aligned, change/delete/insert/equal kinds).
+function buildDiffRows(beforeLines: string[], afterLines: string[]): DiffRow[] {
+  const lcs = computeLCS(beforeLines, afterLines)
+  const rows: DiffRow[] = []
+  let bi = 0, ai = 0, li = 0
+  while (bi < beforeLines.length || ai < afterLines.length) {
+    if (li < lcs.length && bi < lcs[li].from && ai < lcs[li].to) {
+      rows.push({ kind: 'change', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
+      bi++; ai++
+    } else if (li < lcs.length && bi < lcs[li].from) {
+      rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
+      bi++
+    } else if (li < lcs.length && ai < lcs[li].to) {
+      rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
+      ai++
+    } else if (li < lcs.length) {
+      rows.push({ kind: 'equal', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
+      bi++; ai++; li++
+    } else {
+      if (bi < beforeLines.length) rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
+      if (ai < afterLines.length) rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
+      bi++; ai++
+    }
+  }
+  return rows
 }
 function computeLCS(a: string[], b: string[]): { from: number; to: number }[] {
   const m = a.length, n = b.length
@@ -5271,10 +5293,17 @@ onBeforeUnmount(() => {
       </section>
     </div>
     <div v-if="conflictPrompt" class="modal-backdrop" @click.self="resolveConflictKeep()">
-      <section class="help-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="conflict-title" @keydown="trapFocus">
+      <section class="help-dialog leave-dialog conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="conflict-title" @keydown="trapFocus">
         <h2 id="conflict-title">保存冲突 · {{ conflictPrompt.path }}</h2>
         <p>磁盘上的文件在你上次读取之后被外部改动过；为避免覆盖对方的修改，保存已被阻止。</p>
-        <div class="leave-actions"><button class="subtle-button" @click="resolveConflictKeep()">保留当前修改</button><button class="primary-button" :disabled="!isDesktop" @click="resolveConflictReload()">重新载入磁盘版本</button></div>
+        <div class="leave-actions">
+          <button class="subtle-button" :disabled="Boolean(conflictDiff)" @click="void showConflictDiff()">{{ conflictDiff ? '已加载差异' : '查看差异' }}</button>
+          <button class="subtle-button" @click="resolveConflictKeep()">保留当前修改</button>
+          <button class="primary-button" :disabled="!isDesktop" @click="resolveConflictReload()">重新载入磁盘版本</button>
+        </div>
+        <div v-if="conflictDiff" class="conflict-diff">
+          <DiffView :path="conflictPrompt.path" subtitle="磁盘版本 ↔ 当前缓冲（未保存）" :rows="conflictDiff.rows" :unified="conflictDiff.unified" />
+        </div>
       </section>
     </div>
     <div v-if="encodingPrompt && active" class="modal-backdrop" @click.self="encodingPrompt = null">
