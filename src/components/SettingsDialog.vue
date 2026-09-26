@@ -6,10 +6,11 @@ import { isNameHit, matchesOption, optionMatches, resolveSettingsPath, settingsP
 import { RIGHT_MARGIN_MAX, RIGHT_MARGIN_MIN, type CommitMessageInspectionSettings } from '../commitMessageInspection'
 import { addHistoryEntry, formatHistory, parseHistory, popupHistory, SEARCH_HISTORY_LABEL, SETTINGS_SEARCH_HISTORY_KEY, stepHistory, type HistoryDirection } from '../searchHistory'
 import { MAX_SHOWS, NEW_BADGE_TEXT, NEW_OPTION_PAGES, badgeStorageKey, markOpened, parseBadgeCount, showNewBadgeDot, showNewOptions, showNewOptionsInGroup, type BadgeCounts } from '../settingsBadge'
-import { Braces, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FolderTree, GitCommitIcon, Moon, Palette, Search, SlidersHorizontal, Sun, X } from 'lucide-vue-next'
+import { Braces, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Cog, FolderTree, GitCommitIcon, Moon, Palette, Save, Search, SlidersHorizontal, Sun, X } from 'lucide-vue-next'
 import TemplateSettingsPage from './TemplateSettingsPage.vue'
 import ProjectStructurePane from './ProjectStructurePane.vue'
-import type { EditorSettings, JavaProjectSettings, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
+import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
+import { defaultGeneralSettings } from '../bridge'
 import type { Theme } from '../appearance'
 
 const props = defineProps<{
@@ -20,9 +21,12 @@ const props = defineProps<{
   theme: Theme
   busy: boolean
   error: string
-  initialSection?: 'editor' | 'appearance' | 'structure' | null
+  initialSection?: 'appearance' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
+    | 'editor.codeStyle.indents' | 'tools.actionsOnSave' | 'structure' | 'templates' | 'commit' | 'general' | null
   /** IDEA's commit-message inspections (Settings › Version Control › Commit). */
   commitMessageSettings: CommitMessageInspectionSettings
+  /** IDEA's GeneralSettings (ide.general.xml): the System Settings page's backing state. */
+  general: GeneralSettingsState
 }>()
 const templateLanguage = computed(() => languageFor(props.activePath))
 const emit = defineEmits<{
@@ -31,6 +35,7 @@ const emit = defineEmits<{
   saveProject: [patch: { excludedDirs: string[]; todoPatterns: TodoPattern[] }]
   saveJava: [settings: JavaProjectSettings]
   saveTemplates: [settings: TemplateSettings]
+  saveGeneral: [settings: GeneralSettingsState, close?: boolean]
   browseDirectory: [field: 'jdkHome' | 'outputPath']
   theme: [theme: Theme]
   close: []
@@ -39,11 +44,20 @@ const emit = defineEmits<{
 }>()
 const id = useId()
 const dialog = ref<HTMLDialogElement>()
+// 编辑器设置被拆成多页（编辑器 › 常规 › 外观 / 编辑器标签页、代码风格 › 制表符与缩进、
+// 工具 › 保存时操作），每页各自是一个 form；reportValidity 作用在第一个挂载的那个上。
 const editorForm = ref<HTMLFormElement>()
+function registerEditorForm(element: unknown) {
+  if (element) editorForm.value = element as HTMLFormElement
+}
 const editor = ref<EditorSettings>({ ...props.settings })
 // IDEA's commit-message inspections are a second, independent page with its own draft
 // (Settings › Version Control › Commit, CommitDialogConfigurable.kt:56-101).
 const commitMessage = ref<CommitMessageInspectionSettings>({ ...props.commitMessageSettings })
+
+// Source: GeneralSettingsConfigurable.kt:93 — `GeneralSettings.getInstance().state`
+// is the model the panel binds to; TaoCode stages a draft exactly like the other pages.
+const general = ref<GeneralSettingsState>({ ...defaultGeneralSettings, ...props.general })
 
 // IDEA's ConfigurableListPanel reads the groups from intellij.platform.ide.impl.xml
 // groupConfigurable entries (lines 575-608); weight descends, so order is
@@ -54,25 +68,50 @@ const commitMessage = ref<CommitMessageInspectionSettings>({ ...props.commitMess
 // Deployment / Languages & Frameworks / Tools / Other Settings / Natural
 // Languages). Only pages whose configurables are wired up render content;
 // others do not show as empty shells.
-interface SettingsNode { key: PageKey; label: string; icon: typeof Palette; parent: string | null; keywords: string }
+// `expandOnly` 对应 IDEA 树里“只有子项、自己不是设置页”的父节点（点它只展开，不打开空页面）。
+interface SettingsNode { key: PageKey; label: string; icon: typeof Palette; parent: string | null; keywords: string; expandOnly?: boolean }
 // Only pages whose real configurables exist in the source are listed. IDE's
 // full tree (Appearance/Editor/Plugins/...) appears once TaoCode port those
 // Java classes; until then the tree shows only what the project has today.
-type PageKey = 'appearance' | 'editor' | 'structure' | 'templates' | 'commit'
+type PageKey = 'appearance' | 'editor' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
+  | 'editor.codeStyle' | 'editor.codeStyle.indents' | 'tools.actionsOnSave'
+  | 'general' | 'structure' | 'templates' | 'commit'
 const groups = [
   { key: 'group:appearance', label: '外观与行为' },
   { key: 'group:project', label: '默认项目' },
   { key: 'group:vcs', label: '版本控制' },
+  { key: 'group:tools', label: '工具' },
 ]
 const nodes: SettingsNode[] = [
   { key: 'appearance', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 缩放 theme scale' },
-  { key: 'editor', label: '编辑器', icon: SlidersHorizontal, parent: null, keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor font indent' },
+  { key: 'editor', label: '编辑器', icon: SlidersHorizontal, parent: null, expandOnly: true, keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor font indent' },
   { key: 'templates', label: '实时模板', icon: Braces, parent: 'group:project', keywords: '模板 缩写 实时 展开 template' },
   { key: 'structure', label: '项目结构', icon: FolderTree, parent: 'group:project', keywords: 'JDK 输出目录 排除目录 源代码根 测试根 项目 structure' },
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'group:vcs', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
+  // GeneralSettingsConfigurable.kt:84-87 — id "preferences.general", title
+  // IdeBundle "title.general=System Settings"; the IDEA tree nests it under
+  // Appearance & Behavior.
+  // IDEA 的 Editor 是**顶层节点**，其下再分 General 与 Code Style，且 General 自己还有子页。
+  // 注册证据：platform/lang-impl/resources/intellij.platform.lang.impl.xml:1181-1228 ——
+  // editorOptionsProvider id="editor.preferences.appearance" / ".smartKeys" / ".tabs" /
+  // ".folding" / ".gutterIcons"，以及 projectConfigurable parentId="preferences.editor"。
+  { key: 'editor.general', label: '常规', icon: Cog, parent: 'editor', keywords: '常规 软换行 自动换行 标签页上限 general soft wrap tab limit' },
+  { key: 'editor.general.appearance', label: '外观', icon: Palette, parent: 'editor.general', keywords: '外观 行号 空白 缩进参考线 括号 appearance line numbers whitespaces indent guides bracket' },
+  { key: 'editor.general.tabs', label: '编辑器标签页', icon: Save, parent: 'editor.general', keywords: '标签页 上限 打开 数量 editor tabs tab limit' },
+  { key: 'editor.codeStyle', label: '代码风格', icon: SlidersHorizontal, parent: 'editor', expandOnly: true, keywords: '代码风格 缩进 code style' },
+  { key: 'editor.codeStyle.indents', label: '制表符与缩进', icon: SlidersHorizontal, parent: 'editor.codeStyle', keywords: '制表符 缩进 宽度 tab size indent use tab character' },
+  // IDEA 的“保存时操作”注册在 Tools 组下：intellij.platform.ide.impl.xml:1313-1317
+  // projectConfigurable groupId="tools" id="actions.on.save"（文案 CodeInsightBundle:484）。
+  { key: 'tools.actionsOnSave', label: '保存时操作', icon: Save, parent: 'group:tools', keywords: '保存 时 操作 格式化 重新格式化 actions on save format reformat' },
+  { key: 'general', label: '系统设置', icon: Cog, parent: 'group:appearance', keywords: '系统设置 退出 删除 回收站 保存 自动 同步 安全写入 打开项目 新窗口 默认目录 System Settings reopen reopenLastProject deleteToBin confirm exit safe write autosave sync process close terminate disconnect ask' },
 ]
-const expanded = ref(new Set<string>(groups.map(group => group.key)))
-const section = ref<PageKey>(props.initialSection && ['editor', 'appearance', 'structure'].includes(props.initialSection) ? props.initialSection : 'appearance')
+// IDEA 的树里“有子项的节点”只负责展开，本身不是设置页（点它不会打开一个空页面）。
+// 这里沿用同一规则：父节点进 expanded，只有叶子节点才是 PageKey。
+const isParentOnly = (key: string) => nodes.some(node => node.key === key && node.expandOnly)
+const expanded = ref(new Set<string>([...groups.map(group => group.key), 'editor', 'editor.general', 'editor.codeStyle']))
+const PAGE_KEYS: PageKey[] = ['appearance', 'editor.general', 'editor.general.appearance', 'editor.general.tabs',
+  'editor.codeStyle.indents', 'tools.actionsOnSave', 'structure', 'templates', 'commit', 'general']
+const section = ref<PageKey>(props.initialSection && PAGE_KEYS.includes(props.initialSection) ? props.initialSection : 'appearance')
 
 // IDEA's "new options" dot (SettingsNewBadgeState.kt:19-56 + SettingsTreeView.java:791): a page
 // that carries newly added options shows a dot in the tree until it has been shown once, and the
@@ -261,8 +300,18 @@ function onSearchPointerDown() {
   // SettingsFilter.kt:93-105 — pressing into a non-empty field selects the query so it is easy to replace.
   if (searching.value && document.activeElement !== searchInput.value) searchInput.value?.select()
 }
+// 一个匹配到的节点可能挂在另一个节点下（三层树），所以要把祖先一路走到分组。
+function ancestorGroupOf(key: string): string | null {
+  let current = nodes.find(node => node.key === key)
+  while (current && current.parent) {
+    const parent = nodes.find(node => node.key === current!.parent)
+    if (!parent) return current.parent          // parent 是分组
+    current = parent
+  }
+  return null
+}
 const visibleGroups = computed(() => {
-  const needed = new Set(visibleNodes.value.map(node => node.parent).filter((parent): parent is string => Boolean(parent)))
+  const needed = new Set(visibleNodes.value.map(node => ancestorGroupOf(node.key)).filter((key): key is string => Boolean(key)))
   return groups.filter(group => needed.has(group.key))
 })
 // Order of the tree as the arrow keys walk it: groups collapsed to their selected
@@ -272,9 +321,18 @@ const flatKeys = computed<PageKey[]>(() => {
   const keys: PageKey[] = []
   for (const group of groups) {
     if (!expanded.value.has(group.key)) continue
-    for (const node of nodes) if (node.parent === group.key) keys.push(node.key)
+    for (const node of nodes.filter(item => item.parent === group.key)) {
+      if (!isParentOnly(node.key)) keys.push(node.key)
+      for (const grand of nodes.filter(item => item.parent === node.key)) if (!isParentOnly(grand.key)) keys.push(grand.key)
+    }
   }
-  for (const node of nodes) if (!node.parent) keys.push(node.key)
+  for (const node of nodes.filter(item => !item.parent)) {
+    if (!isParentOnly(node.key)) keys.push(node.key)
+    for (const child of nodes.filter(item => item.parent === node.key)) {
+      if (!isParentOnly(child.key)) keys.push(child.key)
+      for (const grand of nodes.filter(item => item.parent === child.key)) if (!isParentOnly(grand.key)) keys.push(grand.key)
+    }
+  }
   return keys
 })
 // IDEA's breadcrumb (外观与行为 › 外观) plus the back/forward arrows that walk the
@@ -354,7 +412,8 @@ const editorDirty = computed(() => JSON.stringify(editor.value) !== JSON.stringi
 const commitMessageDirty = computed(() => JSON.stringify(commitMessage.value) !== JSON.stringify(props.commitMessageSettings))
 const validCommitMessage = computed(() => [commitMessage.value.subjectRightMargin, commitMessage.value.bodyRightMargin]
   .every(value => Number.isInteger(value) && value >= RIGHT_MARGIN_MIN && value <= RIGHT_MARGIN_MAX))
-const dirty = computed(() => editorDirty.value || commitMessageDirty.value)
+const generalDirty = computed(() => JSON.stringify(general.value) !== JSON.stringify(props.general))
+const dirty = computed(() => editorDirty.value || commitMessageDirty.value || generalDirty.value)
 let previousFocus: HTMLElement | null = null
 
 // Not deep, and skipped while the form is dirty: the parent refreshes `settings` when
@@ -368,6 +427,10 @@ watch(() => props.settings, value => {
 watch(() => props.commitMessageSettings, value => {
   if (commitMessageDirty.value) return
   commitMessage.value = { ...value }
+})
+watch(() => props.general, value => {
+  if (generalDirty.value) return
+  general.value = { ...defaultGeneralSettings, ...value }
 })
 // `apply` (the Apply button / Alt+A) commits without closing; `ok` saves and, when the parent
 // reports success, closes — the dialog stays open with the error if the save rejects.
@@ -383,17 +446,30 @@ function resetEditorPage() {
 function applyCommitMessage(close = false) {
   if (!props.busy && validCommitMessage.value) emit('saveCommitMessage', { ...commitMessage.value }, close)
 }
+// GeneralSettings.inactiveTimeout clamps through SAVE_FILES_AFTER_IDLE_SEC.fit
+// (GeneralSettings.kt:193-202, UINumericRange.java:21-23): the stored value always
+// lands inside [1, 300].
+const validGeneral = computed(() => Number.isInteger(general.value.inactiveTimeout) && general.value.inactiveTimeout >= 1 && general.value.inactiveTimeout <= 300)
+function applyGeneral(close = false) {
+  if (!props.busy && validGeneral.value) emit('saveGeneral', { ...general.value }, close)
+}
+function resetGeneralPage() {
+  general.value = { ...defaultGeneralSettings }
+}
 function applyAll() {
   if (editorDirty.value) applyEditor()
   if (commitMessageDirty.value) applyCommitMessage()
+  if (generalDirty.value) applyGeneral()
 }
 function ok() {
   // IDEA's OK: apply, then close only when the save went through.
   if (!dirty.value) { close(); return }
   if (props.busy || !validEditor.value || !validCommitMessage.value) return
   if (editorDirty.value && !editorForm.value?.reportValidity()) return
+  if (!validGeneral.value) return
   applyEditor(true)
   applyCommitMessage(true)
+  applyGeneral(true)
 }
 function close() {
   if (!props.busy) emit('close')
@@ -539,9 +615,11 @@ defineExpose({ handleEscape })
               @click="select(node.key)"
             ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
           </template>
+          <!-- 搜索结果：父节点本身不是页面，所以只列匹配到的叶子，按层级缩进 -->
           <button
-            v-for="node in visibleNodes.filter(item => !item.parent)" :id="`${id}-tab-${node.key}`" :key="node.key"
-            type="button" class="menu-button settings-tab" role="tab" :aria-selected="section === node.key"
+            v-for="node in visibleNodes.filter(item => !isParentOnly(item.key) && !groups.some(group => group.key === item.parent))" :id="`${id}-tab-${node.key}`" :key="node.key"
+            type="button" class="menu-button settings-tab" :class="node.parent === 'editor.general' ? 'settings-grandchild' : (node.parent ? 'settings-child' : '')"
+            role="tab" :aria-selected="section === node.key"
             :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
             @click="select(node.key)"
           ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
@@ -567,12 +645,45 @@ defineExpose({ handleEscape })
               ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
             </template>
           </template>
-          <button
-            v-for="node in nodes.filter(item => !item.parent)" :id="`${id}-tab-${node.key}`" :key="node.key"
-            type="button" class="menu-button settings-tab" role="tab" :aria-selected="section === node.key"
-            :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
-            @click="select(node.key)"
-          ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+          <template v-for="node in nodes.filter(item => !item.parent)" :key="node.key">
+            <!-- IDEA 的树里父节点只负责展开（点它不打开空页面） -->
+            <button
+              v-if="node.expandOnly" type="button" class="menu-button settings-tab settings-group"
+              :aria-expanded="expanded.has(node.key)" :tabindex="-1" @click="toggleGroup(node.key)"
+            >
+              <ChevronDown :size="13" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(node.key) }" aria-hidden="true" />
+              <span>{{ node.label }}</span>
+            </button>
+            <button
+              v-else :id="`${id}-tab-${node.key}`" type="button" class="menu-button settings-tab" role="tab" :aria-selected="section === node.key"
+              :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
+              @click="select(node.key)"
+            ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+            <template v-if="!node.expandOnly || expanded.has(node.key)">
+              <template v-for="child in nodes.filter(item => item.parent === node.key)" :key="child.key">
+                <button
+                  v-if="child.expandOnly" type="button" class="menu-button settings-tab settings-group settings-child"
+                  :aria-expanded="expanded.has(child.key)" :tabindex="-1" @click="toggleGroup(child.key)"
+                >
+                  <ChevronDown :size="13" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(child.key) }" aria-hidden="true" />
+                  <span>{{ child.label }}</span>
+                </button>
+                <template v-else>
+                  <button
+                    :id="`${id}-tab-${child.key}`" type="button" class="menu-button settings-tab settings-child" role="tab" :aria-selected="section === child.key"
+                    :aria-controls="`${id}-panel-${child.key}`" :tabindex="section === child.key ? 0 : -1"
+                    @click="select(child.key)"
+                  ><component :is="child.icon" :size="16" aria-hidden="true" /><span>{{ child.label }}</span><span v-if="pageHasNewBadge(child.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+                  <button
+                    v-for="grand in nodes.filter(item => item.parent === child.key)" :id="`${id}-tab-${grand.key}`" :key="grand.key"
+                    type="button" class="menu-button settings-tab settings-grandchild" role="tab" :aria-selected="section === grand.key"
+                    :aria-controls="`${id}-panel-${grand.key}`" :tabindex="section === grand.key ? 0 : -1"
+                    @click="select(grand.key)"
+                  ><component :is="grand.icon" :size="16" aria-hidden="true" /><span>{{ grand.label }}</span><span v-if="pageHasNewBadge(grand.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+                </template>
+              </template>
+            </template>
+          </template>
         </template>
       </nav>
       <div class="settings-content" :class="{ 'settings-spotlight-on': spotlightActive }">
@@ -622,7 +733,7 @@ defineExpose({ handleEscape })
           </fieldset>
           <h4 class="settings-group-title">辅助功能与字体</h4>
           <fieldset class="settings-fields" :disabled="busy">
-            <label class="checkbox-row"><input v-model="editor.supportScreenReaders" type="checkbox" :aria-describedby="`${id}-sr-hint`" /><span>支持屏幕阅读器</span></label>
+            <label class="checkbox-row"><input v-model="general.supportScreenReaders" type="checkbox" :aria-describedby="`${id}-sr-hint`" /><span>支持屏幕阅读器</span></label>
             <p :id="`${id}-sr-hint`" class="field-hint restore-hint">通知会通过无障碍实时区域朗读；同时关闭鼠标悬停的工具提示（提示文字转为无障碍名称保留）。</p>
           </fieldset>
           <fieldset class="settings-fields" :disabled="busy">
@@ -730,50 +841,97 @@ defineExpose({ handleEscape })
         </section>
 
         <form
-          v-show="section === 'editor'" :id="`${id}-panel-editor`" ref="editorForm" class="settings-panel" data-page="editor"
-          role="tabpanel" :aria-labelledby="`${id}-tab-editor`" :aria-busy="busy" @submit.prevent="applyEditor()"
+          v-show="section === 'editor.general'" :id="`${id}-panel-editor.general`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.general`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
-          <h3>编辑器</h3>
+          <h3>编辑器 › 常规</h3>
           <div class="editor-page-head">
-            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“保存编辑器设置”生效）" @click="resetEditorPage()">恢复默认</button>
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
           </div>
-          <p class="section-description">这些设置应用于编辑器。修改后点击“应用”或“确定”。</p>
+          <p class="section-description">对应 IDEA 的 Editor › General（面板是 platform/lang-impl/.../options/editor/EditorOptionsPanel.kt）。</p>
           <fieldset class="settings-fields" :disabled="busy">
             <div class="input-row">
               <label :for="`${id}-font`">字体大小 <span class="field-hint">（像素）</span></label>
-              <input :id="`${id}-font`" v-model.number="editor.fontSize" type="number" min="10" max="32" step="1" required :aria-describedby="`${id}-font-hint`" />
+              <input :id="`${id}-font`" v-model.number="editor.fontSize" type="number" min="10" max="32" step="1" required aria-describedby="editor-font-hint" />
             </div>
-            <p :id="`${id}-font-hint`" class="field-hint" :class="{ 'validation-error': !validEditor }">字体大小需为 10–32 之间的整数。</p>
+            <p id="editor-font-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">字体大小需为 10–32 之间的整数。待核：IDEA 的编辑器字号很可能在 Editor › Color Scheme › Color Scheme Font，尚未核实。</p>
+            <label class="checkbox-row"><input v-model="editor.wordWrap" type="checkbox" aria-describedby="editor-wrap-hint" /><span>自动换行（软换行）</span></label>
+            <p id="editor-wrap-hint" class="field-hint restore-hint">对应 IDEA 的 “Soft-wrap these files”，在 Editor › General —— EditorOptionsPanel.kt 引用 ApplicationBundle.properties:341 的 checkbox.use.soft.wraps.at.editor。</p>
+          </fieldset>
+        </form>
+
+        <form
+          v-show="section === 'editor.general.appearance'" :id="`${id}-panel-editor.general.appearance`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general.appearance"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.general.appearance`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>编辑器 › 常规 › 外观</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Editor › General › Appearance（EditorAppearanceConfigurable.kt:49-56 的 model::isLineNumbersShown / isWhitespacesShown / isIndentGuidesShown）。</p>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="editor.lineNumbers" type="checkbox" /><span>显示行号</span></label>
+            <label class="checkbox-row"><input v-model="editor.showWhitespaces" type="checkbox" aria-describedby="editor-ws-hint" /><span>显示空白符号</span></label>
+            <p id="editor-ws-hint" class="field-hint restore-hint">空格渲染为“·”，制表符渲染为“→”，行尾多余空格会一并显示。</p>
+            <label class="checkbox-row"><input v-model="editor.showIndentGuides" type="checkbox" aria-describedby="editor-guides-hint" /><span>显示缩进参考线</span></label>
+            <p id="editor-guides-hint" class="field-hint restore-hint">IDEA 风格的垂直引导线，帮助识别代码块层级。</p>
+            <label class="checkbox-row"><input v-model="editor.bracketMatching" type="checkbox" aria-describedby="editor-bracket-hint" /><span>括号匹配高亮</span></label>
+            <p id="editor-bracket-hint" class="field-hint restore-hint">光标靠近括号时高亮对应的另一侧括号。注意：IDEA 没有任何“高亮匹配括号”的开关（EditorSettingsExternalizable 里没有 bracket 字段，平台里唯一的括号复选框是 Smart Keys 的 checkbox.insert.pair.bracket =「自动插入配对括号」），IDEA 的匹配括号高亮由 Editor › Color Scheme › General › Matched brace 的配色决定 —— 本项是 TaoCode 自己的开关，位置按编辑器外观类选项放置。</p>
+          </fieldset>
+        </form>
+
+        <form
+          v-show="section === 'editor.general.tabs'" :id="`${id}-panel-editor.general.tabs`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general.tabs"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.general.tabs`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>编辑器 › 常规 › 编辑器标签页</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Editor › General › Editor Tabs（EditorTabsConfigurable.kt:109 的 editbox.tab.limit，注册 id="editor.preferences.tabs"）。</p>
+          <fieldset class="settings-fields" :disabled="busy">
+            <div class="input-row">
+              <label :for="`${id}-tab-limit`">每个编辑器组的标签页上限</label>
+              <input :id="`${id}-tab-limit`" v-model.number="editor.tabLimit" type="number" min="1" max="100" step="1" required aria-describedby="editor-tab-limit-hint" />
+            </div>
+            <p id="editor-tab-limit-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
+          </fieldset>
+        </form>
+
+        <form
+          v-show="section === 'editor.codeStyle.indents'" :id="`${id}-panel-editor.codeStyle.indents`" :ref="registerEditorForm" class="settings-panel" data-page="editor.codeStyle.indents"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.codeStyle.indents`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>编辑器 › 代码风格 › 制表符与缩进</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Editor › Code Style › Tabs and Indents —— platform/lang-api/.../application/options/IndentOptionsEditor.java 引用 use.tab.character 与制表符宽度，不是 Editor › General。</p>
+          <fieldset class="settings-fields" :disabled="busy">
             <div class="input-row">
               <label :for="`${id}-tab-size`">缩进宽度</label>
-              <select :id="`${id}-tab-size`" v-model.number="editor.tabSize" :aria-describedby="`${id}-tabs-hint`">
+              <select :id="`${id}-tab-size`" v-model.number="editor.tabSize" aria-describedby="editor-tabs-hint">
                 <option v-for="size in [2, 4, 8]" :key="size" :value="size">{{ sizeLabel(size) }}</option>
               </select>
             </div>
-            <p :id="`${id}-tabs-hint`" class="field-hint restore-hint">{{ tabCharacterHint }}</p>
-            <label class="checkbox-row"><input v-model="editor.useTabCharacter" type="checkbox" :aria-describedby="`${id}-tabchar-hint`" /><span>使用制表符（Tab 字符）缩进</span></label>
-            <p :id="`${id}-tabchar-hint`" class="field-hint restore-hint">开启后 Tab 与自动缩进写入一个 Tab 字符；关闭时按上面的宽度写入空格。</p>
-            <label class="checkbox-row"><input v-model="editor.showWhitespaces" type="checkbox" :aria-describedby="`${id}-ws-hint`" /><span>显示空白符号</span></label>
-            <p :id="`${id}-ws-hint`" class="field-hint restore-hint">空格渲染为“·”，制表符渲染为“→”，行尾多余空格会一并显示。</p>
-            <label class="checkbox-row"><input v-model="editor.formatOnSave" type="checkbox" :aria-describedby="`${id}-format-hint`" /><span>保存时格式化代码</span></label>
-            <p :id="`${id}-format-hint`" class="field-hint restore-hint">先调用语言服务的格式化能力再写盘；该文件没有可用语言服务时按原样保存。</p>
-            <label class="checkbox-row"><input v-model="editor.wordWrap" type="checkbox" /><span>自动换行</span></label>
-            <label class="checkbox-row"><input v-model="editor.lineNumbers" type="checkbox" /><span>显示行号</span></label>
-            <label class="checkbox-row"><input v-model="editor.showIndentGuides" type="checkbox" /><span>显示缩进参考线</span></label>
-            <p class="field-hint restore-hint">IDEA 风格的垂直引导线，帮助识别代码块层级。</p>
-            <label class="checkbox-row"><input v-model="editor.bracketMatching" type="checkbox" /><span>括号匹配高亮</span></label>
-            <p class="field-hint restore-hint">光标靠近括号时高亮对应的另一侧括号。</p>
-            <div class="input-row">
-              <label :for="`${id}-tab-limit`">每个编辑器组的标签页上限</label>
-              <input :id="`${id}-tab-limit`" v-model.number="editor.tabLimit" type="number" min="1" max="100" step="1" required :aria-describedby="`${id}-tab-limit-hint`" />
-            </div>
-            <p :id="`${id}-tab-limit-hint`" class="field-hint" :class="{ 'validation-error': !validEditor }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
-            <label class="checkbox-row"><input v-model="editor.restoreLastProject" type="checkbox" :aria-describedby="`${id}-restore-hint`" /><span>重启时恢复上次项目</span></label>
-            <label class="checkbox-row"><input v-model="editor.autoSave" type="checkbox" :aria-describedby="`${id}-autosave-hint`" /><span>停止输入 5 秒后自动保存</span></label>
-            <p :id="`${id}-autosave-hint`" class="field-hint restore-hint">只保存已经改动过的文件；切换项目或关闭窗口前仍会提示未保存内容。</p>
-            <label class="checkbox-row"><input v-model="editor.syncOnFocus" type="checkbox" :aria-describedby="`${id}-sync-hint`" /><span>窗口获得焦点时同步磁盘文件</span></label>
-            <p :id="`${id}-sync-hint`" class="field-hint restore-hint">刷新项目树并重载没有改动的编辑器缓冲；有未保存修改的文件不会被覆盖，保存时仍会提示冲突。超过 4 MiB 的文件跳过自动同步。</p>
-            <p :id="`${id}-restore-hint`" class="field-hint restore-hint">仅恢复上次打开的项目；未保存的文本不会自动保存，也不会随项目恢复。退出前请手动保存文件。</p>
+            <p id="editor-tabs-hint" class="field-hint restore-hint">{{ tabCharacterHint }}</p>
+            <label class="checkbox-row"><input v-model="editor.useTabCharacter" type="checkbox" aria-describedby="editor-tabchar-hint" /><span>使用制表符（Tab 字符）缩进</span></label>
+            <p id="editor-tabchar-hint" class="field-hint restore-hint">开启后 Tab 与自动缩进写入一个 Tab 字符；关闭时按上面的宽度写入空格。</p>
+          </fieldset>
+        </form>
+
+        <form
+          v-show="section === 'tools.actionsOnSave'" :id="`${id}-panel-tools.actionsOnSave`" :ref="registerEditorForm" class="settings-panel" data-page="tools.actionsOnSave"
+          role="tabpanel" :aria-labelledby="`${id}-tab-tools.actionsOnSave`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>工具 › 保存时操作</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Tools › Actions on Save —— intellij.platform.ide.impl.xml:1313-1317 把它注册为 projectConfigurable groupId="tools" id="actions.on.save"，文案见 CodeInsightBundle.properties:484（Reformat code）。</p>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="editor.formatOnSave" type="checkbox" aria-describedby="editor-format-hint" /><span>保存时格式化代码</span></label>
+            <p id="editor-format-hint" class="field-hint restore-hint">先调用语言服务的格式化能力再写盘；该文件没有可用语言服务时按原样保存。</p>
           </fieldset>
         </form>
 
@@ -817,6 +975,63 @@ defineExpose({ handleEscape })
           </fieldset>
           <p class="field-hint restore-hint">IDEA 的「显示右边距」（在提交框里画一条列宽参考线）未实现：它要求提交框使用等宽字体，而参考线在比例字体下没有确定的列位置；超出部分仍会逐条列出。详见 src/commitMessageInspection.ts 顶部说明。</p>
         </section>
+
+        <section v-show="section === 'general'" :id="`${id}-panel-general`" class="settings-panel" data-page="general" role="tabpanel" :aria-labelledby="`${id}-tab-general`" :aria-busy="busy">
+          <!-- Source: GeneralSettingsConfigurable.kt:95-185 (createPanel). Row order, groups
+               and every option mirror the Kotlin DSL panel; labels follow IdeBundle /
+               ProjectConceptBundle strings. -->
+          <h3>系统设置</h3>
+          <p class="section-description">对应 IDEA Settings › Appearance &amp; Behavior › System Settings（GeneralSettingsConfigurable.kt，ide.general.xml）。</p>
+          <h4 class="settings-group-title">退出确认</h4>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="general.confirmExit" type="checkbox" /><span>退出 IDE 前确认</span></label>
+          </fieldset>
+          <h4 class="settings-group-title">当关闭带有运行进程的工具窗口时：</h4>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="general.processCloseConfirmation" type="radio" value="TERMINATE" name="process-close" /><span>终止进程</span></label>
+            <label class="checkbox-row"><input v-model="general.processCloseConfirmation" type="radio" value="DISCONNECT" name="process-close" /><span>断开连接</span></label>
+            <label class="checkbox-row"><input v-model="general.processCloseConfirmation" type="radio" value="ASK" name="process-close" /><span>询问</span></label>
+          </fieldset>
+          <h4 class="settings-group-title">项目</h4>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="general.reopenLastProject" type="checkbox" /><span>启动时重新打开项目</span></label>
+            <!-- IDEA's 打开项目于 (GeneralSettings.confirmOpenNewProject, :120-135 +
+                 :157-168 for the constants) is not rendered: NEW_WINDOW goes through
+                 ProjectManagerImpl.kt:1249-1257 -> processPerProjectSupport().openInChildProcess(),
+                 i.e. a separate OS window/process, and ASK (-1, IDEA's default) exists to offer
+                 exactly that choice. TaoCode is single-window and single-process, so two of the
+                 three options could never take effect — the state field is still carried and
+                 validated like IDEA's, it just has no control here. -->
+            <div class="input-row">
+              <label :for="`${id}-default-dir`">默认项目目录：</label>
+              <input :id="`${id}-default-dir`" v-model="general.defaultProjectDirectory" type="text" spellcheck="false" />
+            </div>
+            <p class="field-hint">此目录将作为“打开…”和“新建 | 项目…”对话框的预选目录。</p>
+          </fieldset>
+          <h4 class="settings-group-title">文件</h4>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="general.deleteToBin" type="checkbox" /><span>将文件移入回收站而不是永久删除</span></label>
+            <div class="input-row">
+              <label class="checkbox-row" :for="`${id}-idle-timeout`"><input v-model="general.autoSaveIfInactive" type="checkbox" /><span>IDE 空闲</span></label>
+              <input :id="`${id}-idle-timeout`" v-model.number="general.inactiveTimeout" type="number" min="1" max="300" step="1" :disabled="!general.autoSaveIfInactive" />
+              <span class="field-hint">秒后自动保存文件</span>
+            </div>
+            <p :id="`${id}-idle-timeout-hint`" class="field-hint" :class="{ 'validation-error': !validGeneral }">空闲自动保存的超时范围是 1–300 秒（GeneralSettings.SAVE_FILES_AFTER_IDLE_SEC，默认 15）。</p>
+            <label class="checkbox-row"><input v-model="general.autoSaveFiles" type="checkbox" /><span>切换到其他应用或内置终端时保存文件</span></label>
+            <label class="checkbox-row"><input v-model="general.isUseSafeWrite" type="checkbox" /><span>保存前备份文件</span></label>
+            <!-- IDEA 用注册表键 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，默认
+                 false），没有设置页入口；TaoCode 没有注册表对话框，按全量移植要求升格为持久化设置。 -->
+            <label class="checkbox-row"><input v-model="general.autoShowProcessPopup" type="checkbox" aria-describedby="general-autoshow-hint" /><span>有进程开始时自动弹出进度面板</span></label>
+            <p id="general-autoshow-hint" class="field-hint restore-hint">对应 IDEA 的 ide.windowSystem.autoShowProcessPopup：Git、克隆或构建/运行开始时自动打开后台任务列表。</p>
+          </fieldset>
+          <h4 class="settings-group-title">同步外部更改：</h4>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="general.autoSyncFiles" type="checkbox" /><span>切换到 IDE 窗口或打开编辑器标签页时</span></label>
+            <label class="checkbox-row"><input v-model="general.backgroundSyncFiles" type="checkbox" /><span>IDE 空闲时周期性同步（实验性）</span></label>
+          </fieldset>
+          <p class="field-hint restore-hint">自动保存无法被完全禁用。</p>
+          <div class="input-row"><button type="button" class="subtle-button" :disabled="busy" title="将本页所有选项恢复为出厂默认值" @click="resetGeneralPage">重置本页</button></div>
+        </section>
       </div>
     </div>
     <footer class="dialog-footer">
@@ -859,6 +1074,7 @@ defineExpose({ handleEscape })
 .settings-tab[aria-selected='true'] { color: var(--bright); background: var(--selected); font-weight: 600; }
 .settings-group { color: var(--text); font-weight: 600; }
 .settings-child { margin-left: var(--space-5); }
+.settings-grandchild { margin-left: calc(var(--space-5) * 2); }
 .settings-caret { transition: transform .12s ease; }
 .settings-caret-closed { transform: rotate(-90deg); }
 .settings-empty { margin: var(--space-2); color: var(--muted); font-size: 11px; }

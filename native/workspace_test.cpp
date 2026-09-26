@@ -312,6 +312,26 @@ int main() {
             check(get(root / "conflict.txt") == binary_change, "Binary external changes must not be overwritten");
         });
 
+        run("safe write can be switched off for a straight in-place save", [&] {
+            put(root / "direct.txt", "before");
+            const auto version = workspace.read("direct.txt").at("version").get<std::string>();
+            const auto entries = workspace.list("");
+            // The last argument is IDEA's "Use safe write" (GeneralSettings.isUseSafeWrite,
+            // GeneralSettings.kt:92-97). Off means the target is truncated in place — no
+            // temporary file, no backup — which is what SafeWriteRequestor.java:12-15 falls
+            // back to.
+            workspace.write("direct.txt", "after", version, "utf-8", false, false);
+            check(get(root / "direct.txt") == "after", "the new content must reach the file");
+            check(workspace.list("") == entries, "a straight save leaves no temporary files behind");
+            check(workspace.read("direct.txt").at("content").get<std::string>() == "after",
+                  "the file must read back as what was written");
+            // The conflict guard is not part of what this option trades away: losing an
+            // external edit is not a risk the user asked for.
+            put(root / "direct.txt", "external");
+            expect_error("CONFLICT", [&] { workspace.write("direct.txt", "editor", version, "utf-8", false, false); });
+            check(get(root / "direct.txt") == "external", "the conflict guard still protects external edits");
+        });
+
         run("all APIs reject traversal absolute drive ADS and malformed paths", [&] {
             const std::vector<std::string> invalid{
                 "../outside/secret.txt", "../" + path_text(root.filename()) + "/a.txt",

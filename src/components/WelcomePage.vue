@@ -18,6 +18,8 @@ const props = defineProps<{
   settings: EditorSettings
   /** The application notification log (`src/notices.ts`), shown by the notification toolbar. */
   notices: NoticeEntry[]
+  /** GeneralSettings.isSupportScreenReaders — announces notifications to assistive tech. */
+  screenReaderLive: boolean
 }>()
 const emit = defineEmits<{
   open: [path?: string]
@@ -610,7 +612,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
               @click="notificationsOpen = !notificationsOpen"
             ><BellDot :size="15" aria-hidden="true" />{{ noticeButtonText(notices.length) }}</button>
             <NoticeList
-              v-if="notificationsOpen" :entries="notices" :live="settings.supportScreenReaders"
+              v-if="notificationsOpen" :entries="notices" :live="screenReaderLive"
               @clear="emit('clearNotices')" @close="notificationsOpen = false"
             />
           </div>

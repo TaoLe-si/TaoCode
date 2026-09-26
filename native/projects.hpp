@@ -15,6 +15,7 @@ Json java_lsp_settings(const Json& java);
 // state file written by an older build does not carry. Exported so tests assert
 // against the real defaults instead of a copy that drifts.
 Json editor_defaults();
+Json general_defaults(); // GeneralSettingsState data-class defaults (GeneralSettings.kt:227-266).
 
 // Source: RecentProjectMetaInfo.activationTimestamp — wall-clock seconds since
 // the Unix epoch in UTC, mirroring what IDEA stores next to displayName.
@@ -33,6 +34,7 @@ public:
     Json forget(const std::string& path); // Returns the public state; keeps project files/settings.
     Json forget_many(const std::vector<std::string>& paths); // Mirrors RecentProjectsManagerBase.removePathsFromGroups + removePath fan-out.
     Json update_settings(const Json& patch); // Returns the complete editor settings.
+    Json update_general(const Json& patch); // Mirrors GeneralSettings (ide.general.xml); returns the complete general state.
     Json project_settings(const std::string& root);
     Json update_project_settings(const std::string& root, const Json& patch);
 

@@ -1,0 +1,39 @@
+{
+ "editor": {
+  "count": 569,
+  "missing_roots": [
+   "platform/lang-impl/src/com/intellij/codeInsight/folding"
+  ]
+ },
+ "toolwindow": {
+  "count": 392,
+  "missing_roots": []
+ },
+ "vcs": {
+  "count": 1002,
+  "missing_roots": [
+   "platform/vcs-log/src/com/intellij/vcs/log"
+  ]
+ },
+ "actions": {
+  "count": 115,
+  "missing_roots": [
+   "platform/searchEverywhere/src/com/intellij/ide/actions/searcheverywhere"
+  ]
+ },
+ "settings-run": {
+  "count": 1676,
+  "missing_roots": []
+ },
+ "projectviews": {
+  "count": 342,
+  "missing_roots": [
+   "platform/platform-impl/src/com/intellij/ide/projectView",
+   "platform/projectView/src"
+  ]
+ },
+ "ui": {
+  "count": 955,
+  "missing_roots": []
+ }
+}

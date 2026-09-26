@@ -7,7 +7,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { BridgeError, isDesktop, subscribeTerm, subscribeTermExit, term } from '../bridge'
 
-const props = defineProps<{ active: boolean; cwd?: string }>()
+const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
 const emit = defineEmits<{ focusTerminal: [] }>()
 
 interface Pane {
@@ -156,6 +156,15 @@ function adopt(id: number, label?: string) {
 defineExpose({ openIn, adopt })
 
 async function close(pane: Pane) {
+  // IDEA asks before a terminal whose process is still running is closed: a terminal marks its
+  // process with ALWAYS_USE_DEFAULT_STOPPING_BEHAVIOUR_KEY (TerminalTabCloseListener.kt:87 ->
+  // TerminalCloseConfirmation.kt:19), which is what makes canDisconnect false and leaves the
+  // dialog with Terminate/Cancel. An already-exited terminal closes without a word.
+  if (!pane.exited && props.confirmClose && !(await props.confirmClose(pane.label))) return
+  await disposePane(pane)
+}
+
+async function disposePane(pane: Pane) {
   const rest = panes.value.filter(other => other !== pane)
   panes.value = rest
   pane.off()
@@ -173,7 +182,8 @@ async function restart(pane: Pane) {
   if (busy.value || !isDesktop) return
   const { group, label } = pane
   const wasSelected = selected.value === pane
-  await close(pane)
+  // Only an exited terminal shows the restart button, so there is nothing running to confirm.
+  await disposePane(pane)
   const before = panes.value.length
   await spawn(group)
   const created = panes.value[panes.value.length - 1]

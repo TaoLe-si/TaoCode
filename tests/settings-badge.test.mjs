@@ -19,26 +19,31 @@ test('the badge text is the one IdeBundle carries', () => {
 
 // SettingsNewBadgeState.kt:53-56 — only configurables marked NewOptions ever get the dot.
 test('only a page that declares itself new qualifies', () => {
-  assert.equal(isNewOptions('editor'), true)
+  // 本轮 UI 位置整改后，编辑器被拆成 编辑器 › 常规 › 外观 等子页，"新选项"跟着承载新行的那一页。
+  const declared = NEW_OPTION_PAGES[0]
+  assert.ok(declared, '至少有一页声明自己是新的')
+  assert.equal(isNewOptions(declared), true)
   assert.equal(isNewOptions('appearance'), false)
   assert.equal(isNewOptions('commit'), false)
-  assert.equal(isNewOptions('editor', ['commit']), false)
-  assert.ok(NEW_OPTION_PAGES.includes('editor'))
+  assert.equal(isNewOptions(declared, ['commit']), false)
+  assert.ok(NEW_OPTION_PAGES.includes(declared))
 })
 
 // :47-51 — shown fewer than MAX_SHOWS times.
 test('a new page keeps the dot until it has been shown once', () => {
-  assert.equal(showNewOptions('editor', {}), true)
-  assert.equal(showNewOptions('editor', { editor: 0 }), true)
-  assert.equal(showNewOptions('editor', { editor: MAX_SHOWS }), false)
+  const declared = NEW_OPTION_PAGES[0]
+  assert.equal(showNewOptions(declared, {}), true)
+  assert.equal(showNewOptions(declared, { [declared]: 0 }), true)
+  assert.equal(showNewOptions(declared, { [declared]: MAX_SHOWS }), false)
   // A non-new page never shows it, whatever the counter says.
   assert.equal(showNewOptions('commit', {}), false)
 })
 
 // :32-36 — a composite reports new options when one of its children does.
 test('a group reports new options when a child page has one pending', () => {
-  assert.equal(showNewOptionsInGroup(['appearance', 'editor'], {}), true)
-  assert.equal(showNewOptionsInGroup(['appearance', 'editor'], { editor: MAX_SHOWS }), false)
+  const declared = NEW_OPTION_PAGES[0]
+  assert.equal(showNewOptionsInGroup(['appearance', declared], {}), true)
+  assert.equal(showNewOptionsInGroup(['appearance', declared], { [declared]: MAX_SHOWS }), false)
   assert.equal(showNewOptionsInGroup(['appearance', 'structure'], {}), false)
   assert.equal(showNewOptionsInGroup([], {}), false)
 })
@@ -54,23 +59,26 @@ test('the dot is drawn on leaves and on collapsed groups only', () => {
 
 // :39-45 — marking a page writes MAX_SHOWS once and reports whether it changed.
 test('opening a new page records it once and reports the change', () => {
-  const first = markOpened('editor', {})
-  assert.deepEqual(first.counts, { editor: MAX_SHOWS })
+  const declared = NEW_OPTION_PAGES[0]
+  const first = markOpened(declared, {})
+  assert.deepEqual(first.counts, { [declared]: MAX_SHOWS })
   assert.equal(first.changed, true)
-  const second = markOpened('editor', first.counts)
+  const second = markOpened(declared, first.counts)
   assert.equal(second.changed, false)
   assert.deepEqual(second.counts, first.counts)
 })
 
 test('opening a page that is not new changes nothing', () => {
-  const result = markOpened('commit', { editor: MAX_SHOWS })
+  const declared = NEW_OPTION_PAGES[0]
+  const result = markOpened('commit', { [declared]: MAX_SHOWS })
   assert.equal(result.changed, false)
-  assert.deepEqual(result.counts, { editor: MAX_SHOWS })
+  assert.deepEqual(result.counts, { [declared]: MAX_SHOWS })
 })
 
 test('marking keeps the other pages untouched', () => {
-  const result = markOpened('editor', { commit: 3, other: 1 })
-  assert.deepEqual(result.counts, { commit: 3, other: 1, editor: MAX_SHOWS })
+  const declared = NEW_OPTION_PAGES[0]
+  const result = markOpened(declared, { commit: 3, other: 1 })
+  assert.deepEqual(result.counts, { commit: 3, other: 1, [declared]: MAX_SHOWS })
 })
 
 // PropertiesComponent.getInt(key, 0) — a missing or broken value means "never shown".

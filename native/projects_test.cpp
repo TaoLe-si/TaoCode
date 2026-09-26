@@ -90,6 +90,7 @@ Json open_result(const fs::path& path) {
 // The real defaults, not a copy: a mirror drifts the moment a setting is added and
 // then every migration assertion fails for no reason.
 Json defaults() { return taocode::editor_defaults(); }
+Json general_defaults() { return taocode::general_defaults(); }
 
 Json default_todo_patterns() {
     return Json::array({{{"pattern", "TODO"}, {"description", "待办"}},
@@ -293,6 +294,46 @@ int main() {
             check(create_project(crowded, "new-project", "empty") == expected, "Crowded parent must not stop creation");
         });
 
+        run("update_general mirrors GeneralSettings (ide.general.xml) validation and clamping", [&] {
+            const auto file = temporary.path / "general.json";
+            ProjectStore store(file);
+            const auto defaults = general_defaults();
+            check(defaults.at("reopenLastProject") == true && defaults.at("deleteToBin") == true
+                  && defaults.at("autoSyncFiles") == true && defaults.at("backgroundSyncFiles") == true
+                  && defaults.at("autoSaveFiles") == true && defaults.at("autoSaveIfInactive") == false
+                  && defaults.at("isUseSafeWrite") == true && defaults.at("confirmExit") == true
+                  && defaults.at("isShowWelcomeScreen") == true && defaults.at("confirmOpenNewProject2").is_null()
+                  && defaults.at("processCloseConfirmation") == "ASK" && defaults.at("inactiveTimeout") == 15
+                  && defaults.at("defaultProjectDirectory") == "",
+                  "GeneralSettingsState data-class defaults (GeneralSettings.kt:227-266)");
+            const auto updated = store.update_general({{"confirmExit", false}, {"processCloseConfirmation", "TERMINATE"},
+                                                       {"confirmOpenNewProject2", 0}, {"inactiveTimeout", 999}});
+            check(updated.at("confirmExit") == false && updated.at("processCloseConfirmation") == "TERMINATE"
+                  && updated.at("confirmOpenNewProject2") == 0,
+                  "Accepted keys merge onto the defaults");
+            check(updated.at("inactiveTimeout") == 300, "inactiveTimeout clamps through SAVE_FILES_AFTER_IDLE_SEC.fit");
+            check(updated.at("reopenLastProject") == true, "Untouched keys keep their defaults");
+            check(Json::parse(get(file)).at("general") == updated, "General settings must actually reach disk");
+            check(ProjectStore(file).update_general(Json({{"confirmOpenNewProject2", Json(nullptr)}})).at("confirmOpenNewProject2").is_null(),
+                  "confirmOpenNewProject2 accepts null (OPEN_PROJECT_ASK default)");
+            const Json bad[] = {
+                {{"unknown", true}},
+                {{"confirmExit", "yes"}},
+                {{"processCloseConfirmation", "KILL"}},
+                {{"confirmOpenNewProject2", 3}},
+                {{"inactiveTimeout", "15"}},
+                {{"defaultProjectDirectory", std::string(513, 'x')}},
+            };
+            for (const auto& patch : bad) expect_error("INVALID_SETTINGS", [&] { store.update_general(patch); });
+            // A state file without "general" (older build) still loads and gains the key on first save.
+            auto legacy = Json::parse(get(file));
+            legacy.erase("general");
+            put(file, legacy.dump());
+            const auto merged = ProjectStore(file).update_general({{"deleteToBin", false}});
+            check(merged.at("reopenLastProject") == true && merged.at("deleteToBin") == false,
+                  "Missing general state falls back to the data-class defaults");
+        });
+
         run("defaults reads are side-effect free and first save creates config parents", [&] {
             const auto file = temporary.path / "application" / "nested" / "projects.json";
             const auto project = create_project(temporary.path, "default-project", "empty");
@@ -434,7 +475,7 @@ int main() {
             const auto root_b = open_result(b).at("root").get<std::string>();
             first.opened(open_result(a));
             const auto editor = first.update_settings({{"fontSize", 32}, {"tabSize", 8}, {"wordWrap", true},
-                                                        {"lineNumbers", false}, {"restoreLastProject", true}, {"tabLimit", 12}});
+                                                        {"lineNumbers", false}, {"showIndentGuides", true}, {"tabLimit", 12}});
             check(editor.at("tabLimit") == 12, "tabLimit round-trips through the settings patch");
             check(second.state().at("settings") == editor, "Already-created store instances must not have stale caches");
             const Json custom = {{"excludedDirs", Json::array({".git", utf8(u8"临时 目录"), "out"})},
@@ -459,7 +500,7 @@ int main() {
                 {{"fontSize", 14.0}}, {{"fontSize", "14"}}, {{"fontSize", true}},
                 {{"fontSize", (std::numeric_limits<std::uint64_t>::max)()}},
                 {{"tabSize", 3}}, {{"tabSize", 2.0}}, {{"wordWrap", 1}}, {{"lineNumbers", nullptr}},
-                {{"restoreLastProject", "true"}}, {{"fontSize", 12}, {"unknown", true}},
+                {{"showIndentGuides", "true"}}, {{"fontSize", 12}, {"unknown", true}},
                 {{"tabLimit", 0}}, {{"tabLimit", 101}}, {{"tabLimit", "30"}}, {{"tabLimit", 8.5}}
             };
             for (const auto& patch : bad_editor) expect_error("INVALID_SETTINGS", [&] { first.update_settings(patch); });
@@ -537,10 +578,9 @@ int main() {
             store.opened(opened);
             const auto valid = Json::parse(get(file));
             std::vector<std::string> bad{"", "{", "[]", "{}", "null", "{\"settings\":{},\"settings\":{}}", std::string("\xFF", 1)};
+            // 注意：**未知键不再算损坏** —— 那是升级路径（旧版本写过、新版本删掉的键）而不是脏数据，
+            // 对齐 IDEA 的 XmlSerializer（忽略未知标签）。它现在被断言在“legacy 键被剪掉”那条用例里。
             auto invalid = valid;
-            invalid["settings"]["theme"] = "dark";
-            bad.push_back(invalid.dump());
-            invalid = valid;
             invalid["settings"]["fontSize"] = 14.5;
             bad.push_back(invalid.dump());
             invalid = valid;
@@ -590,6 +630,25 @@ int main() {
             const auto created = create_project(temporary.path, "legacy-project", "empty");
             store.opened(open_result(created));
             check(store.state().at("recentProjects").size() == 1, "writing after a migrated read still works");
+            // 反方向的情形：文件里带着**当前版本已经删掉的键**（真事：`syncOnFocus` /
+            // `deleteToTrash` / `restoreLastProject` / `autoSave` 都在搬去 GeneralSettings 时删过）。
+            // 读盘必须照样成功并把这些键剪掉，否则升级一次就会让用户看到
+            // "The saved configuration is invalid; the original file was kept." ——
+            // IDEA 的 XmlSerializer 对未知标签是忽略，不是报错。
+            Json outdated = document();
+            outdated["settings"]["theme"] = "dark";          // 曾经的编辑器键，现在不认识了
+            outdated["settings"]["syncOnFocus"] = true;
+            outdated["settings"]["deleteToTrash"] = true;
+            outdated["settings"]["autoSave"] = true;
+            outdated["settings"]["restoreLastProject"] = true;
+            outdated["general"] = {{"legacyKeyFromAnOlderBuild", 1}};
+            put(file, outdated.dump());
+            ProjectStore upgraded(file);
+            check(upgraded.state().at("settings") == defaults(), "被删掉的键被剪掉，其余取默认值");
+            check(!upgraded.state().at("settings").contains("syncOnFocus"), "剪枝后不再出现该键");
+            check(upgraded.state().at("general").contains("legacyKeyFromAnOlderBuild") == false,
+                  "general 里的未知键同样被剪掉");
+            check(get(file) == outdated.dump(), "剪枝发生在内存里，不重写用户的文件");
             Json broken = document();
             broken["settings"]["fontSize"] = "14";
             put(file, broken.dump());

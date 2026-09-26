@@ -608,6 +608,26 @@ void write_temporary(TemporaryFile& temporary, const std::string& content) {
     temporary.handle.reset();
 }
 
+// The plain write IDEA falls back to when "safe write" is off (SafeWriteRequestor.java:12-15):
+// the target is truncated in place, so a failure in the middle leaves a partial file — the
+// exact risk the temporary-file path exists to remove.
+void write_directly(const fs::path& target, const std::string& content) {
+    Handle handle(CreateFileW(api_path(target).c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                              TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!handle) win_error("无法打开文件进行写入");
+    std::size_t offset = 0;
+    while (offset < content.size()) {
+        DWORD written = 0;
+        if (!WriteFile(handle.get(), content.data() + offset,
+                       static_cast<DWORD>(content.size() - offset), &written, nullptr))
+            win_error("写入文件失败");
+        if (!written) fail("IO_ERROR", "写入文件时未能继续写入。");
+        offset += written;
+    }
+    if (!FlushFileBuffers(handle.get())) win_error("无法将内容刷新到磁盘");
+}
+
 bool has_identity(const TemporaryFile& file, const BY_HANDLE_FILE_INFORMATION& expected) {
     Handle handle(CreateFileW(file.name.c_str(), FILE_READ_ATTRIBUTES,
                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -874,7 +894,8 @@ Json Workspace::convert_line_separators(const std::string& relative, const std::
 }
 
 Json Workspace::write(const std::string& relative, const std::string& content,
-                      const std::string& expectedVersion, const std::string& encoding, bool bom) {
+                      const std::string& expectedVersion, const std::string& encoding, bool bom,
+                      bool safe_write) {
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
         require_open(root_);
@@ -904,6 +925,13 @@ Json Workspace::write(const std::string& relative, const std::string& content,
         }
         Json result = {{"version", fingerprint(bytes)}, {"bytes", bytes.size()},
                        {"encoding", chosen.key}, {"bom", bom}};
+        // "Use safe write" off: IDEA writes straight into the file (SafeWriteRequestor
+        // .java:12-15). The conflict and read-only checks above still run — they guard
+        // against losing someone else's work, which is not what this option trades away.
+        if (!safe_write) {
+            write_directly(target, bytes);
+            return result;
+        }
         auto temporary = TemporaryFile::create(pinned.path);
         write_temporary(temporary, bytes);
         auto backup = TemporaryFile::create(pinned.path);

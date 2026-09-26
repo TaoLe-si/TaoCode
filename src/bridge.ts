@@ -39,7 +39,7 @@ export interface RecentProject {
 // AppearanceConfigurable (IdeScaleTransformer bounds 50-400, compact mode, full
 // paths in the window header). They are appearance state but ride the same
 // settings.update channel as the editor flags, so one save covers both pages.
-export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; restoreLastProject: boolean; syncOnFocus: boolean; autoSave: boolean; showIndentGuides: boolean; bracketMatching: boolean; tabLimit: number; useTabCharacter: boolean; showWhitespaces: boolean; formatOnSave: boolean; deleteToTrash: boolean; uiZoomPercent: number; compactMode: boolean; fullPathsInWindowHeader: boolean;
+export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; showIndentGuides: boolean; bracketMatching: boolean; tabLimit: number; useTabCharacter: boolean; showWhitespaces: boolean; formatOnSave: boolean; uiZoomPercent: number; compactMode: boolean; fullPathsInWindowHeader: boolean;
   // IDEA AppearanceConfigurable 'Tree Views' group: indent guides and smaller
   // tree indents; FileTree renders both.
   showTreeIndentGuides: boolean; compactTreeIndents: boolean;
@@ -87,9 +87,9 @@ export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: b
   // IDEA UISettingsState.mainMenuDisplayMode: UNDER_HAMBURGER_BUTTON /
   // MERGED_WITH_MAIN_TOOLBAR / SEPARATE_TOOLBAR -> the three top-bar layouts.
   mainMenuDisplayMode: 'hamburger' | 'merged' | 'separate';
-  // IDEA GeneralSettings.isSupportScreenReaders: announce notifications to assistive
-  // technology and suppress hover tooltips (see the checkbox comment in IDEA).
-  supportScreenReaders: boolean }
+}
+// IDEA GeneralSettings.isSupportScreenReaders moved to GeneralSettingsState: the state lives
+// in ide.general.xml and AppearanceConfigurable.kt:363-372 is the row that edits it.
 // IDEA's Run Configuration: a program with arguments, a working directory, an
 // environment block and an optional "before launch" task chain. `type` picks the
 // runner (shell through cmd.exe vs a direct executable).
@@ -117,8 +117,54 @@ export interface JavaProjectSettings { jdkHome: string; jdkName: string; sourceP
 export const defaultJavaProjectSettings: JavaProjectSettings = { jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] }
 export interface ProjectSettings { excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string> }
 export interface ProjectForm { parent: string; name: string; template: 'empty' | 'cpp' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
-export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
-export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, restoreLastProject: false, syncOnFocus: true, autoSave: false, showIndentGuides: true, bracketMatching: true, tabLimit: 30, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, deleteToTrash: true, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'merged', supportScreenReaders: false }
+export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; general?: GeneralSettingsState; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
+// Source: platform/ide-core/src/com/intellij/ide/GeneralSettings.kt:227-266
+// (GeneralSettingsState) — the application-level PersistentStateComponent stored
+// in ide.general.xml that GeneralSettingsConfigurable.kt binds its panel to.
+// Field names mirror the Kotlin data class; confirmOpenNewProject2 stays
+// null-able exactly as in the source (null means "ask", OPEN_PROJECT_ASK).
+export type ProcessCloseConfirmation = 'ASK' | 'TERMINATE' | 'DISCONNECT'
+export interface GeneralSettingsState {
+  defaultProjectDirectory: string
+  reopenLastProject: boolean
+  deleteToBin: boolean
+  autoSyncFiles: boolean
+  backgroundSyncFiles: boolean
+  autoSaveFiles: boolean
+  autoSaveIfInactive: boolean
+  isUseSafeWrite: boolean
+  confirmExit: boolean
+  isShowWelcomeScreen: boolean
+  confirmOpenNewProject2: number | null  // OPEN_PROJECT_ASK=-1 / NEW_WINDOW=0 / SAME_WINDOW=1 / ATTACH=2
+  processCloseConfirmation: ProcessCloseConfirmation
+  inactiveTimeout: number                // SAVE_FILES_AFTER_IDLE_SEC = UINumericRange(15, 1, 300)
+  supportScreenReaders: boolean          // GeneralSettingsState.supportScreenReaders (kt:265), getter :179-186
+  autoShowProcessPopup: boolean          // ide.windowSystem.autoShowProcessPopup (registry.properties:209-210，默认 false)
+}
+// Defaults are the Kotlin data-class defaults (GeneralSettings.kt:230-265):
+// reopenLastProject/deleteToBin/autoSyncFiles/backgroundSyncFiles/autoSaveFiles/
+// isUseSafeWrite/confirmExit/isShowWelcomeScreen true; autoSaveIfInactive and
+// supportScreenReaders false
+// with inactiveTimeout 15; confirmOpenNewProject2 null (ask);
+// processCloseConfirmation 'ASK'.
+export const defaultGeneralSettings: GeneralSettingsState = {
+  defaultProjectDirectory: '',
+  reopenLastProject: true,
+  deleteToBin: true,
+  autoSyncFiles: true,
+  backgroundSyncFiles: true,
+  autoSaveFiles: true,
+  autoSaveIfInactive: false,
+  isUseSafeWrite: true,
+  confirmExit: true,
+  isShowWelcomeScreen: true,
+  confirmOpenNewProject2: null,
+  processCloseConfirmation: 'ASK',
+  inactiveTimeout: 15,
+  supportScreenReaders: false,
+  autoShowProcessPopup: false,
+}
+export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'merged' }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
@@ -133,7 +179,7 @@ export const defaultProjectSettings: ProjectSettings = {
   java: structuredClone(defaultJavaProjectSettings),
   fileAssociations: {},
 }
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'file.readBinary' | 'file.usages' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'run.start' | 'run.write' | 'run.stop' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'app.memory' | 'dialog.pickImage' | 'app.readImage'
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'file.readBinary' | 'file.usages' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'run.start' | 'run.write' | 'run.stop' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'app.memory' | 'dialog.pickImage' | 'app.readImage'
 export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string }
 // The repository's configured author (`git config user.name` / `user.email`), which IDEA's
 // CommitAuthorComponent shows above the commit actions and can override per commit.
@@ -801,7 +847,7 @@ const samples = new Map<string, string>([
   ['CMakeLists.txt', 'cmake_minimum_required(VERSION 3.24)\nproject(taocode_preview LANGUAGES CXX)\n\nset(CMAKE_CXX_STANDARD 20)\nadd_executable(preview src/main.cpp)\n'],
 ])
 const versions = new Map([...samples.keys()].map(path => [path, 1]))
-const previewState: AppState = { recentProjects: [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: '', available: true }], settings: { ...defaultEditorSettings }, lastProject: null, gitAvailable: false, defaultParent: '' }
+const previewState: AppState = { recentProjects: [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: '', available: true }], settings: { ...defaultEditorSettings }, general: { ...defaultGeneralSettings }, lastProject: null, gitAvailable: false, defaultParent: '' }
 let previewProjectSettings: ProjectSettings = structuredClone(defaultProjectSettings)
 function previewEntries(path: string): Entry[] {
   const prefix = path ? `${path}/` : ''
@@ -957,13 +1003,44 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
       previewProjectSettings = next
       return { settings: structuredClone(previewProjectSettings), entries: previewEntries('') }
     }
+    // Source: GeneralSettings.kt:227-266 — the same fields the native side
+    // validates in validate_general_patch; the preview keeps one state object
+    // like GeneralSettings.getInstance() does.
+    case 'settings.general.update': {
+      const patch = (params.general ?? {}) as Record<string, unknown>
+      if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
+      for (const [key, value] of Object.entries(patch)) {
+        const accepted = key === 'defaultProjectDirectory' || key === 'reopenLastProject' ||
+          key === 'deleteToBin' || key === 'autoSyncFiles' || key === 'backgroundSyncFiles' ||
+          key === 'autoSaveFiles' || key === 'autoSaveIfInactive' || key === 'isUseSafeWrite' ||
+          key === 'confirmExit' || key === 'isShowWelcomeScreen' || key === 'confirmOpenNewProject2' ||
+          key === 'processCloseConfirmation' || key === 'inactiveTimeout' || key === 'supportScreenReaders' ||
+          key === 'autoShowProcessPopup'
+        if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
+        if (key === 'inactiveTimeout') {
+          // UINumericRange(15, 1, 300): values outside the range snap to the bounds.
+          if (!Number.isInteger(value)) throw new BridgeError('INVALID_SETTINGS', 'inactiveTimeout 必须是整数')
+        } else if (key === 'confirmOpenNewProject2') {
+          if (value !== null && ![-1, 0, 1, 2].includes(Number(value))) throw new BridgeError('INVALID_SETTINGS', '无效设置：confirmOpenNewProject2')
+        } else if (key === 'processCloseConfirmation') {
+          if (!['ASK', 'TERMINATE', 'DISCONNECT'].includes(String(value))) throw new BridgeError('INVALID_SETTINGS', '无效设置：processCloseConfirmation')
+        } else if (key === 'defaultProjectDirectory') {
+          if (typeof value !== 'string' || value.length > 512) throw new BridgeError('INVALID_SETTINGS', '无效设置：defaultProjectDirectory')
+        } else if (typeof value !== 'boolean') throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
+      }
+      const merged = { ...defaultGeneralSettings, ...previewState.general, ...patch } as GeneralSettingsState
+      // GeneralSettings.inactiveTimeout clamps through SAVE_FILES_AFTER_IDLE_SEC.fit (kt:193-202).
+      merged.inactiveTimeout = Math.min(300, Math.max(1, merged.inactiveTimeout))
+      previewState.general = merged
+      return structuredClone(merged)
+    }
     case 'settings.update': {
       const patch = params.settings as Record<string, unknown>
       if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
       for (const [key, value] of Object.entries(patch)) {
         const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
-          key === 'lineNumbers' || key === 'restoreLastProject' || key === 'syncOnFocus' ||
-          key === 'autoSave' || key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' ||
+          key === 'lineNumbers' ||
+          key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' ||
           key === 'useTabCharacter' || key === 'showWhitespaces' || key === 'formatOnSave' ||
           key === 'uiZoomPercent' || key === 'compactMode' || key === 'fullPathsInWindowHeader' ||
           key === 'showTreeIndentGuides' || key === 'compactTreeIndents' ||
@@ -975,8 +1052,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           key === 'useContrastScrollbars' || key === 'colorBlindness' || key === 'uiFontFamily' || key === 'uiFontSize' ||
           key === 'backgroundImagePath' || key === 'backgroundImageOpacity' || key === 'backgroundImageFill' ||
           key === 'backgroundImageKeepRatio' || key === 'presentationMode' || key === 'presentationModeFontSize' ||
-          key === 'mainMenuDisplayMode' || key === 'supportScreenReaders' ||
-          key === 'deleteToTrash'
+          key === 'mainMenuDisplayMode'
         if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
         if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
           : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'

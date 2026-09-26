@@ -29,7 +29,7 @@ add_library(taocode_workspace native/workspace.cpp)
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/git_clone.cpp native/git.cpp)
+add_library(taocode_projects native/projects.cpp native/settings_schema.cpp native/git_clone.cpp native/git.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history)
 
 add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cpp)

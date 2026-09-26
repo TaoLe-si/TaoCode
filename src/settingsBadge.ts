@@ -24,7 +24,8 @@ export const NEW_BADGE_TEXT = '新'
  * Appearance), whose option set — line numbers, indent guides, whitespaces, caret/appearance —
  * lives in TaoCode's 编辑器 page.
  */
-export const NEW_OPTION_PAGES: readonly string[] = ['editor']
+// 新增选项所在的页：编辑器页已按 IDEA 拆成子页，“新选项”徽标跟着真正承载新行的那页走。
+export const NEW_OPTION_PAGES: readonly string[] = ['editor.general.appearance']
 
 export type BadgeCounts = Readonly<Record<string, number>>
 

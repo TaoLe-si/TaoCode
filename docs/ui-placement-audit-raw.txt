@@ -1,0 +1,61 @@
+# 状态索引 100 个字段 / Configurable 338 个
+
+
+===== TaoCode 页：appearance（外观） =====
+  compactMode                      组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: AppearanceConfigurable
+  fullPathsInWindowHeader          组件: UISettings.kt                访问器: fullPathsInWindowHeader      归属页: AppearanceConfigurable
+  supportScreenReaders             组件: GeneralSettings.kt           访问器: isSupportScreenReaders       归属页: AppearanceConfigurable
+  useContrastScrollbars            组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: AppearanceConfigurable
+  colorBlindness                   组件: UISettings.kt                访问器: colorBlindness               归属页: （没有 Configurable 引用它）
+  backgroundImageFill              组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  backgroundImageKeepRatio         组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  presentationMode                 组件: UISettings.kt                访问器: presentationMode             归属页: （没有 Configurable 引用它）
+  mainMenuDisplayMode              组件: UISettings.kt                访问器: mainMenuDisplayMode          归属页: AppearanceConfigurable
+  showTreeIndentGuides             组件: UISettings.kt                访问器: showTreeIndentGuides         归属页: AppearanceConfigurable
+  compactTreeIndents               组件: UISettings.kt                访问器: compactTreeIndents           归属页: AppearanceConfigurable
+  smoothScrolling                  组件: UISettings.kt                访问器: smoothScrolling              归属页: AppearanceConfigurable
+  keepPopupsForToggles             组件: UISettings.kt                访问器: keepPopupsForToggles         归属页: AppearanceConfigurable
+  dndWithPressedAltOnly            组件: UISettings.kt                访问器: dndWithPressedAltOnly        归属页: AppearanceConfigurable
+  showIconsInMenus                 组件: UISettings.kt                访问器: showIconsInMenus             归属页: AppearanceConfigurable
+  showToolWindowBars               组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  showToolWindowNames              组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  showToolWindowNumbers            组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  rememberSizeForEachToolWindow    组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  leftSideBySide                   组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  rightSideBySide                  组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  wideScreenSupport                组件: UISettings.kt                访问器: wideScreenSupport            归属页: AppearanceConfigurable
+  uiZoomPercent                    组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  uiFontFamily                     组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  uiFontSize                       组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+
+===== TaoCode 页：editor（编辑器） =====
+  useTabCharacter                  组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  showWhitespaces                  组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  formatOnSave                     组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  wordWrap                         组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  lineNumbers                      组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  showIndentGuides                 组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  bracketMatching                  组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  tabSize                          组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  fontSize                         组件: NotRoamableUiSettings.kt     访问器: fontSize                     归属页: （没有 Configurable 引用它）
+
+===== TaoCode 页：general（系统设置） =====
+  confirmExit                      组件: GeneralSettings.kt           访问器: isConfirmExit                归属页: GeneralSettingsConfigurable
+  processCloseConfirmation         组件: GeneralSettings.kt           访问器: processCloseConfirmation     归属页: GeneralSettingsConfigurable
+  reopenLastProject                组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  defaultProjectDirectory          组件: GeneralLocalSettings.kt, GeneralSettings.kt 访问器: defaultProjectDirectory      归属页: GeneralSettingsConfigurable
+  deleteToBin                      组件: GeneralSettings.kt           访问器: isDeletingToBin              归属页: GeneralSettingsConfigurable
+  autoSaveIfInactive               组件: GeneralSettings.kt           访问器: isAutoSaveIfInactive         归属页: GeneralSettingsConfigurable
+  autoSaveFiles                    组件: GeneralSettings.kt           访问器: isSaveOnFrameDeactivation    归属页: GeneralSettingsConfigurable
+  isUseSafeWrite                   组件: GeneralSettings.kt           访问器: isUseSafeWrite               归属页: GeneralSettingsConfigurable
+  autoSyncFiles                    组件: GeneralSettings.kt           访问器: isSyncOnFrameActivation      归属页: GeneralSettingsConfigurable
+  backgroundSyncFiles              组件: GeneralSettings.kt           访问器: isBackgroundSync             归属页: GeneralSettingsConfigurable
+  inactiveTimeout                  组件: GeneralSettings.kt           访问器: inactiveTimeout              归属页: GeneralSettingsConfigurable
+  isShowWelcomeScreen              组件: GeneralSettings.kt           访问器: isShowWelcomeScreen          归属页: （没有 Configurable 引用它）
+  confirmOpenNewProject2           组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+
+===== TaoCode 页：commit（提交） =====
+  subjectLimit                     组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  bodyLimit                        组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  subjectBodySeparation            组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）
+  wrapOnTyping                     组件: （未在状态文件里找到）                  访问器: （未找到访问器）                     归属页: （没有 Configurable 引用它）

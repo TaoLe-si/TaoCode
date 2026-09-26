@@ -52,6 +52,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; width: max-content; min-width: 244px; max-width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 80px); overflow: auto; z-index: 20; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--menu-radius); padding: var(--space-1); box-shadow: var(--menu-shadow); transform-origin: top left; }
 .dropdown > .menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--menu-row-height); background: transparent; border: 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); text-align: left; font-size: 12px; line-height: 20px; }
 .dropdown > .menu-item:hover:not(:disabled), .dropdown > .menu-item:focus-visible { background: var(--selected); color: var(--bright); outline: none; }
+/* IDEA 的子菜单（ActionGroup popup="true"）：在父行右侧展开。用 fixed 定位，否则会被父菜单的
+   overflow:auto 裁掉；坐标与 maxHeight 在 openSubmenu() 里按父行 rect 计算，放不下向上翻转。 */
+.dropdown.menu-submenu { position: fixed; top: auto; left: 0; z-index: 901; transform-origin: top left;
+  animation: menu-submenu-in .16s cubic-bezier(.16, 1, .3, 1); }
+/* Teleport 到 body 后不再继承父菜单的层叠上下文，必须自己抬到编辑器浮层（quickdoc/signature 是
+   900）之上，否则会被它们或 z-40 的工具弹层盖住。仍低于模态遮罩（50 之上的模态内容层）。 */
+.dropdown.menu-submenu.menu-submenu-above { transform-origin: bottom left; }
+@keyframes menu-submenu-in { from { opacity: 0; transform: translateY(-4px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) { .dropdown.menu-submenu { animation: none; } }
+/* 子菜单的父行外面包了一层 anchor，`.dropdown > .menu-item` 够不到它 —— 不补这条规则，
+   父行就既没有 hover 高亮、子菜单打开时也不会保持选中（IDEA 的父行在子菜单打开时是选中态）。 */
+.menu-submenu-trigger { display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  min-height: var(--menu-row-height); background: transparent; border: 0;
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); text-align: left;
+  font-size: 12px; line-height: 20px; }
+.menu-submenu-trigger:hover:not(:disabled), .menu-submenu-trigger:focus-visible,
+.menu-submenu-trigger[aria-expanded='true'] { background: var(--selected); color: var(--bright); outline: none; }
+.menu-submenu-trigger .menu-item-title { flex: 1; }
+.menu-submenu-caret { margin-left: auto; color: var(--muted); }
+/* 汉堡面板里子菜单的行（没有二级浮层，所以用缩进表达层级）。 */
+.hamburger-item.hamburger-child { margin-left: var(--space-4); }
+/* Zen 模式的悬浮退出按钮：常驻右上角，盖过画布内容。 */
+.zen-exit { position: fixed; z-index: 60; top: var(--space-2); right: var(--space-2);
+  display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated);
+  color: var(--secondary); font-size: 11px; }
+.zen-exit:hover { color: var(--bright); background: var(--hover); }
 .menu-item-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 14px; color: var(--secondary); }
 .menu-item-title, .recent-menu-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-item > kbd { margin-left: 20px; font-size: 10px; color: var(--muted); }
@@ -215,6 +242,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .breadcrumb-file > svg { flex-shrink: 0; }
 .editor-save-state { margin-left: auto; padding-left: 10px; color: var(--muted); font-size: 10px; }
 .editor-stage { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+/* IDEA's drag-to-split preview: the half of the editor area the dropped tab will occupy
+   (TabsUtil.updateBoundsWithDropSide, TabsUtil.java:95-111). The centre is not a split, so
+   its full-area outline is dashed to read as "stays in this group". */
+.tab-drop-preview { position: absolute; pointer-events: none; z-index: 6; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-xs); }
+.tab-drop-preview.side-center { border-style: dashed; }
+/* ScrollableSingleRowLayout: a single-row strip never overflows — the tab that stops fitting
+   is clipped and the rest move behind the "…" button, so the row must not scroll. */
+.editor-tabs { overflow: hidden; }
+.editor-tabs .file-tab { overflow: hidden; flex: 0 0 auto; }
+.editor-tabs .file-tab .tab-select { min-width: 0; }
+.tab-more { flex: 0 0 auto; }
+.tab-more-menu { min-width: 200px; max-width: 320px; }
+.tab-more-menu .tab-more-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 /* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
    above the caret line, dismissed by the next key, a text change or a scroll. */
@@ -568,8 +608,11 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .help-dialog { position: relative; width: 520px; max-width: 100%; max-height: 100%; overflow: auto; padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--elevated); box-shadow: var(--shadow-3); }
 .help-close { position: absolute; right: 13px; top: 13px; }
 .help-dialog h2 { font: 22px var(--font-brand); color: var(--bright); padding-right: 20px; }
-.help-dialog h2 > span { font-size: 11px; color: var(--muted); margin-left: 9px; }
-.help-dialog > p { font-size: 12px; color: var(--secondary); line-height: 1.8; }
+.help-dialog h2 > span { font-size: 11px; color: var(--muted); margin-left: 9px; }.help-dialog > p { font-size: 12px; color: var(--secondary); line-height: 1.8; }
+/* IDEA's exit confirmation (ApplicationExitDialog): a short prompt, the "do not ask again"
+   checkbox and the two buttons — narrower than the help dialog it is built on. */
+.exit-dialog { width: 400px; }
+.exit-dialog .leave-actions { margin-top: 16px; }
 .help-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); margin: var(--space-5) 0; color: var(--text); font-size: 12px; }
 .help-note { color: var(--muted); font-size: 11px; line-height: 1.8; border-top: 1px solid var(--line-strong); padding-top: 14px; }
 .muted { color: var(--muted); }

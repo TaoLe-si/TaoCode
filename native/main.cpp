@@ -748,13 +748,29 @@ struct App {
         if (window) DestroyWindow(window);
     }
 
-    Json select_directory(const wchar_t* title) {
+    // IDEA's project choosers open in GeneralLocalSettings.defaultProjectDirectory when it is
+    // set (WelcomeScreenProjectProvider.kt:231, AttachProjectAction.kt:73) and in the OS
+    // default otherwise. `SetFolder` has to be handed a folder that exists — combined with
+    // FOS_PATHMUSTEXIST a stale path makes the dialog fail to appear at all — so a value that
+    // is not a directory is ignored and the dialog simply opens where it normally would.
+    static void set_initial_folder(IFileOpenDialog* dialog, const std::string& initial) {
+        if (initial.empty()) return;
+        const fs::path folder = fs::path(wide(initial));
+        std::error_code error;
+        if (!fs::is_directory(folder, error)) return;
+        ComPtr<IShellItem> item;
+        if (FAILED(SHCreateItemFromParsingName(folder.c_str(), nullptr, IID_PPV_ARGS(&item)))) return;
+        dialog->SetFolder(item.Get());  // best effort: failing here still opens the dialog
+    }
+
+    Json select_directory(const wchar_t* title, const std::string& initial = std::string()) {
         ComPtr<IFileOpenDialog> dialog;
         check(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)), "Create folder picker");
         DWORD options{};
         check(dialog->GetOptions(&options), "Get folder options");
         check(dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT), "Set folder options");
         dialog->SetTitle(title);
+        set_initial_folder(dialog.Get(), initial);
         const auto result = dialog->Show(window);
         if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return nullptr;
         check(result, "Open folder picker");
@@ -984,7 +1000,7 @@ struct App {
                 result = projects->state();
                 result["gitAvailable"] = !taocode::find_git_executable().empty();
                 result["defaultParent"] = default_parent;
-            } else if (method == "dialog.pickDirectory") result = select_directory(L"选择项目存放目录");
+            } else if (method == "dialog.pickDirectory") result = select_directory(L"选择项目存放目录", params.value("initial", std::string()));
             else if (method == "dialog.pickImage") result = select_image();
             // Restores a previously chosen background image after a restart: the path
             // was persisted in settings, the bytes are re-read here.
@@ -994,7 +1010,7 @@ struct App {
                 else result = read_image(fs::path(wide(path)));
             }
             else if (method == "workspace.open") {
-                const auto path = params.contains("path") ? params.at("path") : select_directory(L"打开 TaoCode 工作区");
+                const auto path = params.contains("path") ? params.at("path") : select_directory(L"打开 TaoCode 工作区", params.value("initial", std::string()));
                 result = path.is_null() ? Json(nullptr) : open_project(fs::path(wide(path.get<std::string>())));
             } else if (method == "workspace.close") {
                 projects->closed();
@@ -1026,7 +1042,10 @@ struct App {
                 for (const auto& entry : params.at("paths")) paths.push_back(entry.get<std::string>());
                 result = projects->forget_many(paths);
             }
-            else if (method == "settings.update") {
+            else if (method == "settings.general.update") {
+                // GeneralSettings (ide.general.xml): the System Settings page's backing state.
+                result = projects->update_general(params.at("general"));
+            } else if (method == "settings.update") {
                 result = projects->update_settings(params.at("settings"));
                 // "Always show full path in window header" applies live, like every
                 // other appearance change in IDEA's dialog.
@@ -1065,7 +1084,8 @@ struct App {
                 const auto path = params.at("path").get<std::string>();
                 const auto content = params.at("content").get<std::string>();
                 result = workspace->write(path, content, params.at("expectedVersion").get<std::string>(),
-                                          params.value("encoding", std::string("utf-8")), params.value("bom", false));
+                                          params.value("encoding", std::string("utf-8")), params.value("bom", false),
+                                          params.value("safeWrite", true));
                 if (history) {
                     try { history->record(path, content, "save"); }
                     catch (const taocode::WorkspaceError& error) {

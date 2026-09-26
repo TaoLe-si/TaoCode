@@ -81,6 +81,17 @@ export function unsplitModel<T>(model: SplitModel<T>): void {
   model.focused = 0
 }
 
+// IDEA's drag-to-split can ask for the *new* group to be the first one (dropping near the
+// left or top edge). The pane order is fixed in this model — group 0 renders first — so the
+// contents are exchanged instead of the groups being reordered. Both the tab lists and each
+// group's selection travel together; `focused` is the caller's business because only it
+// knows which group the user is now looking at.
+export function swapGroups<T>(model: SplitModel<T>): void {
+  const first = model.groups[0]
+  model.groups[0] = model.groups[1]
+  model.groups[1] = first
+}
+
 export function unsplitAllModel<T>(model: SplitModel<T>): void {
   model.orientation = 'none'
   model.groups[1].tabs = []

@@ -40,8 +40,16 @@ public:
     // normalized to "crlf" or "lf"; version-checked and read-only-guarded.
     Json convert_line_separators(const std::string& relative, const std::string& separator,
                                  const std::string& content, const std::string& expectedVersion);
+    // `safe_write` is IDEA's "Use "safe write"" (GeneralSettings.isUseSafeWrite,
+    // GeneralSettings.kt:92-97): the bytes are written to a sibling temporary file that
+    // replaces the target only after the content is verified, so a failed save leaves the
+    // original untouched. With it off the target is truncated and written in place, which is
+    // what ObjectUtil/SafeWriteRequestor does when the option is off (SafeWriteRequestor
+    // .java:12-15). The setting's row is "Back up files before saving"
+    // (IdeBundle.properties:85).
     Json write(const std::string& relative, const std::string& content,
-               const std::string& expectedVersion, const std::string& encoding = "utf-8", bool bom = false);
+               const std::string& expectedVersion, const std::string& encoding = "utf-8",
+               bool bom = false, bool safe_write = true);
     // Tree mutations, all confined to the workspace root by the same relative-path
     // guards as read/write (no absolute paths, no '..', no reparse points).
     // IDEA's $Delete on a project-view selection confirms, then removes a populated

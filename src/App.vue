@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { AnimatePresence, motion, useReducedMotion } from 'motion-v'
-import { ArrowLeft, ArrowRight, Braces, FlaskConical, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Braces, FlaskConical, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, MoreHorizontal, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
 import FileTree, { type SyntheticNode } from './components/FileTree.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import SourceControl from './components/SourceControl.vue'
@@ -20,13 +20,21 @@ import ProjectDialog from './components/ProjectDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import ToolWindowHeader from './components/ToolWindowHeader.vue'
 import NoticeList from './components/NoticeList.vue'
-import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, historyNotes, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace } from './bridge'
+import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultGeneralSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, historyNotes, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type GeneralSettingsState, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace } from './bridge'
 import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
 import { parseAnyIssue } from './buildOutput'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings, type CommitMessageInspectionSettings } from './commitMessageInspection'
 import { rankCommands } from './commandSearch'
 import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
-import { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, tabClosingOrder, type Pane, type SplitModel } from './editorGroups'
+import { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, swapGroups, tabClosingOrder, type Pane, type SplitModel } from './editorGroups'
+import { dropSideFor, dropSidePutsNewGroupFirst, splitOrientationForSide, updateBoundsWithDropSide, type DropSide } from './tabDragSplit'
+import { MIN_TAB_WIDTH, layoutSingleRow, preferredTabWidth, type TabStripLayout } from './tabStripLayout'
+import { useSubmenuState } from './menus/submenuState'
+import { createExitConfirmation } from './confirmations/exitConfirmation'
+import { createProcessCloseConfirmation } from './confirmations/processClose'
+import { errorMessage } from './errors'
+import type { MenuRow } from './menus/types'
+import { PROCESS_CLOSE_LABELS, TERMINAL_CAN_DISCONNECT, confirmationResult, processClosePromptText, rememberedSetting, resolveProcessClose, type ProcessCloseChoice, type ProcessCloseConfirmation, type ProcessCloseResult } from './processClose'
 import { locationSnippet } from './recentLocations'
 import { effectiveTemplates, type Template } from './templates'
 import { surroundTemplates, type SurroundTemplate } from './surround'
@@ -705,6 +713,8 @@ const loading = ref(true)
 const appError = ref('')
 const recentProjects = ref<RecentProject[]>([])
 const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings })
+// Source: GeneralSettings.kt (ide.general.xml) — application-level System Settings state.
+const generalSettings = ref<GeneralSettingsState>({ ...defaultGeneralSettings })
 const projectSettings = ref<ProjectSettings>(structuredClone(defaultProjectSettings))
 const gitAvailable = ref(false)
 const defaultParent = ref('')
@@ -842,6 +852,12 @@ const backgroundTasks = computed(() => {
   return tasks
 })
 const progressOpen = ref(false)
+// IDEA 的 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，默认 false；
+// InfoAndProgressPanel.kt:319-321 读一次）：有进程开始跑时自动弹出进度面板。TaoCode 没有注册表
+// 对话框，所以把它升格为持久化设置（系统设置页），语义与默认值都跟源码一致。
+watch(() => backgroundTasks.value.length, (count, previous) => {
+  if (count > (previous ?? 0) && generalSettings.value.autoShowProcessPopup) progressOpen.value = true
+})
 // ProcessPopup.java:100-133 + TasksFinishedDecorator.kt:19-46 — the popup is a real list, not only a
 // running-task list: with nothing running it either says "all background tasks completed" (once
 // something has run) or "no processes are running" (nothing ever did), and ShowProcessWindow
@@ -1159,6 +1175,61 @@ function onTabDragOver(pane: Pane, event: DragEvent) {
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
+// IDEA's drag-to-split (TabsUtil.java:54-111): a tab dropped on the editor *area* near an
+// edge splits it, and the side is decided by which trapezoid the pointer sits in. The
+// preview is the half of the area the dropped file will take.
+const tabDropSide = ref<{ pane: Pane; side: DropSide; bounds: { x: number; y: number; width: number; height: number } } | null>(null)
+function onStageDragOver(pane: Pane, event: DragEvent) {
+  if (!dragTab.value) return
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  const box = target.getBoundingClientRect()
+  const bounds = { x: 0, y: 0, width: box.width, height: box.height }
+  const side = dropSideFor({ x: event.clientX - box.left, y: event.clientY - box.top }, bounds)
+  if (!side) { tabDropSide.value = null; return }
+  tabDropSide.value = { pane, side, bounds: updateBoundsWithDropSide(bounds, side) }
+}
+function onStageDragLeave(event: DragEvent) {
+  // Only when the pointer really left the stage: dragging over a child fires dragleave on
+  // the parent as well, which would flicker the preview away.
+  const target = event.currentTarget as HTMLElement | null
+  const next = event.relatedTarget as Node | null
+  if (target && next && target.contains(next)) return
+  tabDropSide.value = null
+}
+function onStageDrop(pane: Pane, event: DragEvent) {
+  const dragged = dragTab.value
+  const preview = tabDropSide.value
+  dragTab.value = null
+  tabDropSide.value = null
+  if (!dragged) return
+  event.preventDefault()
+  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
+  if (!tab) return
+  const side: DropSide = preview && preview.pane === pane ? preview.side : 'CENTER'
+  const orientation = splitOrientationForSide(side)
+  if (!orientation) {
+    // The centre is a plain move into this group, which is what the strip drop does too.
+    if (dragged.pane === pane) return
+    dropTabOnGroup(splitModel, (item: Tab) => item.path, dragged.pane, tab, pane)
+    return
+  }
+  // splitTabOutIn acts on the focused group, so point it at the group the tab came from.
+  splitModel.focused = dragged.pane
+  splitTabOut(tab, orientation)
+  // IDEA puts the dragged file in the new group; LEFT / TOP ask for that group to come
+  // first, which the fixed pane order cannot express, so the two groups are exchanged.
+  const landedInFirst = groups[0].tabs.some(item => item.path === tab.path)
+  if (dropSidePutsNewGroupFirst(side)) {
+    if (!landedInFirst) swapGroups(splitModel)
+  } else if (landedInFirst) {
+    swapGroups(splitModel)
+  }
+  splitModel.focused = groups[0].tabs.some(item => item.path === tab.path) ? 0 : 1
+}
+function endTabDrag() { dragTab.value = null; tabDropSide.value = null }
 function onTabDrop(pane: Pane, path: string, event: DragEvent) {
   const dragged = dragTab.value
   dragTab.value = null
@@ -1180,6 +1251,102 @@ function onTabStripDrop(pane: Pane, event: DragEvent) {
   if (!tab) return
   dropTabOnGroup(splitModel, (tab: Tab) => tab.path, dragged.pane, tab, pane)
 }
+// IDEA's single-row tab strip (`ScrollableSingleRowLayout`, JBTabsImpl.kt:766-772): the tabs
+// that do not fit are clipped and then dropped behind a "…" button. The layout itself lives
+// in src/tabStripLayout.ts; here we measure the tabs the way the source measures
+// `TabLabel.getPreferredSize()` and feed the numbers in.
+//
+// The natural width is cached per tab key: once widths are applied, measuring the element
+// again would report the width we just set, so a tab is only measured while it is still free
+// to size itself (`node.style.width` cleared for the measurement and restored afterwards).
+const tabNaturalWidths = new Map<string, number>()
+const tabStripLayouts = ref<[TabStripLayout | null, TabStripLayout | null]>([null, null])
+const tabStripNodes: [HTMLElement | null, HTMLElement | null] = [null, null]
+const tabMoreButtonWidth = ref(28)
+const tabMore = ref<{ pane: Pane; x: number; y: number } | null>(null)
+function registerTabStrip(pane: Pane, element: unknown) {
+  tabStripNodes[pane] = (element as HTMLElement | null) ?? null
+}
+function tabKeyOf(pane: Pane, path: string) { return `${pane}:${path}` }
+function measureTabNaturalWidth(node: HTMLElement, key: string): number {
+  const cached = tabNaturalWidths.get(key)
+  if (cached !== undefined) return cached
+  const previousWidth = node.style.width
+  const previousMax = node.style.maxWidth
+  node.style.width = 'auto'
+  node.style.maxWidth = 'none'
+  const width = node.getBoundingClientRect().width
+  node.style.width = previousWidth
+  node.style.maxWidth = previousMax
+  // A dropped tab is `display: none` and reports no box; do not cache that, so the tab is
+  // measured for real the next time it is on screen.
+  if (width < 1) return 0
+  tabNaturalWidths.set(key, width)
+  return width
+}
+function recomputeTabStrip(pane: Pane) {
+  const strip = tabStripNodes[pane]
+  const tabs = groups[pane].tabs
+  if (!strip || !tabs.length) { tabStripLayouts.value[pane] = null; return }
+  const nodes = Array.from(strip.querySelectorAll<HTMLElement>('.file-tab'))
+  const preferredWidths = tabs.map((tab, index) => {
+    const node = nodes[index]
+    if (!node) return MIN_TAB_WIDTH
+    const natural = measureTabNaturalWidth(node, tabKeyOf(pane, tab.path))
+    return natural < 1 ? MIN_TAB_WIDTH : preferredTabWidth(natural, true)
+  })
+  const box = strip.getBoundingClientRect()
+  // `getToFitLength` (:132-150) subtracts the tab-side toolbar, so measure it here.
+  const toolbar = strip.querySelector<HTMLElement>('.tab-toolbar')
+  tabStripLayouts.value[pane] = layoutSingleRow({
+    preferredWidths,
+    stripWidth: box.width,
+    moreButtonWidth: tabMoreButtonWidth.value,
+    sideToolbarMinWidth: toolbar ? toolbar.getBoundingClientRect().width : 0,
+    insetLeft: 0,
+    insetRight: 0,
+    editorTabs: true,
+    gap: 0,
+  })
+}
+function placedTabFor(pane: Pane, index: number) {
+  return tabStripLayouts.value[pane]?.placed.find(entry => entry.index === index) ?? null
+}
+function isTabDropped(pane: Pane, index: number): boolean {
+  const layout = tabStripLayouts.value[pane]
+  return Boolean(layout && layout.dropped.includes(index))
+}
+// `isTabHidden` (ScrollableSingleRowLayout:139-147) — the clipped ones also belong in the
+// "…" list, because only a sliver of them is on screen.
+function tabWidthStyle(pane: Pane, index: number) {
+  const placed = placedTabFor(pane, index)
+  return placed ? { width: `${placed.width}px`, flex: '0 0 auto' } : undefined
+}
+function hiddenTabsFor(pane: Pane): Tab[] {
+  const layout = tabStripLayouts.value[pane]
+  if (!layout) return []
+  const tabs = groups[pane].tabs
+  const indices = new Set(layout.dropped)
+  for (const placed of layout.placed) if (placed.hidden) indices.add(placed.index)
+  return [...indices].sort((a, b) => a - b).map(index => tabs[index]).filter(Boolean)
+}
+function openTabMore(pane: Pane, event: MouseEvent) {
+  const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  tabMore.value = { pane, x: box.left, y: box.bottom }
+}
+let tabStripObserver: ResizeObserver | null = null
+function observeTabStrips() {
+  if (typeof ResizeObserver === 'undefined' || tabStripObserver) return
+  tabStripObserver = new ResizeObserver(() => { recomputeTabStrip(0); recomputeTabStrip(1) })
+  for (const node of tabStripNodes) if (node) tabStripObserver.observe(node)
+}
+// Re-measure whenever the tab set, the split size or the strip's own size changes.
+watch(() => [groups[0].tabs.map(tab => tab.path).join('|'), groups[1].tabs.map(tab => tab.path).join('|'), splitSize.value, splitOrientation.value].join('~'), async () => {
+  await nextTick()
+  recomputeTabStrip(0)
+  recomputeTabStrip(1)
+  observeTabStrips()
+}, { immediate: true })
 // IDEA maps a file to its type by extension; a project can override that mapping
 // ("Associate with File Type…"), and the override drives both the status-bar label
 // and the editor's syntax highlighting.
@@ -1439,7 +1606,12 @@ function changeTheme(value: Theme) {
   catch { notify('主题已切换，但当前环境无法保存主题偏好。', true) }
 }
 function dismissMenu(event: PointerEvent) {
-  if (!(event.target as Element).closest('.menu-anchor')) menu.value = null
+  // 子菜单浮层 Teleport 到了 body：点它的行不属于 .menu-anchor，必须单独放行，
+  // 否则点子菜单项会被当成"点了菜单外"把整条菜单关掉。
+  if (!(event.target as Element).closest('.menu-anchor') && !(event.target as Element).closest('.menu-submenu')) {
+    menu.value = null
+    submenuRow.value = null   // 否则子菜单浮层会在主菜单收起后孤立地留在屏幕上
+  }
   if (!(event.target as Element).closest('.tool-strip-heading')) toolMenu.value = null
   if (!(event.target as Element).closest('.project-widget')) projectWidgetOpen.value = false
   if (!(event.target as Element).closest('.filename-widget')) filenamePopup.value = false
@@ -1619,7 +1791,13 @@ function openStatusMenu(event: MouseEvent) {
   statusMenu.value = { x: event.clientX, y: event.clientY }
 }
 function clearNotices() { noticeLog.value = []; noticeOpen.value = false }
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
+// WindowMenu › Notifications（`PlatformActions.xml:726-728`）：CloseFirstNotification 关掉
+// **最新**一条 —— `pushNotice` 是前插（`[entry, ...kept]`），所以最新就是下标 0；
+// CloseAllNotifications 清空整条日志（复用通知中心的 clearNotices）。
+function closeFirstNotification() {
+  noticeLog.value = noticeLog.value.slice(1)
+  if (!noticeLog.value.length) noticeOpen.value = false
+}
 // IDEA's "Recent Places" collects every place the caret has been: files, symbols and
 // bookmarks alike, most recent first.
 interface Place { kind: '文件' | '符号' | '书签'; path: string; line: number; label: string; edited?: boolean }
@@ -1640,6 +1818,7 @@ async function refreshAppState() {
   const state = await request<AppState>('app.state')
   recentProjects.value = state.recentProjects
   editorSettings.value = state.settings
+  generalSettings.value = state.general ? { ...defaultGeneralSettings, ...state.general } : { ...defaultGeneralSettings }
   gitAvailable.value = state.gitAvailable
   defaultParent.value = state.defaultParent
   appError.value = ''
@@ -1662,7 +1841,7 @@ async function bootstrap() {
       try { pluginList.value = (await request<PluginList>('plugin.list')).plugins }
       catch { pluginList.value = [] }
     }
-    if (state.settings.restoreLastProject && state.lastProject) await openWorkspace(state.lastProject)
+    if (generalSettings.value.reopenLastProject && state.lastProject) await openWorkspace(state.lastProject)
   } catch (error) { appError.value = errorMessage(error) }
   finally { loading.value = false }
 }
@@ -1724,7 +1903,9 @@ async function openWorkspace(path?: string) {
   if (working.value || !await confirmLeave('切换项目')) return
   busy.value = true
   try {
-    const result = await request<Workspace | null>('workspace.open', path ? { path } : {})
+    // The folder picker opens in the configured default project directory when there is one
+    // and the host's suggestion otherwise (see defaultProjectParent()).
+    const result = await request<Workspace | null>('workspace.open', path ? { path } : { initial: defaultProjectParent() })
     if (!result) return
     await activateWorkspace(result)
     notify(isDesktop ? `已打开 ${result.root}` : '已打开内存示例；保存不会写入磁盘。')
@@ -1776,19 +1957,31 @@ async function forgetProjects(paths: string[]) {
   } catch (error) { appError.value = errorMessage(error) }
   finally { busy.value = false }
 }
+// IDEA's "Default project directory" is a *local* preference (GeneralSettings.kt:223-225 and
+// GeneralLocalSettings.kt:60-63, which is why the settings page calls it 默认项目目录) used by
+// the welcome screen and the attach dialog when a project has to be placed somewhere new —
+// WelcomeScreenProjectProvider.kt:231, AttachProjectAction.kt:73. It overrides the directory
+// the host suggests (the OS documents folder, `defaultParent` from app.state), so an empty
+// setting keeps today's behaviour.
+function defaultProjectParent(): string {
+  return generalSettings.value.defaultProjectDirectory.trim() || defaultParent.value
+}
 async function beginProject(mode: 'create' | 'clone') {
   menu.value = null
   if (working.value || !await confirmLeave(mode === 'create' ? '创建并打开新项目' : '克隆并打开项目')) return
   projectError.value = ''
   cloneProgress.splice(0)
-  projectForm.value = { parent: defaultParent.value, name: 'untitled', template: 'empty', source: '' }
+  projectForm.value = { parent: defaultProjectParent(), name: 'untitled', template: 'empty', source: '' }
   projectMode.value = mode
 }
 async function browseParent() {
   if (busy.value || projectBusy.value) return
   busy.value = true
   try {
-    const path = await request<string | null>('dialog.pickDirectory')
+    // Re-open the picker where the form currently points (and in the configured default
+    // project directory when the form is still empty).
+    const start = projectForm.value.parent.trim() || defaultProjectParent()
+    const path = await request<string | null>('dialog.pickDirectory', { initial: start })
     if (path) projectForm.value.parent = path
   } catch (error) { projectError.value = errorMessage(error) }
   finally { busy.value = false }
@@ -1818,8 +2011,12 @@ async function cancelProject() {
 }
 // IDEA remembers the last-edited configurable (project.structure.last.edited); the
 // Window menu jumps straight into a section, so the dialog needs the hint.
-const settingsSectionHint = ref<'editor' | 'appearance' | 'structure' | null>(null)
-async function openSettings(section?: 'editor' | 'appearance' | 'structure') {
+const settingsSectionHint = ref<SettingsSectionHint>(null)
+// 编辑器设置已按 IDEA 拆成子页（编辑器 › 常规 › 外观 / 编辑器标签页、编辑器 › 代码风格 › 制表符与缩进、
+// 工具 › 保存时操作），所以跳转目标用的是具体的叶子页名，而不是一个笼统的 'editor'。
+type SettingsSectionHint = 'appearance' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
+  | 'editor.codeStyle.indents' | 'tools.actionsOnSave' | 'structure' | 'templates' | 'commit' | 'general' | null
+async function openSettings(section?: SettingsSectionHint) {
   settingsSectionHint.value = section ?? null
   menu.value = null
   if (working.value) return
@@ -1842,6 +2039,19 @@ async function saveSettings(settings: EditorSettings, close = true) {
     editorSettings.value = await request<EditorSettings>('settings.update', { settings })
     if (close) settingsOpen.value = false
     notify(isDesktop ? '编辑器设置已保存并生效。' : '编辑器设置已应用于当前预览会话。')
+  } catch (error) { settingsError.value = errorMessage(error) }
+  finally { settingsBusy.value = false }
+}
+// Source: GeneralSettingsConfigurable.kt — the System Settings page saves through the
+// same Settings dialog Apply/OK flow as the editor page.
+async function saveGeneralSettings(settings: GeneralSettingsState, close = true) {
+  if (settingsBusy.value) return
+  settingsBusy.value = true
+  settingsError.value = ''
+  try {
+    generalSettings.value = await request<GeneralSettingsState>('settings.general.update', { general: settings })
+    if (close) settingsOpen.value = false
+    notify(isDesktop ? '系统设置已保存并生效。' : '系统设置已应用于当前预览会话。')
   } catch (error) { settingsError.value = errorMessage(error) }
   finally { settingsBusy.value = false }
 }
@@ -1907,7 +2117,8 @@ async function browseStructureDir(field: 'jdkHome' | 'outputPath') {
   if (busy.value || settingsBusy.value || !isDesktop) return
   busy.value = true
   try {
-    const path = await request<string | null>('dialog.pickDirectory')
+    const start = projectSettings.value.java[field] ?? ''
+    const path = await request<string | null>('dialog.pickDirectory', { initial: start })
     if (path && workspace.value) await saveJavaSettings({ ...projectSettings.value.java, [field]: path })
   } catch (error) { notify(errorMessage(error), true) }
   finally { busy.value = false }
@@ -2071,15 +2282,34 @@ function lspOn(tab: Tab) {
   if (editorSettings.value.powerSaveMode) return false
   return isDesktop && tab.lspRunning === true && tab.content.length <= 5 * 1024 * 1024
 }
-// IDEA's "save files when the application is idle". Only buffers that actually
-// changed are written, and a failed save still surfaces through save()'s own error.
-const autoSaveDelay = 5000
+// IDEA's "save files if the application is idle": GeneralSettings.isAutoSaveIfInactive
+// (GeneralSettings.kt:81-91 -> state.autoSaveIfInactive), with the delay from
+// SAVE_FILES_AFTER_IDLE_SEC (:163 = 15, range 1..300, read as `inactiveTimeout.seconds` at
+// :193-202). SaveAndSyncHandlerImpl.kt:332-350 pushes idle events through
+// `debounce(inactiveTimeout.seconds)` and then saves every document; the timer below is
+// restarted by every edit (onEditorChange), which is the same "idle" signal.
+// Only buffers that actually changed are written, and a failed save still surfaces through
+// save()'s own error.
+//
+// The editor page used to carry its own `autoSave` switch with a hard-coded 5s: a second name
+// for this one option, so it is gone and this key now has its consumer.
+const autoSaveDelay = computed(() => Math.min(300, Math.max(1, generalSettings.value.inactiveTimeout)) * 1000)
 let autoSaveTimer: number | undefined
 function clearAutoSave() { if (autoSaveTimer) { window.clearTimeout(autoSaveTimer); autoSaveTimer = undefined } }
 function scheduleAutoSave() {
   clearAutoSave()
-  if (!editorSettings.value.autoSave || !isDesktop || !dirty.value) return
-  autoSaveTimer = window.setTimeout(() => { autoSaveTimer = undefined; if (editorSettings.value.autoSave && dirty.value) void saveAll() }, autoSaveDelay)
+  if (!generalSettings.value.autoSaveIfInactive || !isDesktop || !dirty.value) return
+  autoSaveTimer = window.setTimeout(() => {
+    autoSaveTimer = undefined
+    if (generalSettings.value.autoSaveIfInactive && dirty.value) void saveAll()
+  }, autoSaveDelay.value)
+}
+// SaveAndSyncHandlerImpl.kt:300-319 — on frame deactivation IDEA saves every document when
+// GeneralSettings.isSaveOnFrameDeactivation (:73-78 -> state.autoSaveFiles) is on. The
+// window's `blur` is the same signal as ApplicationActivationListener.applicationDeactivated.
+function onWindowBlur() {
+  if (!isDesktop || !generalSettings.value.autoSaveFiles || !dirty.value) return
+  void saveAll()
 }
 function onEditorChange(tab: Tab) {
   tab.dirty = true
@@ -2264,6 +2494,26 @@ function applyTextEdits(content: string, edits: LspTextEdit[]) {
     .map(edit => ({ text: edit.text, from: offsetOf(lines, edit.startLine, edit.startChar), to: offsetOf(lines, edit.endLine, edit.endChar) }))
     .sort((a, b) => b.from - a.from)
     .reduce((text, edit) => text.slice(0, edit.from) + edit.text + text.slice(edit.to), content)
+}
+// GoToMenu › NavigateInFileGroup 的 MethodDown / MethodUp（`PlatformActions.xml:621-623`）。
+// 不需要新的语言服务能力：已实现的 `textDocument/documentSymbol` 就够 —— LSP SymbolKind
+// 6 = Method、12 = Function，只认这两类，避免把字段/变量也当方法。键位与 IDEA 一致（Alt+Down / Alt+Up）。
+const METHOD_SYMBOL_KINDS = [6, 12]
+async function jumpMethod(direction: 1 | -1) {
+  const tab = active.value
+  if (!tab || !lspOn(tab)) { notify('该文件未启用语言服务。', true); return }
+  await refreshOutline(tab.path)
+  const methods = [...new Set(outline.value
+    .filter(symbol => METHOD_SYMBOL_KINDS.includes(symbol.kind))
+    .map(symbol => symbol.startLine))].sort((a, b) => a - b)
+  if (!methods.length) { notify('该文件没有可跳转的方法。'); return }
+  const current = Math.max(0, editorFor(tab.path)?.getCursor().line ?? 0)
+  // 与 IDEA 一致：跳到光标**之后/之前**的最近一个方法起点，已经到头就提示而不是绕回。
+  const target = direction === 1
+    ? methods.find(start => start > current)
+    : [...methods].reverse().find(start => start < current)
+  if (target === undefined) { notify(direction === 1 ? '已经是最后一个方法。' : '已经是第一个方法。'); return }
+  void revealLocation({ path: tab.path, line: target, column: 1 })
 }
 async function refreshOutline(path: string) {
   const tab = findTab(path)
@@ -2451,7 +2701,7 @@ async function applyEditsToFiles(edits: LspFileEdits[], doneMessage: string) {
     }
     const next = applyTextEdits(content, file.textEdits)
     if (next === content) continue
-    const saved = await request<SaveResult>('file.write', { path: file.path, content: next, expectedVersion: version, encoding, bom })
+    const saved = await request<SaveResult>('file.write', { path: file.path, content: next, expectedVersion: version, encoding, bom, safeWrite: generalSettings.value.isUseSafeWrite })
     if (open) { open.content = next; open.version = saved.version; open.dirty = false; editorFor(file.path)?.setDraft(next) }
     if (isDesktop) void request('lsp.change', { path: file.path, text: next }).catch(() => undefined)
     ++count
@@ -2510,7 +2760,7 @@ async function revertHistory(entry: HistoryEntry) {
     let encoding = open?.encoding ?? 'utf-8'
     let bom = open?.bom ?? false
     if (version === undefined) { const doc = await request<DocumentData>('file.read', { path }); version = doc.version; encoding = doc.encoding; bom = doc.bom }
-    const saved = await request<SaveResult>('file.write', { path, content: snapshot.content, expectedVersion: version, encoding, bom })
+    const saved = await request<SaveResult>('file.write', { path, content: snapshot.content, expectedVersion: version, encoding, bom, safeWrite: generalSettings.value.isUseSafeWrite })
     if (open) { open.content = snapshot.content; open.version = saved.version; open.dirty = false; editorFor(path)?.setDraft(snapshot.content) }
     if (isDesktop) void request('lsp.change', { path, text: snapshot.content }).catch(() => undefined)
     notify(`已回滚到 ${entry.time.replace('T', ' ').replace('Z', '')}`)
@@ -2544,7 +2794,7 @@ async function save(tab = active.value): Promise<boolean> {
     } catch (error) { notify(`保存前格式化失败，按原样保存：${errorMessage(error)}`, true) }
   }
   try {
-    const result = await request<SaveResult>('file.write', { path: tab.path, content, expectedVersion: tab.version, encoding: tab.encoding, bom: tab.bom })
+    const result = await request<SaveResult>('file.write', { path: tab.path, content, expectedVersion: tab.version, encoding: tab.encoding, bom: tab.bom, safeWrite: generalSettings.value.isUseSafeWrite })
     tab.content = content
     tab.version = result.version
     tab.dirty = false
@@ -2680,6 +2930,29 @@ async function showFileProperties() {
 // ConvertToWindows/UnixLineSeparatorsAction: rewrite the file on disk with every line
 // ending normalized, then reload the buffer (IDEA refreshes the document too). The
 // native side refuses a locked or externally modified file before touching anything.
+// EditMenu › ConvertIndentsGroup（`<group id="ConvertIndentsGroup" popup="true">`，
+// PlatformActions.xml:500-505）：IDEA 的 Convert Indents to Spaces / to Tabs，作用于**全文件**。
+// 纯文本变换：前导空白按当前 tabSize 在空格与制表符之间折算（已有 tab 先按宽度展开再重算列数），
+// 不需要语言服务与原生参与；与格式化相同只改缓冲并标脏，由用户 Ctrl+S 保存。
+function convertIndents(mode: 'spaces' | 'tabs') {
+  const tab = active.value
+  const editor = tab ? editorFor(tab.path) : undefined
+  if (!tab || !editor) { notify('请先打开一个文件。', true); return }
+  const width = Math.max(1, editorSettings.value.tabSize)
+  const text = editor.text()
+  const converted = text.split('\n').map(line => {
+    const indent = /^[ \t]*/.exec(line)?.[0] ?? ''
+    if (!indent) return line
+    const columns = indent.replace(/\t/g, ' '.repeat(width)).length
+    if (mode === 'tabs') return '\t'.repeat(Math.floor(columns / width)) + ' '.repeat(columns % width) + line.slice(indent.length)
+    return ' '.repeat(columns) + line.slice(indent.length)
+  }).join('\n')
+  if (converted === text) { notify(mode === 'tabs' ? '缩进已经是制表符，无需转换。' : '缩进已经是空格，无需转换。'); return }
+  editor.setDraft(converted)
+  tab.dirty = true
+  if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: converted }).catch(() => undefined)
+  notify(mode === 'tabs' ? '已将缩进转换为制表符（未保存），检查后按 Ctrl+S 保存。' : '已将缩进转换为空格（未保存），检查后按 Ctrl+S 保存。')
+}
 async function convertLineSeparators(separator: 'crlf' | 'lf', target?: Tab) {
   const tab = target ?? active.value
   if (!tab) { notify('请先打开一个文件。', true); return }
@@ -2927,21 +3200,25 @@ const deleteTarget = ref<Entry | null>(null)
 // scan is a real workspace search (file + line + preview), not a guess.
 const deleteUsages = ref<UsageResult | null>(null)
 const deleteUsagesError = ref('')
-// IDEA puts the "Safe delete (move to recycle bin)" checkbox in the confirm dialog
-// and remembers the choice, so it is stored with the editor settings instead of
-// being a per-call `ref` that resets on every reload.
+// IDEA puts the "Move files to the recycle bin instead of deleting permanently" checkbox in
+// the confirm dialog and remembers the choice. It is GeneralSettings.isDeletingToBin
+// (GeneralSettings.kt:55-60 -> state.deleteToBin, ide.general.xml), read by the delete paths
+// as `TrashBin.isSupported() && isDeletingToBin()` — DeleteHandler.java:345,
+// DeleteHandlerHelper.kt:30, FileDeleteAction.java:57, VirtualFileDeleteProvider.java:54.
+// It used to live in the editor settings under the name `deleteToTrash`, which was a second
+// name for this one option; the duplication is gone.
 const trashSaving = ref(false)
-const deleteToTrash = computed({
-  get: () => editorSettings.value.deleteToTrash,
+const deleteToBin = computed({
+  get: () => generalSettings.value.deleteToBin,
   set: value => {
     if (trashSaving.value) return
-    const previous = editorSettings.value
-    editorSettings.value = { ...previous, deleteToTrash: value }
+    const previous = generalSettings.value
+    generalSettings.value = { ...previous, deleteToBin: value }
     trashSaving.value = true
     void (async () => {
-      try { editorSettings.value = await request<EditorSettings>('settings.update', { settings: editorSettings.value }) }
+      try { generalSettings.value = await request<GeneralSettingsState>('settings.general.update', { general: generalSettings.value }) }
       catch (error) {
-        editorSettings.value = previous
+        generalSettings.value = previous
         notify(`回收站选项没有保存成功：${errorMessage(error)}`, true)
       } finally { trashSaving.value = false }
     })()
@@ -3641,23 +3918,6 @@ function requestEvaluate(text: string) {
   evaluateRequest.value = { text, nonce: (evaluateRequest.value?.nonce ?? 0) + 1 }
 }function showOutput(tab: typeof bottomTab.value) { bottom.value = true; bottomTab.value = tab; recordActiveToolWindow(tab); menu.value = null }
 
-// IDEA keeps one action list and shows it in the menus, in "Find Action" and in the
-// keymap editor. The table below plays that role here: the menubar and the
-// Ctrl+Shift+A dialog both read it, so a title, a shortcut or a availability rule can
-// never drift between the two. `keywords` are the Latin aliases Find Action matches,
-// because every visible title is Chinese.
-interface MenuRow {
-  id: string
-  title?: string | (() => string)
-  keywords?: string
-  keys?: string
-  section?: string
-  rule?: boolean
-  recent?: boolean
-  enabled?: () => boolean
-  checked?: () => boolean
-  run?: () => void
-}
 const hasEditor = () => Boolean(active.value)
 const editable = (name: string, title: string, keys?: string, keywords?: string): MenuRow => ({
   id: name, title, keys, keywords, enabled: hasEditor, run: () => runEditor(name),
@@ -3694,12 +3954,20 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'file.closeAllTabs', title: '关闭所有文件', keywords: 'close all tabs editors 全部关闭', enabled: () => allTabs.value.length > 0 && !working.value, run: () => { void closeAllTabsIn(focusedPane.value) } },
     { id: 'file.closeOthers', title: '关闭其他文件', keywords: 'close other tabs 关闭其他', enabled: () => Boolean(active.value) && groups[focusedPane.value].tabs.length > 1, run: () => { const tab = active.value; if (tab) void closeOtherTabsIn(focusedPane.value, tab) } },
     { id: 'file.rule2', rule: true },
-    { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: hasEditor, run: () => openEncoding() },
-    // FilePropertiesGroup (PlatformActions.xml:407-422): encoding, read-only and
-    // the line-separator converters live in the File menu together.
-    { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(active.value) && isDesktop, run: () => void toggleReadOnly(activePath.value) },
-    { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('crlf') },
-    { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('lf') },
+    // FileMenu › FilePropertiesGroup —— **子菜单**（`<group id="FilePropertiesGroup" popup="true">`，
+    // PlatformActions.xml:400-412），子项顺序：ChangeFileEncodingAction · AssociateWithFileType ·
+    // ToggleReadOnlyAttribute · 以及**再嵌一层**的 ChangeLineSeparators（:405 自己也是 popup="true"）。
+    // TaoCode 没有独立的“关联文件类型”菜单行（它在标签页右键菜单里），所以这里不放。
+    { id: 'file.properties', title: '文件属性', keywords: 'file properties encoding read only line separators 文件属性 编码 只读 行分隔符', children: [
+      { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: hasEditor, run: () => openEncoding() },
+      { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(active.value) && isDesktop, run: () => void toggleReadOnly(activePath.value) },
+      { id: 'file.lineSeparators', title: '行分隔符', keywords: 'line separators crlf lf 行尾 分隔符', children: [
+        { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('crlf') },
+        { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('lf') },
+        // IDEA 还有 ConvertToMacLineSeparators(CR)：TaoCode 的换行转换只有 CRLF/LF 两种（见
+        // convertLineSeparators 的参数类型），不做只有名字没有实现的第三项。
+      ] },
+    ] },
     { id: 'file.openBinary', title: '以二进制/十六进制方式打开', keywords: 'binary hex image 二进制 十六进制 图片', enabled: () => isDesktop && Boolean(activePath.value || workspace.value), run: () => { const path = activePath.value; if (path) void openBinary(path); else notify('请先选中一个文件。', true) } },
     { id: 'plugin.manage', title: '插件…', keywords: 'plugin extension 插件 扩展', enabled: () => isDesktop, run: () => void openPlugins() },
     { id: 'file.rule3', rule: true },
@@ -3708,7 +3976,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // 设置, and 从磁盘全部重新加载 (Ctrl+Alt+Y) sits next to 全部保存.
     { id: 'app.projectStructure', title: '项目结构…', keys: 'Ctrl Alt Shift S', keywords: 'project structure sdk modules 项目结构', enabled: () => !working.value && Boolean(workspace.value), run: () => void openSettings('structure') },
     { id: 'file.reloadFromDisk', title: '从磁盘全部重新加载', keys: 'Ctrl Alt Y', keywords: 'reload from disk synchronize 从磁盘重新加载 刷新', enabled: () => Boolean(workspace.value) && isDesktop, run: () => void forceReloadFromDisk() },
-    { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void request('app.quit').catch(() => undefined) } },
+    { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void quitApp() } },
   ] },
   { menu: 'edit', label: '编辑', rows: [
     // IDEA EditMenu order (PlatformActions.xml:446-518): Undo/Redo first, then the
@@ -3718,13 +3986,21 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     editable('undo', '撤销', 'Ctrl Z', 'undo revert 撤销'),
     editable('redo', '重做', 'Ctrl Shift Z', 'redo 重做'),
     { id: 'edit.rule1', rule: true },
-    { id: 'edit.sectionFind', section: '查找' },
-    editable('find', '在文件中查找与替换', 'Ctrl F', 'find replace search 查找'),
-    editable('find.next', '查找下一个', 'F3', 'find next 下一个'),
-    editable('find.previous', '查找上一个', 'Shift F3', 'find previous 上一个'),
-    editable('replace.next', '替换下一个', undefined, 'replace next 替换'),
-    editable('replace.all', '替换全部', undefined, 'replace all 全部替换'),
-    toolWindow('search', '全局搜索与替换', 'search in files find in files global 全局搜索'),
+    // IDEA EditMenu › FindMenuGroup —— 也是**子菜单**（`<group id="FindMenuGroup" popup="true">`，
+    // PlatformActions.xml:465-486）。子项顺序按源码：Find · Replace · FindNext · FindPrevious ·
+    // 多光标选择 · (分隔) · 光标处查找 · (分隔) · FindInPath · ReplaceInPath。
+    // 说明：TaoCode 没有 IDEA 的编辑器内“替换条”，它的「替换下一个 / 替换全部」是那条替换条上的
+    // 两个按钮在这里的落点，所以随这一组一起放进子菜单，而不是发明两个新动作。
+    { id: 'edit.findMenu', title: '查找', keywords: 'find replace search 查找 替换', children: [
+      editable('find', '在文件中查找与替换', 'Ctrl F', 'find replace search 查找'),
+      editable('find.next', '查找下一个', 'F3', 'find next 下一个'),
+      editable('find.previous', '查找上一个', 'Shift F3', 'find previous 上一个'),
+      { id: 'edit.ruleFind1', rule: true },
+      editable('replace.next', '替换下一个', undefined, 'replace next 替换'),
+      editable('replace.all', '替换全部', undefined, 'replace all 全部替换'),
+      { id: 'edit.ruleFind2', rule: true },
+      toolWindow('search', '全局搜索与替换', 'search in files find in files global 全局搜索'),
+    ] },
     { id: 'edit.rule2', rule: true },
     editable('selectAll', '全选', 'Ctrl A', 'select all 全选'),
     { id: 'edit.rule3', rule: true },
@@ -3737,6 +4013,12 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     // IDEA Edit menu: 缩进选区 (Tab) / 反缩进或缩进选区 (Shift+Tab).
     editable('indent.selection', '缩进选区', 'Tab', 'indent selection 缩进'),
     editable('indent.selection.less', '反缩进选区', 'Shift Tab', 'outdent selection 反缩进'),
+    // EditMenu › ConvertIndentsGroup —— IDEA 里是**子菜单**（:500-505），两项：To Spaces / To Tabs。
+    // 作用于全文件，宽度跟随「编辑器 › 代码风格 › 制表符与缩进」的 tabSize。
+    { id: 'edit.convertIndents', title: '转换缩进', keywords: 'convert indents spaces tabs 转换缩进 空格 制表符', children: [
+      { id: 'edit.indentsToSpaces', title: '转换为空格缩进', keywords: 'convert indents to spaces 空格', run: () => convertIndents('spaces') },
+      { id: 'edit.indentsToTabs', title: '转换为制表符缩进', keywords: 'convert indents to tabs 制表符', run: () => convertIndents('tabs') },
+    ] },
     { id: 'edit.rule4', rule: true },
     editable('comment.line', '行注释', 'Ctrl /', 'comment line 行注释'),
     editable('comment.block', '块注释', 'Ctrl Shift /', 'comment block 块注释'),
@@ -3756,7 +4038,6 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'view.explorer', title: () => `${explorer.value ? '隐藏' : '显示'}文件面板`, keywords: 'project view files tool window 文件面板', run: () => { explorer.value = !explorer.value } },
     { id: 'view.trace', title: () => `${activity.value ? '隐藏' : '显示'}处理记录`, keywords: 'activity trace bridge 处理记录', run: () => { activity.value = !activity.value } },
     { id: 'view.output', title: () => `${bottom.value ? '隐藏' : '显示'}输出面板`, keywords: 'output bottom tool window 输出面板', run: () => { bottom.value = !bottom.value } },
-    { id: 'view.zenMode', title: () => `${zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen distraction free fullscreen immersive 禅模式 免打扰', run: () => toggleZenMode() },
     { id: 'view.rule0', rule: true },
     { id: 'view.splitH', title: '向右拆分并移动', keywords: 'split right move tab opposite group 分屏 右拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'horizontal') },
     { id: 'view.splitV', title: '向下拆分并移动', keywords: 'split down move tab opposite group 分屏 下拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'vertical') },
@@ -3782,9 +4063,40 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'view.collapseAll', title: '全部折叠项目树', keywords: 'collapse tree folders 全部折叠', enabled: () => Boolean(workspace.value), run: () => fileTreeRef.value?.collapseAll() },
     { id: 'view.expandAll', title: '全部展开项目树', keywords: 'expand tree folders 全部展开', enabled: () => Boolean(workspace.value), run: () => fileTreeRef.value?.expandAll() },
     { id: 'view.rule2', rule: true },
-    { id: 'view.presentation', title: '演示模式', keywords: 'presentation mode 演示 投屏', checked: () => editorSettings.value.presentationMode, run: () => void saveSettingsPatch({ presentationMode: !editorSettings.value.presentationMode }) },
-    { id: 'view.background', title: '设置背景图像…', keywords: 'background image 背景图', enabled: () => isDesktop, run: () => void chooseBackgroundImage() },
+    // ViewMenu › ViewAppearanceGroup —— IDEA 里是**子菜单**（`<group id="ViewAppearanceGroup" popup="true">`，
+    // PlatformActions.xml:523-546）。它内部还有两个**不带 popup 的内联组**：`ToggleFullScreenGroup`
+    // （TogglePresentationMode / ToggleDistractionFreeMode / ToggleFullScreen / ToggleZenMode /
+    // ToggleCompactMode）与 `UIToggleActions`（主菜单模式、工具栏、状态栏…）。
+    // TaoCode 有真实落点的是：演示模式（TogglePresentationMode）、Zen Mode（ToggleZenMode）、
+    // 紧凑模式（ToggleCompactMode → editorSettings.compactMode）。内联组用分隔线表达同一层。
+    { id: 'view.appearanceGroup', title: '外观', keywords: 'appearance presentation zen compact 外观 演示 禅模式 紧凑', children: [
+      { id: 'view.presentation', title: '演示模式', keywords: 'presentation mode 演示 投屏', checked: () => editorSettings.value.presentationMode, run: () => void saveSettingsPatch({ presentationMode: !editorSettings.value.presentationMode }) },
+      { id: 'view.zenMode', title: () => `${zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen distraction free fullscreen immersive 禅模式 免打扰', run: () => toggleZenMode() },
+      { id: 'view.compactMode', title: '紧凑模式', keywords: 'compact mode density 紧凑 密度', checked: () => editorSettings.value.compactMode, run: () => void saveSettingsPatch({ compactMode: !editorSettings.value.compactMode }) },
+      { id: 'view.ruleAppearance', rule: true },
+      // IDEA 的 ToggleFullScreenGroup 里还有 ToggleDistractionFreeMode 与 ToggleFullScreen：
+      // 前者与 ToggleZenMode 在 TaoCode 里是同一件事（Zen 就是免打扰），不重复放两行；
+      // 后者要先给宿主加全屏通道（Win32 窗口态 / Fullscreen API），本轮不做，登记在审计文档里。
+      { id: 'view.background', title: '设置背景图像…', keywords: 'background image 背景图', enabled: () => isDesktop, run: () => void chooseBackgroundImage() },
+    ] },
     { id: 'view.powerSave', title: '省电模式', keywords: 'power save mode 省电 节能', checked: () => editorSettings.value.powerSaveMode, run: () => void togglePowerSave() },
+    // ViewMenu › EditorToggleActions —— IDEA 里是**子菜单**（`<group id="EditorToggleActions"
+    // popup="true">`，PlatformActions.xml:572-586）。子项顺序照源码：UseSoftWraps · (分隔) ·
+    // ShowWhitespaces · ShowLineNumbers · ShowGutterIcons · ShowIndentLines · (分隔) ·
+    // IncreaseFontSize · DecreaseFontSize。这些都是 ToggleAction，落点是同一份编辑器设置
+    // （与 编辑器 › 常规 › 外观 页共用状态，改一处两边都变）。
+    // `EditorToggleShowGutterIcons` 没做：TaoCode 没有行内图标（gutter icons）这一层，不造空行。
+    { id: 'view.editorToggleActions', title: '编辑器开关', keywords: 'editor toggle soft wrap whitespaces line numbers indent guides font size 编辑器开关 软换行 空白 行号 缩进 字号', children: [
+      { id: 'view.toggleSoftWraps', title: '软换行', keywords: 'soft wrap word wrap 软换行 自动换行', checked: () => editorSettings.value.wordWrap, run: () => void saveSettingsPatch({ wordWrap: !editorSettings.value.wordWrap }) },
+      { id: 'view.ruleEditorToggles1', rule: true },
+      { id: 'view.toggleWhitespaces', title: '显示空白符号', keywords: 'show whitespaces 空白符号', checked: () => editorSettings.value.showWhitespaces, run: () => void saveSettingsPatch({ showWhitespaces: !editorSettings.value.showWhitespaces }) },
+      { id: 'view.toggleLineNumbers', title: '显示行号', keywords: 'show line numbers 行号', checked: () => editorSettings.value.lineNumbers, run: () => void saveSettingsPatch({ lineNumbers: !editorSettings.value.lineNumbers }) },
+      { id: 'view.toggleIndentGuides', title: '显示缩进参考线', keywords: 'show indent guides 缩进参考线', checked: () => editorSettings.value.showIndentGuides, run: () => void saveSettingsPatch({ showIndentGuides: !editorSettings.value.showIndentGuides }) },
+      { id: 'view.ruleEditorToggles2', rule: true },
+      // IDEA 的字号动作以 1 为步长、受同一份字号上下限约束（这里是 10–32，与设置页一致）。
+      { id: 'view.increaseEditorFont', title: '增大编辑器字号', keywords: 'increase editor font size bigger 增大 字号', enabled: () => editorSettings.value.fontSize < 32, run: () => void saveSettingsPatch({ fontSize: Math.min(32, editorSettings.value.fontSize + 1) }) },
+      { id: 'view.decreaseEditorFont', title: '减小编辑器字号', keywords: 'decrease editor font size smaller 减小 字号', enabled: () => editorSettings.value.fontSize > 10, run: () => void saveSettingsPatch({ fontSize: Math.max(10, editorSettings.value.fontSize - 1) }) },
+    ] },
     { id: 'theme.light', title: '亮色主题', keywords: 'light theme bright 亮色', checked: () => theme.value === 'light', run: () => changeTheme('light') },
     { id: 'theme.dark', title: '暗色主题', keywords: 'dark theme 暗色', checked: () => theme.value === 'dark', run: () => changeTheme('dark') },
   ] },
@@ -3799,6 +4111,9 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'navigate.class', title: '转到类…', keys: 'Ctrl N', keywords: 'goto class type 转到类', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('class') },
     { id: 'navigate.symbol', title: '转到符号…', keys: 'Ctrl Shift Alt N', keywords: 'goto symbol global 转到符号', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('global') },
     { id: 'navigate.fileSymbol', title: '转到当前文件符号', keys: 'Ctrl F12', keywords: 'symbol outline structure file 文件符号', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('file') },
+    // GoToMenu › NavigateInFileGroup 的 MethodDown / MethodUp（`PlatformActions.xml:621-623`）。
+    { id: 'navigate.methodDown', title: '下一个方法', keys: 'Alt Down', keywords: 'next method down 下一个方法', enabled: () => Boolean(active.value) && lspReady.value, run: () => void jumpMethod(1) },
+    { id: 'navigate.methodUp', title: '上一个方法', keys: 'Alt Up', keywords: 'previous method up 上一个方法', enabled: () => Boolean(active.value) && lspReady.value, run: () => void jumpMethod(-1) },
     { id: 'navigate.line', title: '转到行/列…', keys: 'Ctrl G', keywords: 'goto line number 转到行', enabled: hasEditor, run: () => openGoLine() },
     // IDEA's Navigate menu puts `<group id="GoToErrorGroup">` between Go to Line and Jump to
     // Last Change (PlatformActions.xml:609-617), with F2 / Shift+F2 ($default.xml:658-660,
@@ -3948,33 +4263,31 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'app.settings.git', title: '版本控制与编辑器设置…', keys: 'Ctrl Alt S', keywords: 'vcs git settings 版本控制设置', enabled: () => isDesktop, run: () => void openSettings() },
   ] },
 ]
-// WindowMenu › LayoutsGroup (`PlatformActions.xml:641-651`). IDEA nests this group into the Window
-// menu as: RestoreFactoryDefaultLayout("Default", a toggle) · separator · CustomLayoutsGroup(the
-// list of named layouts, each a toggle that applies it) · separator · RestoreDefaultLayout(Shift
-// F12) · StoreDefaultLayout · StoreNewLayout. TaoCode's menus are flat, so the list becomes rows in
-// place; `CustomLayoutActionGroup`'s per-layout Apply/Restore/Save/Rename/Delete submenu collapses
-// onto Rename/Delete of the *active* layout plus the two global Store rows, which is the part of it
-// a flat menu can express without inventing a second meaning for a click.
+// IDEA 的 Window › LayoutsGroup 是一个**子菜单**（`<group id="LayoutsGroup" popup="true">`，
+// PlatformActions.xml:641）：出厂默认 · 命名布局列表（每项是 toggle，点即应用）· 分隔 ·
+// RestoreDefaultLayout(Shift+F12) · StoreDefaultLayout · StoreNewLayout。
+// TaoCode 的菜单模型现在带 children，所以这一组保持为一个嵌套菜单，不再被拍平进「窗口」里。
+// CustomLayoutActionGroup 每个布局名下的 Apply/Restore/Save/Rename/Delete 子菜单仍收敛为
+// 「当前布局的重命名/删除」加两条全局 Store —— 这是一张菜单能表达的部分中不发明第二种点击含义的做法。
 const layoutMenuRows = computed<MenuRow[]>(() => {
   const store = toolLayoutStore.value
-  const rows: MenuRow[] = [
+  const children: MenuRow[] = [
     { id: 'window.factoryLayout', title: '默认布局', keywords: 'default tool window layout factory reset 默认布局 出厂', checked: () => isFactoryLayoutActive(store), run: useFactoryToolLayout },
     { id: 'window.ruleLayoutsList', rule: true },
   ]
   for (const name of layoutNames(store))
-    rows.push({ id: `window.layout.${name}`, title: name, keywords: `tool window layout ${name} 布局`, checked: () => store.active === name, run: () => applyNamedToolLayout(name) })
-  rows.push({ id: 'window.ruleLayoutsActions', rule: true })
-  rows.push({ id: 'window.restoreLayout', title: '恢复当前布局', keys: 'Shift F12', keywords: 'restore current layout reset 恢复布局 重置', run: restoreCurrentToolLayout })
-  rows.push({ id: 'window.storeLayout', title: '将更改保存到当前布局', keywords: 'save changes in current layout 保存布局', run: storeCurrentToolLayout })
-  rows.push({ id: 'window.storeLayoutAs', title: '将当前布局另存为新布局…', keywords: 'save current layout as new 另存为 新建布局', run: () => openLayoutNameDialog('newLayout') })
+    children.push({ id: `window.layout.${name}`, title: name, keywords: `tool window layout ${name} 布局`, checked: () => store.active === name, run: () => applyNamedToolLayout(name) })
+  children.push({ id: 'window.ruleLayoutsActions', rule: true })
+  children.push({ id: 'window.restoreLayout', title: '恢复当前布局', keys: 'Shift F12', keywords: 'restore current layout reset 恢复布局 重置', run: restoreCurrentToolLayout })
+  children.push({ id: 'window.storeLayout', title: '将更改保存到当前布局', keywords: 'save changes in current layout 保存布局', run: storeCurrentToolLayout })
+  children.push({ id: 'window.storeLayoutAs', title: '将当前布局另存为新布局…', keywords: 'save current layout as new 另存为 新建布局', run: () => openLayoutNameDialog('newLayout') })
   // Rename/Delete only exist for a stored layout: the factory default is not an entry in the map,
   // which is also why `DeleteNamedLayoutAction` disables itself on the active layout.
   if (!isFactoryLayoutActive(store)) {
-    rows.push({ id: 'window.renameLayout', title: '重命名当前布局…', keywords: 'rename layout 重命名布局', run: () => openLayoutNameDialog('renameLayout') })
-    rows.push({ id: 'window.deleteLayout', title: '删除当前布局', keywords: 'delete layout remove 删除布局', run: deleteCurrentToolLayout })
+    children.push({ id: 'window.renameLayout', title: '重命名当前布局…', keywords: 'rename layout 重命名布局', run: () => openLayoutNameDialog('renameLayout') })
+    children.push({ id: 'window.deleteLayout', title: '删除当前布局', keywords: 'delete layout remove 删除布局', run: deleteCurrentToolLayout })
   }
-  rows.push({ id: 'window.ruleLayoutsEnd', rule: true })
-  return rows
+  return [{ id: 'window.layouts', title: '布局', keywords: 'layouts tool window layout 布局', children }]
 })
 // IDEA's Window menu (ActionsBundle: "Search Everywhere…", "Store Current Selection
 // as a Bookmark", the Activate-* tool-window actions, "Editor Tabs"). Same registry
@@ -4015,17 +4328,22 @@ const windowMenuRows: MenuRow[] = [
   // ActionsBundle `action.ResizeToolWindowMaximize.text` ("Maximize Tool Window") and `.text.alternative`
   // ("Restore Tool Window Size"); `$default.xml:885-887` binds control shift QUOTE.
   { id: 'window.maximizeToolWindow', title: () => (maximizedSide.value ? '恢复工具窗口大小' : '最大化工具窗口'), keys: MAXIMIZE_SHORTCUT_LABEL, keywords: 'maximize tool window restore size 最大化 恢复 工具窗口', enabled: () => canMaximize(Boolean(workspace.value), explorer.value), run: maximizeActiveToolWindow },
-  // The separator in `ActiveToolwindowGroup` falls between DockToolWindow and NextTab; TaoCode has
-  // no DockToolWindow, so it falls directly after MaximizeToolWindow.
-  { id: 'window.ruleTabs', rule: true },
-  { id: 'window.nextTab', title: '选择下一个标签页', keys: 'Alt Right', keywords: 'select next tab activate 下一个标签页', enabled: () => tabTargetCount() > 1, run: selectNextTab },
-  { id: 'window.previousTab', title: '选择上一个标签页', keys: 'Alt Left', keywords: 'select previous tab activate 上一个标签页', enabled: () => tabTargetCount() > 1, run: selectPreviousTab },
-  { id: 'window.closeActiveTab', title: '关闭当前标签页', keys: 'Ctrl Shift F4', keywords: 'close active tab tool window 关闭当前标签页', enabled: () => Boolean(workspace.value), run: closeActiveTab },
-  { id: 'window.closeOtherTabs', title: '关闭其他标签页', keywords: 'close other tabs tool window 关闭其他标签页', enabled: closeOtherTabsTarget, run: closeOtherToolTabs },
-  // `PlatformActions.xml:666` mounts TW.CloseAllTabs right after TW.CloseOtherTabs. Its shortcut
-  // comes from `use-shortcut-of="CloseAllEditors"` (`intellij.platform.ide.impl.actions.xml:462`),
-  // which has no entry in `$default.xml` at all — so no key is shown and none is invented.
-  { id: 'window.closeAllTabs', title: '关闭所有标签页', keywords: 'close all tabs tool window 关闭所有标签页', enabled: closeAllTabsTarget, run: closeAllToolTabs },
+  // WindowMenu › EditorTabsGroup —— IDEA 里是**子菜单**（`<group id="EditorTabsGroup" popup="true">`，
+  // PlatformActions.xml:688-705）。子项顺序照源码：NextTab · PreviousTab · PinActiveEditorTab ·
+  // KeepTabOpen · TabList · (分隔) · CloseEditorsGroup（**不带** popup，是内联组：CloseContent /
+  // CloseAllEditorsButActive / CloseAllEditors / CloseAllUnpinnedEditors / CloseAllToTheLeft …）。
+  // TaoCode 有对应物的五项都在下面；内联组用一条分隔线表达同一层。
+  { id: 'window.editorTabsGroup', title: '编辑器标签页', keywords: 'editor tabs next previous close 编辑器标签页 下一个 上一个 关闭', children: [
+    { id: 'window.nextTab', title: '选择下一个标签页', keys: 'Alt Right', keywords: 'select next tab activate 下一个标签页', enabled: () => tabTargetCount() > 1, run: selectNextTab },
+    { id: 'window.previousTab', title: '选择上一个标签页', keys: 'Alt Left', keywords: 'select previous tab activate 上一个标签页', enabled: () => tabTargetCount() > 1, run: selectPreviousTab },
+    { id: 'window.ruleCloseEditors', rule: true },
+    { id: 'window.closeActiveTab', title: '关闭当前标签页', keys: 'Ctrl Shift F4', keywords: 'close active tab tool window 关闭当前标签页', enabled: () => Boolean(workspace.value), run: closeActiveTab },
+    { id: 'window.closeOtherTabs', title: '关闭其他标签页', keywords: 'close other tabs tool window 关闭其他标签页', enabled: closeOtherTabsTarget, run: closeOtherToolTabs },
+    // `PlatformActions.xml:666` mounts TW.CloseAllTabs right after TW.CloseOtherTabs. Its shortcut
+    // comes from `use-shortcut-of="CloseAllEditors"` (`intellij.platform.ide.impl.actions.xml:462`),
+    // which has no entry in `$default.xml` at all — so no key is shown and none is invented.
+    { id: 'window.closeAllTabs', title: '关闭所有标签页', keywords: 'close all tabs tool window 关闭所有标签页', enabled: closeAllTabsTarget, run: closeAllToolTabs },
+  ] },
   // `ActiveToolwindowGroup`'s split family (`PlatformActions.xml:668-675`: TW.SplitRight,
   // TW.SplitAndMoveRight, TW.SplitDown, TW.SplitAndMoveDown, TW.Unsplit, TW.MoveToNextSplitter,
   // TW.MoveToPreviousSplitter) is absent on purpose: every one of them is gated on
@@ -4044,15 +4362,17 @@ const windowMenuRows: MenuRow[] = [
   // The label is the action's own text (`ActionsBundle.properties:1167` "Group Tabs", description
   // "Toggle between tabbed/combo presentation of contents").
   { id: 'window.toggleContentUiType', title: '合并标签页', keywords: 'group tabs toggle tabbed combo presentation 合并标签页 内容呈现', checked: () => isTabbedContentUi(bottomContentUiType.value), enabled: () => canToggleContentUiType(activeContentCount()), run: () => { bottomContentUiType.value = toggledContentUiType(!isTabbedContentUi(bottomContentUiType.value)) } },
-  // WindowMenu › ActiveToolwindowGroup › ResizeToolWindowGroup (`PlatformActions.xml:678-683`).
-  // TaoCode's menus are flat, so the group becomes a section header; the four rows carry the
-  // source's own step (`ResizeToolWindowAction.java:96-98`, `WindowAction.java:113-118`) and its
-  // enable rule (`:127-131`, `:161-165`) through `src/toolWindowResize.ts`.
-  { id: 'window.sectionResizeToolWindow', section: '调整工具窗口' },
-  { id: 'window.resizeToolWindowLeft', title: '向左拉伸', keys: 'Ctrl Alt Shift ArrowLeft', keywords: 'resize stretch tool window left 向左拉伸 调整工具窗口', enabled: () => resizeTargetFor('left') !== null, run: () => stretchToolWindow('left') },
-  { id: 'window.resizeToolWindowRight', title: '向右拉伸', keys: 'Ctrl Alt Shift ArrowRight', keywords: 'resize stretch tool window right 向右拉伸 调整工具窗口', enabled: () => resizeTargetFor('right') !== null, run: () => stretchToolWindow('right') },
-  { id: 'window.resizeToolWindowUp', title: '向上拉伸', keys: 'Ctrl Alt Shift ArrowUp', keywords: 'resize stretch tool window top 向上拉伸 调整工具窗口', enabled: () => resizeTargetFor('up') !== null, run: () => stretchToolWindow('up') },
-  { id: 'window.resizeToolWindowDown', title: '向下拉伸', keys: 'Ctrl Alt Shift ArrowDown', keywords: 'resize stretch tool window bottom 向下拉伸 调整工具窗口', enabled: () => resizeTargetFor('down') !== null, run: () => stretchToolWindow('down') },
+  // WindowMenu › ActiveToolwindowGroup › ResizeToolWindowGroup —— IDEA 里这一组是**子菜单**
+  // (`<group id="ResizeToolWindowGroup" popup="true">`, PlatformActions.xml:680-686，子项依次是
+  // ResizeToolWindowLeft/Right/Up/Down)。以前用 section 标题顶替，现在菜单模型有 children，就真的做成子菜单。
+  // 四行各自带源码的步长 (`ResizeToolWindowAction.java:96-98`, `WindowAction.java:113-118`) 与
+  // 启用规则 (`:127-131`, `:161-165`)，实现在 `src/toolWindowResize.ts`。
+  { id: 'window.resizeToolWindow', title: '调整工具窗口', keywords: 'resize stretch tool window 调整工具窗口 拉伸', children: [
+    { id: 'window.resizeToolWindowLeft', title: '向左拉伸', keys: 'Ctrl Alt Shift ArrowLeft', keywords: 'resize stretch tool window left 向左拉伸 调整工具窗口', enabled: () => resizeTargetFor('left') !== null, run: () => stretchToolWindow('left') },
+    { id: 'window.resizeToolWindowRight', title: '向右拉伸', keys: 'Ctrl Alt Shift ArrowRight', keywords: 'resize stretch tool window right 向右拉伸 调整工具窗口', enabled: () => resizeTargetFor('right') !== null, run: () => stretchToolWindow('right') },
+    { id: 'window.resizeToolWindowUp', title: '向上拉伸', keys: 'Ctrl Alt Shift ArrowUp', keywords: 'resize stretch tool window top 向上拉伸 调整工具窗口', enabled: () => resizeTargetFor('up') !== null, run: () => stretchToolWindow('up') },
+    { id: 'window.resizeToolWindowDown', title: '向下拉伸', keys: 'Ctrl Alt Shift ArrowDown', keywords: 'resize stretch tool window bottom 向下拉伸 调整工具窗口', enabled: () => resizeTargetFor('down') !== null, run: () => stretchToolWindow('down') },
+  ] },
   { id: 'window.rule4', rule: true },
   // WindowMenu › BackgroundTasks (`PlatformActions.xml:637,723-726`): ShowProcessWindow +
   // AutoShowProcessWindow. TaoCode's menus are flat, so the group becomes a section header — the
@@ -4066,13 +4386,20 @@ const windowMenuRows: MenuRow[] = [
   // the behaviour TaoCode already has).
   { id: 'window.sectionBackgroundTasks', section: '后台任务' },
   { id: 'window.showProcessWindow', title: '显示进程窗口', keywords: 'show hide processes window background tasks 进程窗口 后台任务 运行中', checked: () => progressOpen.value, enabled: () => Boolean(workspace.value), run: () => { progressOpen.value = !progressOpen.value } },
+  // WindowMenu › Notifications —— IDEA 里是**子菜单**（`<group id="Notifications" popup="true">`，
+  // PlatformActions.xml:726-728），两个子项：CloseFirstNotification / CloseAllNotifications。
+  { id: 'window.notifications', title: '通知', keywords: 'notifications close clear 通知 关闭 清空', children: [
+    { id: 'window.closeFirstNotification', title: '关闭最新通知', keywords: 'close first notification 最新 关闭通知', enabled: () => noticeLog.value.length > 0, run: closeFirstNotification },
+    { id: 'window.closeAllNotifications', title: '关闭全部通知', keywords: 'close all notifications 清空 全部关闭', enabled: () => noticeLog.value.length > 0, run: clearNotices },
+  ] },
   { id: 'window.rule3', rule: true },
-  { id: 'window.configureTabs', title: '编辑器标签页选项…', keywords: 'editor tabs configure pin tab placement 标签页设置', run: () => openSettings('editor') },
+  { id: 'window.configureTabs', title: '编辑器标签页选项…', keywords: 'editor tabs configure pin tab placement 标签页设置', run: () => openSettings('editor.general.tabs') },
   { id: 'window.activeToolList', title: '配置工具按钮列表…', keywords: 'configure buttons active tool list 工具按钮', run: () => openSettings('appearance') },
 ]
 // IDEA's Tools menu (intellij.platform.ide.impl.actions.xml "ToolsMenu"): the platform
 // rows are launcher-script creation plus OtherMenu (Terminal, task tools). Only rows
 // backed by a real TaoCode feature appear — no fake plugin services.
+// IDEA's menu order: File Edit View Navigate Code Refactor Analyze Build Run Tools Git Window Help.
 const toolsMenuRows: MenuRow[] = [
   { id: 'tools.terminal', title: '打开终端', keys: 'Alt F12', keywords: 'terminal open shell tool window 终端', enabled: () => Boolean(workspace.value) && isDesktop, run: () => showOutput('terminal') },
   { id: 'tools.taskList', title: '待办事项工具窗口', keywords: 'tasks todo context 任务', enabled: () => Boolean(workspace.value), run: () => showView('todo') },
@@ -4081,7 +4408,6 @@ const toolsMenuRows: MenuRow[] = [
   // .bat already ships in bin/. TaoCode has no CLI launcher yet, so the row is absent
   // rather than faked.
 ]
-// IDEA's menu order: File Edit View Navigate Code Refactor Analyze Build Run Tools Git Window Help.
 const allMenuGroups = computed(() => {
   const at = menus.findIndex(group => group.menu === 'git')
   // The layout group sits directly under the window-strip rows and above ActiveToolwindowGroup, the
@@ -4101,10 +4427,22 @@ const allMenuGroups = computed(() => {
 })
 function rowTitle(row: MenuRow) { return typeof row.title === 'function' ? row.title() : row.title ?? '' }
 function rowEnabled(row: { enabled?: () => boolean }) { return row.enabled ? row.enabled() : true }
+// 子菜单展开状态与定位：见 src/menus/submenuState.ts（对应 IDEA 菜单弹出二级浮层的行为）。
+const { hasSubmenu, submenuRow, submenuPlacement, submenuStyle, openSubmenu, closeSubmenu,
+  scheduleSubmenuClose, cancelSubmenuClose } = useSubmenuState()
+// 主菜单一旦切换或收起（键盘 ↓ 换菜单、Esc、点外部、打开任一对话框……），子菜单浮层必须跟着
+// 关闭 —— 不逐点补丁，用 watch 兜底覆盖全部路径（之前漏过 focusMenu/Tab/Esc/打开对话框四条）。
+watch(menu, () => { closeSubmenu() })
 function pickMenuRow(row: MenuRow) {
+  // 带 children 的行不是动作：点它只切换子菜单的展开状态，不动主菜单的开关。
+  if (hasSubmenu(row)) {
+    submenuRow.value = submenuRow.value === row.id ? null : row.id
+    return
+  }
   // IDEA "Keep popups open for toggle items": a checkable row flips in place and the
   // menu stays open, so several options can be switched in one go.
   if (!(editorSettings.value.keepPopupsForToggles && row.checked)) menu.value = null
+  submenuRow.value = null
   row.run?.()
 }
 // IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
@@ -4150,9 +4488,19 @@ const actionQuery = ref('')
 const actionIndex = ref(0)
 const actionInput = ref<HTMLInputElement>()
 // Same command can sit in several menus (IDEA does too); Find Action lists it once.
+// IDEA 的 Find Action 会把**子菜单里的动作**一起列出来，所以索引时要把 children 递归摊平；
+// 父行本身没有 run，留在里面只会变成一条点不动的命令。
+function flattenMenuRows(rows: readonly MenuRow[]): MenuRow[] {
+  const flat: MenuRow[] = []
+  for (const row of rows) {
+    if (row.children?.length) flat.push(...flattenMenuRows(row.children))
+    else flat.push(row)
+  }
+  return flat
+}
 const actionList = computed<ActionEntry[]>(() => {
   const seen = new Map<string, ActionEntry>()
-  for (const group of allMenuGroups.value) for (const row of group.rows) {
+  for (const group of allMenuGroups.value) for (const row of flattenMenuRows(group.rows)) {
     if (!row.run || seen.has(row.id)) continue
     seen.set(row.id, { id: row.id, title: rowTitle(row), keywords: row.keywords, keys: row.keys, group: group.label, enabled: row.enabled, run: row.run })
   }
@@ -4259,7 +4607,7 @@ async function applyNameDialog() {
 async function confirmDelete() {
   const entry = deleteTarget.value; if (!entry) return
   deleteTarget.value = null
-  const trash = deleteToTrash.value
+  const trash = deleteToBin.value
   // Same rule as rename: deleting a file with an unsaved buffer must not throw the
   // user's edits away without asking.
   const affected = entry.kind === 'directory'
@@ -4483,6 +4831,8 @@ async function sendRunInput() {
 }
 let lastShiftAt = 0
 function onKey(event: KeyboardEvent) {
+  // Every keystroke counts as activity for the idle-driven background refresh.
+  noteActivity()
   // Alt+1..9 focus the tool windows (IDEA ActivateToolWindowAction is unconditional);
   // modals and the palette keep the keyboard first.
   if (event.altKey && workspace.value
@@ -4628,6 +4978,8 @@ function onKey(event: KeyboardEvent) {
   // $default.xml:846-848 — bare F12 is JumpToLastWindow ("Activate the last focused tool
   // window"), *not* FileStructure: that one is Ctrl+F12 (:279-281 FileStructurePopup). This
   // check has to sit above the "needs Ctrl or Alt" bail-out below, because F12 has neither.
+  // Zen 模式下 Esc 退出（IDEA 的免打扰/演示模式同样以 Esc 为退出键）。
+  if (event.key === 'Escape' && zenMode.value) { event.preventDefault(); toggleZenMode(); return }
   if (event.key === 'F12' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && workspace.value) { event.preventDefault(); jumpToLastToolWindow(); return }
   if (event.key === 'Backquote' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); showView('git'); return }
   if (event.key === 'Backquote' && event.altKey && workspace.value) { event.preventDefault(); showView('git'); return }
@@ -4679,15 +5031,44 @@ function onKey(event: KeyboardEvent) {
   if (event.key.toLowerCase() === 'q' && !event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void showQuickDoc(); return }
   if (event.key.toLowerCase() === 'c' && event.altKey && event.shiftKey && active.value) { event.preventDefault(); void copyReference(); return }
 }
-function onUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
+// IDEA's exit confirmation. ApplicationImpl.canExit (:1073, reached from :840) aborts the
+// exit when the DoNotAskOption (:998-1018) says so, and that option is shown only when
+// 退出确认与进程关闭确认：逻辑拆到 src/confirmations/（对应 ConfirmExitDialog 与
+// TerminateRemoteProcessDialog 的带状态流程；纯决策在 src/processClose.ts），
+// App 只保留模板绑定所需的同名变量。
+const { exitPrompt, exitPromptDontAsk, shouldConfirmExit, confirmExit, resolveExit } = createExitConfirmation({
+  generalSettings,
+  hasOpenProject: () => Boolean(workspace.value),
+  notify,
+})
+const { terminalClosePrompt, terminalCloseDontAsk, requestTerminalClose, resolveTerminalClose } = createProcessCloseConfirmation({
+  generalSettings,
+  notify,
+})
+async function quitApp() {
+  if (!(await confirmExit())) return
+  await request('app.quit').catch(() => undefined)
+}
+function onUnload(event: BeforeUnloadEvent) {
+  // The window's own close has no room for IDEA's dialog, and the browser only offers its
+  // standard prompt — so both reasons to hold the window back are folded into this guard:
+  // unsaved buffers, and the exit confirmation of :1002-1004.
+  if (dirty.value || shouldConfirmExit()) { event.preventDefault(); event.returnValue = '' }
+}
 // IDEA's "synchronize files on frame activation". Clean buffers follow the disk; a
 // buffer with unsaved edits is never touched (its save still fails with CONFLICT),
 // and large files are skipped so focusing the window stays instant.
+//
+// The switch is GeneralSettings.isSyncOnFrameActivation (ide.general.xml), which IDEA reads
+// in two places: SaveAndSyncHandlerImpl.kt:221,326 gates the VFS refresh, and
+// EditorWindow.kt:211 re-reads the file when its tab is activated. TaoCode has one path for
+// both, so this is its single consumer. (The editor-page `syncOnFocus` key was a second name
+// for the same option and has been removed.)
 const syncLimit = 4 * 1024 * 1024
 let syncing = false
-async function syncFromDisk() {
+/** The body of the sync, without either trigger's gate. `quiet` keeps the background pass silent. */
+async function performDiskSync(quiet = false) {
   if (!isDesktop || !workspace.value || syncing) return
-  if (!editorSettings.value.syncOnFocus) return
   syncing = true
   try {
     workspace.value = { ...workspace.value, entries: await request<Entry[]>('workspace.list', { path: '' }) }
@@ -4706,11 +5087,42 @@ async function syncFromDisk() {
       Object.assign(tab, { content: disk.content, version: disk.version, encoding: disk.encoding, bom: disk.bom })
       editorFor(tab.path)?.setDraft(disk.content)
       if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: disk.content }).catch(() => undefined)
-      notify(`磁盘上的 ${tab.path} 已变化，编辑器已同步`)
+      if (!quiet) notify(`磁盘上的 ${tab.path} 已变化，编辑器已同步`)
     } catch { /* deleted or unreadable: keep the buffer as it is */ }
   }
   syncing = false
 }
+// Frame activation / editor-tab activation: GeneralSettings.isSyncOnFrameActivation, i.e. the
+// `autoSyncFiles` key (see its own comment above).
+async function syncFromDisk() {
+  if (!generalSettings.value.autoSyncFiles) return
+  await performDiskSync()
+}
+// IDEA's periodic background VFS refresh, a different switch on a different trigger:
+// GeneralSettings.isBackgroundSync (GeneralSettings.kt:67-71) gates both controllers
+// (SaveAndSyncHandlerImpl.kt:610 idle, :649 unfocused). Which one runs is the registry key
+// `vfs.background.refresh.on.idle`, whose default is **true** and whose own description says to
+// "refresh VFS periodically while there is no user activity in the IDE instead of when window
+// is not focused" (intellij.platform.ide.core.impl.xml:77-80). So this is the idle variant: the
+// delay is `vfs.background.refresh.interval` (registry.properties:1656 = 15s, read at
+// SaveAndSyncHandlerImpl.kt:750-752), the window starts after that much inactivity and stops
+// again on any activity (:596-611).
+const backgroundRefreshInterval = 15_000
+let backgroundTimer: number | undefined
+let lastActivityAt = Date.now()
+function noteActivity() { lastActivityAt = Date.now() }
+async function backgroundRefreshOnce() {
+  if (!generalSettings.value.backgroundSyncFiles || !isDesktop) return
+  // "no user activity for one interval" is exactly the source's `debounce(interval)`.
+  if (Date.now() - lastActivityAt < backgroundRefreshInterval) return
+  await performDiskSync(true)
+}
+function startBackgroundRefresh() {
+  stopBackgroundRefresh()
+  if (!isDesktop) return
+  backgroundTimer = window.setInterval(() => { void backgroundRefreshOnce() }, backgroundRefreshInterval)
+}
+function stopBackgroundRefresh() { if (backgroundTimer) { window.clearInterval(backgroundTimer); backgroundTimer = undefined } }
 function onWindowFocus() { void syncFromDisk() }
 function onVisibility() { if (document.visibilityState === 'visible') void syncFromDisk() }
 // IDEA File menu: 从磁盘全部重新加载 (Reload All from Disk, Ctrl+Alt+Y). The same
@@ -4817,7 +5229,9 @@ function stripHoverTitles(root: ParentNode) {
     element.removeAttribute('title')
   }
 }
-watch(() => editorSettings.value.supportScreenReaders, on => {
+// GeneralSettings.isSupportScreenReaders (GeneralSettings.kt:179-186): the state lives in
+// ide.general.xml, not the editor settings — AppearanceConfigurable.kt:363-372 is its row.
+watch(() => generalSettings.value.supportScreenReaders, on => {
   document.documentElement.dataset.screenReader = on ? 'on' : 'off'
   if (screenReaderObserver) { screenReaderObserver.disconnect(); screenReaderObserver = null }
   if (!on) return
@@ -5031,6 +5445,11 @@ onMounted(() => {
   window.addEventListener('beforeunload', onUnload)
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('focus', onWindowFocus)
+  window.addEventListener('blur', onWindowBlur)
+  // IdleTracker's input signals: a click or a scroll is activity just like a keypress.
+  window.addEventListener('pointerdown', noteActivity, true)
+  window.addEventListener('wheel', noteActivity, { capture: true, passive: true })
+  startBackgroundRefresh()
   document.addEventListener('visibilitychange', onVisibility)
   void bootstrap()
 })
@@ -5042,6 +5461,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onUnload)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('focus', onWindowFocus)
+  window.removeEventListener('blur', onWindowBlur)
+  window.removeEventListener('pointerdown', noteActivity, true)
+  window.removeEventListener('wheel', noteActivity, { capture: true } as EventListenerOptions)
+  stopBackgroundRefresh()
   document.removeEventListener('visibilitychange', onVisibility)
   clearAutoSave()
   if (bookmarkSave) window.clearTimeout(bookmarkSave)
@@ -5068,7 +5491,7 @@ onBeforeUnmount(() => {
       <button v-if="editorSettings.mainMenuDisplayMode === 'hamburger'" class="icon-button hamburger-button" :aria-expanded="hamburgerOpen" aria-haspopup="menu" title="主菜单（汉堡按钮）" aria-label="打开主菜单" @click.stop="hamburgerOpen = !hamburgerOpen"><Menu :size="17" /></button>
       <nav class="menubar" aria-label="主菜单">
         <div v-for="group in allMenuGroups" :key="group.menu" class="menu-anchor">
-          <button class="menu-button" :aria-expanded="menu === group.menu" aria-haspopup="menu" :aria-controls="`menu-${group.menu}`" @click="menu = menu === group.menu ? null : group.menu" @keydown.down.prevent="focusMenu(group.menu)" @keydown.up.prevent="focusMenu(group.menu, true)">{{ group.label }}</button>
+          <button class="menu-button" :aria-expanded="menu === group.menu" aria-haspopup="menu" :aria-controls="`menu-${group.menu}`" @click="menu = menu === group.menu ? null : group.menu; submenuRow = null" @keydown.down.prevent="focusMenu(group.menu)" @keydown.up.prevent="focusMenu(group.menu, true)">{{ group.label }}</button>
           <AnimatePresence>
             <motion.div v-if="menu === group.menu" :id="`menu-${group.menu}`" :key="group.menu" class="dropdown" role="menu" :aria-label="group.label" :initial="popupEnter" :animate="{ opacity: 1, y: 0, scale: 1 }" :exit="popupExit" :transition="popupTransition" @keydown="onMenuKeydown($event, group.menu)">
               <template v-for="row in group.rows" :key="row.id">
@@ -5078,6 +5501,20 @@ onBeforeUnmount(() => {
                   <button v-for="project in recentProjects.slice(0, 6)" :key="project.path" class="menu-item recent-menu-item" role="menuitem" :disabled="working || !project.available" :title="project.path" @click="openRecentProject(project)"><FolderOpen :size="14" class="menu-item-icon" /><span class="recent-menu-name">{{ project.name }}</span></button>
                   <span v-if="!recentProjects.length" class="menu-empty">暂无最近项目</span>
                 </template>
+                <div v-else-if="hasSubmenu(row)" class="menu-submenu-anchor" @mouseenter="openSubmenu(row, $event)" @mouseleave="scheduleSubmenuClose">
+                  <button class="menu-item menu-submenu-trigger" role="menuitem" aria-haspopup="menu" :aria-expanded="submenuRow === row.id" :disabled="!rowEnabled(row)" @click.stop="pickMenuRow(row)">
+                    <span class="menu-item-icon" /><span class="menu-item-title">{{ rowTitle(row) }}</span><ChevronRight :size="12" class="menu-submenu-caret" aria-hidden="true" />
+                  </button>
+                  <Teleport to="body">
+                  <div v-if="submenuRow === row.id" class="dropdown menu-submenu" :class="{ 'menu-submenu-above': submenuPlacement === 'above' }" role="menu" :aria-label="rowTitle(row)" :style="submenuStyle" @mouseenter="cancelSubmenuClose" @mouseleave="scheduleSubmenuClose" @keydown.esc.stop="closeSubmenu()">
+                    <template v-for="child in row.children" :key="child.id">
+                      <div v-if="child.rule" class="menu-rule" role="separator" />
+                      <div v-else-if="child.section" class="menu-section-label" role="presentation">{{ child.section }}</div>
+                      <button v-else class="menu-item" :role="child.checked ? 'menuitemcheckbox' : 'menuitem'" :aria-checked="child.checked ? child.checked() : undefined" :disabled="!rowEnabled(child)" @click="pickMenuRow(child)"><span class="menu-item-icon"><Check v-if="child.checked && child.checked()" :size="13" /></span><span class="menu-item-title">{{ rowTitle(child) }}</span><kbd v-if="child.keys">{{ child.keys }}</kbd></button>
+                    </template>
+                  </div>
+                </Teleport>
+                </div>
                 <button v-else class="menu-item" :role="row.checked ? 'menuitemcheckbox' : 'menuitem'" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @click="pickMenuRow(row)"><span class="menu-item-icon"><Check v-if="row.checked && row.checked()" :size="13" /></span><span class="menu-item-title">{{ rowTitle(row) }}</span><kbd v-if="row.keys">{{ row.keys }}</kbd></button>
               </template>
             </motion.div>
@@ -5133,16 +5570,28 @@ onBeforeUnmount(() => {
       <button v-for="group in allMenuGroups" :key="group.menu" class="menu-button hamburger-group" role="menuitem" :aria-expanded="hamburgerGroup === group.menu" @click="hamburgerGroup = hamburgerGroup === group.menu ? null : group.menu">{{ group.label }}</button>
       <template v-if="hamburgerGroup">
         <div class="menu-rule" role="separator" />
-        <button v-for="row in allMenuGroups.find(g => g.menu === hamburgerGroup)?.rows ?? []" :key="row.id" class="menu-item hamburger-item" role="menuitem" :disabled="!rowEnabled(row)" @click="pickMenuRow(row); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(row) }}<kbd v-if="row.keys">{{ row.keys }}</kbd></button>
+        <template v-for="row in allMenuGroups.find(g => g.menu === hamburgerGroup)?.rows ?? []" :key="row.id">
+                <div v-if="row.rule" class="menu-rule" role="separator" />
+                <div v-else-if="row.section" class="menu-section-label" role="presentation">{{ row.section }}</div>
+                <!-- 子菜单：汉堡面板没有二级浮层，按 IDEA 的树展开成分组标题 + 缩进的行 -->
+                <template v-else-if="hasSubmenu(row)">
+                  <div class="menu-section-label" role="presentation">{{ rowTitle(row) }}</div>
+                  <button v-for="child in row.children" v-show="!child.rule && !child.section" :key="child.id" class="menu-item hamburger-item hamburger-child" role="menuitem" :disabled="!rowEnabled(child)" @click="pickMenuRow(child); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(child) }}<kbd v-if="child.keys">{{ child.keys }}</kbd></button>
+                </template>
+                <button v-else class="menu-item hamburger-item" role="menuitem" :disabled="!rowEnabled(row)" @click="pickMenuRow(row); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(row) }}<kbd v-if="row.keys">{{ row.keys }}</kbd></button>
+              </template>
       </template>
     </div>
     <div v-if="hamburgerOpen" class="hamburger-backdrop" @click="hamburgerOpen = false; hamburgerGroup = null" />
-    <p v-if="editorSettings.supportScreenReaders" class="sr-live" role="status" aria-live="polite">{{ notice ?? '' }}</p>
+    <p v-if="generalSettings.supportScreenReaders" class="sr-live" role="status" aria-live="polite">{{ notice ?? '' }}</p>
     <div v-if="!isDesktop && !zenMode" class="preview-banner"><span class="preview-dot" />浏览器预览<span class="preview-description">示例文件仅保存在内存。运行 C++ 桌面端以访问本地工作区。</span><span class="banner-right">Vue 3 / WebView2 / C++20</span></div>
 
-    <WelcomePage v-if="!workspace" :projects="recentProjects" :busy="working" :error="appError" :git-available="gitAvailable" :is-desktop="isDesktop" :plugin-count="pluginList.length" :theme="theme" :settings="editorSettings" :notices="noticeLog" @open="openWorkspace" @create="beginProject('create')" @clone="beginProject('clone')" @settings="openSettings()" @forget="forgetProject" @forget-batch="forgetProjects" @refresh="refreshRecent" @help="help = true" @plugins="openPlugins" @theme="changeTheme" @settings-change="saveSettingsPatch" @clear-notices="clearNotices" />
+    <WelcomePage v-if="!workspace" :projects="recentProjects" :busy="working" :error="appError" :git-available="gitAvailable" :is-desktop="isDesktop" :plugin-count="pluginList.length" :theme="theme" :settings="editorSettings" :notices="noticeLog" :screen-reader-live="generalSettings.supportScreenReaders" @open="openWorkspace" @create="beginProject('create')" @clone="beginProject('clone')" @settings="openSettings()" @forget="forgetProject" @forget-batch="forgetProjects" @refresh="refreshRecent" @help="help = true" @plugins="openPlugins" @theme="changeTheme" @settings-change="saveSettingsPatch" @clear-notices="clearNotices" />
 
     <div v-else class="workbench" :class="{ 'zen-workbench': zenMode, 'tool-maximized': maximizedSide !== null }">
+      <!-- Zen 模式的退出入口：IDEA 的 Zen/免打扰模式保留 Esc 与顶部浮出工具栏，这里给常驻悬浮按钮，
+           否则唯一入口（视图 › 外观）随 header 一起 v-if 掉，用户会被困在空界面里。 -->
+      <button v-if="zenMode" class="zen-exit" title="退出 Zen Mode（Esc）" aria-label="退出 Zen Mode" @click="toggleZenMode()"><X :size="13" />退出 Zen Mode</button>
       <aside v-if="explorer && !zenMode" class="activity-bar" aria-label="工具栏">
         <template v-for="id in stripeOrder('left')" :key="id">
           <span v-if="isDropBefore('left', id)" class="stripe-drop-marker" aria-hidden="true" />
@@ -5483,10 +5932,10 @@ onBeforeUnmount(() => {
     <AnimatePresence>
       <motion.div v-if="notice" key="workspace-notice" class="notice workspace-notice" :class="{ error: noticeError, clickable: Boolean(noticeAction) }" role="status" :title="noticeAction ? '点击查看运行控制台' : undefined" @click="noticeAction?.()" :initial="reducedMotion ? { opacity: 1 } : { opacity: 0, y: 8 }" :animate="{ opacity: 1, y: 0 }" :exit="popupExit" :transition="popupTransition"><Check v-if="!noticeError" :size="15" class="notice-icon" /><CircleHelp v-else :size="15" class="notice-icon" /><span>{{ notice }}</span><button class="icon-button" title="关闭提示" aria-label="关闭提示" @click.stop="notice = ''"><X :size="13" /></button></motion.div>
     </AnimatePresence>
-    <footer v-if="workspace && !zenMode" ref="statusBarRef" class="statusbar" role="group" aria-label="状态栏" @contextmenu="openStatusMenu" @keydown="onStatusBarKeydown"><div class="status-left"><span class="status-brand"><Braces :size="13" /></span><button class="status-toolwindows" :aria-label="editorSettings.showToolWindowBars ? '隐藏工具窗口条' : '显示工具窗口条'" :aria-expanded="toolWindowsPopup" @click="toggleToolWindowStripes" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)"><PanelLeftClose v-if="editorSettings.showToolWindowBars" :size="13" /><PanelLeftOpen v-else :size="13" /></button><div v-if="toolWindowsPopup" class="status-toolwindows-popup" role="menu" aria-label="工具窗口" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)" @keydown.esc.stop="closeToolWindowsPopup()"><button v-for="id in availableToolWindows" :key="id" class="menu-button status-toolwindows-row" role="menuitem" @click="closeToolWindowsPopup(); showView(id)"><span class="menu-item-icon"><component :is="toolIcons[id]" :size="13" /></span><span class="status-toolwindows-name">{{ toolTitles[id] }}</span><span class="status-toolwindows-key">Alt+{{ toolWindowMnemonic(id) }}</span></button><p v-if="!availableToolWindows.length" class="status-toolwindows-empty">当前没有可用的工具窗口。</p></div><button v-if="active && showWidget('file')" class="status-file" :title="`在资源管理器中定位 ${active.path} (Alt+F1,1)`" @click="selectInTree"><span class="status-file-root">{{ workspace?.name }}</span><ChevronRight :size="11" /><span>{{ active.path }}</span></button><button v-if="gitHead && showWidget('branch')" class="status-branch" :title="`当前分支 ${gitHead}（点击打开源代码管理）`" @click="showView('git')"><GitBranch :size="12" />{{ gitHead }}<span v-if="gitAheadBehind.available && gitAheadBehind.ahead" class="status-count">↑{{ gitAheadBehind.ahead }}</span><span v-if="gitAheadBehind.available && gitAheadBehind.behind" class="status-count">↓{{ gitAheadBehind.behind }}</span></button><span v-if="showWidget('bridge')"><span class="status-dot" />{{ isDesktop ? '原生桥接已连接' : '浏览器示例模式' }}</span><span class="status-separator">|</span><span>{{ working ? '正在处理…' : '就绪' }}</span><span v-if="dirty" class="status-unsaved">有未保存修改</span></div><!-- IDEA's InfoAndProgressPanel: a compact indicator in the status bar; clicking it lists every running background task. --><div v-if="showProgressWidget(backgroundTasks.length > 0, progressOpen) && showWidget('progress')" class="status-progress" :class="{ open: progressOpen }"><button class="status-progress-toggle" :aria-expanded="progressOpen" :title="progressOpen ? '收起后台任务列表' : '查看所有运行中的进程'" aria-label="后台任务" @click.stop="progressOpen = !progressOpen"><Loader2 v-if="backgroundTasks.length" :size="12" class="status-spin" /><Check v-else :size="12" aria-hidden="true" /><span>{{ backgroundTasks.length ? `后台任务 ${backgroundTasks.length}` : '后台任务' }}</span></button><div v-if="progressOpen" class="status-progress-list" role="menu" aria-label="后台任务" @keydown.esc.stop="progressOpen = false"><p v-for="row in progressRows" :key="`${row.kind}:${row.title}`" class="status-progress-row" :class="[`status-progress-${row.kind}`, { 'has-separator': row.separator }]"><template v-if="row.kind === 'task'"><strong>{{ row.title }}</strong><span>{{ row.detail }}</span><button v-if="row.cancellable" class="status-progress-cancel" :aria-label="`取消：${row.title}`" title="取消此任务" @click="cancelProgressRow(row)"><X :size="12" />取消</button></template><template v-else><Check v-if="row.kind === 'finished'" :size="13" aria-hidden="true" class="status-progress-check" /><span>{{ row.title }}</span></template></p></div></div><div class="status-right"><button v-if="smartModeLabel && showWidget('smartMode')" class="status-chip status-smart" :title="`${smartModeLabel}（IDEA 的 Smart Mode 指示器）`" aria-label="语言服务状态" @click="showView('outline')">{{ smartModeLabel }}</button><button v-if="showWidget('problems')" class="status-problems" title="打开问题面板" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ allProblems.filter(p => p.severity === 1).length }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ allProblems.filter(p => p.severity === 2).length }} 警告</span></button><button v-if="active && showWidget('position')" class="status-chip status-position" :title="selectionInfo ? `已选中 ${selectionInfo.characters} 个字符，跨 ${selectionInfo.lines} 行；点击转到行` : '点击转到行 (Ctrl+G)'" aria-label="光标位置" @click="openGoLine()">{{ cursorCount > 1 ? `${cursorCount} 个光标` : selectionInfo ? `已选 ${selectionInfo.characters} 字符` : `${active.line}:${active.column}` }}</button><button v-if="active?.readOnly && showWidget('readonly')" class="status-chip status-locked" title="文件只读（点击切换为可写）" @click="void toggleReadOnly(active!.path)"><Lock :size="12" />只读</button><span v-if="active && showWidget('lineSeparator')">{{ active.content.includes('\r\n') ? 'CRLF' : 'LF' }}</span><button v-if="processMemory && showWidget('memory')" class="status-chip status-memory" :title="`进程工作集 ${processMemory.workingSetMb} MB（历史峰值 ${processMemory.peakWorkingSetMb} MB，提交 ${processMemory.privateMb} MB）。宿主没有 JVM 堆上限，峰值不是上限。`" aria-label="内存使用" @click="refreshMemory">{{ processMemory.workingSetMb }} MB</button><button v-if="active && isDesktop && showWidget('lineSeparator')" class="status-chip" title="转换行分隔符（点击在 Windows 与 Unix 之间切换）" aria-label="转换行分隔符" @click="convertLineSeparators(active.content.includes('\r\n') ? 'lf' : 'crlf')">转换行尾</button><button v-if="showWidget('encoding')" class="status-chip" title="文件编码（点击可重新读取或转换保存）" aria-label="文件编码" :disabled="!active" @click="openEncoding">{{ encodingLabels[active?.encoding ?? 'utf-8'] }}{{ active?.bom ? ' 带 BOM' : '' }}</button><button v-if="showWidget('indent')" class="status-chip" :title="editorSettings.useTabCharacter ? '使用制表符缩进，点击修改' : `使用 ${editorSettings.tabSize} 个空格缩进，点击修改`" aria-label="缩进设置" @click="openSettings('editor')">{{ editorSettings.useTabCharacter ? '制表符' : `${editorSettings.tabSize} 个空格` }}</button><button v-if="columnMode && showWidget('column')" class="status-chip status-column" title="列选择模式已开启（Alt+Shift+Insert 或点击此处关闭）" aria-label="列选择模式" @click="toggleColumnModeFromStatusBar">列选择</button><button v-if="noticeLog.length && showWidget('notices')" class="status-chip status-notices" :class="{ 'has-error': noticeLevel(noticeLog) === 'error' }" :aria-expanded="noticeOpen" :title="noticeTitle(noticeLog)" aria-label="通知中心" @click.stop="noticeOpen = !noticeOpen">{{ noticeLog.length }} 条通知</button><button v-if="editorSettings.powerSaveMode && showWidget('powerSave')" class="status-chip status-powersave" title="省电模式已开启：语言服务与后台轮询暂停，点击关闭" aria-label="省电模式" @click="togglePowerSave"><Zap :size="12" />省电模式</button><span>{{ active ? language : 'TaoCode 0.1' }}</span><button title="切换输出面板" aria-label="切换底部面板" @click="bottom = !bottom"><PanelBottom :size="13" /></button><NoticeList v-if="noticeOpen" :entries="noticeLog" :live="editorSettings.supportScreenReaders" @clear="clearNotices" @close="noticeOpen = false" /></div><div v-if="statusMenu" class="status-widget-menu" role="menu" aria-label="状态栏组件" :style="{ left: `${statusMenu.x}px`, top: `${statusMenu.y}px` }"><span class="status-widget-title">状态栏组件</span><button v-for="widget in STATUS_WIDGETS" :key="widget.key" class="menu-button status-widget-item" role="menuitemcheckbox" :aria-checked="showWidget(widget.key)" @click="toggleWidget(widget.key)"><span class="menu-item-icon"><Check v-if="showWidget(widget.key)" :size="13" /></span><span>{{ widget.label }}</span></button><div class="menu-rule" role="separator" /><button class="menu-button status-widget-item" role="menuitem" @click="showAllWidgets(); statusMenu = null">全部显示</button></div><div v-if="statusMenu" class="status-widget-backdrop" @click="statusMenu = null" @contextmenu.prevent="statusMenu = null" /></footer>
+    <footer v-if="workspace && !zenMode" ref="statusBarRef" class="statusbar" role="group" aria-label="状态栏" @contextmenu="openStatusMenu" @keydown="onStatusBarKeydown"><div class="status-left"><span class="status-brand"><Braces :size="13" /></span><button class="status-toolwindows" :aria-label="editorSettings.showToolWindowBars ? '隐藏工具窗口条' : '显示工具窗口条'" :aria-expanded="toolWindowsPopup" @click="toggleToolWindowStripes" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)"><PanelLeftClose v-if="editorSettings.showToolWindowBars" :size="13" /><PanelLeftOpen v-else :size="13" /></button><div v-if="toolWindowsPopup" class="status-toolwindows-popup" role="menu" aria-label="工具窗口" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)" @keydown.esc.stop="closeToolWindowsPopup()"><button v-for="id in availableToolWindows" :key="id" class="menu-button status-toolwindows-row" role="menuitem" @click="closeToolWindowsPopup(); showView(id)"><span class="menu-item-icon"><component :is="toolIcons[id]" :size="13" /></span><span class="status-toolwindows-name">{{ toolTitles[id] }}</span><span class="status-toolwindows-key">Alt+{{ toolWindowMnemonic(id) }}</span></button><p v-if="!availableToolWindows.length" class="status-toolwindows-empty">当前没有可用的工具窗口。</p></div><button v-if="active && showWidget('file')" class="status-file" :title="`在资源管理器中定位 ${active.path} (Alt+F1,1)`" @click="selectInTree"><span class="status-file-root">{{ workspace?.name }}</span><ChevronRight :size="11" /><span>{{ active.path }}</span></button><button v-if="gitHead && showWidget('branch')" class="status-branch" :title="`当前分支 ${gitHead}（点击打开源代码管理）`" @click="showView('git')"><GitBranch :size="12" />{{ gitHead }}<span v-if="gitAheadBehind.available && gitAheadBehind.ahead" class="status-count">↑{{ gitAheadBehind.ahead }}</span><span v-if="gitAheadBehind.available && gitAheadBehind.behind" class="status-count">↓{{ gitAheadBehind.behind }}</span></button><span v-if="showWidget('bridge')"><span class="status-dot" />{{ isDesktop ? '原生桥接已连接' : '浏览器示例模式' }}</span><span class="status-separator">|</span><span>{{ working ? '正在处理…' : '就绪' }}</span><span v-if="dirty" class="status-unsaved">有未保存修改</span></div><!-- IDEA's InfoAndProgressPanel: a compact indicator in the status bar; clicking it lists every running background task. --><div v-if="showProgressWidget(backgroundTasks.length > 0, progressOpen) && showWidget('progress')" class="status-progress" :class="{ open: progressOpen }"><button class="status-progress-toggle" :aria-expanded="progressOpen" :title="progressOpen ? '收起后台任务列表' : '查看所有运行中的进程'" aria-label="后台任务" @click.stop="progressOpen = !progressOpen"><Loader2 v-if="backgroundTasks.length" :size="12" class="status-spin" /><Check v-else :size="12" aria-hidden="true" /><span>{{ backgroundTasks.length ? `后台任务 ${backgroundTasks.length}` : '后台任务' }}</span></button><div v-if="progressOpen" class="status-progress-list" role="menu" aria-label="后台任务" @keydown.esc.stop="progressOpen = false"><p v-for="row in progressRows" :key="`${row.kind}:${row.title}`" class="status-progress-row" :class="[`status-progress-${row.kind}`, { 'has-separator': row.separator }]"><template v-if="row.kind === 'task'"><strong>{{ row.title }}</strong><span>{{ row.detail }}</span><button v-if="row.cancellable" class="status-progress-cancel" :aria-label="`取消：${row.title}`" title="取消此任务" @click="cancelProgressRow(row)"><X :size="12" />取消</button></template><template v-else><Check v-if="row.kind === 'finished'" :size="13" aria-hidden="true" class="status-progress-check" /><span>{{ row.title }}</span></template></p></div></div><div class="status-right"><button v-if="smartModeLabel && showWidget('smartMode')" class="status-chip status-smart" :title="`${smartModeLabel}（IDEA 的 Smart Mode 指示器）`" aria-label="语言服务状态" @click="showView('outline')">{{ smartModeLabel }}</button><button v-if="showWidget('problems')" class="status-problems" title="打开问题面板" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ allProblems.filter(p => p.severity === 1).length }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ allProblems.filter(p => p.severity === 2).length }} 警告</span></button><button v-if="active && showWidget('position')" class="status-chip status-position" :title="selectionInfo ? `已选中 ${selectionInfo.characters} 个字符，跨 ${selectionInfo.lines} 行；点击转到行` : '点击转到行 (Ctrl+G)'" aria-label="光标位置" @click="openGoLine()">{{ cursorCount > 1 ? `${cursorCount} 个光标` : selectionInfo ? `已选 ${selectionInfo.characters} 字符` : `${active.line}:${active.column}` }}</button><button v-if="active?.readOnly && showWidget('readonly')" class="status-chip status-locked" title="文件只读（点击切换为可写）" @click="void toggleReadOnly(active!.path)"><Lock :size="12" />只读</button><span v-if="active && showWidget('lineSeparator')">{{ active.content.includes('\r\n') ? 'CRLF' : 'LF' }}</span><button v-if="processMemory && showWidget('memory')" class="status-chip status-memory" :title="`进程工作集 ${processMemory.workingSetMb} MB（历史峰值 ${processMemory.peakWorkingSetMb} MB，提交 ${processMemory.privateMb} MB）。宿主没有 JVM 堆上限，峰值不是上限。`" aria-label="内存使用" @click="refreshMemory">{{ processMemory.workingSetMb }} MB</button><button v-if="active && isDesktop && showWidget('lineSeparator')" class="status-chip" title="转换行分隔符（点击在 Windows 与 Unix 之间切换）" aria-label="转换行分隔符" @click="convertLineSeparators(active.content.includes('\r\n') ? 'lf' : 'crlf')">转换行尾</button><button v-if="showWidget('encoding')" class="status-chip" title="文件编码（点击可重新读取或转换保存）" aria-label="文件编码" :disabled="!active" @click="openEncoding">{{ encodingLabels[active?.encoding ?? 'utf-8'] }}{{ active?.bom ? ' 带 BOM' : '' }}</button><button v-if="showWidget('indent')" class="status-chip" :title="editorSettings.useTabCharacter ? '使用制表符缩进，点击修改' : `使用 ${editorSettings.tabSize} 个空格缩进，点击修改`" aria-label="缩进设置" @click="openSettings('editor.codeStyle.indents')">{{ editorSettings.useTabCharacter ? '制表符' : `${editorSettings.tabSize} 个空格` }}</button><button v-if="columnMode && showWidget('column')" class="status-chip status-column" title="列选择模式已开启（Alt+Shift+Insert 或点击此处关闭）" aria-label="列选择模式" @click="toggleColumnModeFromStatusBar">列选择</button><button v-if="noticeLog.length && showWidget('notices')" class="status-chip status-notices" :class="{ 'has-error': noticeLevel(noticeLog) === 'error' }" :aria-expanded="noticeOpen" :title="noticeTitle(noticeLog)" aria-label="通知中心" @click.stop="noticeOpen = !noticeOpen">{{ noticeLog.length }} 条通知</button><button v-if="editorSettings.powerSaveMode && showWidget('powerSave')" class="status-chip status-powersave" title="省电模式已开启：语言服务与后台轮询暂停，点击关闭" aria-label="省电模式" @click="togglePowerSave"><Zap :size="12" />省电模式</button><span>{{ active ? language : 'TaoCode 0.1' }}</span><button title="切换输出面板" aria-label="切换底部面板" @click="bottom = !bottom"><PanelBottom :size="13" /></button><NoticeList v-if="noticeOpen" :entries="noticeLog" :live="generalSettings.supportScreenReaders" @clear="clearNotices" @close="noticeOpen = false" /></div><div v-if="statusMenu" class="status-widget-menu" role="menu" aria-label="状态栏组件" :style="{ left: `${statusMenu.x}px`, top: `${statusMenu.y}px` }"><span class="status-widget-title">状态栏组件</span><button v-for="widget in STATUS_WIDGETS" :key="widget.key" class="menu-button status-widget-item" role="menuitemcheckbox" :aria-checked="showWidget(widget.key)" @click="toggleWidget(widget.key)"><span class="menu-item-icon"><Check v-if="showWidget(widget.key)" :size="13" /></span><span>{{ widget.label }}</span></button><div class="menu-rule" role="separator" /><button class="menu-button status-widget-item" role="menuitem" @click="showAllWidgets(); statusMenu = null">全部显示</button></div><div v-if="statusMenu" class="status-widget-backdrop" @click="statusMenu = null" @contextmenu.prevent="statusMenu = null" /></footer>
 
     <ProjectDialog v-if="projectMode" v-model:form="projectForm" :mode="projectMode" :busy="projectBusy || busy" :cancelling="cancelling" :error="projectError" :progress="cloneProgress" :git-available="gitAvailable" :is-desktop="isDesktop" @browse="browseParent" @submit="submitProject" @cancel="cancelProject" />
-    <SettingsDialog v-if="settingsOpen" ref="settingsDialogRef" :settings="editorSettings" :project-settings="workspace ? projectSettings : null" :project-root="workspace?.root ?? null" :active-path="activePath" :theme="theme" :busy="settingsBusy" :error="settingsError" :initial-section="settingsSectionHint" @save="saveSettings" @save-project="saveProjectSettings" :commit-message-settings="commitMessageSettings" @save-commit-message="saveCommitMessageSettings" @save-templates="saveTemplateSettings" @save-java="saveJavaSettings" @browse-directory="browseStructureDir" @theme="changeTheme" @pick-background="void chooseBackgroundImage()" @clear-background="void clearBackgroundImage()" @close="settingsOpen = false" />
+    <SettingsDialog v-if="settingsOpen" ref="settingsDialogRef" :settings="editorSettings" :project-settings="workspace ? projectSettings : null" :project-root="workspace?.root ?? null" :active-path="activePath" :theme="theme" :busy="settingsBusy" :error="settingsError" :initial-section="settingsSectionHint" @save="saveSettings" @save-project="saveProjectSettings" :commit-message-settings="commitMessageSettings" :general="generalSettings" @save-general="saveGeneralSettings" @save-commit-message="saveCommitMessageSettings" @save-templates="saveTemplateSettings" @save-java="saveJavaSettings" @browse-directory="browseStructureDir" @theme="changeTheme" @pick-background="void chooseBackgroundImage()" @clear-background="void clearBackgroundImage()" @close="settingsOpen = false" />
     <div v-if="leavePrompt" class="modal-backdrop">
       <section class="help-dialog leave-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trapFocus">
         <h2 id="leave-title">{{ leavePrompt.title }}</h2><p>以下文件尚未保存；保存失败时不会继续关闭或切换。</p>
@@ -5671,7 +6120,7 @@ onBeforeUnmount(() => {
           <div class="menu-rule" />
           <button @click="const tab = findTab(menu.path); if (tab) togglePinTab(menu.pane, tab); tabMenu = null">{{ findTab(menu.path)?.pinned ? '取消固定' : '固定标签页' }}</button>
           <button :disabled="!findTab(menu.path)?.preview" @click="const tab = findTab(menu.path); if (tab) keepTabOpen(tab); tabMenu = null">保持打开</button>
-          <button @click="tabMenu = null; void openSettings('editor')">配置编辑器标签页…</button>
+          <button @click="tabMenu = null; void openSettings('editor.general.tabs')">配置编辑器标签页…</button>
         </template>
       </div>
     </div>
@@ -5707,7 +6156,7 @@ onBeforeUnmount(() => {
         <!-- universal.file.chooser.action.delete.confirm: Delete "X"? /
              Delete "X" and all of its contents? -->
         <h2>删除 “{{ deleteTarget.path }}”{{ deleteTarget.kind === 'directory' ? ' 及其全部内容？' : '？' }}</h2>
-        <p>{{ deleteTarget.kind === 'directory' ? '目录及其所有子项都会从磁盘移除，无法在 TaoCode 内撤销。' : (deleteToTrash ? '该文件会移到系统回收站；如需找回也可用「本地历史」回滚旧版本。' : '该文件将从磁盘直接删除且无法撤销；如需找回只能用「本地历史」回滚旧版本。') }}</p>
+        <p>{{ deleteTarget.kind === 'directory' ? '目录及其所有子项都会从磁盘移除，无法在 TaoCode 内撤销。' : (generalSettings.deleteToBin ? '该文件会移到系统回收站；如需找回也可用「本地历史」回滚旧版本。' : '该文件将从磁盘直接删除且无法撤销；如需找回只能用「本地历史」回滚旧版本。') }}</p>
         <!-- Safe Delete: IDEA lists the places that still reference the file so the
              decision is made with the callers in view. -->
         <div v-if="deleteTarget.kind === 'file'" class="delete-usages">
@@ -5733,8 +6182,7 @@ onBeforeUnmount(() => {
           </template>
           <p v-else class="delete-usages-empty">正在扫描引用…</p>
         </div>
-        <label class="delete-trash"><input v-model="deleteToTrash" type="checkbox" />移到回收站（可恢复）</label>
-        <div class="leave-actions"><button ref="leaveCancel" class="subtle-button" @click="deleteTarget = null">取消</button><button class="primary-button menu-danger-solid" @click="confirmDelete">{{ deleteToTrash ? '移到回收站' : '删除' }}</button></div>
+                <div class="leave-actions"><button ref="leaveCancel" class="subtle-button" @click="deleteTarget = null">取消</button><button class="primary-button menu-danger-solid" @click="confirmDelete">{{ generalSettings.deleteToBin ? '移到回收站' : '删除' }}</button></div>
       </section>
     </div>
     <!-- EXT-01: plugins contribute commands and templates only; enabling one writes or
@@ -5866,6 +6314,30 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="actionPrompt" class="modal-backdrop" @click.self="actionPrompt = null">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="15" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
+    </div>
+    <!-- 退出确认：IDEA 的 ConfirmExitDialog（确认 + “不再询问”写回 GeneralSettings.confirmExit） -->
+    <div v-if="exitPrompt" class="modal-backdrop" @click.self="resolveExit(false)">
+      <section class="help-dialog exit-dialog" role="alertdialog" aria-modal="true" aria-label="退出 TaoCode" @keydown="trapFocus">
+        <h2>退出 TaoCode</h2>
+        <p>确定要退出吗？未保存的修改会先全部保存。</p>
+        <label class="checkbox-row"><input v-model="exitPromptDontAsk" type="checkbox" /><span>不再询问</span></label>
+        <div class="leave-actions">
+          <button class="subtle-button" @click="resolveExit(false)">取消</button>
+          <button class="primary-button" @click="resolveExit(true)">退出</button>
+        </div>
+      </section>
+    </div>
+    <!-- TerminateRemoteProcessDialog（:66-71）：终端 canDisconnect=false，对话框只有 终止 / 取消 -->
+    <div v-if="terminalClosePrompt" class="modal-backdrop" @click.self="resolveTerminalClose('cancel')">
+      <section class="help-dialog exit-dialog" role="alertdialog" aria-modal="true" :aria-label="processClosePromptText(terminalClosePrompt.labels)?.title">
+        <h2>{{ processClosePromptText(terminalClosePrompt.labels)?.title }}</h2>
+        <p>{{ processClosePromptText(terminalClosePrompt.labels)?.message }}</p>
+        <label class="checkbox-row"><input v-model="terminalCloseDontAsk" type="checkbox" /><span>不再询问</span></label>
+        <div class="leave-actions">
+          <button class="subtle-button" @click="resolveTerminalClose('cancel')">{{ PROCESS_CLOSE_LABELS.cancel }}</button>
+          <button class="primary-button" @click="resolveTerminalClose('terminate')">{{ PROCESS_CLOSE_LABELS.terminate }}</button>
+        </div>
+      </section>
     </div>
     <div v-if="help" class="modal-backdrop" @click.self="help = false"><section class="help-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode" @keydown="trapFocus"><button ref="helpClose" class="icon-button help-close" aria-label="关闭说明" @click="help = false"><X :size="18" /></button><h2>TaoCode <span>0.1 · Foundation</span></h2><p>Vue 3 界面 + CodeMirror 编辑器 + C++20 文件核心。<br />Windows 原生宿主复用系统 WebView2，不捆绑 Electron。</p><div class="help-grid"><span>打开文件夹</span><kbd>Ctrl Shift O</kbd><span>全部保存</span><kbd>Ctrl S</kbd><span>转到文件</span><kbd>Ctrl Shift N</kbd><span>转到类</span><kbd>Ctrl N</kbd><span>查找操作</span><kbd>Ctrl Shift A</kbd><span>转到行</span><kbd>Ctrl G</kbd><span>当前文件内查找</span><kbd>Ctrl F</kbd><span>转到定义</span><kbd>Ctrl B</kbd><span>重命名符号</span><kbd>Shift F6</kbd><span>查找用法</span><kbd>Alt F7</kbd><span>智能补全</span><kbd>Ctrl Space</kbd><span>代码操作</span><kbd>Alt Enter</kbd><span>用模板包裹</span><kbd>Ctrl Alt T</kbd><span>格式化（可带选区）</span><kbd>Ctrl Alt L</kbd><span>智能选区</span><kbd>Ctrl W</kbd><span>书签</span><kbd>F11</kbd><span>书签编号 / 跳转</span><kbd>Ctrl F11 · Ctrl 0-9</kbd><span>行断点</span><kbd>Ctrl F8</kbd><span>运行 / 调试配置</span><kbd>Shift F10 · Shift F9</kbd><span>运行 / 调试上下文</span><kbd>Ctrl Shift F10</kbd><span>选择运行/调试配置</span><kbd>Alt Shift F10 · Alt Shift F9</kbd><span>全部保存</span><kbd>Ctrl S</kbd><span>重新运行</span><kbd>Ctrl F5</kbd><span>关闭当前标签页</span><kbd>Ctrl Shift F4</kbd><span>隐藏当前工具窗口</span><kbd>Shift Esc</kbd><span>上一个 / 下一个标签页</span><kbd>Alt ← · Alt →</kbd><span>跳到上一个工具窗口</span><kbd>F12</kbd><span>恢复当前布局</span><kbd>Shift F12</kbd><span>隐藏全部工具窗口</span><kbd>Ctrl Shift F12</kbd><span>最大化编辑器</span><kbd>Ctrl Shift F12</kbd><span>后退 / 前进</span><kbd>Ctrl Alt ← · Ctrl Alt →</kbd></div><div class="help-note">当前已接通项目创建、打开、克隆、设置，桌面端语言服务（诊断、悬停、转到定义/实现/类型、补全、重命名、查找引用、符号大纲、代码操作含 resolve 解析、格式化与选区格式化、签名信息、文档内同符号高亮、智能选区、内联提示）、操作查找（Ctrl+Shift+A）、书签与 0-9 编号跳转、模板包裹（Ctrl+Alt+T）、随项目保存的运行配置、全局查找/替换、本地历史快照与回滚、Git 状态/暂存/提交/改写上次提交/分支/日志/储藏/拉取/推送/变基/摘取/标签/忽略/与分支比较/文件追溯/回滚文件/重置分支/按块暂存、集成终端（ConPTY + xterm，支持目录右键在终端打开）与调试器（DAP：启动/附加/异常断点/线程/监视），测试运行器（ctest/node:test/JUnit 发现、运行、失败重跑、定义跳转），构建控制台错误定位跳转；浏览器预览无语言服务、终端与调试器。尚无 AI Agent / 模型执行。处理记录仅保留当前会话，不是持久审计日志。</div></section></div>
   </div>
