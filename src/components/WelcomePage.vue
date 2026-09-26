@@ -118,19 +118,34 @@ function clearSearch() {
 // IDEA's project list: the ⋮ at the row end opens the row menu (open / remove from
 // the list); the row itself is highlighted while its menu is open.
 const menuPath = ref('')
-// IDEA's NewRecentProjectPanel can group recent projects (isUseGroups=true) with
-// collapsible group headers, and each row can be moved into a group. The grouping is
-// a user preference of this machine, so it lives in localStorage like the anchors.
-interface ProjectGroup { name: string; paths: string[] }
+// Source: ProjectGroup.java (platform/ide-core/.../ProjectGroup.java).
+// Properties are name, projects (List<path>), expanded (myExpanded), tutorials
+// (myTutorials), bottomGroup (myBottomGroup), plus a modCounter for change tracking.
+// ProjectGroupActionGroup.update() reads myGroup.isExpanded() and toggles the
+// popup/inline rendering; TaoCode renders the group header collapsed vs expanded
+// with the same semantic (when collapsed the header is a "popup group" that
+// expands on click). The bottomGroup flag moves the group to the bottom of the
+// list; tutorials is informational only at the data layer for now.
+interface ProjectGroup { name: string; paths: string[]; expanded: boolean; tutorials: boolean; bottomGroup: boolean }
 const groups = ref<ProjectGroup[]>([])
 const groupCollapsed = ref<Set<string>>(new Set())
 const UNGROUPED = '未分组'
 try {
-  const saved = JSON.parse(localStorage.getItem('taocode.projectGroups') ?? 'null') as { groups?: ProjectGroup[]; collapsed?: string[] } | null
+  const saved = JSON.parse(localStorage.getItem('taocode.projectGroups') ?? 'null') as { groups?: Array<Partial<ProjectGroup>>; collapsed?: string[] } | null
   if (saved && Array.isArray(saved.groups)) {
     groups.value = saved.groups
       .filter(group => group && typeof group.name === 'string' && Array.isArray(group.paths))
-      .map(group => ({ name: group.name, paths: group.paths.filter((path): path is string => typeof path === 'string') }))
+      .map(group => ({
+        name: group.name as string,
+        paths: (group.paths as unknown[]).filter((path): path is string => typeof path === 'string'),
+        // Source: ProjectGroup.isExpanded() defaults to false (myExpanded = false).
+        // Older TaoCode builds used a collapsed-set as the source of truth, so
+        // when the persisted record lacks the boolean we fall back to that set
+        // to keep the user's view stable across the upgrade.
+        expanded: typeof group.expanded === 'boolean' ? group.expanded : !groupCollapsed.value.has(group.name as string),
+        tutorials: group.tutorials === true,
+        bottomGroup: group.bottomGroup === true,
+      }))
   }
   if (saved && Array.isArray(saved.collapsed)) groupCollapsed.value = new Set(saved.collapsed.filter((name): name is string => typeof name === 'string'))
 } catch { /* corrupted state falls back to a single ungrouped list */ }
@@ -140,14 +155,43 @@ function saveGroups() {
 function groupOf(path: string): string {
   return groups.value.find(group => group.paths.includes(path))?.name ?? UNGROUPED
 }
-// Rows are rendered group by group; the ungrouped bucket is always last so the list
-// reads the same whether or not the user has started grouping.
+// Source: RecentProjectListActionProvider.addGroups (RecentProjectListActionProvider.kt:333-355)
+// iterates groups twice — once with `bottom = false` (top groups, rendered in
+// ProjectGroupComparator order) and once with `bottom = true` (the bottomGroup
+// buckets, rendered after the un-grouped recent projects). We mirror that two-pass
+// layout: top groups in ProjectGroupComparator order, then the un-grouped bucket,
+// then any bottom groups. The bottomGroup flag is set by ProjectGroup.setBottomGroup
+// and survives the localStorage round-trip just like the other ProjectGroup fields.
+// ProjectGroupComparator (RecentProjectListActionProvider.kt:388-407): orders two
+// groups by the lowest recent-path index they each contain; ties break on a
+// natural (locale-aware) comparison of their names.
+function projectGroupComparator(a: ProjectGroup, b: ProjectGroup): number {
+  const recent = filteredProjects.value
+  const pathIndex = new Map(recent.map((project, index) => [project.path, index]))
+  let indexA = Number.MAX_SAFE_INTEGER
+  for (const path of a.paths) {
+    const idx = pathIndex.get(path)
+    if (idx !== undefined && idx < indexA) indexA = idx
+  }
+  let indexB = Number.MAX_SAFE_INTEGER
+  for (const path of b.paths) {
+    const idx = pathIndex.get(path)
+    if (idx !== undefined && idx < indexB) indexB = idx
+  }
+  if (indexA === indexB) return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+  return indexA - indexB
+}
 const groupedProjects = computed(() => {
-  const buckets = groups.value.map(group => ({
-    name: group.name,
-    projects: filteredProjects.value.filter(project => group.paths.includes(project.path)),
-  }))
+  const topGroups = [...groups.value.filter(group => !group.bottomGroup)].sort(projectGroupComparator)
+  const bottomGroups = [...groups.value.filter(group => group.bottomGroup)].sort(projectGroupComparator)
+  const buckets: { name: string; projects: RecentProject[] }[] = []
+  for (const group of topGroups) {
+    buckets.push({ name: group.name, projects: filteredProjects.value.filter(project => group.paths.includes(project.path)) })
+  }
   buckets.push({ name: UNGROUPED, projects: filteredProjects.value.filter(project => groupOf(project.path) === UNGROUPED) })
+  for (const group of bottomGroups) {
+    buckets.push({ name: group.name, projects: filteredProjects.value.filter(project => group.paths.includes(project.path)) })
+  }
   return buckets.filter(bucket => bucket.name === UNGROUPED ? bucket.projects.length > 0 : true)
 })
 const groupingActive = computed(() => groups.value.length > 0)
@@ -165,14 +209,24 @@ function createGroupWith(project: RecentProject) {
   const name = window.prompt('新分组名称（用于把最近项目归类）', '')?.trim()
   if (!name) return
   if (name === UNGROUPED || groups.value.some(group => group.name === name)) { moveToGroup(project, name); return }
-  groups.value = [...groups.value, { name, paths: [project.path] }]
+  // Source: ProjectGroup(name) constructor sets myName; myExpanded defaults to
+  // false; the group's bottomGroup flag stays off so it renders above the
+  // un-grouped bucket.
+  groups.value = [...groups.value, { name, paths: [project.path], expanded: true, tutorials: false, bottomGroup: false }]
   saveGroups()
 }
+// Source: ProjectGroupActionGroup.update() reads myGroup.isExpanded() to set
+// popupGroup, and ProjectGroup.setExpanded() flips it. We track both forms so
+// the JSON we serialise matches the boolean field on ProjectGroup and the older
+// collapsed-set semantics keep working for any caller that still reads them.
 function toggleGroupCollapsed(name: string) {
   const next = new Set(groupCollapsed.value)
   if (next.has(name)) next.delete(name)
   else next.add(name)
   groupCollapsed.value = next
+  for (const group of groups.value) {
+    if (group.name === name) group.expanded = !groupCollapsed.value.has(name)
+  }
   saveGroups()
 }
 // IDEA's list binds Left/Right to collapse/expand the group under the cursor.
