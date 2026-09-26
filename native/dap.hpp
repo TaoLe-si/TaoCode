@@ -32,9 +32,17 @@
 // every event callback runs on that thread and must not block; the callbacks are
 // never invoked while an internal lock is held, so a callback may safely start
 // another request. Writes are serialised under their own mutex.
+//
+// LIFETIME: every mutable field lives in a shared `State`. The reader thread (and
+// the request-timeout watchdog) hold a reference to it, so a Client that is
+// destroyed right after `disconnect()` — while a callback is still in flight —
+// can never leave those threads touching dead memory. Stopping is idempotent and
+// every callback is dropped once the state is stopped.
 // ---------------------------------------------------------------------------
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -58,6 +66,13 @@ namespace dap {
 // us reserve unbounded memory; these caps mirror the LSP engine's limits.
 inline constexpr std::size_t max_message_bytes = 64 * 1024 * 1024;
 inline constexpr std::size_t max_header_bytes = 64 * 1024;
+
+// How long a request may stay unanswered before the client answers its caller
+// itself. A hung adapter must never leave a bridge Promise pending forever.
+inline constexpr std::chrono::milliseconds default_request_timeout{120000};
+// Hard ceiling on in-flight requests: an adapter that never answers cannot grow
+// the pending map without bound.
+inline constexpr std::size_t max_pending_requests = 4096;
 
 // Incremental reader for the DAP base protocol. Feed raw bytes from the adapter's
 // stdout in arbitrary chunks (header split across reads, body split across reads,
@@ -103,6 +118,11 @@ public:
     using Reply = std::function<void(Json result, Json error)>;
     // Receives the reshaped bridge event: {"event":name, ...contract keys...}.
     using EventCb = std::function<void(Json event)>;
+    // Answers an adapter reverse request (`runInTerminal`, `startDebugging`):
+    // returns the response body on success, or fills `error` with a reason. The
+    // host installs one so the request can reach the terminal layer / its own
+    // session; with none installed the client does the work itself.
+    using ReverseHandler = std::function<Json(const Json& arguments, std::string& error)>;
 
     Client();
     ~Client();
@@ -114,6 +134,15 @@ public:
     // paths through unmodified".
     void set_root(std::filesystem::path root);
     std::filesystem::path root() const;
+
+    // --- reverse request hooks ---------------------------------------------
+    // Optional wiring for the host. Both are process-wide (an adapter may ask at
+    // any time) and both have a real default, so nothing is ever unanswered.
+    static void set_run_in_terminal_handler(ReverseHandler handler);
+    static void set_start_debugging_handler(ReverseHandler handler);
+
+    // How long a request waits before it is answered with a TIMEOUT error.
+    void set_timeout(std::chrono::milliseconds timeout);
 
     // --- lifecycle ---------------------------------------------------------
     // Spawn the adapter (CreateProcessW, redirected stdin/stdout, its own Job
@@ -169,6 +198,9 @@ public:
     void scopes(long frame_id, Reply on_reply);
     // Reply result: {variables:[{name, value, type?, reference, named}]}.
     void variables(long variables_reference, Reply on_reply);
+    // Ends the session: asks the adapter to disconnect and then waits for its
+    // reader thread to actually exit, so a caller that drops the Client right
+    // afterwards can never race a callback still running.
     void disconnect(Reply on_reply);
 
     // Escape hatch for adapter-specific commands (`evaluate`, `source`,
@@ -190,45 +222,30 @@ public:
     void clear_breakpoints();
 
 private:
+    struct State;  // all mutable session state; shared with the reader thread
     struct Pending {
         Reply handler;
         std::string command;
+        std::chrono::steady_clock::time_point deadline;
     };
 
-    void reader_loop();
-    void handle(const Json& message);
-    void deliver_event(Json event);
-    void answer_adapter_request(const Json& message);
-    std::int64_t send(std::string_view command, Json arguments, Reply on_reply);
-    void fail_pending(std::string_view reason);
-    bool write_frame(std::string_view frame);
+    static void reader_loop(std::shared_ptr<State> state);
+    static void watchdog_loop(std::shared_ptr<State> state);
+    static void handle(State& state, const Json& message);
+    static void deliver_event(State& state, Json event);
+    static void answer_adapter_request(State& state, const Json& message);
+    static void fail_pending(State& state, std::string_view reason);
+    static bool write_frame(State& state, std::string_view frame);
+    // Real defaults for the two reverse requests, used when the host installed no
+    // hook: the command is launched, and a nested adapter session is started.
+    static Json run_in_terminal_default(const Json& arguments, std::string& error);
+    static Json start_debugging_default(State& state, const Json& arguments, std::string& error);
     void close_pipes_and_kill();
     void apply_remembered_breakpoints(std::shared_ptr<Startup> startup);
+    std::int64_t send(std::string_view command, Json arguments, Reply on_reply);
+    void wait_for_exit(std::chrono::milliseconds limit) const;
 
-    mutable std::mutex mutex_;               // guards seq_, pending_, breakpoints_, on_event_
-    std::mutex write_mutex_;                 // guards the stdin pipe + job/process handles
-    mutable std::mutex root_mutex_;            // guards root_ (path mapping is const)
-
-    std::int64_t seq_ = 1;
-    std::unordered_map<std::int64_t, Pending> pending_;
-    std::map<std::string, Json> breakpoints_;   // path -> [{line, condition?, ...}]
-    Json exception_filters_ = Json::array();    // remembered setExceptionBreakpoints filters
-    std::filesystem::path root_;
-    std::string adapter_id_;
-    EventCb on_event_;
-
-    void* stdin_write_ = nullptr;  // HANDLE
-    void* stdout_read_ = nullptr;  // HANDLE
-    void* process_ = nullptr;      // HANDLE
-    void* thread_ = nullptr;       // HANDLE (primary thread of the adapter)
-    void* job_ = nullptr;          // HANDLE (KILL_ON_JOB_CLOSE)
-    std::thread reader_;
-
-    std::atomic<bool> running_{false};
-    std::atomic<bool> exited_{false};
-    std::atomic<bool> debuggee_alive_{false};
-    std::atomic<bool> saw_terminated_{false};
-    std::atomic<long> exit_code_{-1};
+    std::shared_ptr<State> state_;
 };
 
 }  // namespace dap

@@ -5,7 +5,7 @@ import type { Bookmark as BookmarkEntry } from '../bridge'
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string }>()
 const emit = defineEmits<{ jump: [entry: BookmarkEntry]; remove: [entry: BookmarkEntry]; assign: [] }>()
 
-const folderOf = (path: string) => path.slice(0, path.length - (path.split('/').pop()?.length ?? 0))
+const folderOf = (path: string) => path.slice(0, path.length - (path.split('/').pop()?.length ?? 0)).replace(/\/$/, '')
 </script>
 
 <template>
@@ -23,13 +23,13 @@ const folderOf = (path: string) => path.slice(0, path.length - (path.split('/').
     <div v-else class="bookmark-scroll" role="list" aria-label="项目书签">
       <div v-for="entry in entries" :key="`${entry.path}:${entry.line}`" class="bookmark-row" role="listitem">
         <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
-                :title="`${entry.path}:${entry.line}`" @click="emit('jump', entry)">
+                :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行`" @click="emit('jump', entry)">
           <span class="bookmark-digit" :title="entry.mnemonic === undefined ? '无编号' : `Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic ?? '' }}</span>
           <span class="bookmark-name">{{ entry.path.split('/').pop() }}</span>
           <span class="bookmark-folder">{{ folderOf(entry.path) }}</span>
           <span class="bookmark-line">{{ entry.line }}</span>
         </button>
-        <button class="icon-button" title="移除书签" aria-label="移除书签" @click="emit('remove', entry)"><X :size="13" /></button>
+        <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>
       </div>
     </div>
   </div>

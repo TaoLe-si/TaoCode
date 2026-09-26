@@ -14,9 +14,15 @@ const diffRows = ref<DiffRow[]>([])
 const diffTruncated = ref(false)
 const diffHeader = ref('')
 const loading = ref(false)
+const diffLoading = ref(false)
 const error = ref('')
+// The list is keyed to a file and the diff to one snapshot, so each keeps a token:
+// an answer that arrives after the subject changed belongs to nothing on screen.
+let listToken = 0
+let diffToken = 0
 
 async function load() {
+  const token = ++listToken
   selected.value = null
   diff.value = ''
   diffRows.value = []
@@ -26,14 +32,18 @@ async function load() {
   if (!isDesktop || !props.path || !props.ready) return
   loading.value = true
   try {
-    entries.value = (await request<HistoryList>('history.list', { path: props.path })).entries ?? []
-    if (entries.value[0]) await select(entries.value[0])
-  } catch (caught) { error.value = message(caught) }
-  finally { loading.value = false }
+      const listed = await request<HistoryList>('history.list', { path: props.path })
+      if (token !== listToken) return  // a stale answer must not replace the new file's list
+      entries.value = listed.entries ?? []
+    if (entries.value[0]) await select(entries.value[0]!)
+  } catch (caught) { if (token === listToken) error.value = message(caught) }
+  finally { if (token === listToken) loading.value = false }
 }
 async function select(entry: HistoryEntry) {
   selected.value = entry
+  const token = ++diffToken
   if (!isDesktop || !props.path) { diff.value = ''; diffRows.value = []; return }
+  diffLoading.value = true
   try {
     // Unified text for the patch view, aligned rows for the side-by-side one; both
     // come from the same snapshot so the two modes cannot disagree.
@@ -41,12 +51,17 @@ async function select(entry: HistoryEntry) {
       request<HistoryDiff>('history.diff', { path: props.path, id: entry.id }),
       request<HistoryDiffSides>('history.diffSides', { path: props.path, id: entry.id }),
     ])
+    if (token !== diffToken) return
     diff.value = unified.diff ?? ''
     diffRows.value = sides.rows ?? []
     diffTruncated.value = sides.truncated === true
     diffHeader.value = sides.header ?? ''
   }
-  catch (caught) { diff.value = ''; diffRows.value = []; error.value = message(caught) }
+  catch (caught) {
+    if (token !== diffToken) return
+    diff.value = ''; diffRows.value = []; error.value = message(caught)
+  }
+  finally { if (token === diffToken) diffLoading.value = false }
 }
 function message(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 function label(entry: HistoryEntry) {
@@ -66,13 +81,14 @@ watch(() => [props.path, props.ready], () => void load(), { immediate: true })
     <template v-else-if="path && ready && isDesktop">
       <div v-if="!entries.length" class="hist-empty">此文件还没有保存过的历史版本。</div>
       <div v-else class="hist-body">
-        <div class="hist-list">
-          <button v-for="entry in entries" :key="entry.id" class="hist-item" :class="{ selected: selected?.id === entry.id }" @click="select(entry)">{{ label(entry) }}</button>
+        <div class="hist-list" role="list" aria-label="历史版本">
+          <button v-for="entry in entries" :key="entry.id" class="hist-item" role="listitem" :class="{ selected: selected?.id === entry.id }" :aria-current="selected?.id === entry.id ? 'true' : undefined" @click="select(entry)">{{ label(entry) }}</button>
         </div>
         <div class="hist-actions">
           <button class="subtle-button" :disabled="!selected" title="把当前文件回滚到所选版本（会作为新版本保存）" @click="selected && emit('revert', selected)"><RotateCcw :size="13" />回滚此版本</button>
         </div>
-        <DiffView v-if="diffRows.length || diff" :path="props.path" :subtitle="diffHeader" :rows="diffRows" :unified="diff" :truncated="diffTruncated" />
+        <p v-if="diffLoading" class="hist-empty">正在读取所选版本的差异…</p>
+        <DiffView v-else-if="diffRows.length || diff" :path="props.path" :subtitle="diffHeader" :rows="diffRows" :unified="diff" :truncated="diffTruncated" />
         <p v-else-if="selected" class="hist-empty">与当前内容一致，无差异。</p>
       </div>
     </template>
@@ -88,7 +104,6 @@ watch(() => [props.path, props.ready], () => void load(), { immediate: true })
 .hist-item:hover { background: var(--hover); }
 .hist-item.selected { background: var(--selected); color: var(--bright); }
 .hist-actions { display: flex; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
-.hist-diff { flex: 1; min-height: 0; margin: 0; padding: var(--space-2) var(--space-3); overflow: auto; color: var(--secondary); background: var(--editor); font: 11px/1.6 var(--font-mono); white-space: pre-wrap; }
 .hist-error { margin: 0; padding: var(--space-2) var(--space-3); color: var(--error); font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .hist-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
 </style>

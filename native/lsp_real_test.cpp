@@ -32,8 +32,19 @@ using taocode::Json;
 using taocode::lsp::Session;
 
 std::string env(const char* name, const std::string& fallback = {}) {
+    // _dupenv_s is the checked variant MSVC wants; the POSIX branch keeps the file
+    // buildable if it is ever compiled somewhere else.
+#if defined(_MSC_VER)
+    char* value = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr) return fallback;
+    const std::string text(value, length > 0 ? length - 1 : 0);
+    free(value);
+    return text.empty() ? fallback : text;
+#else
     const char* value = std::getenv(name);
     return value && *value ? std::string(value) : fallback;
+#endif
 }
 std::vector<std::wstring> split_args(const std::string& raw) {
     std::vector<std::wstring> parts;

@@ -134,9 +134,21 @@ Json SessionStore::load(const std::string& root) {
 }
 
 Json SessionStore::clear(const std::string& root) {
+    const auto target = file_for(root);
     std::error_code error;
-    const bool removed = fs::remove(file_for(root), error);
-    return {{"cleared", true}, {"removed", removed}};
+    const bool exists = fs::exists(target, error);
+    // Nothing on disk means the session is already clear — that is not a failure.
+    if (!exists && !error) return {{"cleared", true}, {"removed", false}};
+    // `cleared` used to be a hard-coded true: when the session file was locked or
+    // unwritable the delete failed, the UI still promised "已清除", and the next
+    // start restored drafts the user had been told were gone. Report the truth and
+    // hand the Windows error code up so the failure is diagnosable, not swallowed.
+    const bool removed = fs::remove(target, error);
+    if (!removed) {
+        const auto code = error ? static_cast<DWORD>(error.value()) : GetLastError();
+        return {{"cleared", false}, {"removed", false}, {"error", code}};
+    }
+    return {{"cleared", true}, {"removed", true}};
 }
 
 }  // namespace session

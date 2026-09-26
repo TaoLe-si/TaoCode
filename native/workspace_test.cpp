@@ -544,6 +544,17 @@ int main() {
                       reread.at("content").get<std::string>().find('\r') == std::string::npos,
                   "re-read shows LF-only lines");
         });
+
+        // RevealProjectDirAction (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33):
+        // the welcome screen reveals an absolute path with no workspace open. Only the guards are
+        // exercised here — a successful call spawns Explorer, which a test must not do.
+        run("shell.reveal rejects a bad path and a missing parent before starting the shell", [&] {
+            expect_error("INVALID_PATH", [&] { taocode::reveal_absolute(""); });
+            expect_error("INVALID_PATH", [&] { taocode::reveal_absolute("relative\\project"); });
+            expect_error("INVALID_PATH", [&] { taocode::reveal_absolute(std::string("bad\0tail", 8)); });
+            const auto orphan = std::string("C:\\taocode-reveal-missing-parent\\project");
+            expect_error("NOT_FOUND", [&] { taocode::reveal_absolute(orphan); });
+        });
     } catch (const std::exception& error) {
         ++failures;
         std::cerr << "FAIL setup: " << error.what() << '\n';

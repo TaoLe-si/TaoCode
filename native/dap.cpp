@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwchar>
 #include <utility>
 
 namespace taocode {
@@ -169,6 +170,94 @@ std::string decode_source_path(std::string_view value) {
     return slash_form(text);
 }
 
+// A source path (URI or absolute) -> workspace-relative '/', or the decoded path
+// when it lives outside the root.
+std::string relative_to(const std::string& source, const std::filesystem::path& root) {
+    std::string decoded = decode_source_path(source);
+    if (decoded.empty()) return {};
+    std::string base = slash_form(u8_path(root.lexically_normal()));
+    if (base.size() > 1 && decoded.size() >= base.size() && lower(decoded.substr(0, base.size())) == lower(base)) {
+        auto relative = decoded.substr(base.size());
+        while (!relative.empty() && relative.front() == '/') relative.erase(relative.begin());
+        return relative;
+    }
+    return decoded;
+}
+
+// ------------------------------------------------------------ process help ---
+
+std::wstring widen(const std::string& value) {
+    if (value.empty()) return {};
+    const int size = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0) return {};
+    std::wstring out(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), out.data(), size);
+    return out;
+}
+
+std::string narrow(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string out(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), out.data(), size, nullptr, nullptr);
+    return out;
+}
+
+// Quotes one command-line token the way CreateProcessW's own parser expects.
+std::wstring quote_argument(const std::wstring& value) {
+    if (!value.empty() && value.find_first_of(L" \t\"") == std::wstring::npos) return value;
+    std::wstring quoted = L"\"";
+    for (std::size_t i = 0; i != value.size(); ++i) {
+        std::size_t backslashes = 0;
+        while (i != value.size() && value[i] == L'\\') { ++backslashes; ++i; }
+        if (i == value.size()) { quoted.append(backslashes * 2, L'\\'); break; }
+        if (value[i] == L'"') quoted.append(backslashes * 2 + 1, L'\\');
+        else quoted.append(backslashes, L'\\');
+        quoted.push_back(value[i]);
+    }
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+// The parent environment plus the overrides an adapter sent, as the sorted,
+// double-NUL-terminated UTF-16 block CreateProcessW wants.
+std::wstring environment_block(const Json& overrides) {
+    std::vector<std::pair<std::wstring, std::wstring>> entries;
+    const wchar_t* inherited = GetEnvironmentStringsW();
+    if (inherited) {
+        for (const wchar_t* cursor = inherited; *cursor;) {
+            const std::wstring entry(cursor);
+            cursor += entry.size() + 1;
+            const auto equals = entry.find(L'=');
+            if (equals == std::wstring::npos || equals == 0) continue;  // the `=C:` oddities
+            entries.emplace_back(entry.substr(0, equals), entry.substr(equals + 1));
+        }
+        FreeEnvironmentStringsW(const_cast<wchar_t*>(inherited));
+    }
+    if (overrides.is_object())
+        for (const auto& [key, value] : overrides.items()) {
+            const auto wide_key = widen(key);
+            const auto found = std::find_if(entries.begin(), entries.end(), [&wide_key](const auto& entry) {
+                return _wcsicmp(entry.first.c_str(), wide_key.c_str()) == 0;
+            });
+            if (value.is_null()) {  // an explicit null removes the variable
+                if (found != entries.end()) entries.erase(found);
+                continue;
+            }
+            const auto wide_value = widen(value.is_string() ? value.get<std::string>() : value.dump());
+            if (found != entries.end()) found->second = wide_value;
+            else entries.emplace_back(wide_key, wide_value);
+        }
+    std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
+        return _wcsicmp(left.first.c_str(), right.first.c_str()) < 0;
+    });
+    std::wstring block;
+    for (const auto& [key, value] : entries) block += key + L'=' + value + L'\0';
+    block += L'\0';
+    return block;
+}
+
 // -------------------------------------------------------------- reshaping ---
 
 Json shape_event(const std::string& name, const Json& body) {
@@ -189,9 +278,13 @@ Json shape_event(const std::string& name, const Json& body) {
         event["category"] = std::move(category);
         event["text"] = std::move(text);
     } else if (name == "breakpoint") {
-        // {event:"breakpoint", verified, line?, path?}
+        // {event:"breakpoint", verified, line?, path?, id?}
         const Json& point =
             source.contains("breakpoint") && source.at("breakpoint").is_object() ? source.at("breakpoint") : source;
+        // DAP's optional Breakpoint id: it is how an adapter says *which* breakpoint
+        // moved (or was set outside the IDE), so the UI must not have to guess.
+        if (point.contains("id") && (point.at("id").is_number() || point.at("id").is_string()))
+            event["id"] = point.at("id");
         event["verified"] = bool_of(point, "verified", false);
         if (point.contains("line") && point.at("line").is_number_integer()) event["line"] = point.at("line").get<std::int64_t>();
         const auto path = text_of(point, "path");
@@ -199,10 +292,45 @@ Json shape_event(const std::string& name, const Json& body) {
     } else if (name == "terminated") {
         // {event:"terminated", restartable?}
         if (source.contains("restartable")) event["restartable"] = bool_of(source, "restartable", false);
+    } else if (name == "exited") {
+        // {event:"exited", exitCode} — the debuggee's own exit status, which the
+        // debugger console shows instead of a bare "session ended".
+        event["exitCode"] = int_of(source, "exitCode", 0);
+    } else if (name == "module") {
+        // {event:"module", reason, module:{id, name}, path?}
+        const Json& module = source.contains("module") && source.at("module").is_object() ? source.at("module") : source;
+        event["reason"] = text_of(source, "reason");
+        Json shaped{{"id", int_of(module, "id", 0)}, {"name", text_of(module, "name")}};
+        const auto type = text_of(module, "type");
+        if (!type.empty()) shaped["type"] = type;
+        if (int_of(module, "sourceReference", 0) != 0) shaped["sourceReference"] = int_of(module, "sourceReference", 0);
+        event["module"] = std::move(shaped);
+        const auto path = text_of(module, "path");
+        if (!path.empty()) event["rawPath"] = path;
+    } else if (name == "loadedSource") {
+        // {event:"loadedSource", reason, source:{name, sourceReference}, path?}
+        const Json& loaded = source.contains("source") && source.at("source").is_object() ? source.at("source") : source;
+        event["reason"] = text_of(source, "reason");
+        Json shaped{{"name", text_of(loaded, "name")}, {"sourceReference", int_of(loaded, "sourceReference", 0)}};
+        event["source"] = std::move(shaped);
+        const auto path = text_of(loaded, "path");
+        if (!path.empty()) event["rawPath"] = path;
+    } else if (name == "progressStart" || name == "progressUpdate" || name == "progressEnd") {
+        // {event:"progress", phase, progressId, title?, message?, percentage?} —
+        // the three DAP progress events collapse into the one shape the UI polls.
+        event["event"] = "progress";
+        event["phase"] = name == "progressStart" ? "start" : name == "progressUpdate" ? "update" : "end";
+        event["progressId"] = text_of(source, "progressId");
+        const auto title = text_of(source, "title");
+        if (!title.empty()) event["title"] = title;
+        const auto message = text_of(source, "message");
+        if (!message.empty()) event["message"] = message;
+        if (source.contains("percentage") && source.at("percentage").is_number())
+            event["percentage"] = source.at("percentage");
     } else {
-        // Everything else (continued, thread, module, capability, invalidated,
-        // progressUpdate, loadedSources, memory, exited, ...) forwards the raw body
-        // so the UI can still react to adapter-specific events.
+        // Everything else (continued, thread, capability, invalidated,
+        // loadedSources, memory, ...) forwards the raw body so the UI can still
+        // react to adapter-specific events.
         event["body"] = source;
     }
     return event;
@@ -370,6 +498,54 @@ struct Startup {
     Client::Reply done;
 };
 
+// Every mutable byte of a session. The reader thread and the timeout watchdog hold
+// one of these, so a Client that is destroyed the moment a session ends can never
+// leave a callback running against freed memory.
+struct Client::State {
+    mutable std::mutex mutex_;               // guards seq_, pending_, breakpoints_, on_event_, stopped_
+    std::mutex write_mutex_;                 // guards the stdin pipe + job/process handles
+    mutable std::mutex root_mutex_;          // guards root_ (path mapping is const)
+
+    std::int64_t seq_ = 1;
+    std::unordered_map<std::int64_t, Pending> pending_;
+    std::map<std::string, Json> breakpoints_;   // path -> [{line, condition?, ...}]
+    Json exception_filters_ = Json::array();    // remembered setExceptionBreakpoints filters
+    std::filesystem::path root_;
+    std::string adapter_id_;
+    EventCb on_event_;
+
+    void* stdin_write_ = nullptr;  // HANDLE
+    void* stdout_read_ = nullptr;  // HANDLE
+    void* process_ = nullptr;      // HANDLE
+    void* thread_ = nullptr;       // HANDLE (primary thread of the adapter)
+    void* job_ = nullptr;          // HANDLE (KILL_ON_JOB_CLOSE)
+    std::thread reader_;
+    std::thread watchdog_;
+
+    // How this adapter was launched, so a `startDebugging` reverse request can
+    // start a sibling session of the same adapter.
+    std::wstring adapter_command_;
+    std::vector<std::wstring> adapter_arguments_;
+    std::filesystem::path adapter_cwd_;
+    // Sessions started on the adapter's behalf; torn down with this one.
+    std::vector<std::shared_ptr<Client>> nested_;
+
+    std::condition_variable due_;
+    std::uint64_t wake_ = 0;   // bumped whenever a deadline is registered, so the
+                               // watchdog re-picks the earliest one instead of
+                               // sleeping on the stale absolute time
+    std::chrono::milliseconds timeout_ = default_request_timeout;
+    bool stopped_ = false;   // once set, no callback is delivered any more
+    bool tearing_ = false;   // shutdown() has begun (idempotence guard)
+    bool watching_ = false;
+
+    std::atomic<bool> running_{false};
+    std::atomic<bool> exited_{false};
+    std::atomic<bool> debuggee_alive_{false};
+    std::atomic<bool> saw_terminated_{false};
+    std::atomic<long> exit_code_{-1};
+};
+
 namespace {
 
 // Runs the caller's callback exactly once, whoever finishes the sequence first.
@@ -464,28 +640,28 @@ bool is_adapter_request(const Json& message) { return message_type(message) == "
 
 // ------------------------------------------------------------------ client ---
 
-Client::Client() = default;
+Client::Client() : state_(std::make_shared<State>()) {}
 
 Client::~Client() { shutdown(); }
 
 void Client::set_root(std::filesystem::path root) {
-    std::lock_guard lock(root_mutex_);
-    root_ = std::move(root);
+    std::lock_guard lock(state_->root_mutex_);
+    state_->root_ = std::move(root);
 }
 
 std::filesystem::path Client::root() const {
-    std::lock_guard lock(root_mutex_);
-    return root_;
+    std::lock_guard lock(state_->root_mutex_);
+    return state_->root_;
 }
 
 std::string Client::to_uri(const std::string& path) const {
     if (path.rfind("file:", 0) == 0) return path;  // already a URI
     std::string generic;
     {
-        std::lock_guard lock(root_mutex_);
-        if (path.empty()) generic = u8_path(root_.lexically_normal());
+        std::lock_guard lock(state_->root_mutex_);
+        if (path.empty()) generic = u8_path(state_->root_.lexically_normal());
         else if (looks_absolute(path)) generic = slash_form(path);
-        else generic = u8_path((root_ / std::filesystem::path(std::u8string(path.begin(), path.end()))).lexically_normal());
+        else generic = u8_path((state_->root_ / std::filesystem::path(std::u8string(path.begin(), path.end()))).lexically_normal());
     }
     if (generic.empty()) return {};
     // "C:/dir/file" -> "file:///C:/dir/file": the drive colon stays readable and
@@ -501,34 +677,146 @@ std::string Client::to_uri(const std::string& path) const {
 }
 
 std::string Client::to_path(const std::string& source) const {
-    std::string decoded = decode_source_path(source);
-    if (decoded.empty()) return {};
-    std::string root;
+    std::filesystem::path root;
     {
-        std::lock_guard lock(root_mutex_);
-        root = u8_path(root_.lexically_normal());
+        std::lock_guard lock(state_->root_mutex_);
+        root = state_->root_;
     }
-    root = slash_form(root);
-    if (root.size() > 1 && decoded.size() >= root.size() && lower(decoded.substr(0, root.size())) == lower(root)) {
-        auto relative = decoded.substr(root.size());
-        while (!relative.empty() && relative.front() == '/') relative.erase(relative.begin());
-        return relative;
-    }
-    return decoded;
+    return relative_to(source, root);
 }
 
 std::string Client::to_native(const std::string& path) const {
     if (path.empty()) return path;
     if (path.rfind("file:", 0) == 0) return to_path(path);  // map a URI back to a real path
     if (looks_absolute(path)) return slash_form(path);
-    std::lock_guard lock(root_mutex_);
-    return u8_path((root_ / std::filesystem::path(std::u8string(path.begin(), path.end()))).lexically_normal());
+    std::lock_guard lock(state_->root_mutex_);
+    return u8_path((state_->root_ / std::filesystem::path(std::u8string(path.begin(), path.end()))).lexically_normal());
+}
+
+void Client::set_timeout(std::chrono::milliseconds timeout) {
+    std::lock_guard lock(state_->mutex_);
+    state_->timeout_ = timeout;
+}
+
+Client::ReverseHandler& run_in_terminal_hook() {
+    static Client::ReverseHandler hook;  // set once, before any session starts
+    return hook;
+}
+
+Client::ReverseHandler& start_debugging_hook() {
+    static Client::ReverseHandler hook;
+    return hook;
+}
+
+void Client::set_run_in_terminal_handler(ReverseHandler handler) { run_in_terminal_hook() = std::move(handler); }
+
+void Client::set_start_debugging_handler(ReverseHandler handler) { start_debugging_hook() = std::move(handler); }
+
+// The default `runInTerminal`: the command is really launched. "external" gets its
+// own console window (the process id is what the adapter waits on), "integrated"
+// runs windowless and reports a shell process id, which is what debugpy and the
+// js adapters ask for when they want the program inside the IDE's terminal.
+Json Client::run_in_terminal_default(const Json& arguments, std::string& error) {
+    const bool external = text_of(arguments, "kind") == "external";
+    std::wstring line;
+    const auto& parts = arguments.contains("args") && arguments.at("args").is_array() ? arguments.at("args") : Json::array();
+    for (const auto& part : parts) {
+        if (!part.is_string()) continue;
+        if (!line.empty()) line += L' ';
+        line += quote_argument(widen(part.get<std::string>()));
+    }
+    if (line.empty()) {
+        const auto command = text_of(arguments, "command");
+        if (command.empty()) { error = "runInTerminal 没有要执行的命令。"; return Json(nullptr); }
+        line = quote_argument(widen(command));
+    }
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION info{};
+    const auto cwd = text_of(arguments, "cwd");
+    const std::wstring wide_cwd = widen(cwd);
+    const Json environment = arguments.contains("env") && arguments.at("env").is_object() ? arguments.at("env")
+                                                                                          : Json(nullptr);
+    std::wstring block = environment_block(environment);
+    const DWORD flags = CREATE_NEW_PROCESS_GROUP | (external ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) |
+                        (block.empty() ? DWORD(0) : CREATE_UNICODE_ENVIRONMENT);
+    // No lpApplicationName: the adapter's command has to go through the normal
+    // PATH search exactly like a shell would.
+    std::vector<wchar_t> mutable_line(line.begin(), line.end());
+    mutable_line.push_back(L'\0');
+    const BOOL created = CreateProcessW(nullptr, mutable_line.data(), nullptr, nullptr, FALSE, flags,
+                                        block.empty() ? nullptr : block.data(),
+                                        wide_cwd.empty() ? nullptr : wide_cwd.c_str(), &startup, &info);
+    if (!created) {
+        error = "无法启动调试适配器请求的进程（Windows 错误 " + std::to_string(GetLastError()) + "）：" +
+                narrow(line);
+        return Json(nullptr);
+    }
+    CloseHandle(info.hThread);
+    CloseHandle(info.hProcess);  // the child outlives this call; it is not ours to reap
+    Json body = Json::object();
+    if (external) body["processId"] = static_cast<std::int64_t>(info.dwProcessId);
+    else body["shellProcessId"] = static_cast<std::int64_t>(info.dwProcessId);
+    return body;
+}
+
+// The default `startDebugging`: a genuinely new session of the same adapter, run
+// for the configuration the adapter handed back (compound/multi-process launches
+// work exactly this way in VS Code). The nested session is torn down with this one.
+Json Client::start_debugging_default(State& state, const Json& arguments, std::string& error) {
+    std::wstring command;
+    std::vector<std::wstring> adapter_arguments;
+    std::filesystem::path working_directory;
+    std::filesystem::path root;
+    std::string adapter_id;
+    std::chrono::milliseconds timeout{default_request_timeout};
+    {
+        std::lock_guard lock(state.mutex_);
+        command = state.adapter_command_;
+        adapter_arguments = state.adapter_arguments_;
+        working_directory = state.adapter_cwd_;
+        adapter_id = state.adapter_id_;
+        timeout = state.timeout_;
+    }
+    {
+        std::lock_guard lock(state.root_mutex_);
+        root = state.root_;
+    }
+    if (command.empty()) {
+        error = "嵌套调试会话需要适配器命令，而当前会话不是由 TaoCode 启动的。";
+        return Json(nullptr);
+    }
+    const Json configuration = arguments.contains("configuration") && arguments.at("configuration").is_object()
+                                   ? arguments.at("configuration") : Json::object();
+    auto nested = std::make_shared<Client>();
+    nested->set_root(root);
+    nested->set_timeout(timeout);
+    // The adapter asked for a session; its events belong to the same debug UI, so
+    // they are forwarded and merely tagged.
+    try {
+        nested->start(command, adapter_arguments, working_directory, [](Json) {});
+    } catch (const std::exception& failure) {
+        error = std::string("无法启动嵌套调试会话：") + failure.what();
+        return Json(nullptr);
+    }
+    Json launch_configuration = configuration;
+    const auto request = text_of(arguments, "request");
+    if (!request.empty()) launch_configuration["request"] = request;
+    nested->start_debugging(adapter_id.empty() ? std::string("taocode") : adapter_id, std::move(launch_configuration),
+                            [](Json, Json) {});
+    {
+        std::lock_guard lock(state.mutex_);
+        state.nested_.push_back(nested);
+    }
+    return Json{{"ok", true}};
 }
 
 void Client::start(const std::wstring& command, const std::vector<std::wstring>& arguments,
                    const std::filesystem::path& working_directory, EventCb on_event) {
-    std::lock_guard lock(mutex_);
-    if (running_.load()) throw WorkspaceError("DAP_RUNNING", "调试会话已在进行，请先停止。");
+    auto& s = *state_;
+    std::lock_guard lock(s.mutex_);
+    if (s.running_.load()) throw WorkspaceError("DAP_RUNNING", "调试会话已在进行，请先停止。");
     if (command.empty()) throw WorkspaceError("DAP_SPAWN", "缺少调试适配器可执行文件。");
 
     SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
@@ -542,10 +830,10 @@ void Client::start(const std::wstring& command, const std::vector<std::wstring>&
 
     // Quoted executable path plus quoted-when-needed arguments: an adapter living
     // under "C:\Program Files\..." has to survive CreateProcessW's own parsing.
-    std::wstring line = L"\"" + command + L"\"";
+    std::wstring line = quote_argument(command);
     for (const auto& argument : arguments) {
         line += L' ';
-        line += argument.find_first_of(L" \t") == std::wstring::npos ? argument : L"\"" + argument + L"\"";
+        line += quote_argument(argument);
     }
     std::vector<wchar_t> mutable_line(line.begin(), line.end());
     mutable_line.push_back(L'\0');
@@ -560,7 +848,7 @@ void Client::start(const std::wstring& command, const std::vector<std::wstring>&
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION info{};
     const auto working = working_directory.empty() ? nullptr : working_directory.c_str();
-    const BOOL created = CreateProcessW(command.c_str(), mutable_line.data(), nullptr, nullptr, TRUE,
+    const BOOL created = CreateProcessW(nullptr, mutable_line.data(), nullptr, nullptr, TRUE,
                                         CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED, nullptr, working,
                                         &startup, &info);
     CloseHandle(stdin_read);
@@ -579,32 +867,41 @@ void Client::start(const std::wstring& command, const std::vector<std::wstring>&
     if (job) {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
-        AssignProcessToJobObject(job, info.hProcess);
+        // An unconfigured or unassigned job kills nothing; in that case drop it so
+        // close_pipes_and_kill() terminates the adapter process directly instead.
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
+            !AssignProcessToJobObject(job, info.hProcess)) {
+            CloseHandle(job);
+            job = nullptr;
+        }
     }
     ResumeThread(info.hThread);
 
-    {
-        std::lock_guard write_lock(write_mutex_);
-        stdin_write_ = stdin_write;
-        stdout_read_ = stdout_read;
-        process_ = info.hProcess;
-        thread_ = info.hThread;
-        job_ = job;
-    }
-    on_event_ = std::move(on_event);
-    adapter_id_.clear();
-    exited_.store(false);
-    saw_terminated_.store(false);
-    debuggee_alive_.store(true);  // until a `terminated` event or the pipe closes
-    exit_code_.store(-1);
-    running_.store(true);
-    reader_ = std::thread([this] { reader_loop(); });
+    s.stdin_write_ = stdin_write;
+    s.stdout_read_ = stdout_read;
+    s.process_ = info.hProcess;
+    s.thread_ = info.hThread;
+    s.job_ = job;
+    s.adapter_command_ = command;      // so a nested session can be started later
+    s.adapter_arguments_ = arguments;
+    s.adapter_cwd_ = working_directory;
+    s.on_event_ = std::move(on_event);
+    s.adapter_id_.clear();
+    s.exited_.store(false);
+    s.saw_terminated_.store(false);
+    s.debuggee_alive_.store(true);  // until a `terminated` event or the pipe closes
+    s.exit_code_.store(-1);
+    s.running_.store(true);
+    s.stopped_ = false;    // a restart clears the "session over" flag
+    s.tearing_ = false;
+    s.watching_ = true;
+    s.reader_ = std::thread([state = state_] { reader_loop(state); });
+    s.watchdog_ = std::thread([state = state_] { watchdog_loop(state); });
 }
 
-bool Client::write_frame(std::string_view frame) {
-    std::lock_guard lock(write_mutex_);
-    auto pipe = static_cast<HANDLE>(stdin_write_);
+bool Client::write_frame(State& s, std::string_view frame) {
+    std::lock_guard lock(s.write_mutex_);
+    auto pipe = static_cast<HANDLE>(s.stdin_write_);
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
     const char* data = frame.data();
     std::size_t remaining = frame.size();
@@ -618,11 +915,12 @@ bool Client::write_frame(std::string_view frame) {
     return true;
 }
 
-void Client::reader_loop() {
+void Client::reader_loop(std::shared_ptr<State> state) {
+    auto& s = *state;
     std::vector<char> buffer(16384);
     MessageReader stream;
     bool protocol_failure = false;
-    auto pipe = static_cast<HANDLE>(stdout_read_);
+    auto pipe = static_cast<HANDLE>(s.stdout_read_);
     while (pipe) {
         DWORD got = 0;
         if (!ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &got, nullptr) || got == 0) break;
@@ -631,7 +929,7 @@ void Client::reader_loop() {
             for (;;) {
                 const auto message = stream.next();
                 if (!message) break;
-                handle(*message);
+                handle(s, *message);
             }
         } catch (const std::exception&) {
             protocol_failure = true;  // desynchronised: tear down instead of guessing
@@ -640,33 +938,74 @@ void Client::reader_loop() {
     }
 
     if (protocol_failure) {  // a chatty or broken adapter must not outlive the session
-        std::lock_guard lock(write_mutex_);
-        if (job_) TerminateJobObject(static_cast<HANDLE>(job_), 1);
-        else if (process_) TerminateProcess(static_cast<HANDLE>(process_), 1);
+        std::lock_guard lock(s.write_mutex_);
+        if (s.job_) TerminateJobObject(static_cast<HANDLE>(s.job_), 1);
+        else if (s.process_) TerminateProcess(static_cast<HANDLE>(s.process_), 1);
     }
-    auto process = static_cast<HANDLE>(process_);
+    auto process = static_cast<HANDLE>(s.process_);
     if (process) {
         WaitForSingleObject(process, protocol_failure ? 5000 : 20000);
         DWORD code = 1;
-        if (GetExitCodeProcess(process, &code)) exit_code_.store(static_cast<long>(code));
+        if (GetExitCodeProcess(process, &code)) s.exit_code_.store(static_cast<long>(code));
     }
-    running_.store(false);
-    debuggee_alive_.store(false);
-    exited_.store(true);
-    fail_pending(protocol_failure ? "调试适配器数据流损坏（协议错误），会话已终止。" : "调试适配器已退出，连接关闭。");
-    if (!saw_terminated_.exchange(true)) {
+    s.running_.store(false);
+    s.debuggee_alive_.store(false);
+    s.exited_.store(true);
+    fail_pending(s, protocol_failure ? "调试适配器数据流损坏（协议错误），会话已终止。" : "调试适配器已退出，连接关闭。");
+    if (!s.saw_terminated_.exchange(true)) {
         // A close marker, so the UI can never stay stuck on "running".
-        deliver_event({{"event", "terminated"}, {"restartable", false}, {"connectionClosed", true}});
+        deliver_event(s, Json{{"event", "terminated"}, {"restartable", false}, {"connectionClosed", true}});
     }
 }
 
-void Client::fail_pending(std::string_view reason) {
+// Answers requests whose deadline has passed, so an adapter that accepted a
+// request and then hung still costs the UI a bounded wait.
+void Client::watchdog_loop(std::shared_ptr<State> state) {
+    auto& s = *state;
+    std::vector<Pending> expired;
+    for (;;) {
+        expired.clear();
+        std::unique_lock lock(s.mutex_);
+        if (!s.watching_) return;
+        // Wake on the earliest deadline still outstanding; a new request is always
+        // announced, so an earlier one can never be missed.
+        auto deadline = std::chrono::steady_clock::time_point::max();
+        for (const auto& entry : s.pending_) deadline = std::min(deadline, entry.second.deadline);
+        if (deadline == std::chrono::steady_clock::time_point::max()) {
+            s.due_.wait(lock, [&s] { return !s.watching_ || !s.pending_.empty(); });
+            continue;
+        }
+        // The wait must also break when a *new* request registered an earlier
+        // deadline: notify_all() alone only re-runs the predicate, and would send
+        // us back to sleep until the absolute time we picked before.
+        const auto ticket = s.wake_;
+        s.due_.wait_until(lock, deadline, [&s, ticket] { return !s.watching_ || s.wake_ != ticket; });
+        if (!s.watching_) return;
+        const auto now = std::chrono::steady_clock::now();
+        for (auto entry = s.pending_.begin(); entry != s.pending_.end();) {
+            if (entry->second.deadline > now) { ++entry; continue; }
+            if (entry->second.handler) expired.push_back(std::move(entry->second));
+            entry = s.pending_.erase(entry);
+        }
+        lock.unlock();
+        for (auto& entry : expired) {
+            if (!entry.handler) continue;
+            entry.handler(Json(nullptr), error_object("DAP_TIMEOUT",
+                                                      "调试适配器在超时前没有回答 " + entry.command + " 请求。",
+                                                      entry.command));
+            entry.handler = nullptr;
+        }
+        expired.clear();
+    }
+}
+
+void Client::fail_pending(State& s, std::string_view reason) {
     std::vector<Pending> orphaned;
     {
-        std::lock_guard lock(mutex_);
-        orphaned.reserve(pending_.size());
-        for (auto& [seq, entry] : pending_) orphaned.push_back(std::move(entry));
-        pending_.clear();
+        std::lock_guard lock(s.mutex_);
+        orphaned.reserve(s.pending_.size());
+        for (auto& [seq, entry] : s.pending_) orphaned.push_back(std::move(entry));
+        s.pending_.clear();
     }
     for (auto& entry : orphaned) {
         if (!entry.handler) continue;
@@ -674,43 +1013,48 @@ void Client::fail_pending(std::string_view reason) {
     }
 }
 
-void Client::deliver_event(Json event) {
+void Client::deliver_event(State& s, Json event) {
     if (event.contains("event") && event.at("event").is_string() && event.at("event").get<std::string>() == "terminated") {
-        saw_terminated_.store(true);
-        debuggee_alive_.store(false);
+        s.saw_terminated_.store(true);
+        s.debuggee_alive_.store(false);
     } else if (event.contains("event") && event.at("event").is_string() && event.at("event").get<std::string>() == "started") {
-        debuggee_alive_.store(true);
+        s.debuggee_alive_.store(true);
     }
     EventCb handler;
     {
-        std::lock_guard lock(mutex_);
-        handler = on_event_;
+        std::lock_guard lock(s.mutex_);
+        if (s.stopped_) return;  // the session is over: never call back into a dead UI
+        handler = s.on_event_;
     }
     if (handler) handler(std::move(event));  // never under a lock: callbacks may start requests
 }
 
-void Client::handle(const Json& message) {
+void Client::handle(State& s, const Json& message) {
+    {
+        std::lock_guard lock(s.mutex_);
+        if (s.stopped_) return;  // a response that lands after teardown is dropped
+    }
     if (is_response(message)) {
         const auto command = text_of(message, "command");
         const auto key = int_of(message, "request_seq", -1);
         Pending entry;
         {
-            std::lock_guard lock(mutex_);
-            auto pending = pending_.end();
-            if (key > 0) pending = pending_.find(key);
+            std::lock_guard lock(s.mutex_);
+            auto pending = s.pending_.end();
+            if (key > 0) pending = s.pending_.find(key);
             else {
                 // Lenient fallback for adapters omitting request_seq: accept it only
                 // when exactly one in-flight request carries the same command, so
                 // correlation is never guessed.
-                for (auto candidate = pending_.begin(); candidate != pending_.end(); ++candidate) {
+                for (auto candidate = s.pending_.begin(); candidate != s.pending_.end(); ++candidate) {
                     if (candidate->second.command != command) continue;
-                    if (pending != pending_.end()) { pending = pending_.end(); break; }
+                    if (pending != s.pending_.end()) { pending = s.pending_.end(); break; }
                     pending = candidate;
                 }
             }
-            if (pending == pending_.end()) return;  // stale or unsolicited: drop
+            if (pending == s.pending_.end()) return;  // stale or unsolicited: drop
             entry = std::move(pending->second);
-            pending_.erase(pending);
+            s.pending_.erase(pending);
         }
         if (!entry.handler) return;
         // `success` is mandatory per spec; a few adapters omit it on success.
@@ -726,53 +1070,89 @@ void Client::handle(const Json& message) {
         if (name.empty()) return;
         auto event = shape_event(name, message.contains("body") ? message.at("body") : Json::object());
         if (event.contains("rawPath")) {
-            event["path"] = to_path(event.at("rawPath").get<std::string>());  // rel '/' for the gutter
+            std::filesystem::path root;
+            {
+                std::lock_guard lock(s.root_mutex_);
+                root = s.root_;
+            }
+            event["path"] = relative_to(event.at("rawPath").get<std::string>(), root);  // rel '/' for the gutter
             event.erase("rawPath");
         }
-        deliver_event(std::move(event));
+        deliver_event(s, std::move(event));
         return;
     }
-    if (is_adapter_request(message)) answer_adapter_request(message);
+    if (is_adapter_request(message)) answer_adapter_request(s, message);
 }
 
 // Adapters may issue reverse requests (runInTerminal, startDebugging, probes,
-// evaluate). TaoCode answers instead of hanging the session forever.
-void Client::answer_adapter_request(const Json& message) {
+// evaluate). TaoCode answers them for real instead of hanging the session.
+void Client::answer_adapter_request(State& s, const Json& message) {
     const auto key = int_of(message, "seq", -1);
     if (key <= 0) return;
+    const auto command = text_of(message, "command");
+    const Json arguments = message.contains("arguments") && message.at("arguments").is_object()
+                               ? message.at("arguments") : Json::object();
+
+    Json body = Json::object();
+    bool success = true;
+    std::string failure;
+    if (command == "runInTerminal") {
+        const auto& hook = run_in_terminal_hook();
+        body = hook ? hook(arguments, failure) : run_in_terminal_default(arguments, failure);
+        if (!failure.empty()) success = false;
+    } else if (command == "startDebugging") {
+        const auto& hook = start_debugging_hook();
+        body = hook ? hook(arguments, failure) : start_debugging_default(s, arguments, failure);
+        if (!failure.empty()) success = false;
+    } else {
+        success = false;
+        failure = "TaoCode 不支持该适配器请求";
+    }
+
     std::int64_t seq = 0;
     {
-        std::lock_guard lock(mutex_);
-        seq = seq_++;
+        std::lock_guard lock(s.mutex_);
+        seq = s.seq_++;
     }
     Json reply{{"seq", seq},
                {"type", "response"},
                {"request_seq", key},
-               {"command", text_of(message, "command")},
-               {"success", false},
-               {"message", "TaoCode 不支持该适配器请求"}};
-    write_frame(encode_message(reply));
+               {"command", command},
+               {"success", success}};
+    if (success) reply["body"] = body.is_null() ? Json::object() : std::move(body);
+    else reply["message"] = std::move(failure);
+    write_frame(s, encode_message(reply));
 }
 
 std::int64_t Client::send(std::string_view command, Json arguments, Reply on_reply) {
+    auto& s = *state_;
     Json frame;
     std::int64_t seq = 0;
     {
-        std::lock_guard lock(mutex_);
-        if (!running_.load()) {
+        std::lock_guard lock(s.mutex_);
+        if (!s.running_.load()) {
             if (on_reply) on_reply(Json(nullptr), error_object("DAP_NOT_RUNNING", "调试会话未运行。", command));
             return 0;
         }
-        seq = seq_++;
-        if (on_reply) pending_.emplace(seq, Pending{std::move(on_reply), std::string(command)});
+        if (s.pending_.size() >= max_pending_requests) {
+            // An adapter that never answers cannot grow the map without bound.
+            if (on_reply) on_reply(Json(nullptr), error_object("DAP_BUSY", "未回答的调试请求过多。", command));
+            return 0;
+        }
+        seq = s.seq_++;
+        if (on_reply)
+            s.pending_.emplace(seq, Pending{std::move(on_reply), std::string(command),
+                                            std::chrono::steady_clock::now() + s.timeout_});
         frame = make_request(seq, command, std::move(arguments));
+        ++s.wake_;
     }
-    if (write_frame(encode_message(frame))) return seq;
+    s.due_.notify_all();  // the watchdog may need to wake for an earlier deadline
+    if (write_frame(s, encode_message(frame))) return seq;
     Pending orphaned;
     {
-        std::lock_guard lock(mutex_);
-        auto pending = pending_.find(seq);
-        if (pending != pending_.end()) { orphaned = std::move(pending->second); pending_.erase(pending); }
+        std::lock_guard lock(s.mutex_);
+        auto pending = s.pending_.find(seq);
+        if (pending != s.pending_.end()) { orphaned = std::move(pending->second); s.pending_.erase(pending); }
     }
     if (orphaned.handler)
         orphaned.handler(Json(nullptr), error_object("DAP_CLOSED", "无法写入调试适配器管道。", orphaned.command));
@@ -784,9 +1164,10 @@ void Client::request(std::string_view command, Json arguments, Reply on_reply) {
 }
 
 void Client::initialize(const std::string& adapter_id, Reply on_reply) {
+    auto& s = *state_;
     {
-        std::lock_guard lock(mutex_);
-        adapter_id_ = adapter_id;
+        std::lock_guard lock(s.mutex_);
+        s.adapter_id_ = adapter_id;
     }
     Json arguments{{"adapterID", adapter_id.empty() ? std::string("taocode") : adapter_id},
                    {"clientID", "taocode"},
@@ -795,8 +1176,11 @@ void Client::initialize(const std::string& adapter_id, Reply on_reply) {
                    {"columnsStartAt1", true},  // ...for columns too
                    {"pathFormat", "uri"},
                    {"supportsVariableType", true},
-                   {"supportsRunInTerminalRequest", false},
-                   {"supportsProgressReporting", false},
+                   // Both reverse requests are answered for real now: a command the
+                   // adapter wants run in a terminal is launched, and a nested
+                   // session really is started.
+                   {"supportsRunInTerminalRequest", true},
+                   {"supportsProgressReporting", true},
                    {"supportsInvalidatedEvent", false}};
     send("initialize", std::move(arguments),
          [this, handler = std::move(on_reply)](Json capabilities, Json error) {
@@ -805,10 +1189,10 @@ void Client::initialize(const std::string& adapter_id, Reply on_reply) {
                  // initialize and before launch. It is fire-and-forget.
                  std::int64_t seq = 0;
                  {
-                     std::lock_guard lock(mutex_);
-                     seq = seq_++;
+                     std::lock_guard lock(state_->mutex_);
+                     seq = state_->seq_++;
                  }
-                 write_frame(encode_message(make_event(seq, "initialized", Json::object())));
+                 write_frame(*state_, encode_message(make_event(seq, "initialized", Json::object())));
              }
              if (handler) handler(std::move(capabilities), std::move(error));
          });
@@ -844,8 +1228,8 @@ Json normalize_configuration(const Client& client, Json configuration, const cha
 void Client::launch(Json configuration, Reply on_reply) {
     std::string kind;
     {
-        std::lock_guard lock(mutex_);
-        kind = adapter_id_;
+        std::lock_guard lock(state_->mutex_);
+        kind = state_->adapter_id_;
     }
     Json arguments = normalize_configuration(*this, std::move(configuration), "launch");
     if (text_of(arguments, "type").empty() || text_of(arguments, "type") == "taocode") arguments["type"] = kind;
@@ -857,8 +1241,8 @@ void Client::launch(Json configuration, Reply on_reply) {
 void Client::attach(Json configuration, Reply on_reply) {
     std::string kind;
     {
-        std::lock_guard lock(mutex_);
-        kind = adapter_id_;
+        std::lock_guard lock(state_->mutex_);
+        kind = state_->adapter_id_;
     }
     Json arguments = normalize_configuration(*this, std::move(configuration), "attach");
     if (text_of(arguments, "type").empty() || text_of(arguments, "type") == "taocode") arguments["type"] = kind;
@@ -866,13 +1250,14 @@ void Client::attach(Json configuration, Reply on_reply) {
 }
 
 void Client::set_exception_breakpoints(const Json& filters, Reply on_reply) {
+    auto& s = *state_;
     Json list = Json::array();
     if (filters.is_array()) for (const auto& item : filters) if (item.is_string()) list.push_back(item);
     {
-        std::lock_guard lock(mutex_);
-        exception_filters_ = list;  // remembered, so a restart re-applies it
+        std::lock_guard lock(s.mutex_);
+        s.exception_filters_ = list;  // remembered, so a restart re-applies it
     }
-    if (!running_.load()) {
+    if (!s.running_.load()) {
         if (on_reply) on_reply(Json{{"ok", true}, {"filters", list}, {"deferred", true}}, Json(nullptr));
         return;
     }
@@ -898,11 +1283,11 @@ void Client::set_breakpoints(const std::string& rel_path, const Json& requested,
     const auto key = slash_form(rel_path);
     const Json points = normalize_breakpoints(requested);
     {
-        std::lock_guard lock(mutex_);
-        if (points.empty()) breakpoints_.erase(key);
-        else breakpoints_[key] = points;  // remembered, so a restart re-applies
+        std::lock_guard lock(state_->mutex_);
+        if (points.empty()) state_->breakpoints_.erase(key);
+        else state_->breakpoints_[key] = points;  // remembered, so a restart re-applies
     }
-    if (!running_.load()) {
+    if (!state_->running_.load()) {
         // No live adapter yet: the lines are stored and will be installed by the
         // next `start_debugging`. `deferred` tells the bridge why nothing is verified.
         if (on_reply)
@@ -956,8 +1341,20 @@ void Client::variables(long variables_reference, Reply on_reply) {
          shaped(std::move(on_reply), [](const Json& body) { return shape_variables(body); }));
 }
 
+// Waits (bounded) for the reader thread to observe that the adapter is gone. Used
+// by disconnect() so the caller can drop the Client without racing a callback.
+void Client::wait_for_exit(std::chrono::milliseconds limit) const {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!state_->exited_.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
 void Client::disconnect(Reply on_reply) {
     send("disconnect", Json{{"terminateDebuggee", true}}, wrap_ok(std::move(on_reply)));
+    // Wait for the adapter to actually go away, then reclaim it: the caller is
+    // allowed to destroy this Client the moment disconnect() returns.
+    wait_for_exit(std::chrono::seconds(5));
+    shutdown();
 }
 
 void Client::start_debugging(const std::string& adapter_id, Json launch_configuration, Reply on_reply) {
@@ -985,9 +1382,9 @@ void Client::apply_remembered_breakpoints(std::shared_ptr<Startup> startup) {
     std::vector<std::pair<std::string, Json>> remembered;
     Json exception_filters = Json::array();
     {
-        std::lock_guard lock(mutex_);
-        remembered.assign(breakpoints_.begin(), breakpoints_.end());
-        exception_filters = exception_filters_;
+        std::lock_guard lock(state_->mutex_);
+        remembered.assign(state_->breakpoints_.begin(), state_->breakpoints_.end());
+        exception_filters = state_->exception_filters_;
     }
     {
         std::lock_guard lock(startup->lock);
@@ -1012,7 +1409,8 @@ void Client::apply_remembered_breakpoints(std::shared_ptr<Startup> startup) {
         set_exception_breakpoints(exception_filters, [startup](Json, Json) {});
     if (remembered.empty()) { advance(); return; }
     for (const auto& [path, lines] : remembered) {
-        set_breakpoints(path, lines, [startup, path, advance](Json result, Json error) {            Json report;
+        set_breakpoints(path, lines, [startup, path, advance](Json result, Json error) {
+            Json report;
             if (error.is_null()) report = std::move(result);
             else report = Json{{"path", path}, {"error", error.contains("message") ? error.at("message") : error}};
             {
@@ -1025,64 +1423,94 @@ void Client::apply_remembered_breakpoints(std::shared_ptr<Startup> startup) {
 }
 
 Json Client::breakpoint_map() const {
-    std::lock_guard lock(mutex_);
+    std::lock_guard lock(state_->mutex_);
     Json map = Json::object();
-    for (const auto& [path, points] : breakpoints_) map[path] = points;
+    for (const auto& [path, points] : state_->breakpoints_) map[path] = points;
     return map;
 }
 
 void Client::forget_breakpoints(const std::string& rel_path) {
-    std::lock_guard lock(mutex_);
-    breakpoints_.erase(slash_form(rel_path));
+    std::lock_guard lock(state_->mutex_);
+    state_->breakpoints_.erase(slash_form(rel_path));
 }
 
 void Client::clear_breakpoints() {
-    std::lock_guard lock(mutex_);
-    breakpoints_.clear();
+    std::lock_guard lock(state_->mutex_);
+    state_->breakpoints_.clear();
 }
 
-bool Client::running() const { return running_.load(); }
+bool Client::running() const { return state_->running_.load(); }
 
-bool Client::exited() const { return exited_.load(); }
+bool Client::exited() const { return state_->exited_.load(); }
 
-long Client::exit_code() const { return exit_code_.load(); }
+long Client::exit_code() const { return state_->exit_code_.load(); }
 
-bool Client::debuggee_alive() const { return debuggee_alive_.load(); }
+bool Client::debuggee_alive() const { return state_->debuggee_alive_.load(); }
 
 void Client::close_pipes_and_kill() {
-    std::lock_guard lock(write_mutex_);
-    if (stdin_write_) {
-        CloseHandle(static_cast<HANDLE>(stdin_write_));
-        stdin_write_ = nullptr;
+    auto& s = *state_;
+    std::lock_guard lock(s.write_mutex_);
+    if (s.stdin_write_) {
+        CloseHandle(static_cast<HANDLE>(s.stdin_write_));
+        s.stdin_write_ = nullptr;
     }
     // Closing our job handle would also reap the tree, but terminate explicitly so
     // the blocked ReadFile returns immediately instead of on handle close.
-    if (job_) TerminateJobObject(static_cast<HANDLE>(job_), 1);
-    else if (process_) TerminateProcess(static_cast<HANDLE>(process_), 1);
+    if (s.job_) TerminateJobObject(static_cast<HANDLE>(s.job_), 1);
+    else if (s.process_) TerminateProcess(static_cast<HANDLE>(s.process_), 1);
 }
 
 void Client::shutdown() noexcept {
+    auto& s = *state_;
     try {
+        bool begun = false;
+        std::vector<std::shared_ptr<Client>> nested;
         {
-            std::lock_guard lock(mutex_);
-            running_.store(false);
+            std::lock_guard lock(s.mutex_);
+            begun = s.tearing_;
+            s.tearing_ = true;
+            s.running_.store(false);
+            nested.swap(s.nested_);
         }
+        s.due_.notify_all();
+        if (begun) {
+            // Idempotent: a second call only has to join threads that may still be
+            // winding down (the destructor and WM_CLOSE both come through here).
+            if (s.watchdog_.joinable() && s.watchdog_.get_id() != std::this_thread::get_id()) s.watchdog_.join();
+            if (s.reader_.joinable() && s.reader_.get_id() != std::this_thread::get_id()) s.reader_.join();
+            return;
+        }
+        fail_pending(s, "调试会话已关闭。");
         // Close stdin (adapters exit on EOF) and kill the job, which unblocks the
         // reader thread's pending ReadFile at once.
         close_pipes_and_kill();
-        if (reader_.joinable()) {
-            if (reader_.get_id() == std::this_thread::get_id()) reader_.detach();  // called from a callback
-            else reader_.join();
+        // The reader is joined BEFORE `stopped_` is raised: its last act is the
+        // synthetic "connection closed" terminated event, which the UI needs.
+        const bool from_reader = s.reader_.joinable() && s.reader_.get_id() == std::this_thread::get_id();
+        if (from_reader) {
+            std::lock_guard lock(s.mutex_);
+            s.stopped_ = true;  // cannot join ourselves: drop every later callback
+            s.reader_.detach();
+        } else {
+            if (s.reader_.joinable()) s.reader_.join();
+            std::lock_guard lock(s.mutex_);
+            s.stopped_ = true;
         }
         {
-            std::lock_guard lock(write_mutex_);
-            for (auto** handle : {&stdout_read_, &process_, &thread_, &job_}) {
+            std::lock_guard lock(s.mutex_);
+            s.watching_ = false;
+        }
+        s.due_.notify_all();
+        if (s.watchdog_.joinable()) s.watchdog_.join();
+        {
+            std::lock_guard lock(s.write_mutex_);
+            for (auto** handle : {&s.stdout_read_, &s.process_, &s.thread_, &s.job_}) {
                 if (*handle) CloseHandle(static_cast<HANDLE>(*handle));
                 *handle = nullptr;
             }
         }
-        std::lock_guard lock(mutex_);
-        pending_.clear();  // breakpoints stay remembered: a restart re-applies them
+        // Sessions this one started for the adapter end with it.
+        for (auto& session : nested) if (session) session->shutdown();
     } catch (...) {
         // Teardown is the last resort on the UI thread: it must never throw.
     }

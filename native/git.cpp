@@ -11,9 +11,12 @@
 #include <windows.h>
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -59,9 +62,43 @@ std::wstring utf8_to_wide(std::string_view value) {
     return out;
 }
 
+std::string wide_to_utf8(std::wstring_view value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                                         nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string out(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                        out.data(), size, nullptr, nullptr);
+    return out;
+}
+
 struct Result { int code; std::string out; std::string err; };
 
-Result run(const fs::path& repo, std::vector<std::wstring> arguments) {
+// A git command that hangs — a remote that never answers, a credential helper
+// waiting on the stdin we deliberately left at NUL — must not pin the worker
+// thread forever, and closing the project must be able to stop it. So every child
+// runs inside a job object (killing it takes the whole tree: git spawns ssh and
+// credential helpers of its own) and gets a bounded wait.
+constexpr DWORD default_timeout_ms = 10 * 60 * 1000;  // a large clone/push fits in this
+constexpr DWORD kill_wait_ms = 5000;                  // grace for the tree to actually die
+
+// Handles of the child currently running. request_cancel() reads them from the UI
+// thread while a worker runs git, so they are published and cleared under this
+// mutex, and the kill is issued while holding it: a handle can then never be
+// terminated after run() closed it (which would otherwise risk killing whatever
+// process later reused that handle value).
+std::mutex current_mutex;
+HANDLE current_job = nullptr;       // job object of the running child, nullptr if none
+HANDLE current_process = nullptr;   // fallback if no job object could be created
+
+void kill_current() {
+    std::lock_guard lock(current_mutex);
+    if (current_job) TerminateJobObject(current_job, 1);
+    else if (current_process) TerminateProcess(current_process, 1);
+}
+
+Result run(const fs::path& repo, std::vector<std::wstring> arguments, DWORD timeout_ms = default_timeout_ms) {
     const auto git = find_git_executable();
     if (git.empty()) throw WorkspaceError("GIT_MISSING", "未找到 Git，可执行文件不在 PATH 中。");
     std::wstring command = L"\"" + git.native() + L"\" -C \"" + repo.native() + L"\"";
@@ -72,8 +109,29 @@ Result run(const fs::path& repo, std::vector<std::wstring> arguments) {
     SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE stdout_read = nullptr, stdout_write = nullptr, stderr_read = nullptr, stderr_write = nullptr;
     HANDLE null_in = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (!CreatePipe(&stdout_read, &stdout_write, &inheritable, 0) || !CreatePipe(&stderr_read, &stderr_write, &inheritable, 0)) {
+    // Created one pair at a time: the old single `||` expression threw with the first
+    // pair already open, leaking two handles per failed git call (and one NUL handle).
+    if (!CreatePipe(&stdout_read, &stdout_write, &inheritable, 0)) {
+        if (null_in != INVALID_HANDLE_VALUE) CloseHandle(null_in);
         throw WorkspaceError("GIT_PIPE", "无法创建 Git 输出管道");
+    }
+    if (!CreatePipe(&stderr_read, &stderr_write, &inheritable, 0)) {
+        CloseHandle(stdout_read);
+        CloseHandle(stdout_write);
+        if (null_in != INVALID_HANDLE_VALUE) CloseHandle(null_in);
+        throw WorkspaceError("GIT_PIPE", "无法创建 Git 输出管道");
+    }
+    // The child is born suspended so it can be put in a job before it can spawn
+    // anything of its own — otherwise a grandchild (ssh, a credential helper) can
+    // slip out of the job and survive the kill.
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+            CloseHandle(job);
+            job = nullptr;
+        }
     }
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -82,25 +140,60 @@ Result run(const fs::path& repo, std::vector<std::wstring> arguments) {
     startup.hStdOutput = stdout_write;
     startup.hStdError = stderr_write;
     PROCESS_INFORMATION info{};
-    const BOOL created = CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info);
+    const BOOL created = CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &info);
     CloseHandle(stdout_write);
     CloseHandle(stderr_write);
     if (null_in != INVALID_HANDLE_VALUE) CloseHandle(null_in);
     if (!created) {
         CloseHandle(stdout_read); CloseHandle(stderr_read);
+        if (job) CloseHandle(job);
         throw WorkspaceError("GIT_SPAWN", "无法启动 Git 进程");
     }
+    if (job && !AssignProcessToJobObject(job, info.hProcess)) {  // rare; fall back to the bare process
+        CloseHandle(job);
+        job = nullptr;
+    }
+    {
+        std::lock_guard lock(current_mutex);
+        current_job = job;
+        current_process = info.hProcess;
+    }
+    ResumeThread(info.hThread);
+
+    std::atomic<bool> timed_out{false};
+    // The reads below block while the child holds the pipes open, so the timeout has
+    // to be armed before them: on expiry this kills the tree, which breaks the pipes
+    // and lets run() return instead of hanging in ReadFile forever.
+    std::thread watchdog([&] {
+        if (WaitForSingleObject(info.hProcess, timeout_ms) == WAIT_TIMEOUT) {
+            timed_out.store(true);
+            kill_current();
+        }
+    });
     std::string err;
     std::thread stderr_drain([&] { err = read_all(stderr_read); });
     std::string out = read_all(stdout_read);
     stderr_drain.join();
+    watchdog.join();
     CloseHandle(stdout_read);
     CloseHandle(stderr_read);
     DWORD code = 1;
-    WaitForSingleObject(info.hProcess, INFINITE);
+    if (timed_out.load()) WaitForSingleObject(info.hProcess, kill_wait_ms);
     GetExitCodeProcess(info.hProcess, &code);
     CloseHandle(info.hProcess);
     CloseHandle(info.hThread);
+    {
+        std::lock_guard lock(current_mutex);
+        current_job = nullptr;
+        current_process = nullptr;
+    }
+    if (job) CloseHandle(job);
+    if (timed_out.load()) {
+        const std::string what = arguments.empty() ? std::string() : wide_to_utf8(arguments.front());
+        throw WorkspaceError("GIT_TIMEOUT", "git " + what + " 超时（超过 " +
+                                                std::to_string(timeout_ms / 60000) + " 分钟），已终止该命令。");
+    }
     return {static_cast<int>(code), std::move(out), std::move(err)};
 }
 
@@ -127,6 +220,25 @@ std::wstring checked_ref(const fs::path& repo, const std::string& base) {
     return wide;
 }
 
+// A ref the caller is about to CREATE (a branch or a tag). Nothing in the repo can
+// vouch for it yet, so rev-parse cannot be used; instead it is held to what git
+// itself would accept before it ever reaches a command line: no leading '-' (which
+// git would parse as an option, e.g. -f / --hard), no spaces, no control characters.
+std::wstring checked_new_name(const std::string& name, const std::string& label) {
+    if (name.empty() || name.size() > 200)
+        throw WorkspaceError("INVALID_REQUEST", label + "不能为空，且不能超过 200 个字符。");
+    if (name.front() == '-')
+        throw WorkspaceError("INVALID_REQUEST", label + "不能以 '-' 开头，否则会被 Git 当成命令行选项。");
+    for (const char ch : name) {
+        const auto value = static_cast<unsigned char>(ch);
+        if (ch == ' ' || value < 32 || value == 127)
+            throw WorkspaceError("INVALID_REQUEST", label + "不能包含空格或控制字符。");
+    }
+    const auto wide = utf8_to_wide(name);
+    if (wide.empty()) throw WorkspaceError("INVALID_REQUEST", label + "必须是有效的 UTF-8 文本。");
+    return wide;
+}
+
 std::vector<std::wstring> range_args(const fs::path& repo, const std::string& base) {
     // "git diff HEAD base" reads as "what does that side have that I do not": its files
     // appear as additions, and files only this side has appear as deletions. Comparing
@@ -135,6 +247,14 @@ std::vector<std::wstring> range_args(const fs::path& repo, const std::string& ba
 }
 
 }  // namespace
+
+// Stop the git command that is running right now, if any. Called from the UI thread
+// (closing a project or the window) while a worker thread is inside run():
+// terminating the job takes git and every process it spawned, which also breaks the
+// pipes the reader is parked on, so the worker returns. Non-blocking, and a no-op
+// when nothing runs. Deliberately outside the anonymous namespace above — it is
+// declared in git.hpp and must have external linkage.
+void request_cancel() { kill_current(); }
 
 bool available() { return !find_git_executable().empty(); }
 
@@ -246,21 +366,61 @@ void unstage(const fs::path& repo, const std::string& path) {
     require_ok(run(repo, {L"reset", L"-q", L"--", utf8_to_wide(path)}), "取消暂存");
 }
 
-void commit(const fs::path& repo, const std::string& message, bool amend) {
+namespace {
+// `git commit --author=` takes "Name <email>" (or a bare "<email>"), and the value is a
+// single argv entry so nothing is re-parsed by a shell. It still has to be well formed:
+// git rejects a missing email, and a control character would be written into the commit
+// object verbatim.
+std::wstring format_author(const std::string& name, const std::string& email) {
+    const auto trimmed_email = trim(email);
+    if (trimmed_email.empty()) throw WorkspaceError("INVALID_REQUEST", "指定提交作者时必须同时填写邮箱。");
+    for (const auto* field : {&name, &email}) {
+        for (const char character : *field) {
+            if (static_cast<unsigned char>(character) < 0x20) {
+                throw WorkspaceError("INVALID_REQUEST", "提交作者不能包含控制字符。");
+            }
+        }
+    }
+    const auto trimmed_name = trim(name);
+    return utf8_to_wide(trimmed_name.empty() ? "<" + trimmed_email + ">" : trimmed_name + " <" + trimmed_email + ">");
+}
+}  // namespace
+
+void commit(const fs::path& repo, const std::string& message, bool amend, bool signoff,
+            const std::string& author_name, const std::string& author_email) {
+    // IDEA's CommitAuthorComponent: the author override is per commit, not per repository.
+    const bool override_author = !trim(author_name).empty() || !trim(author_email).empty();
     if (amend) {
         // IDEA's "Amend": re-write the last commit. An empty message keeps the original.
         std::vector<std::wstring> arguments{L"commit", L"--amend"};
+        if (signoff) arguments.push_back(L"--signoff");
+        if (override_author) arguments.push_back(L"--author=" + format_author(author_name, author_email));
         if (message.empty()) arguments.push_back(L"--no-edit");
         else { arguments.push_back(L"-m"); arguments.push_back(utf8_to_wide(message)); }
         require_ok(run(repo, arguments), "修改上次提交");
         return;
     }
     if (message.empty()) throw WorkspaceError("INVALID_REQUEST", "提交信息不能为空。");
-    require_ok(run(repo, {L"commit", L"-m", utf8_to_wide(message)}), "提交");
+    std::vector<std::wstring> arguments{L"commit", L"-m", utf8_to_wide(message)};
+    if (signoff) arguments.push_back(L"--signoff");
+    if (override_author) arguments.push_back(L"--author=" + format_author(author_name, author_email));
+    require_ok(run(repo, arguments), "提交");
+}
+
+Json user(const fs::path& repo) {
+    const auto read = [&repo](const std::wstring& key) {
+        const auto result = run(repo, {L"config", L"--get", key});
+        // `git config --get` exits 1 when the key is simply not set; that is not an error.
+        return result.code == 0 ? trim(result.out) : std::string();
+    };
+    return {{"name", read(L"user.name")}, {"email", read(L"user.email")}};
 }
 
 void checkout(const fs::path& repo, const std::string& branch) {
-    require_ok(run(repo, {L"checkout", utf8_to_wide(branch)}), "切换分支");
+    if (branch.empty()) throw WorkspaceError("INVALID_REQUEST", "要切换的分支不能为空。");
+    // checked_ref: the name is a ref that must exist, and it can never start with
+    // '-', which git would otherwise read as an option (`git checkout --hard …`).
+    require_ok(run(repo, {L"checkout", checked_ref(repo, branch)}), "切换分支");
 }
 
 namespace {
@@ -303,6 +463,31 @@ Json log(const fs::path& repo, const std::string& path, int limit) {
         commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]}, {"date", record[3]}, {"subject", record[4]}});
     }
     return {{"commits", std::move(commits)}};
+}
+
+Json authors(const fs::path& repo) {
+    // IDEA's registry holds the users the log index has seen (VcsUserRegistryImpl.kt:84-92),
+    // so every reachable commit counts, not just the ones on HEAD.
+    const auto result = run(repo, {L"log", L"--all", L"--pretty=%an\x1f%ae"});
+    // A repository without commits has no log; `git log` errors there, and GitUserRegistry
+    // swallows the same failure (GitUserRegistry.java:60-68 -> LOG.warn + null).
+    if (result.code != 0) return {{"authors", Json::array()}};
+    Json list = Json::array();
+    std::set<std::string> seen;
+    for (const auto& record : parse_records(result.out)) {
+        if (record.size() < 2) continue;
+        const auto name = trim(record[0].get<std::string>());
+        const auto email = trim(record[1].get<std::string>());
+        if (name.empty() && email.empty()) continue;
+        // Two users are equal when name and e-mail match, and createUser stores the e-mail
+        // lower-cased (VcsUserImpl.kt:9, VcsUserUtil.java:91-93).
+        std::string folded_email = email;
+        for (char& character : folded_email) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        if (!seen.insert(name + "\x1f" + folded_email).second) continue;
+        // VcsUserUtil.getString: the name, else the e-mail, else "Name <email>".
+        list.push_back(name.empty() ? email : (email.empty() ? name : name + " <" + email + ">"));
+    }
+    return {{"authors", std::move(list)}};
 }
 
 Json log_full(const fs::path& repo, int limit) {
@@ -383,14 +568,17 @@ void stash_save(const fs::path& repo, const std::string& message) {
 void stash_pop(const fs::path& repo) { require_ok(run(repo, {L"stash", L"pop"}), "弹出储藏"); }
 
 void create_branch(const fs::path& repo, const std::string& name, bool checkout_now) {
-    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "分支名不能为空。");
-    if (checkout_now) require_ok(run(repo, {L"checkout", L"-b", utf8_to_wide(name)}), "新建分支");
-    else require_ok(run(repo, {L"branch", utf8_to_wide(name)}), "新建分支");
+    // The branch does not exist yet, so it cannot be resolved with rev-parse; it is
+    // still a name landing on git's command line and gets the same option/control
+    // character rejection an existing ref would.
+    const auto wide = checked_new_name(name, "分支名");
+    if (checkout_now) require_ok(run(repo, {L"checkout", L"-b", wide}), "新建分支");
+    else require_ok(run(repo, {L"branch", wide}), "新建分支");
 }
 
 void merge(const fs::path& repo, const std::string& branch) {
     if (branch.empty()) throw WorkspaceError("INVALID_REQUEST", "要合并的分支不能为空。");
-    require_ok(run(repo, {L"merge", utf8_to_wide(branch)}), "合并");
+    require_ok(run(repo, {L"merge", checked_ref(repo, branch)}), "合并");
 }
 
 Json ahead_behind(const fs::path& repo) {
@@ -444,17 +632,18 @@ void fetch(const fs::path& repo) { require_ok(run(repo, {L"fetch", L"--all", L"-
 
 void rebase(const fs::path& repo, const std::string& branch) {
     if (branch.empty()) require_ok(run(repo, {L"rebase"}), "变基");
-    else require_ok(run(repo, {L"rebase", utf8_to_wide(branch)}), "变基");
+    // checked_ref: "-f" / "--onto" and friends must never be read as options.
+    else require_ok(run(repo, {L"rebase", checked_ref(repo, branch)}), "变基");
 }
 
 void cherry_pick(const fs::path& repo, const std::string& commit) {
     if (commit.empty()) throw WorkspaceError("INVALID_REQUEST", "要摘取的提交不能为空。");
-    require_ok(run(repo, {L"cherry-pick", utf8_to_wide(commit)}), "摘取提交");
+    require_ok(run(repo, {L"cherry-pick", checked_ref(repo, commit)}), "摘取提交");
 }
 
 void delete_branch(const fs::path& repo, const std::string& name) {
     if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的分支不能为空。");
-    require_ok(run(repo, {L"branch", L"-D", utf8_to_wide(name)}), "删除分支");
+    require_ok(run(repo, {L"branch", L"-D", checked_ref(repo, name)}), "删除分支");
 }
 
 Json tag_list(const fs::path& repo) {
@@ -471,15 +660,16 @@ Json tag_list(const fs::path& repo) {
 }
 
 void tag_create(const fs::path& repo, const std::string& name, const std::string& target) {
-    if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "标签名不能为空。");
-    std::vector<std::wstring> arguments{L"tag", utf8_to_wide(name)};
-    if (!target.empty()) arguments.push_back(utf8_to_wide(target));
+    // The tag is new (checked_new_name), the optional target is an existing ref.
+    std::vector<std::wstring> arguments{L"tag", checked_new_name(name, "标签名")};
+    if (!target.empty()) arguments.push_back(checked_ref(repo, target));
     require_ok(run(repo, arguments), "新建标签");
 }
 
 void tag_delete(const fs::path& repo, const std::string& name) {
     if (name.empty()) throw WorkspaceError("INVALID_REQUEST", "要删除的标签不能为空。");
-    require_ok(run(repo, {L"tag", L"-d", utf8_to_wide(name)}), "删除标签");
+    // The tag has to exist to be deleted, so checked_ref is the right guard here.
+    require_ok(run(repo, {L"tag", L"-d", checked_ref(repo, name)}), "删除标签");
 }
 
 void ignore_path(const fs::path& repo, const std::string& path) {
@@ -575,6 +765,210 @@ void apply_hunks(const fs::path& repo, const std::string& path, bool staged,
     std::error_code ignored;
     fs::remove(patch_file, ignored);
     require_ok(result, reverse ? "按块取消暂存" : "按块暂存");
+}
+
+namespace {
+
+std::vector<std::string> split_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::size_t start = 0;
+    while (start < text.size()) {
+        auto end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        auto line = text.substr(start, end - start);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(std::move(line));
+        start = end + 1;
+    }
+    return lines;
+}
+
+// Same 0x1F-separated record format log() asks git for.
+std::vector<std::string> split_fields(const std::string& line) {
+    std::vector<std::string> fields;
+    std::size_t position = 0;
+    for (;;) {
+        const auto separator = line.find('\x1f', position);
+        if (separator == std::string::npos) { fields.push_back(line.substr(position)); break; }
+        fields.push_back(line.substr(position, separator - position));
+        position = separator + 1;
+    }
+    return fields;
+}
+
+std::string utf8_path(const fs::path& path) {
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+}
+
+// A path spec is user-controlled and lands on git's command line after "--", so it
+// only has to stay inside the repository: no traversal, no newline, no option.
+std::wstring checked_path(const std::string& path) {
+    if (path.empty() || path.size() > 512 || path.front() == '-' ||
+        path.find('\n') != std::string::npos || path.find('\r') != std::string::npos ||
+        path.find("..") != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "文件路径不合法。");
+    return utf8_to_wide(path);
+}
+
+// A worktree destination: an absolute path outside the current repo (git refuses a
+// nested worktree) with no characters that would confuse the command line.
+void check_worktree_path(const fs::path& repo, const std::string& path) {
+    if (path.empty() || path.size() > 512 || path.front() == '-' ||
+        path.find_first_of("\r\n") != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "工作树路径不合法。");
+    const fs::path target(path);
+    if (!target.is_absolute()) throw WorkspaceError("INVALID_REQUEST", "工作树路径必须是绝对路径。");
+    std::error_code ec;
+    const auto canonical_repo = fs::weakly_canonical(repo, ec);
+    const auto canonical_target = fs::weakly_canonical(target, ec);
+    if (!canonical_target.empty() && !canonical_repo.empty() &&
+        canonical_target.native().starts_with(canonical_repo.native()))
+        throw WorkspaceError("INVALID_REQUEST", "工作树不能放在当前仓库目录内。");
+}
+
+}  // namespace
+
+Json file_history(const fs::path& repo, const std::string& path, int limit) {
+    const int count = limit <= 0 ? 100 : (limit > 500 ? 500 : limit);
+    const auto target = checked_path(path);
+    // --follow keeps the log going across renames; --name-status reports what the
+    // commit did to the file so the UI can mark the rename commits.
+    std::vector<std::wstring> args = {L"log", L"--follow", L"--date=iso-strict", L"--name-status",
+        L"--pretty=%H\x1f%h\x1f%an\x1f%ad\x1f%s", L"-n", utf8_to_wide(std::to_string(count)), L"--", target};
+    const auto result = run(repo, args);
+    require_ok(result, "读取文件历史");
+    Json commits = Json::array();
+    std::string pending;
+    std::vector<std::string> pending_paths;
+    for (const auto& line : split_lines(result.out)) {
+        if (line.find('\x1f') != std::string::npos) {
+            if (!pending.empty()) {
+                const auto record = split_fields(pending);
+                if (record.size() >= 5)
+                    commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]},
+                                       {"date", record[3]}, {"subject", record[4]},
+                                       {"paths", pending_paths}});
+            }
+            pending = line;
+            pending_paths.clear();
+            continue;
+        }
+        if (line.empty()) continue;
+        // "M\tpath", "R100\told\tnew", "A\tpath"…
+        const auto tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        const std::string status = line.substr(0, tab);
+        const std::string rest = line.substr(tab + 1);
+        if (status.rfind('R', 0) == 0 || status.rfind('C', 0) == 0) {
+            const auto second = rest.find('\t');
+            if (second != std::string::npos)
+                pending_paths.push_back(rest.substr(second + 1) + " (← " + rest.substr(0, second) + ")");
+            else pending_paths.push_back(rest);
+        } else pending_paths.push_back(rest);
+    }
+    if (!pending.empty()) {
+        const auto record = split_fields(pending);
+        if (record.size() >= 5)
+            commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]},
+                               {"date", record[3]}, {"subject", record[4]}, {"paths", pending_paths}});
+    }
+    return {{"path", path}, {"commits", std::move(commits)}};
+}
+
+Json show_commit(const fs::path& repo, const std::string& revision) {
+    if (revision.empty()) throw WorkspaceError("INVALID_REQUEST", "请指定提交。");
+    const auto rev = checked_ref(repo, revision);
+    std::vector<std::wstring> args = {L"show", L"--format=", L"--no-color", L"--date=iso-strict",
+                                      L"-m", L"--first-parent", rev};
+    const auto result = run(repo, args);
+    require_ok(result, "读取提交内容");
+    const std::string patch = result.out;
+    return {{"revision", revision}, {"patch", patch}, {"sides", history::diff_sides_from_unified(patch)}};
+}
+
+Json worktree_list(const fs::path& repo) {
+    const auto result = run(repo, {L"worktree", L"list", L"--porcelain"});
+    require_ok(result, "读取工作树列表");
+    Json list = Json::array();
+    Json current = Json::object();
+    for (const auto& line : split_lines(result.out)) {
+        if (line.empty()) {
+            if (!current.empty()) { list.push_back(std::move(current)); current = Json::object(); }
+            continue;
+        }
+        if (line.rfind("worktree ", 0) == 0) current["path"] = utf8_path(line.substr(9));
+        else if (line.rfind("HEAD ", 0) == 0) current["head"] = line.substr(5);
+        else if (line.rfind("branch ", 0) == 0) current["branch"] = line.substr(7);
+        else if (line == "bare") current["bare"] = true;
+        else if (line == "detached") current["detached"] = true;
+        else if (line == "locked") current["locked"] = true;
+        else if (line == "prunable") current["prunable"] = true;
+    }
+    if (!current.empty()) list.push_back(std::move(current));
+    for (auto& entry : list) {
+        if (!entry.contains("branch")) entry["branch"] = entry.value("detached", false) ? "detached" : "";
+        if (!entry.contains("bare")) entry["bare"] = false;
+        if (!entry.contains("locked")) entry["locked"] = false;
+        if (!entry.contains("prunable")) entry["prunable"] = false;
+    }
+    return {{"worktrees", std::move(list)}};
+}
+
+void worktree_add(const fs::path& repo, const std::string& path, const std::string& branch, bool new_branch) {
+    check_worktree_path(repo, path);
+    std::vector<std::wstring> args = {L"worktree", L"add"};
+    if (!branch.empty()) {
+        if (branch.size() > 200 || branch.front() == '-' || branch.find_first_of("\r\n ") != std::string::npos)
+            throw WorkspaceError("INVALID_REQUEST", "分支名不合法。");
+        if (new_branch) args.push_back(L"-b");
+        args.push_back(utf8_to_wide(branch));
+    }
+    args.push_back(utf8_to_wide(path));
+    const auto result = run(repo, args);
+    require_ok(result, "添加工作树");
+}
+
+void worktree_remove(const fs::path& repo, const std::string& path, bool force) {
+    if (path.empty() || path.size() > 512 || path.front() == '-' || path.find_first_of("\r\n") != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "工作树路径不合法。");
+    std::vector<std::wstring> args = {L"worktree", L"remove"};
+    if (force) args.push_back(L"--force");
+    args.push_back(utf8_to_wide(path));
+    const auto result = run(repo, args);
+    require_ok(result, "移除工作树");
+}
+
+Json submodule_status(const fs::path& repo) {
+    const auto result = run(repo, {L"submodule", L"status"});
+    require_ok(result, "读取子模块状态");
+    Json list = Json::array();
+    for (const auto& raw : split_lines(result.out)) {
+        if (raw.size() < 2) continue;
+        const char status = raw[0];
+        std::string rest = raw.substr(1);
+        while (!rest.empty() && rest.front() == ' ') rest.erase(rest.begin());
+        const auto space = rest.find(' ');
+        const std::string commit = space == std::string::npos ? rest : rest.substr(0, space);
+        std::string path = space == std::string::npos ? std::string() : rest.substr(space + 1);
+        std::string describe;
+        const auto paren = path.find(" (");
+        if (paren != std::string::npos && path.back() == ')') {
+            describe = path.substr(paren + 2, path.size() - paren - 3);
+            path = path.substr(0, paren);
+        }
+        list.push_back({{"status", std::string(1, status)}, {"commit", commit},
+                        {"path", path}, {"describe", describe}});
+    }
+    return {{"submodules", std::move(list)}};
+}
+
+void submodule_update(const fs::path& repo, bool init, bool recursive) {
+    std::vector<std::wstring> args = {L"submodule", L"update"};
+    if (init) args.push_back(L"--init");
+    if (recursive) args.push_back(L"--recursive");
+    const auto result = run(repo, args);
+    require_ok(result, "更新子模块");
 }
 
 }  // namespace git

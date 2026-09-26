@@ -45,6 +45,44 @@ test('horizontal rules and raw HTML escaping', () => {
   assert.equal(renderMarkdown('文本 <script>alert(1)</script>'), '<p>文本 &lt;script&gt;alert(1)&lt;/script&gt;</p>')
 })
 
+test('relative links resolve against the file directory into workspace paths', () => {
+  // The preview cannot address files by URL (the UI is served from a virtual host),
+  // so every relative target becomes the workspace path the editor can open.
+  assert.equal(renderMarkdown('[指南](guide.md)', { basePath: 'docs' }), '<p><a href="#docs/guide.md" data-md-open="docs/guide.md">指南</a></p>')
+  assert.equal(renderMarkdown('[指南](./guide.md)', { basePath: 'docs' }), '<p><a href="#docs/guide.md" data-md-open="docs/guide.md">指南</a></p>')
+  assert.equal(renderMarkdown('[返回](../README.md)', { basePath: 'docs/api' }), '<p><a href="#docs/README.md" data-md-open="docs/README.md">返回</a></p>')
+  assert.equal(renderMarkdown('[根](/README.md)', { basePath: 'docs/api' }), '<p><a href="#README.md" data-md-open="README.md">根</a></p>')
+  assert.equal(renderMarkdown('[同级](guide.md)'), '<p><a href="#guide.md" data-md-open="guide.md">同级</a></p>')
+  // Escaping the root is impossible, so there is nothing to open.
+  assert.equal(renderMarkdown('[越界](../../secret.md)', { basePath: 'docs' }), '<p>越界</p>')
+})
+
+test('unsafe link targets are never written into an href', () => {
+  const script = renderMarkdown('[点我](javascript:alert(1))')
+  assert.ok(!script.includes('href'), script)
+  assert.equal(script, '<p>点我</p>')
+  assert.equal(renderMarkdown('[数据](data:text/html;base64,PHNjcmlwdD4=)'), '<p>数据</p>')
+  assert.equal(renderMarkdown('[脚本](vbScript:msgbox)'), '<p>脚本</p>')
+  // A URL with parentheses is one link, not a link plus stray text.
+  assert.equal(renderMarkdown('[维基](https://example.com/a_(b))'), '<p><a href="https://example.com/a_(b)">维基</a></p>')
+})
+
+test('images carry a workspace path to load from and reject unsafe sources', () => {
+  assert.equal(renderMarkdown('![图](img/a.png)', { basePath: 'docs' }),
+    '<p><span class="md-image md-image-pending" role="img" data-md-src="docs/img/a.png" data-md-alt="图">图片加载中…</span></p>')
+  const inline = renderMarkdown('![图](data:image/png;base64,AAA)', { basePath: 'docs' })
+  assert.equal(inline, '<p><img src="data:image/png;base64,AAA" alt="图" /></p>')
+  const html = renderMarkdown('![图](javascript:alert(1))', { basePath: 'docs' })
+  assert.ok(!html.includes('src='), html)
+})
+
+test('basePath reaches blockquotes and table cells', () => {
+  assert.equal(renderMarkdown('> [指南](guide.md)', { basePath: 'docs' }),
+    '<blockquote><p><a href="#docs/guide.md" data-md-open="docs/guide.md">指南</a></p></blockquote>')
+  assert.equal(renderMarkdown('| 名 | 链 |\n| --- | --- |\n| 甲 | [指南](guide.md) |', { basePath: 'docs' }),
+    '<table><thead><tr><th>名</th><th>链</th></tr></thead><tbody><tr><td>甲</td><td><a href="#docs/guide.md" data-md-open="docs/guide.md">指南</a></td></tr></tbody></table>')
+})
+
 test('CRLF input normalizes like any other buffer', () => {
   assert.equal(renderMarkdown('# 头\r\n\r\n正文\r\n'), '<h1>头</h1>\n<p>正文</p>')
 })

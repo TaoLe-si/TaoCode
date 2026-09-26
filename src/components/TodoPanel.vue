@@ -25,6 +25,7 @@ const filterPattern = ref('')
 const expanded = reactive(new Set<string>())
 const selected = ref<{ path: string; line: number } | null>(null)
 const preview = ref<{ path: string; line: number; lines: string[]; start: number } | null>(null)
+const previewError = ref('')
 
 const badge = (preview: string) => props.patterns.find(pattern => markerMatches(preview, pattern.pattern))?.description ?? ''
 // The scan queries the markers as a regex alternation (`\b(TODO|FIXME[:\s])\b`), so the
@@ -40,21 +41,26 @@ const tree = computed(() => buildTodoTree(filtered.value, { showPackages: showPa
 const rows = computed(() => flattenTodoRows(tree.value, expanded))
 const occurrences = computed(() => orderedItems(tree.value))
 
+// A scan is one workspace walk, so its generation guard is what keeps a slow scan of
+// the previous project from overwriting the tree of the project now open.
+let scanToken = 0
 async function scan() {
   if (!isDesktop || !props.root || running.value) return
+  const token = ++scanToken
   running.value = true
   error.value = ''
   try {
     const markers = props.patterns.map(pattern => pattern.pattern).join('|') || 'TODO'
     const result = await request<SearchResult>('search.run', { query: `\\b(${markers})\\b`, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '' })
+    if (token !== scanToken) return
     items.value = result.matches.map((match: SearchMatch) => ({
       path: match.path, line: match.line, text: match.preview.trim(), kind: badge(match.preview) }))
     scanned.value = true
     // A fresh scan replaces the tree, so start from IDEA's fully-expanded view.
     expanded.clear()
     for (const id of packageIds(tree.value)) expanded.add(id)
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : String(caught) }
-  finally { running.value = false }
+  } catch (caught) { if (token === scanToken) error.value = caught instanceof Error ? caught.message : String(caught) }
+  finally { if (token === scanToken) running.value = false }
 }
 
 function nodeKey(node: TodoNode) { return node.id }
@@ -78,8 +84,13 @@ async function select(occurrence: { path: string; line: number }) {
     const lines = doc.content.split(/\r?\n/)
     const index = Math.min(Math.max(occurrence.line - 1, 0), lines.length - 1)
     const start = Math.max(0, index - 2)
+    previewError.value = ''
     preview.value = { path: occurrence.path, line: occurrence.line, lines: lines.slice(start, index + 3), start }
-  } catch { if (token === selectToken) preview.value = null }
+  } catch (caught) {
+    if (token !== selectToken) return
+    preview.value = null
+    previewError.value = `无法预览 ${occurrence.path}：${caught instanceof Error ? caught.message : String(caught)}`
+  }
 }
 function open(occurrence: { path: string; line: number }) { emit('open', occurrence) }
 function step(direction: 1 | -1) {
@@ -106,7 +117,22 @@ function treeAncestors(nodes: TodoNode[], path: string, trail: string[] = []): s
   }
   return []
 }
-watch(() => props.active, active => { if (active && !scanned.value) void scan() })
+// immediate: the panel mounts already active (the Todo tool window is only created
+// when its view is selected), so without this the very first open never scanned.
+watch(() => props.active, active => { if (active && !scanned.value) void scan() }, { immediate: true })
+// Switching projects changes every path in the index: invalidate the scan in flight,
+// drop the old tree (and the preview that belongs to it) and rescan.
+watch(() => props.root, root => {
+  ++scanToken
+  items.value = []
+  scanned.value = false
+  running.value = false
+  error.value = ''
+  selected.value = null
+  preview.value = null
+  previewError.value = ''
+  if (root && isDesktop) void scan()
+})
 // Editing the marker list in Settings changes what the index means, so refresh it.
 watch(() => props.patterns, () => { if (scanned.value) void scan() }, { deep: true })
 // IDEA's auto-scroll: the tree follows the caret. Keyed on "path:line" so a keystroke
@@ -147,7 +173,10 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
       </div>
       <div class="todo-stack">
         <p v-if="!isDesktop" class="todo-note">浏览器预览不能扫描工作区，请在桌面端使用。</p>
-        <p v-else-if="error" class="todo-error">{{ error }}</p>
+        <template v-else>
+          <p v-if="error" class="todo-error">{{ error }}</p>
+          <p v-if="!root" class="todo-note">尚未打开项目。</p>
+        </template>
         <div class="todo-scroll" role="tree" aria-label="任务列表" @click="groupByOpen = false">
           <div v-if="running" class="todo-empty">扫描中…</div>
           <template v-else-if="rows.length">
@@ -179,6 +208,7 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
           <div v-else-if="scanned" class="todo-empty">{{ items.length ? '没有符合当前过滤标记的任务。' : '没有找到标记。到 设置 › 项目结构 里增减 TODO 模式。' }}</div>
           <div v-else class="todo-empty">打开项目后自动扫描注释中的 TODO / FIXME 等标记。</div>
         </div>
+        <p v-if="showPreview && previewError" class="todo-error">{{ previewError }}</p>
         <section v-if="showPreview && preview" class="todo-preview" aria-label="预览">
           <div class="preview-head">{{ preview.path }}</div>
           <pre class="preview-lines"><span

@@ -56,9 +56,12 @@ target_link_libraries(taocode_session PUBLIC taocode_workspace)
 add_library(taocode_watcher native/watcher.cpp)
 target_link_libraries(taocode_watcher PUBLIC taocode_workspace)
 
+add_library(taocode_plugins native/plugins.cpp)
+target_link_libraries(taocode_plugins PUBLIC taocode_workspace)
+
 add_executable(TaoCode WIN32 native/main.cpp)
 target_include_directories(TaoCode PRIVATE "${WEBVIEW2_SDK}/build/native/include")
-target_link_libraries(TaoCode PRIVATE taocode_projects taocode_lsp taocode_runner taocode_search taocode_dap taocode_terminal taocode_history taocode_session taocode_watcher "${WEBVIEW2_SDK}/build/native/x64/WebView2LoaderStatic.lib" ole32 oleaut32 user32 shell32 shlwapi version dwmapi)
+target_link_libraries(TaoCode PRIVATE taocode_projects taocode_lsp taocode_runner taocode_search taocode_dap taocode_terminal taocode_history taocode_session taocode_watcher taocode_plugins "${WEBVIEW2_SDK}/build/native/x64/WebView2LoaderStatic.lib" ole32 oleaut32 user32 shell32 shlwapi version dwmapi)
 target_link_options(TaoCode PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/native/app.manifest")
 add_custom_target(taocode_ui ALL
   COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:TaoCode>/ui"

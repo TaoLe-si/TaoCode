@@ -29,6 +29,9 @@ export const joinLinesCommand: Command = view => {
       range: EditorSelection.cursor(first.from + joined.length),
     }
   })
+  // Nothing to join is not "handled": returning true here swallowed the key and made
+  // CodeMirror skip every later binding for it.
+  if (edit.changes.empty) return false
   view.dispatch(edit, { scrollIntoView: true, userEvent: 'delete.join' })
   return true
 }
@@ -48,7 +51,7 @@ export const toggleCaseCommand: Command = view => {
 }
 
 // All-lower (or caseless) text goes up; anything with a capital goes down.
-export function flipCase(text: string) {
+function flipCase(text: string) {
   return text === text.toLowerCase() ? text.toUpperCase() : text.toLowerCase()
 }
 

@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue'
-import { CircleHelp, FolderOpen, FolderPlus, GitBranch, RefreshCw, Search, Settings, X } from 'lucide-vue-next'
-import type { RecentProject } from '../bridge'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { BellDot, ChevronDown, CircleHelp, Copy, FolderOpen, FolderPlus, FolderSearch, GitBranch, Moon, Palette, Plug, RefreshCw, Search, Settings, Sun, X } from 'lucide-vue-next'
+import { lastOpenedPath, matchesSearch, systemDependentPath } from '../welcomeProjects'
+import { noticeButtonText, noticeButtonVisible, noticeTitle, type NoticeEntry } from '../notices'
+import { request, type EditorSettings, type RecentProject } from '../bridge'
+import type { Theme } from '../appearance'
+import NoticeList from './NoticeList.vue'
 
 const props = defineProps<{
   projects: RecentProject[]
@@ -9,6 +13,11 @@ const props = defineProps<{
   error: string
   gitAvailable: boolean
   isDesktop: boolean
+  pluginCount: number
+  theme: Theme
+  settings: EditorSettings
+  /** The application notification log (`src/notices.ts`), shown by the notification toolbar. */
+  notices: NoticeEntry[]
 }>()
 const emit = defineEmits<{
   open: [path?: string]
@@ -18,15 +27,32 @@ const emit = defineEmits<{
   forget: [path: string]
   refresh: []
   help: []
+  plugins: []
+  theme: [theme: Theme]
+  'settings-change': [patch: Partial<EditorSettings>]
+  /** "全部清空" in the notification popup (`IDEA`'s notification centre). */
+  clearNotices: []
 }>()
+// NotificationEventAction's toggle: the popup takes focus so Escape reaches it, exactly like the
+// balloon the action pops up on the welcome screen (`NotificationEventAction.kt:63-79`).
+const notificationsOpen = ref(false)
+const noticeBox = ref<HTMLElement>()
+watch(notificationsOpen, async open => {
+  if (!open) return
+  await nextTick()
+  noticeBox.value?.focus()
+})
 
 const id = useId()
+// IDEA's welcome screen is tabbed (TabbedWelcomeScreen + ProjectsTabFactory /
+// CustomizeTabFactory / LearnIdeTabFactory): the left rail switches pages, it does
+// not jump into the project list. 自定义 is a real page here — theme, UI zoom and
+// editor font size, all writing through the same settings as the Settings dialog.
+const page = ref<'projects' | 'customize'>('projects')
+const moreOpen = ref(false)
 const query = ref('')
 const searchInput = ref<HTMLInputElement>()
-const filteredProjects = computed(() => {
-  const needle = query.value.trim().toLocaleLowerCase()
-  return props.projects.filter(project => `${project.name}\n${project.path}`.toLocaleLowerCase().includes(needle))
-})
+const filteredProjects = computed(() => props.projects.filter(project => matchesSearch(project, groupOf(project.path), query.value)))
 const dateFormat = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
 })
@@ -37,10 +63,175 @@ function openedDate(value: string) {
 function avatarTone(path: string) {
   return [...path].reduce((sum, character) => sum + character.codePointAt(0)!, 0) % 3
 }
+// IDEA's RecentProjectPanel shows each project's git branch under the path; the
+// branch was recorded by the IDE the last time the project was open (see the
+// gitHead watch in App.vue), so it costs nothing on the welcome page.
+// IDEA's RecentProjectPanel asks before it drops a record (the path itself is never
+// touched, but the user should not lose it by a stray click).
+function confirmForget(project: RecentProject) {
+  if (!window.confirm(`仅从最近项目列表移除「${project.name}」？磁盘上的文件不会被删除。`)) return
+  menuPath.value = ''
+  emit('forget', project.path)
+}
+// IDEA's RecentProjectPanel binds DELETE / BACK_SPACE on the list to remove the
+// selected record (still going through the confirmation).
+function onRowKeydown(project: RecentProject, event: KeyboardEvent) {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return
+  event.preventDefault()
+  confirmForget(project)
+}
+function branchOf(path: string): string {
+  if (!props.isDesktop) return ''
+  try { return localStorage.getItem(`taocode.branch:${path}`) ?? '' } catch { return '' }
+}
 function clearSearch() {
   query.value = ''
   searchInput.value?.focus()
 }
+// IDEA's project list: the ⋮ at the row end opens the row menu (open / remove from
+// the list); the row itself is highlighted while its menu is open.
+const menuPath = ref('')
+// IDEA's NewRecentProjectPanel can group recent projects (isUseGroups=true) with
+// collapsible group headers, and each row can be moved into a group. The grouping is
+// a user preference of this machine, so it lives in localStorage like the anchors.
+interface ProjectGroup { name: string; paths: string[] }
+const groups = ref<ProjectGroup[]>([])
+const groupCollapsed = ref<Set<string>>(new Set())
+const UNGROUPED = '未分组'
+try {
+  const saved = JSON.parse(localStorage.getItem('taocode.projectGroups') ?? 'null') as { groups?: ProjectGroup[]; collapsed?: string[] } | null
+  if (saved && Array.isArray(saved.groups)) {
+    groups.value = saved.groups
+      .filter(group => group && typeof group.name === 'string' && Array.isArray(group.paths))
+      .map(group => ({ name: group.name, paths: group.paths.filter((path): path is string => typeof path === 'string') }))
+  }
+  if (saved && Array.isArray(saved.collapsed)) groupCollapsed.value = new Set(saved.collapsed.filter((name): name is string => typeof name === 'string'))
+} catch { /* corrupted state falls back to a single ungrouped list */ }
+function saveGroups() {
+  try { localStorage.setItem('taocode.projectGroups', JSON.stringify({ groups: groups.value, collapsed: [...groupCollapsed.value] })) } catch { /* session-only */ }
+}
+function groupOf(path: string): string {
+  return groups.value.find(group => group.paths.includes(path))?.name ?? UNGROUPED
+}
+// Rows are rendered group by group; the ungrouped bucket is always last so the list
+// reads the same whether or not the user has started grouping.
+const groupedProjects = computed(() => {
+  const buckets = groups.value.map(group => ({
+    name: group.name,
+    projects: filteredProjects.value.filter(project => group.paths.includes(project.path)),
+  }))
+  buckets.push({ name: UNGROUPED, projects: filteredProjects.value.filter(project => groupOf(project.path) === UNGROUPED) })
+  return buckets.filter(bucket => bucket.name === UNGROUPED ? bucket.projects.length > 0 : true)
+})
+const groupingActive = computed(() => groups.value.length > 0)
+function moveToGroup(project: RecentProject, name: string) {
+  menuPath.value = ''
+  for (const group of groups.value) group.paths = group.paths.filter(path => path !== project.path)
+  if (name !== UNGROUPED) {
+    const target = groups.value.find(group => group.name === name)
+    if (target) target.paths = [...target.paths, project.path]
+  }
+  saveGroups()
+}
+function createGroupWith(project: RecentProject) {
+  menuPath.value = ''
+  const name = window.prompt('新分组名称（用于把最近项目归类）', '')?.trim()
+  if (!name) return
+  if (name === UNGROUPED || groups.value.some(group => group.name === name)) { moveToGroup(project, name); return }
+  groups.value = [...groups.value, { name, paths: [project.path] }]
+  saveGroups()
+}
+function toggleGroupCollapsed(name: string) {
+  const next = new Set(groupCollapsed.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  groupCollapsed.value = next
+  saveGroups()
+}
+// IDEA's list binds Left/Right to collapse/expand the group under the cursor.
+function onGroupKeydown(name: string, event: KeyboardEvent) {
+  if (event.key === 'ArrowLeft') { if (!groupCollapsed.value.has(name)) toggleGroupCollapsed(name) }
+  else if (event.key === 'ArrowRight') { if (groupCollapsed.value.has(name)) toggleGroupCollapsed(name) }
+}
+function toggleMenu(path: string) {
+  menuPath.value = menuPath.value === path ? '' : path
+}
+// RecentProjectFilteringTree.kt:189-191 binds ENTER to "activate the selected item" and
+// ALT+DELETE to "remove it"; the tree selection is what those keys act on, so the page keeps track
+// of the focused row and falls back to the first visible project.
+const focusedPath = ref('')
+const activeProject = computed(() => filteredProjects.value.find(project => project.path === focusedPath.value)
+  ?? filteredProjects.value[0])
+function openProject(project: RecentProject) {
+  menuPath.value = ''
+  emit('open', project.path)
+}
+// CopyProjectPathAction (ActionsBundle.properties:2208 `action.WelcomeScreen.CopyProjectPath.text`)
+// copies the absolute path in the platform's own separator form.
+const copyNote = ref('')
+let copyTimer: number | undefined
+function copyProjectPath(project: RecentProject) {
+  menuPath.value = ''
+  const text = systemDependentPath(project.path, props.isDesktop)
+  try { void navigator.clipboard?.writeText(text) } catch { /* clipboard may be unavailable in WebView2 */ }
+  copyNote.value = `已复制：${text}`
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+  copyTimer = window.setTimeout(() => { copyNote.value = '' }, 4000)
+}
+// RevealProjectDirAction (:25-33) opens the *parent* directory with the project path selected —
+// `RevealFileAction.openFile(Path)` (:170-174) canonicalizes the path and passes its parent, and on
+// Windows `doOpen` (:273) reaches Explorer as `explorer /select,"<path>"`. A project whose folder is
+// gone still works, because `update` (:17-21) only asks for a selected RecentProjectItem, not for an
+// existing directory. The native side does that and reports the reason when it cannot.
+async function revealProjectDir(project: RecentProject) {
+  menuPath.value = ''
+  try {
+    await request('shell.reveal', { path: project.path })
+    copyNote.value = `已在资源管理器中显示：${project.path}`
+  } catch (error) {
+    copyNote.value = error instanceof Error ? error.message : String(error)
+  }
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+  copyTimer = window.setTimeout(() => { copyNote.value = '' }, 4000)
+}
+function onSearchKeydown(event: KeyboardEvent) {
+  const project = activeProject.value
+  if (!project) return
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    if (project.available && !props.busy) openProject(project)
+    return
+  }
+  if (event.key === 'Delete' && event.altKey) {
+    event.preventDefault()
+    confirmForget(project)
+  }
+}
+// selectLastOpenedProject() — RecentProjectFilteringTree.kt:236-254, called while the Projects tab
+// is built (ProjectsTabFactory.kt:170,210): the list starts with the project the IDE opened last
+// focused, so ENTER / ALT+DELETE act on it right away. Only the first load grabs the focus.
+const rowElements = new Map<string, HTMLElement>()
+let autoFocused = false
+function setRow(path: string, element: unknown) {
+  if (element instanceof HTMLElement) rowElements.set(path, element)
+  else rowElements.delete(path)
+}
+async function focusLastOpened() {
+  if (autoFocused || page.value !== 'projects' || !props.projects.length) return
+  const path = lastOpenedPath(props.projects)
+  if (!path) return
+  await nextTick()
+  const row = rowElements.get(path)
+  if (!row) return
+  autoFocused = true
+  // IDEA moves the selection; only take the focus when nothing else owns it, so a user who has
+  // already clicked into the search box is not pulled away.
+  if (document.activeElement === document.body || document.activeElement === null) row.focus()
+}
+watch(() => props.projects, focusLastOpened, { immediate: true, deep: false })
+// The rows only exist after the first render, so the initial load is handled here as well.
+onMounted(focusLastOpened)
+onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 </script>
 
 <template>
@@ -51,21 +242,62 @@ function clearSearch() {
         <span class="welcome-version">0.1</span>
       </div>
       <nav class="welcome-navigation" aria-label="欢迎页导航">
-        <button type="button" class="menu-button navigation-item selected" aria-current="page" @click="searchInput?.focus()">
+        <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'projects' }" :aria-current="page === 'projects' ? 'page' : undefined" @click="page = 'projects'">
           <FolderOpen :size="17" aria-hidden="true" />项目
         </button>
-        <button type="button" class="menu-button navigation-item" :disabled="busy" @click="emit('settings')">
-          <Settings :size="17" aria-hidden="true" />设置
+        <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'customize' }" :aria-current="page === 'customize' ? 'page' : undefined" @click="page = 'customize'">
+          <Palette :size="17" aria-hidden="true" />自定义
+        </button>
+        <button
+          type="button" class="menu-button navigation-item" :disabled="busy || !isDesktop"
+          :title="isDesktop ? '管理本机插件' : '浏览器预览不能读取本机插件目录'" @click="emit('plugins')"
+        >
+          <Plug :size="17" aria-hidden="true" />插件
+          <span v-if="pluginCount" class="nav-badge" :title="`${pluginCount} 个已安装插件`">{{ pluginCount }}</span>
         </button>
         <button type="button" class="menu-button navigation-item" :disabled="busy" @click="emit('help')">
           <CircleHelp :size="17" aria-hidden="true" />关于
         </button>
       </nav>
+      <button type="button" class="icon-button welcome-gear" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="busy" @click="emit('settings')">
+        <Settings :size="18" aria-hidden="true" />
+      </button>
       <p class="sidebar-note">{{ isDesktop ? '本地项目' : '浏览器 · 内存预览' }}</p>
     </aside>
 
-    <main class="welcome-main" :aria-labelledby="`${id}-title`">
-      <div class="welcome-content">
+    <main class="welcome-main">
+      <!-- IDEA CustomizeTabFactory: theme, UI scale and font size, applied live
+           through the same settings the Settings dialog writes. -->
+      <div v-if="page === 'customize'" class="welcome-content customize-page">
+        <header class="welcome-heading"><h1>自定义</h1></header>
+        <section class="customize-group">
+          <h2>主题</h2>
+          <div class="theme-options" role="group" aria-label="主题">
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light')"><Sun :size="17" aria-hidden="true" /><span>浅色</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark')"><Moon :size="17" aria-hidden="true" /><span>深色</span></button>
+          </div>
+        </section>
+        <section class="customize-group">
+          <h2>缩放</h2>
+          <label class="customize-row">
+            <span>整个界面的缩放百分比</span>
+            <select :value="settings.uiZoomPercent" @change="emit('settings-change', { uiZoomPercent: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="percent in [50, 70, 80, 90, 100, 110, 125, 150, 175, 200]" :key="percent" :value="percent">{{ percent }}%</option>
+            </select>
+          </label>
+        </section>
+        <section class="customize-group">
+          <h2>编辑器字体</h2>
+          <label class="customize-row">
+            <span>字体大小（像素）</span>
+            <input
+              type="number" min="10" max="32" step="1" :value="settings.fontSize"
+              @change="emit('settings-change', { fontSize: Math.min(32, Math.max(10, Number(($event.target as HTMLInputElement).value) || settings.fontSize)) })"
+            />
+          </label>
+        </section>
+      </div>
+      <div v-else class="welcome-content" :aria-labelledby="`${id}-title`">
         <header class="welcome-heading">
           <h1 :id="`${id}-title`">项目</h1>
           <div class="project-actions" aria-label="项目操作">
@@ -100,13 +332,21 @@ function clearSearch() {
           </div>
           <div class="project-search">
             <Search :size="16" aria-hidden="true" />
-            <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称或路径搜索" placeholder="搜索项目名称或路径" autocomplete="off" spellcheck="false" />
+            <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称、路径或分组搜索" placeholder="搜索项目名称、路径或分组" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
             <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="15" aria-hidden="true" /></button>
           </div>
-          <p class="list-status" role="status">{{ busy ? '正在处理项目操作…' : query.trim() ? `找到 ${filteredProjects.length} 个项目` : `${projects.length} 个项目` }}</p>
+          <p class="list-status" role="status">{{ copyNote || (busy ? '正在处理项目操作…' : query.trim() ? `找到 ${filteredProjects.length} 个项目` : `${projects.length} 个项目`) }}</p>
 
-          <ul v-if="filteredProjects.length" class="recent-list">
-            <li v-for="project in filteredProjects" :key="project.path" class="recent-row">
+          <p v-if="filteredProjects.length && !filteredProjects.some(project => project.available)" class="list-hint" role="status">列出的路径都不存在或不可访问：用记录右侧的「仅从列表移除」删掉记录（不会动磁盘文件），或打开其他位置的项目。</p>
+          <div v-if="filteredProjects.length" class="recent-list">
+            <section v-for="group in groupedProjects" :key="group.name" class="recent-group">
+              <header v-if="groupingActive" class="recent-group-head" tabindex="0" role="button" :aria-expanded="!groupCollapsed.has(group.name)" :aria-label="`${group.name}，${group.projects.length} 个项目，左右方向键折叠展开`" @keydown="onGroupKeydown(group.name, $event)" @click="toggleGroupCollapsed(group.name)">
+                <ChevronDown :size="13" :class="{ collapsed: groupCollapsed.has(group.name) }" aria-hidden="true" />
+                <span class="recent-group-name">{{ group.name }}</span>
+                <span class="recent-group-count">{{ group.projects.length }}</span>
+              </header>
+              <ul v-show="!groupCollapsed.has(group.name)" class="recent-group-list">
+            <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除`" @focus="focusedPath = project.path" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path }">
               <button
                 type="button" class="recent-open" :disabled="busy || !project.available"
                 :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
@@ -116,19 +356,50 @@ function clearSearch() {
                 <span class="project-details">
                   <span class="project-title"><strong>{{ project.name }}</strong><span v-if="!isDesktop" class="memory-tag">内存示例</span></span>
                   <span class="project-path" :title="project.path">{{ project.path }}</span>
+                  <span v-if="branchOf(project.path)" class="project-branch"><GitBranch :size="11" aria-hidden="true" />{{ branchOf(project.path) }}</span>
                   <span class="project-date">最近打开：<time>{{ openedDate(project.lastOpened) }}</time></span>
                 </span>
               </button>
               <div class="recent-row-actions">
                 <span v-if="!project.available" class="missing-tag">{{ isDesktop ? '路径缺失或不可访问' : '示例不可用' }}</span>
+                <!-- RecentProjectFilteringTree.kt:536-545: the row button is a gear while the project is
+                     reachable and a remove icon once its path is gone. -->
                 <button
-                  type="button" class="menu-button forget-button" :disabled="busy"
-                  :aria-label="`仅从列表移除 ${project.name}，不删除文件`" title="仅移除记录，不删除文件"
-                  @click="emit('forget', project.path)"
-                ><X :size="13" aria-hidden="true" />仅从列表移除</button>
+                  type="button" class="icon-button row-menu-button" :disabled="busy"
+                  :aria-label="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path" :title="project.available ? '更多操作' : '更多操作（路径不可用，可仅从列表移除）'"
+                  @click.stop="toggleMenu(project.path)"
+                ><Settings v-if="project.available" :size="14" aria-hidden="true" /><X v-else :size="15" aria-hidden="true" /></button>
+              </div>
+              <div v-if="menuPath === project.path" class="row-menu" role="menu" :aria-label="`${project.name} 的操作`">
+                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy || !project.available" @click="openProject(project)">
+                  <FolderOpen :size="14" aria-hidden="true" />打开项目
+                </button>
+                <button type="button" class="menu-button row-menu-item" role="menuitem" title="把项目路径复制到剪贴板" @click="copyProjectPath(project)">
+                  <Copy :size="14" aria-hidden="true" />复制路径
+                </button>
+                <!-- RevealFileAction.getActionName() = `action.RevealIn.name.other` ("Show in {0}")
+                     with the file manager name (`IdeBundle.properties:3209` `action.explorer.text`
+                     = "Explorer"); `isDirectoryOpenSupported()` (`RevealFileAction.java:108-110`)
+                     is what the desktop check stands for. -->
+                <button
+                  type="button" class="menu-button row-menu-item" role="menuitem" :disabled="!isDesktop" :title="isDesktop ? '在资源管理器中打开项目所在目录并选中它' : '浏览器预览无法打开资源管理器'"
+                  @click="revealProjectDir(project)"
+                >
+                  <FolderSearch :size="14" aria-hidden="true" />在资源管理器中显示
+                </button>
+                <button v-if="groupingActive" type="button" class="menu-button row-menu-item" role="menuitem" @click="moveToGroup(project, '未分组')">移出分组</button>
+                <button v-for="group in groups" :key="group.name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === group.name" @click="moveToGroup(project, group.name)">移入「{{ group.name }}」</button>
+                <button type="button" class="menu-button row-menu-item" role="menuitem" @click="createGroupWith(project)">新建分组并移入…</button>
+                <div class="menu-rule" role="separator" />
+                <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="confirmForget(project)">
+                  <X :size="14" aria-hidden="true" />仅从列表移除
+                </button>
               </div>
             </li>
-          </ul>
+              </ul>
+            </section>
+          </div>
+          <div v-if="menuPath" class="menu-backdrop" @click="menuPath = ''" />
           <div v-else-if="query.trim()" class="project-empty">
             <Search :size="28" aria-hidden="true" />
             <h3>没有匹配的项目</h3>
@@ -139,6 +410,38 @@ function clearSearch() {
             <FolderOpen :size="30" aria-hidden="true" />
             <h3>{{ isDesktop ? '还没有近期项目' : '尚未打开内存示例' }}</h3>
             <p>{{ isDesktop ? '点击“打开项目”选择已有文件夹，或点击“新建项目”创建 Java 项目或空项目。' : '点击“打开内存示例”体验编辑。真实的打开、新建和克隆需要在桌面端操作。' }}</p>
+            <!-- IDEA EmptyStateProjectsPanel starts with a vertical group of quick actions
+                 plus a "More" drop-down instead of a single hint line. -->
+            <div class="empty-actions" role="group" aria-label="快捷开始">
+              <button type="button" class="primary-button empty-action" :disabled="busy" @click="emit('create')"><FolderPlus :size="15" aria-hidden="true" />新建项目</button>
+              <button type="button" class="subtle-button empty-action" :disabled="busy" @click="emit('open')"><FolderOpen :size="15" aria-hidden="true" />打开</button>
+              <button type="button" class="subtle-button empty-action" :disabled="busy || !gitAvailable" :title="gitAvailable ? '从远程仓库克隆' : '安装 Git 后可用'" @click="emit('clone')"><GitBranch :size="15" aria-hidden="true" />从 VCS 获取</button>
+              <div class="empty-more">
+                <button type="button" class="subtle-button empty-action" :aria-expanded="moreOpen" aria-haspopup="menu" @click="moreOpen = !moreOpen">更多<ChevronDown :size="13" aria-hidden="true" /></button>
+                <div v-if="moreOpen" class="empty-more-menu" role="menu">
+                  <button type="button" class="menu-button empty-more-item" role="menuitem" :disabled="busy" @click="moreOpen = false; emit('settings')">设置…</button>
+                  <button type="button" class="menu-button empty-more-item" role="menuitem" :disabled="busy || !isDesktop" @click="moreOpen = false; emit('plugins')">插件…</button>
+                  <button type="button" class="menu-button empty-more-item" role="menuitem" @click="moreOpen = false; emit('help')">帮助</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- IDEA's welcome-screen notification toolbar: ProjectsTabFactory.kt:126-131 puts it in
+               the last row of the projects tab, aligned right, and builds it from
+               WelcomeScreenComponentFactory.createNotificationToolbar (:399-451). The button itself
+               is NotificationEventAction.kt:24-81 — enabled and visible only while notifications
+               exist (:53-56), its text is IdeBundle toolwindow.stripe.Notifications (:2238), and it
+               opens the same notification list the status bar widget shows. -->
+          <div v-if="noticeButtonVisible(notices.length)" ref="noticeBox" class="welcome-notifications" tabindex="-1" @keydown.esc.stop="notificationsOpen = false">
+            <button
+              type="button" class="subtle-button welcome-notice-button" :aria-expanded="notificationsOpen"
+              aria-haspopup="dialog" :title="noticeTitle(notices)" :aria-label="noticeTitle(notices)"
+              @click="notificationsOpen = !notificationsOpen"
+            ><BellDot :size="15" aria-hidden="true" />{{ noticeButtonText(notices.length) }}</button>
+            <NoticeList
+              v-if="notificationsOpen" :entries="notices" :live="settings.supportScreenReaders"
+              @clear="emit('clearNotices')" @close="notificationsOpen = false"
+            />
           </div>
         </section>
       </div>
@@ -156,9 +459,16 @@ function clearSearch() {
 .navigation-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-3); border-radius: var(--radius-xs); text-align: left; font-size: 13px; }
 .navigation-item.selected { background: var(--selected); color: var(--bright); font-weight: 600; }
 .navigation-item > svg { flex-shrink: 0; }
-.sidebar-note { margin: auto var(--space-3) 0; color: var(--muted); font-size: 11px; }
+.nav-badge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--selected); color: var(--accent); font: 600 10px/18px var(--font-ui); text-align: center; }
+.welcome-gear { margin-top: auto; align-self: flex-start; }
+.sidebar-note { margin: var(--space-2) var(--space-3) 0; color: var(--muted); font-size: 11px; }
 .welcome-main { min-width: 0; min-height: 0; overflow: auto; }
 .welcome-content { width: 100%; max-width: 1050px; margin: 0 auto; padding: clamp(24px, 5vw, 64px); }
+.customize-group { margin-bottom: var(--space-6); }
+.customize-group h2 { margin: 0 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; }
+.customize-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); max-width: 420px; color: var(--text); font-size: 13px; }
+.customize-row select, .customize-row input { width: 120px; min-height: 30px; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
+.customize-page .theme-option { flex: 0 0 auto; min-width: 110px; padding: var(--space-3); }
 .welcome-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
 .welcome-heading h1 { margin: 0; font-size: 24px; line-height: 1.4; font-weight: 600; color: var(--bright); }
 .project-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -180,8 +490,23 @@ function clearSearch() {
 .project-search input::placeholder { color: var(--muted); }
 .project-search input::-webkit-search-cancel-button { display: none; }
 .list-status { margin: var(--space-2) 0 var(--space-1); color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
-.recent-list { list-style: none; margin: 0; padding: 0; }
-.recent-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--line); }
+/* IDEA keeps the welcome notification toolbar in the last row of the projects tab, aligned right
+   (ProjectsTabFactory.kt:126-131 -> `align(AlignX.RIGHT)`); the popup reuses the status bar's list. */
+.welcome-notifications { position: relative; display: flex; justify-content: flex-end; margin-top: var(--space-3); }
+.welcome-notice-button { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12px; }
+.list-hint { margin: 0 0 var(--space-1); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 11px; line-height: 1.7; }
+.recent-list { margin: 0; padding: 0; }
+.recent-group { margin-bottom: var(--space-1); }
+.recent-group-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); border-radius: var(--radius-xs); color: var(--muted); font-size: 11px; cursor: pointer; }
+.recent-group-head:hover { background: var(--hover); color: var(--secondary); }
+.recent-group-head:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.recent-group-head svg { transition: transform var(--dur-1) var(--ease); }
+.recent-group-head svg.collapsed { transform: rotate(-90deg); }
+.recent-group-name { font-weight: 600; letter-spacing: .02em; }
+.recent-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.recent-group-list { list-style: none; margin: 0; padding: 0; }
+.recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.recent-row.menu-open .recent-open { background: var(--selected); }
 .recent-open { display: grid; align-items: center; grid-template-columns: 26px minmax(11rem, 26%) minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: baseline; flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
@@ -193,11 +518,22 @@ function clearSearch() {
 .project-title strong { min-width: 0; color: var(--bright); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-path { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); font: 11px/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
 .project-date { color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-branch { display: inline-flex; align-items: center; gap: 3px; color: var(--secondary); font: 11px var(--font-mono); white-space: nowrap; }
 .memory-tag { flex-shrink: 0; color: var(--warning); font-size: 10px; }
 .recent-row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); flex-shrink: 0; }
+/* IDEA shows the row's ⋮ only while the pointer (or keyboard focus) is on the row. */
+.row-menu-button { opacity: 0; transition: opacity .1s ease; }
+.recent-row:hover .row-menu-button, .recent-row:focus-within .row-menu-button, .recent-row.menu-open .row-menu-button { opacity: 1; }
+.row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.row-menu-item { justify-content: flex-start; gap: var(--space-2); }
+.menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .missing-tag { padding: 2px var(--space-1); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 10px; }
-.forget-button { display: inline-flex; align-items: center; gap: var(--space-1); border-radius: var(--radius-xs); font-size: 11px; }
 .project-empty { padding: 42px var(--space-3); text-align: center; color: var(--muted); }
+.empty-actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.empty-action { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 168px; justify-content: flex-start; }
+.empty-more { position: relative; display: flex; flex-direction: column; align-items: center; }
+.empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: 4px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.empty-more-item { justify-content: flex-start; width: 100%; }
 .project-empty h3 { margin: var(--space-3) 0 var(--space-2); font-size: 15px; color: var(--text); font-weight: 500; }
 .project-empty p { max-width: 430px; margin: 0 auto var(--space-4); line-height: 1.8; overflow-wrap: anywhere; }
 @media (max-width: 760px) {

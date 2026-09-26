@@ -94,8 +94,25 @@ bool same_text(std::wstring_view a, std::wstring_view b) {
                                 static_cast<int>(b.size()), TRUE) == CSTR_EQUAL;
 }
 
+// TEMP is very often the 8.3 short form (C:\Users\ADMINI~1\...), while the kernel
+// reports the long form. Comparing the raw strings therefore declared two handles on
+// the same directory to be different paths, every boundary check failed, and whole
+// staging directories were left behind.
+std::wstring long_text(const fs::path& path) {
+    const auto& text = path.native();
+    if (text.empty()) return {};
+    const DWORD size = GetLongPathNameW(text.c_str(), nullptr, 0);
+    if (!size) return text;
+    std::wstring buffer(size, L'\0');
+    const DWORD count = GetLongPathNameW(text.c_str(), buffer.data(), size);
+    if (!count || count >= size) return text;
+    buffer.resize(count);
+    return buffer;
+}
+
 bool same_path(const fs::path& a, const fs::path& b) {
-    return same_text(a.native(), b.native());
+    if (same_text(a.native(), b.native())) return true;
+    return same_text(long_text(a), long_text(b));
 }
 
 BY_HANDLE_FILE_INFORMATION info(HANDLE handle) {
@@ -114,9 +131,15 @@ fs::path final_path(HANDLE handle) {
     return plain_path(std::move(buffer));
 }
 
+// `owned` additionally asks for DELETE and for FILE_SHARE_DELETE. The share flag is
+// not optional: Windows refuses FileDispositionInfo with ERROR_ACCESS_DENIED unless
+// the handle itself was opened allowing delete sharing, so a handle opened
+// FILE_SHARE_READ only can never delete the object it owns — which is what left
+// entire staging directories behind. Pins stay delete-share-denied on purpose.
 Handle open_directory(const fs::path& path, bool owned = false) {
+    const DWORD share = FILE_SHARE_READ | (owned ? (FILE_SHARE_WRITE | FILE_SHARE_DELETE) : 0);
     Handle handle(CreateFileW(api_path(path).c_str(), FILE_READ_ATTRIBUTES | (owned ? DELETE : 0),
-                             FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                             share, nullptr, OPEN_EXISTING,
                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!handle) win_fail("无法锁定克隆目录");
     const auto attributes = info(handle.get()).dwFileAttributes;
@@ -371,6 +394,23 @@ std::vector<wchar_t> child_environment() {
     return block;
 }
 
+// A file a git child process has just written can still be held for an instant — by
+// git's own background maintenance, or by an on-access scanner. Deleting once and
+// giving up is exactly what leaked whole staging directories, so a delete that fails
+// with a transient sharing error is retried briefly before it counts as a failure.
+template <class Operation>
+bool retry_delete(Operation&& operation) {
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        if (operation()) return true;
+        const DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION &&
+            error != ERROR_USER_MAPPED_FILE)
+            return false;
+        Sleep(10 * (attempt + 1));
+    }
+    return false;
+}
+
 bool dispose(HANDLE handle) noexcept {
     FILE_BASIC_INFO basic{};
     if (!GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic))) return false;
@@ -395,15 +435,21 @@ bool remove_children(const fs::path& directory) {
         const std::wstring_view name(data.cFileName);
         if (name == L"." || name == L"..") continue;
         const auto path = directory / data.cFileName;
-        Handle child(CreateFileW(api_path(path).c_str(), DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
-                                 FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-        if (!child) { ok = false; continue; }
+        Handle child;
+        const bool opened = retry_delete([&] {
+            // FILE_SHARE_DELETE is required: without it the later FileDispositionInfo
+            // call fails with ERROR_ACCESS_DENIED and the entry survives.
+            child = Handle(CreateFileW(api_path(path).c_str(), DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+            return static_cast<bool>(child);
+        });
+        if (!opened) { ok = false; continue; }
         const auto attributes = info(child.get()).dwFileAttributes;
         if ((attributes & FILE_ATTRIBUTE_DIRECTORY) && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
             if (!same_path(final_path(child.get()), path) || !remove_children(path)) { ok = false; continue; }
         }
-        if (!dispose(child.get())) ok = false;
+        if (!retry_delete([&] { return dispose(child.get()); })) ok = false;
     } while (FindNextFileW(search, &data));
     return GetLastError() == ERROR_NO_MORE_FILES && ok;
 }

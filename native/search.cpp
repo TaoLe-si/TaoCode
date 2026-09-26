@@ -10,9 +10,12 @@
 
 #include <cctype>
 #include <atomic>
+#include <functional>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <set>
 #include <optional>
 #include <regex>
 #include <string_view>
@@ -235,6 +238,10 @@ struct Scan {
     std::vector<Glob> exclude;
     std::regex pattern;
     bool has_pattern = false;
+    std::function<bool()> cancelled;
+    // Set by walk() when it stopped because `cancelled()` returned true, so the
+    // caller can report "abandoned" instead of "finished but truncated".
+    bool cancelled_hit = false;
 };
 
 // Prefix used for replacement scratch files; also skipped by walk() so a temp
@@ -270,7 +277,7 @@ void write_atomically(const fs::path& target, const std::string& content) {
 // absolute path, workspace-relative '/' path and contents. Returns false when
 // the walk was cut short by the scanned-file ceiling.
 template <class Visit>
-bool walk(const fs::path& root, const Scan& scan, Visit&& visit) {
+bool walk(const fs::path& root, Scan& scan, Visit&& visit) {
     std::error_code ec;
     fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
     if (ec) fail("NOT_OPEN", "无法读取工作区目录。");
@@ -288,6 +295,7 @@ bool walk(const fs::path& root, const Scan& scan, Visit&& visit) {
             if (excluded_dir_name(utf8_path(entry.path().filename()))) it.disable_recursion_pending();
             continue;
         }
+        if (scan.cancelled && scan.cancelled()) { scan.cancelled_hit = true; return false; }
         if (!entry.is_regular_file(leec) || leec) continue;
         if (entry.path().filename().native().starts_with(replace_prefix)) continue;  // our own scratch
         if (++scanned > max_scanned_files) return false;
@@ -324,7 +332,7 @@ Json run(const fs::path& root, const Options& options) {
     if (!options.regex && options.query.empty())
         return {{"matches", Json::array()}, {"truncated", false}, {"fileCount", 0}};
     Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
-              options.regex ? build_query_pattern(options) : std::regex{}, options.regex};
+              options.regex ? build_query_pattern(options) : std::regex{}, options.regex, options.cancelled};
 
     Json matches = Json::array();
     std::size_t files = 0;
@@ -351,6 +359,10 @@ Json run(const fs::path& root, const Options& options) {
         if (matches.size() >= max_matches) truncated = true;
         if (matches.size() > before) ++files;
     });
+    if (scan.cancelled_hit) return {{"matches", Json::array()}, {"truncated", true}, {"fileCount", 0}, {"cancelled", true}};
+    // walk() returns false both when it abandoned (handled above) and when it hit
+    // max_scanned_files; the ceiling path must be reported too, otherwise the UI
+    // presents a partial result as the whole answer.
     if (!complete) truncated = true;
     return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files}};
 }
@@ -360,7 +372,7 @@ Json replace(const fs::path& root, const Options& options) {
     if (!options.regex && options.query.empty())
         return {{"files", 0}, {"replacements", 0}};
     Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
-              options.regex ? build_query_pattern(options) : std::regex{}, options.regex};
+              options.regex ? build_query_pattern(options) : std::regex{}, options.regex, options.cancelled};
 
     std::size_t files = 0, replacements = 0;
     bool truncated = false;
@@ -383,8 +395,125 @@ Json replace(const fs::path& root, const Options& options) {
         ++files;
         replacements += hits;
     });
+    if (scan.cancelled_hit) return {{"files", files}, {"replacements", replacements}, {"truncated", true}, {"cancelled", true}};
+    // A walk cut short by max_scanned_files leaves files below the ceiling
+    // untouched: the rewrite is partial, so it must not come back as complete.
     if (!complete) truncated = true;
     return {{"files", files}, {"replacements", replacements}, {"truncated", truncated}};
+}
+
+// The text a single occurrence becomes: regex replacement applies $1/$& through
+// std::match_results::format (the same ECMAScript substitution IDEA's dialog does),
+// a literal search substitutes the plain string.
+std::string substitution_text(const Options& options, const std::string& content,
+                              std::size_t pos, std::size_t len, const std::smatch* match) {
+    if (match) {
+        try { return match->format(options.replacement); }
+        catch (const std::regex_error&) { return options.replacement; }
+    }
+    (void)content; (void)pos; (void)len;
+    return options.replacement;
+}
+
+Json preview(const fs::path& root, const Options& options) {
+    if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
+    if (!options.regex && options.query.empty())
+        return {{"matches", Json::array()}, {"truncated", false}, {"fileCount", 0}};
+    Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
+              options.regex ? build_query_pattern(options) : std::regex{}, options.regex, options.cancelled};
+
+    Json matches = Json::array();
+    std::size_t files = 0;
+    bool truncated = false;
+    const bool complete = walk(root, scan, [&](const fs::path&, const std::string& rel, const std::string& content) {
+        const std::size_t before = matches.size();
+        std::size_t line = 1, line_start = 0, cursor = 0;
+        for_each_match(content, options, scan.has_pattern ? &scan.pattern : nullptr,
+            [&](std::size_t pos, std::size_t len, const std::smatch* match) {
+                for (; cursor < pos; ++cursor)
+                    if (content[cursor] == '\n') { ++line; line_start = cursor + 1; }
+                std::size_t line_end = content.find('\n', line_start);
+                if (line_end == std::string::npos) line_end = content.size();
+                if (line_end > line_start && content[line_end - 1] == '\r') --line_end;
+                const std::string line_text = content.substr(line_start, line_end - line_start);
+                const std::string inserted = substitution_text(options, content, pos, len, match);
+                matches.push_back({
+                    {"path", rel},
+                    {"line", line},
+                    {"column", static_cast<std::int64_t>(code_points(content, line_start, pos) + 1)},
+                    {"length", static_cast<std::int64_t>(code_points(content, pos, pos + len))},
+                    {"before", content.substr(pos, len)},
+                    {"after", clip_preview(line_text.substr(0, pos - line_start) + inserted +
+                                           line_text.substr(pos - line_start + len))},
+                    {"preview", clip_preview(std::string_view(line_text))},
+                });
+                return matches.size() < max_matches;
+            });
+        if (matches.size() >= max_matches) truncated = true;
+        if (matches.size() > before) ++files;
+    });
+    if (scan.cancelled_hit) return {{"matches", Json::array()}, {"truncated", true}, {"fileCount", 0}, {"cancelled", true}};
+    if (!complete) truncated = true;
+    return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files}};
+}
+
+Json replace_selected(const fs::path& root, const Options& options, const std::vector<Selection>& selections) {
+    if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
+    if (!options.regex && options.query.empty())
+        return {{"files", 0}, {"replacements", 0}, {"truncated", false}, {"skippedFiles", 0}};
+    if (selections.empty()) return {{"files", 0}, {"replacements", 0}, {"truncated", false}, {"skippedFiles", 0}};
+    if (selections.size() > max_matches)
+        fail("INVALID_REQUEST", "一次最多替换 5000 处。");
+    Scan scan{compile_globs(options.include, "包含"), compile_globs(options.exclude, "排除"),
+              options.regex ? build_query_pattern(options) : std::regex{}, options.regex, options.cancelled};
+
+    // Only the files that actually carry a selection are opened, and a file is
+    // written once, with every ticked occurrence applied in ascending order.
+    std::map<std::string, std::set<std::pair<std::int64_t, std::int64_t>>> wanted;
+    for (const auto& selection : selections) {
+        if (selection.path.empty() || selection.line < 1 || selection.column < 1) continue;
+        wanted[selection.path].insert({selection.line, selection.column});
+    }
+    std::size_t files = 0, replacements = 0;
+    bool truncated = false;
+    // Every wanted file the walk actually reached. A walk cut short by
+    // max_scanned_files never opens the files past the ceiling, so the difference
+    // between this and `wanted` is the set of ticked files that were silently
+    // left alone — reported as skippedFiles instead of a clean "0 replacements".
+    std::set<std::string> visited;
+    const bool complete = walk(root, scan, [&](const fs::path& path, const std::string& rel, const std::string& content) {
+        const auto chosen = wanted.find(rel);
+        if (chosen == wanted.end()) return;
+        visited.insert(rel);
+        std::string result;
+        result.reserve(content.size());
+        std::size_t last = 0, hits = 0;
+        std::size_t line = 1, line_start = 0, cursor = 0;
+        for_each_match(content, options, scan.has_pattern ? &scan.pattern : nullptr,
+            [&](std::size_t pos, std::size_t len, const std::smatch* match) {
+                for (; cursor < pos; ++cursor)
+                    if (content[cursor] == '\n') { ++line; line_start = cursor + 1; }
+                const auto column = static_cast<std::int64_t>(code_points(content, line_start, pos) + 1);
+                if (!chosen->second.contains({static_cast<std::int64_t>(line), column})) return true;
+                result.append(content, last, pos - last);
+                result += substitution_text(options, content, pos, len, match);
+                last = pos + len;
+                ++hits;
+                return true;
+            });
+        if (!hits) return;
+        result.append(content, last, std::string::npos);
+        if (result == content) return;
+        write_atomically(path, result);
+        ++files;
+        replacements += hits;
+    });
+    if (scan.cancelled_hit) return {{"files", files}, {"replacements", replacements}, {"truncated", true}, {"cancelled", true}};
+    if (!complete) truncated = true;
+    std::size_t skipped = 0;
+    for (const auto& entry : wanted)
+        if (!visited.contains(entry.first)) ++skipped;
+    return {{"files", files}, {"replacements", replacements}, {"truncated", truncated}, {"skippedFiles", skipped}};
 }
 
 }  // namespace taocode::search

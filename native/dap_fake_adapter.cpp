@@ -24,10 +24,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 #include <string_view>
 #include <vector>
 
@@ -128,6 +130,28 @@ std::string text(const Json& object, const char* key) {
     return {};
 }
 
+std::string narrow(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string out(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), out.data(), size, nullptr, nullptr);
+    return out;
+}
+
+// file:/// URI of the directory the client made the adapter's cwd, so an event
+// can carry a path that really is inside the workspace.
+std::string workspace_uri() {
+    std::wstring directory(32768, L'\0');
+    const auto length = GetCurrentDirectoryW(static_cast<DWORD>(directory.size()), directory.data());
+    if (!length) return "file:///";
+    directory.resize(length);
+    auto path = narrow(directory);
+    for (auto& character : path)
+        if (character == '\\') character = '/';
+    return "file:///" + path;
+}
+
 std::int64_t number(const Json& object, const char* key, std::int64_t fallback) {
     if (object.is_object() && object.contains(key) && object.at(key).is_number_integer()) return object.at(key).get<std::int64_t>();
     return fallback;
@@ -135,7 +159,14 @@ std::int64_t number(const Json& object, const char* key, std::int64_t fallback) 
 
 }  // namespace
 
-int main() {
+// One test switch: --extras makes the launch also emit the events the client has
+// to reshape for the UI (exited / module / loadedSource / progress*). The two
+// reverse requests are asked for through markers in the *launch configuration*
+// instead, because a nested session is started with this same command line and
+// must not ask for another one.
+int main(int argc, char** argv) {
+    const std::vector<std::string> switches(argv + 1, argv + argc);
+    const bool extras = std::find(switches.begin(), switches.end(), std::string("--extras")) != switches.end();
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -187,6 +218,24 @@ int main() {
             if (!inbound) break;
             const Json& message = *inbound;
             const auto type = text(message, "type");
+            if (type == "response") {
+                // The answer to one of our own reverse requests. It is echoed as
+                // console output so the client test can assert the host really
+                // answered (and that runInTerminal carries a real process id).
+                const auto answered = text(message, "command");
+                const bool ok = message.contains("success") && message.at("success").is_boolean()
+                                    ? message.at("success").get<bool>() : false;
+                std::string detail;
+                if (message.contains("body") && message.at("body").is_object()) {
+                    const Json& body = message.at("body");
+                    if (body.contains("shellProcessId")) detail = " shellProcessId=" + std::to_string(number(body, "shellProcessId", 0));
+                    else if (body.contains("processId")) detail = " processId=" + std::to_string(number(body, "processId", 0));
+                    else detail = " body=" + body.dump();
+                }
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: " + answered + " answered success=" + (ok ? "true" : "false") + detail}});
+                continue;
+            }
             if (type != "request") continue;  // client events (`initialized`) are not answered
             const auto command = text(message, "command");
             const auto seq = number(message, "seq", 0);
@@ -223,6 +272,41 @@ int main() {
                 event("output", Json{{"category", "console"},
                                       {"output", "fake-adapter: launching " + text(arguments, "program") + " (" + text(arguments, "type") + ")"}});
                 event("output", Json{{"category", "stderr"}, {"output", "fake-adapter: warning, this adapter is scripted\n"}});
+                if (extras) {
+                    // The event shapes the client has to reshape for the UI: a real
+                    // exit code, a loaded module, a loaded source and one progress
+                    // sequence (start -> update -> end).
+                    const auto base = workspace_uri();
+                    event("module", Json{{"reason", "new"},
+                                         {"module", Json{{"id", 7}, {"name", "fake.dll"}, {"path", base + "/fake.dll"}}}});
+                    event("loadedSource", Json{{"reason", "new"},
+                                               {"source", Json{{"name", "main.cpp"}, {"path", base + "/dap/main.cpp"}}}});
+                    event("progressStart", Json{{"progressId", "load"}, {"title", "Loading"}, {"message", "reading symbols"}, {"percentage", 0}});
+                    event("progressUpdate", Json{{"progressId", "load"}, {"message", "halfway"}, {"percentage", 50}});
+                    event("progressEnd", Json{{"progressId", "load"}, {"message", "done"}});
+                    event("exited", Json{{"exitCode", 3}});
+                }
+                if (arguments.contains("__reverseTerminal")) {
+                    // A reverse request: the host must really run something and hand
+                    // back a process id. What it answers is echoed as an `output`
+                    // event, so the client test can assert on the real pid.
+                    send(Json{{"seq", outgoing_seq++},
+                              {"type", "request"},
+                              {"command", "runInTerminal"},
+                              {"arguments", Json{{"kind", "integrated"},
+                                                 {"cwd", "."},
+                                                 {"args", Json::array({"cmd", "/c", "exit 0"})}}}});
+                }
+                if (arguments.contains("__reverseNested")) {
+                    // A reverse request for a second session. The nested
+                    // configuration carries no marker, so the child adapter will not
+                    // ask for another one.
+                    send(Json{{"seq", outgoing_seq++},
+                              {"type", "request"},
+                              {"command", "startDebugging"},
+                              {"arguments", Json{{"request", "launch"},
+                                                 {"configuration", Json{{"program", "dap/nested.cpp"}}}}}});
+                }
                 event("stopped", Json{{"reason", "entry"}, {"threadId", 1}, {"allThreadsStopped", true}, {"description", "stopped at entry"}});
             } else if (command == "setBreakpoints") {
                 const Json& source = arguments.contains("source") && arguments.at("source").is_object() ? arguments.at("source") : Json::object();
@@ -242,8 +326,13 @@ int main() {
                     }
                 respond(seq, command, Json{{"breakpoints", points}});
                 for (const auto line : breakpoint_lines)
+                    // DAP's optional Breakpoint id: an adapter uses it to name the
+                    // one breakpoint an event is about.
                     event("breakpoint", Json{{"reason", "changed"},
-                                             {"breakpoint", Json{{"verified", true}, {"line", line}, {"path", breakpoint_source}}}});
+                                             {"breakpoint", Json{{"id", line * 10 + 1},
+                                                                 {"verified", true},
+                                                                 {"line", line},
+                                                                 {"path", breakpoint_source}}}});
             } else if (command == "configurationDone") {
                 respond(seq, command, Json::object());
             } else if (command == "stackTrace") {

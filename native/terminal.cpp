@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -68,39 +69,185 @@ void check_size(int cols, int rows) {
 
 constexpr std::size_t max_terminals = 64;
 constexpr DWORD reader_handover_ms = 3000;
+// How long the reader waits for the shell after the pseudo console reached
+// end-of-file; a shell that lingers is terminated with the rest of its job.
+constexpr DWORD exit_wait_ms = 3000;
+constexpr DWORD writer_join_ms = 2000;
+// Grace period for the read that is in flight when the shell dies, so its last
+// bytes still make it to the front end.
+constexpr DWORD last_output_ms = 100;
+std::atomic<unsigned long long> pipe_serial{0};
+
+// The output pipe needs an overlapped read end: ConPTY keeps its side open until
+// the pseudo console itself is closed, so end-of-file never tells us the shell
+// exited. With an overlapped pipe the reader thread can wait on the pipe *and* on
+// the shell process at the same time. CreatePipe cannot make one, hence a named
+// pipe (the server end is ours to read, the client end goes to the pseudo console).
+void create_output_pipe(HANDLE* read_end, HANDLE* write_end, const SECURITY_ATTRIBUTES& security) {
+    *read_end = nullptr;
+    *write_end = nullptr;
+    const auto serial = ++pipe_serial;
+    std::wstring name = L"\\\\.\\pipe\\taocode-conpty-";
+    name += std::to_wstring(GetCurrentProcessId());
+    name += L"-";
+    name += std::to_wstring(serial);
+    const HANDLE server = CreateNamedPipeW(name.c_str(),
+                                           PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                                           PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                           1, 65536, 65536, 0, const_cast<SECURITY_ATTRIBUTES*>(&security));
+    if (server == INVALID_HANDLE_VALUE) throw WorkspaceError("TERMINAL_SPAWN", "无法创建终端输出管道。");
+    const HANDLE client = CreateFileW(name.c_str(), GENERIC_WRITE, 0,
+                                      const_cast<SECURITY_ATTRIBUTES*>(&security), OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (client == INVALID_HANDLE_VALUE) {
+        CloseHandle(server);
+        throw WorkspaceError("TERMINAL_SPAWN", "无法创建终端输出管道。");
+    }
+    *read_end = server;
+    *write_end = client;
+}
 }  // namespace
 
 struct Manager::Session {
     int id = 0;
-    HANDLE input_write = nullptr;   // parent -> pseudo console
+    Manager* owner = nullptr;
     HANDLE output_read = nullptr;   // pseudo console -> parent
     HANDLE process = nullptr;
     HANDLE job = nullptr;           // kill-on-close, so no orphan shell survives
     PseudoConsole console = nullptr;
+    std::shared_ptr<Input> input;   // queued keystrokes + the input pipe they go to
     std::thread reader;
+    std::thread writer;
     std::mutex callback_mutex;      // held while a callback runs; closed flips first
     bool closed = false;
+    std::atomic<bool> exited{false};
     OutputCb on_output;
 
     ~Session() {
-        if (input_write) CloseHandle(input_write);
+        close_input();
+        finish_writer();
         if (output_read) CloseHandle(output_read);
         if (process) CloseHandle(process);
         if (job) CloseHandle(job);
         if (console && conpty().available) conpty().close(console);
     }
 
-    bool alive() const { return process && WaitForSingleObject(process, 0) == WAIT_TIMEOUT; }
+    bool alive() const { return process && !exited.load() && WaitForSingleObject(process, 0) == WAIT_TIMEOUT; }
 
+    // Stop accepting keystrokes and release a writer that is parked inside WriteFile
+    // because the shell is not draining its input.
+    void close_input() noexcept {
+        if (!input) return;
+        void* pipe = nullptr;
+        {
+            const std::lock_guard lock(input->mutex);
+            if (!input->open) return;
+            input->open = false;
+            pipe = input->pipe;
+        }
+        input->ready.notify_all();
+        if (pipe) CancelIoEx(pipe, nullptr);
+        if (writer.joinable()) CancelSynchronousIo(writer.native_handle());
+    }
+
+    void finish_writer() noexcept {
+        close_input();
+        if (!writer.joinable()) return;
+        if (WaitForSingleObject(writer.native_handle(), writer_join_ms) == WAIT_OBJECT_0) writer.join();
+        else writer.detach();  // the shared Input keeps the detached writer safe
+    }
+
+    void emit(const char* bytes, DWORD size) {
+        const std::lock_guard lock(callback_mutex);
+        if (closed || !on_output) return;
+        on_output(id, {bytes, size});  // verbatim console bytes, ANSI intact
+    }
+
+    // One read at a time, parked on both the pipe and the shell process: whichever
+    // fires first decides the next step, so an exited shell is noticed immediately
+    // instead of when the pseudo console happens to be closed.
     void read_loop() {
         std::vector<char> buffer(16384);
+        const HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!completed) return;
+        OVERLAPPED overlapped{};
+        overlapped.hEvent = completed;
+        bool pending = false;
         for (;;) {
+            if (!pending) {
+                ResetEvent(completed);
+                const BOOL started = ReadFile(output_read, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                              nullptr, &overlapped);
+                if (!started && GetLastError() != ERROR_IO_PENDING) break;
+                pending = true;
+            }
+            const HANDLE handles[] = {completed, process};
+            const DWORD waited = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+            if (waited == WAIT_OBJECT_0 + 1) {
+                // The shell is gone. The read that is already in flight still owes
+                // us whatever the shell wrote last, so give it a moment.
+                if (WaitForSingleObject(completed, last_output_ms) == WAIT_OBJECT_0) {
+                    DWORD got = 0;
+                    if (GetOverlappedResult(output_read, &overlapped, &got, TRUE) && got) emit(buffer.data(), got);
+                    pending = false;
+                }
+                break;
+            }
+            if (waited != WAIT_OBJECT_0) break;  // read failed or wait failed
             DWORD got = 0;
-            if (!ReadFile(output_read, buffer.data(), static_cast<DWORD>(buffer.size()), &got, nullptr) || !got) return;
-            const std::lock_guard lock(callback_mutex);
-            if (closed || !on_output) continue;
-            on_output(id, {buffer.data(), got});  // verbatim console bytes, ANSI intact
+            if (!GetOverlappedResult(output_read, &overlapped, &got, TRUE)) break;
+            pending = false;
+            if (got == 0) break;  // the pseudo console closed the pipe: end of file
+            emit(buffer.data(), got);
         }
+        if (pending) {
+            CancelIo(output_read);
+            DWORD ignored = 0;
+            GetOverlappedResult(output_read, &overlapped, &ignored, TRUE);
+        }
+        CloseHandle(completed);
+    }
+
+    // The whole life of the reader thread: stream the shell's output, then report
+    // that it exited so the id stops being listed and its slot can be reused.
+    void pump() {
+        read_loop();
+        const int code = exit_code();
+        report_exit(code);
+    }
+
+    // The pseudo console reaching end-of-file is how a ConPTY session reports that
+    // its last attached client is gone; the shell itself can still be winding down
+    // (or, if it spawned something that outlived it, still be alive).
+    int exit_code() const {
+        if (!process) return 0;
+        if (WaitForSingleObject(process, exit_wait_ms) != WAIT_OBJECT_0) {
+            if (job) TerminateJobObject(job, 1);
+            if (WaitForSingleObject(process, exit_wait_ms) != WAIT_OBJECT_0) return -1;
+        }
+        DWORD code = 0;
+        if (!GetExitCodeProcess(process, &code) || code == STILL_ACTIVE) return -1;
+        return static_cast<int>(code);
+    }
+
+    // Hands this session over to the manager's zombie list (so ids() and running()
+    // stop reporting it) and publishes the exit; a deliberate kill stays silent.
+    void report_exit(int code) {
+        exited.store(true);
+        Manager* manager = owner;
+        if (!manager) return;
+        ExitCb callback;
+        {
+            const std::lock_guard lock(manager->mutex_);
+            const std::lock_guard guard(callback_mutex);
+            if (closed) return;  // killed on purpose: no exit event
+            const auto found = manager->sessions_.find(id);
+            if (found == manager->sessions_.end()) return;  // already taken
+            manager->zombies_.push_back(std::move(found->second));
+            manager->sessions_.erase(found);
+            callback = manager->on_exit_;
+        }
+        if (callback) callback(id, code);
     }
 
     // Returns true when the reader had to be detached, i.e. this session object and
@@ -110,7 +257,8 @@ struct Manager::Session {
         // Flipping closed under the mutex guarantees no callback starts after here.
         if (job) TerminateJobObject(job, 1);  // the shell plus every program it spawned
         else if (process) TerminateProcess(process, 1);
-        if (input_write) { CloseHandle(input_write); input_write = nullptr; }
+        close_input();
+        finish_writer();
         if (process) WaitForSingleObject(process, reader_handover_ms);
         // Releasing the pseudo console breaks the output pipe, which is what turns
         // a reader parked inside ReadFile into a finished thread.
@@ -134,6 +282,7 @@ int Manager::create(int cols, int rows, std::wstring working_directory, OutputCb
     if (!conpty().available)
         throw WorkspaceError("TERMINAL_UNAVAILABLE", "此系统不支持 Windows 伪控制台（需要 Windows 10 1809 以上）。");
     check_size(cols, rows);
+    reap_zombies();  // shells that exited earlier are destroyed before the limit check
 
     std::unique_ptr<Session> session = std::make_unique<Session>();
     std::unique_lock lock(mutex_);
@@ -142,13 +291,17 @@ int Manager::create(int cols, int rows, std::wstring working_directory, OutputCb
     session->on_output = std::move(on_output);
 
     SECURITY_ATTRIBUTES shared{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    HANDLE input_read = nullptr, output_write = nullptr;
-    if (!CreatePipe(&input_read, &session->input_write, &shared, 65536))
+    HANDLE input_read = nullptr, input_write = nullptr, output_write = nullptr;
+    if (!CreatePipe(&input_read, &input_write, &shared, 65536))
         throw WorkspaceError("TERMINAL_SPAWN", "无法创建终端输入管道。");
-    if (!CreatePipe(&session->output_read, &output_write, &shared, 65536)) {
-        CloseHandle(input_read);
-        throw WorkspaceError("TERMINAL_SPAWN", "无法创建终端输出管道。");
-    }
+    create_output_pipe(&session->output_read, &output_write, shared);
+    // The writer thread starts as soon as the pipe exists: it owns the write end
+    // from here on, so every later failure path closes it exactly once (in the
+    // writer, after close_input() lets it go).
+    session->input = std::make_shared<Input>();
+    session->input->pipe = input_write;
+    session->input->open = true;
+    session->writer = std::thread([input = session->input] { drain_input(input); });
     const COORD size{static_cast<SHORT>(cols), static_cast<SHORT>(rows)};
     const HRESULT made = conpty().create(size, input_read, output_write, 0, &session->console);
     // The pseudo console has taken both ends, so the parent's copies go away now:
@@ -209,10 +362,13 @@ int Manager::create(int cols, int rows, std::wstring working_directory, OutputCb
     }
     CloseHandle(info.hThread);
     session->process = info.hProcess;
-    session->reader = std::thread([pointer = session.get()] { pointer->read_loop(); });
-
+    // Published before the threads start, so a shell that exits immediately still
+    // finds itself in the map and gets reclaimed instead of being orphaned.
     const int id = session->id;
+    Session* pointer = session.get();
     sessions_.emplace(id, std::move(session));
+    pointer->owner = this;
+    pointer->reader = std::thread([pointer] { pointer->pump(); });
     return id;
 }
 
@@ -230,19 +386,64 @@ void Manager::reap(std::unique_ptr<Session> session) {
     if (session->close()) session.release();  // leaked on purpose, see Session::close
 }
 
+// A shell that exited on its own has already left sessions_ (so its slot is free);
+// its Session only survives until its reader thread unwinds, which is what this
+// waits for outside the lock.
+void Manager::reap_zombies() {
+    std::vector<std::unique_ptr<Session>> dead;
+    {
+        const std::lock_guard lock(mutex_);
+        dead.swap(zombies_);
+    }
+    for (auto& session : dead) reap(std::move(session));
+}
+
+void Manager::drain_input(const std::shared_ptr<Input>& input) {
+    bool broken = false;
+    while (!broken) {
+        std::string chunk;
+        {
+            std::unique_lock lock(input->mutex);
+            input->ready.wait(lock, [&input] { return !input->queue.empty() || !input->open; });
+            // Input closed: what is still queued is written first, so keystrokes
+            // typed just before the shell exited are never dropped.
+            if (input->queue.empty()) break;
+            chunk = std::move(input->queue.front());
+            input->queue.pop_front();
+        }
+        std::size_t offset = 0;
+        while (offset < chunk.size()) {
+            DWORD written = 0;
+            const auto step = static_cast<DWORD>(std::min<std::size_t>(chunk.size() - offset, 4096));
+            if (!WriteFile(input->pipe, chunk.data() + offset, step, &written, nullptr) || !written) {
+                const std::lock_guard lock(input->mutex);
+                input->queue.clear();  // the pipe is broken; nothing more can be sent
+                broken = true;
+                break;
+            }
+            offset += written;
+        }
+    }
+    const std::lock_guard lock(input->mutex);
+    if (input->pipe) { CloseHandle(input->pipe); input->pipe = nullptr; }
+}
+
 void Manager::write(int id, std::string_view bytes) {
     if (bytes.empty()) return;
-    const std::lock_guard lock(mutex_);
-    const auto found = sessions_.find(id);
-    if (found == sessions_.end()) throw WorkspaceError("TERMINAL_GONE", "终端已关闭。");
-    Session& session = *found->second;
-    if (!session.input_write) return;  // the shell already exited; typing is fire-and-forget
-    while (!bytes.empty()) {
-        DWORD written = 0;
-        const auto chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size(), 4096));
-        if (!WriteFile(session.input_write, bytes.data(), chunk, &written, nullptr) || !written) return;
-        bytes.remove_prefix(written);
+    std::shared_ptr<Input> input;
+    {
+        const std::lock_guard lock(mutex_);
+        const auto found = sessions_.find(id);
+        if (found == sessions_.end()) throw WorkspaceError("TERMINAL_GONE", "终端已关闭。");
+        input = found->second->input;
     }
+    if (!input) return;
+    {
+        const std::lock_guard lock(input->mutex);
+        if (!input->open) return;  // the shell already exited; typing is fire-and-forget
+        input->queue.emplace_back(bytes);
+    }
+    input->ready.notify_one();
 }
 
 void Manager::resize(int id, int cols, int rows) {
@@ -257,6 +458,7 @@ void Manager::resize(int id, int cols, int rows) {
 
 void Manager::kill(int id) {
     reap(take(id));
+    reap_zombies();
 }
 
 bool Manager::running(int id) const {
@@ -273,7 +475,13 @@ std::vector<int> Manager::ids() const {
     return ids;
 }
 
+void Manager::on_exit(ExitCb callback) {
+    const std::lock_guard lock(mutex_);
+    on_exit_ = std::move(callback);
+}
+
 void Manager::kill_all() {
+    reap_zombies();
     std::vector<std::unique_ptr<Session>> pending;
     {
         const std::lock_guard lock(mutex_);
@@ -281,6 +489,7 @@ void Manager::kill_all() {
         sessions_.clear();
     }
     for (auto& session : pending) reap(std::move(session));
+    reap_zombies();
 }
 
 Manager::Manager() = default;

@@ -123,6 +123,59 @@ int main() {
         session.shutdown_all();
     });
 
+    // A server that accepts a request and then never answers it must cost the UI a
+    // bounded wait: the request is failed with TIMEOUT and dropped from the pending
+    // map, so the session keeps working.
+    run("a request the server never answers times out instead of hanging", [&] {
+        std::mutex timed_mutex;
+        std::condition_variable timed_cv;
+        bool got_hover = false, got_definition = false;
+        Json hover_error, definition_payload;
+
+        Session session([](std::string, Json) {});
+        session.set_root(fs::path(L"C:\\ws"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        config.arguments = {L"--hang=textDocument/hover"};
+        std::map<std::string, Session::ServerConfig> servers;
+        servers["java"] = config;
+        session.configure(std::move(servers));
+        session.set_timeout(std::chrono::milliseconds(400));
+
+        const auto opened = session.open("src/Hang.java", "class Hang {}\n");
+        check(opened.at("running") == true, "the hung server should still start");
+
+        const auto wait_for = [&](bool& flag) {
+            std::unique_lock lock(timed_mutex);
+            return timed_cv.wait_for(lock, std::chrono::seconds(15), [&] { return flag; });
+        };
+        const auto sent_at = std::chrono::steady_clock::now();
+        session.request("hover", "src/Hang.java", 0, 6, [&](Json, Json error) {
+            std::lock_guard lock(timed_mutex);
+            hover_error = std::move(error);
+            got_hover = true;
+            timed_cv.notify_all();
+        });
+        check(wait_for(got_hover), "a request the server never answers must still be answered");
+        check(!hover_error.is_null(), "the timeout must surface as an error, not an empty success");
+        check(hover_error.value("message", std::string()) == "TIMEOUT",
+              "the error names the timeout, got: " + hover_error.dump());
+        check(std::chrono::steady_clock::now() - sent_at < std::chrono::seconds(10),
+              "and it arrives when the deadline expires");
+
+        // The session survives: another request on the same server still round-trips.
+        session.request("definition", "src/Hang.java", 1, 0, [&](Json result, Json) {
+            std::lock_guard lock(timed_mutex);
+            definition_payload = std::move(result);
+            got_definition = true;
+            timed_cv.notify_all();
+        });
+        check(wait_for(got_definition), "the session must still work after a timeout");
+        check(definition_payload.value("available", false) == true, "definition answered normally");
+
+        session.shutdown_all();
+    });
+
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;
 }

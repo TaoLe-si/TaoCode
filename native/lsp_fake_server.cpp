@@ -12,7 +12,16 @@
 // unresolved command-only action (which codeAction/resolve then completes with an
 // edit), TextEdit[],
 // single Locations and DocumentHighlight[], so lsp_coding_test covers the same ground
-// without a toolchain installed.
+// without a toolchain installed. textDocument/completion answers from the text the
+// client actually synchronised (the identifier prefix at the requested position), so
+// both the document-sync path and the completion shaping are observable end to end.
+//
+// Switches (both optional):
+//   --incremental         advertise TextDocumentSyncKind.Incremental and accept
+//                         range-based didChange, so the client's incremental diff is
+//                         exercised instead of the full-text fallback.
+//   --no-selection-range  advertise selectionRangeProvider:false, so the client's
+//                         "this server declined the capability" path is exercised.
 #include "lsp.hpp"
 
 #ifndef NOMINMAX
@@ -23,8 +32,10 @@
 #endif
 #include <windows.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 using taocode::Json;
@@ -58,12 +69,86 @@ Json range(int start_line, int start_char, int end_line, int end_char) {
 Json location(const std::string& uri, int start_line, int start_char, int end_line, int end_char) {
     return {{"uri", uri}, {"range", range(start_line, start_char, end_line, end_char)}};
 }
+
+// One UTF-8 code point's byte length from its lead byte.
+std::size_t step_of(unsigned char lead) {
+    if (lead >= 0xF0) return 4;
+    if (lead >= 0xE0) return 3;
+    if (lead >= 0xC0) return 2;
+    return 1;
+}
+
+// LSP (line, character) -> byte offset, with `character` in UTF-16 code units like
+// the protocol says. Clamped to the text, so a stale range cannot crash the server.
+std::size_t offset_of(const std::string& text, int line, int character) {
+    std::size_t position = 0;
+    for (int current = 0; current != line; ++current) {
+        const auto newline = text.find('\n', position);
+        if (newline == std::string::npos) return text.size();
+        position = newline + 1;
+    }
+    std::size_t index = position, units = 0;
+    const auto wanted = character > 0 ? static_cast<std::size_t>(character) : std::size_t(0);
+    while (index != text.size() && text[index] != '\n' && units < wanted) {
+        const auto step = step_of(static_cast<unsigned char>(text[index]));
+        units += step == 4 ? 2 : 1;
+        index += step;
+    }
+    return index;
+}
+
+// The identifier being typed: the trailing [A-Za-z0-9_] run of the line prefix.
+std::string prefix_of(const std::string& text, int line, int character) {
+    std::size_t position = 0;
+    for (int current = 0; current != line; ++current) {
+        const auto newline = text.find('\n', position);
+        if (newline == std::string::npos) return {};
+        position = newline + 1;
+    }
+    const auto end = offset_of(text, line, character);
+    auto start = end;
+    while (start != position) {
+        const auto previous = start - 1;
+        const unsigned char byte = static_cast<unsigned char>(text[previous]);
+        const bool identifier = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+                                (byte >= '0' && byte <= '9') || byte == '_';
+        if (!identifier) break;
+        start = previous;
+    }
+    return text.substr(start, end - start);
+}
+
+// Replaces [start,end) with `text`, the way a TextDocumentEdit is applied. Edits
+// arrive back-to-front, so earlier offsets stay valid.
+void splice(std::string& document, const Json& span, const std::string& replacement) {
+    const auto start_point = span.contains("start") && span.at("start").is_object() ? span.at("start") : Json::object();
+    const auto end_point = span.contains("end") && span.at("end").is_object() ? span.at("end") : Json::object();
+    const auto number = [](const Json& point, const char* key) {
+        return point.contains(key) && point.at(key).is_number_integer() ? point.at(key).get<int>() : 0;
+    };
+    const auto from = offset_of(document, number(start_point, "line"), number(start_point, "character"));
+    auto to = offset_of(document, number(end_point, "line"), number(end_point, "character"));
+    if (to < from) to = from;
+    if (from > document.size()) return;
+    if (to > document.size()) to = document.size();
+    document.replace(from, to - from, replacement);
+}
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const std::vector<std::string> switches(argv + 1, argv + argc);
+    const bool incremental = std::find(switches.begin(), switches.end(), std::string("--incremental")) != switches.end();
+    const bool no_selection_range =
+        std::find(switches.begin(), switches.end(), std::string("--no-selection-range")) != switches.end();
+    // --hang=<method>: that method is accepted and never answered, so the client's
+    // request deadline is the only thing that can end the wait.
+    std::string hang;
+    for (const auto& option : switches)
+        if (option.rfind("--hang=", 0) == 0) hang = option.substr(7);
     MessageReader reader;
     std::vector<char> buffer(16384);
     std::string opened_uri;
+    std::string document_text;
     bool saw_source_paths = false;
     for (;;) {
         DWORD available = 0;
@@ -77,16 +162,41 @@ int main() {
             const Json& inbound = *message;
             if (!inbound.contains("method") || !inbound.contains("id")) {
                 if (inbound.value("method", std::string()) == "exit") return 0;
-                if (inbound.value("method", std::string()) == "textDocument/didOpen") {
-                    opened_uri = inbound.at("params").at("textDocument").at("uri").get<std::string>();
+                const auto notification = inbound.value("method", std::string());
+                const Json params = inbound.contains("params") && inbound.at("params").is_object()
+                                        ? inbound.at("params") : Json::object();
+                if (notification == "textDocument/didOpen") {
+                    opened_uri = params.at("textDocument").at("uri").get<std::string>();
+                    document_text = params.at("textDocument").value("text", std::string());
                     write_message(Json{{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"}, {"params",
                         {{"uri", opened_uri}, {"diagnostics", Json::array({
                             {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 5}}}}},
                              {"severity", 1}, {"message", "fake diagnostic"}}})}}}});
+                } else if (notification == "textDocument/didChange") {
+                    // Both wire forms: a full-text change replaces the buffer, a
+                    // range change is spliced into it. Keeping the text is what lets
+                    // completion below answer from what the client really sent.
+                    opened_uri = params.at("textDocument").value("uri", opened_uri);
+                    const auto& changes = params.contains("contentChanges") && params.at("contentChanges").is_array()
+                                              ? params.at("contentChanges") : Json::array();
+                    for (const auto& change : changes) {
+                        if (!change.is_object()) continue;
+                        if (change.contains("range") && change.at("range").is_object())
+                            splice(document_text, change.at("range"), change.value("text", std::string()));
+                        else if (!incremental)
+                            document_text = change.value("text", std::string());
+                        // In incremental mode a bare {text} change is not a valid
+                        // Incremental sync, so it is dropped: a client that promised
+                        // ranges but sent the whole document shows up as stale text
+                        // in the completion answer instead of passing silently.
+                    }
+                } else if (notification == "textDocument/didClose") {
+                    document_text.clear();
                 }
                 continue;
             }
             const auto method = inbound.at("method").get<std::string>();
+            if (!hang.empty() && method == hang) continue;  // deliberately never answered
             const auto id = inbound.at("id");
             const Json params = inbound.contains("params") && inbound.at("params").is_object()
                                     ? inbound.at("params") : Json::object();
@@ -102,13 +212,60 @@ int main() {
                 const auto java = settings.is_object() ? settings.value("java", Json::object()) : Json::object();
                 const auto project = java.is_object() ? java.value("project", Json::object()) : Json::object();
                 saw_source_paths = project.is_object() && project.contains("sourcePaths");
-                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"capabilities",
-                    {{"hoverProvider", true}, {"definitionProvider", true}, {"textDocumentSync", 1}}}}}});
+                // A real server advertises what it implements: the client is entitled
+                // to refuse a request whose capability is missing, and the session
+                // layer's graceful-degradation path is driven by these values.
+                Json capabilities{{"hoverProvider", true}, {"definitionProvider", true},
+                                  {"textDocumentSync", incremental ? 2 : 1},
+                                  {"completionProvider", {{"triggerCharacters", Json::array({"."})},
+                                                          {"resolveProvider", false}}},
+                                  {"referencesProvider", true},
+                                  {"renameProvider", {{"prepareProvider", false}}},
+                                  {"documentSymbolProvider", true},
+                                  {"workspaceSymbolProvider", true},
+                                  {"signatureHelpProvider", {{"triggerCharacters", Json::array({"(", ","})}}},
+                                  {"codeActionProvider", {{"resolveProvider", true}}},
+                                  {"documentFormattingProvider", true},
+                                  {"documentRangeFormattingProvider", true},
+                                  {"implementationProvider", true},
+                                  {"typeDefinitionProvider", true},
+                                  {"documentHighlightProvider", true},
+                                  {"callHierarchyProvider", true},
+                                  {"typeHierarchyProvider", true},
+                                  {"inlayHintProvider", true}};
+                capabilities["selectionRangeProvider"] = !no_selection_range;
+                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"capabilities", std::move(capabilities)}}}});
             } else if (method == "shutdown") {
                 write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json(nullptr)}});
             } else if (method == "textDocument/hover") {
                 const auto contents = saw_source_paths ? std::string("hover with Java settings") : std::string("hover from fake");
                 write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"contents", {{"kind", "markdown"}, {"value", contents}}}}}});
+            } else if (method == "textDocument/completion") {
+                // Items derived from the synchronised document: the identifier being
+                // typed at the requested position filters a canned dictionary, and
+                // `detail` echoes that prefix plus the position, so a test can prove
+                // both the sync path and the request position arrived intact.
+                const Json point = params.contains("position") && params.at("position").is_object()
+                                       ? params.at("position") : Json::object();
+                const auto line = point.value("line", 0);
+                const auto character = point.value("character", 0);
+                const auto prefix = prefix_of(document_text, line, character);
+                const std::string marker = "prefix:" + prefix + "@" + std::to_string(line) + ":" +
+                                           std::to_string(character);
+                static const std::vector<std::pair<std::string, int>> dictionary{
+                    {"counter", 5}, {"count", 6},  {"Sample", 7}, {"String", 7},
+                    {"System", 7},  {"sort", 2},   {"println", 2}};
+                Json items = Json::array();
+                for (const auto& [label, kind] : dictionary) {
+                    if (!prefix.empty() && label.rfind(prefix, 0) != 0) continue;
+                    items.push_back(Json{{"label", label},
+                                         {"kind", kind},
+                                         {"detail", marker},
+                                         {"insertText", label},
+                                         {"documentation", {{"kind", "markdown"}, {"value", marker}}}});
+                }
+                write_message({{"jsonrpc", "2.0"}, {"id", id},
+                               {"result", {{"isIncomplete", false}, {"items", std::move(items)}}}});
             } else if (method == "textDocument/definition") {
                 write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json::array({
                     {{"uri", opened_uri.empty() ? std::string("file:///fake") : opened_uri},

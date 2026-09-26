@@ -11,16 +11,57 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace taocode {
 namespace lsp {
+namespace {
+
+// Quotes a command-line token the way CreateProcessW's own parser expects: an
+// empty or space/tab-bearing argument has to arrive as one token.
+std::wstring quote_argument(const std::wstring& value) {
+    if (!value.empty() && value.find_first_of(L" \t\"") == std::wstring::npos) return value;
+    std::wstring quoted = L"\"";
+    for (std::size_t i = 0; i != value.size(); ++i) {
+        std::size_t backslashes = 0;
+        while (i != value.size() && value[i] == L'\\') { ++backslashes; ++i; }
+        if (i == value.size()) { quoted.append(backslashes * 2, L'\\'); break; }
+        if (value[i] == L'"') quoted.append(backslashes * 2 + 1, L'\\');
+        else quoted.append(backslashes, L'\\');
+        quoted.push_back(value[i]);
+    }
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+// A kill-on-close job guarantees the server (and anything it spawned) is reaped
+// when the IDE goes away: an orphaned clangd/jdtls holding a pipe open is the
+// classic leak of this kind of integration. Same approach as native/runner.cpp.
+HANDLE create_kill_job(HANDLE process) {
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) return nullptr;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    // Both calls are checked: a job that cannot be configured (or that refuses the
+    // process) must not be reported as usable, or stop() would "kill" a job holding
+    // nothing and leave the language server running.
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
+        !AssignProcessToJobObject(job, process)) {
+        CloseHandle(job);
+        return nullptr;  // stop() falls back to TerminateProcess on the handle
+    }
+    return job;
+}
+
+}  // namespace
 
 struct Host::Pipe {
     HANDLE stdin_write = nullptr;    // we write requests to the server
     HANDLE stdout_read = nullptr;    // we read responses from the server
     HANDLE process = nullptr;
     HANDLE thread = nullptr;
+    HANDLE job = nullptr;            // KILL_ON_JOB_CLOSE, so nothing is orphaned
 };
 
 Host::Host() : client_([this](std::string_view frame) { write_frame(frame); }) {}
@@ -50,9 +91,12 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
     if (!CreatePipe(&stdin_read, &pipe_->stdin_write, &inheritable, 0)) throw WorkspaceError("LSP_SPAWN", "无法创建标准输入管道");
     if (!CreatePipe(&pipe_->stdout_read, &stdout_write, &inheritable, 0)) { CloseHandle(stdin_read); CloseHandle(pipe_->stdin_write); pipe_.reset(); throw WorkspaceError("LSP_SPAWN", "无法创建标准输出管道"); }
 
-    // A command line is required by CreateProcessW; build it from the executable plus arguments.
-    std::wstring command = L"\"" + spec.executable.native() + L"\"";
-    for (const auto& argument : spec.arguments) command += L" " + argument;
+    // One command line, and NO lpApplicationName: that is what makes CreateProcessW
+    // run its normal search (PATH included), so a bare "clangd" / "pyright" /
+    // "jdtls" the user merely has on PATH starts. An absolute path works the same
+    // way because the first token is quoted.
+    std::wstring command = quote_argument(spec.executable.native());
+    for (const auto& argument : spec.arguments) command += L" " + quote_argument(argument);
     std::vector<wchar_t> mutable_command(command.begin(), command.end());
     mutable_command.push_back(L'\0');
 
@@ -64,8 +108,10 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION info{};
     const auto working = spec.working_directory.empty() ? nullptr : spec.working_directory.c_str();
-    const BOOL created = CreateProcessW(spec.executable.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,
-                                        CREATE_NO_WINDOW, nullptr, working, &startup, &info);
+    // CREATE_SUSPENDED so the child cannot spawn anything before it is inside the
+    // kill-on-close job below.
+    const BOOL created = CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, working, &startup, &info);
     CloseHandle(stdin_read);
     CloseHandle(stdout_write);
     if (!created) {
@@ -77,11 +123,14 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
     }
     pipe_->process = info.hProcess;
     pipe_->thread = info.hThread;
+    pipe_->job = create_kill_job(info.hProcess);
+    ResumeThread(info.hThread);
 
     alive_ = true;
-reader_ = std::thread([this]() {
+    reader_ = std::thread([this]() {
         std::vector<char> buffer(16384);
         MessageReader stream;
+        std::vector<Json> batch;
         for (;;) {
             DWORD available = 0;
             if (!PeekNamedPipe(pipe_->stdout_read, nullptr, 0, nullptr, &available, nullptr)) break;
@@ -94,12 +143,19 @@ reader_ = std::thread([this]() {
             DWORD got = 0;
             if (!ReadFile(pipe_->stdout_read, buffer.data(), static_cast<DWORD>(want), &got, nullptr) || !got) break;
             try {
-                std::lock_guard io(io_mutex_);
                 stream.feed({buffer.data(), got});
-                while (const auto message = stream.next()) client_.receive(*message);
+                // Frames are cut out under the lock; dispatching happens WITHOUT it.
+                // Callbacks then run on this thread with no lock of ours held, which
+                // is what lets a callback re-enter the Session (Session::mutex_ ->
+                // io_mutex_) without deadlocking against a caller doing the reverse.
+                {
+                    std::lock_guard io(io_mutex_);
+                    while (const auto message = stream.next()) batch.push_back(*message);
+                }
+                for (const auto& message : batch) client_.receive(message);
+                batch.clear();
             } catch (const WorkspaceError&) {
-                // A malformed frame aborts the reader. Lock order matters: io_mutex_
-                // is released by this scope before fail_pending acquires client.mutex_.
+                // A malformed frame aborts the reader rather than desynchronising.
                 break;
             }
         }
@@ -130,12 +186,17 @@ void Host::stop() noexcept {
         if (pipe_->stdin_write) CloseHandle(pipe_->stdin_write);
         if (pipe_->stdout_read) CloseHandle(pipe_->stdout_read);
         if (was_alive && pipe_->process) {
-            // Give the server a moment to exit on its own after the pipes closed, then reclaim it.
+            // Give the server a moment to exit on its own after the pipes closed,
+            // then reclaim it — the job takes the whole tree with it.
             WaitForSingleObject(pipe_->process, 2000);
-            if (WaitForSingleObject(pipe_->process, 0) == WAIT_TIMEOUT) TerminateProcess(pipe_->process, 0);
+            if (WaitForSingleObject(pipe_->process, 0) == WAIT_TIMEOUT) {
+                if (pipe_->job) TerminateJobObject(pipe_->job, 0);
+                else TerminateProcess(pipe_->process, 0);
+            }
         }
         if (pipe_->process) CloseHandle(pipe_->process);
         if (pipe_->thread) CloseHandle(pipe_->thread);
+        if (pipe_->job) CloseHandle(pipe_->job);
         pipe_.reset();
     }
 }
@@ -148,6 +209,21 @@ void Host::set_configuration(Json settings) {
 void Host::set_diagnostics(Client::Notify handler) {
     std::lock_guard lock(io_mutex_);
     client_.on_diagnostics(std::move(handler));
+}
+
+void Host::set_document_editor(Client::DocumentEditor editor) {
+    std::lock_guard lock(io_mutex_);
+    client_.set_document_editor(std::move(editor));
+}
+
+void Host::set_sync_kind(SyncKind kind) {
+    std::lock_guard lock(io_mutex_);
+    client_.set_sync_kind(kind);
+}
+
+void Host::set_timeout(std::chrono::milliseconds timeout) {
+    std::lock_guard lock(io_mutex_);
+    client_.set_timeout(timeout);
 }
 
 void Host::did_open(std::string uri, std::string language_id, int version, std::string text) {
@@ -165,10 +241,35 @@ void Host::did_close(std::string uri) {
     if (alive_) client_.did_close(uri);
 }
 
-void Host::request(std::string_view method, Json params, Client::Handler on_result) {
+bool Host::is_superseding(std::string_view method) {
+    // The caret moved: only the newest answer matters, and IDEA cancels the older one.
+    return method == "textDocument/hover" || method == "textDocument/completion" ||
+           method == "textDocument/signatureHelp" || method == "textDocument/documentHighlight";
+}
+
+std::int64_t Host::request(std::string_view method, Json params, Client::Handler on_result) {
+    const std::string key(method);
+    const bool supersede = is_superseding(method);
+    std::int64_t stale = 0;
+    if (supersede) {
+        std::lock_guard lookup_lock(inflight_mutex_);
+        const auto found = in_flight_.find(key);
+        if (found != in_flight_.end()) stale = found->second;
+    }
+    // Deliberately outside io_mutex_: cancelling answers the previous caller, whose
+    // handler may re-enter this host.
+    if (stale) client_.cancel(stale);
     std::lock_guard lock(io_mutex_);
-    if (!alive_) { on_result(Json(nullptr), Json{{"code", -32001}, {"message", "Language server is not running"}}); return; }
-    client_.request(method, std::move(params), std::move(on_result));
+    if (!alive_) {
+        on_result(Json(nullptr), Json{{"code", -32001}, {"message", "Language server is not running"}});
+        return 0;
+    }
+    const auto id = client_.request(method, std::move(params), std::move(on_result));
+    if (supersede) {
+        std::lock_guard record_lock(inflight_mutex_);
+        in_flight_[key] = id;
+    }
+    return id;
 }
 
 }  // namespace lsp

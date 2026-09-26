@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { EditorState } from '@codemirror/state'
 import { editingCommands, joinLinesCommand, toggleCaseCommand } from '../src/editorCommands.ts'
 
@@ -36,12 +37,31 @@ test('toggle case refuses text that has no case at all', () => {
   assert.equal(run(toggleCaseCommand, '12345', 2, 2).ran, false)
 })
 
-test('every name the menus offer maps to a command', () => {
-  assert.deepEqual(Object.keys(editingCommands).sort(), [
-    'case.toggle', 'comment.block', 'comment.line', 'cursor.above', 'cursor.below', 'find', 'find.next',
-    'find.previous', 'fold', 'foldAll', 'line.delete', 'line.duplicate', 'line.join', 'line.moveDown',
-    'line.moveUp', 'occurrence.next', 'occurrence.select', 'redo', 'replace.all', 'replace.next',
-    'selectAll', 'undo', 'unfold', 'unfoldAll',
-  ].sort())
-  for (const command of Object.values(editingCommands)) assert.equal(typeof command, 'function')
+// Names the menus use that are served by the editor's other bindings rather than by the
+// editing-command table (the CodeEditor owns completion, evaluation and live templates).
+const OWNED_BY_EDITOR = new Set(['completion', 'evaluate', 'template.expand'])
+
+test('every editing command is a callable', () => {
+  for (const [name, command] of Object.entries(editingCommands)) {
+    assert.equal(typeof command, 'function', `${name} is not a command`)
+  }
+})
+
+// The old version of this test compared the table against a hard-coded copy of the same
+// table, so a typo in a *menu* entry (line.jion) stayed green while the menu row silently
+// did nothing. It now reads the menu sources.
+test('every name the menus offer is either an editing command or owned by the editor', () => {
+  const sources = ['src/App.vue', 'src/components/CodeEditor.vue'].map(file => readFileSync(file, 'utf8'))
+  const offered = new Set()
+  for (const source of sources)
+    for (const [, name] of source.matchAll(/editable\('([a-zA-Z.]+)'/g)) offered.add(name)
+
+  assert.ok(offered.size >= 20, `expected the menus to offer many commands, saw ${offered.size}`)
+  for (const name of offered) {
+    const known = name in editingCommands || OWNED_BY_EDITOR.has(name)
+    assert.ok(known, `菜单提供了「${name}」，但命令表里没有它，也没有编辑器接管`)
+  }
+  // And the reverse: a command nobody can reach is dead weight.
+  const unused = Object.keys(editingCommands).filter(name => !offered.has(name))
+  assert.deepEqual(unused, [], `命令表里有菜单到不了的项：${unused.join(', ')}`)
 })

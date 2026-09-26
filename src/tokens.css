@@ -49,6 +49,8 @@
   --debug-line: #b67c1626;
   --gutter: #fafbfc;
   --search-match: #f5e3ae;
+  --search-field-error: #ffcccc;
+  --spotlight: #e08855;
   --line: #e1e4e9;
   --line-strong: #c9ced8;
   --text: #303644;
@@ -105,6 +107,8 @@
   --debug-line: #e6c68f26;
   --gutter: #1f2229;
   --search-match: #4d4228;
+  --search-field-error: #743a3a;
+  --spotlight: #a36b4e;
   --line: #343943;
   --line-strong: #4c5463;
   --text: #d3d7df;

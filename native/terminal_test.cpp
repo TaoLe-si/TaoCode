@@ -12,6 +12,7 @@
 #endif
 #include <windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
@@ -120,6 +121,24 @@ int main() {
     };
     int survivor = 0;
 
+    // What the host turns into the term.exit event: the id plus the shell's real
+    // exit code, delivered on the terminal's reader thread.
+    std::mutex exit_mutex;
+    std::condition_variable exit_ready;
+    std::map<int, int> exits;
+    manager.on_exit([&](int id, int code) {
+        { const std::lock_guard lock(exit_mutex); exits[id] = code; }
+        exit_ready.notify_all();
+    });
+    const auto reported = [&](int id, int seconds) {
+        std::unique_lock lock(exit_mutex);
+        return exit_ready.wait_for(lock, std::chrono::seconds(seconds), [&] { return exits.count(id) != 0; });
+    };
+    const auto exit_code_of = [&](int id) {
+        const std::lock_guard lock(exit_mutex);
+        return exits.count(id) ? exits[id] : -999;
+    };
+
     run("create returns a positive id for a live pseudo console", [&] {
         const int id = manager.create(80, 24, on_output);
         check(id > 0, "expected a positive terminal id, got " + std::to_string(id));
@@ -164,6 +183,21 @@ int main() {
         manager.write(id, "exit\r");
         check(stopped(id), "the shell was still running 5s after typing exit");
         manager.kill(id);
+    });
+
+    run("a shell that exits by itself reports the exit code and frees its slot", [&] {
+        const int id = manager.create(80, 24, on_output);
+        attach(id);
+        check(manager.running(id), "the new terminal should be running");
+        manager.write(id, "exit 7\r");
+        check(reported(id, 10), "no term.exit within 10s of the shell exiting");
+        check(exit_code_of(id) == 7, "the exit code must be the shell's own, got " + std::to_string(exit_code_of(id)));
+        check(!manager.running(id), "an exited terminal must not be running");
+        const auto open = manager.ids();
+        check(std::find(open.begin(), open.end(), id) == open.end(),
+              "an exited terminal must not keep occupying one of the 64 slots");
+        manager.kill(id);  // still idempotent on an already-reaped terminal
+        check(!manager.running(id), "kill() after a natural exit is a no-op");
     });
 
     run("kill_all leaves nothing running", [&] {

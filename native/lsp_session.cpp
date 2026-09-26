@@ -1,8 +1,11 @@
 #include "lsp_session.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <vector>
 
 namespace taocode {
 namespace lsp {
@@ -159,6 +162,74 @@ void collect_symbols(const Json& nodes, Json& out) {
 
 Json invalid(const std::string& code, const std::string& message) {
     return Json{{"code", code}, {"message", message}};
+}
+
+// The ServerCapabilities key a request kind needs. Every kind this session can
+// issue has one, which is what makes the "server did not advertise it" check
+// below complete instead of best-effort.
+const char* provider_for(const std::string& kind) {
+    if (kind == "hover") return "hoverProvider";
+    if (kind == "completion") return "completionProvider";
+    if (kind == "definition") return "definitionProvider";
+    if (kind == "rename") return "renameProvider";
+    if (kind == "references") return "referencesProvider";
+    if (kind == "documentSymbol") return "documentSymbolProvider";
+    if (kind == "workspaceSymbol") return "workspaceSymbolProvider";
+    if (kind == "signatureHelp") return "signatureHelpProvider";
+    if (kind == "codeAction" || kind == "codeActionResolve") return "codeActionProvider";
+    if (kind == "formatting") return "documentFormattingProvider";
+    if (kind == "rangeFormatting") return "documentRangeFormattingProvider";
+    if (kind == "implementation") return "implementationProvider";
+    if (kind == "typeDefinition") return "typeDefinitionProvider";
+    if (kind == "documentHighlight") return "documentHighlightProvider";
+    if (kind == "prepareCallHierarchy" || kind == "callHierarchyIncoming" || kind == "callHierarchyOutgoing")
+        return "callHierarchyProvider";
+    if (kind == "prepareTypeHierarchy" || kind == "typeHierarchySupertypes" || kind == "typeHierarchySubtypes")
+        return "typeHierarchyProvider";
+    if (kind == "selectionRange") return "selectionRangeProvider";
+    if (kind == "inlayHint") return "inlayHintProvider";
+    return nullptr;
+}
+
+// A workspace-relative path is only writable when it stays inside the root: no
+// absolute form, no drive letter, no `..`.
+bool escapes_root(const std::string& relative) {
+    if (relative.empty()) return true;
+    if (relative.front() == '/' || relative.front() == '\\') return true;
+    if (relative.size() >= 2 && std::isalpha(static_cast<unsigned char>(relative[0])) != 0 && relative[1] == ':')
+        return true;
+    for (std::size_t start = 0; start < relative.size();) {
+        const auto slash = relative.find_first_of("/\\", start);
+        const auto segment = relative.substr(start, slash == std::string::npos ? slash : slash - start);
+        if (segment == "..") return true;
+        if (slash == std::string::npos) break;
+        start = slash + 1;
+    }
+    return false;
+}
+
+// LSP (line, character) -> byte offset in UTF-8 text, with `character` counted in
+// UTF-16 code units like the protocol says. Clamped, so a range a server computed
+// against an older buffer can never run past the end of this one.
+std::size_t offset_of(const std::string& text, int line, int character) {
+    std::size_t position = 0;
+    for (int current = 0; current != line; ++current) {
+        const auto newline = text.find('\n', position);
+        if (newline == std::string::npos) return text.size();
+        position = newline + 1;
+    }
+    std::size_t index = position, units = 0;
+    const auto wanted = character > 0 ? static_cast<std::size_t>(character) : std::size_t(0);
+    while (index != text.size() && text[index] != '\n' && units < wanted) {
+        const auto byte = static_cast<unsigned char>(text[index]);
+        std::size_t step = 1;
+        if (byte >= 0xF0) { step = 4; units += 2; }
+        else if (byte >= 0xE0) { step = 3; units += 1; }
+        else if (byte >= 0xC0) { step = 2; units += 1; }
+        else units += 1;
+        index += step;
+    }
+    return index;
 }
 
 // ---- shared result shaping for the coding-assistance kinds -------------------
@@ -517,6 +588,7 @@ Host& Session::ensure(const std::string& language) {
     auto initialization = config->second.initialization_options;
     initialization["settings"] = config->second.settings;
     host->set_configuration(config->second.settings);
+    host->set_timeout(timeout_);
     const auto root_name = root_.filename().generic_u8string();
     Json params{
         {"initializationOptions", std::move(initialization)},
@@ -527,8 +599,21 @@ Host& Session::ensure(const std::string& language) {
             {"textDocument", {
                 {"hover", {{"contentFormat", Json::array({"markdown", "plaintext"})}}},
                 {"definition", Json::object()},
-                {"completion", {{"completionItem", {{"snippetSupport", false}}}}},
-                {"publishDiagnostics", Json::object()},
+                // Completion: the item kinds the UI renders and the resolve-driven
+                // detail/documentation the item list can ask for. `resolveSupport` is
+                // deliberately absent — completionItem/resolve is not implemented, so
+                // a server must send everything with the item.
+                {"completion", {{"completionItem", {{"snippetSupport", false},
+                                                    {"commitCharactersSupport", false},
+                                                    {"documentationFormat", Json::array({"markdown", "plaintext"})},
+                                                    {"deprecatedSupport", false},
+                                                    {"insertReplaceSupport", false}}},
+                                {"completionItemKind", {{"valueSet", Json::array({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                                                                                 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                                                                 21, 22, 23, 24, 25})}}},
+                                {"contextSupport", true}}},
+                {"publishDiagnostics", {{"relatedInformation", false}, {"versionSupport", false},
+                                        {"dataSupport", true}}},
                 // Refactor + symbol capabilities: declaring hierarchical symbol
                 // support is what makes real servers answer DocumentSymbol[]
                 // instead of the legacy flat SymbolInformation[].
@@ -554,17 +639,53 @@ Host& Session::ensure(const std::string& language) {
                 {"documentHighlight", Json::object()},
                 {"callHierarchy", Json::object()},
                 {"typeHierarchy", Json::object()},
+                // Inlay hints and selection ranges are requested below, so they are
+                // declared here: a server is entitled to refuse a request whose
+                // capability the client never announced. `resolveSupport` is omitted
+                // on purpose — inlayHint/resolve is not implemented.
+                {"inlayHint", {{"dynamicRegistration", true}}},
+                {"selectionRange", {{"dynamicRegistration", true}}},
+                // The didChange the client sends is derived from what the server
+                // announces (full or incremental), so declaring both is honest.
+                {"synchronization", {{"dynamicRegistration", true}, {"willSave", false},
+                                     {"willSaveWaitUntil", false}, {"didSave", false}}},
             }},
-            {"workspace", {{"configuration", true}, {"symbol", Json::object()}}},
+            {"workspace", {{"configuration", true}, {"symbol", Json::object()},
+                           // applyEdit is implemented: the server's edits really are
+                           // written through the workspace layer.
+                           {"applyEdit", true},
+                           {"workspaceEdit", {{"documentChanges", true},
+                                              {"resourceOperations", Json::array({"create", "rename", "delete"})},
+                                              {"failureHandling", "textOnlyTransactional"}}},
+                           {"didChangeConfiguration", {{"dynamicRegistration", true}}},
+                           {"workspaceFolders", true}}},
         }},
     };
+    // The server-driven `workspace/applyEdit` writes real files through Workspace.
+    host->set_document_editor([this](const std::string& uri, const Json& edits, int version) {
+        return apply_document_edits(uri, edits, version);
+    });
     // Defer didOpen until the initialize handshake completes on the reader thread.
-    host->start(spec, std::move(params), [this, language](Json, Json error) {
+    host->start(spec, std::move(params), [this, language](Json result, Json error) {
         if (!error.is_null()) return;
         std::lock_guard lock(mutex_);
         ready_[language] = true;
+        capabilities_[language] = result.is_object() && result.contains("capabilities") &&
+                                          result.at("capabilities").is_object()
+                                      ? result.at("capabilities") : Json::object();
         const auto host = hosts_.find(language);
         if (host == hosts_.end()) return;
+        // Honour the sync kind the server announced: with Incremental a didChange
+        // carries a range instead of the whole document.
+        const auto& capabilities = capabilities_[language];
+        const auto& declared = capabilities.contains("textDocumentSync") ? capabilities.at("textDocumentSync")
+                                                                         : Json(nullptr);
+        int kind = static_cast<int>(SyncKind::full);
+        if (declared.is_number_integer()) kind = declared.get<int>();
+        else if (declared.is_object() && declared.contains("change") && declared.at("change").is_number_integer())
+            kind = declared.at("change").get<int>();
+        host->second->set_sync_kind(kind == static_cast<int>(SyncKind::incremental) ? SyncKind::incremental
+                                                                                    : SyncKind::full);
         for (auto& [path, doc] : documents_)
             if (doc.language == language && !doc.opened) {
                 host->second->did_open(doc.uri, language, doc.version, doc.text);
@@ -630,15 +751,26 @@ void Session::close(const std::string& path) {
 void Session::request(const std::string& kind, const std::string& path, int line, int character, ResultHandler on_result) {
     Host* host = nullptr;
     std::string uri;
+    Json declined;
     {
         std::lock_guard lock(mutex_);
         const auto document = documents_.find(path);
-        if (document == documents_.end()) { on_result(Json(nullptr), Json{{"code", "LSP_CLOSED"}, {"message", "document is not open"}}); return; }
-        const auto found = hosts_.find(document->second.language);
-        if (found == hosts_.end()) { on_result(Json(nullptr), Json{{"code", "LSP_UNAVAILABLE"}, {"message", "no language server"}}); return; }
-        host = found->second.get();
-        uri = document->second.uri;
+        if (document == documents_.end()) declined = invalid("LSP_CLOSED", "document is not open");
+        else {
+            const auto found = hosts_.find(document->second.language);
+            if (found == hosts_.end()) declined = invalid("LSP_UNAVAILABLE", "no language server");
+            // A server that explicitly declined the provider gets a clear error
+            // instead of a request it will only refuse.
+            else if (const auto missing = unsupported(document->second.language, kind)) declined = Json(*missing);
+            else {
+                host = found->second.get();
+                uri = document->second.uri;
+            }
+        }
     }
+    // Every early answer is delivered outside the lock: a handler is allowed to
+    // come straight back into the session.
+    if (!declined.is_null()) { on_result(Json(nullptr), std::move(declined)); return; }
     const auto position = Json{{"line", line}, {"character", character}};
     if (kind == "hover") {
         host->request("textDocument/hover", {{"textDocument", text_document(uri)}, {"position", position}},
@@ -716,6 +848,7 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                        ResultHandler on_result) {
     Host* host = nullptr;
     std::string uri;
+    Json declined;
     {
         std::lock_guard lock(mutex_);
         if (kind == "workspaceSymbol") {
@@ -732,20 +865,27 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                 try {
                     host = &ensure(language);
                 } catch (const WorkspaceError& error) {
-                    on_result(Json(nullptr), invalid(error.code, error.what()));
-                    return;
+                    declined = invalid(error.code, error.what());
                 }
             }
-            if (!host) { on_result(Json(nullptr), invalid("LSP_UNAVAILABLE", "no language server")); return; }
+            if (declined.is_null() && !host) declined = invalid("LSP_UNAVAILABLE", "no language server");
+            if (declined.is_null())
+                if (const auto missing = unsupported(language, kind)) declined = Json(*missing);
         } else {
             const auto document = documents_.find(path);
-            if (document == documents_.end()) { on_result(Json(nullptr), invalid("LSP_CLOSED", "document is not open")); return; }
-            const auto found = hosts_.find(document->second.language);
-            if (found == hosts_.end()) { on_result(Json(nullptr), invalid("LSP_UNAVAILABLE", "no language server")); return; }
-            host = found->second.get();
-            uri = document->second.uri;
+            if (document == documents_.end()) declined = invalid("LSP_CLOSED", "document is not open");
+            else {
+                const auto found = hosts_.find(document->second.language);
+                if (found == hosts_.end()) declined = invalid("LSP_UNAVAILABLE", "no language server");
+                else if (const auto missing = unsupported(document->second.language, kind)) declined = Json(*missing);
+                else {
+                    host = found->second.get();
+                    uri = document->second.uri;
+                }
+            }
         }
     }
+    if (!declined.is_null()) { on_result(Json(nullptr), std::move(declined)); return; }
 
     const auto position = Json{{"line", line}, {"character", character}};
     const auto relative = [this](const std::string& target) { return to_path(target); };
@@ -992,16 +1132,170 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
     on_result(Json(nullptr), invalid("LSP_BAD_KIND", "unknown semantic kind"));
 }
 
-void Session::shutdown_all() noexcept {
-    std::lock_guard lock(mutex_);
-    for (auto& [language, host] : hosts_) {
-        host->request("shutdown", Json(nullptr), [](Json, Json) {});
-        host->stop();
+// An error when the server explicitly declined the provider `kind` needs, so the
+// UI is told why nothing came back instead of getting an empty success-shaped
+// result. A server that said nothing at all (or whose handshake has not landed)
+// is still asked: plenty of real servers implement more than they advertise.
+std::optional<Json> Session::unsupported(const std::string& language, const std::string& kind) const {
+    const char* provider = provider_for(kind);
+    if (!provider) return std::nullopt;
+    const auto capabilities = capabilities_.find(language);
+    if (capabilities == capabilities_.end() || !capabilities->second.is_object()) return std::nullopt;
+    const auto declared = capabilities->second.find(provider);
+    if (declared == capabilities->second.end()) return std::nullopt;
+    const bool refused = declared->is_boolean() ? declared->get<bool>() == false
+                                                : declared->is_null();
+    if (!refused) return std::nullopt;
+    return invalid("LSP_UNSUPPORTED", std::string("the ") + language + " server does not support " + provider);
+}
+
+// Bounds every request a server fails to answer. Servers started later pick the
+// value up in ensure(); the ones already running are updated here.
+void Session::set_timeout(std::chrono::milliseconds timeout) {
+    std::vector<Host*> live;
+    {
+        std::lock_guard lock(mutex_);
+        timeout_ = timeout;
+        for (auto& entry : hosts_) live.push_back(entry.second.get());
     }
-    hosts_.clear();
-    documents_.clear();
-    pending_actions_.clear();
-    ready_.clear();
+    for (auto* host : live) host->set_timeout(timeout);
+}
+
+void Session::set_root(std::filesystem::path root) {
+    {
+        std::lock_guard lock(mutex_);
+        root_ = std::move(root);
+    }
+    std::lock_guard edit(edit_mutex_);
+    editor_.reset();  // any cached writer belongs to the previous root
+    editor_root_.clear();
+}
+
+// The workspace handle behind server-driven edits. Opened on first use and then
+// kept, so a burst of quick fixes pays the (one-off) tree walk only once. A
+// shared handle: switching the root replaces it, but an edit already in flight on
+// a reader thread keeps its own reference alive.
+std::shared_ptr<Workspace> Session::editor_workspace(const std::filesystem::path& root) {
+    std::lock_guard lock(edit_mutex_);
+    if (!editor_ || editor_root_ != root) {
+        auto candidate = std::make_shared<Workspace>();
+        candidate->open(root);
+        editor_ = std::move(candidate);
+        editor_root_ = root;
+    }
+    return editor_;
+}
+
+// `workspace/applyEdit`, one document. `edits` arrive already sorted back to
+// front, so splicing them in order can never invalidate a later edit's offsets.
+std::optional<std::string> Session::apply_document_edits(const std::string& uri, const Json& edits, int version) {
+    std::filesystem::path root;
+    std::string text;
+    bool tracked = false;
+    {
+        std::lock_guard lock(mutex_);
+        root = root_;
+        const auto document = documents_.find(uri_to_relative(uri, root_));
+        if (document != documents_.end()) {
+            // The server's view of an open document is the text we last synced, not
+            // whatever is on disk; edits computed against it land on that text.
+            if (version >= 0 && version != document->second.version)
+                return "the document changed since the server read it (version " + std::to_string(version) +
+                       " vs " + std::to_string(document->second.version) + ")";
+            text = document->second.text;
+            tracked = true;
+        }
+    }
+    const auto relative = uri_to_relative(uri, root);
+    // Reject anything the workspace layer would refuse: no absolute paths, no
+    // drive letters, no `..`, so a hostile or buggy server cannot write outside.
+    if (escapes_root(relative)) return "the edit targets " + uri + ", which is outside the workspace root";
+    if (root.empty()) return "no workspace root is open, so the edit cannot be applied";
+
+    Json current;
+    try {
+        current = editor_workspace(root)->read(relative, "utf-8");
+    } catch (const WorkspaceError& error) {
+        return std::string("cannot read ") + relative + ": " + error.what();
+    } catch (const std::exception& error) {
+        return std::string("cannot read ") + relative + ": " + error.what();
+    }
+    if (!tracked) text = current.value("content", std::string());
+    if (!current.contains("version") || !current.at("version").is_string())
+        return std::string("cannot read ") + relative;
+
+    std::size_t cursor = text.size();  // edits are back-to-front: walk once, from the end
+    for (const auto& edit : edits) {
+        if (!edit.is_object() || !edit.contains("range") || !edit.at("range").is_object()) continue;
+        const auto& range = edit.at("range");
+        const auto start = range.contains("start") && range.at("start").is_object() ? range.at("start") : Json::object();
+        const auto end = range.contains("end") && range.at("end").is_object() ? range.at("end") : Json::object();
+        const auto line_at = [](const Json& point, const char* key) {
+            return point.contains(key) && point.at(key).is_number_integer() ? point.at(key).get<int>() : 0;
+        };
+        const auto from = offset_of(text, line_at(start, "line"), line_at(start, "character"));
+        auto to = offset_of(text, line_at(end, "line"), line_at(end, "character"));
+        if (to < from) to = from;
+        if (from > text.size()) continue;
+        if (to > text.size()) to = text.size();
+        if (from > cursor) continue;  // out of order or overlapping: skip rather than corrupt
+        const auto replacement = edit.contains("newText") && edit.at("newText").is_string()
+                                     ? edit.at("newText").get<std::string>() : std::string();
+        text.replace(from, to - from, replacement);
+        cursor = from;
+    }
+
+    try {
+        editor_workspace(root)->write(relative, text, current.at("version").get<std::string>(),
+                                      current.value("encoding", std::string("utf-8")),
+                                      current.value("bom", false));
+    } catch (const WorkspaceError& error) {
+        return std::string("cannot write ") + relative + ": " + error.what();
+    } catch (const std::exception& error) {
+        return std::string("cannot write ") + relative + ": " + error.what();
+    }
+    {
+        std::lock_guard lock(mutex_);
+        const auto document = documents_.find(relative);
+        if (document != documents_.end()) {
+            document->second.text = text;   // keep the server's view and the file in step
+            ++document->second.version;
+        }
+    }
+    EditSink sink;
+    {
+        std::lock_guard lock(edit_mutex_);
+        sink = on_edit_;
+    }
+    if (sink) sink(relative);
+    return std::nullopt;
+}
+
+void Session::shutdown_all() noexcept {
+    // The reader thread of a live host calls back into this session (diagnostics,
+    // the deferred didOpen, code-action bookkeeping), and Host::stop() joins that
+    // thread. Joining while holding mutex_ therefore deadlocks every single time,
+    // so the hosts are moved out under the lock and stopped with it released.
+    std::vector<std::unique_ptr<Host>> doomed;
+    {
+        std::lock_guard lock(mutex_);
+        doomed.reserve(hosts_.size());
+        for (auto& [language, host] : hosts_) doomed.push_back(std::move(host));
+        hosts_.clear();
+        documents_.clear();
+        pending_actions_.clear();
+        ready_.clear();
+        capabilities_.clear();
+    }
+    for (auto& host : doomed) {
+        if (!host) continue;
+        try {
+            host->request("shutdown", Json(nullptr), [](Json, Json) {});
+        } catch (...) {
+            // A host that cannot even take the request is stopped below anyway.
+        }
+        host->stop();  // joins the reader thread; mutex_ is NOT held here
+    }
 }
 
 }  // namespace lsp

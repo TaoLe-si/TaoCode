@@ -41,11 +41,57 @@ const shown = computed(() => {
 
 const draft = ref<CustomTemplate>({ key: '', body: '', description: '', languages: [] })
 const encoder = new TextEncoder()
+// Exactly what src/templates.ts `render()` recognises: $END$, $EXPR$ and any
+// $NAME$ or $NAME:默认值$ slot become caret stops, everything else stays literal.
+const VARIABLE = /\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$\n]*))?\$/g
+// The same grammar seen from the inside: everything but END/EXPR that is not a bare
+// identifier (or `identifier:default`) never becomes a slot.
+const SLOT_SYNTAX = /^(?:END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::[^$\n]*)?$/
+const KEY_RULE = /^[A-Za-z][A-Za-z0-9]*$/
 const duplicateKey = computed(() => props.settings.customs.some(custom => custom.key === draft.value.key.trim() && custom.key !== editing.value?.key))
-const validDraft = computed(() => /^[A-Za-z][A-Za-z0-9]*$/.test(draft.value.key.trim()) && !duplicateKey.value
-  && !!draft.value.body.trim() && !!draft.value.description.trim()
-  && encoder.encode(draft.value.body).length <= 8000 && encoder.encode(draft.value.description.trim()).length <= 120
-  && (editing.value !== null || props.settings.customs.length < 100))
+const keyError = computed(() => {
+  const key = draft.value.key.trim()
+  if (!key) return '缩写不能为空。'
+  if (!KEY_RULE.test(key)) return '缩写只能以字母开头，且只含字母和数字（例如 myloop）。'
+  if (duplicateKey.value) return '此缩写已存在，请使用不同名称。'
+  return ''
+})
+const descriptionError = computed(() => {
+  const description = draft.value.description.trim()
+  if (!description) return '说明不能为空。'
+  if (encoder.encode(description).length > 120) return '说明过长：请控制在 120 字节以内。'
+  return ''
+})
+const bodyError = computed(() => {
+  if (!draft.value.body.trim()) return '模板内容不能为空。'
+  if (encoder.encode(draft.value.body).length > 8000) return '模板内容过长：请控制在 8000 字节以内。'
+  return ''
+})
+const capacityError = computed(() => editing.value !== null || props.settings.customs.length < 100
+  ? '' : '自定义模板最多 100 条，请先删除不再使用的条目。')
+const validDraft = computed(() => !keyError.value && !descriptionError.value && !bodyError.value && !capacityError.value)
+// Slots the engine will turn into tab stops, in the order they appear.
+const slots = computed(() => [...draft.value.body.matchAll(VARIABLE)]
+  .map(match => match[1] === 'END' ? '' : match[1] === 'EXPR' ? 'EXPR（后置模板表达式）' : match[1])
+  .filter((name, index, list) => name && list.indexOf(name) === index))
+// `$...$` runs that look like a slot but do not match the grammar above stay in the
+// expanded text as-is; they are listed so nobody wonders why nothing was replaced.
+const unresolved = computed(() => {
+  const body = draft.value.body
+  const bad: string[] = []
+  let index = 0
+  while (index < body.length) {
+    const start = body.indexOf('$', index)
+    if (start < 0) break
+    const end = body.indexOf('$', start + 1)
+    const lineEnd = body.indexOf('\n', start)
+    if (end < 0 || (lineEnd >= 0 && lineEnd < end)) { index = (lineEnd < 0 ? body.length : lineEnd) + 1; continue }
+    const raw = body.slice(start + 1, end)
+    if (!SLOT_SYNTAX.test(raw)) bad.push(`$${raw}$`)
+    index = end + 1
+  }
+  return [...new Set(bad)]
+})
 watch(() => props.settings, settings => {
   const entry = submitted.value
   if (entry && settings.customs.some(custom => custom.key === entry.key && custom.body === entry.body
@@ -105,11 +151,18 @@ function toggleLanguage(language: string) {
     <div class="lt-list" role="list" aria-label="实时模板列表">
       <div v-for="row in shown" :key="row.pattern" class="lt-row" :class="{ 'lt-off': row.disabled }" role="listitem">
         <label class="lt-check"><input type="checkbox" :disabled="busy" :checked="!row.disabled" :aria-label="`启用模板 ${row.key}`" @change="toggle(row)" /></label>
-        <button class="lt-main" :disabled="busy" :title="row.body" @click="row.custom ? startEdit(row) : undefined">
+        <!-- Only custom rows are editable, so only they get a button; a built-in row
+             is a plain caption instead of something that looks clickable but isn't. -->
+        <button v-if="row.custom" class="lt-main" :disabled="busy" :title="row.body" :aria-label="`编辑自定义模板 ${row.key}`" @click="startEdit(row)">
           <span class="lt-key">{{ row.key }}</span>
           <span class="lt-desc">{{ row.description }}</span>
           <span class="lt-detail">{{ row.detail }}</span>
         </button>
+        <span v-else class="lt-main lt-builtin" :title="row.body">
+          <span class="lt-key">{{ row.key }}</span>
+          <span class="lt-desc">{{ row.description }}</span>
+          <span class="lt-detail">{{ row.detail }}</span>
+        </span>
         <button v-if="row.custom" :disabled="busy" class="icon-button" title="编辑自定义模板" aria-label="编辑模板" @click="startEdit(row)"><Pencil :size="13" /></button>
         <button v-if="row.custom" :disabled="busy" class="icon-button" title="删除自定义模板" aria-label="删除模板" @click="remove(row)"><Trash2 :size="13" /></button>
       </div>
@@ -117,9 +170,12 @@ function toggleLanguage(language: string) {
     </div>
     <form v-if="creating || editing" class="lt-editor" @submit.prevent="applyDraft">
       <div class="lt-fields">
-        <label>缩写<input v-model="draft.key" required pattern="[A-Za-z][A-Za-z0-9]*" maxlength="40" aria-label="模板缩写" /></label>
-        <label>说明<input v-model="draft.description" required maxlength="120" aria-label="模板说明" /></label>
+        <label>缩写<input v-model="draft.key" required pattern="[A-Za-z][A-Za-z0-9]*" maxlength="40" aria-label="模板缩写" :aria-invalid="Boolean(keyError)" /></label>
+        <label>说明<input v-model="draft.description" required maxlength="120" aria-label="模板说明" :aria-invalid="Boolean(descriptionError)" /></label>
       </div>
+      <p v-if="keyError" class="lt-field-error" role="alert">{{ keyError }}</p>
+      <p v-else-if="descriptionError" class="lt-field-error" role="alert">{{ descriptionError }}</p>
+      <p v-else-if="capacityError" class="lt-field-error" role="alert">{{ capacityError }}</p>
       <div class="lt-langs">
         <span>适用语言</span>
         <label v-for="language in ['java', 'cpp', 'typescript', 'other']" :key="language" class="lt-lang">
@@ -127,8 +183,11 @@ function toggleLanguage(language: string) {
         </label>
         <em>全不选表示所有语言；启用时覆盖适用语言的同名关键字模板。</em>
       </div>
-      <textarea v-model="draft.body" rows="6" required maxlength="8000" spellcheck="false" aria-label="模板内容" placeholder="用 $NAME$ / $NAME:默认值$ / $END$ 标记槽位" />
-      <p v-if="duplicateKey" role="alert" class="lt-empty">此缩写已存在，请使用不同名称。</p>
+      <textarea v-model="draft.body" rows="6" required maxlength="8000" spellcheck="false" aria-label="模板内容" :aria-invalid="Boolean(bodyError)" placeholder="用 $NAME$ / $NAME:默认值$ / $END$ 标记槽位" />
+      <p v-if="bodyError" class="lt-field-error" role="alert">{{ bodyError }}</p>
+      <p v-else-if="slots.length" class="lt-slots" role="status">插入后可用 Tab 依次跳转的槽位：{{ slots.join('、') }}。</p>
+      <p v-else class="lt-slots" role="status">没有槽位：展开后会原样插入这段文本，光标停在末尾。</p>
+      <p v-if="unresolved.length" class="lt-field-error" role="alert">这些写法不是槽位，展开时会原样输出：{{ unresolved.slice(0, 4).join(' 、 ') }}{{ unresolved.length > 4 ? ' …' : '' }}。正确写法是 $NAME$ 或 $NAME:默认值$；引擎没有转义机制，文本里真正需要的美元符号请改用描述性写法。</p>
       <div class="lt-actions">
         <button type="submit" class="primary-button" :disabled="busy || !validDraft">{{ busy ? '保存中…' : '保存模板' }}</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="cancel">取消</button>
@@ -149,6 +208,10 @@ function toggleLanguage(language: string) {
 .lt-check { display: flex; align-items: center; }
 .lt-check input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
 .lt-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-1) var(--space-1); border: 0; background: transparent; color: var(--text); text-align: left; cursor: default; }
+.lt-main[disabled] { opacity: 1; }
+.lt-builtin { cursor: default; }
+.lt-field-error { margin: 0; color: var(--error); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.lt-slots { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .lt-key { font: 12px var(--font-mono); color: var(--accent); }
 .lt-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .lt-detail { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 10px; }

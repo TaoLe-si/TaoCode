@@ -248,6 +248,9 @@ void scenario_full_session() {
                  "breakpoint event for line 9", &breakpoint_event);
     check(flag_at(breakpoint_event, "verified"), "the scripted adapter verifies breakpoints");
     check(string_at(breakpoint_event, "path") == "dap/main.cpp", "breakpoint events map source.path back to a relative path");
+    // DAP's optional Breakpoint id is forwarded, so the UI can tell which breakpoint
+    // an adapter moved instead of guessing from the line number.
+    check(number_at(breakpoint_event, "id") == 91, "breakpoint events carry the adapter's breakpoint id, got: " + breakpoint_event.dump());
 
     // (4) Stack frames keep the 1-based DAP line/column, and source.path becomes a
     // workspace-relative path (paths outside the root stay absolute).
@@ -581,6 +584,186 @@ void scenario_attach_and_exception_filters() {
     client.shutdown();
 }
 
+// A hung adapter must not hang the bridge: every request carries a deadline and
+// is answered with DAP_TIMEOUT when it expires, and the pending entry is dropped
+// so a reply that eventually arrives cannot resurrect it.
+void scenario_request_timeout() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for(), "dap.start never replied");
+    check(started.ok(), "dap.start failed: " + started.failure_text());
+
+    client.set_timeout(std::chrono::milliseconds(500));
+    // variables(555) is deliberately held back until the *next* request, so on its
+    // own it is never answered — exactly the hung-adapter case.
+    const auto sent_at = Clock::now();
+    Waiter held;
+    client.variables(555, held.reply());
+    check(held.await_for(25), "a request the adapter never answers must still be answered");
+    check(!held.ok(), "the timeout must surface as an error, not an empty success");
+    check(held.error.value("code", std::string()) == "DAP_TIMEOUT",
+          "the error names the timeout, got: " + held.failure_text());
+    check(Clock::now() - sent_at < std::chrono::seconds(20), "and it arrives when the deadline expires");
+
+    // The session survives: the next request flushes the adapter's held reply,
+    // which must be dropped (its caller is long gone) instead of mis-delivered.
+    Waiter follow;
+    client.scopes(1000, follow.reply());
+    check(follow.await_for(), "the session must still work after a timeout");
+    check(follow.ok() && follow.result.contains("scopes"), "scopes answered normally: " + follow.failure_text());
+    client.shutdown();
+}
+
+// The events an adapter sends around the edges of a session have to arrive in the
+// shape the debug UI consumes: a real exit code, a module and a source mapped back
+// to workspace-relative paths, and one progress sequence with its own id.
+void scenario_event_shaping() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {L"--extras"}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for(), "dap.start never replied");
+    check(started.ok(), "dap.start failed: " + started.failure_text());
+
+    Json exited;
+    expect_event(recorder, [](const Json& event) { return is_event(event, "exited"); }, "the exited event", &exited);
+    check(number_at(exited, "exitCode") == 3, "exited carries the debuggee's real exit code");
+
+    Json module;
+    expect_event(recorder, [](const Json& event) { return is_event(event, "module"); }, "the module event", &module);
+    check(number_at(module.at("module"), "id") == 7, "module keeps the adapter's module id");
+    check(string_at(module.at("module"), "name") == "fake.dll", "module keeps the module name");
+    check(string_at(module, "path") == "fake.dll",
+          "the module path is workspace-relative, got: " + string_at(module, "path"));
+
+    Json loaded;
+    expect_event(recorder, [](const Json& event) { return is_event(event, "loadedSource"); }, "the loadedSource event",
+                 &loaded);
+    check(string_at(loaded.at("source"), "name") == "main.cpp", "loadedSource keeps the source name");
+    check(string_at(loaded, "path") == "dap/main.cpp",
+          "the loadedSource path is workspace-relative, got: " + string_at(loaded, "path"));
+
+    // progressStart / progressUpdate / progressEnd: three DAP events, one shape.
+    Json begin;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "progress") && event.value("phase", std::string()) == "start";
+                 },
+                 "the progress start", &begin);
+    check(string_at(begin, "progressId") == "load", "progress carries its id");
+    check(string_at(begin, "title") == "Loading", "progress carries its title");
+    check(number_at(begin, "percentage") == 0, "progress start carries a percentage");
+
+    Json update;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "progress") && event.value("phase", std::string()) == "update" &&
+                            event.value("percentage", 0) == 50;
+                 },
+                 "the progress update", &update);
+    check(string_at(update, "message") == "halfway", "progress update carries its message");
+
+    Json end;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "progress") && event.value("phase", std::string()) == "end";
+                 },
+                 "the progress end", &end);
+    check(string_at(end, "progressId") == "load", "progress end still names the same id");
+
+    client.shutdown();
+}
+
+// An adapter's reverse requests are real work, not `success:false`: runInTerminal
+// launches the command and hands back a live process id, startDebugging starts a
+// second session. Both answers are echoed by the adapter as console output.
+void scenario_reverse_requests() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"},
+                                                {"__reverseTerminal", true},
+                                                {"__reverseNested", true}},
+                           started.reply());
+    check(started.await_for(), "dap.start never replied");
+    check(started.ok(), "dap.start failed: " + started.failure_text());
+
+    Json terminal_output;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "output") && event.value("text", std::string()).find("runInTerminal answered") != std::string::npos;
+                 },
+                 "the adapter's echo of the runInTerminal answer", &terminal_output);
+    const auto echo = string_at(terminal_output, "text");
+    check(echo.find("success=true") != std::string::npos, "runInTerminal must be answered successfully, got: " + echo);
+    const auto at = echo.find("shellProcessId=");
+    check(at != std::string::npos, "runInTerminal must answer with a real process id, got: " + echo);
+    check(std::stoll(echo.substr(at + 15)) > 0, "the process id must be a live one, got: " + echo);
+
+    Json nested_output;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "output") && event.value("text", std::string()).find("startDebugging answered") != std::string::npos;
+                 },
+                 "the adapter's echo of the startDebugging answer", &nested_output);
+    check(string_at(nested_output, "text").find("success=true") != std::string::npos,
+          "startDebugging must be answered successfully, got: " + string_at(nested_output, "text"));
+
+    // A host hook — what main.cpp installs to route "integrated" into the IDE's own
+    // terminal — has to win over the built-in launcher.
+    Client::set_run_in_terminal_handler([](const Json&, std::string&) { return Json{{"shellProcessId", 4242}}; });
+    Waiter again;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}, {"__reverseTerminal", true}}, again.reply());
+    check(again.await_for(), "the second dap.start never replied");
+    check(again.ok(), "the second dap.start failed: " + again.failure_text());
+    Json hooked;
+    expect_event(recorder,
+                 [](const Json& event) {
+                     return is_event(event, "output") &&
+                            event.value("text", std::string()).find("shellProcessId=4242") != std::string::npos;
+                 },
+                 "the answer the host hook produced", &hooked);
+    Client::set_run_in_terminal_handler(Client::ReverseHandler{});  // back to the default
+
+    // The nested session is a real adapter process owned by this one: tearing the
+    // parent down has to take it with it.
+    client.shutdown();
+    check(client.exited(), "the session is over after shutdown");
+    check(live_adapters() == 0, "no adapter process may outlive the session, found " + std::to_string(live_adapters()));
+}
+
+// disconnect() waits for the reader thread, so dropping the Client the moment it
+// returns can never leave a callback running against destroyed state.
+void scenario_disconnect_then_destroy() {
+    const auto root = workspace_root();
+    int events = 0;
+    {
+        Client client;
+        client.set_root(root);
+        client.start(adapter_path(), {}, root, [&events](Json) { ++events; });
+        Waiter started;
+        client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+        check(started.await_for() && started.ok(), "dap.start failed: " + started.failure_text());
+        Waiter closed;
+        client.disconnect(closed.reply());
+        check(closed.await_for(5), "disconnect must answer");
+        check(client.exited(), "disconnect waits for the adapter to be gone");
+    }
+    // Reaching this line is the assertion: no use-after-free, no hang.
+    check(true, "the client was destroyed immediately after disconnect");
+}
+
 }  // namespace
 
 int main() {
@@ -602,6 +785,10 @@ int main() {
     run("shutdown reaps the adapter and the client is reusable", scenario_shutdown_reaps_the_adapter);
     run("conditional breakpoints normalize, reach the adapter and are remembered", scenario_conditional_breakpoints);
     run("attach handshake, remembered exception filters and the thread list", scenario_attach_and_exception_filters);
+    run("a request the adapter never answers times out instead of hanging", scenario_request_timeout);
+    run("exited / module / loadedSource / progress arrive in the UI's own shape", scenario_event_shaping);
+    run("runInTerminal and startDebugging are answered for real", scenario_reverse_requests);
+    run("disconnect waits for the reader thread, so the client can be dropped", scenario_disconnect_then_destroy);
 
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;

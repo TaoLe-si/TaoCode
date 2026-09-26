@@ -1,10 +1,15 @@
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 
 #include "workspace.hpp"  // Json, WorkspaceError
@@ -18,6 +23,19 @@ inline constexpr std::size_t max_message_bytes = 64 * 1024 * 1024;
 // Bound on the header block before a `\r\n\r\n` is seen; guards against a stream
 // of header bytes that never terminates.
 inline constexpr std::size_t max_header_bytes = 64 * 1024;
+
+// TextDocumentSyncKind, as the server advertises it in
+// ServerCapabilities.textDocumentSync. The client honours it: with `incremental`
+// a didChange carries a range instead of the whole document.
+enum class SyncKind { none = 0, full = 1, incremental = 2 };
+
+// How long a request may stay unanswered before the client gives up and answers
+// its caller itself. A hung language server must never leave a bridge Promise
+// pending forever, so every request carries a deadline.
+inline constexpr std::chrono::milliseconds default_request_timeout{60000};
+// Hard ceiling on the number of requests a client tracks at once: a server that
+// never answers cannot grow the pending map without bound.
+inline constexpr std::size_t max_pending_requests = 4096;
 
 // Incremental reader for the LSP base protocol (header block terminated by
 // CRLF CRLF, then exactly Content-Length bytes of UTF-8 JSON). Feed raw bytes
@@ -51,6 +69,10 @@ bool is_notification(const Json& message);
 // and turns parsed server messages into callbacks. The subprocess host feeds it
 // bytes and drains its writes, so this state machine is testable with a scripted
 // peer and does not depend on a real language server being installed.
+//
+// LOCKING: `mutex_` guards the client's own bookkeeping only. Nothing is written
+// to the peer and no caller callback is invoked while it is held, so a callback
+// may freely re-enter the client (or the Session that owns it) without deadlock.
 class Client {
 public:
     enum class State { fresh, initializing, ready, stopping, stopped, failed };
@@ -58,8 +80,15 @@ public:
     // `error` is the JSON-RPC error object, or null when the call succeeded.
     using Handler = std::function<void(Json result, Json error)>;
     using Notify = std::function<void(Json params)>;
+    // Applies one document's TextEdit[] to the file the uri names. The edits are
+    // already sorted back-to-front, so they can be spliced in order without
+    // invalidating each other's offsets. `version` is the document version the
+    // server saw, or -1 when it did not send one. Returns std::nullopt on success
+    // and a human-readable reason on failure (the reply carries it verbatim).
+    using DocumentEditor = std::function<std::optional<std::string>(const std::string& uri, const Json& edits, int version)>;
 
     explicit Client(Writer writer) : writer_(std::move(writer)) {}
+    ~Client();
 
     State state() const { return state_; }
     bool ready() const { return state_ == State::ready; }
@@ -71,9 +100,13 @@ public:
 
     // Synchronisation and feature calls. All require a ready connection.
     void did_open(const std::string& uri, const std::string& language_id, int version, const std::string& text);
+    // Sends a full-text change or — when the server asked for incremental sync —
+    // the smallest range that turns the previous text into `full_text`.
     void did_change(const std::string& uri, int version, const std::string& full_text);
     void did_close(const std::string& uri);
-    void request(std::string_view method, Json params, Handler on_result);
+    // Returns the request id the server will answer with, so a caller can `cancel()`
+    // a request that a newer one supersedes.
+    std::int64_t request(std::string_view method, Json params, Handler on_result);
     void notify(std::string_view method, Json params);
 
     void on_diagnostics(Notify handler) { diagnostics_ = std::move(handler); }
@@ -87,18 +120,51 @@ public:
     // instead of silently hanging.
     void fail_pending(const std::string& code);
 
+    // --- wiring the client to the rest of the IDE ---------------------------
+    // Installs the real workspace writer used by `workspace/applyEdit`. Without
+    // one the client reports the edit as not applied instead of pretending.
+    void set_document_editor(DocumentEditor editor) { editor_ = std::move(editor); }
+    // Tells the client which sync kind the server announced, so didChange matches
+    // the server's own declaration instead of guessing.
+    void set_sync_kind(SyncKind kind) { sync_kind_ = kind; }
+    SyncKind sync_kind() const { return sync_kind_; }
+    void set_timeout(std::chrono::milliseconds timeout);
+    std::chrono::milliseconds timeout() const;
+    // Cancels an outstanding request: sends `$/cancelRequest`, drops the pending
+    // entry and answers the caller with a CANCELLED error. Returns false when the
+    // id is unknown (already answered, cancelled or timed out).
+    bool cancel(std::int64_t id);
+
 private:
-    std::mutex mutex_;
+    struct Pending {
+        Handler handler;
+        std::chrono::steady_clock::time_point deadline;
+    };
+
+    mutable std::mutex mutex_;
+    std::condition_variable due_;
+    std::uint64_t wake_ = 0;   // bumped when a deadline is registered, so the
+                               // watchdog re-picks the earliest one instead of
+                               // sleeping on a stale absolute time
     std::int64_t next_id_ = 1;
     State state_ = State::fresh;
     Writer writer_;
     Notify diagnostics_;
     Json configuration_ = Json::object();
-    std::unordered_map<std::int64_t, Handler> pending_;
+    std::unordered_map<std::int64_t, Pending> pending_;
+    std::unordered_map<std::string, std::string> synced_;  // uri -> last text sent
+    DocumentEditor editor_;
+    SyncKind sync_kind_ = SyncKind::full;
+    std::chrono::milliseconds timeout_ = default_request_timeout;
+    std::thread watchdog_;
+    bool watching_ = false;
 
     void send(const Json& message);
     std::int64_t send_request(std::string_view method, Json params, Handler on_result);
     void respond(const Json& id, Json result, Json error);
+    void answer_apply_edit(const Json& id, const Json& params);
+    void watchdog_loop();
+    void wake_watchdog(std::unique_lock<std::mutex>& lock);
 };
 
 }  // namespace lsp

@@ -21,11 +21,48 @@ const id = useId()
 const java = ref<JavaProjectSettings>({ jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] })
 const excludedText = ref('')
 const patterns = ref<TodoPattern[]>([])
-watch(() => [props.root, props.settings] as const, () => {
-  java.value = structuredClone(props.settings?.java ?? { jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] })
-  excludedText.value = props.settings?.excludedDirs.join('\n') ?? ''
-  patterns.value = (props.settings?.todoPatterns ?? []).map(entry => ({ ...entry }))
-}, { deep: true, immediate: true })
+// Roots added through the popup remember whether they were picked as test roots;
+// stored ones fall back to the name heuristic below.
+const testRoots = ref<string[]>([])
+// The project the form was filled from. A save is only ever issued for that root:
+// if the workspace moved on while the dialog was open, the edit belongs to nothing
+// that exists any more and is dropped instead of being written to the new project.
+const formRoot = ref<string | null>(null)
+const snapshot = ref('')
+const stale = ref('')
+const discarded = ref('')
+const emptyJava = (): JavaProjectSettings => ({ jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] })
+
+// IDEA's content entries distinguish source from test roots; TaoCode keeps one flat
+// list, so the choice is remembered per root for the row label.
+const isTestRoot = (path: string) => testRoots.value.includes(path) || /test/i.test(path)
+
+function fillFrom(source: ProjectSettings | null, root: string | null) {
+  java.value = structuredClone(source?.java ?? emptyJava())
+  excludedText.value = source?.excludedDirs.join('\n') ?? ''
+  patterns.value = (source?.todoPatterns ?? []).map(entry => ({ ...entry }))
+  testRoots.value = (source?.java.sourcePaths ?? []).filter(path => /test/i.test(path))
+  formRoot.value = root
+  snapshot.value = currentShape()
+  stale.value = ''
+}
+// IDEA's Reset button restores the values that are actually persisted.
+function resetForm() {
+  fillFrom(props.settings, props.root)
+  discarded.value = ''
+}
+function currentShape() {
+  return JSON.stringify([java.value, excludedText.value.split(/\r?\n/), patterns.value])
+}
+const dirty = computed(() => currentShape() !== snapshot.value)
+// Not `deep`: reloading on any nested write to `props.settings` would throw away
+// what the user is typing whenever another panel refreshes the same object.
+watch(() => [props.root, props.settings] as const, ([root, settings]) => {
+  // Whatever was typed belongs to the previous root; say so instead of silently
+  // carrying it into the next project.
+  discarded.value = dirty.value ? '已切换到另一个项目，之前未保存的改动已丢弃。' : ''
+  fillFrom(settings, root)
+}, { immediate: true })
 
 // IDEA's LanguageLevelCombo: "SDK default" plus every level the platform knows.
 const languageLevels = ['_DEFAULT_', '8', '9', '11', '13', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25']
@@ -55,10 +92,12 @@ function addSourceRoot() { sourceDraft.value = ''; sourcePopup.value = true; voi
 function applySourceRoot(kind: 'sources' | 'tests') {
   const path = sourceDraft.value.trim().replace(/\/$/, '')
   if (!path) return
-  // IDEA marks test roots distinctly; TaoCode's JDT config keeps sources flat and
-  // excludes test roots from sourcePaths is not modelled — both land in sourcePaths.
+  // IDEA marks test roots distinctly; TaoCode's JDT config has no separate list, so
+  // both kinds land in sourcePaths and the row shows the type that was chosen.
   if (!java.value.sourcePaths.includes(path)) java.value.sourcePaths.push(path)
-  void kind
+  testRoots.value = kind === 'tests'
+    ? [...testRoots.value.filter(entry => entry !== path), path]
+    : testRoots.value.filter(entry => entry !== path)
   sourcePopup.value = false
 }
 function dropSourceRoot(index: number) { java.value.sourcePaths.splice(index, 1) }
@@ -80,7 +119,15 @@ const libraryDraft = ref('')
 const libraryInput = ref<HTMLInputElement>()
 
 function save() {
-  if (props.busy || !props.settings || invalidAll.value) return
+  stale.value = ''
+  if (props.busy || !props.settings) return
+  // Dropping a save whose root is no longer the one the form was filled from is what
+  // keeps a stale edit from landing in the freshly opened project.
+  if (formRoot.value !== props.root) {
+    stale.value = '项目已切换，改动没有保存。请确认后重新保存。'
+    return
+  }
+  if (invalidAll.value) return
   emit('saveJava', { ...java.value, sourcePaths: listLines(java.value.sourcePaths), referencedLibraries: listLines(java.value.referencedLibraries) })
   emit('saveProject', { excludedDirs: listLines(excludedText.value.split(/\r?\n/)), todoPatterns: patterns.value.map(entry => ({ ...entry })) })
 }
@@ -92,6 +139,8 @@ function save() {
     <form v-else :id="`${id}-form`" class="ps-form" :aria-busy="busy" @submit.prevent="save">
       <!-- Category header, like SidePanel's selected place in ProjectStructureConfigurable -->
       <h3 class="ps-title">项目：{{ root?.split('/').pop() || root }}</h3>
+      <p v-if="stale" class="ps-error ps-banner" role="alert">{{ stale }}</p>
+      <p v-else-if="discarded" class="ps-notice" role="status">{{ discarded }}</p>
 
       <fieldset class="ps-group" :disabled="busy">
         <legend class="ps-group-label">项目设置</legend>
@@ -135,9 +184,9 @@ function save() {
         <div class="ps-tree" role="tree" aria-label="内容根">
           <div class="ps-tree-node ps-content">内容根 {{ root || '.' }}</div>
           <div v-for="(source, index) in java.sourcePaths" :key="source" class="ps-tree-node" role="treeitem">
-            <span class="ps-root-icon" :class="{ 'ps-root-test': /test/i.test(source) }" aria-hidden="true" />
+            <span class="ps-root-icon" :class="{ 'ps-root-test': isTestRoot(source) }" aria-hidden="true" />
             <span>{{ source }}</span>
-            <span class="ps-root-type">{{ /test/i.test(source) ? '测试' : '源代码' }}</span>
+            <span class="ps-root-type">{{ isTestRoot(source) ? '测试' : '源代码' }}</span>
             <button type="button" class="icon-button" :aria-label="`移除 ${source}`" @click="dropSourceRoot(index)"><Minus :size="13" /></button>
           </div>
           <p v-if="!java.sourcePaths.length" class="ps-empty-line">没有源码目录。点“添加内容根”选择项目内目录。</p>
@@ -194,7 +243,9 @@ function save() {
            various inputs; add one so the form is actually saveable. -->
       <div class="ps-actions">
         <button type="submit" :form="`${id}-form`" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存项目结构' }}</button>
-        <button type="reset" :form="`${id}-form`" class="subtle-button" :disabled="busy">还原</button>
+        <!-- type="reset" only restores the DOM defaults, which are the values the form
+             was built with — it never put back the saved project settings. -->
+        <button type="button" class="subtle-button" :disabled="busy || !dirty" title="放弃未保存的改动，回到已保存的项目结构" @click="resetForm">还原</button>
       </div>
     </form>
   </div>
@@ -217,6 +268,8 @@ function save() {
 .ps-level { min-height: var(--ctrl-height); max-width: 100%; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
 .ps-comment { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .ps-error { margin: 0; color: var(--error); font-size: 11px; }
+.ps-banner { padding: var(--space-1) var(--space-2); border: 1px solid var(--error); border-radius: var(--radius-xs); background: var(--panel); }
+.ps-notice { margin: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); background: var(--panel); font-size: 11px; }
 .ps-invalid { border-color: var(--error); }
 .ps-tree { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--editor); overflow: hidden; }
 .ps-tree-node { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font: 12px/1.6 var(--font-mono); color: var(--text); }

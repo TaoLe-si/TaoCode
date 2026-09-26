@@ -2,6 +2,11 @@
 // separated from the panel so every rule (permissions, plans, diffs, usage) is
 // unit-testable without a model. The only built-in provider is a deterministic
 // local fake — a real model requires separate authorization per the roadmap.
+//
+// NOT WIRED YET (deliberate): nothing in src/ imports this module, because phase 1 of
+// this project is a full IDE and the Agent panel is phase 2. The About dialog says the
+// same thing ("尚无 AI Agent / 模型执行"). Until the panel exists, this file is verified
+// only by tests/agent.test.mjs — treat changes here as library work, not as UI.
 
 export type AgentToolName = 'read_file' | 'write_file' | 'run_command' | 'fetch_network'
 
@@ -151,6 +156,6 @@ export function fakeModelReply(prompt: string, workspaceFiles: readonly string[]
     `（本地假模型：无网络访问，输出确定性，可用于验证权限门与差异预览。）`
   const toolCalls: AgentToolCall[] = [{ id: call * 2, tool: 'read_file', params: { path: target } }]
   if (call > 0)
-    toolCalls.push({ id: call * 2 + 1, tool: 'write_file', params: { path: target, append: `\n// taocode-agent ${new Date().toISOString().slice(0, 10)}\n` } })
+    toolCalls.push({ id: call * 2 + 1, tool: 'write_file', params: { path: target, append: `\n// taocode-agent\n` } })
   return { text, toolCalls }
 }

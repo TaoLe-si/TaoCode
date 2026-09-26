@@ -35,7 +35,23 @@ std::vector<std::string> branches(const std::filesystem::path& repo);
 void stage(const std::filesystem::path& repo, const std::string& path);
 void unstage(const std::filesystem::path& repo, const std::string& path);
 // `amend` rewrites the last commit; an empty message then keeps the original one.
-void commit(const std::filesystem::path& repo, const std::string& message, bool amend = false);
+// `signoff` adds Git's Signed-off-by trailer (git commit --signoff), which IDEA
+// exposes as the "Sign-off commit" option in the commit options popup.
+// `author_name`/`author_email` override the commit author for this commit only
+// (git commit --author=…), which is IDEA's CommitAuthorComponent editor; both empty
+// means "use the repository configuration".
+void commit(const std::filesystem::path& repo, const std::string& message, bool amend = false,
+            bool signoff = false, const std::string& author_name = std::string(),
+            const std::string& author_email = std::string());
+// The repository's configured author, read from `git config --get user.name` /
+// `user.email`. Shapes {name, email}; either may be empty when unset.
+Json user(const std::filesystem::path& repo);
+// The distinct authors that appear in the repository's log, shaped {authors:["Name <email>"]}.
+// IDEA feeds these into the commit-author field's completion list (GitCommitOptionsUi.kt:259
+// -> VcsUserEditor.getAllUsers -> VcsUserRegistry.users, a set of the log's users); an entry
+// with only a name or only an e-mail keeps the shorter form, like VcsUserUtil.getString.
+// Best-effort: an empty repository has no log to read and simply yields no authors.
+Json authors(const std::filesystem::path& repo);
 void checkout(const std::filesystem::path& repo, const std::string& branch);
 
 // History and remote/stash/branch operations. `log` shapes {commits:[{hash,
@@ -69,6 +85,13 @@ void tag_delete(const std::filesystem::path& repo, const std::string& name);
 // IDEA's "Add to .gitignore": append the path as one line (creating the file).
 void ignore_path(const std::filesystem::path& repo, const std::string& path);
 
+// Stop the git command that is currently running, if any: the child — and, through
+// its job object, every process it spawned — is terminated at once. Called from the
+// UI thread while git runs on a worker thread, so it is thread-safe and never blocks;
+// a call with nothing running is a no-op. Every run() is also bounded by its own
+// timeout, so this is the "stop now" path rather than the only guard against a hang.
+void request_cancel();
+
 // Partial staging (IDEA's commit diff viewer stage/unstage hunks): `diff_hunks`
 // splits the unified diff into selectable hunks; `apply_hunks` re-applies only the
 // chosen ones to the index (`--cached`, reversed to unstage).
@@ -79,6 +102,42 @@ void apply_hunks(const std::filesystem::path& repo, const std::string& path, boo
 // Per-line origin for `path` via `git blame --line-porcelain`:
 // {lines:[{line, hash, author, content}]} with 1-BASED line numbers.
 Json blame(const std::filesystem::path& repo, const std::string& path);
+
+// IDEA's "Show History for File" follows a file across renames (`--follow`), so the
+// log keeps going past the commit that moved it. Adds the previous path of each
+// commit so the UI can say "renamed from …".
+Json file_history(const std::filesystem::path& repo, const std::string& path, int limit);
+
+// What one commit actually changed, as a patch: `git show` with an empty format so
+// the header is dropped and only the diff remains. Merge commits are shown against
+// their first parent, which is what IDEA's "Show Details" does.
+Json show_commit(const std::filesystem::path& repo, const std::string& revision);
+
+// One linked worktree (`git worktree list --porcelain`), i.e. a second checkout of
+// the same repository IDEA can open as its own project.
+struct Worktree {
+    std::string path;
+    std::string branch;   // "detached" when the worktree has no branch checked out
+    std::string head;     // commit hash
+    bool bare = false;
+    bool detached = false;
+    bool locked = false;
+    bool prunable = false;
+};
+Json worktree_list(const std::filesystem::path& repo);
+void worktree_add(const std::filesystem::path& repo, const std::string& path, const std::string& branch, bool new_branch);
+void worktree_remove(const std::filesystem::path& repo, const std::string& path, bool force);
+
+// `git submodule status` rows: the submodule's path, the recorded commit and the
+// state git reports ('-' uninitialized, '+' differs, 'U' merge conflict).
+struct Submodule {
+    std::string path;
+    std::string commit;
+    std::string describe;  // e.g. "v1.2.3-4-gabcdef" when git can name the commit
+    char status = ' ';
+};
+Json submodule_status(const std::filesystem::path& repo);
+void submodule_update(const std::filesystem::path& repo, bool init, bool recursive);
 
 }  // namespace git
 }  // namespace taocode

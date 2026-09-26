@@ -87,11 +87,9 @@ Json open_result(const fs::path& path) {
     return workspace.open(path);
 }
 
-Json defaults() {
-    return {{"fontSize", 14}, {"tabSize", 4}, {"wordWrap", false},
-            {"lineNumbers", true}, {"restoreLastProject", false}, {"syncOnFocus", true}, {"autoSave", false},
-            {"showIndentGuides", true}, {"bracketMatching", true}, {"tabLimit", 30}};
-}
+// The real defaults, not a copy: a mirror drifts the moment a setting is added and
+// then every migration assertion fails for no reason.
+Json defaults() { return taocode::editor_defaults(); }
 
 Json default_todo_patterns() {
     return Json::array({{{"pattern", "TODO"}, {"description", "待办"}},
@@ -464,7 +462,11 @@ int main() {
                 expect_error("FILE_BUSY", [&] { store.update_project_settings(root, {{"excludedDirs", Json::array()}}); });
                 check(get(file) == old_bytes && store.state() == old_state && store.project_settings(root) == old_settings,
                       "All failed saves must retain the old file and observable in-memory state");
-                check(names(directory) == old_names, "Failed saves must clean up their own temporary files");
+                const auto now_names = names(directory);
+                std::string dump;
+                for (const auto& name : now_names) if (std::find(old_names.begin(), old_names.end(), name) == old_names.end()) dump += " [+" + name + "]";
+                for (const auto& name : old_names) if (std::find(now_names.begin(), now_names.end(), name) == now_names.end()) dump += " [-" + name + "]";
+                check(now_names == old_names, "Failed saves must clean up their own temporary files" + dump);
             }
             store.opened(opened_b);
             check(store.state().at("lastProject") == opened_b.at("root"), "Store must remain usable after failed replacement");

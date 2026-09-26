@@ -171,6 +171,185 @@ test('file associations map an extension to a language and patch independently',
     'rejected writes change nothing')
 })
 
+const { applyDapEvent, dapBreakpoints, dapConsole, dapLoadedSources, dapModules, dapProgress, dapState, dapThreadSignal } = preview
+
+function resetDap() {
+  dapProgress.splice(0); dapModules.splice(0); dapLoadedSources.splice(0); dapConsole.splice(0)
+  dapState.exitCode = null
+  dapBreakpoints.clear()
+  dapThreadSignal.reason = null; dapThreadSignal.threadId = null
+}
+
+test('dap exited keeps the debuggee exit code and says it in the console', () => {
+  resetDap()
+  applyDapEvent({ event: 'exited', exitCode: 3 })
+  assert.equal(dapState.exitCode, 3, 'a non-zero exit is kept so the UI can show it')
+  applyDapEvent({ event: 'exited', exitCode: 0 })
+  assert.equal(dapState.exitCode, 0, 'a clean exit overwrites the previous run\'s code')
+  const texts = dapConsole.map(line => `${line.category}|${line.text}`)
+  assert.ok(texts.includes('stderr|程序已退出，退出码 3。'), 'a non-zero exit is an error line')
+  assert.ok(texts.includes('telemetry|程序已退出，退出码 0。'), 'exit code 0 is not an error line')
+  applyDapEvent({ event: 'exited' })
+  assert.equal(dapState.exitCode, 0, 'an event with no code reads as 0 instead of NaN')
+})
+
+test('dap progress runs start -> update -> end without duplicating ids', () => {
+  resetDap()
+  applyDapEvent({ event: 'progress', phase: 'start', progressId: 'boot', title: '启动适配器', message: '连接中', percentage: 0 })
+  assert.equal(dapProgress.length, 1)
+  assert.deepEqual(dapProgress[0], { id: 'boot', requestId: null, title: '启动适配器', message: '连接中', percentage: 0 })
+
+  applyDapEvent({ event: 'progress', phase: 'update', progressId: 'boot', message: '加载符号', percentage: 42 })
+  assert.equal(dapProgress.length, 1, 'an update touches the existing row')
+  assert.equal(dapProgress[0].message, '加载符号')
+  assert.equal(dapProgress[0].percentage, 42)
+
+  applyDapEvent({ event: 'progress', phase: 'start', progressId: 'boot', title: '启动适配器', message: '连接中' })
+  assert.equal(dapProgress.length, 1, 'a repeated start for a live id cannot insert a second row')
+
+  applyDapEvent({ event: 'progress', phase: 'end', progressId: 'boot' })
+  assert.equal(dapProgress.length, 0, 'end removes the row')
+  applyDapEvent({ event: 'progress', phase: 'end', progressId: 'boot' })
+  assert.equal(dapProgress.length, 0, 'a duplicate end is a no-op, not a crash')
+
+  // A partial update keeps what it does not mention, and unknown ids are ignored.
+  applyDapEvent({ event: 'progress', phase: 'start', progressId: 'x', title: '索引', percentage: 10 })
+  applyDapEvent({ event: 'progress', phase: 'update', progressId: 'x', message: '仍在索引' })
+  assert.equal(dapProgress[0].percentage, 10, 'an update without a percentage keeps the last one')
+  applyDapEvent({ event: 'progress', phase: 'update', progressId: 'nope', message: '幽灵' })
+  assert.equal(dapProgress.length, 1, 'an update for an unknown id adds nothing')
+  applyDapEvent({ event: 'progress', phase: 'update', message: '没有 id' })
+  assert.equal(dapProgress[0].message, '没有 id', 'an update with no id addresses the newest operation')
+  applyDapEvent({ event: 'progress', phase: 'start', title: '无 id 启动' })
+  assert.equal(dapProgress.length, 2, 'a start with no id still opens a row instead of being dropped')
+  applyDapEvent({ event: 'progress', phase: 'end' })
+  assert.equal(dapProgress.length, 1, 'end with no id closes the newest row')
+})
+
+test('dap module and loadedSource apply new / changed / removed', () => {
+  resetDap()
+  applyDapEvent({ event: 'module', reason: 'new', module: { id: 7, name: 'libcore.so' }, path: 'build/libcore.so' })
+  applyDapEvent({ event: 'module', reason: 'new', module: { id: 7, name: 'libcore.so' }, path: 'build/libcore.so' })
+  assert.equal(dapModules.length, 1, 'the same id is never inserted twice')
+  applyDapEvent({ event: 'module', reason: 'changed', module: { id: 7, name: 'libcore.so', type: 'native' }, path: 'build/libcore.so' })
+  assert.equal(dapModules[0].type, 'native', 'changed updates the row in place')
+  applyDapEvent({ event: 'module', reason: 'new', module: { id: '8', name: 'app.exe' } })
+  assert.equal(dapModules.length, 2, 'a string id is accepted too')
+  applyDapEvent({ event: 'module', reason: 'removed', module: { id: 7 } })
+  assert.deepEqual(dapModules.map(entry => entry.id), ['8'], 'removed drops exactly that id')
+  applyDapEvent({ event: 'module', reason: 'new' })
+  assert.equal(dapModules.length, 1, 'an event with no usable id is ignored')
+
+  applyDapEvent({ event: 'loadedSource', reason: 'new', source: { name: 'main.cpp', sourceReference: 11 }, path: 'src/main.cpp' })
+  applyDapEvent({ event: 'loadedSource', reason: 'new', source: { name: 'main.cpp', sourceReference: 11 }, path: 'src/main.cpp' })
+  assert.equal(dapLoadedSources.length, 1, 'the source reference is the identity')
+  applyDapEvent({ event: 'loadedSource', reason: 'changed', source: { name: 'Main.cpp', sourceReference: 11 }, path: 'src/main.cpp' })
+  assert.equal(dapLoadedSources[0].name, 'Main.cpp')
+  applyDapEvent({ event: 'loadedSource', reason: 'new', source: { name: 'helper.cpp' }, path: 'src/helper.cpp' })
+  assert.equal(dapLoadedSources.length, 2, 'no reference: the path identifies it')
+  applyDapEvent({ event: 'loadedSource', reason: 'removed', source: { name: 'Main.cpp', sourceReference: 11 }, path: 'src/main.cpp' })
+  assert.deepEqual(dapLoadedSources.map(entry => entry.key), ['path:src/helper.cpp'], 'removed drops exactly that source')
+})
+
+test('dap breakpoint reports the line the adapter really bound', () => {
+  resetDap()
+  // The user asked for line 10; the adapter moved it to 12 and says so.
+  dapBreakpoints.set('src/main.cpp', [{ line: 10 }])
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 12, path: 'src/main.cpp' })
+  assert.deepEqual(dapBreakpoints.get('src/main.cpp'), [{ line: 12, verified: true }],
+    'the gutter row moves to the bound line instead of keeping the requested one')
+
+  // A later report about the same line only updates the verdict.
+  applyDapEvent({ event: 'breakpoint', verified: false, line: 12, path: 'src/main.cpp' })
+  assert.deepEqual(dapBreakpoints.get('src/main.cpp'), [{ line: 12, verified: false }])
+
+  // Two unconfirmed breakpoints: which one moved is unknowable, so nothing is moved.
+  dapBreakpoints.set('src/main.cpp', [{ line: 4 }, { line: 8 }])
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 9, path: 'src/main.cpp' })
+  assert.deepEqual(dapBreakpoints.get('src/main.cpp'), [{ line: 4 }, { line: 8 }, { line: 9, verified: true }],
+    'an ambiguous move adds the adapter\'s line rather than guessing')
+
+  // A breakpoint this client never set is still shown, because the adapter has it.
+  dapBreakpoints.set('src/other.cpp', [])
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 3, path: 'src/other.cpp' })
+  assert.deepEqual(dapBreakpoints.get('src/other.cpp'), [{ line: 3, verified: true }])
+
+  // An unverified line nobody asked for is not invented, and no path means no target.
+  dapBreakpoints.delete('src/other.cpp')
+  applyDapEvent({ event: 'breakpoint', verified: false, line: 77, path: 'src/other.cpp' })
+  assert.equal(dapBreakpoints.has('src/other.cpp'), false, 'unverified reports do not create rows')
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 5 })
+  assert.equal(dapBreakpoints.size, 1, 'a report with no path is ignored')
+  applyDapEvent({ event: 'breakpoint', verified: true, path: 'src/main.cpp' })
+  assert.equal(dapBreakpoints.get('src/main.cpp').length, 3, 'a report with no line is ignored')
+})
+
+test('dap breakpoint uses the adapter id to place a moved breakpoint exactly', () => {
+  resetDap()
+  // The adapter's own handle makes "which breakpoint moved" a fact: the first
+  // report says where it was asked for, the second where it actually landed.
+  dapBreakpoints.set('src/moved.cpp', [{ line: 20 }])
+  applyDapEvent({ event: 'breakpoint', verified: false, line: 20, path: 'src/moved.cpp', id: 91 })
+  assert.deepEqual(dapBreakpoints.get('src/moved.cpp'), [{ line: 20, verified: false }], 'the requested line stays while unconfirmed')
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 24, path: 'src/moved.cpp', id: 91 })
+  assert.deepEqual(dapBreakpoints.get('src/moved.cpp'), [{ line: 24, verified: true }], 'the same id moves that row to the bound line')
+
+  // Ids are what disambiguate: without one, two unconfirmed breakpoints would make
+  // the move unknowable and nothing would be touched. Here line 8 is the one.
+  dapBreakpoints.set('src/two.cpp', [{ line: 4 }, { line: 8 }])
+  applyDapEvent({ event: 'breakpoint', verified: false, line: 8, path: 'src/two.cpp', id: 7 })
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 9, path: 'src/two.cpp', id: 7 })
+  assert.deepEqual(dapBreakpoints.get('src/two.cpp'), [{ line: 4 }, { line: 9, verified: true }],
+    'the id says it was line 8, so line 4 is left alone')
+
+  // A string id works the same as a numeric one.
+  dapBreakpoints.set('src/str.cpp', [{ line: 30 }])
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 31, path: 'src/str.cpp', id: 'bp-a' })
+  assert.deepEqual(dapBreakpoints.get('src/str.cpp'), [{ line: 31, verified: true }])
+
+  // The remembered place is per file: an id last seen in another file is not used
+  // to move a row here, it falls back to the normal single-unconfirmed rule.
+  dapBreakpoints.set('src/other-file.cpp', [{ line: 50 }])
+  applyDapEvent({ event: 'breakpoint', verified: true, line: 60, path: 'src/other-file.cpp', id: 'bp-a' })
+  assert.deepEqual(dapBreakpoints.get('src/other-file.cpp'), [{ line: 60, verified: true }],
+    'no cross-file move: the id only identifies a row inside its own file')
+})
+
+test('dap thread events signal the panel to refetch', () => {
+  resetDap()
+  const before = dapThreadSignal.version
+  applyDapEvent({ event: 'thread', reason: 'started', threadId: 3 })
+  assert.equal(dapThreadSignal.version, before + 1, 'the panel watches version, not the payload')
+  assert.equal(dapThreadSignal.reason, 'started')
+  assert.equal(dapThreadSignal.threadId, 3)
+
+  // The native layer forwards the raw body for `thread`, so both shapes must work.
+  applyDapEvent({ event: 'thread', body: { reason: 'exited', threadId: 9 } })
+  assert.equal(dapThreadSignal.version, before + 2)
+  assert.equal(dapThreadSignal.reason, 'exited')
+  assert.equal(dapThreadSignal.threadId, 9)
+
+  applyDapEvent({ event: 'thread' })
+  assert.equal(dapThreadSignal.version, before + 3, 'an empty event is still a change to refetch for')
+  assert.equal(dapThreadSignal.reason, null)
+  assert.equal(dapThreadSignal.threadId, null)
+})
+
+test('unknown dap events still change nothing', () => {
+  resetDap()
+  const version = dapThreadSignal.version
+  applyDapEvent({ event: 'capability', body: { capabilities: { supportsRestart: true } } })
+  applyDapEvent({ event: 'memory' })
+  applyDapEvent({ event: 'invalidated' })
+  assert.equal(dapProgress.length, 0)
+  assert.equal(dapModules.length, 0)
+  assert.equal(dapLoadedSources.length, 0)
+  assert.equal(dapConsole.length, 0)
+  assert.equal(dapState.exitCode, null)
+  assert.equal(dapBreakpoints.size, 0)
+  assert.equal(dapThreadSignal.version, version, 'unknown events do not ask the panel to refetch')
+})
+
 test('tree mutations, sessions and reveal stay desktop-only in the preview', async () => {
   for (const call of [
     () => preview.request('file.copy', { from: 'a.txt', to: 'b.txt' }),

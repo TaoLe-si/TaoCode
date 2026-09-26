@@ -310,7 +310,15 @@ struct OwnedObject {
         if (!cleanup) return;
         if (handle) {
             FILE_DISPOSITION_INFO disposition{TRUE};
-            SetFileInformationByHandle(handle.get(), FileDispositionInfo, &disposition, sizeof(disposition));
+            if (SetFileInformationByHandle(handle.get(), FileDispositionInfo, &disposition, sizeof(disposition))) return;
+            // Delete-on-close can still be refused (a filter driver, a file someone
+            // marked read-only after the fact). Fall back to an explicit delete once
+            // our handle is gone, so a failed save never strands a temporary file.
+            const auto owned = path;
+            handle.reset();
+            // DeleteFileW does not throw; the return value is deliberately ignored
+            // because this is the last-resort cleanup of an already-failed save.
+            DeleteFileW(api_path(owned).c_str());
             return;
         }
         // Never recursively remove a path which another process could have replaced.
@@ -420,12 +428,54 @@ std::string text_or(const Json& object, const char* key) {
     return {};
 }
 
-Json editor_defaults() {
+Json editor_defaults_impl() {
     return {{"fontSize", 14}, {"tabSize", 4}, {"wordWrap", false},
             {"lineNumbers", true}, {"restoreLastProject", false}, {"syncOnFocus", true},
             {"autoSave", false}, {"showIndentGuides", true}, {"bracketMatching", true},
             // UISettingsState.editorTabLimit defaults to 30 open tabs per group.
-            {"tabLimit", 30}};
+            {"tabLimit", 30},
+            // Indent with tabs instead of spaces, render whitespace, reformat on save
+            // (IDEA: Editor → Code Style "Use tab character", "Show whitespaces",
+            // "Reformat code" in Actions on Save).
+            {"useTabCharacter", false}, {"showWhitespaces", false}, {"formatOnSave", false},
+            // Delete through the platform recycle bin instead of unlinking the file
+            // (IDEA's "Safe delete" fallback); `file.delete` honours it per call, this
+            // is just the remembered default.
+            {"deleteToTrash", true},
+            // IDEA AppearanceConfigurable: ideScale is a percent (100 = default),
+            // compactMode shrinks control heights/densities ("UI elements take up
+            // less screen space"), fullPathsInWindowHeader shows the project path in
+            // the window header instead of just its name.
+            {"uiZoomPercent", 100}, {"compactMode", false}, {"fullPathsInWindowHeader", false},
+            // AppearanceConfigurable "Tree Views": indent guides + smaller indents
+            // (UISettings defaults both to off).
+            {"showTreeIndentGuides", false}, {"compactTreeIndents", false},
+            // "UI Options": UISettingsState defaults smoothScrolling to ON
+            // (UISettingsState.kt:220 `by property(true)`) and showIconsInMenus to on;
+            // fullPathsInWindowHeader / dndWithAlt / keepPopups default to off.
+            {"smoothScrolling", true}, {"showIconsInMenus", true},
+            // "Tool Windows": per-window size off, names under icons off, stripes
+            // on — UISettings defaults, in the same order as the dialog.
+            {"rememberSizeForEachToolWindow", false}, {"showToolWindowNames", false},
+            {"showToolWindowBars", true},
+            // "Side-by-side layout on the left" and "Widescreen tool window layout".
+            {"leftSideBySide", false}, {"wideScreenSupport", false}, {"rightSideBySide", false},
+            {"showToolWindowNumbers", false},
+            // "Keep popups open for toggle items" + "Drag-and-drop with Alt pressed
+            // only" (both off in UISettings).
+            {"keepPopupsForToggles", false}, {"dndWithPressedAltOnly", false},
+            // PowerSaveMode: off by default, like IDEA.
+            {"powerSaveMode", false},
+            // AppearanceConfigurable items with a real consumer: contrast scrollbars,
+            // colour-vision filter, and the UI font stack (empty family = system).
+            {"useContrastScrollbars", false}, {"colorBlindness", "none"},
+            {"uiFontFamily", ""}, {"uiFontSize", 13},
+            // Background image (Images.SetBackgroundImage) + presentation mode.
+            {"backgroundImagePath", ""}, {"backgroundImageOpacity", 100},
+            {"backgroundImageFill", "scale"}, {"backgroundImageKeepRatio", true},
+            {"presentationMode", false}, {"presentationModeFontSize", 24},
+            // Main menu placement + screen-reader support (IDEA defaults).
+            {"mainMenuDisplayMode", "merged"}, {"supportScreenReaders", false}};
 }
 
 // The markers IDEA ships: TODO, FIXME and the two conventional warning tags.
@@ -453,7 +503,7 @@ Json project_defaults() {
 }
 
 Json empty_document() {
-    return {{"recentProjects", Json::array()}, {"settings", editor_defaults()},
+    return {{"recentProjects", Json::array()}, {"settings", editor_defaults_impl()},
             {"lastProject", nullptr}, {"perProject", Json::object()}};
 }
 
@@ -480,8 +530,24 @@ void known_keys(const Json& value, std::initializer_list<std::string_view> keys,
 }
 
 void validate_editor_patch(const Json& patch) {
+    // useTabCharacter / showWhitespaces / formatOnSave were added to the editor
+    // defaults; a validator that does not know them makes the settings dialog fail
+    // on save, so they belong here too.
+    // deleteToTrash is read by file.delete; an unknown key here would make every
+    // settings.update fail, so it belongs in the allow-list, not just in the defaults.
     known_keys(patch, {"fontSize", "tabSize", "wordWrap", "lineNumbers", "restoreLastProject", "syncOnFocus",
-                   "autoSave", "showIndentGuides", "bracketMatching", "tabLimit"},
+                   "autoSave", "showIndentGuides", "bracketMatching", "tabLimit",
+                   "useTabCharacter", "showWhitespaces", "formatOnSave", "deleteToTrash",
+                   "uiZoomPercent", "compactMode", "fullPathsInWindowHeader",
+                   "showTreeIndentGuides", "compactTreeIndents",
+                   "smoothScrolling", "showIconsInMenus",
+                   "rememberSizeForEachToolWindow", "showToolWindowNames", "showToolWindowBars",
+                   "leftSideBySide", "wideScreenSupport", "rightSideBySide", "showToolWindowNumbers",
+                   "keepPopupsForToggles", "dndWithPressedAltOnly", "powerSaveMode",
+                   "useContrastScrollbars", "colorBlindness", "uiFontFamily", "uiFontSize",
+                   "backgroundImagePath", "backgroundImageOpacity", "backgroundImageFill",
+                   "backgroundImageKeepRatio", "presentationMode", "presentationModeFontSize",
+                   "mainMenuDisplayMode", "supportScreenReaders"},
                "INVALID_SETTINGS");
     for (auto it = patch.begin(); it != patch.end(); ++it) {
         const auto& value = it.value();
@@ -495,6 +561,37 @@ void validate_editor_patch(const Json& patch) {
             // IDEA's TabLimitValidator: at least one open tab, sane upper bound.
             if (!value.is_number_integer() || value < 1 || value > 100)
                 fail("INVALID_SETTINGS", "tabLimit must be an integer from 1 through 100.");
+        } else if (it.key() == "uiFontSize") {
+            if (!value.is_number_integer() || value < 9 || value > 24)
+                fail("INVALID_SETTINGS", "uiFontSize must be an integer from 9 through 24.");
+        } else if (it.key() == "uiFontFamily") {
+            if (!value.is_string() || value.get_ref<const std::string&>().size() > 120)
+                fail("INVALID_SETTINGS", "uiFontFamily must be a string of at most 120 bytes.");
+        } else if (it.key() == "backgroundImageOpacity") {
+            if (!value.is_number_integer() || value < 0 || value > 100)
+                fail("INVALID_SETTINGS", "backgroundImageOpacity must be an integer from 0 through 100.");
+        } else if (it.key() == "presentationModeFontSize") {
+            if (!value.is_number_integer() || value < 12 || value > 72)
+                fail("INVALID_SETTINGS", "presentationModeFontSize must be an integer from 12 through 72.");
+        } else if (it.key() == "backgroundImagePath") {
+            if (!value.is_string() || value.get_ref<const std::string&>().size() > 512)
+                fail("INVALID_SETTINGS", "backgroundImagePath must be a string of at most 512 bytes.");
+        } else if (it.key() == "mainMenuDisplayMode") {
+            const auto mode = value.is_string() ? value.get<std::string>() : std::string();
+            if (mode != "hamburger" && mode != "merged" && mode != "separate")
+                fail("INVALID_SETTINGS", "mainMenuDisplayMode must be hamburger, merged or separate.");
+        } else if (it.key() == "backgroundImageFill") {
+            const auto fill = value.is_string() ? value.get<std::string>() : std::string();
+            if (fill != "scale" && fill != "tile" && fill != "center")
+                fail("INVALID_SETTINGS", "backgroundImageFill must be scale, tile or center.");
+        } else if (it.key() == "colorBlindness") {
+            const auto mode = value.is_string() ? value.get<std::string>() : std::string();
+            if (mode != "none" && mode != "deuteranopia" && mode != "protanopia" && mode != "tritanopia")
+                fail("INVALID_SETTINGS", "colorBlindness must be none, deuteranopia, protanopia or tritanopia.");
+        } else if (it.key() == "uiZoomPercent") {
+            // IdeScaleTransformer: the same bounds IDEA's editable combo enforces.
+            if (!value.is_number_integer() || value < 50 || value > 400)
+                fail("INVALID_SETTINGS", "uiZoomPercent must be an integer from 50 through 400.");
         } else if (!value.is_boolean()) {
             fail("INVALID_SETTINGS", "Editor flags must be JSON booleans.");
         }
@@ -686,14 +783,61 @@ void validate_project_patch(const Json& patch) {
             fail("INVALID_SETTINGS", "每个项目的运行配置不能超过 " + std::to_string(max_run_configs) + " 个。");
         std::set<std::string> names;
         for (const auto& value : values) {
+            // A run configuration carries the whole shape (program, arguments, working
+            // directory, environment, before-launch steps); dropping any of it on save
+            // is what made the dialog feel decorative.
             if (!value.is_object()) fail("INVALID_SETTINGS", "runConfigs 的每一项都要是 {name, command[, type]}。");
-            known_keys(value, {"name", "command", "type"}, "INVALID_SETTINGS");
+            known_keys(value, {"name", "command", "type", "program", "args", "cwd", "env", "beforeLaunch", "adapter"},
+                       "INVALID_SETTINGS");
             if (value.contains("type") && !value.at("type").is_string()) fail("INVALID_SETTINGS", "运行配置类型必须是字符串。");
-            if (value.contains("type") && value.at("type").get<std::string>() != "shell" && value.at("type").get<std::string>() != "debug") fail("INVALID_SETTINGS", "运行配置类型只能是 shell 或 debug。");
+            if (value.contains("adapter")) {
+                if (!value.at("adapter").is_string() || value.at("adapter").get_ref<const std::string&>().size() > 64)
+                    fail("INVALID_SETTINGS", "运行配置的调试适配器名要是不超过 64 字节的字符串。");
+            }
+            if (value.contains("type")) {
+                const auto type = value.at("type").get<std::string>();
+                if (type != "shell" && type != "application" && type != "debug")
+                    fail("INVALID_SETTINGS", "运行配置类型只能是 shell、application 或 debug。");
+            }
             const auto name = text_or(value, "name"), command = text_or(value, "command");
             if (name.empty() || name.size() > 80) fail("INVALID_SETTINGS", "运行配置名不能为空且不超过 80 字节。");
             if (command.empty() || command.size() > 4096) fail("INVALID_SETTINGS", "运行命令不能为空且不超过 4096 字节。");
             if (!valid_utf8(name) || !valid_utf8(command)) fail("INVALID_SETTINGS", "运行配置必须是 UTF-8 文本。");
+            const auto optional_text = [&](const char* key, std::size_t limit) {
+                if (!value.contains(key)) return std::string();
+                if (!value.at(key).is_string()) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 必须是字符串。");
+                const auto text = value.at(key).get<std::string>();
+                if (text.size() > limit) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 过长。");
+                if (!valid_utf8(text)) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 必须是 UTF-8 文本。");
+                return text;
+            };
+            optional_text("program", 1024);
+            optional_text("cwd", 1024);
+            const auto string_list = [&](const char* key, std::size_t limit, std::size_t item_limit) {
+                if (!value.contains(key)) return;
+                if (!value.at(key).is_array()) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 必须是数组。");
+                if (value.at(key).size() > limit) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 条目过多。");
+                for (const auto& item : value.at(key)) {
+                    if (!item.is_string()) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 只能是字符串。");
+                    const auto text = item.get<std::string>();
+                    if (text.size() > item_limit) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 条目过长。");
+                    if (!valid_utf8(text)) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 必须是 UTF-8 文本。");
+                }
+            };
+            string_list("args", 256, 1024);
+            string_list("env", 256, 1024);
+            if (value.contains("beforeLaunch")) {
+                if (!value.at("beforeLaunch").is_array()) fail("INVALID_SETTINGS", "运行配置的 beforeLaunch 必须是数组。");
+                if (value.at("beforeLaunch").size() > 16) fail("INVALID_SETTINGS", "运行前步骤最多 16 个。");
+                for (const auto& step : value.at("beforeLaunch")) {
+                    if (!step.is_object()) fail("INVALID_SETTINGS", "运行前步骤要写成 {name, command}。");
+                    known_keys(step, {"name", "command"}, "INVALID_SETTINGS");
+                    const auto step_name = text_or(step, "name"), step_command = text_or(step, "command");
+                    if (step_name.empty() || step_name.size() > 80) fail("INVALID_SETTINGS", "运行前步骤名不能为空且不超过 80 字节。");
+                    if (step_command.empty() || step_command.size() > 4096) fail("INVALID_SETTINGS", "运行前步骤命令不能为空。");
+                    if (!valid_utf8(step_name) || !valid_utf8(step_command)) fail("INVALID_SETTINGS", "运行前步骤必须是 UTF-8 文本。");
+                }
+            }
             if (!names.insert(name).second) fail("INVALID_SETTINGS", "运行配置名不能重复：" + name);
         }
     }
@@ -754,7 +898,7 @@ Json validate_document(Json value) {
         // take their defaults. Unknown keys and wrong types are still refused above.
         // The defaults are hoisted because iterating the items() view of a temporary
         // would leave the iterators dangling.
-        const Json fallbacks = editor_defaults();
+        const Json fallbacks = editor_defaults_impl();
         for (const auto& entry : fallbacks.items())
             if (!value["settings"].contains(entry.key())) value["settings"][entry.key()] = entry.value();
         std::vector<std::string> paths;
@@ -921,6 +1065,10 @@ std::string existing_project_key(const Json& projects, const std::string& root) 
 }
 
 } // namespace
+
+// Public mirror of the internal defaults (projects.hpp): tests and any future caller
+// assert against the real defaults instead of a hand-copied snapshot that drifts.
+Json editor_defaults() { return editor_defaults_impl(); }
 
 Json java_lsp_settings(const Json& java) {
     Json runtimes = Json::array();

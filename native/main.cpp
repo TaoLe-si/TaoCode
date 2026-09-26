@@ -1,10 +1,12 @@
 #include <windows.h>
+#include <psapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <dwmapi.h>
 #include <wrl.h>
 #include <WebView2.h>
 #include <chrono>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -26,6 +28,7 @@
 #include "history.hpp"
 #include "session.hpp"
 #include "watcher.hpp"
+#include "plugins.hpp"
 #include "history.hpp"
 
 using Microsoft::WRL::Callback;
@@ -42,6 +45,9 @@ constexpr UINT run_event_message = WM_APP + 3;
 constexpr UINT dap_event_message = WM_APP + 4;
 constexpr UINT term_event_message = WM_APP + 5;
 constexpr UINT watch_event_message = WM_APP + 6;
+constexpr UINT search_event_message = WM_APP + 7;
+constexpr UINT git_event_message = WM_APP + 8;
+constexpr UINT watch_restart_message = WM_APP + 9;
 
 std::string utf8(const std::wstring& value) {
     if (value.empty()) return {};
@@ -144,6 +150,23 @@ struct App {
     std::mutex run_mutex;
     std::deque<Json> run_events;
 
+    // IDEA's Run Configuration "Before launch" list: the steps run one after another
+    // and a non-zero exit aborts the chain, so a program is never launched against a
+    // build that just failed. The pending step lives here until the UI thread has
+    // delivered the previous step's exit event.
+    struct RunStep {
+        std::string label;
+        std::string command;
+        std::string program;
+        std::string cwd;
+        std::vector<std::string> args;
+        std::vector<std::string> environment;
+        bool shell = true;
+    };
+    std::deque<RunStep> run_steps;
+    bool run_pending_continue = false;
+    int run_last_code = 0;
+
     std::unique_ptr<taocode::dap::Client> dap;
     std::mutex dap_mutex;
     std::deque<Json> dap_events;
@@ -152,6 +175,15 @@ struct App {
     std::unique_ptr<taocode::terminal::Manager> terminals = std::make_unique<taocode::terminal::Manager>();
     std::mutex term_mutex;
     std::deque<Json> term_events;
+    // Last size the UI asked a terminal for. A reverse `runInTerminal` has no size
+    // of its own, so a session the adapter opens reuses what the user is looking at
+    // instead of a constant.
+    int terminal_cols = 120;
+    int terminal_rows = 30;
+    // Console windows opened on an adapter's behalf (`runInTerminal` with kind
+    // "external") outlive the request: the Runner is kept here until it exits.
+    std::mutex external_mutex;
+    std::vector<std::unique_ptr<taocode::Runner>> external_runners;
 
     std::unique_ptr<taocode::history::History> history;  // per-project local history, recreated on open
     std::unique_ptr<taocode::session::SessionStore> sessions;  // crash-recovery drafts, per profile
@@ -161,6 +193,53 @@ struct App {
     std::unique_ptr<taocode::watcher::Watcher> watcher;
     std::mutex watch_mutex;
     std::deque<Json> watch_events;
+    // Set by the watcher's own thread when it dies; consumed on the UI thread, which
+    // is the only place allowed to touch `watcher`.
+    std::mutex watch_restart_mutex;
+    std::string watch_stop_reason;
+    int watch_restarts = 0;
+    std::chrono::steady_clock::time_point watch_started;
+
+    // Find-in-Files: one worker thread per search. The request returns immediately and
+    // the result is delivered from the message loop, so a 100k-file walk cannot freeze
+    // the window; `search_cancel` is polled between files.
+    std::thread search_thread;
+    std::atomic<bool> search_busy{false};
+    std::atomic<bool> search_cancel{false};
+    std::mutex search_mutex;
+    std::deque<Json> search_events;
+
+    // Every git.* command is a child process; they are drained by one worker so a
+    // slow push cannot queue up behind — or freeze — the UI thread.
+    std::thread git_thread;
+    std::atomic<bool> git_busy{false};
+    std::mutex git_mutex;
+    std::deque<Json> git_requests;
+    std::deque<Json> git_replies;
+
+    void queue_search(Json payload) {
+        {
+            std::lock_guard lock(search_mutex);
+            search_events.push_back(std::move(payload));
+        }
+        PostMessageW(window, search_event_message, 0, 0);
+    }
+
+    void drain_search() {
+        std::deque<Json> events;
+        { std::lock_guard lock(search_mutex); events.swap(search_events); }
+        if (webview) for (const auto& event : events) post_json(event);
+    }
+
+    void stop_search() {
+        search_cancel.store(true);
+        if (search_thread.joinable()) {
+            // The walk polls the flag between files, so this returns promptly; waiting
+            // here is what makes "close the project" safe while a search is in flight.
+            search_thread.join();
+        }
+        search_busy.store(false);
+    }
 
     void queue_watch(Json payload) {
         {
@@ -180,13 +259,55 @@ struct App {
     void start_watcher() {
         if (current_root.empty()) return;
         watcher = std::make_unique<taocode::watcher::Watcher>();
+        // A watcher that dies on its own used to do so in silence: the root was
+        // renamed away, or ReadDirectoryChangesW failed, and the file tree simply
+        // stopped refreshing with nothing anywhere saying so. The reason is now
+        // reported and a genuine failure restarts the watch.
+        watcher->on_stopped([this](std::string reason) {
+            {
+                std::lock_guard lock(watch_restart_mutex);
+                watch_stop_reason = std::move(reason);
+            }
+            PostMessageW(window, watch_restart_message, 0, 0);  // must not touch the watcher from its own thread
+        });
         try {
-            watcher->start(fs::path(wide(current_root)), [this](std::vector<std::string> changed) {
-                queue_watch({{"event", "fs.changed"}, {"paths", changed}});
+            // `paths` stays a string array so existing consumers keep working;
+            // `changes` carries the action and, for a rename, the previous path. The
+            // elements come from watcher::to_json so the wire shape has one owner.
+            watcher->start(fs::path(wide(current_root)), [this](std::vector<taocode::watcher::Change> changed) {
+                Json paths = Json::array();
+                Json changes = Json::array();
+                for (const auto& change : changed) {
+                    paths.push_back(change.path);
+                    changes.push_back(change);
+                }
+                queue_watch({{"event", "fs.changed"}, {"paths", std::move(paths)}, {"changes", std::move(changes)}});
             });
+            watch_started = std::chrono::steady_clock::now();
         } catch (const taocode::WorkspaceError&) {
             watcher.reset();  // watching is an enhancement, never a blocker
         }
+    }
+
+    // Runs on the UI thread. `监听已停止` is the reason for a deliberate stop, so it
+    // is the one case that must not be retried; every other reason means the watch
+    // died on its own and the file tree would otherwise go stale forever.
+    void handle_watch_stopped() {
+        std::string reason;
+        { std::lock_guard lock(watch_restart_mutex); reason.swap(watch_stop_reason); }
+        if (reason.empty() || reason == "监听已停止" || current_root.empty()) return;
+        // A watch that lived a while earned a fresh budget; one that dies over and
+        // over is a directory we cannot watch, and retrying would just spin.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - watch_started > std::chrono::seconds(60)) watch_restarts = 0;
+        if (watch_restarts >= 5) {
+            queue_watch({{"event", "fs.watchStopped"}, {"reason", reason}, {"restarting", false}});
+            return;
+        }
+        ++watch_restarts;
+        stop_watcher();
+        start_watcher();
+        queue_watch({{"event", "fs.watchStopped"}, {"reason", reason}, {"restarting", true}, {"attempt", watch_restarts}});
     }
 
     void stop_watcher() noexcept {
@@ -221,22 +342,103 @@ struct App {
         std::deque<Json> events;
         { std::lock_guard lock(run_mutex); events.swap(run_events); }
         if (webview) for (const auto& event : events) post_json(event);
+        bool more = false;
+        int code = 0;
+        { std::lock_guard lock(run_mutex); if (run_pending_continue) { more = true; code = run_last_code; run_pending_continue = false; } }
+        if (more) advance_run_chain(code);
     }
 
-    void start_run(const std::string& line) {
-        if (line.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "运行命令不能为空。");
+    // Runs one step of the chain. The label is echoed into the console so a chained
+    // run reads as named steps rather than one opaque wall of output.
+    void start_run_step(const RunStep& step) {
+        if (!step.label.empty()) queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> " + step.label + " <==\r\n")}});
+        start_run(step.command, step.program, step.args, step.cwd, step.environment, step.shell);
+    }
+
+    void begin_run_chain(std::deque<RunStep> steps) {
+        { std::lock_guard lock(run_mutex); run_steps = std::move(steps); run_pending_continue = false; run_last_code = 0; }
+        if (run_steps.empty()) return;
+        const RunStep first = run_steps.front();
+        run_steps.pop_front();
+        start_run_step(first);
+    }
+
+    // Called from the message loop once the previous step's exit has been posted, so
+    // the next process is created on the UI thread and never from the reader thread.
+    void advance_run_chain(int code) {
+        try {
+            if (code != 0) {
+                const std::size_t skipped = run_steps.size();
+                run_steps.clear();
+                queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> 链已中止：上一步以退出码 " + std::to_string(code)
+                                                                  + " 结束，跳过 " + std::to_string(skipped) + " 个后续步骤 <==\r\n")}});
+                queue_run({{"event", "run.exit"}, {"code", code}, {"remaining", std::size_t{0}}, {"aborted", true}});
+                return;
+            }
+            if (run_steps.empty()) return;
+            const RunStep next = run_steps.front();
+            run_steps.pop_front();
+            start_run_step(next);
+        } catch (const taocode::WorkspaceError& error) {
+            run_steps.clear();
+            queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> 无法启动：" + std::string(error.what()) + " <==\r\n")}});
+            queue_run({{"event", "run.exit"}, {"code", -1}, {"remaining", std::size_t{0}}, {"error", error.code}});
+        } catch (const std::exception&) {
+            run_steps.clear();
+            queue_run({{"event", "run.output"}, {"dataB64", base64_encode(std::string("\r\n==> 无法启动后续步骤 <==\r\n"))}});
+            queue_run({{"event", "run.exit"}, {"code", -1}, {"remaining", std::size_t{0}}});
+        }
+    }
+
+    // IDEA's Run Configuration is not just a command line: it carries the program,
+    // its arguments, the working directory and environment variables. The frontend
+    // sends that whole shape, and this builds the child process from it. A bare
+    // `command` string (the older contract, still accepted) runs through cmd.exe.
+    void start_run(const std::string& command, const std::string& program, const std::vector<std::string>& args,
+                   const std::string& cwd, const std::vector<std::string>& environment, const bool shell) {
         if (runner && runner->running()) throw taocode::WorkspaceError("BUSY", "已有构建/运行任务在进行中，请先停止。");
         runner = std::make_unique<taocode::Runner>();
         taocode::Runner::Spec spec;
-        spec.command = L"cmd.exe";
-        spec.arguments = {L"/d", L"/s", L"/c", wide(line)};
-        if (!current_root.empty()) spec.working_directory = fs::path(wide(current_root));
+        if (shell || program.empty()) {
+            if (command.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "运行命令不能为空。");
+            spec.command = L"cmd.exe";
+            spec.arguments = {L"/d", L"/s", L"/c", wide(command)};
+        } else {
+            spec.command = wide(program);
+            for (const auto& argument : args) spec.arguments.push_back(wide(argument));
+        }
+        // Working directory: an absolute path from the configuration wins, then the
+        // workspace-relative path against the project root, then the root itself.
+        std::wstring directory;
+        if (!cwd.empty()) {
+            const fs::path requested(wide(cwd));
+            directory = requested.is_absolute() || !current_root.empty() ? (requested.is_absolute() ? requested.native() : (fs::path(wide(current_root)) / requested).native()) : requested.native();
+        } else if (!current_root.empty()) {
+            directory = wide(current_root);
+        }
+        if (!directory.empty()) spec.working_directory = fs::path(directory);
+        for (const auto& entry : environment) if (!entry.empty()) spec.environment.push_back(wide(entry));
         runner->start(spec,
-            [this](std::string_view chunk) { queue_run({{"event", "run.output"}, {"chunk", Json(std::string(chunk))}}); },
-            [this](int code) { queue_run({{"event", "run.exit"}, {"code", code}}); });
+            // Raw bytes, base64-encoded: a build prints in its own code page, and a
+            // chunk boundary can split a multi-byte character. The frontend decodes
+            // incrementally and flushes on the last step's exit.
+            [this](std::string_view chunk) { queue_run({{"event", "run.output"}, {"dataB64", base64_encode(chunk)}}); },
+            [this](int code) {
+                std::size_t remaining = 0;
+                {
+                    std::lock_guard lock(run_mutex);
+                    remaining = run_steps.size();
+                    run_last_code = code;
+                    run_pending_continue = true;   // even with nothing left: drain_run clears the flag
+                }
+                // `remaining` lets the console keep the run open across steps instead of
+                // declaring the whole configuration finished after step one.
+                queue_run({{"event", "run.exit"}, {"code", code}, {"remaining", remaining}});
+            });
     }
 
     void stop_run() {
+        { std::lock_guard lock(run_mutex); run_steps.clear(); run_pending_continue = false; }
         if (runner) runner->stop();
     }
 
@@ -279,12 +481,170 @@ struct App {
 
     taocode::dap::Client& require_dap() {
         if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-        if (!dap) { load_dap_config(); dap = std::make_unique<taocode::dap::Client>(); }
+        if (!dap) {
+            load_dap_config();
+            dap = std::make_unique<taocode::dap::Client>();
+            // The adapter's own reverse requests. Both are process-wide hooks with a
+            // working default inside dap.cpp; installing them routes the request to
+            // the real terminal layer / a real nested session instead.
+            taocode::dap::Client::set_run_in_terminal_handler(
+                [this](const Json& args, std::string& error) { return run_in_terminal(args, error); });
+            taocode::dap::Client::set_start_debugging_handler(
+                [this](const Json& args, std::string& error) { return start_nested_debug(args, error); });
+        }
         dap->set_root(fs::path(wide(current_root)));
         return *dap;
     }
 
-    void stop_dap() noexcept { if (dap) { dap->shutdown(); dap.reset(); } }
+    // NOTE: `workspace/applyEdit` is implemented inside taocode::lsp::Session
+    // (lsp_session.cpp: apply_document_edits writes through the workspace layer and
+    // refuses anything that escapes the root). The host side only has to react to a
+    // server-driven write, which is the edit sink wired below.
+
+    // DAP `runInTerminal` (adapter -> host reverse request). kind "integrated" opens
+    // a real ConPTY session in the Terminal tool window and types the command into
+    // it; kind "external" opens a detached console window. Failures fill `error`
+    // instead of throwing, because the answer travels back as a failed response.
+    Json run_in_terminal(const Json& args, std::string& error) {
+        const auto kind = args.value("kind", std::string("integrated"));
+        std::vector<std::string> command_args;
+        if (args.contains("args") && args.at("args").is_array())
+            for (const auto& item : args.at("args")) if (item.is_string()) command_args.push_back(item.get<std::string>());
+        const auto command = args.value("command", std::string());
+        if (command.empty()) { error = "runInTerminal 没有要执行的命令。"; return Json::object(); }
+        std::wstring directory = wide(current_root);
+        const auto cwd = args.value("cwd", std::string());
+        if (!cwd.empty()) {
+            const fs::path requested(wide(cwd));
+            directory = (requested.is_absolute() ? requested : fs::path(wide(current_root)) / requested).native();
+        }
+        if (kind == "external") {
+            taocode::Runner::Spec spec;
+            spec.command = L"cmd.exe";
+            spec.arguments = {L"/d", L"/s", L"/c", L"start", wide(args.value("title", std::string("TaoCode"))), wide(command)};
+            for (const auto& argument : command_args) spec.arguments.push_back(wide(argument));
+            spec.working_directory = fs::path(directory);
+            auto console = std::make_unique<taocode::Runner>();
+            try {
+                console->start(spec, [](const taocode::Runner::Chunk&) {}, [](int) {});
+            } catch (const taocode::WorkspaceError& failure) {
+                error = failure.what();
+                return Json::object();
+            }
+            const auto pid = console->process_id();
+            reap_external_runners();
+            { std::lock_guard lock(external_mutex); external_runners.push_back(std::move(console)); }
+            // `processId` is the one field the adapter can act on: it lets the
+            // debuggee's launcher be waited on or killed later.
+            return {{"processId", pid}};
+        }
+        // Integrated: ConPTY has no "run one command" mode, so a real session is
+        // opened and the command line is typed into it. Both pid fields of the
+        // DAP answer are optional and the shell's own pid is not ours to report,
+        // so an empty body means "started" — the UI shows the session by its id.
+        std::string line = command;
+        for (const auto& argument : command_args) { line += ' '; line += argument; }
+        int id = 0;
+        try {
+            id = terminals->create(terminal_cols, terminal_rows, directory,
+                                   [this](int terminal, std::string_view bytes) {
+                                       queue_term({{"event", "term.output"}, {"id", terminal}, {"dataB64", base64_encode(bytes)}});
+                                   });
+        } catch (const taocode::WorkspaceError& failure) {
+            error = failure.what();
+            return Json::object();
+        }
+        terminals->write(id, line + "\r\n");
+        queue_term({{"event", "term.opened"}, {"id", id}, {"cwd", cwd.empty() ? current_root : cwd}, {"reason", "runInTerminal"}});
+        return Json::object();
+    }
+
+    // Drops the console windows the adapter asked for once their child is gone, so
+    // a long debug session does not accumulate spent Runner objects.
+    void reap_external_runners() {
+        std::lock_guard lock(external_mutex);
+        std::vector<std::unique_ptr<taocode::Runner>> alive;
+        alive.reserve(external_runners.size());
+        for (auto& console : external_runners) if (console && console->running()) alive.push_back(std::move(console));
+        external_runners.swap(alive);
+    }
+
+    // DAP `startDebugging` (adapter -> host reverse request): the nested session
+    // replaces the current one, exactly like IDEA launching a child process debug
+    // from the debug toolbar — one adapter at a time, the previous one reaped.
+    Json start_nested_debug(const Json& args, std::string& error) {
+        const Json configuration = args.contains("configuration") && args.at("configuration").is_object()
+                                       ? args.at("configuration") : Json::object();
+        const auto kind = configuration.value("kind", std::string("cppvsdbg"));
+        const Json entry = dap_config.is_object() ? dap_config.value(kind, Json::object()) : Json::object();
+        auto command = configuration.value("command", std::string());
+        if (command.empty()) command = entry.value("command", std::string());
+        if (command.empty()) { error = "没有为 kind \"" + kind + "\" 配置调试适配器。"; return Json::object(); }
+        std::vector<std::wstring> arguments;
+        const Json args_src = configuration.contains("args") ? configuration.at("args") : entry.value("args", Json::array());
+        if (args_src.is_array()) for (const auto& item : args_src) if (item.is_string()) arguments.push_back(wide(item.get<std::string>()));
+        auto cwd = configuration.value("cwd", std::string());
+        if (cwd.empty()) cwd = current_root;
+        auto nested = std::make_unique<taocode::dap::Client>();
+        nested->set_root(fs::path(wide(current_root)));
+        try {
+            nested->start(wide(command), arguments, fs::path(wide(cwd)),
+                          [this](Json event) { queue_dap({{"event", "dap.event"}, {"payload", std::move(event)}}); });
+        } catch (const taocode::WorkspaceError& failure) {
+            error = failure.what();
+            return Json::object();
+        }
+        stop_dap();
+        dap = std::move(nested);
+        Json request_configuration = configuration;
+        if (!request_configuration.contains("request"))
+            request_configuration["request"] = entry.value("request", std::string("launch"));
+        // The reply arrives on the nested adapter's reader thread, which may answer
+        // long after this function gives up waiting (its own request timeout is two
+        // minutes). The state therefore lives in a shared_ptr the callback keeps
+        // alive: capturing stack locals by reference here was a use-after-free that
+        // would corrupt the stack the moment a slow adapter answered.
+        struct Startup {
+            std::atomic<bool> done{false};
+            std::atomic<bool> failed{false};
+            std::mutex mutex;
+            std::string message;
+        };
+        auto startup = std::make_shared<Startup>();
+        dap->start_debugging(kind, std::move(request_configuration), [startup](Json, Json failure) {
+            if (!failure.is_null()) {
+                std::lock_guard lock(startup->mutex);
+                startup->message = failure.value("message", std::string("调试启动失败"));
+                startup->failed.store(true);
+            }
+            startup->done.store(true);
+        });
+        // A whole initialize -> launch -> setBreakpoints -> configurationDone handshake
+        // legitimately takes a while, so the bound is generous; it exists only so a
+        // silent adapter cannot wedge the session that asked for the child.
+        for (int waited = 0; !startup->done.load() && waited < 3000; ++waited)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (!startup->done.load()) { error = "调试适配器启动超时。"; return Json::object(); }
+        if (startup->failed.load()) {
+            std::lock_guard lock(startup->mutex);
+            error = startup->message.empty() ? std::string("调试启动失败") : startup->message;
+            return Json::object();
+        }
+        return Json::object();
+    }
+
+    void stop_dap() noexcept {
+        // Graceful first: `disconnect` asks the adapter to end the session, waits at
+        // most 5s for it to actually go away and then shuts the pipes down itself, so
+        // this is bounded. shutdown() afterwards is idempotent and is what makes the
+        // stop deterministic — it closes stdin, kills the job and joins the reader
+        // thread (detaching it instead when it is called *from* that thread, which is
+        // what a reverse request does). Destroying the client straight after start()
+        // used to detach a still-running reader — a use-after-free that surfaced as
+        // random crashes right after a detach.
+        if (dap) { dap->disconnect({}); dap->shutdown(); dap.reset(); }
+        reap_external_runners();
+    }
 
     std::string require_repo_root() const {
         if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
@@ -313,6 +673,12 @@ struct App {
         if (!lsp)
             lsp = std::make_unique<taocode::lsp::Session>([this](std::string path, Json diagnostics) {
                 queue_lsp({{"event", "lsp.diagnostics"}, {"path", path}, {"diagnostics", diagnostics}});
+            });
+            // A server-driven write (workspace/applyEdit, a quick fix, organize
+            // imports) changes the file behind the editor's back: tell the UI to
+            // reload that path so the buffer matches disk.
+            lsp->set_edit_sink([this](std::string path) {
+                queue_lsp({{"event", "lsp.edited"}, {"path", std::move(path)}});
             });
         std::map<std::string, taocode::lsp::Session::ServerConfig> servers;
         std::ifstream stream(ui.parent_path() / L"TaoCode.lsp.json", std::ios::binary);
@@ -353,6 +719,8 @@ struct App {
 
     void set_theme(bool dark) {
         const BOOL enabled = dark;
+        // Best effort: a Windows build that does not know attribute 20 simply keeps its
+        // default title bar, which is cosmetic only.
         DwmSetWindowAttribute(window, 20, &enabled, sizeof(enabled));
         ComPtr<ICoreWebView2Controller2> background;
         if (SUCCEEDED(controller.As(&background))) {
@@ -395,6 +763,60 @@ struct App {
         return utf8(selected.native());
     }
 
+    // IDEA's "Background Image..." action (Images.SetBackgroundImage): pick an image
+    // file and hand its bytes to the UI as a data URL. Only real image extensions are
+    // accepted and the file is size-capped, so this cannot be used as a general
+    // "read any file" channel.
+    static bool image_mime_for(const fs::path& path, std::string& mime) {
+        auto extension = path.extension().wstring();
+        for (auto& ch : extension) ch = static_cast<wchar_t>(std::towlower(ch));
+        if (extension == L".png") mime = "image/png";
+        else if (extension == L".jpg" || extension == L".jpeg") mime = "image/jpeg";
+        else if (extension == L".gif") mime = "image/gif";
+        else if (extension == L".webp") mime = "image/webp";
+        else if (extension == L".bmp") mime = "image/bmp";
+        else if (extension == L".svg") mime = "image/svg+xml";
+        else return false;
+        return true;
+    }
+
+    Json read_image(const fs::path& path) {
+        std::string mime;
+        if (!image_mime_for(path, mime))
+            throw taocode::WorkspaceError("INVALID_IMAGE", "只支持 PNG / JPEG / GIF / WebP / BMP / SVG 图片。");
+        std::error_code ec;
+        const auto size = fs::file_size(path, ec);
+        if (ec) throw taocode::WorkspaceError("IO_ERROR", "无法读取该图片文件。");
+        if (size == 0 || size > 16ull * 1024 * 1024)
+            throw taocode::WorkspaceError("INVALID_IMAGE", "图片必须大于 0 且不超过 16 MiB。");
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream) throw taocode::WorkspaceError("IO_ERROR", "无法打开该图片文件。");
+        const std::string bytes{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+        return {{"path", utf8(path.native())}, {"mime", mime}, {"bytes", static_cast<std::int64_t>(bytes.size())},
+                {"dataUrl", "data:" + mime + ";base64," + base64_encode(bytes)}};
+    }
+
+    Json select_image() {
+        ComPtr<IFileOpenDialog> dialog;
+        check(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)), "Create image picker");
+        DWORD options{};
+        check(dialog->GetOptions(&options), "Get image options");
+        check(dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT), "Set image options");
+        const COMDLG_FILTERSPEC filters[]{{L"图片", L"*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.svg"}};
+        check(dialog->SetFileTypes(1, filters), "Set image filters");
+        dialog->SetTitle(L"选择背景图像");
+        const auto result = dialog->Show(window);
+        if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return nullptr;
+        check(result, "Open image picker");
+        ComPtr<IShellItem> item;
+        check(dialog->GetResult(&item), "Get selected image");
+        PWSTR path{};
+        check(item->GetDisplayName(SIGDN_FILESYSPATH, &path), "Get image path");
+        const fs::path selected(path);
+        CoTaskMemFree(path);
+        return read_image(selected);
+    }
+
     Json open_project(const fs::path& path) {
         const auto settings = projects->project_settings(utf8(path.native()));
         auto candidate = std::make_unique<taocode::Workspace>();
@@ -410,14 +832,29 @@ struct App {
             history = std::make_unique<taocode::history::History>(store);
         } catch (...) { history.reset(); }
         start_watcher();
-        const auto title = wide(result.at("name").get<std::string>() + " — TaoCode");
-        SetWindowTextW(window, title.c_str());
+        // IDEA's "Always show full path in window header": the title shows the
+        // project root instead of just the folder name, so two same-named projects
+        // are told apart on the taskbar.
+        // IDEA's "Always show full path in window header": the title shows the
+        // project root instead of just the folder name.
+        Json state = Json::object();
+        {
+            Json loaded = projects->state();
+            if (loaded.is_object() && loaded.contains("settings")) state = loaded.at("settings");
+        }
+        const bool full_path = state.contains("fullPathsInWindowHeader")
+                                   && state.at("fullPathsInWindowHeader").is_boolean()
+                                   && state.at("fullPathsInWindowHeader").get<bool>();
+        const std::string heading = full_path ? current_root : result.at("name").get<std::string>();
+        SetWindowTextW(window, wide(heading + " — TaoCode").c_str());
         return result;
     }
 
     void post_json(const Json& value) {
+        if (!webview) return;  // a reply that races window teardown is simply dropped
         const auto text = wide(value.dump(-1, ' ', false, Json::error_handler_t::replace));
-        webview->PostWebMessageAsJson(text.c_str());
+        if (FAILED(webview->PostWebMessageAsJson(text.c_str())))
+            OutputDebugStringW(L"TaoCode: PostWebMessageAsJson failed (WebView is shutting down).\n");
     }
 
     void queue_clone(Json event) {
@@ -493,10 +930,23 @@ struct App {
         std::wstring text(raw);
         CoTaskMemFree(raw);
         if (text.size() > 16 * 1024 * 1024) return;
+        try {
+            run_request(Json::parse(utf8(text)), false);
+        } catch (const Json::exception&) {
+            // Unparseable: there is no id to answer, so drop it instead of crashing.
+        }
+    }
+
+    // One bridge request, from parse to reply. `on_worker` is true when this runs on
+    // the git worker thread: every git.* call spawns a child process that can block
+    // for minutes (a credential prompt on push, a hung remote on fetch) and running
+    // those on the WebView2 message thread froze the whole window with no way out.
+    // The worker may not touch the WebView2 control either, so its reply is
+    // marshalled back to the UI thread by queue_git_reply / drain_git.
+    void run_request(const Json& request, bool on_worker) {
         const auto start = std::chrono::steady_clock::now();
         Json reply = {{"id", 0}, {"ok", false}};
         try {
-            const Json request = Json::parse(utf8(text));
             if (!request.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "请求必须为 JSON 对象");
             if (request.value("type", std::string()) == "documentState") {
                 dirty = request.at("dirty").get<bool>();
@@ -513,6 +963,12 @@ struct App {
             const auto method = request.at("method").get<std::string>();
             const auto& params = request.at("params");
             if (!params.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "参数必须为 JSON 对象");
+            // git.* goes to the worker. One request at a time, in order: git itself
+            // takes a lock on .git, so running two at once would only fight over it.
+            if (!on_worker && method.rfind("git.", 0) == 0 && is_git_method(method)) {
+                queue_git_request(request);
+                return;  // answered by drain_git once the worker is done
+            }
             if (clone_active && (method == "workspace.open" || method == "workspace.close" || method == "project.create" || method == "project.clone" || method == "project.settings.update" || method == "file.create" || method == "file.rename" || method == "file.delete"))
                 throw taocode::WorkspaceError("BUSY", "请先等待克隆完成或取消克隆。");
             Json result;
@@ -521,11 +977,24 @@ struct App {
                 result["gitAvailable"] = !taocode::find_git_executable().empty();
                 result["defaultParent"] = default_parent;
             } else if (method == "dialog.pickDirectory") result = select_directory(L"选择项目存放目录");
+            else if (method == "dialog.pickImage") result = select_image();
+            // Restores a previously chosen background image after a restart: the path
+            // was persisted in settings, the bytes are re-read here.
+            else if (method == "app.readImage") {
+                const auto path = params.at("path").get<std::string>();
+                if (path.empty()) result = Json(nullptr);
+                else result = read_image(fs::path(wide(path)));
+            }
             else if (method == "workspace.open") {
                 const auto path = params.contains("path") ? params.at("path") : select_directory(L"打开 TaoCode 工作区");
                 result = path.is_null() ? Json(nullptr) : open_project(fs::path(wide(path.get<std::string>())));
             } else if (method == "workspace.close") {
                 projects->closed();
+                stop_search();
+                stop_git();
+                // Breakpoints belong to a project: leaving them behind would make the
+                // next debug session stop in files that are no longer open.
+                if (dap) dap->clear_breakpoints();
                 stop_watcher();
                 stop_lsp();
                 stop_dap();
@@ -543,7 +1012,21 @@ struct App {
             } else if (method == "project.clone") { begin_clone(request["id"], params); return; }
             else if (method == "project.clone.cancel") { result = {{"requested", clone_active && clone_thread.request_stop()}}; }
             else if (method == "projects.forget") result = projects->forget(params.at("path").get<std::string>());
-            else if (method == "settings.update") result = projects->update_settings(params.at("settings"));
+            else if (method == "settings.update") {
+                result = projects->update_settings(params.at("settings"));
+                // "Always show full path in window header" applies live, like every
+                // other appearance change in IDEA's dialog.
+                if (!current_root.empty()) {
+                    const bool full_path = result.is_object() && result.contains("fullPathsInWindowHeader")
+                                               && result.at("fullPathsInWindowHeader").is_boolean()
+                                               && result.at("fullPathsInWindowHeader").get<bool>();
+                    const auto stored_name = projects->state();
+                    const std::string name = stored_name.is_object() && stored_name.contains("recentProjects") && stored_name.at("recentProjects").is_array() && !stored_name.at("recentProjects").empty()
+                                                 ? stored_name.at("recentProjects").back().value("name", std::string()) : std::string();
+                    const std::string heading = full_path ? current_root : name;
+                    if (!heading.empty()) SetWindowTextW(window, wide(heading + " — TaoCode").c_str());
+                }
+            }
             else if (method == "project.settings.get" || method == "project.settings.update") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 if (method == "project.settings.get") result = projects->project_settings(current_root);
@@ -574,10 +1057,20 @@ struct App {
             else if (method == "file.create") result = workspace->create(params.at("path").get<std::string>(), params.value("directory", false), params.value("template", std::string()));
             else if (method == "file.readOnly") result = workspace->set_read_only(params.at("path").get<std::string>(), params.value("readOnly", true));
             else if (method == "file.lineSeparators") result = workspace->convert_line_separators(params.at("path").get<std::string>(), params.at("separator").get<std::string>(), params.at("content").get<std::string>(), params.at("expectedVersion").get<std::string>());
+            else if (method == "file.readBinary") result = workspace->read_binary(params.at("path").get<std::string>(),
+                                                                                  params.value("limit", std::size_t{1024 * 1024}));
+            // Safe delete: "is anything still referring to this?" answered by a real
+            // workspace scan (file + line + preview), so the confirm dialog can show
+            // the same rows IDEA's Safe Delete dialog would.
+            else if (method == "file.usages") result = workspace->usages_of(params.at("path").get<std::string>(),
+                                                                            params.value("symbol", std::string()));
             else if (method == "file.rename") result = workspace->rename(params.at("from").get<std::string>(), params.at("to").get<std::string>());
-            else if (method == "file.delete") result = workspace->remove(params.at("path").get<std::string>());
+            else if (method == "file.delete") result = workspace->remove(params.at("path").get<std::string>(), params.value("trash", false));
             else if (method == "file.copy") result = workspace->copy(params.at("from").get<std::string>(), params.at("to").get<std::string>());
             else if (method == "file.reveal") result = workspace->reveal(params.at("path").get<std::string>());
+            // RevealFileAction for absolute paths: the welcome screen has no workspace yet
+            // (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33).
+            else if (method == "shell.reveal") result = taocode::reveal_absolute(params.at("path").get<std::string>());
             else if (method == "session.save") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 result = sessions->save(current_root, params.at("state"));
@@ -590,8 +1083,18 @@ struct App {
             }
             else if (method == "lsp.open") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                result = lsp ? lsp->open(params.at("path").get<std::string>(), params.value("text", std::string()))
-                             : Json{{"running", false}, {"language", taocode::lsp::Session::language_for(params.at("path").get<std::string>())}};
+                const auto path = params.at("path").get<std::string>();
+                const auto language = taocode::lsp::Session::language_for(path);
+                if (lsp) {
+                    result = lsp->open(path, params.value("text", std::string()));
+                } else {
+                    result = {{"running", false}, {"language", language}};
+                }
+                // "No server configured for this language" is not the same state as
+                // "server is starting": the status bar must not claim indexing is
+                // pending for a plain text file (IDEA only shows the indicator when
+                // the project is actually in dumb mode).
+                result["configured"] = lsp ? lsp->has_server(language) : false;
             }
             else if (method == "lsp.change") {
                 if (!lsp) throw taocode::WorkspaceError("LSP_UNAVAILABLE", "语言服务未就绪。");
@@ -639,8 +1142,48 @@ struct App {
             }
             else if (method == "run.start") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                start_run(params.value("command", std::string()));
-                result = {{"started", true}};
+                const auto string_list = [&params](const char* key) {
+                    std::vector<std::string> values;
+                    if (params.contains(key) && params.at(key).is_array())
+                        for (const auto& item : params.at(key))
+                            if (item.is_string()) values.push_back(item.get<std::string>());
+                    return values;
+                };
+                RunStep main;
+                main.command = params.value("command", std::string());
+                main.program = params.value("program", std::string());
+                main.cwd = params.value("cwd", std::string());
+                main.shell = params.value("shell", true);
+                main.args = string_list("args");
+                main.environment = string_list("env");
+                for (const auto& entry : main.environment)
+                    if (entry.empty() || entry.front() == '=' || entry.find('=') == std::string::npos)
+                        throw taocode::WorkspaceError("INVALID_REQUEST", "环境变量要写成 KEY=VALUE。");
+                if (main.command.empty() && main.program.empty())
+                    throw taocode::WorkspaceError("INVALID_REQUEST", "运行配置需要命令或可执行程序。");
+
+                // IDEA's "Before launch" steps run first, in order, and abort the whole
+                // configuration if one fails — otherwise the program would start against
+                // whatever the previous build left behind.
+                std::deque<RunStep> steps;
+                if (params.contains("beforeLaunch") && params.at("beforeLaunch").is_array()) {
+                    for (const auto& item : params.at("beforeLaunch")) {
+                        if (!item.is_object()) continue;
+                        RunStep step;
+                        step.command = item.value("command", std::string());
+                        step.label = item.value("name", std::string());
+                        if (step.command.empty()) continue;
+                        step.cwd = main.cwd;               // before-launch inherits the configuration's directory
+                        step.environment = main.environment;
+                        step.shell = true;                 // before-launch entries are shell command lines
+                        steps.push_back(std::move(step));
+                    }
+                }
+                main.label = params.value("label", std::string());
+                steps.push_back(std::move(main));
+                const std::size_t step_count = steps.size();
+                begin_run_chain(std::move(steps));
+                result = {{"started", true}, {"steps", step_count}};
             }
             else if (method == "run.write") {
                 if (!runner || !runner->running()) throw taocode::WorkspaceError("NOT_RUNNING", "没有正在运行的任务。");
@@ -681,7 +1224,8 @@ struct App {
             }
             else if (method == "git.commit") {
                 taocode::git::commit(fs::path(wide(require_repo_root())), params.value("message", std::string()),
-                                     params.value("amend", false));
+                                     params.value("amend", false), params.value("signoff", false),
+                                     params.value("author", std::string()), params.value("authorEmail", std::string()));
                 result = {{"ok", true}};
             }
             else if (method == "git.checkout") {
@@ -705,6 +1249,11 @@ struct App {
             else if (method == "git.tag.create") { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; }
             else if (method == "git.tag.delete") { taocode::git::tag_delete(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
             else if (method == "git.ignore") { taocode::git::ignore_path(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; }
+            // IDEA's CommitAuthorComponent reads the repository's configured author; the
+            // same values are handed back to `git.commit` when the user overrides them.
+            else if (method == "git.user") result = taocode::git::user(fs::path(wide(require_repo_root())));
+            // ...and the *authors* completion list comes from the log users (GitCommitOptionsUi.kt:259).
+            else if (method == "git.authors") result = taocode::git::authors(fs::path(wide(require_repo_root())));
             else if (method == "git.diffHunks") result = taocode::git::diff_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("staged", false));
             else if (method == "git.applyHunks") {
                 taocode::git::apply_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(),
@@ -713,7 +1262,38 @@ struct App {
             }
             else if (method == "git.aheadBehind") result = taocode::git::ahead_behind(fs::path(wide(require_repo_root())));
             else if (method == "git.blame") result = taocode::git::blame(fs::path(wide(require_repo_root())), params.at("path").get<std::string>());
-            else if (method == "search.run" || method == "search.replace") {
+            else if (method == "git.fileHistory") result = taocode::git::file_history(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("limit", 100));
+            else if (method == "git.showCommit") result = taocode::git::show_commit(fs::path(wide(require_repo_root())), params.at("revision").get<std::string>());
+            else if (method == "git.worktree.list") result = taocode::git::worktree_list(fs::path(wide(require_repo_root())));
+            else if (method == "git.worktree.add") {
+                const auto repository = fs::path(wide(require_repo_root()));
+                taocode::git::worktree_add(repository, params.at("path").get<std::string>(),
+                                           params.value("branch", std::string()), params.value("newBranch", false));
+                // Return the refreshed list so the UI cannot show a stale tree after a
+                // mutation it just performed.
+                result = taocode::git::worktree_list(repository);
+            } else if (method == "git.worktree.remove") {
+                const auto repository = fs::path(wide(require_repo_root()));
+                taocode::git::worktree_remove(repository, params.at("path").get<std::string>(), params.value("force", false));
+                result = taocode::git::worktree_list(repository);
+            }             else if (method == "git.submodules") result = taocode::git::submodule_status(fs::path(wide(require_repo_root())));
+            else if (method == "git.submodule.update") {
+                const auto repository = fs::path(wide(require_repo_root()));
+                taocode::git::submodule_update(repository, params.value("init", true), params.value("recursive", false));
+                result = taocode::git::submodule_status(repository);
+            }
+            // Cancels the git command running on the worker right now. IDEAs
+            // background-task rows carry a cancel button; git commands are the tasks
+            // TaoCode runs in the background, so this is that button's backend.
+            else if (method == "git.cancel") {
+                taocode::git::request_cancel();
+                result = {{"ok", true}};
+            }
+            else if (method == "search.cancel") { search_cancel.store(true); result = {{"ok", true}}; }
+            // Find in Files walks up to 100k files, which is far too long to hold the
+            // UI thread: it runs on its own thread and answers through the message
+            // loop, and `search.cancel` abandons a walk nobody is waiting for any more.
+            else if (method == "search.run" || method == "search.replace" || method == "search.preview" || method == "search.replaceSelected") {
                 const auto repository = fs::path(wide(require_repo_root()));
                 taocode::search::Options options;
                 options.query = params.value("query", std::string());
@@ -722,11 +1302,46 @@ struct App {
                 options.whole_word = params.value("wholeWord", false);
                 options.include = taocode::search::parse_patterns(params.value("include", std::string()));
                 options.exclude = taocode::search::parse_patterns(params.value("exclude", std::string()));
-                if (method == "search.run") result = taocode::search::run(repository, options);
-                else {
-                    options.replacement = params.value("replacement", std::string());
-                    result = taocode::search::replace(repository, options);
+                options.replacement = params.value("replacement", std::string());
+                options.cancelled = [this] { return search_cancel.load(); };
+                std::vector<taocode::search::Selection> selections;
+                if (method == "search.replaceSelected") {
+                    if (params.contains("matches") && params.at("matches").is_array())
+                        for (const auto& item : params.at("matches")) {
+                            if (!item.is_object()) continue;
+                            taocode::search::Selection selection;
+                            selection.path = item.value("path", std::string());
+                            selection.line = item.value("line", std::int64_t{0});
+                            selection.column = item.value("column", std::int64_t{0});
+                            if (!selection.path.empty() && selection.line > 0 && selection.column > 0)
+                                selections.push_back(std::move(selection));
+                        }
+                    if (selections.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "没有勾选任何要替换的匹配。");
                 }
+                if (search_busy.exchange(true)) throw taocode::WorkspaceError("BUSY", "已有搜索在进行中，请先取消或等待。");
+                search_cancel.store(false);
+                if (search_thread.joinable()) search_thread.join();
+                const auto id = request["id"];
+                const auto started = std::chrono::steady_clock::now();
+                const auto kind = method;
+                search_thread = std::thread([this, repository, options, selections, kind, id, started]() noexcept {
+                    Json payload{{"id", id}, {"ok", false}};
+                    try {
+                        if (kind == "search.run") payload["result"] = taocode::search::run(repository, options);
+                        else if (kind == "search.preview") payload["result"] = taocode::search::preview(repository, options);
+                        else if (kind == "search.replaceSelected") payload["result"] = taocode::search::replace_selected(repository, options, selections);
+                        else payload["result"] = taocode::search::replace(repository, options);
+                        payload["ok"] = true;
+                    } catch (const taocode::WorkspaceError& error) {
+                        payload["error"] = {{"code", error.code}, {"message", error.what()}};
+                    } catch (const std::exception&) {
+                        payload["error"] = {{"code", "SEARCH_FAILED"}, {"message", "搜索失败，请缩小范围后重试。"}};
+                    }
+                    payload["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    search_busy.store(false);
+                    queue_search(std::move(payload));
+                });
+                return;  // asynchronous; delivered by drain_search
             }
             else if (method == "dap.start") {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
@@ -815,7 +1430,9 @@ struct App {
                 return;  // async; delivered through drain_dap
             }
             else if (method == "dap.terminate") { stop_dap(); result = {{"ok", true}}; }
-            else if (method == "dap.disconnect") { if (dap) { dap->disconnect({}); dap->shutdown(); } result = {{"ok", true}}; }
+            // Disconnect ends the session; the client is dropped so the next start
+            // gets a fresh adapter instead of one whose pipes are already closed.
+            else if (method == "dap.disconnect") { stop_dap(); result = {{"ok", true}}; }
             else if (method == "term.create") {
                 // The cwd defaults to the workspace root when the caller omits it
                 // (IDEA's "Open Terminal Here" needs a per-directory cwd).
@@ -823,14 +1440,31 @@ struct App {
                 if (params.contains("cwd") && params.at("cwd").is_string() && !params.at("cwd").get<std::string>().empty())
                     cwd = wide(params.at("cwd").get<std::string>());
                 else if (!current_root.empty()) cwd = wide(current_root);
-                result = {{"id", terminals->create(params.value("cols", 80), params.value("rows", 24), cwd,
+                // Remembered so a terminal a debug adapter opens (runInTerminal)
+                // comes up at the size the user is actually working at.
+                terminal_cols = params.value("cols", terminal_cols);
+                terminal_rows = params.value("rows", terminal_rows);
+                result = {{"id", terminals->create(terminal_cols, terminal_rows, cwd,
                                                    [this](int id, std::string_view bytes) {
                                                        queue_term({{"event", "term.output"}, {"id", id}, {"dataB64", base64_encode(bytes)}});
                                                    })}};
             }
             else if (method == "term.write") { terminals->write(params.at("id").get<int>(), base64_decode(params.value("dataB64", std::string()))); result = {{"ok", true}}; }
-            else if (method == "term.resize") { terminals->resize(params.at("id").get<int>(), params.value("cols", 80), params.value("rows", 24)); result = {{"ok", true}}; }
+            else if (method == "term.resize") {
+                terminal_cols = params.value("cols", terminal_cols);
+                terminal_rows = params.value("rows", terminal_rows);
+                terminals->resize(params.at("id").get<int>(), terminal_cols, terminal_rows);
+                result = {{"ok", true}};
+            }
             else if (method == "term.kill") { terminals->kill(params.at("id").get<int>()); result = {{"ok", true}}; }
+            // IDEA's terminal tool window keeps a session list so a shell that exited
+            // still shows its state; `ids()` was already there, only unreachable.
+            else if (method == "term.list") {
+                Json list = Json::array();
+                for (const int id : terminals->ids())
+                    list.push_back({{"id", id}, {"running", terminals->running(id)}});
+                result = {{"terminals", std::move(list)}};
+            }
             else if (method == "history.list" || method == "history.content" || method == "history.diff" || method == "history.diffSides") {
                 if (!history) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 const auto path = params.at("path").get<std::string>();
@@ -845,6 +1479,33 @@ struct App {
                                                       : history->side_diff(path, id, current);
                 }
             }
+            // Plugin extension points: plugins live under the profile and only publish
+            // command/template metadata, so "installing" one is a directory copy.
+            else if (method == "plugin.list" || method == "plugin.setEnabled") {
+                const fs::path directory = profile / L"plugins";
+                if (method == "plugin.list") {
+                    fs::create_directories(directory);
+                    result = taocode::plugins::to_json(taocode::plugins::list(directory));
+                } else {
+                    taocode::plugins::set_enabled(directory, params.at("id").get<std::string>(), params.value("enabled", true));
+                    result = taocode::plugins::to_json(taocode::plugins::list(directory));
+                }
+            }
+            // IDEA's MemoryUsagePanel reads the JVM heap; the host reports its own
+            // process memory instead, which is the real equivalent here.
+            else if (method == "app.memory") {
+                PROCESS_MEMORY_COUNTERS counters{};
+                std::uint64_t working = 0, peak = 0, private_bytes = 0;
+                if (K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
+                    working = counters.WorkingSetSize;
+                    peak = counters.PeakWorkingSetSize;
+                    private_bytes = counters.PagefileUsage;
+                }
+                result = {{"workingSetMb", working / (1024 * 1024)},
+                          {"peakWorkingSetMb", peak / (1024 * 1024)},
+                          {"privateMb", private_bytes / (1024 * 1024)},
+                          {"available", working != 0}};
+            }
             else if (method == "app.quit") { PostMessageW(window, WM_CLOSE, 0, 0); result = {{"closing", true}}; }
             else throw taocode::WorkspaceError("UNKNOWN_METHOD", "该原生方法未开放");
             reply["ok"] = true;
@@ -857,10 +1518,130 @@ struct App {
             reply["error"] = {{"code", "NATIVE_ERROR"}, {"message", "原生操作失败，请检查工作区是否可访问"}};
         }
         reply["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        post_json(reply);
+        if (on_worker) queue_git_reply(std::move(reply));
+        else post_json(reply);
+    }
+
+    // Bridge methods that spawn git and must therefore never sit on the UI thread.
+    // Kept as an explicit list so a future `git.somethingUI` cannot be swept along.
+    static bool is_git_method(const std::string& method) {
+        // Kept in sync with the `method == "git.*"` branches below and with the
+        // frontend's Method union (src/bridge.ts). A name here that no branch
+        // handles would be answered as UNKNOWN_METHOD off the UI thread.
+        static const std::set<std::string> methods = {
+            "git.status", "git.stage", "git.unstage", "git.commit", "git.rebase", "git.cherryPick",
+            "git.user", "git.authors", "git.diff", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
+            "git.log", "git.logFull", "git.showCommit", "git.blame", "git.fileHistory",
+            "git.checkout", "git.branch.create", "git.branch.delete", "git.merge",
+            "git.tags", "git.tag.create", "git.tag.delete", "git.ignore",
+            "git.fetch", "git.pull", "git.push", "git.aheadBehind",
+            "git.stash", "git.stash.save", "git.stash.pop",
+            "git.worktree.list", "git.worktree.add", "git.worktree.remove",
+            "git.submodules", "git.submodule.update"};
+        return methods.count(method) != 0;
+    }
+
+    void queue_git_reply(Json payload) {
+        {
+            std::lock_guard lock(git_mutex);
+            git_replies.push_back(std::move(payload));
+        }
+        PostMessageW(window, git_event_message, 0, 0);
+    }
+
+    void drain_git() {
+        std::deque<Json> replies;
+        { std::lock_guard lock(git_mutex); replies.swap(git_replies); }
+        if (!webview) return;
+        for (const auto& reply : replies) post_json(reply);
+        // The queue emptied out: tell the UI there is no git work in flight, so the
+        // status-bar indicator settles even when the last reply was an error.
+        std::size_t queued = 0;
+        bool busy = false;
+        {
+            std::lock_guard lock(git_mutex);
+            queued = git_requests.size();
+            busy = git_busy.load();
+        }
+        if (!queued && !busy) post_json(Json{{"event", "git.progress"}, {"queued", 0}, {"running", false}});
+    }
+
+    void queue_git_request(const Json& request) {
+        bool inherited = false;
+        {
+            std::lock_guard lock(git_mutex);
+            git_requests.push_back(request);
+            if (git_busy.load()) inherited = true;  // the running worker will pick this up
+            else git_busy.store(true);
+        }
+        // Never under the lock: publish_git_progress() takes the same mutex.
+        publish_git_progress();
+        if (inherited) return;
+        if (git_thread.joinable()) git_thread.join();
+        git_thread = std::thread([this] { git_worker(); });
+    }
+
+    // IDEA's status bar shows the queue behind the running git command: "正在获取
+    // 变更…（还有 2 个操作）". The counts are real (deque sizes under the lock), so
+    // the indicator can never claim work that is not there.
+    void publish_git_progress() {
+        std::size_t queued = 0;
+        bool busy = false;
+        {
+            std::lock_guard lock(git_mutex);
+            queued = git_requests.size();
+            busy = git_busy.load();
+        }
+        Json event{{"event", "git.progress"}, {"queued", queued}, {"running", busy}};
+        queue_git_reply_event(std::move(event));
+    }
+
+    // Progress events ride the same WM_APP+8 marshalling as the git replies; this is
+    // not a reply, so it goes out as a separate message the bridge fronts as an event.
+    void queue_git_reply_event(Json payload) {
+        {
+            std::lock_guard lock(git_mutex);
+            git_replies.push_back(std::move(payload));
+        }
+        PostMessageW(window, git_event_message, 0, 0);
+    }
+
+    void git_worker() {
+        for (;;) {
+            Json request;
+            {
+                std::lock_guard lock(git_mutex);
+                if (git_requests.empty()) { git_busy.store(false); break; }
+                request = std::move(git_requests.front());
+                git_requests.pop_front();
+            }
+            run_request(request, true);
+        }
+        // Outside the lock, like every other publish.
+        publish_git_progress();
+    }
+
+    // Closing the project or the window drops queued work and waits for the one
+    // command already running. git.cpp bounds every child with a timeout, so this
+    // cannot hang on a hung remote — and a half-finished push must not keep running
+    // against a workspace the UI has already let go of.
+    void stop_git() {
+        {
+            std::lock_guard lock(git_mutex);
+            git_requests.clear();
+        }
+        taocode::git::request_cancel();
+        if (git_thread.joinable()) git_thread.join();
+        git_busy.store(false);
+        std::deque<Json> dropped;
+        { std::lock_guard lock(git_mutex); dropped.swap(git_replies); }
+        if (webview) post_json(Json{{"event", "git.progress"}, {"queued", 0}, {"running", false}});
     }
 
     void configure() {
+        // A shell that exits on its own must release its slot: without this the 64
+        // terminal sessions are eventually all dead-but-held and no new one can spawn.
+        terminals->on_exit([this](int id, int code) { queue_term({{"event", "term.exit"}, {"id", id}, {"code", code}}); });
         check(controller->get_CoreWebView2(&webview), "Get WebView");
         ComPtr<ICoreWebView2_3> mapping;
         check(webview.As(&mapping), "Query local asset mapping");
@@ -875,7 +1656,19 @@ struct App {
         if (SUCCEEDED(settings.As(&settings3))) settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
         EventRegistrationToken token{};
         check(webview->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>([this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-            try { message(args); } catch (...) {}
+            // message() answers every failure itself; this outer guard only catches
+            // the unexpected (allocation failure, a bug in a dispatch branch), and it
+            // must not swallow it silently: the UI gets an error reply instead of a
+            // request that never comes back.
+            try {
+                message(args);
+            } catch (const std::exception& failure) {
+                post_json({{"id", 0}, {"ok", false},
+                           {"error", {{"code", "NATIVE_CRASH"}, {"message", std::string("原生处理请求时发生异常：") + failure.what()}}}});
+            } catch (...) {
+                post_json({{"id", 0}, {"ok", false},
+                           {"error", {{"code", "NATIVE_CRASH"}, {"message", "原生处理请求时发生未知异常。"}}}});
+            }
             return S_OK;
         }).Get(), &token), "Attach bridge");
         check(webview->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
@@ -971,6 +1764,15 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         case watch_event_message:
             app->drain_watch();
             return 0;
+        case search_event_message:
+            app->drain_search();
+            break;
+        case git_event_message:
+            app->drain_git();
+            break;
+        case watch_restart_message:
+            app->handle_watch_stopped();
+            break;
         case WM_CLOSE:
             if (!app->closing_after_clone && app->dirty && MessageBoxW(window, L"有未保存的修改。确定放弃修改并关闭？", L"TaoCode", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
             if (app->clone_active) {
@@ -979,10 +1781,12 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
                 app->clone_thread.request_stop();
                 return 0;
             }
+            app->stop_search();  // join the Find-in-Files thread before teardown
             app->stop_lsp();  // reap language-server children before teardown
             app->stop_run();  // kill any running build/process tree
             app->stop_dap();  // never orphan a debug adapter or its debuggee
             app->stop_watcher();  // join the directory-watcher thread
+            app->stop_git();      // join the git worker; no child outlives the window
             app->terminals->kill_all();  // no shell outlives the window
             if (app->controller) app->controller->Close();
             DestroyWindow(window);

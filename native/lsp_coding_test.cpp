@@ -139,9 +139,35 @@ int main() {
         done = false;
         session.request("completion", kDoc, 2, 4, reply);
         check(wait_for(done), "completion never replied");
-        // The fake server answers completion with a JSON-RPC error, so the client must
-        // surface it through the same callback rather than throw on the odd payload.
-        check(!failure.is_null() && payload.is_null(), "an unimplemented method stays an error");
+        check(failure.is_null(), "completion failed: " + describe(failure));
+        check(payload.at("available") == true, "completion is available");
+        // Line 2 is "}" so there is no identifier being typed: the whole canned
+        // dictionary comes back.
+        check(payload.at("items").size() == 7, "all seven items, got " + std::to_string(payload.at("items").size()));
+    });
+
+    run("completion is filtered by the identifier at the requested position", [&] {
+        bool done = false;
+        Json payload, failure;
+        session.request("completion", kDoc, 1, 11, [&](Json result, Json error) {
+            std::lock_guard lock(mutex);
+            payload = std::move(result);
+            failure = std::move(error);
+            done = true;
+            cv.notify_all();
+        });
+        check(wait_for(done), "completion never replied");
+        check(failure.is_null(), "completion failed: " + describe(failure));
+        const auto& items = payload.at("items");
+        // Line 1 is "    int counter;", so character 11 sits inside "cou".
+        check(items.size() == 2, "prefix 'cou' keeps two items, got " + std::to_string(items.size()));
+        check(items[0].at("label") == "counter" && items[1].at("label") == "count",
+              "the surviving labels, got " + describe(items));
+        check(items[0].at("kind") == "field" && items[1].at("kind") == "variable",
+              "numeric completion kinds become the contract's names");
+        check(items[0].at("apply") == "counter", "insertText becomes apply");
+        check(items[0].at("detail") == "prefix:cou@1:11",
+              "the position and the prefix reached the server: " + describe(items[0].at("detail")));
     });
 
     run("signatureHelp shapes signatures, parameters and the active indices", [&] {
@@ -448,6 +474,104 @@ int main() {
         Json kind_error;
         session.semantic("retype", kDoc, 0, 0, Json::object(), [&](Json, Json error) { kind_error = std::move(error); });
         check(!kind_error.is_null() && kind_error.value("code", std::string()) == "LSP_BAD_KIND", "unknown kind rejected");
+    });
+
+    // A second session whose server advertises TextDocumentSyncKind.Incremental: it
+    // only accepts range changes, so a client that kept sending whole documents
+    // leaves the server with a stale buffer — visible as the wrong prefix.
+    run("didChange sends a range when the server declares incremental sync", [&] {
+        std::mutex local_mutex;
+        std::condition_variable local_cv;
+        bool local_diagnostics = false;
+        Session incremental_session([&](std::string, Json) {
+            std::lock_guard lock(local_mutex);
+            local_diagnostics = true;
+            local_cv.notify_all();
+        });
+        incremental_session.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        config.arguments.push_back(L"--incremental");
+        std::map<std::string, Session::ServerConfig> servers;
+        servers["java"] = config;
+        incremental_session.configure(std::move(servers));
+        check(incremental_session.open(kDoc, "class Sample {\n    int counter;\n}\n").at("running") == true,
+              "the incremental server starts");
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return local_diagnostics; }),
+                  "no diagnostics after deferred didOpen");
+        }
+        incremental_session.change(kDoc, "class Sample {\n    int Sample;\n}\n");
+        bool done = false;
+        Json payload, failure;
+        incremental_session.request("completion", kDoc, 1, 11, [&](Json result, Json error) {
+            std::lock_guard lock(local_mutex);
+            payload = std::move(result);
+            failure = std::move(error);
+            done = true;
+            local_cv.notify_all();
+        });
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return done; }), "completion never replied");
+        }
+        check(failure.is_null(), "completion failed: " + describe(failure));
+        const auto& items = payload.at("items");
+        check(items.size() == 1 && items[0].at("label") == "Sample",
+              "the server's buffer really saw the incremental change, got " + describe(items));
+        check(items[0].at("detail") == "prefix:Sam@1:11",
+              "the prefix comes from the synchronised text: " + describe(items[0].at("detail")));
+        incremental_session.shutdown_all();
+    });
+
+    // A server that explicitly declined a provider must be reported, not answered
+    // with an empty result the UI would read as "nothing to show".
+    run("a capability the server declined is an error, not an empty success", [&] {
+        std::mutex local_mutex;
+        std::condition_variable local_cv;
+        bool local_diagnostics = false;
+        Session declined_session([&](std::string, Json) {
+            std::lock_guard lock(local_mutex);
+            local_diagnostics = true;
+            local_cv.notify_all();
+        });
+        declined_session.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        config.arguments.push_back(L"--no-selection-range");
+        std::map<std::string, Session::ServerConfig> servers;
+        servers["java"] = config;
+        declined_session.configure(std::move(servers));
+        check(declined_session.open(kDoc, "class Sample {\n    int counter;\n}\n").at("running") == true,
+              "the server without selection ranges starts");
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return local_diagnostics; }),
+                  "no diagnostics after deferred didOpen");
+        }
+        const auto ask_local = [&](const std::string& kind) {
+            bool done = false;
+            Json payload, failure;
+            declined_session.semantic(kind, kDoc, 4, 6, Json::object(), [&](Json result, Json error) {
+                std::lock_guard lock(local_mutex);
+                payload = std::move(result);
+                failure = std::move(error);
+                done = true;
+                local_cv.notify_all();
+            });
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return done; }), kind + " never replied");
+            return std::make_pair(payload, failure);
+        };
+        const auto [declined_payload, declined_failure] = ask_local("selectionRange");
+        check(!declined_failure.is_null() && declined_failure.value("code", std::string()) == "LSP_UNSUPPORTED",
+              "a declined selectionRangeProvider is reported: " + describe(declined_failure));
+        check(declined_payload.is_null(), "and no success-shaped result is handed back");
+        const auto [hints, hints_failure] = ask_local("inlayHint");
+        check(hints_failure.is_null() && hints.at("available") == true,
+              "a capability the same server did advertise still works: " + describe(hints_failure));
+        declined_session.shutdown_all();
     });
 
     session.shutdown_all();

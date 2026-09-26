@@ -11,6 +11,11 @@ fs::path project_destination(const fs::path& parent, const std::string& name);
 
 Json java_lsp_settings(const Json& java);
 
+// The editor settings a fresh profile starts with, and the fallback for any key a
+// state file written by an older build does not carry. Exported so tests assert
+// against the real defaults instead of a copy that drifts.
+Json editor_defaults();
+
 // Publishes a project template without replacing anything; does not open/record it.
 fs::path create_project(const fs::path& parent, const std::string& name,
                         const std::string& kind);

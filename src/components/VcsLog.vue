@@ -14,6 +14,7 @@ const selected = ref('')
 const busy = ref(false)
 
 const palette = ['#4FC1E9', '#A0D468', '#FFCE54', '#FC6E51', '#ED5565', '#AC92EC', '#48CFAD', '#EC87C0', '#5D9CEC', '#E8636F']
+const listRef = ref<HTMLElement>()
 const refColor = (ref: GitRef) => ref.type === 'tag' ? 'var(--warning)' : ref.type === 'remote' ? 'var(--secondary)' : 'var(--accent)'
 
 function colorFor(hash: string): string {
@@ -22,41 +23,76 @@ function colorFor(hash: string): string {
   return palette[Math.abs(h) % palette.length]
 }
 
-interface GraphRow { commit: GitFullCommit; lane: number; edges: GraphEdge[] }
-interface GraphEdge { fromRow: number; fromLane: number; toRow: number; toLane: number; color: string }
+interface GraphRow {
+  commit: GitFullCommit
+  lane: number
+  color: string
+  // Parent links leaving this row downwards: a node-to-bottom-edge S-curve.
+  down: Array<{ from: number; to: number; color: string }>
+  // Stubs entering this row from above, from the top edge down to the node.
+  up: Array<{ lane: number; color: string }>
+  // Verticals that only pass through this row on their way to a later commit.
+  pass: Array<{ lane: number; color: string }>
+}
+
+// One row of the canvas is exactly ROW_H CSS pixels tall and the viewBox uses the
+// same units, so a user unit is a device-independent pixel and the drawing is not
+// rescaled (the previous canvas had a broken viewBox, which clipped every lane).
+const LANE_W = 14
+const ROW_H = 26
+const laneX = (lane: number) => lane * LANE_W + LANE_W / 2
+// Both control points sit directly below/above the endpoints, so the curve leaves
+// the node downwards and arrives at the next lane vertically: consecutive rows
+// continue each other's line without a kink.
+const LANE_PATH = (from: number, to: number) =>
+  `M ${laneX(from)} ${ROW_H / 2} C ${laneX(from)} ${ROW_H * 0.75} ${laneX(to)} ${ROW_H * 0.75} ${laneX(to)} ${ROW_H}`
 
 const graph = computed(() => {
   const list = filtered.value
-  if (!list.length) return { rows: [] as GraphRow[], edges: [] as GraphEdge[], width: 0 }
+  if (!list.length) return { rows: [] as GraphRow[], width: 0 }
+  // Commits are listed child-before-parent, so a hash first shows up as a parent:
+  // a lane is claimed then and released again once its own row is drawn, which
+  // keeps the canvas as narrow as the number of concurrently open branches.
+  const rowOf = new Map<string, number>()
+  list.forEach((commit, index) => { if (!rowOf.has(commit.hash)) rowOf.set(commit.hash, index) })
   const laneOf = new Map<string, number>()
-  let nextLane = 0
-  const rows: GraphRow[] = []
-  const edges: GraphEdge[] = []
-  const activeLanes = new Set<number>()
-
-  for (let i = 0; i < list.length; i++) {
-    const c = list[i]
-    let lane = laneOf.get(c.hash)
-    if (lane === undefined) {
-      lane = nextLane++
-      laneOf.set(c.hash, lane)
-    }
-    activeLanes.add(lane)
-    const rowEdges: GraphEdge[] = []
-    for (let p = 0; p < c.parents.length; p++) {
-      const parentHash = c.parents[p]
-      let parentLane = laneOf.get(parentHash)
-      if (parentLane === undefined) {
-        parentLane = p === 0 ? lane : nextLane++
-        laneOf.set(parentHash, parentLane)
-      }
-      const edge: GraphEdge = { fromRow: i, fromLane: lane, toRow: i + 1, toLane: parentLane, color: colorFor(parentHash) }
-      edges.push(edge)
-      rowEdges.push(edge)
-    }
-    rows.push({ commit: c, lane, edges: rowEdges })
+  const lanes: Array<string | null> = []
+  const claimLane = (hash: string) => {
+    const existing = laneOf.get(hash)
+    if (existing !== undefined) return existing
+    const free = lanes.indexOf(null)
+    const lane = free >= 0 ? free : lanes.push(null) - 1
+    laneOf.set(hash, lane)
+    return lane
   }
-  return { rows, edges, width: nextLane }
+  const rows: GraphRow[] = []
+  const edges: Array<{ from: number; to: number; fromRow: number; targetRow: number; color: string }> = []
+  list.forEach((commit, index) => {
+    const lane = claimLane(commit.hash)
+    lanes[lane] = null  // the commit itself occupies the lane for this row
+    for (const parent of commit.parents) {
+      const targetRow = rowOf.get(parent)
+      // A parent missing from the list (shallow clone, grafted root) draws nothing.
+      if (targetRow === undefined || targetRow <= index) continue
+      const parentLane = claimLane(parent)
+      lanes[parentLane] = parent
+      edges.push({ from: lane, to: parentLane, fromRow: index, targetRow, color: colorFor(parent) })
+    }
+    rows.push({ commit, lane, color: colorFor(commit.hash), down: [], up: [], pass: [] })
+  })
+  for (const edge of edges) {
+    rows[edge.fromRow]?.down.push({ from: edge.from, to: edge.to, color: edge.color })
+    const target = rows[edge.targetRow]
+    if (!target) continue
+    // Whatever distance the edge spans, the last stretch falls into the target row
+    // from above, and the rows in between carry it straight through.
+    target.up.push({ lane: edge.to, color: edge.color })
+    for (let row = edge.fromRow + 1; row < edge.targetRow; row++) rows[row]?.pass.push({ lane: edge.to, color: edge.color })
+  }
+  let laneCount = 1
+  for (const row of rows) laneCount = Math.max(laneCount, row.lane + 1)
+  for (const edge of edges) laneCount = Math.max(laneCount, edge.to + 1)
+  return { rows, width: laneCount * LANE_W }
 })
 
 const filtered = computed(() => {
@@ -71,24 +107,67 @@ const filtered = computed(() => {
 
 const selectedCommit = computed(() => commits.value.find(c => c.hash === selected.value) ?? null)
 
+let loadToken = 0
 async function load() {
   if (!isDesktop || !props.root || loading.value) return
+  const token = ++loadToken
   loading.value = true
   error.value = ''
   try {
     const data = await request<GitFullLog>('git.logFull', { limit: 300 })
+    // A commit list belongs to the root that was current when the request started;
+    // another root took over in the meantime, so the answer is stale.
+    if (token !== loadToken) return
     commits.value = data.commits
     loaded.value = true
-    if (!selected.value && data.commits.length) selected.value = data.commits[0].hash
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : String(caught) }
-  finally { loading.value = false }
+    if (!selected.value && data.commits.length) selected.value = data.commits[0]!.hash
+  } catch (caught) {
+    if (token !== loadToken) return
+    error.value = caught instanceof Error ? caught.message : String(caught)
+  } finally {
+    if (token === loadToken) loading.value = false
+  }
 }
 
 function select(hash: string) { selected.value = hash }
 
+// Rows are options in a listbox: Enter/Space selects, arrows walk the history.
+function rowKeys(index: number, event: KeyboardEvent) {
+  const list = listRef.value
+  if (!list) return
+  const move = (next: number) => {
+    event.preventDefault()
+    const target = list.querySelectorAll<HTMLElement>('.vcslog-row')[next]
+    if (!target) return
+    select(graph.value.rows[next]!.commit.hash)
+    target.focus()
+    target.scrollIntoView({ block: 'nearest' })
+  }
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(graph.value.rows[index]!.commit.hash); return }
+  if (event.key === 'ArrowDown' && index + 1 < graph.value.rows.length) move(index + 1)
+  else if (event.key === 'ArrowUp' && index > 0) move(index - 1)
+  else if (event.key === 'Home' && index > 0) move(0)
+  else if (event.key === 'End' && index + 1 < graph.value.rows.length) move(graph.value.rows.length - 1)
+}
+
+function copyFallback(text: string): boolean {
+  // WebView2 gives the async clipboard only for focused documents; the selection
+  // route still works when it refuses (no clipboard permission on file:// origins).
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.append(area)
+  area.select()
+  try { return document.execCommand('copy') } finally { area.remove() }
+}
+
 async function copyHash() {
   if (!selectedCommit.value) return
-  try { await navigator.clipboard.writeText(selectedCommit.value.hash) } catch { /* fallback: no-op */ }
+  const hash = selectedCommit.value.hash
+  try { await navigator.clipboard.writeText(hash) }
+  catch { if (!copyFallback(hash)) error.value = '无法写入剪贴板，请手动选中详情里的完整哈希复制。' }
 }
 
 // IDEA's VCS log popup: Cherry-Pick applies the selected commit onto the current
@@ -109,11 +188,17 @@ function shortDate(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-const LANE_W = 14
-const ROW_H = 26
-
 watch(() => props.active, active => { if (active && !loaded.value) void load() })
-watch(() => props.root, () => { loaded.value = false; commits.value = []; selected.value = '' })
+watch(() => props.root, () => {
+  // Switching projects invalidates anything in flight: bump the token so a reply
+  // for the previous repository cannot land on the new one.
+  loadToken++
+  loading.value = false
+  loaded.value = false
+  commits.value = []
+  selected.value = ''
+  if (isDesktop && props.active) void load()
+})
 onMounted(() => { if (props.active) void load() })
 </script>
 
@@ -122,7 +207,7 @@ onMounted(() => { if (props.active) void load() })
     <div class="panel-heading">
       <span><GitGraph :size="14" />VCS 日志</span>
       <div class="heading-actions">
-        <span class="heading-count">{{ commits.length }}</span>
+        <span class="heading-count">{{ graph.rows.length }}</span>
         <button class="icon-button" title="刷新" aria-label="刷新提交历史" :disabled="!root || loading" @click="load"><RefreshCw :size="14" /></button>
       </div>
     </div>
@@ -133,15 +218,34 @@ onMounted(() => { if (props.active) void load() })
     <p v-if="!isDesktop" class="vcslog-note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
     <p v-else-if="error" class="vcslog-error">{{ error }}</p>
     <div class="vcslog-body">
-      <div class="vcslog-list">
+      <div ref="listRef" class="vcslog-list" role="listbox" aria-label="提交列表">
         <div v-if="loading" class="vcslog-empty">加载中…</div>
         <template v-else-if="graph.rows.length">
-          <div v-for="(row, idx) in graph.rows" :key="row.commit.hash" class="vcslog-row" :class="{ selected: selected === row.commit.hash }" @click="select(row.commit.hash)">
-            <svg class="vcslog-graph" :width="Math.max(graph.width * LANE_W, LANE_W)" :height="ROW_H" viewBox="0 0 {{ Math.max(graph.width * LANE_W, LANE_W) }} {{ ROW_H }}">
-              <template v-for="edge in row.edges" :key="`${edge.fromLane}-${edge.toLane}`">
-                <line :x1="edge.fromLane * LANE_W + LANE_W / 2" :y1="0" :x2="edge.toLane * LANE_W + LANE_W / 2" :y2="ROW_H" :stroke="edge.color" stroke-width="1.5" stroke-opacity="0.7" />
-              </template>
-              <circle :cx="row.lane * LANE_W + LANE_W / 2" :cy="ROW_H / 2" r="3.5" :fill="colorFor(row.commit.hash)" />
+          <div
+            v-for="(row, index) in graph.rows" :key="row.commit.hash" class="vcslog-row" role="option"
+            :class="{ selected: selected === row.commit.hash }" :aria-selected="selected === row.commit.hash"
+            :tabindex="selected === row.commit.hash || (!selected && index === 0) ? 0 : -1"
+            @click="select(row.commit.hash)" @keydown="rowKeys(index, $event)"
+          >
+            <!-- One canvas per row: width/height and viewBox use the same units, so
+                 nothing is scaled and every lane has room. -->
+            <svg
+              class="vcslog-graph" :width="graph.width" :height="ROW_H" :viewBox="`0 0 ${graph.width} ${ROW_H}`"
+              shape-rendering="geometricPrecision" aria-hidden="true" focusable="false"
+            >
+              <line
+                v-for="(line, position) in row.pass" :key="`p${position}-${line.lane}`"
+                :x1="laneX(line.lane)" y1="0" :x2="laneX(line.lane)" :y2="ROW_H" :stroke="line.color" stroke-width="1.5"
+              />
+              <line
+                v-for="(stub, position) in row.up" :key="`u${position}-${stub.lane}`"
+                :x1="laneX(stub.lane)" y1="0" :x2="laneX(stub.lane)" :y2="ROW_H / 2" :stroke="stub.color" stroke-width="1.5"
+              />
+              <path
+                v-for="(edge, position) in row.down" :key="`d${position}-${edge.from}-${edge.to}`"
+                :d="LANE_PATH(edge.from, edge.to)" fill="none" :stroke="edge.color" stroke-width="1.5"
+              />
+              <circle :cx="laneX(row.lane)" :cy="ROW_H / 2" r="3.5" :fill="row.color" />
             </svg>
             <span class="vcslog-refs">
               <span v-for="r in row.commit.refs" :key="r.name" class="vcslog-ref" :class="r.type" :style="{ borderColor: refColor(r) }">{{ r.name }}</span>

@@ -1,14 +1,17 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "lsp_host.hpp"
+#include "workspace.hpp"
 
 namespace taocode {
 namespace lsp {
@@ -31,6 +34,10 @@ public:
     using DiagnosticsSink = std::function<void(std::string path, Json diagnostics)>;
     // Contract-shaped result or a JSON-RPC error object.
     using ResultHandler = std::function<void(Json result, Json error)>;
+    // Fired after the session itself wrote a file (a server-driven workspace edit),
+    // so the host can tell the editor to reload it. Optional: with no sink the file
+    // is still written.
+    using EditSink = std::function<void(std::string path)>;
 
     explicit Session(DiagnosticsSink on_diagnostics) : on_diagnostics_(std::move(on_diagnostics)) {}
     ~Session();
@@ -38,7 +45,11 @@ public:
     Session& operator=(const Session&) = delete;
 
     void configure(std::map<std::string, ServerConfig> servers) { config_ = std::move(servers); }
-    void set_root(std::filesystem::path root) { root_ = std::move(root); }
+    void set_root(std::filesystem::path root);
+    void set_edit_sink(EditSink on_edit) { on_edit_ = std::move(on_edit); }
+    // How long a request may stay unanswered before it is failed with TIMEOUT.
+    // Applies to every server already running and to any server started later.
+    void set_timeout(std::chrono::milliseconds timeout);
 
     static std::string language_for(const std::string& path);
     bool has_server(const std::string& language) const { return config_.count(language) != 0; }
@@ -90,15 +101,29 @@ private:
     std::string to_uri(const std::string& path) const;    // workspace-relative -> file://
     std::string to_path(const std::string& uri) const;    // file:// -> workspace-relative
     static Json text_document(const std::string& uri) { return {{"uri", uri}}; }
+    // `workspace/applyEdit`: splices one document's TextEdit[] (already ordered
+    // back-to-front) into the file and writes it through the workspace layer.
+    // Returns std::nullopt on success, a reason on failure.
+    std::optional<std::string> apply_document_edits(const std::string& uri, const Json& edits, int version);
+    // The workspace handle behind those writes, opened lazily for the current root.
+    std::shared_ptr<Workspace> editor_workspace(const std::filesystem::path& root);
+    // An error when the server explicitly declined the provider `kind` needs.
+    std::optional<Json> unsupported(const std::string& language, const std::string& kind) const;  // caller holds mutex_
 
     std::mutex mutex_;
+    std::mutex edit_mutex_;                               // guards editor_ / on_edit_ (leaf lock)
     std::map<std::string, std::unique_ptr<Host>> hosts_;   // by language
     std::map<std::string, bool> ready_;                    // language -> initialize handshake done
+    std::map<std::string, Json> capabilities_;             // language -> ServerCapabilities
     std::map<std::string, ServerConfig> config_;
     std::map<std::string, Document> documents_;            // by workspace-relative path
     std::map<std::string, Json> pending_actions_;          // path -> last raw CodeAction[]
     std::filesystem::path root_;
     DiagnosticsSink on_diagnostics_;
+    EditSink on_edit_;
+    std::shared_ptr<Workspace> editor_;                   // lazily opened for root_
+    std::filesystem::path editor_root_;
+    std::chrono::milliseconds timeout_ = default_request_timeout;
 };
 
 }  // namespace lsp

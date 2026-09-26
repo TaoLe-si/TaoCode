@@ -3,6 +3,33 @@
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--editor); color: var(--text); font-family: var(--font-ui); font-size: 12px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+/* Compact mode (IDEA AppearanceConfigurable "UI elements take up less screen space"):
+   control heights, panel headings and tab strips shrink. Only density variables are
+   touched, so layout rules never fork. */
+html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ctrl-height-lg: 27px; --panel-heading-h: 26px; --tab-h: 28px; --chrome-height: 34px; }
+/* IDEA "Display icons in menu items" off: the icon column collapses so the titles
+   move to the left, exactly like a Swing menu without icons. */
+html[data-menu-icons='off'] .menu-item-icon { display: none; }
+html[data-menu-icons='off'] .dropdown > .menu-item { padding-left: var(--space-4); }
+/* The same option applies to every menu surface, not just the top menu bar. */
+html[data-menu-icons='off'] .row-menu-item > svg:first-child,
+html[data-menu-icons='off'] .tool-menu-item > svg:first-child,
+html[data-menu-icons='off'] .context-menu-item > svg:first-child { display: none; }
+/* IDEA "Show tool window names": the stripe buttons carry the window name under the
+   icon, so the rail widens; "Show tool window bars" off hides the rails entirely and
+   the docked panels keep their own width. */
+.activity-name { display: none; }
+html[data-tool-names='on'] .activity-bar { width: 66px; min-width: 66px; }
+html[data-tool-names='on'] .activity-button { flex-direction: column; gap: 2px; height: auto; width: 60px; padding: var(--space-1) 2px; }
+html[data-tool-names='on'] .activity-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 1.3; letter-spacing: 0; color: inherit; }
+html[data-tool-stripes='off'] .activity-bar { display: none; }
+/* IDEA "Show tool window numbers": Alt+1..9 mnemonics sit on the stripe buttons. */
+.activity-number { display: none; }
+html[data-tool-numbers='on'] .activity-button { position: relative; }
+html[data-tool-numbers='on'] .activity-number { position: absolute; top: 1px; right: 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 12px; height: 12px; padding: 0 2px; border-radius: 6px; background: var(--selected); color: var(--secondary); font: 600 9px/1 var(--font-mono); }
+html[data-tool-numbers='on'][data-tool-names='on'] .activity-number { top: 2px; right: 4px; }
+.dock-split { flex-shrink: 0; height: 1px; background: var(--line-strong); margin: var(--space-1) 0; }
+.side-by-side-tree { flex: 1 1 40%; min-height: 120px; }
 button, input { font: inherit; }
 select { font: inherit; }
 option { background-color: Canvas; color: CanvasText; }
@@ -35,14 +62,51 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .menu-rule { height: 1px; margin: 4px 8px; background: var(--line); }
 .menu-rule + .menu-section-label { padding-top: 2px; }
 .menu-empty { display: block; padding: 3px 8px 6px 30px; font-size: 11px; color: var(--muted); }
+/* IDEA New UI header widgets (RunToolbarWidgetAction / main.toolbar.git.Branches). */
+.topbar-widgets { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
+.header-widget { display: inline-flex; align-items: center; gap: 5px; max-width: 200px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 11px; white-space: nowrap; }
+.header-widget:hover { background: var(--hover); color: var(--bright); }
+.header-widget > span { overflow: hidden; text-overflow: ellipsis; }
+.header-widget-count { color: var(--accent); }
+.header-run { display: inline-flex; align-items: center; }
+.run-button { color: var(--success, var(--accent)); }
+.run-button.running { color: var(--error); }
+.run-caret { padding: 2px 3px; font-size: 10px; }
+/* IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
+   the project name with a chevron, whose popup lists the open projects and then the recent
+   ones (ProjectConceptBundle.properties:22-23) with the project path and its branch. */
+.project-widget { position: relative; display: flex; align-items: center; flex-shrink: 0; }
+.project-widget-name { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.project-widget-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 300px; max-width: 420px; max-height: 360px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.project-widget-search { margin-bottom: var(--space-2); padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--bright); font-size: 11px; }
+.project-widget-group { padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.project-widget-row { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; text-align: left; }
+.project-widget-details { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.project-widget-title { color: var(--bright); font-size: 12px; }
+.project-widget-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.project-widget-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
+.project-widget-caret { transition: transform .15s ease; }
+.project-widget-caret.open { transform: rotate(180deg); }
 .command-box { display: flex; align-items: center; flex: 1 1 300px; min-width: 0; max-width: 400px; margin-left: auto; gap: var(--space-2); height: 27px; background: var(--panel); border: 1px solid var(--line-strong); color: var(--secondary); border-radius: var(--radius-sm); padding: 0 var(--space-2); }
 .command-box:hover { border-color: var(--accent); background: var(--editor); }
 .command-box > svg, .command-box > kbd { flex-shrink: 0; }
 .command-box > span { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .command-box > kbd { font: 10px var(--font-mono); color: var(--muted); border-left: 1px solid var(--line-strong); padding-left: var(--space-2); }
+/* IDEA's main-toolbar filename widget (FilenameToolbarWidgetAction.kt:49-181): the selected file
+   name in the centre region, coloured with its FileStatus (ADDED/MODIFIED/DELETED — the same
+   tokens the commit legend uses), with a recent-files popup under it. */
+.filename-widget { position: relative; display: flex; align-items: center; flex-shrink: 0; margin-left: var(--space-2); }
+.filename-button { max-width: 320px; color: var(--text); font-size: 12px; }
+.filename-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filename-added { color: var(--success); }
+.filename-modified { color: var(--accent); }
+.filename-deleted { color: var(--error); }
+.filename-none { color: var(--text); }
+.filename-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 220px; max-width: 420px; max-height: 320px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--menu-shadow); }
+.filename-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; text-align: left; }
+.filename-row > svg { flex-shrink: 0; }
+.filename-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .topbar-right { margin-left: auto; display: flex; flex-shrink: 0; gap: var(--space-2); align-items: center; }
-.version-tag { font: 10px var(--font-brand); letter-spacing: 1px; color: var(--muted); white-space: nowrap; }
-.version-tag > span { margin-left: var(--space-1); color: var(--secondary); letter-spacing: 0; }
 .icon-button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--secondary); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .theme-toggle { color: var(--text); }
@@ -63,6 +127,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .rail-bottom { margin-top: auto; padding-bottom: 13px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
 .local-avatar { display: inline-flex; width: 25px; height: 25px; border-radius: 50%; border: 1px solid var(--line-strong); justify-content: center; align-items: center; color: var(--secondary); font: 11px var(--font-brand); }
 .explorer-panel { width: var(--explorer-width, 240px); min-width: 0; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border-right: 1px solid var(--line); }
+/* Right-docked tool windows (IDEA ToolWindowAnchor.RIGHT): mirrored column. */
+.explorer-panel.right-dock { border-right: 0; border-left: 1px solid var(--line); }
+/* IDEA's right stripe: same narrow rail as the left activity bar, on the right. */
+.activity-bar.right-stripe { border-right: 0; border-left: 1px solid var(--line); order: 99; }
+/* The ⋮ strip on a tool window: title + Move to Left/Right/Bottom + Hide
+   (UIBundle tool.window.move.to.action.group.name). */
+.tool-strip-heading { position: relative; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: var(--panel-heading-h); padding: 0 var(--space-2) 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; border-bottom: 1px solid var(--line); }
+.tool-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 60; display: flex; flex-direction: column; min-width: 170px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.tool-menu-item { justify-content: flex-start; gap: var(--space-2); }
+.tool-menu-item:disabled { opacity: .5; }
 .panel-heading { height: var(--panel-heading-h); min-height: var(--panel-heading-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .panel-heading > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
 .heading-actions { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-1); }
@@ -115,6 +189,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .zen-workbench .editor-column { border: 0; }
 .zen-workbench .editor-pane { border: 0; }
 .zen-workbench .breadcrumbs { display: none; }
+/* Maximize Tool Window (MaximizeToolWindowAction.java:30-37 -> ToolWindowPane.kt:544-560
+   `stretch(toolWindow, MAX)`): the dock is stretched over the whole width and everything that
+   shared the pane with it — the editor column *and* the bottom dock nested inside it — is squeezed
+   out. Nothing is written to state, so un-maximizing restores the previous width because
+   `maximizedProportion` was only ever a copy. */
+.tool-maximized .explorer-panel { width: 100%; max-width: none; border-right: 0; border-left: 0; }
+.tool-maximized .editor-column { display: none; }
 .editor-tabs { display: flex; height: 34px; min-height: 34px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .file-tab { display: flex; align-items: center; border-right: 1px solid var(--line); border-top: 2px solid transparent; padding: 0 5px 0 0; flex-shrink: 0; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-2) var(--ease); }
 .file-tab.selected { background: var(--editor); border-top-color: var(--accent); }
@@ -135,7 +216,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .breadcrumb-file > svg { flex-shrink: 0; }
 .editor-save-state { margin-left: auto; padding-left: 10px; color: var(--muted); font-size: 10px; }
 .editor-stage { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
-.code-editor { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.code-editor { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+/* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
+   above the caret line, dismissed by the next key, a text change or a scroll. */
+.editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--menu-shadow); pointer-events: none; }
 .welcome-screen { margin: auto; width: 100%; max-width: 520px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; }
 .welcome-symbol { display: inline-flex; margin-bottom: 8px; color: var(--muted); padding: 0; }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
@@ -160,6 +244,9 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .output-tabs > button { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .output-tabs > button.selected { color: var(--text); border-bottom-color: var(--accent); }
 .count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 16px; padding: 0 5px; margin-left: 5px; background: var(--selected); color: var(--secondary); border-radius: var(--radius-pill); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+/* COMBO content UI (`ToggleContentUiTypeMode`, `ContentComboLabel.java`): the same list of contents
+   as the tab strip above, presented as one combo box instead. */
+.output-content-select { height: 20px; max-width: 260px; min-width: 90px; flex-shrink: 1; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--elevated); color: var(--text); font-size: 11px; }
 .small-muted { color: var(--muted); font-size: 10px; }
 .output-heading .heading-actions { min-width: 28px; flex-shrink: 1; }
 .output-heading .small-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); letter-spacing: .6px; margin-right: 5px; white-space: nowrap; }
@@ -178,7 +265,13 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .run-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .run-toolbar { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .run-command { flex: 1; min-width: 0; background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 10px; font: 12px var(--font-mono); }
-.run-log { flex: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: 10px 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--secondary); font: 12px/1.6 var(--font-mono); }
+.run-log { flex: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: 10px 16px; color: var(--secondary); font: 12px/1.6 var(--font-mono); }
+.run-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-issue-link { display: inline; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
+.run-issue-link:hover { color: var(--text); }
+.run-placeholder { margin: 0; padding: 10px 16px; color: var(--muted); font: 12px/1.6 var(--font-mono); }
+.run-issues { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-top: 1px solid var(--line); background: var(--rail); }
+.run-issue-count { color: var(--muted); font-size: 11px; }
 .run-stdin { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--line); }
 .run-stdin > span { color: var(--muted); font: 12px var(--font-mono); }
 .run-stdin input { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font: 12px var(--font-mono); }
@@ -190,6 +283,51 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-commit-button { justify-self: start; }
 .sc-amend { display: flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; cursor: pointer; }
 .sc-amend input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+/* IDEA ChangesViewCommitPanel: message box header, the changes-tree header with
+   修改(M) + 展开, and the 提交(N) / 提交并推送(P) action row under the tree. */
+.sc-msg-head { display: flex; align-items: center; justify-content: space-between; color: var(--secondary); font-size: 11px; }
+.sc-msg-head .icon-button.on { color: var(--accent); }
+.sc-msg-history { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-xs); max-height: 160px; overflow: auto; }
+.sc-msg-row { padding: 3px var(--space-2); border: 0; background: transparent; color: var(--text); font-size: 11px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-msg-row:hover { background: var(--hover); color: var(--bright); }
+/* IDEA's commit-message inspections (vcs/commit/message/): the commit message editor underlines
+   the part of the line that is past the right margin and offers quick fixes on it. A <textarea>
+   cannot underline a range, so each problem names its line, shows exactly the substring IDEA
+   highlights, and carries the same fixes. */
+.sc-msg-inspections { display: flex; flex-direction: column; gap: 2px; padding: var(--space-1) var(--space-2); border: 1px solid var(--warning); border-radius: var(--radius-xs); background: var(--warning-bg); }
+.sc-inspection-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); margin: 0; font-size: 11px; color: var(--secondary); }
+.sc-inspection-line { border: 0; background: none; padding: 0; color: var(--accent); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.sc-inspection-line:hover { text-decoration: underline; }
+.sc-inspection-text { white-space: nowrap; }
+.sc-inspection-excess { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--warning); font: 11px var(--font-mono); }
+.sc-inspection-fix { padding: 0 4px; font-size: 10px; }
+.sc-changes-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); }
+.sc-actions { display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
+/* IDEA's commit progress panel prints the reason a commit was refused just above the
+   commit actions, in the error colour (CommitProgressPanel.setError, CommitProgressPanel
+   .kt:80-85, fed by buildErrorText() :321-328). */
+.sc-commit-check { margin: 0; padding: var(--space-1) var(--space-3); color: var(--error); font-size: 11px; }
+/* CommitAuthorComponent (vcs/commit/CommitAuthorComponent.kt:124-137): the inactive "By"
+   label followed by the short author name. The row only exists while an author is set (:73-77). */
+.sc-author { display: flex; align-items: center; gap: 5px; padding: 0 var(--space-3) var(--space-1); font-size: 11px; }
+.sc-author-label { color: var(--muted); }
+.sc-author-link { color: var(--accent); font-size: 11px; }
+.sc-author-x { width: 18px; height: 18px; }
+/* GitCommitOptionsUi warning outline (JComponent.outline = "warning", :210-211) + balloon text. */
+.sc-author-warning { margin: 0; padding: 0 var(--space-3) var(--space-2); color: var(--warning); font-size: 11px; line-height: 1.5; }
+/* GitCommitOptionsUi.buildLayout (:136-140) `row(commit.author)` — the two halves of the
+   editor plus its Enter action, laid out like the other option rows. */
+.sc-author-fields { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: 0 var(--space-3) var(--space-2); }
+.sc-author-fields .sc-input { min-width: 140px; }
+.sc-actions .sc-commit-button { flex: 0 0 auto; }
+.sc-push-button { flex: 0 0 auto; }
+/* IDEA ChangesView.ShowCommitOptions: the gear opens the commit options popup. */
+.sc-options-button.on { color: var(--accent); border-color: var(--accent); }
+.sc-options { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 var(--space-3) var(--space-2); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--elevated); }
+/* IDEA's CommitOptionsPanel groups the commit options under their VCS name and under
+   `commit.checks.group` (VcsBundle.properties:44). */
+.sc-options-group { margin: var(--space-1) 0 0; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.sc-flip { transform: rotate(-90deg); }
 .sc-error { color: var(--error); font-size: 12px; margin: 0 12px; overflow-wrap: anywhere; }
 .sc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 0 12px; }
 .sc-section { margin: 4px 0; }
@@ -246,16 +384,137 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .capabilities > div:not(.capabilities-heading) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1); font-size: 11px; color: var(--secondary); margin: var(--space-2) 0; }
 .capabilities > div > span:last-child { color: var(--muted); }
 .capabilities > div > span.capability-ready { color: var(--success); background: var(--success-bg); border-radius: var(--radius-xs); padding: var(--space-1); }
-.statusbar { min-height: 26px; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; color: var(--secondary); font-size: 11px; }
+.statusbar { position: relative; min-height: 26px; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; color: var(--secondary); font-size: 11px; }
 .status-left, .status-right { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-width: 0; min-height: 25px; }
 .status-left > span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .status-brand { display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); width: 33px; height: 25px; }
+/* IDEA's ToolWindowsWidget (status/ToolWindowsWidget.java:62-299) sits in the status
+   bar's left panel (IdeStatusBarImpl.kt:286-297): an icon-only stripe toggle whose
+   hover list carries the tool windows and their Alt+<digit> mnemonics. */
+.status-toolwindows { display: flex; align-items: center; justify-content: center; width: 26px; height: 25px; border: 0; background: none; color: var(--secondary); cursor: pointer; }
+.status-toolwindows:hover { background: var(--hover); color: var(--bright); }
+.status-toolwindows-popup { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 60; display: flex; flex-direction: column; min-width: 220px; max-height: 320px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); }
+.status-toolwindows-name { flex: 1; text-align: left; }
+.status-toolwindows-key { color: var(--secondary); font: 400 10px/1 var(--font-mono); }
+.status-toolwindows-empty { margin: 0; padding: var(--space-2); color: var(--secondary); }
 .status-separator { color: var(--muted); }
 .status-unsaved { color: var(--warning); background: var(--warning-bg); padding: var(--space-1); border-radius: var(--radius-xs); }
 /* IDEA's Git widget in the status bar: branch name plus ↑/↓ counters. */
 .status-branch { display: inline-flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); white-space: nowrap; }
 .status-branch:hover { background: var(--hover); color: var(--bright); }
+/* IDEA's left-most "current file" widget: project name › relative path, click to
+   locate the file in the project view. */
+.status-file { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 340px; padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); white-space: nowrap; }
+.status-file:hover { background: var(--hover); color: var(--bright); }
+.status-file > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status-file-root { flex-shrink: 0; color: var(--bright); font-weight: 600; }
+.status-file svg { flex-shrink: 0; color: var(--muted); }
+/* IDEA's InfoAndProgressPanel: compact indicator + the "all running processes"
+   flyout. Indeterminate tasks spin, like IDEA's AsyncProcessIcon. */
+.status-progress { position: relative; display: inline-flex; align-items: center; }
+.status-progress-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-ui); white-space: nowrap; }
+.status-progress-toggle:hover { background: var(--hover); color: var(--bright); }
+.status-spin { animation: status-spin 1.1s linear infinite; }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+.status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
+.status-progress-row strong { color: var(--text); font-size: 11px; font-weight: 600; }
+.status-progress-row span { color: var(--secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* IDEA ProcessPopup: every row ends in a real cancel button. */
+.status-progress-cancel { display: inline-flex; align-items: center; gap: 3px; align-self: flex-end; margin-top: 2px; padding: 1px var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 10px; }
+.status-progress-cancel:hover { background: var(--error-bg, transparent); color: var(--error); border-color: var(--error); }
+/* SeparatorDecorator.kt:31-43 — the separator is drawn only when the component *before* the
+   indicator was an indicator too, so the first running task (and the "all tasks finished" label,
+   TasksFinishedDecorator.kt:42) never carries one. */
+.status-progress-row.has-separator { border-top: 1px solid var(--line); padding-top: var(--space-2); }
+/* TasksFinishedDecorator.kt:35-45 — success icon, info foreground, label laid out like the rows. */
+.status-progress-finished, .status-progress-empty { flex-direction: row; align-items: center; gap: 5px; }
+.status-progress-finished span, .status-progress-empty span { color: var(--secondary); }
+.status-progress-check { color: var(--success); flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) { .status-spin { animation: none; } }
 .status-count { color: var(--accent); }
+/* IDEA's ColumnSelectionModePanel: a highlighted status-bar widget while the mode is on. */
+.status-column { color: var(--accent) !important; background: var(--accent-soft); border-radius: var(--radius-xs); padding: 0 4px; }
+/* IDEA PowerSaveStatusWidgetFactory: the icon that flags power save mode. */
+/* IDEA IdeStatusBarImpl/ViewStatusBarWidgetsGroup: right-click lists the widgets. */
+.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-widget-title { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
+.status-widget-item { justify-content: flex-start; gap: var(--space-2); width: 100%; }
+.status-widget-backdrop { position: fixed; inset: 0; z-index: 55; }
+.status-notices { color: var(--secondary) !important; }
+.status-notices.has-error { color: var(--error) !important; }
+.status-position { font-variant-numeric: tabular-nums; }
+/* Power save mode stops animations the same way IDEA's JBAnimator pause does. */
+html[data-motion='reduced'] *, html[data-motion='reduced'] *::before, html[data-motion='reduced'] *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+/* IDEA 'Use contrast scrollbars' + colour-vision filter + custom UI font size. */
+html[data-scrollbars='contrast'] * { scrollbar-color: var(--bright) var(--panel); }
+html[data-scrollbars='contrast'] ::-webkit-scrollbar { width: 14px; height: 14px; }
+html[data-scrollbars='contrast'] ::-webkit-scrollbar-thumb { background: var(--bright); border: 2px solid var(--panel); border-radius: 7px; }
+html[data-scrollbars='contrast'] ::-webkit-scrollbar-track { background: var(--panel); border-left: 1px solid var(--line-strong); }
+html[data-color-blind='deuteranopia'] body { filter: url(#cb-deuteranopia); }
+html[data-color-blind='protanopia'] body { filter: url(#cb-protanopia); }
+html[data-color-blind='tritanopia'] body { filter: url(#cb-tritanopia); }
+html[data-ui-font-size='9'] { font-size: 9px; }
+html[data-ui-font-size='10'] { font-size: 10px; }
+html[data-ui-font-size='11'] { font-size: 11px; }
+html[data-ui-font-size='12'] { font-size: 12px; }
+html[data-ui-font-size='13'] { font-size: 13px; }
+html[data-ui-font-size='14'] { font-size: 14px; }
+html[data-ui-font-size='15'] { font-size: 15px; }
+html[data-ui-font-size='16'] { font-size: 16px; }
+html[data-ui-font-size='18'] { font-size: 18px; }
+html[data-ui-font-size='20'] { font-size: 20px; }
+html[data-ui-font-size='24'] { font-size: 24px; }
+/* IDEA AbstractDroppableStripe: drag a stripe button to another stripe or reorder it. */
+.activity-button.dragging { opacity: .5; }
+.stripe-drop-marker { flex-shrink: 0; width: 26px; height: 2px; margin: 1px 0; border-radius: 1px; background: var(--accent); }
+.stripe-drop-hint { flex: 1 1 auto; min-height: 8px; }
+/* IDEA's "Choose Run Configuration" popup (Alt+Shift+F10): the header Run widget's
+   caret opens this list; keyboard navigation is handled by the global key handler. */
+.config-chooser { position: fixed; top: var(--chrome-height); right: var(--space-3); z-index: 70; display: flex; flex-direction: column; min-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.config-chooser-title { margin: 0 0 var(--space-1); padding: 0 var(--space-2); color: var(--muted); font-size: 11px; }
+.config-chooser-empty { margin: 0; padding: var(--space-2); color: var(--secondary); font-size: 11px; }
+.config-chooser-row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; }
+.config-chooser-row.selected { background: var(--selected); color: var(--bright); }
+.config-chooser-name { font-weight: 600; }
+.config-chooser-meta { color: var(--secondary); font-size: 10px; font-family: var(--font-mono); }
+.config-chooser-hint { margin: var(--space-1) 0 0; padding: 0 var(--space-2); color: var(--muted); font-size: 10px; }
+.config-chooser-backdrop { position: fixed; inset: 0; z-index: 65; }
+/* IDEA mainMenuDisplayMode: merged stays inline; separate wraps the menu bar onto its
+   own row; hamburger hides it behind the button. */
+html[data-main-menu='separate'] .topbar { flex-wrap: wrap; }
+html[data-main-menu='separate'] .menubar { flex: 1 1 100%; order: 9; justify-content: flex-start; padding-top: 2px; }
+html[data-main-menu='hamburger'] .menubar { display: none; }
+.hamburger-button { flex-shrink: 0; }
+.hamburger-menu { position: fixed; top: var(--chrome-height); left: var(--space-2); z-index: 70; display: flex; flex-direction: column; min-width: 240px; max-height: 70vh; overflow: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.hamburger-group { justify-content: flex-start; width: 100%; font-weight: 600; }
+.hamburger-item { justify-content: flex-start; gap: var(--space-2); width: 100%; padding-left: var(--space-4); }
+.hamburger-backdrop { position: fixed; inset: 0; z-index: 65; }
+/* Visually hidden live region that announces notifications to assistive technology. */
+.sr-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* IDEA 'Support screen readers': the tooltip suppression itself is done by removing
+   title attributes (see the watcher in App.vue); only the live region is styled here. */
+html[data-screen-reader='on'] .status-notice-list { position: fixed; }
+/* IDEA 'Bracket matching highlight' off: CodeMirror still matches, but the emphasis
+   is removed (same effect as IDEA's unchecked option). */
+html[data-bracket-matching='off'] .cm-matchingBracket,
+html[data-bracket-matching='off'] .cm-nonmatchingBracket { background: none !important; color: inherit !important; outline: none !important; text-decoration: none !important; }
+/* IDEA background image: painted behind the editor stage, opacity from the dialog. */
+html[data-background='on'] .editor-stage { background-image: var(--bg-image-url); background-size: var(--bg-image-size, contain); background-repeat: var(--bg-image-repeat, no-repeat); background-position: var(--bg-image-position, center); }
+html[data-background='on'] .editor-stage .cm-editor { background: color-mix(in srgb, var(--editor) calc((1 - var(--bg-image-opacity, 1)) * 100%), transparent); }
+/* Presentation mode: bigger text, no chrome (IDEA presentationMode). */
+html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-banner { font-size: 1.15em; }
+.status-notice-list { position: absolute; bottom: 100%; right: 8px; z-index: 50; display: flex; flex-direction: column; gap: 2px; min-width: 300px; max-width: 420px; max-height: 280px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-notice-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
+.status-notice-row { display: flex; gap: var(--space-2); margin: 0; color: var(--text); font-size: 11px; line-height: 1.6; }
+.status-notice-row.error { color: var(--error); }
+.status-notice-time { flex-shrink: 0; color: var(--muted); font-family: var(--font-mono); }
+/* ShowNotificationCommitResultHandler.getCommitSummary (:100-116) puts the commit message and the
+   failures *under* the title, so they read as the notification body rather than as more titles. */
+.status-notice-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.status-notice-detail { color: var(--secondary); font-size: 10px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.status-powersave { display: inline-flex; align-items: center; gap: 3px; color: var(--warning) !important; background: var(--warning-bg); border-radius: var(--radius-xs); padding: 0 4px; }
 .status-right { margin-left: auto; padding-right: 10px; }
 .status-right > span { white-space: nowrap; font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
 .status-right > button { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: transparent; border: 0; border-radius: var(--radius-xs); padding: 0; color: var(--secondary); }
@@ -317,7 +576,6 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .muted { color: var(--muted); }
 @media (max-width: 1200px) {
   .trace-intro { padding: 18px 16px 14px; }
-  .version-tag { display: none; }
 }
 @media (max-width: 1000px) {
   .trace-panel { position: absolute; z-index: 7; right: 0; top: 0; bottom: 0; max-width: calc(100% - 48px); box-shadow: -10px 0 24px var(--shadow); }
@@ -405,6 +663,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 
 /* Source control: remote/stash/history controls */
 .sc-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
+/* IDEA's commit legend lives to the right of the commit toolbar and colours each group
+   with its file status (CommitLegendPanel.kt:36-59). It falls back to the compact
+   one-letter form once the full string stops fitting (adjustLegendToFitPanel :63-78),
+   so it always occupies the leftover width of the row. */
+.sc-legend { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); overflow: hidden; white-space: nowrap; font-size: 11px; }
+.sc-legend-item { flex-shrink: 0; }
+.legend-added { color: var(--success); }
+.legend-modified { color: var(--accent); }
+.legend-deleted { color: var(--error); }
+.sc-legend-probe { position: absolute; visibility: hidden; pointer-events: none; white-space: nowrap; }
 .sc-tool { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--secondary); font-size: 11px; }
 .sc-tool:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .sc-tool:disabled { opacity: .5; color: var(--muted); }
@@ -428,6 +696,67 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .run-config-select:focus-visible, .run-config-name:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .run-config-debug { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--secondary); font-size: 11px; cursor: pointer; white-space: nowrap; }
 .run-config-debug input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+/* Full run-configuration editor: program / args / cwd / env / before-launch. */
+.run-config-editor { flex-shrink: 0; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--rail); }
+.run-config-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
+.run-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--muted); font-size: 10px; }
+.run-field-wide { grid-column: 1 / -1; }
+.run-field input, .run-field select, .run-field textarea { min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
+.run-field textarea { resize: vertical; line-height: 1.5; }
+.run-field input:focus-visible, .run-field select:focus-visible, .run-field textarea:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.run-config-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
+.run-before { display: flex; flex-direction: column; gap: var(--space-1); }
+.run-before-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: 10px; }
+.run-before-empty { margin: 0; color: var(--muted); font-size: 11px; }
+.run-before-row { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
+.run-before-name, .run-before-command { min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
+.run-before-name:focus-visible, .run-before-command:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* Safe Delete dialog: usages + recycle-bin choice */
+.delete-usages { max-height: 180px; overflow: auto; margin: var(--space-2) 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
+.delete-usages-head, .delete-usages-empty, .delete-usages-error { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 11px; }
+.delete-usages-scope { margin: 0 0 var(--space-1); padding: 3px 5px; border-left: 2px solid var(--muted); color: var(--secondary); font-size: 11px; line-height: 1.5; }
+.delete-usages-error { color: var(--danger, #c0392b); }
+.delete-usages-more { color: var(--muted); }
+.delete-usages-list { margin: 0; padding: 0; list-style: none; }
+.delete-usage-row { display: block; width: 100%; padding: 1px 0; border: 0; background: transparent; color: var(--text); text-align: left; font: 11px var(--font-mono); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delete-usage-row:hover { color: var(--accent); }
+.delete-trash { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-2); color: var(--secondary); font-size: 11px; cursor: pointer; }
+.delete-trash input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+
+/* Plugin / worktree / submodule / file-history dialogs */
+.plugin-hint { margin: 0 0 var(--space-2); color: var(--muted); font-size: 11px; }
+.plugin-hint code, .plugin-version { font: 11px var(--font-mono); }
+.plugin-empty { margin: var(--space-2) 0; color: var(--muted); font-size: 11px; }
+.plugin-list, .worktree-list, .submodule-list, .file-history-list { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+.plugin-row { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.plugin-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plugin-name { color: var(--text); font-size: 12px; }
+.plugin-desc, .plugin-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; color: var(--secondary); font-size: 11px; cursor: pointer; }
+.plugin-toggle input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.worktree-row, .submodule-row { display: flex; align-items: center; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--line); }
+.worktree-path, .submodule-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: 11px var(--font-mono); }
+.worktree-branch { flex-shrink: 0; color: var(--accent); font: 11px var(--font-mono); }
+.worktree-flag, .submodule-commit { flex-shrink: 0; color: var(--muted); font-size: 10px; }
+.submodule-status { flex-shrink: 0; color: var(--muted); font-size: 10px; }
+.submodule-status.dirty { color: var(--danger, #c0392b); }
+.worktree-add { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.worktree-add input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
+.worktree-new { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; color: var(--secondary); font-size: 11px; cursor: pointer; }
+.worktree-new input { flex: initial; width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.file-history-dialog { width: min(760px, 92vw); }
+.file-history-body { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: var(--space-3); }
+.file-history-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.file-history-row:hover { background: var(--hover); }
+.file-history-row.selected { background: var(--accent-soft, var(--hover)); }
+.fh-hash { color: var(--accent); font: 11px var(--font-mono); }
+.fh-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.fh-meta { color: var(--muted); font-size: 10px; }
+.fh-rename { align-self: flex-start; color: var(--secondary); font-size: 10px; }
+.file-history-detail { min-width: 0; display: flex; flex-direction: column; }
+.fh-detail-head { margin: 0 0 var(--space-1); color: var(--muted); font-size: 11px; }
+.fh-patch { flex: 1; min-height: 0; max-height: 300px; overflow: auto; margin: 0; padding: var(--space-2); background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--secondary); font: 11px/1.6 var(--font-mono); white-space: pre; }
 
 /* Git 追溯（annotate） */
 .blame-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -541,3 +870,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 
 /* IDEA Problems view toolbar (batch code cleanup entry point) */
 .problems-toolbar { display: flex; justify-content: flex-end; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); }
+
+/* IDEA settings search: empty-result field (LightColors.RED — LightColors.java:11), the copy-path
+   breadcrumb menu (CopySettingsPathAction.kt:34-69) and the option spotlight (GlassPanel.java:37-40,
+   59-104: a 2px border around every lit component plus the rest of the page dimmed away). */
+.settings-filter-error { background: var(--search-field-error); border-color: var(--error); }
+.settings-filter-error input, .settings-filter-error input::placeholder { color: var(--text); }
+.settings-search-hint { margin: calc(var(--space-2) * -1) 0 var(--space-2); padding: 0 var(--space-1); color: var(--muted); font-size: 10px; line-height: 1.6; }
+.settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px 4px; }
+.settings-crumbs[tabindex]:hover, .settings-crumbs[tabindex]:focus-visible { background: var(--hover); outline: none; }
+.settings-crumb-menu { position: fixed; z-index: 30; min-width: 150px; box-shadow: var(--menu-shadow); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.settings-crumb-backdrop { position: fixed; inset: 0; z-index: 20; }
+.settings-spotlight { outline: 2px solid var(--spotlight); outline-offset: 2px; border-radius: var(--radius-xs); }
+.settings-spotlight-on .settings-panel :is(.checkbox-row, .input-row, .theme-option):not(.settings-spotlight) { opacity: 0.4; }

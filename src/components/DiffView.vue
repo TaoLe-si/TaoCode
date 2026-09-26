@@ -19,17 +19,20 @@ const stats = computed(() => {
   return { added, removed }
 })
 // Split a line into plain/highlighted parts using the [start, length] word marks.
+// Out-of-range or overlapping marks are dropped instead of shifting the text: the
+// line itself is always rendered whole, and every part goes out as text (never
+// HTML) so a file that contains markup cannot inject anything into the viewer.
 function parts(cell: DiffRow['left'], marks?: [number, number][]) {
   if (!cell) return []
   const list: { text: string; mark: boolean }[] = []
   let cursor = 0
   for (const [start, length] of marks ?? []) {
-    if (start < cursor || start + length > cell.text.length) continue
+    if (start < cursor || length <= 0 || start + length > cell.text.length) continue
     if (start > cursor) list.push({ text: cell.text.slice(cursor, start), mark: false })
     list.push({ text: cell.text.slice(start, start + length), mark: true })
     cursor = start + length
   }
-  list.push({ text: cell.text.slice(cursor), mark: false })
+  if (cursor < cell.text.length) list.push({ text: cell.text.slice(cursor), mark: false })
   return list
 }
 </script>
@@ -45,9 +48,8 @@ function parts(cell: DiffRow['left'], marks?: [number, number][]) {
       </div>
       <button v-if="closable" class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="16" /></button>
     </div>
-    <div v-if="mode === 'sides'" class="diff-sides">
-      <p v-if="truncated" class="diff-note">差异行数超过上限，后续部分未显示。</p>
-      <p v-if="!rows.length" class="diff-note">{{ unified || '（无差异）' }}</p>
+    <p v-if="truncated" class="diff-note">差异行数超过上限，后续部分未显示。</p>
+    <div v-if="rows.length && mode === 'sides'" class="diff-sides">
       <div v-for="(row, index) in rows" :key="index" class="diff-line" :class="`diff-${row.kind}`">
         <span class="diff-no">{{ row.left?.no ?? '' }}</span>
         <span class="diff-cell"><span v-for="(part, i) in parts(row.left, row.leftMarks)" :key="i" :class="{ 'diff-word-del': part.mark }">{{ part.text }}</span></span>
@@ -55,6 +57,8 @@ function parts(cell: DiffRow['left'], marks?: [number, number][]) {
         <span class="diff-cell"><span v-for="(part, i) in parts(row.right, row.rightMarks)" :key="i" :class="{ 'diff-word-add': part.mark }">{{ part.text }}</span></span>
       </div>
     </div>
+    <!-- Both the unified patch and the "nothing to show" fallback need pre-formatted
+         text: a <p> would collapse the patch's newlines and indentation. -->
     <pre v-else class="diff-body">{{ unified || '（无差异）' }}</pre>
   </div>
 </template>

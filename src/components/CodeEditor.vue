@@ -2,19 +2,24 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { basicSetup } from 'codemirror'
 import { Compartment, EditorSelection, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
-import { Decoration, EditorView, hoverTooltip, keymap, rectangularSelection, crosshairCursor, WidgetType, type Command } from '@codemirror/view'
-import { HighlightStyle, bracketMatching, indentUnit, syntaxHighlighting } from '@codemirror/language'
+import { Decoration, EditorView, hoverTooltip, keymap, rectangularSelection, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { HighlightStyle, foldedRanges, indentUnit, syntaxHighlighting, unfoldEffect } from '@codemirror/language'
+import { indentLess, indentMore } from '@codemirror/commands'
 import { autocompletion, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/lint'
 import { tags } from '@lezer/highlight'
 import type { Theme } from '../appearance'
 import { editingCommands } from '../editorCommands'
+import { NO_ERRORS_IN_FILE, nextErrorTarget } from '../gotoNextError'
 import { candidates as templateCandidates, expand as expandTemplateAt, defaultTemplateSettings, type TemplateSettings } from '../templates'
 import { wrapSelection, type SurroundTemplate } from '../surround'
 import { lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspCompletionResult, type LspDefinitionResult, type LspHighlightResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult } from '../bridge'
 
 const props = defineProps<{ content: string; path: string; language?: string; theme: Theme; active: boolean; settings: EditorSettings; templates: TemplateSettings; lspEnabled: boolean; readOnly?: boolean; reveal?: { path: string; line: number } | null; breakpoints?: DapBreakpoint[]; debugLine?: number; bookmarks?: number[] }>()
-const emit = defineEmits<{ change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: [] }>()
+const emit = defineEmits<{
+  columnMode: [active: boolean]
+  selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: [] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
@@ -42,6 +47,9 @@ const readOnlyMode = new Compartment
 function toggleColumnSelection() {
   columnActive = !columnActive
   view?.dispatch({ effects: columnMode.reconfigure(columnActive ? rectangularSelection({ eventFilter: event => event.button === 0 }) : []) })
+  // IDEA's ColumnSelectionModePanel shows this state in the status bar, so the mode
+  // has to be observable from outside the editor.
+  emit('columnMode', columnActive)
 }
 let lspTimer: number | undefined
 function scheduleLspChange() {
@@ -116,6 +124,49 @@ const indentGuidesExtension = [
     '& .cm-indent-guide': { display: 'inline-block', width: '1px', height: '1em', background: 'var(--border)', opacity: '0.55' },
   }),
 ]
+// IDEA's "Visualize whitespaces": a dot per space and a chevron per tab, drawn as
+// replaced characters so they never shift the text they annotate.
+class WhitespaceWidget extends WidgetType {
+  constructor(readonly tab: boolean) { super() }
+  eq(other: WhitespaceWidget) { return other.tab === this.tab }
+  toDOM() {
+    const span = document.createElement('span')
+    span.className = this.tab ? 'cm-whitespace-tab' : 'cm-whitespace-space'
+    span.textContent = this.tab ? '→' : '·'
+    span.setAttribute('aria-hidden', 'true')
+    return span
+  }
+  ignoreEvent() { return false }
+}
+const whitespaceLayer = [
+  ViewPlugin.fromClass(class {
+    decorations: DecorationSet
+    constructor(readonly view: EditorView) { this.decorations = buildWhitespace(view) }
+    update(update: ViewUpdate) { if (update.docChanged || update.viewportChanged) this.decorations = buildWhitespace(update.view) }
+  }, { decorations: plugin => plugin.decorations }),
+  EditorView.theme({
+    '.cm-whitespace-space': { color: 'var(--muted)', opacity: '0.55' },
+    '.cm-whitespace-tab': { color: 'var(--muted)', opacity: '0.55' },
+  }),
+]
+// One widget budget per redraw: a minified bundle or a generated table can put tens
+// of thousands of spaces in a single screen, and each one is a real DOM node. Past
+// the budget the layer simply stops annotating instead of stalling the editor.
+const WHITESPACE_BUDGET = 50000
+function buildWhitespace(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  let budget = WHITESPACE_BUDGET
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to)
+    for (let index = 0; index < text.length && budget > 0; ++index) {
+      const character = text[index]!
+      if (character !== ' ' && character !== '\t') continue
+      --budget
+      builder.add(from + index, from + index + 1, Decoration.replace({ widget: new WhitespaceWidget(character === '\t') }))
+    }
+  }
+  return builder.finish()
+}
 // Same-symbol highlighting: on caret move (debounced) ask documentHighlight and mark
 // every occurrence. Sorted + non-overlapping so the decoration builder never throws.
 const setHighlights = StateEffect.define<{ from: number; to: number }[]>()
@@ -225,6 +276,8 @@ function adjustSelection(grow: boolean) {
   return true
 }
 defineExpose({
+  columnModeActive: () => columnActive,
+  toggleColumnSelection,
   command: (name: string) => {
     const editor = view
     const run = editorActions[name]
@@ -310,6 +363,68 @@ function lspMarkers(): Diagnostic[] {
   }
   return markers
 }
+// IDEA's lightweight information hint (HintManagerImpl.java:606-624): an overlay ABOVE the
+// caret line that the next key, the next text change and any scrolling dismiss. The window
+// listener is attached one tick later so the key press that asked for the hint cannot be the
+// one that hides it.
+const errorHint = ref<{ text: string; style: Record<string, string> } | null>(null)
+let errorHintKeys: (() => void) | null = null
+function dropErrorHintKey() {
+  if (errorHintKeys) { window.removeEventListener('keydown', errorHintKeys); errorHintKeys = null }
+}
+function hideErrorHint() {
+  errorHint.value = null
+  dropErrorHintKey()
+}
+function showErrorHint(text: string) {
+  const editor = view
+  const box = container.value
+  if (!editor || !box) return
+  const coords = editor.coordsAtPos(editor.state.selection.main.head)
+  if (!coords) return
+  const rect = box.getBoundingClientRect()
+  const top = coords.top - rect.top
+  const style = { left: `${Math.round(coords.left - rect.left)}px` }
+  // ABOVE is IDEA's position (HintManagerImpl.java:611); a line at the very top of the view
+  // has no room above it, so the label flips below that line instead of being clipped.
+  errorHint.value = { text, style: top >= 26 ? { ...style, bottom: `${Math.round(rect.height - top + 4)}px` } : { ...style, top: `${Math.round(coords.bottom - rect.top + 4)}px` } }
+  dropErrorHintKey()
+  errorHintKeys = hideErrorHint
+  void nextTick(() => { if (errorHintKeys) window.addEventListener('keydown', errorHintKeys, { once: true }) })
+}
+/**
+ * IDEA's GotoNextError / GotoPreviousError (GotoNextErrorHandler.java). The target is picked
+ * by src/gotoNextError.ts; this only turns it into an editor transaction.
+ *
+ * navigateToError() (:165-198) removes the selection and the secondary carets, puts the caret
+ * on the highlight and scrolls it to the centre (:172-177), then unfolds a collapsed region
+ * hiding it (:178-179). getNavigationPositionFor() (:200-208) navigates to the highlight
+ * start plus `navigationShift` — zero for LSP diagnostics, and the after-end-of-line case
+ * needs no extra shift either: lspPosition() clamps the character to the line, so an
+ * end-of-line highlight already resolves to the offset IDEA would use.
+ */
+function goToError(forward: boolean): boolean {
+  const editor = view
+  if (!editor || !props.lspEnabled) return false
+  const doc = editor.state.doc
+  const head = editor.state.selection.main.head
+  const line = doc.lineAt(head)
+  const target = nextErrorTarget(
+    lspDiagnostics.get(props.path) ?? [],
+    { line: line.number - 1, character: head - line.from },
+    forward,
+  )
+  if (!target) { showErrorHint(NO_ERRORS_IN_FILE); return true }
+  const pos = lspPosition(doc, target.line, target.character)
+  const effects: StateEffect<unknown>[] = [EditorView.scrollIntoView(pos, { y: 'center' })]
+  foldedRanges(editor.state).between(0, doc.length, (from, to) => {
+    if (from <= pos && pos <= to) effects.push(unfoldEffect.of({ from, to }))
+  })
+  hideErrorHint()
+  editor.dispatch({ selection: { anchor: pos }, effects })
+  editor.focus()
+  return true
+}
 const hoverSource = hoverTooltip(async (hovered, pos) => {
   const info = hovered.state.doc.lineAt(pos)
   try {
@@ -381,6 +496,29 @@ function nextTemplateStop(view: EditorView): boolean {
   view.dispatch({ selection: { anchor: next.from, head: next.to }, scrollIntoView: true })
   return true
 }
+// Tab / Shift+Tab (IDEA's indent & outdent). CodeMirror's basicSetup deliberately
+// does NOT install `indentWithTab`, so until now the keystroke fell through to the
+// browser and only moved focus. A non-empty selection indents every line it touches;
+// a bare caret inserts one indent unit — a real tab when Editor → "Use tab character"
+// is on, `tabSize` spaces otherwise. Both paths read the same `indentUnit` facet the
+// settings compartment writes, so the result always matches the setting.
+function indentUnitText() { return props.settings.useTabCharacter ? '\t' : ' '.repeat(props.settings.tabSize) }
+function changeIndent(direction: 1 | -1): Command {
+  const outdent = direction < 0
+  return editor => {
+    const state = editor.state
+    if (state.readOnly) return false
+    if (outdent || state.selection.ranges.some(range => !range.empty)) return (outdent ? indentLess : indentMore)(editor)
+    const text = indentUnitText()
+    editor.dispatch(state.changeByRange(range => ({
+      changes: { from: range.from, to: range.to, insert: text },
+      range: EditorSelection.cursor(range.from + text.length),
+    })), { scrollIntoView: true, userEvent: 'input.indent' })
+    return true
+  }
+}
+const indentCommand = changeIndent(1)
+const outdentCommand = changeIndent(-1)
 function templateCompletion(context: CompletionContext): CompletionResult | null {
   const info = context.state.doc.lineAt(context.pos)
   const list = templateCandidates(info.text, context.pos - info.from, props.path, props.templates)
@@ -464,6 +602,9 @@ const editorActions: Record<string, Command> = {
   'template.expand': expandTemplate,
   'column.select': () => { toggleColumnSelection(); return true },
   'edit.last': lastEditLocation,
+  // IDEA's Navigate menu: GotoNextError / GotoPreviousError (PlatformActions.xml:612-615).
+  'error.next': () => goToError(true),
+  'error.previous': () => goToError(false),
 }
 function surroundWith(template: SurroundTemplate) {
   const editor = view
@@ -504,6 +645,12 @@ function lspExtensions(): Extension[] {
       { key: 'Ctrl-p', preventDefault: true, run: emitSemantic('signature') },
       { key: 'Mod-w', preventDefault: true, run: () => adjustSelection(true) },
       { key: 'Mod-Shift-w', preventDefault: true, run: () => adjustSelection(false) },
+      // $default.xml:658-660 GotoNextError = F2, :679-681 GotoPreviousError = shift F2. Both
+      // are editor actions that need highlighting to be available
+      // (BaseGotoNextErrorAction.isValidForFile:52-54), so they belong to this conditional
+      // keymap rather than to the always-on one.
+      { key: 'F2', preventDefault: true, run: () => goToError(true) },
+      { key: 'Shift-F2', preventDefault: true, run: () => goToError(false) },
     ]),
     EditorView.domEventHandlers({
       mousedown: (event, editor) => {
@@ -564,11 +711,16 @@ function editorAppearance() {
   }, { dark: props.theme === 'dark' })
 }
 function editorOptions() {
+  // IDEA's "Use tab character" (Editor → Code Style): the indent unit becomes a real
+  // tab and Tab inserts one, instead of padding with spaces.
   return [
     EditorState.tabSize.of(props.settings.tabSize),
-    indentUnit.of(' '.repeat(props.settings.tabSize)),
+    indentUnit.of(indentUnitText()),
     props.settings.wordWrap && !heavy ? EditorView.lineWrapping : [],
     EditorView.theme({ '.cm-lineNumbers': { display: props.settings.lineNumbers ? 'flex' : 'none' } }),
+    // "Show whitespaces": every space becomes a faint dot and every tab an arrow, the
+    // way IDEA's "Visualize whitespaces" renders them.
+    props.settings.showWhitespaces ? whitespaceLayer : [],
   ]
 }
 onMounted(() => {
@@ -603,8 +755,27 @@ onMounted(() => {
           // proceeds.
           { key: 'Ctrl-Alt-j', preventDefault: true, run: expandTemplate },
           { key: 'Ctrl-Alt-t', preventDefault: true, run: () => { emit('surround'); return true } },
-          { key: 'Tab', preventDefault: true, run: nextTemplateStop },
+          // Tab first feeds a pending live-template slot; otherwise it indents.
+          // (A snippet inserted by a completion owns Tab through @codemirror/autocomplete's
+          // own highest-precedence keymap, which runs before this one.)
+          { key: 'Tab', preventDefault: true, run: editor => nextTemplateStop(editor) || indentCommand(editor), shift: outdentCommand },
           { key: 'Ctrl-Shift-Backspace', preventDefault: true, run: lastEditLocation },
+        ]),
+        // Keys the library would otherwise answer with something IDEA does not do. These
+        // bindings have to precede basicSetup: a CodeMirror keymap facet is a plain facet, so
+        // the extension listed first wins the key.
+        keymap.of([
+          // $default.xml:849-851 — F8 is Step Over in the debugger, and dapStep runs from the
+          // window-level handler. @codemirror/lint's lintKeymap also binds F8 to
+          // nextDiagnostic and would fire for the same press, dragging the caret away
+          // mid-step. Consuming the key here shadows only the library binding: CodeMirror
+          // prevents the browser default but lets the event through to the window handler.
+          { key: 'F8', preventDefault: true, run: () => true },
+          // $default.xml:309-311 / :717-719 — Alt+Left/Right is PreviousTab/NextTab, and
+          // TabNavigationActionBase.java:71-78 routes it to the editor's tabs. CodeMirror binds the
+          // same chord to cursorSyntaxLeft/Right, so the caret would also jump a syntax unit.
+          { key: 'Alt-ArrowLeft', preventDefault: true, run: () => true },
+          { key: 'Alt-ArrowRight', preventDefault: true, run: () => true },
         ]),
         basicSetup,
         EditorState.lineSeparator.of(props.content.includes('\r\n') ? '\r\n' : '\n'),
@@ -636,11 +807,18 @@ onMounted(() => {
           },
         }),
         EditorView.updateListener.of(update => {
+          // HIDE_BY_TEXT_CHANGE (HintManagerImpl.java:624): typing dismisses the hint.
+          if (update.docChanged) hideErrorHint()
           if (update.docChanged && !replacing) { if (!dirty) { dirty = true; emit('change') } scheduleLspChange(); rangeStack = null; templateStops = []; noteEdit(); scheduleHints() }
           if (update.selectionSet || update.docChanged) {
             const pos = update.state.selection.main.head
             const line = update.state.doc.lineAt(pos)
             emit('cursor', line.number, pos - line.from + 1)
+            // IDEA's PositionPanel switches to "N selected" while a selection exists.
+            const range = update.state.selection.main
+            const selected = range.to - range.from
+            emit('selection', selected > 0 ? { characters: selected, lines: update.state.doc.lineAt(range.to).number - update.state.doc.lineAt(range.from).number } : null)
+            emit('cursors', update.state.selection.ranges.length)
             if (update.selectionSet) scheduleHighlight()
           }
         }),
@@ -650,14 +828,19 @@ onMounted(() => {
   })
   void loadLanguage(props.path)
   syncBreakDeco()
+  // HIDE_BY_SCROLLING (HintManagerImpl.java:624): the hint is placed in the container's
+  // coordinates and would be left floating over the wrong line once the text moves.
+  view.scrollDOM.addEventListener('scroll', hideErrorHint, { passive: true })
   if (props.active) view.focus()
   applyReveal(props.reveal)
   scheduleHighlight()
   scheduleHints()
 })
-watch(() => props.path, loadLanguage)
+// The hint belongs to one file and to the focused tab, so leaving either dismisses it.
+watch(() => props.path, () => { hideErrorHint(); void loadLanguage(props.path) })
 watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }
+  else hideErrorHint()
 })
 watch(() => props.theme, () => view?.dispatch({ effects: appearance.reconfigure(editorAppearance()) }))
 watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorAppearance()), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? indentGuidesExtension : []), setIndentGuides.of(props.settings.showIndentGuides)] }), { deep: true })
@@ -676,4 +859,10 @@ watch(() => [props.breakpoints, props.debugLine, props.bookmarks], () => syncBre
 onBeforeUnmount(() => { if (lspTimer !== undefined) clearTimeout(lspTimer); if (highlightTimer !== undefined) clearTimeout(highlightTimer); view?.destroy(); view = undefined })
 </script>
 
-<template><div ref="container" class="code-editor" /></template>
+<template>
+  <div ref="container" class="code-editor">
+    <!-- IDEA anchors the hint above the caret line (HintManagerImpl.java:611 ABOVE); the
+         coordinates are taken when it appears because any scroll dismisses it. -->
+    <div v-if="errorHint" class="editor-hint" role="status" :style="errorHint.style">{{ errorHint.text }}</div>
+  </div>
+</template>

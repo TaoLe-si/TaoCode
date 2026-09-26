@@ -29,7 +29,7 @@ const label = (symbol: LspDocumentSymbol) => `${KIND[symbol.kind] ?? '符号'} �
 
 <template>
   <div class="outline-panel">
-    <div class="panel-heading"><span><FolderTree :size="14" />结构大纲</span><span class="heading-count">{{ symbols.length }}</span></div>
+    <div class="panel-heading"><span><FolderTree :size="14" />结构大纲</span><span class="heading-count">{{ filter.trim() ? `${rows.length}/${symbols.length}` : symbols.length }}</span></div>
     <div v-if="path && available" class="outline-tools">
       <button class="outline-tool" :class="{ on: sortByName }" :title="sortByName ? '按名称排序' : '按文档顺序'" aria-label="按名称排序" @click="sortByName = !sortByName"><ArrowDownAZ :size="13" /></button>
       <button class="outline-tool" :class="{ on: flatView }" :title="flatView ? '平铺显示' : '层级显示'" aria-label="平铺显示" @click="flatView = !flatView"><component :is="flatView ? Rows3 : ListTree" :size="13" /></button>
@@ -38,7 +38,7 @@ const label = (symbol: LspDocumentSymbol) => `${KIND[symbol.kind] ?? '符号'} �
     <div v-if="!path" class="outline-empty"><FolderTree :size="24" /><p>打开一个文件查看符号大纲</p></div>
     <div v-else-if="!available" class="outline-empty"><FolderTree :size="24" /><p>该语言服务未提供符号信息</p><span class="outline-file">{{ path }}</span></div>
     <div v-else-if="!symbols.length" class="outline-empty"><p>此文件没有符号</p></div>
-    <div v-else class="outline-scroll">
+    <div v-else class="outline-scroll" role="group" aria-label="符号列表">
       <button v-for="(entry, index) in rows" :key="`${entry.symbol.name}:${entry.symbol.startLine}:${entry.symbol.startChar}:${index}`"
               class="outline-row" :style="{ paddingLeft: `${entry.depth * 13 + 12}px` }"
               :title="entry.trail ? `${entry.trail}.${entry.symbol.name}` : label(entry.symbol)"

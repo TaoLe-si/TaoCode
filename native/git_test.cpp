@@ -10,11 +10,13 @@
 #endif
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 namespace fs = std::filesystem;
@@ -260,6 +262,53 @@ int main() {
         try { taocode::git::commit(root, "", false); }
         catch (const taocode::WorkspaceError& error) { rejected = error.code == "INVALID_REQUEST"; }
         check(rejected, "a plain commit still needs a message");
+    });
+
+    run("git.user reads the repository author and can be overridden for one commit", [&] {
+        const auto configured = taocode::git::user(root);
+        check(configured.at("name").get<std::string>() == "Test", "user.name comes from the repository config");
+        check(configured.at("email").get<std::string>() == "test@example.com", "user.email comes from the repository config");
+
+        put(root / "author.txt", "pairing\n");
+        taocode::git::stage(root, "author.txt");
+        // IDEA's CommitAuthorComponent editor: the override applies to this commit only.
+        taocode::git::commit(root, "pair programming", false, false, "Guest", "guest@example.com");
+        const auto overridden = taocode::git::blame(root, "author.txt").at("lines");
+        check(!overridden.empty(), "the overridden commit produced lines");
+        check(overridden[0].at("author").get<std::string>() == "Guest", "the override is the author of the new commit");
+        check(taocode::git::user(root).at("name").get<std::string>() == "Test", "the repository config is untouched");
+
+        // A malformed override must be refused rather than handed to git.
+        put(root / "author2.txt", "no email\n");
+        taocode::git::stage(root, "author2.txt");
+        bool rejected = false;
+        try { taocode::git::commit(root, "no email", false, false, "Nameless", ""); }
+        catch (const taocode::WorkspaceError& error) { rejected = error.code == "INVALID_REQUEST"; }
+        check(rejected, "an author override without an email is refused");
+        bool injected = false;
+        try { taocode::git::commit(root, "newline", false, false, "Bad\nName", "bad@example.com"); }
+        catch (const taocode::WorkspaceError& error) { injected = error.code == "INVALID_REQUEST"; }
+        check(injected, "an author override cannot smuggle control characters");
+        // The rejected commits left author2.txt staged; the rebase/cherry-pick tests
+        // below need a clean index, so undo that here.
+        taocode::git::unstage(root, "author2.txt");
+        fs::remove(root / "author2.txt");
+    });
+
+    run("git.authors lists each log user once for the commit-author completion", [&] {
+        // Copy the array out first: `.at()` on the temporary would leave the range-for
+        // iterating a destroyed Json.
+        const auto listed = taocode::git::authors(root).at("authors");
+        std::vector<std::string> entries;
+        for (const auto& entry : listed) entries.push_back(entry.get<std::string>());
+        check(entries.size() == 2, "two distinct authors so far, not one per commit");
+        check(std::find(entries.begin(), entries.end(), "Test <test@example.com>") != entries.end(),
+              "the configured repository author is offered");
+        check(std::find(entries.begin(), entries.end(), "Guest <guest@example.com>") != entries.end(),
+              "the one-commit override from the case above is offered as well");
+        check(std::count_if(entries.begin(), entries.end(),
+                            [](const std::string& value) { return value.find("guest@example.com") != std::string::npos; }) == 1,
+              "the same person with a differently cased e-mail is still one entry");
     });
 
     run("ahead_behind reports unavailable without an upstream", [&] {

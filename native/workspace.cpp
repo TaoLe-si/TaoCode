@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <fstream>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -709,6 +711,74 @@ Json Workspace::read(const std::string& relative, const std::string& encoding) {
 
 // ToggleReadOnlyAttributeAction: SetFileAttributesW on the pinned path. The handle is
 // opened with attribute access only — a read-only file must still be toggleable.
+// JSON is text, so raw file bytes travel base64-encoded to the renderer. Used only
+// by read_binary, which caps the payload before this ever sees a large buffer.
+std::string base64_encode(std::string_view in) {
+    static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((in.size() + 2) / 3 * 4);
+    std::size_t i = 0;
+    for (; i + 3 <= in.size(); i += 3) {
+        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8) | static_cast<unsigned char>(in[i + 2]);
+        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += table[n & 63];
+    }
+    if (i + 1 == in.size()) {
+        const unsigned n = static_cast<unsigned char>(in[i]) << 16;
+        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += "==";
+    } else if (i + 2 == in.size()) {
+        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8);
+        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += '=';
+    }
+    return out;
+}
+
+// Sniffs the leading bytes for the formats TaoCode can render without a plugin.
+// Everything else falls back to the hex viewer, which is always correct but never
+// pretty; the UI decides from `kind`, not from the extension.
+std::string sniff_kind(const std::string& bytes) {
+    const auto starts = [&](std::string_view magic) {
+        return bytes.size() >= magic.size() && std::string_view(bytes.data(), magic.size()) == magic;
+    };
+    if (starts("\x89PNG\r\n\x1a\n")) return "png";
+    if (starts("\xFF\xD8\xFF")) return "jpeg";
+    if (starts("GIF87a") || starts("GIF89a")) return "gif";
+    if (bytes.size() > 2 && bytes[0] == 'B' && bytes[1] == 'M') return "bmp";
+    if (starts("RIFF") && bytes.size() > 12 && std::string_view(bytes.data() + 8, 4) == "WEBP") return "webp";
+    if (bytes.size() > 4 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F') return "riff";
+    if (starts("%PDF-")) return "pdf";
+    return "binary";
+}
+
+Json Workspace::read_binary(const std::string& relative, std::size_t limit) {
+    return boundary([&]() -> Json {
+        std::lock_guard lock(mutex_);
+        require_open(root_);
+        const auto path = parse_relative(relative);
+        if (path.empty()) fail("NOT_FILE", "工作区根目录不是正规文件。");
+        if (limit == 0 || limit > max_bytes) limit = max_bytes;
+        auto pinned = pin_directory(root_ / path.parent_path(), root_);
+        auto handle = open_regular(pinned.path / path.filename(), root_);
+        const auto info = file_info(handle.get());
+        reject_reparse(info);
+        if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) fail("NOT_FILE", "目录不能用二进制方式查看。");
+        const auto total = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+        const auto take = static_cast<std::size_t>(std::min<std::uint64_t>(total, limit));
+        std::string bytes(take, '\0');
+        std::size_t offset = 0;
+        while (offset < take) {
+            DWORD got = 0;
+            const auto chunk = static_cast<DWORD>(std::min<std::size_t>(take - offset, 1u << 20));
+            if (!ReadFile(handle.get(), bytes.data() + offset, chunk, &got, nullptr) || !got) break;
+            offset += got;
+        }
+        bytes.resize(offset);
+        return {{"path", utf8_path(path)}, {"size", total}, {"truncated", total > offset},
+                {"bytes", static_cast<std::size_t>(offset)}, {"base64", base64_encode(bytes)},
+                {"kind", sniff_kind(bytes)},
+                {"readOnly", (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0}};
+    });
+}
+
 Json Workspace::set_read_only(const std::string& relative, bool read_only) {
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
@@ -1036,8 +1106,12 @@ void remove_tree(const fs::path& directory, const fs::path& root, std::size_t& b
         if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) nested.push_back(child);
         else {
             if (budget-- == 0) fail("TOO_MANY_FILES", "目录内容过多，删除已中止。");
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
-                SetFileAttributesW(api_path(child).c_str(), data.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
+            // A file whose read-only bit cannot be cleared would fail DeleteFileW
+            // with a misleading "access denied"; report the real reason instead.
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY &&
+                !SetFileAttributesW(api_path(child).c_str(), data.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY))
+                fail("IO_ERROR", "无法解除只读属性，删除已中止（Windows 错误 " +
+                                     std::to_string(GetLastError()) + "）：" + utf8_path(child));
             if (!DeleteFileW(api_path(child).c_str())) win_error("无法删除文件");
         }
     } while (FindNextFileW(search, &data));
@@ -1086,8 +1160,13 @@ void copy_tree(const fs::path& source, const fs::path& target, const fs::path& r
         if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) fail("EXISTS", "同名文件已存在。");
         win_error("无法复制文件", error);
     }
-    if (attributes & FILE_ATTRIBUTE_READONLY)
-        SetFileAttributesW(api_path(target).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+    // The copy is promised writable (workspace.hpp): if the bit cannot be cleared,
+    // the caller must hear about it instead of getting a "copied: true" that is
+    // read-only on disk.
+    if (attributes & FILE_ATTRIBUTE_READONLY &&
+        !SetFileAttributesW(api_path(target).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY))
+        fail("IO_ERROR", "副本仍带只读属性，无法清除（Windows 错误 " + std::to_string(GetLastError()) +
+                             "）：" + utf8_path(target));
 }
 
 }  // namespace
@@ -1130,13 +1209,40 @@ Json Workspace::reveal(const std::string& relative) {
         }
         std::wstring argument = L"/select,\"" + target.native() + L"\"";
         const auto instance = ShellExecuteW(nullptr, L"open", L"explorer.exe", argument.c_str(), nullptr, SW_SHOWNORMAL);
-        if (reinterpret_cast<int>(instance) <= 32)
+        // HINSTANCE is pointer-wide: a cast to int would truncate on x64 and could
+        // turn a real failure into a value that reads as success.
+        if (reinterpret_cast<std::intptr_t>(instance) <= 32)
             fail("IO_ERROR", "无法打开资源管理器。");
         return {{"path", utf8_path(path)}, {"revealed", true}};
     });
 }
 
-Json Workspace::remove(const std::string& relative) {
+Json reveal_absolute(const std::string& absolute) {
+    return boundary([&]() -> Json {
+        if (absolute.empty() || !valid_utf8(absolute) || absolute.find('\0') != std::string::npos)
+            fail("INVALID_PATH", "路径必须是没有 NUL 字节的 UTF-8 文本。");
+        const fs::path target = fs::path(std::u8string(absolute.begin(), absolute.end())).lexically_normal();
+        if (!target.is_absolute()) fail("INVALID_PATH", "只允许绝对路径。");
+        // RevealFileAction.openFile(Path) (:170-174) canonicalizes the path and opens its *parent*
+        // directory; a root without a parent does nothing at all, so it is reported instead of
+        // silently opening an unrelated folder.
+        const fs::path parent = target.parent_path();
+        if (parent.empty()) fail("INVALID_PATH", "无法定位该项的父目录。");
+        const auto attributes = GetFileAttributesW(api_path(parent).c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY))
+            fail("NOT_FOUND", "父目录不存在，无法显示该项。");
+        // RevealFileAction.doOpen (:194-211, Windows branch :273): `explorer /select,"<path>"` both
+        // loads the parent directory and highlights the entry. The entry itself may be gone — the
+        // welcome list keeps unavailable projects and IDEA still opens their parent.
+        std::wstring argument = L"/select,\"" + target.native() + L"\"";
+        const auto instance = ShellExecuteW(nullptr, L"open", L"explorer.exe", argument.c_str(), nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<std::intptr_t>(instance) <= 32)
+            fail("IO_ERROR", "无法打开资源管理器。");
+        return {{"path", utf8_path(target)}, {"revealed", true}};
+    });
+}
+
+Json Workspace::remove(const std::string& relative, bool to_trash) {
     return boundary([&]() -> Json {
         std::lock_guard lock(mutex_);
         require_open(root_);
@@ -1147,6 +1253,27 @@ Json Workspace::remove(const std::string& relative) {
         const auto attr = GetFileAttributesW(api_path(target).c_str());
         if (attr == INVALID_FILE_ATTRIBUTES) fail("NOT_FOUND", "要删除的项目不存在。");
         if (attr & FILE_ATTRIBUTE_REPARSE_POINT) fail("REPARSE_POINT", "不允许删除重解析点。");
+        // IDEA deletes through the platform trash when the OS offers one; Windows
+        // Explorer's "Delete" is undoable, so the same is true here. SHFileOperation
+        // restores the original name in the recycle bin (FOF_WANTNUKEWARNING is not
+        // set, so a file too large for the bin is reported instead of silently purged).
+        if (to_trash) {
+            if (attr & FILE_ATTRIBUTE_READONLY &&
+                !SetFileAttributesW(api_path(target).c_str(), attr & ~FILE_ATTRIBUTE_READONLY))
+                fail("IO_ERROR", "无法解除只读属性，未移入回收站（Windows 错误 " +
+                                     std::to_string(GetLastError()) + "）：" + utf8_path(target));
+            auto native = target.native();
+            native.push_back(L'\0');  // SHFileOperationW wants a double-NUL terminated list
+            native.push_back(L'\0');
+            SHFILEOPSTRUCTW operation{};
+            operation.wFunc = FO_DELETE;
+            operation.pFrom = native.c_str();
+            operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+            const int status = SHFileOperationW(&operation);
+            if (status != 0 || operation.fAnyOperationsAborted)
+                fail("IO_ERROR", "无法把该项移入回收站（Windows 状态 " + std::to_string(status) + "），可改用永久删除。");
+            return {{"path", utf8_path(path)}, {"deleted", true}, {"trash", true}};
+        }
         if (attr & FILE_ATTRIBUTE_DIRECTORY) {
             // IDEA's $Delete removes a populated tree after the "and all of its
             // contents?" confirmation — everything under the selection goes.
@@ -1155,11 +1282,86 @@ Json Workspace::remove(const std::string& relative) {
             if (!RemoveDirectoryW(api_path(target).c_str()))
                 win_error("无法删除目录");
         } else {
-            if (attr & FILE_ATTRIBUTE_READONLY)
-                SetFileAttributesW(api_path(target).c_str(), attr & ~FILE_ATTRIBUTE_READONLY);
+            if (attr & FILE_ATTRIBUTE_READONLY &&
+                !SetFileAttributesW(api_path(target).c_str(), attr & ~FILE_ATTRIBUTE_READONLY))
+                fail("IO_ERROR", "无法解除只读属性，删除已中止（Windows 错误 " +
+                                     std::to_string(GetLastError()) + "）：" + utf8_path(target));
             if (!DeleteFileW(api_path(target).c_str())) win_error("无法删除文件");
         }
-        return {{"path", utf8_path(path)}, {"deleted", true}};
+        return {{"path", utf8_path(path)}, {"deleted", true}, {"trash", false}};
+    });
+}
+
+// Safe Delete needs "is anything still referring to this?". The file layer cannot
+// ask a language server, so it answers the question it can answer honestly: a
+// WORKSPACE-WIDE text scan for the identifier, reported with file/line/preview so
+// the UI shows the same rows Find Usages would. It is not a language query — no
+// PSI, no scope resolution, no false confidence — and `scope: "workspace"` in the
+// reply says so out loud, because a reference to a file about to be deleted can sit
+// in any directory (a build script, a manifest, an import) and must not be missed.
+// `relative` is the file the caller is about to delete: it names the subject and is
+// echoed back, it does not narrow the scan.
+constexpr std::size_t max_usage_file_bytes = 8 * 1024 * 1024;  // skip build artifacts
+constexpr std::size_t max_usage_files = 20000;                 // ceiling on the walk
+constexpr std::size_t usage_sniff_bytes = 8192;                // head read to detect binaries
+Json Workspace::usages_of(const std::string& relative, const std::string& symbol, std::size_t limit) {
+    return boundary([&]() -> Json {
+        std::lock_guard lock(mutex_);
+        require_open(root_);
+        const auto path = parse_relative(relative);
+        if (path.empty()) fail("INVALID_PATH", "请指定工作区内的文件。");
+        if (symbol.empty()) fail("INVALID_REQUEST", "请输入要检查的符号名。");
+        Json hits = Json::array();
+        std::size_t scanned = 0;
+        bool ceiling = false;  // the walk stopped on max_usage_files, not on the tree
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(root_, fs::directory_options::skip_permission_denied, ec), end; it != end; it.increment(ec)) {
+            if (hits.size() >= limit) break;
+            if (scanned >= max_usage_files) { ceiling = true; break; }
+            const auto& entry = *it;
+            const auto relative_path = fs::relative(entry.path(), root_, ec).generic_string();
+            if (relative_path.empty() || relative_path == ".") continue;
+            // Decode the UTF-8 relative path explicitly: path(const char*) would go
+            // through the local code page and mangle non-ASCII directory names.
+            const auto decoded = fs::path(std::u8string(relative_path.begin(), relative_path.end()));
+            if (std::find(excluded_.begin(), excluded_.end(), decoded.filename().wstring()) != excluded_.end()) {
+                it.disable_recursion_pending();
+                continue;
+            }
+            if (entry.is_directory(ec)) continue;
+            if (entry.is_symlink(ec)) continue;
+            std::error_code size_error;
+            const auto size = fs::file_size(entry.path(), size_error);
+            if (size_error || size > max_usage_file_bytes) continue;  // artifact/blob: not text
+            std::ifstream stream(entry.path(), std::ios::binary);
+            if (!stream) continue;
+            // Sniff the head for a NUL byte before reading: a .dll or a .png in the
+            // workspace is never a text usage, and getline would walk all of it.
+            std::array<char, usage_sniff_bytes> head{};
+            stream.read(head.data(), static_cast<std::streamsize>(head.size()));
+            const auto sniffed = static_cast<std::size_t>(stream.gcount());
+            if (std::find(head.data(), head.data() + sniffed, '\0') != head.data() + sniffed) continue;
+            stream.clear();
+            stream.seekg(0, std::ios::beg);
+            ++scanned;
+            std::string line;
+            std::size_t number = 0;
+            while (std::getline(stream, line) && hits.size() < limit) {
+                ++number;
+                const auto at = line.find(symbol);
+                if (at == std::string::npos) continue;
+                std::string preview = line;
+                if (preview.size() > 240) preview = preview.substr(0, 240);
+                for (auto& ch : preview) if (ch == '\r') ch = ' ';
+                hits.push_back({{"path", relative_path}, {"line", number}, {"column", at + 1}, {"preview", preview}});
+            }
+        }
+        // `scope` states what this actually is; `truncated` now also covers the
+        // walk ceiling, so a cut-short scan is never presented as the whole answer.
+        return {{"path", utf8_path(path)}, {"symbol", symbol}, {"scanned", scanned},
+                {"scope", "workspace"}, {"kind", "text"},
+                {"truncated", hits.size() >= limit || ceiling},
+                {"hits", std::move(hits)}};
     });
 }
 
