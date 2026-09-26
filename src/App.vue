@@ -5238,9 +5238,18 @@ onBeforeUnmount(() => {
               <BinaryViewer v-if="binaryView && pane === focusedPane" :path="binaryView.path" :data="binaryView.data" @close="closeBinary" @reveal="revealBinary" />
               <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @template-chooser="openTemplateChooser" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" />
               <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" @open="path => void openFile(path, false, { preview: true })" @error="message => notify(message, true)" />
-              <!-- IDEA's empty editor: just a muted hint, no landing page. -->
+              <!-- IDEA's empty editor: a right-aligned shortcut list plus the
+                   drag-and-drop hint (verified on screen: 随处搜索 Shift Shift /
+                   转到文件 Ctrl+Shift+N / 最近的文件 Ctrl+E / 导航栏 Alt+Home /
+                   将文件拖放到此处以打开). -->
               <div v-if="!groups[pane].tabs.length && !binaryView && pane === 0" class="welcome-screen">
-                <p class="welcome-hint">从项目树选择文件开始编辑，或按 <kbd>Ctrl Shift N</kbd> 转到文件。</p>
+                <ul class="empty-hints">
+                  <li><button class="empty-hint" @click="openActionSearch">随处搜索</button><span>Shift Shift</span></li>
+                  <li><button class="empty-hint" @click="openPalette">转到文件</button><span>Ctrl+Shift+N</span></li>
+                  <li><button class="empty-hint" @click="openRecentFiles">最近的文件</button><span>Ctrl+E</span></li>
+                  <li><button class="empty-hint" @click="selectInTree">导航栏</button><span>Alt+Home</span></li>
+                  <li class="empty-hint-drag">将文件拖放到此处以打开</li>
+                </ul>
               </div>
             </div>
           </div>

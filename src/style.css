@@ -891,6 +891,10 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .conflict-dialog { max-width: min(920px, 92vw); }
 .conflict-diff { margin-top: var(--space-3); max-height: 46vh; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
 
-/* IDEA empty-editor hint (was a full welcome landing page) */
-.welcome-hint { margin: auto; color: var(--muted); font-size: 13px; text-align: center; }
-.welcome-hint kbd { font: 11px var(--font-mono); color: var(--secondary); }
+/* IDEA's empty-editor shortcut list (right-of-centre, muted, no chrome) */
+.empty-hints { margin: auto; list-style: none; padding: 0; min-width: 300px; }
+.empty-hints > li { display: flex; align-items: baseline; gap: var(--space-2); padding: 3px 0; font-size: 13px; }
+.empty-hint { background: none; border: 0; padding: 0; color: var(--secondary); font-size: 13px; cursor: pointer; }
+.empty-hint:hover { color: var(--bright); text-decoration: underline; }
+.empty-hints > li > span { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.empty-hint-drag { color: var(--muted); }
