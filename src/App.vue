@@ -3709,6 +3709,7 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
     { id: 'run.debug', title: '调试', keys: 'Shift F9', keywords: 'debug start breakpoint dap 调试', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => void runSelectedConfig(true) },
     { id: 'run.debugContext', title: '调试当前上下文配置', keys: 'Ctrl Shift F9', keywords: 'debug contextual configuration 调试上下文', enabled: () => isDesktop && Boolean(active.value) && !dapState.running, run: () => void runContextConfiguration(true) },
     { id: 'run.pickConfig', title: '选择运行/调试配置', keys: 'Alt Shift F10', keywords: 'select run configuration choose active edit 选择配置', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
+    { id: 'run.rerun', title: '重新运行', keys: 'Ctrl F5', keywords: 'rerun relaunch last 重新运行', enabled: () => Boolean(lastRunParams) && !runState.running, run: () => void rerunLast() },
     { id: 'run.stop', title: '停止', keys: 'Ctrl F2', keywords: 'stop terminate kill 停止', enabled: () => runState.running, run: () => void stopRun() },
     // RunClass in the default keymap: run whatever is under the caret.
     { id: 'run.context', title: '运行当前上下文配置', keys: 'Ctrl Shift F10', keywords: 'run contextual configuration run class 运行上下文', enabled: () => isDesktop && Boolean(active.value) && !runState.running, run: () => void runContextConfiguration(false) },
@@ -4120,7 +4121,9 @@ async function startRun() {
     }
   }
   beginRun()
-  try { await request('run.start', { ...runStartParams() }) }
+  const params = runStartParams()
+  lastRunParams = params
+  try { await request('run.start', { ...params }) }
   catch (error) { endRun(); notify(`无法启动：${errorMessage(error)}`, true) }
 }
 // IDEA's Run/Debug act on the selected configuration. A debug-type config hands its
@@ -4315,6 +4318,7 @@ function onKey(event: KeyboardEvent) {
     if (event.key === 'F8' && event.shiftKey) { event.preventDefault(); void dapStep('stepOut'); return }
   }
   if (event.key === 'F2' && event.ctrlKey && runState.running) { event.preventDefault(); void stopRun(); return }
+  if (event.key === 'F5' && event.ctrlKey && !event.shiftKey && !event.altKey && lastRunParams && !runState.running) { event.preventDefault(); void rerunLast(); return }
   // Shift+F10 Run, Alt+Shift+F10 Choose Run Configuration, Alt+Shift+F9 Choose Debug
   // Configuration, Ctrl+Shift+F10 Run Context Configuration.
   if (event.key === 'F10' && event.shiftKey && event.altKey && workspace.value) { event.preventDefault(); openConfigChooser(); return }
@@ -4709,6 +4713,15 @@ watch(() => runOutput.length, async () => {
 })
 let pumpedRunLines = 0
 // Run an arbitrary command from a panel (e.g. the test runner's rerun command).
+// IDEA's Rerun (Ctrl+F5): relaunch the last run content with the same parameters.
+let lastRunParams: RunStartParams | null = null
+async function rerunLast() {
+  if (!lastRunParams) { notify('还没有可重新运行的任务。', true); return }
+  if (runState.running) { notify('已有任务在运行，请先停止。', true); return }
+  beginRun(); showOutput('run')
+  try { await request('run.start', { ...lastRunParams }) }
+  catch (error) { endRun(); notify(`无法重新运行：${errorMessage(error)}`, true) }
+}
 async function startRunWith(command: string) {
   if (!command.trim() || runState.running) return
   beginRun(); showOutput('run')
@@ -5097,7 +5110,9 @@ onBeforeUnmount(() => {
             </div>
             <div class="run-toolbar">
               <input v-model="runCommand" :disabled="runState.running" class="run-command" aria-label="运行命令" placeholder="在项目根目录执行的命令，如 cmake --build build" @keydown.enter.prevent="startRun" />
-              <button v-if="!runState.running" class="primary-button" :disabled="!isDesktop || !workspace" @click="startRun">运行</button>
+              <!-- IDEA's Run toolbar: Rerun / Stop. Rerun (Ctrl+F5) relaunches the
+                   last content with identical parameters. -->
+              <button v-if="!runState.running" class="primary-button" :disabled="!isDesktop || !workspace" :title="lastRunParams ? '重新运行上次任务 (Ctrl+F5)' : '运行'" @click="lastRunParams ? rerunLast() : startRun()">{{ lastRunParams ? '重新运行' : '运行' }}</button>
               <button v-else class="subtle-button" @click="stopRun">停止</button>
             </div>
             <!-- IDEA's build console: recognised compiler diagnostics are clickable and
@@ -5535,6 +5550,6 @@ onBeforeUnmount(() => {
     <div v-if="actionPrompt" class="modal-backdrop" @click.self="actionPrompt = null">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="15" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
     </div>
-    <div v-if="help" class="modal-backdrop" @click.self="help = false"><section class="help-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode" @keydown="trapFocus"><button ref="helpClose" class="icon-button help-close" aria-label="关闭说明" @click="help = false"><X :size="18" /></button><h2>TaoCode <span>0.1 · Foundation</span></h2><p>Vue 3 界面 + CodeMirror 编辑器 + C++20 文件核心。<br />Windows 原生宿主复用系统 WebView2，不捆绑 Electron。</p><div class="help-grid"><span>打开文件夹</span><kbd>Ctrl Shift O</kbd><span>保存当前文件</span><kbd>Ctrl S</kbd><span>转到文件</span><kbd>Ctrl Shift N</kbd><span>转到类</span><kbd>Ctrl N</kbd><span>查找操作</span><kbd>Ctrl Shift A</kbd><span>转到行</span><kbd>Ctrl G</kbd><span>当前文件内查找</span><kbd>Ctrl F</kbd><span>转到定义</span><kbd>Ctrl B</kbd><span>重命名符号</span><kbd>Shift F6</kbd><span>查找用法</span><kbd>Alt F7</kbd><span>智能补全</span><kbd>Ctrl Space</kbd><span>代码操作</span><kbd>Alt Enter</kbd><span>用模板包裹</span><kbd>Ctrl Alt T</kbd><span>格式化（可带选区）</span><kbd>Ctrl Alt L</kbd><span>智能选区</span><kbd>Ctrl W</kbd><span>书签</span><kbd>F11</kbd><span>书签编号 / 跳转</span><kbd>Ctrl F11 · Ctrl 0-9</kbd><span>行断点</span><kbd>Ctrl F8</kbd><span>运行 / 调试配置</span><kbd>Shift F10 · Shift F9</kbd><span>运行 / 调试上下文</span><kbd>Ctrl Shift F10 · Ctrl Shift F9</kbd><span>关闭当前标签页</span><kbd>Ctrl Shift F4</kbd><span>隐藏当前工具窗口</span><kbd>Shift Esc</kbd><span>上一个 / 下一个标签页</span><kbd>Alt ← · Alt →</kbd><span>跳到上一个工具窗口</span><kbd>F12</kbd><span>恢复当前布局</span><kbd>Shift F12</kbd><span>隐藏全部工具窗口</span><kbd>Ctrl Shift F12</kbd><span>最大化编辑器</span><kbd>Ctrl Shift F12</kbd><span>Git 追溯</span><kbd>Ctrl Shift G</kbd><span>后退 / 前进</span><kbd>Ctrl Alt ← · Ctrl Alt →</kbd></div><div class="help-note">当前已接通项目创建、打开、克隆、设置，桌面端语言服务（诊断、悬停、转到定义/实现/类型、补全、重命名、查找引用、符号大纲、代码操作含 resolve 解析、格式化与选区格式化、签名信息、文档内同符号高亮、智能选区、内联提示）、操作查找（Ctrl+Shift+A）、书签与 0-9 编号跳转、模板包裹（Ctrl+Alt+T）、随项目保存的运行配置、全局查找/替换、本地历史快照与回滚、Git 状态/暂存/提交/改写上次提交/分支/日志/储藏/拉取/推送/与分支比较与文件追溯、集成终端（ConPTY + xterm）与调试器（DAP 客户端，需在 exe 旁 TaoCode.dap.json 配置本机调试适配器）；浏览器预览无语言服务、终端与调试器。尚无 AI Agent / 模型执行。处理记录仅保留当前会话，不是持久审计日志。</div></section></div>
+    <div v-if="help" class="modal-backdrop" @click.self="help = false"><section class="help-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode" @keydown="trapFocus"><button ref="helpClose" class="icon-button help-close" aria-label="关闭说明" @click="help = false"><X :size="18" /></button><h2>TaoCode <span>0.1 · Foundation</span></h2><p>Vue 3 界面 + CodeMirror 编辑器 + C++20 文件核心。<br />Windows 原生宿主复用系统 WebView2，不捆绑 Electron。</p><div class="help-grid"><span>打开文件夹</span><kbd>Ctrl Shift O</kbd><span>保存当前文件</span><kbd>Ctrl S</kbd><span>转到文件</span><kbd>Ctrl Shift N</kbd><span>转到类</span><kbd>Ctrl N</kbd><span>查找操作</span><kbd>Ctrl Shift A</kbd><span>转到行</span><kbd>Ctrl G</kbd><span>当前文件内查找</span><kbd>Ctrl F</kbd><span>转到定义</span><kbd>Ctrl B</kbd><span>重命名符号</span><kbd>Shift F6</kbd><span>查找用法</span><kbd>Alt F7</kbd><span>智能补全</span><kbd>Ctrl Space</kbd><span>代码操作</span><kbd>Alt Enter</kbd><span>用模板包裹</span><kbd>Ctrl Alt T</kbd><span>格式化（可带选区）</span><kbd>Ctrl Alt L</kbd><span>智能选区</span><kbd>Ctrl W</kbd><span>书签</span><kbd>F11</kbd><span>书签编号 / 跳转</span><kbd>Ctrl F11 · Ctrl 0-9</kbd><span>行断点</span><kbd>Ctrl F8</kbd><span>运行 / 调试配置</span><kbd>Shift F10 · Shift F9</kbd><span>运行 / 调试上下文</span><kbd>Ctrl Shift F10 · Ctrl Shift F9</kbd><span>重新运行</span><kbd>Ctrl F5</kbd><span>关闭当前标签页</span><kbd>Ctrl Shift F4</kbd><span>隐藏当前工具窗口</span><kbd>Shift Esc</kbd><span>上一个 / 下一个标签页</span><kbd>Alt ← · Alt →</kbd><span>跳到上一个工具窗口</span><kbd>F12</kbd><span>恢复当前布局</span><kbd>Shift F12</kbd><span>隐藏全部工具窗口</span><kbd>Ctrl Shift F12</kbd><span>最大化编辑器</span><kbd>Ctrl Shift F12</kbd><span>后退 / 前进</span><kbd>Ctrl Alt ← · Ctrl Alt →</kbd></div><div class="help-note">当前已接通项目创建、打开、克隆、设置，桌面端语言服务（诊断、悬停、转到定义/实现/类型、补全、重命名、查找引用、符号大纲、代码操作含 resolve 解析、格式化与选区格式化、签名信息、文档内同符号高亮、智能选区、内联提示）、操作查找（Ctrl+Shift+A）、书签与 0-9 编号跳转、模板包裹（Ctrl+Alt+T）、随项目保存的运行配置、全局查找/替换、本地历史快照与回滚、Git 状态/暂存/提交/改写上次提交/分支/日志/储藏/拉取/推送/变基/摘取/标签/忽略/与分支比较/文件追溯/回滚文件/重置分支/按块暂存、集成终端（ConPTY + xterm，支持目录右键在终端打开）与调试器（DAP：启动/附加/异常断点/线程/监视），测试运行器（ctest/node:test/JUnit 发现、运行、失败重跑、定义跳转），构建控制台错误定位跳转；浏览器预览无语言服务、终端与调试器。尚无 AI Agent / 模型执行。处理记录仅保留当前会话，不是持久审计日志。</div></section></div>
   </div>
 </template>
