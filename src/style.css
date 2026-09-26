@@ -87,11 +87,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .project-widget-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
 .project-widget-caret { transition: transform .15s ease; }
 .project-widget-caret.open { transform: rotate(180deg); }
-.command-box { display: flex; align-items: center; flex: 1 1 300px; min-width: 0; max-width: 400px; margin-left: auto; gap: var(--space-2); height: 27px; background: var(--panel); border: 1px solid var(--line-strong); color: var(--secondary); border-radius: var(--radius-sm); padding: 0 var(--space-2); }
-.command-box:hover { border-color: var(--accent); background: var(--editor); }
-.command-box > svg, .command-box > kbd { flex-shrink: 0; }
-.command-box > span { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.command-box > kbd { font: 10px var(--font-mono); color: var(--muted); border-left: 1px solid var(--line-strong); padding-left: var(--space-2); }
+.topbar-spacer { flex: 1 1 0; min-width: var(--space-3); }
+.branch-widget { flex-shrink: 0; }
 /* IDEA's main-toolbar filename widget (FilenameToolbarWidgetAction.kt:49-181): the selected file
    name in the centre region, coloured with its FileStatus (ADDED/MODIFIED/DELETED — the same
    tokens the commit legend uses), with a recent-files popup under it. */
@@ -143,7 +140,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .workspace-heading { display: flex; align-items: center; gap: var(--space-1); height: 30px; flex-shrink: 0; min-width: 0; padding: 0 var(--space-3); color: var(--text); font-size: 12px; }
 .workspace-heading > svg { flex-shrink: 0; }
 .workspace-heading > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.local-tag { border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); margin-left: auto; padding: 1px var(--space-1); font-size: 10px; flex-shrink: 0; }
+.local-tag { border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); padding: 1px var(--space-1); font-size: 10px; flex-shrink: 0; }
+/* Merged Project-view header: name ellipsizes, action buttons pin right. */
+.workspace-heading .heading-actions { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 2px; }
 .tree-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding-top: var(--space-1); }
 /* Indentation contributes to the root's intrinsic width, never to name truncation. */
 .tree-list { list-style: none; padding: 0; margin: 0; min-width: 100%; width: 100%; }
@@ -891,3 +890,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
    differences before the user picks Reload/Keep). */
 .conflict-dialog { max-width: min(920px, 92vw); }
 .conflict-diff { margin-top: var(--space-3); max-height: 46vh; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+
+/* IDEA empty-editor hint (was a full welcome landing page) */
+.welcome-hint { margin: auto; color: var(--muted); font-size: 13px; text-align: center; }
+.welcome-hint kbd { font: 11px var(--font-mono); color: var(--secondary); }
