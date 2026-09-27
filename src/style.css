@@ -43,7 +43,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 .ide-shell { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ide-shell.is-resizing, .ide-shell.is-resizing * { user-select: none !important; }
-.topbar { height: var(--chrome-height); min-height: var(--chrome-height); flex-shrink: 0; display: flex; align-items: center; padding: 0 var(--space-3); gap: var(--space-4); background: var(--project-tint, var(--rail)); border-bottom: 1px solid var(--line); z-index: 10; }
+.topbar { flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; padding: 0 var(--space-3); background: var(--project-tint, var(--rail)); border-bottom: 1px solid var(--line); z-index: 10; }
+/* 行1 菜单栏 / 行2 主工具栏 —— IDEA `MainMenuDisplayMode.SEPARATE_TOOLBAR`（默认值，UISettings.kt:863）*/
+.topbar-menubar-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--chrome-height); min-width: 0; }
+.topbar-toolbar { display: flex; align-items: center; gap: var(--space-4); min-height: var(--chrome-height); min-width: 0; }
+/* `MERGED_WITH_MAIN_TOOLBAR`：菜单栏与主工具栏并成一行（IDEA 三档里的中间那档）*/
+html[data-main-menu='merged'] .topbar { flex-direction: row; align-items: center; gap: var(--space-4); }
+html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .brand { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-2); font-family: var(--font-brand); font-size: 15px; letter-spacing: .3px; color: var(--bright); }
 .menubar { display: flex; flex-shrink: 0; gap: 2px; }
 .menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: 28px; color: var(--secondary); border-radius: var(--radius-xs); }
@@ -116,6 +122,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .project-widget-caret.open { transform: rotate(180deg); }
 .topbar-spacer { flex: 1 1 0; min-width: var(--space-3); }
 .branch-widget { flex-shrink: 0; }
+/* 分支弹窗的定位锚点（弹窗相对分支 widget 展开） */
+.branch-widget-anchor { position: relative; display: inline-flex; flex-shrink: 0; }
+/* 补全项的文档（`completionItem/resolve` 回来的内容）：按纯文本渲染，限制宽度便于阅读 */
+.completion-info { max-width: 420px; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+/* 运行 widget 的配置选择器现在带配置名（IDEA 的 RedesignedRunConfigurationSelector 显示当前配置） */
+.run-config-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 /* IDEA's main-toolbar filename widget (FilenameToolbarWidgetAction.kt:49-181): the selected file
    name in the centre region, coloured with its FileStatus (ADDED/MODIFIED/DELETED — the same
    tokens the commit legend uses), with a recent-files popup under it. */
@@ -222,7 +234,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
    `maximizedProportion` was only ever a copy. */
 .tool-maximized .explorer-panel { width: 100%; max-width: none; border-right: 0; border-left: 0; }
 .tool-maximized .editor-column { display: none; }
-.editor-tabs { display: flex; height: 34px; min-height: 34px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.editor-tabs { display: flex; height: 34px; min-height: 34px; flex-shrink: 0; background: var(--editor); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .file-tab { display: flex; align-items: center; border-right: 1px solid var(--line); border-top: 2px solid transparent; padding: 0 5px 0 0; flex-shrink: 0; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-2) var(--ease); }
 .file-tab.selected { background: var(--editor); border-top-color: var(--accent); }
 /* IDEA's pinned tab: the pin glyph replaces the file icon; bulk close skips it. */
@@ -236,12 +248,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .tab-toolbar { margin-left: auto; position: sticky; right: 0; display: flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 0 6px; background: var(--rail); border-left: 1px solid var(--line); }
 .welcome-tab { display: flex; align-items: center; gap: 9px; color: var(--secondary); padding: 0 17px; white-space: nowrap; }
 .breadcrumbs { display: flex; align-items: center; gap: var(--space-2); min-height: 31px; flex-shrink: 0; min-width: 0; padding: 0 var(--space-4); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+/* 面包屑位置=下方（IDEA BreadcrumbsPlacement.BOTTOM）：边框翻到上沿。 */
+.breadcrumbs-bottom { border-bottom: 0; border-top: 1px solid var(--line); }
 .breadcrumbs > svg { flex-shrink: 0; }
 .breadcrumbs > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .breadcrumb-file { display: flex; gap: var(--space-1); align-items: center; color: var(--secondary); }
 .breadcrumb-file > svg { flex-shrink: 0; }
 .editor-save-state { margin-left: auto; padding-left: 10px; color: var(--muted); font-size: 10px; }
 .editor-stage { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+/* 编辑器双向文本方向（IDEA View › 「文本方向」子菜单，对应 EditorSettingsExternalizable.BIDI_TEXT_DIRECTION）。
+   三档语义见 src/bidiTextDirection.ts：contentBased 用 `unicode-bidi: plaintext`（每段按内容定方向），
+   LTR/RTL 用 `isolate` 强制一个方向。作用在 .cm-content 上，与 IDEA 只影响编辑区文本一致。 */
+.editor-stage[data-bidi="rtl"] .cm-content { direction: rtl; unicode-bidi: isolate; }
+.editor-stage[data-bidi="ltr"] .cm-content { direction: ltr; unicode-bidi: isolate; }
+.editor-stage[data-bidi="contentBased"] .cm-content { direction: ltr; unicode-bidi: plaintext; }
 /* IDEA's drag-to-split preview: the half of the editor area the dropped tab will occupy
    (TabsUtil.updateBoundsWithDropSide, TabsUtil.java:95-111). The centre is not a split, so
    its full-area outline is dashed to read as "stays in this group". */
@@ -298,9 +318,6 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .log-target { color: var(--muted); padding-left: 8px; }
 .output-line.failure .log-result { color: var(--error); background: var(--error-bg); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
 .output-placeholder { color: var(--muted); overflow-wrap: anywhere; }
-.workspace-about { flex: 1; min-width: 0; min-height: 0; overflow: auto; color: var(--secondary); font-size: 12px; line-height: 1.7; padding: 5px 17px; overflow-wrap: anywhere; }
-.workspace-about p { display: flex; gap: var(--space-3); margin: var(--space-2) 0; }
-.workspace-about strong { color: var(--text); font-weight: 400; width: 48px; flex-shrink: 0; }
 .run-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .run-toolbar { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .run-command { flex: 1; min-width: 0; background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 10px; font: 12px var(--font-mono); }
@@ -434,6 +451,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-toolwindows:hover { background: var(--hover); color: var(--bright); }
 .status-toolwindows-popup { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 60; display: flex; flex-direction: column; min-width: 220px; max-height: 320px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); }
+.status-toolwindows-group { display: block; margin: 4px 0 2px; padding: 0 8px; color: var(--muted); font-size: 10px; text-transform: none; }
 .status-toolwindows-name { flex: 1; text-align: left; }
 .status-toolwindows-key { color: var(--secondary); font: 400 10px/1 var(--font-mono); }
 .status-toolwindows-empty { margin: 0; padding: var(--space-2); color: var(--secondary); }
@@ -511,7 +529,7 @@ html[data-ui-font-size='24'] { font-size: 24px; }
 .stripe-drop-hint { flex: 1 1 auto; min-height: 8px; }
 /* IDEA's "Choose Run Configuration" popup (Alt+Shift+F10): the header Run widget's
    caret opens this list; keyboard navigation is handled by the global key handler. */
-.config-chooser { position: fixed; top: var(--chrome-height); right: var(--space-3); z-index: 70; display: flex; flex-direction: column; min-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.config-chooser { position: fixed; top: var(--topbar-height); right: var(--space-3); z-index: 70; display: flex; flex-direction: column; min-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .config-chooser-title { margin: 0 0 var(--space-1); padding: 0 var(--space-2); color: var(--muted); font-size: 11px; }
 .config-chooser-empty { margin: 0; padding: var(--space-2); color: var(--secondary); font-size: 11px; }
 .config-chooser-row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; }
@@ -522,11 +540,15 @@ html[data-ui-font-size='24'] { font-size: 24px; }
 .config-chooser-backdrop { position: fixed; inset: 0; z-index: 65; }
 /* IDEA mainMenuDisplayMode: merged stays inline; separate wraps the menu bar onto its
    own row; hamburger hides it behind the button. */
-html[data-main-menu='separate'] .topbar { flex-wrap: wrap; }
-html[data-main-menu='separate'] .menubar { flex: 1 1 100%; order: 9; justify-content: flex-start; padding-top: 2px; }
+/* 结构上已经是两行（`.topbar-menubar-row` / `.topbar-toolbar`），所以这里只剩「汉堡模式隐藏菜单栏」。
+   原来还有一条 `separate` 的 `flex: 1 1 100%; order: 9` —— 那是靠排序把菜单栏挤到第二行的旧做法，
+   在新的 column 布局下反而会把它排到工具栏**之后**。 */
 html[data-main-menu='hamburger'] .menubar { display: none; }
+/* 顶栏高度按显示模式：合并成一行时矮一半；汉堡模式仍是「按钮行 + 工具栏行」两行。 */
+html[data-main-menu='merged'] { --topbar-height: var(--chrome-height); }
+html[data-main-menu='hamburger'] { --topbar-height: calc(var(--chrome-height) * 2); }
 .hamburger-button { flex-shrink: 0; }
-.hamburger-menu { position: fixed; top: var(--chrome-height); left: var(--space-2); z-index: 70; display: flex; flex-direction: column; min-width: 240px; max-height: 70vh; overflow: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.hamburger-menu { position: fixed; top: var(--topbar-height); left: var(--space-2); z-index: 70; display: flex; flex-direction: column; min-width: 240px; max-height: 70vh; overflow: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .hamburger-group { justify-content: flex-start; width: 100%; font-weight: 600; }
 .hamburger-item { justify-content: flex-start; gap: var(--space-2); width: 100%; padding-left: var(--space-4); }
 .hamburger-backdrop { position: fixed; inset: 0; z-index: 65; }
@@ -961,3 +983,46 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .empty-hint:hover { color: var(--bright); text-decoration: underline; }
 .empty-hints > li > span { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
 .empty-hint-drag { color: var(--muted); }
+
+/* 控制台折叠计数（IDEA Console 折叠行的重复次数标记） */
+.run-fold-count { margin-left: var(--space-2); padding: 0 4px; border-radius: var(--radius-xs); background: var(--hover); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10px; }
+
+/* 粘性作用域行（IDEA editor.stickyLines）：绝对定位覆盖在编辑区顶部，不占布局。 */
+.sticky-lines { position: absolute; top: 0; left: 0; right: 12px; z-index: 8; display: flex; flex-direction: column; pointer-events: none; }
+.sticky-line { height: 20px; min-height: 20px; padding: 0 var(--space-3) 0 52px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 20px; }
+
+/* IDEA 的右边距线（Editor → General → Appearance → Show hard wrap guide，默认第 120 列）——
+   专注模式会把它关掉（ToggleDistractionFreeModeAction.applyAndSave:108 的 IS_RIGHT_MARGIN_SHOWN）。 */
+.editor-right-margin .cm-content {
+  background-image: linear-gradient(to right, transparent 0, transparent 120ch,
+                    var(--border, var(--muted)) 120ch, var(--border, var(--muted)) calc(120ch + 1px),
+                    transparent calc(120ch + 1px));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* 主题切换的水纹：从点击位置扩散的一圈，用**目标主题的底色**铺满，于是亮色主题看起来在
+   「变亮」、暗色主题看起来在「变暗」（颜色不在这里写死 —— src/themeRipple.ts 从
+   `:root[data-theme]` 的 `--editor` 现取，主题改了不用同步这里）。
+   形状与动画都在 src/themeRipple.ts；`prefers-reduced-motion` 由它挡掉，这里不重复判断。 */
+.theme-ripple {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  /* 一圈更亮/更暗的水痕：中心实、边缘虚，扩出去时像一圈波纹推过去 */
+  box-shadow: 0 0 0 1px rgb(127 127 127 / .18) inset;
+  animation: theme-ripple-spread 560ms cubic-bezier(.16, 1, .3, 1) forwards;
+}
+.theme-ripple.to-dark { box-shadow: 0 0 0 1px rgb(0 0 0 / .22) inset; }
+
+@keyframes theme-ripple-spread {
+  from { transform: translate(-50%, -50%) scale(0); opacity: .88; }
+  to   { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+/* 系统里关了动画就不要这圈（themeRipple 也会提前返回，这里是双保险：万一动画被别处触发）。 */
+@media (prefers-reduced-motion: reduce) {
+  .theme-ripple { animation: none; display: none; }
+}

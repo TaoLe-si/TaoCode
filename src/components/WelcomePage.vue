@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { BellDot, ChevronDown, CircleHelp, Copy, FolderOpen, FolderPlus, FolderSearch, GitBranch, Moon, Palette, Plug, RefreshCw, Search, Settings, Sun, X } from 'lucide-vue-next'
 import { lastOpenedPath, matchesSearch, systemDependentPath } from '../welcomeProjects'
 import { noticeButtonText, noticeButtonVisible, noticeTitle, type NoticeEntry } from '../notices'
+import { copyToClipboard } from '../clipboard'
 import { request, type EditorSettings, type RecentProject } from '../bridge'
 import type { Theme } from '../appearance'
 import NoticeList from './NoticeList.vue'
@@ -31,7 +32,8 @@ const emit = defineEmits<{
   refresh: []
   help: []
   plugins: []
-  theme: [theme: Theme]
+  /** 第二个参数是点击事件：主题切换的水纹从点击位置扩散（见 src/themeRipple.ts）。 */
+  theme: [theme: Theme, event?: MouseEvent]
   'settings-change': [patch: Partial<EditorSettings>]
   /** "全部清空" in the notification popup (`IDEA`'s notification centre). */
   clearNotices: []
@@ -339,7 +341,7 @@ let copyTimer: number | undefined
 function copyProjectPath(project: RecentProject) {
   menuPath.value = ''
   const text = systemDependentPath(project.path, props.isDesktop)
-  try { void navigator.clipboard?.writeText(text) } catch { /* clipboard may be unavailable in WebView2 */ }
+  void copyToClipboard(text)
   copyNote.value = `已复制：${text}`
   if (copyTimer !== undefined) clearTimeout(copyTimer)
   copyTimer = window.setTimeout(() => { copyNote.value = '' }, 4000)
@@ -407,6 +409,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <div class="brand">TaoCode</div>
         <span class="welcome-version">0.1</span>
       </div>
+      <p class="sidebar-note">{{ isDesktop ? '本地项目' : '浏览器 · 内存预览' }}</p>
       <nav class="welcome-navigation" aria-label="欢迎页导航">
         <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'projects' }" :aria-current="page === 'projects' ? 'page' : undefined" @click="page = 'projects'">
           <FolderOpen :size="17" aria-hidden="true" />项目
@@ -428,7 +431,6 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
       <button type="button" class="icon-button welcome-gear" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="busy" @click="emit('settings')">
         <Settings :size="18" aria-hidden="true" />
       </button>
-      <p class="sidebar-note">{{ isDesktop ? '本地项目' : '浏览器 · 内存预览' }}</p>
     </aside>
 
     <main class="welcome-main">
@@ -439,8 +441,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <section class="customize-group">
           <h2>主题</h2>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light')"><Sun :size="17" aria-hidden="true" /><span>浅色</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark')"><Moon :size="17" aria-hidden="true" /><span>深色</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="17" aria-hidden="true" /><span>月之亮面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="17" aria-hidden="true" /><span>月之暗面</span></button>
           </div>
         </section>
         <section class="customize-group">
@@ -511,6 +513,9 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <p class="list-status" role="status">{{ copyNote || (busy ? '正在处理项目操作…' : query.trim() ? `找到 ${filteredProjects.length} 个项目` : `${projects.length} 个项目`) }}</p>
 
           <p v-if="filteredProjects.length && !filteredProjects.some(project => project.available)" class="list-hint" role="status">列出的路径都不存在或不可访问：用记录右侧的「仅从列表移除」删掉记录（不会动磁盘文件），或打开其他位置的项目。</p>
+          <div v-if="menuPath" class="menu-backdrop" @click="menuPath = ''" />
+          <!-- 列表为空时的空状态：v-else-if / v-else 必须紧跟在 recent-list 的 v-if 之后，
+               中间不能插入其它元素（否则链被打断，空状态会与列表同时渲染）。 -->
           <div v-if="filteredProjects.length" class="recent-list">
             <section v-for="group in groupedProjects" :key="group.name" class="recent-group">
               <header v-if="groupingActive" class="recent-group-head" tabindex="0" role="button" :aria-expanded="!groupCollapsed.has(group.name)" :aria-label="`${group.name}，${group.projects.length} 个项目，左右方向键折叠展开`" @keydown="onGroupKeydown(group.name, $event)" @click="toggleGroupCollapsed(group.name)">
@@ -572,7 +577,6 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
               </ul>
             </section>
           </div>
-          <div v-if="menuPath" class="menu-backdrop" @click="menuPath = ''" />
           <div v-else-if="query.trim()" class="project-empty">
             <Search :size="28" aria-hidden="true" />
             <h3>没有匹配的项目</h3>
@@ -624,7 +628,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 
 <style scoped>
 .project-welcome { display: grid; grid-template-columns: 210px minmax(0, 1fr); flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--editor); }
-.welcome-sidebar { display: flex; flex-direction: column; gap: var(--space-5); min-height: 0; overflow: auto; padding: var(--space-6) var(--space-3) var(--space-4); background: var(--panel); border-right: 1px solid var(--line); }
+.welcome-sidebar { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; padding: var(--space-6) var(--space-3) var(--space-5); background: var(--panel); border-right: 1px solid var(--line); }
+.welcome-gear { margin-top: auto; }   /* 齿轮固定在侧栏底部（IDEA 的欢迎页设置入口） */
 .welcome-brand { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-3); }
 .welcome-brand .brand { font-size: 20px; gap: var(--space-2); }
 .welcome-version { font: 11px var(--font-mono); color: var(--muted); }
@@ -678,13 +683,13 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .recent-group-name { font-weight: 600; letter-spacing: .02em; }
 .recent-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 .recent-group-list { list-style: none; margin: 0; padding: 0; }
-.recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; border-bottom: 1px solid var(--line); }
 .recent-row.is-selected { background: var(--selected); }
 .recent-row.menu-open .recent-open { background: var(--selected); }
-.recent-open { display: grid; align-items: center; grid-template-columns: 26px minmax(11rem, 26%) minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: baseline; flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
+.recent-open { display: grid; grid-template-columns: 32px 17rem minmax(0, 1fr) 2.2rem; gap: var(--space-2) var(--space-4); align-items: center; flex: 1; min-width: 0; min-height: 52px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
-.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex-shrink: 0; align-self: center; border-radius: var(--radius-sm); background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: #fff; font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; align-self: center; border-radius: 50%; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: #fff; font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
 /* RecentProjectIconHelper generates gradient avatars (ProjectIconPalette) for
    reachable paths and a desaturated version when the path is gone. The CSS
    gradient lives inline so the JS palette stays the single source of truth. */

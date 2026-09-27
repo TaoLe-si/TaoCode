@@ -16,10 +16,32 @@ namespace {
 
 constexpr std::size_t max_todo_patterns = 20;
 constexpr std::size_t max_run_configs = 40;
+// 作用域条数上限：状态文件本身有 1 MiB 上限，模式最长 1024 字节，64 条远不会触顶，
+// 同时挡住「无限追加」的写法。IDEA 自己没有条数上限。
+constexpr std::size_t max_scopes = 64;
 
 }} // namespace
 
 namespace taocode {
+
+namespace {
+// TaoCode 能高亮/索引的语言集合，与 templates.ts / fileAssociations 用的是同一份。
+constexpr std::string_view editor_languages[]{"java", "cpp", "typescript", "other"};
+}  // namespace
+
+// 「语言 id -> 布尔」表：只存被显式配置过的语言，没进表=默认（源码 mapLanguageBreadcrumbs
+// 的语义，EditorSettingsExternalizable.java:146-152 + isBreadcrumbsShownFor :459-466）。
+void validate_language_flags(const Json& value, const char* name) {
+    if (!value.is_object()) fail("INVALID_SETTINGS", std::string(name) + " must be an object of language flags.");
+    if (value.size() > 32) fail("INVALID_SETTINGS", std::string(name) + " 的条目过多。");
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        const auto id = it.key();
+        if (std::find(std::begin(editor_languages), std::end(editor_languages), std::string_view(id)) == std::end(editor_languages))
+            fail("INVALID_SETTINGS", std::string(name) + " 里有未知语言：" + id);
+        if (!it.value().is_boolean())
+            fail("INVALID_SETTINGS", std::string(name) + " 的值必须是布尔值。");
+    }
+}
 
 void validate_editor_patch(const Json& patch) {
     // useTabCharacter / showWhitespaces / formatOnSave were added to the editor
@@ -55,6 +77,33 @@ void validate_editor_patch(const Json& patch) {
         } else if (it.key() == "backgroundImagePath") {
             if (!value.is_string() || value.get_ref<const std::string&>().size() > 512)
                 fail("INVALID_SETTINGS", "backgroundImagePath must be a string of at most 512 bytes.");
+        } else if (it.key() == "breadcrumbsPlacement") {
+            // EditorSettingsExternalizable.isBreadcrumbsAbove()（`EditorSettingsExternalizable.java:420-430`）：
+            // 位置只有「上 / 下」两种，默认 SHOW_BREADCRUMBS_ABOVE = false（即下方，:91）。
+            // 是否显示由 showBreadcrumbs 单独管（isBreadcrumbsShown，:439-453）—— 两个开关各存各的，
+            // 关掉显示不会丢掉位置记忆。
+            const auto mode = value.is_string() ? value.get<std::string>() : std::string();
+            if (mode != "top" && mode != "bottom")
+                fail("INVALID_SETTINGS", "breadcrumbsPlacement must be top or bottom.");
+            // 早期版本把「不显示」也编码进这里（三值）。升级路径必须仍有出路：
+            // 旧文件里的 'disabled' 由前端 `normalizeEditorSettings` 迁移，而不是在这里悄悄接受。
+        } else if (it.key() == "showBreadcrumbs") {
+            if (!value.is_boolean()) fail("INVALID_SETTINGS", "showBreadcrumbs must be a boolean.");
+        } else if (it.key() == "breadcrumbsLanguages") {
+            // EditorSettingsExternalizable 的 mapLanguageBreadcrumbs（:146-152）：**只存被显式配置过的
+            // 语言**，没进表的就是默认显示（isBreadcrumbsShownFor :459-466）。键必须是已知语言 id。
+            validate_language_flags(value, "breadcrumbsLanguages");
+        } else if (it.key() == "reformatOnPaste") {
+            // CodeInsightSettings.java:143-148 的四个取值（NO_REFORMAT / INDENT_BLOCK / INDENT_EACH_LINE /
+            // REFORMAT_BLOCK），下拉顺序同 EditorSmartKeysConfigurable.kt:186-188。
+            const auto mode = value.is_string() ? value.get<std::string>() : std::string();
+            if (mode != "none" && mode != "indentBlock" && mode != "indentEachLine" && mode != "reformatBlock")
+                fail("INVALID_SETTINGS", "reformatOnPaste must be none, indentBlock, indentEachLine or reformatBlock.");
+        } else if (it.key() == "bidiTextDirection") {
+            // BidiTextDirection.java:21-23 只有这三个值。
+            const auto direction = value.is_string() ? value.get<std::string>() : std::string();
+            if (direction != "contentBased" && direction != "ltr" && direction != "rtl")
+                fail("INVALID_SETTINGS", "bidiTextDirection must be contentBased, ltr or rtl.");
         } else if (it.key() == "mainMenuDisplayMode") {
             const auto mode = value.is_string() ? value.get<std::string>() : std::string();
             if (mode != "hamburger" && mode != "merged" && mode != "separate")
@@ -91,7 +140,15 @@ Json general_defaults_impl() {
                 // IDEA 用注册表键 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，
                 // 默认 false），在 InfoAndProgressPanel.kt:319-321 读一次：有进程开始跑时是否自动
                 // 弹出进度面板。全量移植时把它升格为持久化设置（TaoCode 没有注册表对话框）。
-                {"autoShowProcessPopup", false}};
+                // Console 行折叠规则（默认空：不折叠任何内容）。
+                {"autoShowProcessPopup", false},
+                {"foldConsoleLines", Json::array()}, {"foldExceptions", Json::array()},
+                // git 默认 3 行上下文；IDEA 的 settings.context.lines 默认值同为 3。
+                {"diffContextLines", 3},
+                // IDEA 2023+ 默认显示粘性行；一次最多 3 层作用域。
+                {"showStickyLines", true}, {"stickyLinesLimit", 3},
+                // 默认没有任何外部工具。
+                {"externalTools", Json::array()}};
 }
 
 void validate_general_patch(const Json& patch) {
@@ -109,10 +166,34 @@ void validate_general_patch(const Json& patch) {
             const auto mode = value.is_string() ? value.get<std::string>() : std::string();
             if (mode != "ASK" && mode != "TERMINATE" && mode != "DISCONNECT")
                 fail("INVALID_SETTINGS", "processCloseConfirmation must be ASK, TERMINATE or DISCONNECT.");
+        } else if (it.key() == "stickyLinesLimit") {
+            if (!value.is_number_integer() || value.get<int>() < 0 || value.get<int>() > 10)
+                fail("INVALID_SETTINGS", "stickyLinesLimit must be an integer between 0 and 10.");
+        } else if (it.key() == "diffContextLines") {
+            if (!value.is_number_integer() || value.get<int>() < 1 || value.get<int>() > 100)
+                fail("INVALID_SETTINGS", "diffContextLines must be an integer between 1 and 100.");
         } else if (it.key() == "inactiveTimeout") {
             // UINumericRange.fit (UINumericRange.java:21-23) clamps instead of failing.
             if (!value.is_number_integer())
                 fail("INVALID_SETTINGS", "inactiveTimeout must be an integer.");
+        } else if (it.key() == "externalTools") {
+            // 外部工具：{name, command} 数组（上限 32 条，各字段长度受限）。
+            if (!value.is_array() || value.size() > 32)
+                fail("INVALID_SETTINGS", "externalTools must be an array of at most 32 entries.");
+            for (const auto& entry : value) {
+                if (!entry.is_object()) fail("INVALID_SETTINGS", "each external tool must be an object.");
+                known_keys(entry, {"name", "command"}, "INVALID_SETTINGS");
+                const auto name = text_or(entry, "name"), command = text_or(entry, "command");
+                if (name.empty() || name.size() > 80) fail("INVALID_SETTINGS", "external tool name must be 1..80 bytes.");
+                if (command.empty() || command.size() > 1000) fail("INVALID_SETTINGS", "external tool command must be 1..1000 bytes.");
+            }
+        } else if (it.key() == "foldConsoleLines" || it.key() == "foldExceptions") {
+            // ConsoleConfigurable 的两个折叠列表：字符串数组（上限 64 条，每条 ≤200 字节）。
+            if (!value.is_array() || value.size() > 64)
+                fail("INVALID_SETTINGS", "fold rules must be an array of at most 64 strings.");
+            for (const auto& entry : value)
+                if (!entry.is_string() || entry.get_ref<const std::string&>().size() > 200)
+                    fail("INVALID_SETTINGS", "a fold rule must be a string of at most 200 bytes.");
         } else if (!value.is_boolean()) {
             fail("INVALID_SETTINGS", "General flags must be JSON booleans.");
         }
@@ -123,6 +204,21 @@ Json editor_defaults_impl() {
     return {{"fontSize", 14}, {"tabSize", 4}, {"wordWrap", false},
             {"lineNumbers", true},
             {"showIndentGuides", true}, {"bracketMatching", true},
+            // EditorSettingsExternalizable.OptionSet:91-92 —— SHOW_BREADCRUMBS = true、
+            // SHOW_BREADCRUMBS_ABOVE = false（即默认显示在**下方**）。按语言的表默认空
+            //（未配置 = 显示，:459-466）。
+            {"showBreadcrumbs", true}, {"breadcrumbsPlacement", "bottom"}, {"breadcrumbsLanguages", Json::object()},
+            // IDEA 默认两者都开（错误高亮与 stripe 标记）。
+            {"showDiagnostics", true}, {"showErrorStripe", true},
+            // CodeInsightSettings.java:144 `REFORMAT_ON_PASTE = INDENT_EACH_LINE`。
+            {"reformatOnPaste", "indentEachLine"},
+            // EditorSettingsExternalizable.java:137 `BIDI_TEXT_DIRECTION = BidiTextDirection.CONTENT_BASED`。
+            {"bidiTextDirection", "contentBased"},
+            // EditorSettingsExternalizable.java:87 默认 true。
+            {"showGutterIcons", true},
+            // 文件颜色两层开关（IDEA `FileColorManagerImpl` 的 FileColorsEnabled /
+            // FileColorsForTabsEnabled，`_isEnabled()` :72-74 默认都是 true）。
+            {"fileColorsEnabled", true}, {"fileColorsForTabs", true},
             // UISettingsState.editorTabLimit defaults to 30 open tabs per group.
             {"tabLimit", 30},
             // Indent with tabs instead of spaces, render whitespace, reformat on save
@@ -184,6 +280,17 @@ Json default_todo_markers() {
 Json project_defaults() {
     return {{"excludedDirs", Json::array({".git", "node_modules", "build", "dist"})},
             {"runConfigs", Json::array()}, {"bookmarks", Json::array()},
+            // 命名作用域（IDEA `ScopeChooserConfigurable`）：默认一个都没有，
+            // 与 `NamedScopesHolder.myScopes = NamedScope.EMPTY_ARRAY` 一致。
+            {"scopes", Json::array()},
+            // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认一条都没有，
+            // 与 `FileColorsModel` 初始两个空列表（应用级/项目级）一致。
+            {"fileColors", Json::array()},
+            // 书签工具窗口的视图状态（IDEA `BookmarksViewState`，workspace.xml，默认值见 :23-29）。
+            {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
+                               {"autoscrollFromSource", false}}},
+            // VCS Log 的 UI 开关（IDEA `VcsLogApplicationSettings` 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。
+            {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_markers()},
             {"java", {{"jdkHome", ""}, {"jdkName", "JavaSE-17"}, {"sourcePaths", Json::array()},
                       {"outputPath", ""}, {"referencedLibraries", Json::array({"lib/**/*.jar"})}}},
@@ -192,7 +299,24 @@ Json project_defaults() {
             {"templates", {{"overrides", Json::array()}, {"customs", Json::array()}}},
             // IDEA's FileType association table, reduced to what TaoCode can highlight:
             // extension -> language, e.g. {"conf": "typescript"}. Empty by default.
-            {"fileAssociations", Json::object()}};
+            {"fileAssociations", Json::object()},
+            // 构建工具（IDEA 设置里「构建、执行、部署 › 构建工具」这一组）。**项目级**：
+            //   · autoReloadType —— `ExternalSystemGroupConfigurable.kt:29-56`（id=`build.tools`，
+            //     三档 ALL/SELECTIVE/NONE）；`ExternalSystemProjectTrackerSettings` 的默认值是 ALL。
+            //   · previousAutoReloadType —— 选 NONE 时把上一次的选择记在
+            //     `settings.build.tools.auto.reload`（同文件 `PREVIOUS_KEY`）。
+            //   · gradle —— `GradleConfigurable` 的三项：distributionType（用哪个 Gradle）在
+            //     `GradleProjectSettings`，serviceDirectoryPath（Gradle 用户主目录）在
+            //     `GradleLocalSettings.getGradleUserHome()`（GradleSettings.java:113-115），
+            //     offlineMode 在 `GradleSettings.MyState`（:118-131）。三者都在项目级存储里。
+            // 导出到 HTML（IDEA `ExportToHTMLSettings`，存 workspace.xml ⇒ 项目级）。
+            // `scope: 0` = 还没选过（IDEA 的 MyState 里 printScope 默认 0，对话框按上下文决定初值）。
+            {"exportToHtml", {{"scope", 0}, {"includeSubdirectories", false},
+                              {"printLineNumbers", false}, {"openInBrowser", false}, {"outputDirectory", ""}}},
+            {"buildTools", {{"autoReloadType", "ALL"}, {"previousAutoReloadType", "ALL"},
+                            {"gradle", {{"useGradleFrom", "wrapper"}, {"gradlePath", ""},
+                                        {"gradleUserHome", ""}, {"gradleJvm", "#USE_PROJECT_JDK"},
+                                        {"delegatedBuild", true}, {"offline", false}}}}}};
 }
 
 Json empty_document() {
@@ -271,10 +395,13 @@ void validate_todo_patterns(const Json& values) {
     std::set<std::string> patterns;
     for (const auto& value : values) {
         if (!value.is_object()) fail("INVALID_SETTINGS", "TODO 模式要写成 {pattern, description}。");
-        known_keys(value, {"pattern", "description"}, "INVALID_SETTINGS");
+        // caseSensitive 对应 IDEA TodoPattern.isCaseSensitive()（模式表每行的"区分大小写"列）。
+        known_keys(value, {"pattern", "description", "caseSensitive"}, "INVALID_SETTINGS");
         const auto pattern = text_or(value, "pattern"), description = text_or(value, "description");
         if (pattern.empty() || pattern.size() > 200) fail("INVALID_SETTINGS", "TODO 模式不能为空且不超过 200 字节。");
         if (description.empty() || description.size() > 60) fail("INVALID_SETTINGS", "TODO 说明不能为空且不超过 60 字节。");
+        if (value.contains("caseSensitive") && !value.at("caseSensitive").is_boolean())
+            fail("INVALID_SETTINGS", "caseSensitive 必须是布尔值。");
         if (!valid_utf8(pattern) || !valid_utf8(description)) fail("INVALID_SETTINGS", "TODO 模式必须是 UTF-8 文本。");
         if (pattern.find_first_of("\r\n\u0000") != std::string::npos) fail("INVALID_SETTINGS", "TODO 模式不能换行。");
         if (!patterns.insert(pattern).second) fail("INVALID_SETTINGS", "TODO 模式不能重复：" + pattern);
@@ -423,10 +550,158 @@ void validate_file_associations(const Json& value) {
     }
 }
 
+// 命名作用域（IDEA `project.scopes`）。IDEA 把本地作用域存在 workspace.xml 的
+// `NamedScopeManager`、共享作用域存在 `.idea` 下的 `DependencyValidationManager`
+// （`NamedScopesHolder.java:125-165` 的 writeScope/readScope）：每条只有 name 与 pattern。
+// TaeCode 用一条数组保存两者，多一个 `shared` 区分持有者；数组顺序就是
+// `ScopeChooserConfigurableState.myOrder`（:524-528）要保住的那个顺序。
+//
+// 校验只针对**形状**：IDEA 允许存下任何解析不了的模式（`readScope` 捕获 ParsingException
+// 之后落到 InvalidPackageSet），所以这里绝不因为模式语法不合法而拒绝保存。
+void validate_scopes(const Json& value) {
+    if (!value.is_array()) fail("INVALID_SETTINGS", "scopes 必须是数组。");
+    if (value.size() > max_scopes)
+        fail("INVALID_SETTINGS", "每个项目最多保存 " + std::to_string(max_scopes) + " 个作用域。");
+    std::set<std::string> names;
+    for (const auto& entry : value) {
+        if (!entry.is_object()) fail("INVALID_SETTINGS", "每个作用域要写成 {name, pattern, shared}。");
+        known_keys(entry, {"name", "pattern", "shared"}, "INVALID_SETTINGS");
+        if (!entry.contains("name") || !entry.at("name").is_string())
+            fail("INVALID_SETTINGS", "作用域名必须是字符串。");
+        if (!entry.contains("pattern") || !entry.at("pattern").is_string())
+            fail("INVALID_SETTINGS", "作用域模式必须是字符串。");
+        const auto name = entry.at("name").get<std::string>();
+        const auto pattern = entry.at("pattern").get<std::string>();
+        if (name.empty() || name.size() > 80)
+            fail("INVALID_SETTINGS", "作用域名不能为空且不超过 80 字节。");
+        if (!valid_utf8(name) || name.find_first_of("\r\n\t") != std::string::npos)
+            fail("INVALID_SETTINGS", "作用域名必须是单行 UTF-8 文本。");
+        if (pattern.size() > 1024)
+            fail("INVALID_SETTINGS", "作用域模式不能超过 1024 字节。");
+        if (!valid_utf8(pattern))
+            fail("INVALID_SETTINGS", "作用域模式必须是 UTF-8 文本。");
+        // ScopeConfigurable 的明细页里有「Share through VCS」复选框（:49,103-108），
+        // 它决定这条落在本地持有者还是共享持有者（:91-95）。
+        if (!entry.contains("shared") || !entry.at("shared").is_boolean())
+            fail("INVALID_SETTINGS", "作用域的 shared 必须是布尔值。");
+        if (!names.insert(name).second)
+            fail("INVALID_SETTINGS", "作用域名不能重复：" + name);
+    }
+}
+
+// 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors 一族：FileColorConfiguration =
+// scopeName + colorID）。每条只有「作用域名 + 颜色名」两个字段，颜色名限死在那七个
+// （`FileColorManagerImpl.ourDefaultColors` 的键）；数组顺序即优先级 —— 源码里
+// `FileColorsModel.findConfigurationWithScopeFilter:247-260` 顺着迭代器**首个命中就返回**。
+//
+// 上限与 scopes 同量级：文件名 80 字节、颜色名 7 个，64 条足够覆盖一个项目。
+// 作用域名允许指向尚未定义的作用域（与 IDEA 一致：它按名字查作用域，查不到就跳过这一条）。
+void validate_file_colors(const Json& value) {
+    if (!value.is_array()) fail("INVALID_SETTINGS", "fileColors 必须是数组。");
+    if (value.size() > max_scopes)
+        fail("INVALID_SETTINGS", "每个项目最多保存 " + std::to_string(max_scopes) + " 条文件颜色。");
+    const std::set<std::string> palette = {"Blue", "Green", "Orange", "Rose", "Violet", "Yellow", "Gray"};
+    std::set<std::string> scopes;
+    for (const auto& entry : value) {
+        if (!entry.is_object()) fail("INVALID_SETTINGS", "每条文件颜色要写成 {scope, color}。");
+        known_keys(entry, {"scope", "color"}, "INVALID_SETTINGS");
+        if (!entry.contains("scope") || !entry.at("scope").is_string())
+            fail("INVALID_SETTINGS", "文件颜色的作用域名必须是字符串。");
+        if (!entry.contains("color") || !entry.at("color").is_string())
+            fail("INVALID_SETTINGS", "文件颜色的颜色名必须是字符串。");
+        const auto scope = entry.at("scope").get<std::string>();
+        const auto color = entry.at("color").get<std::string>();
+        if (scope.empty() || scope.size() > 80)
+            fail("INVALID_SETTINGS", "作用域名不能为空且不超过 80 字节。");
+        if (!valid_utf8(scope) || scope.find_first_of("\r\n\t") != std::string::npos)
+            fail("INVALID_SETTINGS", "作用域名必须是单行 UTF-8 文本。");
+        if (!palette.count(color))
+            fail("INVALID_SETTINGS", "颜色名只能是 Blue/Green/Orange/Rose/Violet/Yellow/Gray 之一。");
+        // 同名只留一条：重复会让「首个命中」依赖数组顺序里哪一条在前，语义不清。
+        if (!scopes.insert(scope).second)
+            fail("INVALID_SETTINGS", "同一个作用域名只能配一种颜色：" + scope);
+    }
+}
+
+void validate_build_tools(const Json& value) {
+    if (!value.is_object()) fail("INVALID_SETTINGS", "buildTools 必须是对象。");
+    known_keys(value, {"autoReloadType", "previousAutoReloadType", "gradle"}, "INVALID_SETTINGS");
+    // `ExternalSystemProjectTrackerSettings.AutoReloadType` 的三个值（枚举名大写，存盘同形）。
+    const auto reload_type = [&value](const char* key) {
+        if (!value.contains(key)) return;
+        const auto& field = value.at(key);
+        const auto text = field.is_string() ? field.get<std::string>() : std::string();
+        if (text != "ALL" && text != "SELECTIVE" && text != "NONE")
+            fail("INVALID_SETTINGS", std::string(key) + " 只能是 ALL / SELECTIVE / NONE。");
+    };
+    reload_type("autoReloadType");
+    reload_type("previousAutoReloadType");
+    if (!value.contains("gradle")) return;
+    const auto& gradle = value.at("gradle");
+    if (!gradle.is_object()) fail("INVALID_SETTINGS", "buildTools.gradle 必须是对象。");
+    known_keys(gradle, {"useGradleFrom", "gradlePath", "gradleUserHome", "gradleJvm", "delegatedBuild", "offline"}, "INVALID_SETTINGS");
+    if (gradle.contains("useGradleFrom")) {
+        const auto& field = gradle.at("useGradleFrom");
+        // `DistributionType`：默认/包装器 → wrapper；本机 → local；指定路径 → path。
+        const auto text = field.is_string() ? field.get<std::string>() : std::string();
+        if (text != "wrapper" && text != "local" && text != "path")
+            fail("INVALID_SETTINGS", "useGradleFrom 只能是 wrapper / local / path。");
+    }
+    // 「Gradle JVM」（`GradleProjectSettings.getGradleJvm()`）：要么是 `#USE_PROJECT_JDK`
+    // （`ExternalSystemJdkUtil.java:52` —— 用项目 JDK，默认值），要么是一个 JDK 主目录。
+    for (const auto key : {"gradlePath", "gradleUserHome", "gradleJvm"}) {
+        if (!gradle.contains(key)) continue;
+        const auto& field = gradle.at(key);
+        if (!field.is_string() || !valid_utf8(field.get_ref<const std::string&>()) || field.get_ref<const std::string&>().size() > 512)
+            fail("INVALID_SETTINGS", std::string(key) + " 必须是 512 字节以内的 UTF-8 路径字符串。");
+    }
+    // 「构建并运行使用」（`GradleProjectSettings.getDelegatedBuild()`，默认 true）。
+    for (const auto key : {"delegatedBuild", "offline"}) {
+        if (gradle.contains(key) && !gradle.at(key).is_boolean())
+            fail("INVALID_SETTINGS", std::string("buildTools.gradle.") + key + " 必须是布尔值。");
+    }
+}
+
+void validate_export_to_html(const Json& value) {
+    if (!value.is_object()) fail("INVALID_SETTINGS", "exportToHtml 必须是对象。");
+    known_keys(value, {"scope", "includeSubdirectories", "printLineNumbers", "openInBrowser", "outputDirectory"},
+               "INVALID_SETTINGS");
+    if (value.contains("scope")) {
+        // `PrintSettings.PRINT_FILE/PRINT_SELECTED_TEXT/PRINT_DIRECTORY`（1/2/4）+ 0 = 未选。
+        const auto& scope = value.at("scope");
+        if (!scope.is_number_integer()) fail("INVALID_SETTINGS", "exportToHtml.scope 必须是整数。");
+        const auto number = scope.get<std::int64_t>();
+        if (number != 0 && number != 1 && number != 2 && number != 4)
+            fail("INVALID_SETTINGS", "exportToHtml.scope 只能是 0 / 1 / 2 / 4（未选 / 当前文件 / 选中文本 / 当前目录）。");
+    }
+    for (const auto key : {"includeSubdirectories", "printLineNumbers", "openInBrowser"})
+        if (value.contains(key) && !value.at(key).is_boolean())
+            fail("INVALID_SETTINGS", std::string("exportToHtml.") + key + " 必须是布尔值。");
+    if (value.contains("outputDirectory")) {
+        const auto& field = value.at("outputDirectory");
+        if (!field.is_string() || !valid_utf8(field.get_ref<const std::string&>()) ||
+            field.get_ref<const std::string&>().size() > 512)
+            fail("INVALID_SETTINGS", "exportToHtml.outputDirectory 必须是 512 字节以内的 UTF-8 路径字符串。");
+    }
+}
+
 void validate_project_patch(const Json& patch) {
     known_keys(patch, {"excludedDirs", "runConfigs", "bookmarks", "todoPatterns", "templates", "java",
-                       "fileAssociations"},
+                       "fileAssociations", "vcsLog", "scopes", "fileColors", "bookmarksView", "buildTools", "exportToHtml"},
                "INVALID_SETTINGS");
+    if (patch.contains("buildTools")) validate_build_tools(patch.at("buildTools"));
+    if (patch.contains("exportToHtml")) validate_export_to_html(patch.at("exportToHtml"));
+    if (patch.contains("scopes")) validate_scopes(patch.at("scopes"));
+if (patch.contains("fileColors")) validate_file_colors(patch.at("fileColors"));
+    if (patch.contains("bookmarksView")) {
+        // 只收录有真实落点的三个开关（IDEA 还有 askBeforeDeletingLists / showPreview /
+        // rewriteBookmarkType，本仓没有对应概念，故不接受它们 —— 免得存下一个没人读的值）。
+        const auto& view = patch.at("bookmarksView");
+        if (!view.is_object()) fail("INVALID_SETTINGS", "bookmarksView 必须是对象。");
+        known_keys(view, {"groupLineBookmarks", "autoscrollToSource", "autoscrollFromSource"}, "INVALID_SETTINGS");
+        for (auto it = view.begin(); it != view.end(); ++it)
+            if (!it.value().is_boolean()) fail("INVALID_SETTINGS", "bookmarksView 的值必须是布尔值。");
+    }
     if (patch.contains("fileAssociations")) validate_file_associations(patch.at("fileAssociations"));
     if (patch.contains("java")) validate_java_settings(patch.at("java"));
     if (patch.contains("excludedDirs")) {
@@ -451,8 +726,15 @@ void validate_project_patch(const Json& patch) {
             // directory, environment, before-launch steps); dropping any of it on save
             // is what made the dialog feel decorative.
             if (!value.is_object()) fail("INVALID_SETTINGS", "runConfigs 的每一项都要是 {name, command[, type]}。");
-            known_keys(value, {"name", "command", "type", "program", "args", "cwd", "env", "beforeLaunch", "adapter"},
+            // `folder` 对应 IDEA RunConfigurable 树里的文件夹节点（`RunConfigurableNodeKind.FOLDER`，
+            // RunConfigurable.kt:180 用 String 当 userObject），空串/缺省表示放在类型节点下。
+            // `allowRunningInParallel` = IDEA `RunConfigurationOptions.isAllowRunningInParallel`
+            // （`:54-56`，默认 false）：「允许并行运行多个实例」。
+            known_keys(value, {"name", "command", "type", "program", "args", "cwd", "env", "beforeLaunch", "adapter", "folder",
+                               "allowRunningInParallel"},
                        "INVALID_SETTINGS");
+            if (value.contains("allowRunningInParallel") && !value.at("allowRunningInParallel").is_boolean())
+                fail("INVALID_SETTINGS", "运行配置的 allowRunningInParallel 必须是布尔值。");
             if (value.contains("type") && !value.at("type").is_string()) fail("INVALID_SETTINGS", "运行配置类型必须是字符串。");
             if (value.contains("adapter")) {
                 if (!value.at("adapter").is_string() || value.at("adapter").get_ref<const std::string&>().size() > 64)
@@ -477,6 +759,14 @@ void validate_project_patch(const Json& patch) {
             };
             optional_text("program", 1024);
             optional_text("cwd", 1024);
+            // 文件夹名：非空时最多 80 字节、单行（树的节点标签一行显示）。
+            if (value.contains("folder")) {
+                if (!value.at("folder").is_string()) fail("INVALID_SETTINGS", "运行配置的 folder 必须是字符串。");
+                const auto folder = value.at("folder").get<std::string>();
+                if (folder.size() > 80) fail("INVALID_SETTINGS", "运行配置的文件夹名不能超过 80 字节。");
+                if (!valid_utf8(folder) || folder.find_first_of("\r\n\t") != std::string::npos)
+                    fail("INVALID_SETTINGS", "运行配置的文件夹名必须是单行 UTF-8 文本。");
+            }
             const auto string_list = [&](const char* key, std::size_t limit, std::size_t item_limit) {
                 if (!value.contains(key)) return;
                 if (!value.at(key).is_array()) fail("INVALID_SETTINGS", std::string("运行配置的 ") + key + " 必须是数组。");

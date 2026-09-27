@@ -21,6 +21,7 @@ import RunConfigurationsDialog from './components/RunConfigurationsDialog.vue'
 import ToolWindowView, { type ToolWindowViewContext } from './components/ToolWindowView.vue'
 import SearchEverywhereDialog from './components/SearchEverywhereDialog.vue'
 import { createSearchEverywhereHost } from './searchEverywhereHost'
+import { createFileColorHost } from './fileColorsHost'
 import ProjectDialog from './components/ProjectDialog.vue'
 import ProjectStructureDialog from './components/ProjectStructureDialog.vue'
 import MainToolbar, { type MainToolbarContext } from './components/MainToolbar.vue'
@@ -82,6 +83,7 @@ import type { Place } from './lspNavigation'
 import { describeCopiedReference, primaryMoniker, referenceText, type MonikerResult } from './moniker'
 import type { WorkspaceDiagnosticsResult } from './bridge'
 import { clampPanelSize, initialTheme, projectTint, themeStorageKey, type Theme } from './appearance'
+import { themeRipple } from './themeRipple'
 import { parseAnyIssue } from './buildOutput'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings, type CommitMessageInspectionSettings } from './commitMessageInspection'
 import { rankCommands } from './commandSearch'
@@ -814,9 +816,12 @@ function toggleMaximizeEditor() {
   }
 }
 const savedChrome = ref<ToolWindowChrome | null>(null)
-function changeTheme(value: Theme) {
+function changeTheme(value: Theme, event?: MouseEvent) {
   theme.value = value
   menu.value = null
+  // 水纹：先换主题，**再**取目标主题的底色铺那圈圆（themeRipple 读的是换完之后的 `--editor`），
+  // 所以看到的是"从点击点开始逐渐变亮/变暗"。系统关了动画时它自己什么都不做。
+  themeRipple(event ?? null, value)
   try { localStorage.setItem(themeStorageKey, value) }
   catch { notify('主题已切换，但当前环境无法保存主题偏好。', true) }
 }
@@ -939,7 +944,7 @@ function rememberPlace(place: Place) {
 const {
   settingsSectionHint, commitMessageSettings, openSettings, saveSettings, saveGeneralSettings, readCommitMessageSettings, saveCommitMessageSettings,
   saveProjectSettings, saveTemplateSettings, saveTodoPatterns, saveFileAssociations, saveVcsLog, saveBookmarksView,
-  saveScopes, saveJavaSettings, browseStructureDir, saveBuildTools,
+  saveScopes, saveFileColors, saveJavaSettings, browseStructureDir, saveBuildTools,
 } = createSettingsPersistence({
   // 惰性：`startLsp` 由 LSP 模块提供（解构在更后面），这里只要一个引用。
   notify, isDesktop, startLsp: (...args) => startLsp(...args), settingsOpen, settingsBusy, settingsError,
@@ -1678,6 +1683,10 @@ const {
   allRunConfigNames, selectRunConfig, runSelectedConfig: debug => runSelectedConfig(debug), baseName,
 })
 
+// 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors / `EditorTabColorProviderImpl`）：
+// 按作用域给标签页上色。算颜色的纯逻辑在 src/fileColors.ts，落点在 src/fileColorsHost.ts。
+const { tabFileColor, tabFileColorScope } = createFileColorHost({ editorSettings, projectSettings, workspace })
+
 function closeAffectedTabs(path: string, isDir: boolean) {
   for (const pane of [0, 1] as const) {
     const group = groups[pane]
@@ -2120,8 +2129,8 @@ onBeforeUnmount(() => {
           </template>
           <div v-if="pane === 0 || splitOrientation !== 'none'" class="editor-pane" :class="[pane === 0 ? 'primary-pane' : 'secondary-pane', { 'pane-focused': focusedPane === pane }]" :style="pane === 1 ? (splitOrientation === 'horizontal' ? { flex: `0 1 ${splitSize}px`, minWidth: '160px' } : { flex: `0 1 ${splitSize}px`, minHeight: '160px' }) : undefined" @pointerdown.capture="focusPane(pane)">
             <div class="editor-tabs" role="tablist" :aria-label="pane === 0 ? '编辑器标签组' : '第二标签组'" @dragover="onTabDragOver(pane, $event)" @drop="onTabStripDrop(pane, $event)">
-              <div v-for="tab in groups[pane].tabs" :key="`${pane}:${tab.path}`" class="file-tab" :class="{ selected: groups[pane].activePath === tab.path, pinned: tab.pinned, preview: tab.preview && groups[pane].activePath !== tab.path, dragging: dragTab?.pane === pane && dragTab.path === tab.path }" draggable="true" @dragstart="onTabDragStart(pane, tab, $event)" @dragend="dragTab = null" @dragover="onTabDragOver(pane, $event)" @drop="onTabDrop(pane, tab.path, $event)" @contextmenu="onTabContext(pane, tab, $event)">
-                <button class="tab-select" role="tab" :aria-selected="groups[pane].activePath === tab.path" :title="tab.path" @click="switchTabIn(pane, tab)"><FileCode2 :size="14" /><span>{{ tab.path.split('/').pop() }}</span><Pin v-if="tab.pinned" :size="11" class="pin-mark" aria-label="已固定" /><span v-if="tab.dirty" class="dirty-dot" aria-label="未保存" /></button>
+              <div v-for="tab in groups[pane].tabs" :key="`${pane}:${tab.path}`" class="file-tab" :class="{ selected: groups[pane].activePath === tab.path, pinned: tab.pinned, preview: tab.preview && groups[pane].activePath !== tab.path, dragging: dragTab?.pane === pane && dragTab.path === tab.path }" :style="tabFileColor(tab.path) ? { background: tabFileColor(tab.path)!, color: 'var(--text)' } : undefined" draggable="true" @dragstart="onTabDragStart(pane, tab, $event)" @dragend="dragTab = null" @dragover="onTabDragOver(pane, $event)" @drop="onTabDrop(pane, tab.path, $event)" @contextmenu="onTabContext(pane, tab, $event)">
+                <button class="tab-select" role="tab" :aria-selected="groups[pane].activePath === tab.path" :title="tabFileColorScope(tab.path) ? `作用域：${tabFileColorScope(tab.path)}` : tab.path" @click="switchTabIn(pane, tab)"><FileCode2 :size="14" /><span>{{ tab.path.split('/').pop() }}</span><Pin v-if="tab.pinned" :size="11" class="pin-mark" aria-label="已固定" /><span v-if="tab.dirty" class="dirty-dot" aria-label="未保存" /></button>
                 <button class="tab-close" :aria-label="`关闭 ${tab.path}`" :disabled="tab.saving" @click="closeTabIn(pane, tab)"><X :size="12" /></button>
               </div>
               <div v-if="!groups[pane].tabs.length" class="welcome-tab"><Braces :size="14" />工作台</div>
@@ -2302,7 +2311,7 @@ onBeforeUnmount(() => {
 
     <ExportToHtmlDialog v-if="exportDialogOpen" :settings="projectSettings.exportToHtml ?? { scope: 0, includeSubdirectories: false, printLineNumbers: false, openInBrowser: false, outputDirectory: '' }" :file-name="activePath ? activePath.split('/').pop() ?? '' : ''" :directory-name="activePath.includes('/') ? activePath.slice(0, activePath.lastIndexOf('/')) : (activePath ? '(工作区根目录)' : '')" :selection-available="Boolean(active) && Boolean(editorFor(activePath)?.hasSelection?.())" :busy="busy" @save="draft => void runExportToHtml(draft)" @browse="initial => void browseOutputDirectory(initial).then(path => { if (path) exportPickedDirectory = path })" :picked-directory="exportPickedDirectory" @close="closeExportDialog()" />
     <ProjectDialog v-if="projectMode" v-model:form="projectForm" :mode="projectMode" :busy="projectBusy || busy" :cancelling="cancelling" :error="projectError" :progress="cloneProgress" :git-available="gitAvailable" :is-desktop="isDesktop" @browse="browseParent" @submit="submitProject" @cancel="cancelProject" />
-    <ProjectStructureDialog v-if="projectStructureOpen" :settings="workspace ? projectSettings : null" :root="workspace?.root ?? null" :busy="settingsBusy" @save-java="saveJavaSettings" @save-project="saveProjectSettings" @browse="browseStructureDir" @close="projectStructureOpen = false" />
+    <ProjectStructureDialog v-if="projectStructureOpen" :settings="workspace ? projectSettings : null" :root="workspace?.root ?? null" :busy="settingsBusy" @save-java="saveJavaSettings" @save-scopes="saveScopes" @save-file-colors="saveFileColors" @save-project="saveProjectSettings" @browse="browseStructureDir" @close="projectStructureOpen = false" />
     <SettingsDialog v-if="settingsOpen" ref="settingsDialogRef" :settings="editorSettings" :project-settings="workspace ? projectSettings : null" :project-root="workspace?.root ?? null" :active-path="activePath" :theme="theme" :busy="settingsBusy" :error="settingsError" :initial-section="settingsSectionHint" :gradle-detection="gradleDetection" @save="saveSettings" @save-project="saveProjectSettings" @saveVcsLog="saveVcsLog" @save-build-tools="saveBuildTools" :module-name="workspace?.name ?? ''" @saveScopes="saveScopes" @saveTodoPatterns="saveTodoPatterns" @saveFileAssociations="saveFileAssociations" :commit-message-settings="commitMessageSettings" :general="generalSettings" @save-general="saveGeneralSettings" @save-commit-message="saveCommitMessageSettings" @save-templates="saveTemplateSettings" @save-java="saveJavaSettings" @theme="changeTheme" @pick-background="void chooseBackgroundImage()" @clear-background="void clearBackgroundImage()" @close="settingsOpen = false" />
     <div v-if="leavePrompt" class="modal-backdrop">
       <section class="help-dialog leave-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trapFocus">

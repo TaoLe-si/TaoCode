@@ -1,16 +1,33 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { languageFor } from '../templates'
+import { copyToClipboard } from '../clipboard'
 import { defaultEditorSettings } from '../bridge'
 import { isNameHit, matchesOption, optionMatches, resolveSettingsPath, settingsPath } from '../settingsSearch'
 import { RIGHT_MARGIN_MAX, RIGHT_MARGIN_MIN, type CommitMessageInspectionSettings } from '../commitMessageInspection'
 import { addHistoryEntry, formatHistory, parseHistory, popupHistory, SEARCH_HISTORY_LABEL, SETTINGS_SEARCH_HISTORY_KEY, stepHistory, type HistoryDirection } from '../searchHistory'
 import { MAX_SHOWS, NEW_BADGE_TEXT, NEW_OPTION_PAGES, badgeStorageKey, markOpened, parseBadgeCount, showNewBadgeDot, showNewOptions, showNewOptionsInGroup, type BadgeCounts } from '../settingsBadge'
-import { Braces, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Cog, FolderTree, GitCommitIcon, Moon, Palette, Save, Search, SlidersHorizontal, Sun, X } from 'lucide-vue-next'
+import { PASTE_REFORMAT_MODES, pasteReformatLabel } from '../pasteOptions'
+import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Moon, Save, Search, Sun, X } from 'lucide-vue-next'
 import TemplateSettingsPage from './TemplateSettingsPage.vue'
-import ProjectStructurePane from './ProjectStructurePane.vue'
-import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
-import { defaultGeneralSettings } from '../bridge'
+// 设置树的**表**在 src/settingsTreeMeta.ts（与 src/toolWindowMeta.ts 同一个模式）。
+// `groups` / `nodes` 用别名导入，模板与脚本其余部分一个字都不用改。
+import {
+  EXPANDED_DEFAULT, PAGE_KEYS, PROJECT_SCOPED_PAGES,
+  SETTINGS_GROUPS as groups, SETTINGS_NODES as nodes, isParentOnly,
+  type PageKey,
+} from '../settingsTreeMeta'
+import BuildToolsSettingsPage from './BuildToolsSettingsPage.vue'
+import GradleSettingsPage from './GradleSettingsPage.vue'
+import ScopesSettingsPage from './ScopesSettingsPage.vue'
+import TodoPatternsPage from './TodoPatternsPage.vue'
+import FileTypesPage from './FileTypesPage.vue'
+import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, NamedScopeSetting, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
+import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '../bridge'
+import type { FileColorSetting } from '../fileColors'
+// 构建工具组（`build.tools` + Gradle 页）的取值/文案/控件都在 src/gradle.ts 与两个子页组件里；
+// 这里只剩两处需要类型：emit 的载荷形状与传给 Gradle 页的检测结果。
+import type { BuildToolsSettings, GradleDetection } from '../gradle'
 import type { Theme } from '../appearance'
 
 const props = defineProps<{
@@ -21,24 +38,38 @@ const props = defineProps<{
   theme: Theme
   busy: boolean
   error: string
-  initialSection?: 'appearance' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
-    | 'editor.codeStyle.indents' | 'tools.actionsOnSave' | 'structure' | 'templates' | 'commit' | 'general' | null
+  initialSection?: 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs'
+    | 'preferences.sourceCode.indents' | 'tools.actionsOnSave' | 'editing.templates' | 'commit' | 'preferences.general'
+    | 'build.tools' | 'reference.settingsdialog.project.gradle' | null
   /** IDEA's commit-message inspections (Settings › Version Control › Commit). */
   commitMessageSettings: CommitMessageInspectionSettings
   /** IDEA's GeneralSettings (ide.general.xml): the System Settings page's backing state. */
   general: GeneralSettingsState
+  /** 单隐式模块名（工作区目录名）：作用域模式里的 `file[模块名]:…` 用它。 */
+  moduleName: string
+  /** 当前项目的 Gradle 检测结果（宿主 `gradle.detect` 的产出）—— Gradle 页显示"检测到什么"。 */
+  gradleDetection?: GradleDetection | null
 }>()
 const templateLanguage = computed(() => languageFor(props.activePath))
 const emit = defineEmits<{
   save: [settings: EditorSettings, close?: boolean]
   saveCommitMessage: [settings: CommitMessageInspectionSettings, close?: boolean]
-  saveProject: [patch: { excludedDirs: string[]; todoPatterns: TodoPattern[] }]
+  saveProject: [patch: { excludedDirs: string[] }]
+  /** VCS 日志的 UI 开关（IDEA vcs.log）：单独一条 emit，避免与 saveProject 的重载混淆。 */
+  saveVcsLog: [log: { showTagNames: boolean; showRootNames: boolean }]
+  /** 命名作用域（IDEA project.scopes）：整表替换，数组顺序就是 ScopeChooserConfigurableState.myOrder。 */
+  saveScopes: [scopes: NamedScopeSetting[]], saveFileColors: [fileColors: FileColorSetting[]]
+  /** TODO 模式表（IDEA preferences.toDoOptions）：整表替换，随项目保存。 */
+  saveTodoPatterns: [patterns: TodoPattern[]]
+  /** 文件类型关联（IDEA preferences.fileTypes）：整表替换，随项目保存。 */
+  saveFileAssociations: [associations: Record<string, string>]
   saveJava: [settings: JavaProjectSettings]
+  /** 构建工具组的项目级状态（IDEA `build.tools`）：`{autoReloadType, previousAutoReloadType, gradle}`。 */
+  saveBuildTools: [patch: Partial<BuildToolsSettings>]
   saveTemplates: [settings: TemplateSettings]
   saveGeneral: [settings: GeneralSettingsState, close?: boolean]
-  browseDirectory: [field: 'jdkHome' | 'outputPath']
-  theme: [theme: Theme]
-  close: []
+  /** 第二个参数是点击事件：主题切换的水纹从点击位置扩散（见 src/themeRipple.ts）。 */
+  theme: [theme: Theme, event?: MouseEvent]; close: []
   pickBackground: []
   clearBackground: []
 }>()
@@ -58,6 +89,60 @@ const commitMessage = ref<CommitMessageInspectionSettings>({ ...props.commitMess
 // Source: GeneralSettingsConfigurable.kt:93 — `GeneralSettings.getInstance().state`
 // is the model the panel binds to; TaoCode stages a draft exactly like the other pages.
 const general = ref<GeneralSettingsState>({ ...defaultGeneralSettings, ...props.general })
+// 控制台折叠规则用多行文本编辑（每行一条），写回字符串数组（对应 IDEA 的两个 AddDeleteListPanel）。
+// 高级设置：内部设置键值审计视图（IDEA Registry 的只读等价物）。
+// 高级设置＝内部键的可编辑视图（IDEA Registry 的等价物）：值按 JSON 文本编辑，写回**本地副本**，
+// 由页面底部的「应用更改」按各自的保存链路提交（editor → save，general → save-general），非法 JSON 会标红。
+const advancedErrors = ref(new Set<string>())
+const internalSettingRows = computed(() => [
+  ...Object.entries(editor.value ?? {}).map(([key, value]) => ({ group: 'editor' as const, key, value: JSON.stringify(value) })),
+  ...Object.entries(general.value ?? {}).map(([key, value]) => ({ group: 'preferences.general' as const, key, value: JSON.stringify(value) })),
+].sort((left, right) => left.group === right.group ? left.key.localeCompare(right.key) : left.group.localeCompare(right.group)))
+
+function editInternalSetting(group: 'editor' | 'preferences.general', key: string, text: string) {
+  const id = `${group}:${key}`
+  try {
+    const parsed = JSON.parse(text)
+    if (group === 'editor') editor.value = { ...editor.value, [key]: parsed } as EditorSettings
+    else general.value = { ...general.value, [key]: parsed } as GeneralSettingsState
+    advancedErrors.value.delete(id)
+  } catch { advancedErrors.value.add(id) }
+}
+
+function applyAdvanced() {
+  if (advancedErrors.value.size) return
+  applyEditor(false)
+  applyGeneral(false)
+}
+
+const copyHint = ref('')
+function copyInternalSettings() {
+  const payload = JSON.stringify({ editor: editor.value ?? {}, general: general.value ?? {} }, null, 2)
+  void copyToClipboard(payload)
+  copyHint.value = '已复制到剪贴板'
+  window.setTimeout(() => { copyHint.value = '' }, 2000)
+}
+
+// 外部工具：每行「名称|命令」，写回 general.externalTools。
+const externalToolsText = computed({
+  get: () => (general.value.externalTools ?? []).map(tool => `${tool.name}|${tool.command}`).join('\n'),
+  set: value => {
+    const entries = value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+      const [name, ...rest] = line.split('|')
+      return { name: (name ?? '').trim(), command: rest.join('|').trim() }
+    }).filter(tool => tool.name && tool.command)
+    general.value = { ...general.value, externalTools: entries }
+  },
+})
+
+const foldConsoleText = computed({
+  get: () => (general.value.foldConsoleLines ?? []).join('\n'),
+  set: value => { general.value = { ...general.value, foldConsoleLines: value.split('\n').map(line => line.trim()).filter(Boolean) } },
+})
+const foldExceptionText = computed({
+  get: () => (general.value.foldExceptions ?? []).join('\n'),
+  set: value => { general.value = { ...general.value, foldExceptions: value.split('\n').map(line => line.trim()).filter(Boolean) } },
+})
 
 // IDEA's ConfigurableListPanel reads the groups from intellij.platform.ide.impl.xml
 // groupConfigurable entries (lines 575-608); weight descends, so order is
@@ -69,49 +154,17 @@ const general = ref<GeneralSettingsState>({ ...defaultGeneralSettings, ...props.
 // Languages). Only pages whose configurables are wired up render content;
 // others do not show as empty shells.
 // `expandOnly` 对应 IDEA 树里“只有子项、自己不是设置页”的父节点（点它只展开，不打开空页面）。
-interface SettingsNode { key: PageKey; label: string; icon: typeof Palette; parent: string | null; keywords: string; expandOnly?: boolean }
 // Only pages whose real configurables exist in the source are listed. IDE's
 // full tree (Appearance/Editor/Plugins/...) appears once TaoCode port those
 // Java classes; until then the tree shows only what the project has today.
-type PageKey = 'appearance' | 'editor' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
-  | 'editor.codeStyle' | 'editor.codeStyle.indents' | 'tools.actionsOnSave'
-  | 'general' | 'structure' | 'templates' | 'commit'
-const groups = [
-  { key: 'group:appearance', label: '外观与行为' },
-  { key: 'group:project', label: '默认项目' },
-  { key: 'group:vcs', label: '版本控制' },
-  { key: 'group:tools', label: '工具' },
-]
-const nodes: SettingsNode[] = [
-  { key: 'appearance', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 缩放 theme scale' },
-  { key: 'editor', label: '编辑器', icon: SlidersHorizontal, parent: null, expandOnly: true, keywords: '字体 大小 缩进 空格 制表符 行号 换行 空白 括号 标签 保存 自动 editor font indent' },
-  { key: 'templates', label: '实时模板', icon: Braces, parent: 'group:project', keywords: '模板 缩写 实时 展开 template' },
-  { key: 'structure', label: '项目结构', icon: FolderTree, parent: 'group:project', keywords: 'JDK 输出目录 排除目录 源代码根 测试根 项目 structure' },
-  { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'group:vcs', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
-  // GeneralSettingsConfigurable.kt:84-87 — id "preferences.general", title
-  // IdeBundle "title.general=System Settings"; the IDEA tree nests it under
-  // Appearance & Behavior.
-  // IDEA 的 Editor 是**顶层节点**，其下再分 General 与 Code Style，且 General 自己还有子页。
-  // 注册证据：platform/lang-impl/resources/intellij.platform.lang.impl.xml:1181-1228 ——
-  // editorOptionsProvider id="editor.preferences.appearance" / ".smartKeys" / ".tabs" /
-  // ".folding" / ".gutterIcons"，以及 projectConfigurable parentId="preferences.editor"。
-  { key: 'editor.general', label: '常规', icon: Cog, parent: 'editor', keywords: '常规 软换行 自动换行 标签页上限 general soft wrap tab limit' },
-  { key: 'editor.general.appearance', label: '外观', icon: Palette, parent: 'editor.general', keywords: '外观 行号 空白 缩进参考线 括号 appearance line numbers whitespaces indent guides bracket' },
-  { key: 'editor.general.tabs', label: '编辑器标签页', icon: Save, parent: 'editor.general', keywords: '标签页 上限 打开 数量 editor tabs tab limit' },
-  { key: 'editor.codeStyle', label: '代码风格', icon: SlidersHorizontal, parent: 'editor', expandOnly: true, keywords: '代码风格 缩进 code style' },
-  { key: 'editor.codeStyle.indents', label: '制表符与缩进', icon: SlidersHorizontal, parent: 'editor.codeStyle', keywords: '制表符 缩进 宽度 tab size indent use tab character' },
-  // IDEA 的“保存时操作”注册在 Tools 组下：intellij.platform.ide.impl.xml:1313-1317
-  // projectConfigurable groupId="tools" id="actions.on.save"（文案 CodeInsightBundle:484）。
-  { key: 'tools.actionsOnSave', label: '保存时操作', icon: Save, parent: 'group:tools', keywords: '保存 时 操作 格式化 重新格式化 actions on save format reformat' },
-  { key: 'general', label: '系统设置', icon: Cog, parent: 'group:appearance', keywords: '系统设置 退出 删除 回收站 保存 自动 同步 安全写入 打开项目 新窗口 默认目录 System Settings reopen reopenLastProject deleteToBin confirm exit safe write autosave sync process close terminate disconnect ask' },
-]
-// IDEA 的树里“有子项的节点”只负责展开，本身不是设置页（点它不会打开一个空页面）。
-// 这里沿用同一规则：父节点进 expanded，只有叶子节点才是 PageKey。
-const isParentOnly = (key: string) => nodes.some(node => node.key === key && node.expandOnly)
-const expanded = ref(new Set<string>([...groups.map(group => group.key), 'editor', 'editor.general', 'editor.codeStyle']))
-const PAGE_KEYS: PageKey[] = ['appearance', 'editor.general', 'editor.general.appearance', 'editor.general.tabs',
-  'editor.codeStyle.indents', 'tools.actionsOnSave', 'structure', 'templates', 'commit', 'general']
-const section = ref<PageKey>(props.initialSection && PAGE_KEYS.includes(props.initialSection) ? props.initialSection : 'appearance')
+// 页面键尽量直接沿用 IDEA 的 configurable id（editor.breadcrumbs / Console / Errors /
+// preferences.toDoOptions / diff.base / build.tools / vcs.log …），这样"这一页对应源码哪一条注册"
+// 在代码里就是答案；早期批次用过的键（appearance / editor.general / structure / commit …）保持不变，
+// 以免打断跳转目标与测试。
+// 设置树的**表**（页面键 / 分组 / 节点 / 随项目保存的页）在 src/settingsTreeMeta.ts ——
+// 与 src/toolWindowMeta.ts 同一个模式：树是数据，组件只管渲染。
+const expanded = ref(new Set<string>(EXPANDED_DEFAULT))
+const section = ref<PageKey>(props.initialSection && PAGE_KEYS.includes(props.initialSection) ? props.initialSection : 'preferences.lookFeel')
 
 // IDEA's "new options" dot (SettingsNewBadgeState.kt:19-56 + SettingsTreeView.java:791): a page
 // that carries newly added options shows a dot in the tree until it has been shown once, and the
@@ -389,7 +442,7 @@ function copyCrumbPath() {
   crumbMenu.value = null
   const path = crumbText.value
   if (!path) return
-  try { void navigator.clipboard?.writeText(path) } catch { /* clipboard may be unavailable in WebView2 */ }
+  void copyToClipboard(path)
   copyNote.value = `已复制：${path}`
   if (copyTimer !== undefined) clearTimeout(copyTimer)
   copyTimer = window.setTimeout(() => { copyNote.value = '' }, 4000)
@@ -618,7 +671,7 @@ defineExpose({ handleEscape })
           <!-- 搜索结果：父节点本身不是页面，所以只列匹配到的叶子，按层级缩进 -->
           <button
             v-for="node in visibleNodes.filter(item => !isParentOnly(item.key) && !groups.some(group => group.key === item.parent))" :id="`${id}-tab-${node.key}`" :key="node.key"
-            type="button" class="menu-button settings-tab" :class="node.parent === 'editor.general' ? 'settings-grandchild' : (node.parent ? 'settings-child' : '')"
+            type="button" class="menu-button settings-tab" :class="node.parent ? 'settings-child' : ''"
             role="tab" :aria-selected="section === node.key"
             :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
             @click="select(node.key)"
@@ -637,6 +690,8 @@ defineExpose({ handleEscape })
               <span v-if="groupHasNewBadge(group.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" />
             </button>
             <template v-if="expanded.has(group.key)">
+              <!-- 分组下还没有移植任何页面时明说，而不是显示一个点开什么都没有的节点。 -->
+              <p v-if="!nodes.some(item => item.parent === group.key)" class="settings-empty">本分组下的设置页尚未移植。</p>
               <button
                 v-for="node in nodes.filter(item => item.parent === group.key)" :id="`${id}-tab-${node.key}`" :key="node.key"
                 type="button" class="menu-button settings-tab settings-child" role="tab" :aria-selected="section === node.key"
@@ -706,14 +761,14 @@ defineExpose({ handleEscape })
         <div v-if="crumbMenu" class="settings-crumb-backdrop" @click="crumbMenu = null" @contextmenu.prevent="crumbMenu = null" />
         <div v-if="error" class="notice error settings-error" role="alert"><span>{{ error }}</span></div>
         <section
-          v-show="section === 'appearance'" :id="`${id}-panel-appearance`" class="settings-panel" data-page="appearance"
+          v-show="section === 'preferences.lookFeel'" :id="`${id}-panel-appearance`" class="settings-panel" data-page="appearance"
           role="tabpanel" :aria-labelledby="`${id}-tab-appearance`"
         >
           <h3>外观</h3>
           <p class="section-description">主题立即生效；缩放与紧凑模式随“应用”保存并立即作用于整个界面。</p>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light')"><Sun :size="19" aria-hidden="true" /><span>亮色</span><span class="theme-state">{{ theme === 'light' ? '当前主题' : '切换到亮色' }}</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark')"><Moon :size="19" aria-hidden="true" /><span>暗色</span><span class="theme-state">{{ theme === 'dark' ? '当前主题' : '切换到暗色' }}</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="19" aria-hidden="true" /><span>月之亮面</span><span class="theme-state">{{ theme === 'light' ? '当前主题' : '切换到月之亮面' }}</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="19" aria-hidden="true" /><span>月之暗面</span><span class="theme-state">{{ theme === 'dark' ? '当前主题' : '切换到月之暗面' }}</span></button>
           </div>
           <fieldset class="settings-fields" :disabled="busy" aria-label="缩放与界面密度">
             <div class="input-row">
@@ -849,7 +904,7 @@ defineExpose({ handleEscape })
         </section>
 
         <form
-          v-show="section === 'editor.general'" :id="`${id}-panel-editor.general`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general"
+          v-show="section === 'editor'" :id="`${id}-panel-editor`" :ref="registerEditorForm" class="settings-panel" data-page="editor"
           role="tabpanel" :aria-labelledby="`${id}-tab-editor.general`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
           <h3>编辑器 › 常规</h3>
@@ -869,8 +924,8 @@ defineExpose({ handleEscape })
         </form>
 
         <form
-          v-show="section === 'editor.general.appearance'" :id="`${id}-panel-editor.general.appearance`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general.appearance"
-          role="tabpanel" :aria-labelledby="`${id}-tab-editor.general.appearance`" :aria-busy="busy" @submit.prevent="applyEditor()"
+          v-show="section === 'editor.preferences.appearance'" :id="`${id}-panel-editor.preferences.appearance`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.appearance"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.appearance`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
           <h3>编辑器 › 常规 › 外观</h3>
           <div class="editor-page-head">
@@ -889,8 +944,8 @@ defineExpose({ handleEscape })
         </form>
 
         <form
-          v-show="section === 'editor.general.tabs'" :id="`${id}-panel-editor.general.tabs`" :ref="registerEditorForm" class="settings-panel" data-page="editor.general.tabs"
-          role="tabpanel" :aria-labelledby="`${id}-tab-editor.general.tabs`" :aria-busy="busy" @submit.prevent="applyEditor()"
+          v-show="section === 'editor.preferences.tabs'" :id="`${id}-panel-editor.preferences.tabs`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.tabs"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.tabs`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
           <h3>编辑器 › 常规 › 编辑器标签页</h3>
           <div class="editor-page-head">
@@ -905,9 +960,43 @@ defineExpose({ handleEscape })
             <p id="editor-tab-limit-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
           </fieldset>
         </form>
+        <form
+          v-show="section === 'editor.preferences.smartKeys'" :id="`${id}-panel-editor.preferences.smartKeys`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.smartKeys"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.smartKeys`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>编辑器 › 常规 › 智能键</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Editor › General › Smart Keys（EditorSmartKeysConfigurable.kt:185-197，注册 id="editor.preferences.smartKeys"）。</p>
+          <fieldset class="settings-fields" :disabled="busy">
+            <div class="input-row">
+              <label :for="`${id}-reformat-on-paste`">粘贴时</label>
+              <select :id="`${id}-reformat-on-paste`" v-model="editor.reformatOnPaste" aria-describedby="editor-reformat-on-paste-hint">
+                <option v-for="mode in PASTE_REFORMAT_MODES" :key="mode" :value="mode">{{ pasteReformatLabel(mode) }}</option>
+              </select>
+            </div>
+            <p id="editor-reformat-on-paste-hint" class="field-hint">CodeInsightSettings.REFORMAT_ON_PASTE，默认「粘贴时逐行缩进」。有语言服务时把刚粘贴的那一段交给它重新缩进/格式化；没有语言服务时只按光标所在列给后续行补缩进（源码 PasteHandler.java:255-257 会把档位强制为整块缩进）。</p>
+          </fieldset>
+        </form>
 
         <form
-          v-show="section === 'editor.codeStyle.indents'" :id="`${id}-panel-editor.codeStyle.indents`" :ref="registerEditorForm" class="settings-panel" data-page="editor.codeStyle.indents"
+          v-show="section === 'editor.preferences.gutterIcons'" :id="`${id}-panel-editor.preferences.gutterIcons`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.gutterIcons"
+          role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.gutterIcons`" :aria-busy="busy" @submit.prevent="applyEditor()"
+        >
+          <h3>编辑器 › 常规 › 装订线图标</h3>
+          <div class="editor-page-head">
+            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
+          </div>
+          <p class="section-description">对应 IDEA 的 Editor › General › Gutter Icons（GutterIconsConfigurable，注册 id="editor.preferences.gutterIcons"）。</p>
+          <fieldset class="settings-fields" :disabled="busy">
+            <label class="checkbox-row"><input v-model="editor.showGutterIcons" type="checkbox" aria-describedby="editor-gutter-icons-hint" /><span>显示装订线图标</span></label>
+            <p id="editor-gutter-icons-hint" class="field-hint">EditorSettingsExternalizable.ARE_GUTTER_ICONS_SHOWN（默认开）。图标来自语言服务诊断、断点与书签；关掉后不再绘制，但标记本身保留（视图 › 编辑器开关 里也有同一个开关）。IDEA 页里还有一张「按插件分组的行标记列表」，那依赖 LineMarkerProvider 体系，本仓暂无，已登记待办。</p>
+          </fieldset>
+        </form>
+
+        <form
+          v-show="section === 'preferences.sourceCode.indents'" :id="`${id}-panel-editor.codeStyle.indents`" :ref="registerEditorForm" class="settings-panel" data-page="preferences.sourceCode.indents"
           role="tabpanel" :aria-labelledby="`${id}-tab-editor.codeStyle.indents`" :aria-busy="busy" @submit.prevent="applyEditor()"
         >
           <h3>编辑器 › 代码风格 › 制表符与缩进</h3>
@@ -943,11 +1032,148 @@ defineExpose({ handleEscape })
           </fieldset>
         </form>
 
-        <section v-show="section === 'structure'" :id="`${id}-panel-structure`" class="settings-panel" data-page="structure" role="tabpanel" :aria-labelledby="`${id}-tab-structure`" :aria-busy="busy">
-          <ProjectStructurePane :settings="projectSettings" :root="projectRoot" :busy="busy" @save-java="emit('saveJava', $event)" @save-project="emit('saveProject', $event)" @browse="emit('browseDirectory', $event)" />
+        <section
+          v-show="section === 'advanced'"
+          :id="`${id}-panel-advanced`"
+          class="settings-panel"
+          data-page="advanced"
+          role="tabpanel"
+          :aria-labelledby="`${id}-tab-advanced`"
+        >
+          <h3>高级设置</h3>
+          <p class="field-hint"><strong>仅供内部使用</strong>：这里列出 TaoCode 的内部设置键与当前值（对应 IDEA 的 Registry）。
+            这些键由设置页正常维护，直接改动的持久化文件会在下次启动时按同一套校验读取。</p>
+          <div class="advanced-toolbar">
+            <button type="button" class="primary-button" :disabled="busy || advancedErrors.size > 0" @click="applyAdvanced">应用更改</button>
+            <button type="button" class="subtle-button" @click="copyInternalSettings">复制为 JSON</button>
+            <span class="field-hint">共 {{ internalSettingRows.length }} 项<template v-if="copyHint"> · {{ copyHint }}</template></span>
+          </div>
+          <div class="advanced-table" role="table" aria-label="内部设置">
+            <div v-for="row in internalSettingRows" :key="row.group + row.key" class="advanced-row" role="row">
+              <span class="advanced-group" role="cell">{{ row.group }}</span>
+              <code class="advanced-key" role="cell">{{ row.key }}</code>
+              <input
+                class="advanced-value" role="cell" :value="row.value"
+                :class="{ invalid: advancedErrors.has(`${row.group}:${row.key}`) }"
+                :aria-label="`${row.group} 的 ${row.key}`"
+                @change="editInternalSetting(row.group, row.key, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+          </div>
         </section>
 
-        <section v-show="section === 'templates'" :id="`${id}-panel-templates`" class="settings-panel" data-page="templates" role="tabpanel" :aria-labelledby="`${id}-tab-templates`">
+        <section v-show="section === 'editor.breadcrumbs'" :id="`${id}-panel-editor.breadcrumbs`" class="settings-panel" data-page="editor.breadcrumbs" role="tabpanel" :aria-labelledby="`${id}-tab-editor.breadcrumbs`" :aria-busy="busy">
+          <h3>编辑器 › 面包屑</h3>
+          <p class="section-description">对应 IDEA Settings › Editor › Breadcrumbs（platform-impl/.../xml/breadcrumbs/BreadcrumbsConfigurable.java:24；UI 在 BreadcrumbsConfigurableUI.kt:44-70）。注册证据：intellij.platform.ide.impl.xml:1231 `&lt;applicationConfigurable parentId="preferences.editor" id="editor.breadcrumbs"&gt;` —— 它是**编辑器的直接子页**，不是「常规 › 外观」里的行。</p>
+          
+            <!-- IDEA BreadcrumbsConfigurableUI.kt:44-70 三段：显示开关 → 位置单选（上/下，随总开关禁用）
+                 → 按语言的开关（mapLanguageBreadcrumbs，只存显式配置过的语言）。
+                 最后那个「配置面包屑颜色」链接指向颜色方案页（ColorAndFontOptions），本仓没有色板页，
+                 登记在 class-parity-todo.md 里，不渲染假链接。 -->
+            <label class="checkbox-row"><input v-model="settings.showBreadcrumbs" type="checkbox" aria-describedby="editor-breadcrumbs-hint" /><span>显示面包屑</span></label>
+            <div class="checkbox-row" role="radiogroup" aria-label="面包屑位置" :aria-disabled="!settings.showBreadcrumbs">
+              <span>位置</span>
+              <label><input v-model="settings.breadcrumbsPlacement" type="radio" value="top" :disabled="!settings.showBreadcrumbs" /><span>编辑器上方</span></label>
+              <label><input v-model="settings.breadcrumbsPlacement" type="radio" value="bottom" :disabled="!settings.showBreadcrumbs" /><span>编辑器下方</span></label>
+            </div>
+            <div class="checkbox-row">
+              <span>语言</span>
+              <label v-for="language in EDITOR_LANGUAGES" :key="language">
+                <input
+                  type="checkbox"
+                  :checked="breadcrumbsShownFor(settings, language)"
+                  :disabled="!settings.showBreadcrumbs"
+                  @change="settings.breadcrumbsLanguages = { ...settings.breadcrumbsLanguages, [language]: !breadcrumbsShownFor(settings, language) }"
+                />
+                <span>{{ language }}</span>
+              </label>
+            </div>
+            <p id="editor-breadcrumbs-hint" class="field-hint">对应 IDEA 的 <code>editor.breadcrumbs</code>：总开关、位置（编辑器上方/下方，默认下方），以及每种语言是否显示；没被单独勾选过的语言按「显示」处理。</p>
+        </section>
+
+        <section v-show="section === 'editor.stickyLines'" :id="`${id}-panel-editor.stickyLines`" class="settings-panel" data-page="editor.stickyLines" role="tabpanel" :aria-labelledby="`${id}-tab-editor.stickyLines`" :aria-busy="busy">
+          <h3>编辑器 › 粘性行</h3>
+          <p class="section-description">对应 IDEA Settings › Editor › Sticky Lines（StickyLinesConfigurable.kt:7-20）。注册证据：intellij.platform.ide.impl.xml:1236 `&lt;applicationConfigurable parentId="preferences.editor" id="editor.stickyLines"&gt;` —— 同样是编辑器的直接子页。</p>
+          
+            <!-- IDEA StickyLinesConfigurable（`editor.stickyLines`）。 -->
+            <label class="checkbox-row"><input v-model="settings.showStickyLines" type="checkbox" aria-describedby="editor-sticky-hint" /><span>在编辑器顶边固定显示当前作用域</span></label>
+            <label class="field-row"><span>层数上限</span><input v-model.number="settings.stickyLinesLimit" type="number" min="0" max="10" step="1" :disabled="!settings.showStickyLines" aria-describedby="editor-sticky-hint" /></label>
+            <p id="editor-sticky-hint" class="field-hint">对应 IDEA 的 `editor.stickyLines`：把当前光标所在的类/方法等作用域首行固定在编辑区顶部，最多显示 N 层（0 = 关闭）。</p>
+        </section>
+
+        <section v-show="section === 'Errors'" :id="`${id}-panel-Errors`" class="settings-panel" data-page="Errors" role="tabpanel" :aria-labelledby="`${id}-tab-Errors`" :aria-busy="busy">
+          <h3>编辑器 › 检查</h3>
+          <p class="section-description">对应 IDEA Settings › Editor › Inspections（`Errors`，注册证据 intellij.platform.lang.impl.xml:1823 `groupId="editor" groupWeight="160" key="configurable.InspectionToolsConfigurable.display.name"`=Inspections）。TaoCode 用 LSP 诊断，等价开关是显示诊断与滚动条标记。</p>
+          
+            <!-- IDEA Error highlighting（`Errors` + ErrorOptionsProvider）：TaoCode 用 LSP 诊断，等价开关是显示诊断与 stripe 标记。 -->
+            <label class="checkbox-row"><input v-model="settings.showDiagnostics" type="checkbox" aria-describedby="editor-diagnostics-hint" /><span>在编辑器里显示错误与警告</span></label>
+            <label class="checkbox-row"><input v-model="settings.showErrorStripe" type="checkbox" :disabled="!settings.showDiagnostics" aria-describedby="editor-diagnostics-hint" /><span>在滚动条旁显示错误标记</span></label>
+            <p id="editor-diagnostics-hint" class="field-hint">对应 IDEA 的 Editor | Error highlighting：关闭后语言服务仍然运行，只是不再绘制波浪线与标记。</p>
+        </section>
+
+        <section v-show="section === 'Console'" :id="`${id}-panel-Console`" class="settings-panel" data-page="Console" role="tabpanel" :aria-labelledby="`${id}-tab-Console`" :aria-busy="busy">
+          <h3>编辑器 › 控制台</h3>
+          <p class="section-description">对应 IDEA Settings › Editor › Console（注册证据 intellij.platform.lang.impl.xml:983 `&lt;applicationConfigurable parentId="preferences.editor" id="Console"&gt;`）。</p>
+          
+            <!-- IDEA ConsoleConfigurable（`Console`，ConsoleConfigurable.java:43-73）：两个折叠列表。 -->
+            <label class="field-row field-row-block"><span>折叠行</span><textarea :value="foldConsoleText" rows="3" aria-label="要折叠的控制台行" placeholder="每行一条：匹配到该子串的重复行会被折叠" @input="foldConsoleText = ($event.target as HTMLTextAreaElement).value" /></label>
+            <label class="field-row field-row-block"><span>例外</span><textarea :value="foldExceptionText" rows="3" aria-label="不折叠的例外" placeholder="每行一条：命中例外的行永不折叠" @input="foldExceptionText = ($event.target as HTMLTextAreaElement).value" /></label>
+            <p class="field-hint">对应 IDEA 的 `Console` 设置（控制台行折叠）：输出/终端里连续重复且命中「折叠行」的行会合并成一条并显示次数；命中「例外」的行保持原样。</p>
+        </section>
+
+        <section v-show="section === 'preferences.externalTools'" :id="`${id}-panel-preferences.externalTools`" class="settings-panel" data-page="preferences.externalTools" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.externalTools`" :aria-busy="busy">
+          <h3>工具 › 外部工具</h3>
+          <p class="section-description">对应 IDEA Settings › Tools › External Tools（注册证据 intellij.platform.lang.impl.xml:1013 `groupId="tools" id="preferences.externalTools" key="tools.settings.title"`=External Tools）。</p>
+          
+            <!-- IDEA ToolConfigurable（`preferences.externalTools`）：应用级命令收藏，每行一条「名称|命令」。 -->
+            <label class="field-row field-row-block"><span>工具</span><textarea :value="externalToolsText" rows="4" aria-label="外部工具" placeholder="名称|命令（每行一条，例如：格式化|clang-format -i *.cpp）" @input="externalToolsText = ($event.target as HTMLTextAreaElement).value" aria-describedby="general-external-tools-hint" /></label>
+            <p id="general-external-tools-hint" class="field-hint">对应 IDEA 的 `preferences.externalTools`：这里定义的工具会出现在「工具 › 外部工具」子菜单里，运行时复用构建的同一条输出通道。</p>
+        </section>
+
+        <section v-show="section === 'diff.base'" :id="`${id}-panel-diff.base`" class="settings-panel" data-page="diff.base" role="tabpanel" :aria-labelledby="`${id}-tab-diff.base`" :aria-busy="busy">
+          <h3>工具 › 差异与合并</h3>
+          <p class="section-description">对应 IDEA Settings › Tools › Diff &amp; Merge（注册证据 platform/diff-impl/resources/intellij.platform.diff.impl.xml:78 `groupId="tools" id="diff.base"`）。</p>
+          
+            <!-- IDEA DiffSettingsConfigurable（`diff.base`）：settings.context.lines。 -->
+            <label class="field-row"><span>上下文行数</span><input v-model.number="settings.diffContextLines" type="number" min="1" max="100" step="1" aria-describedby="general-diff-hint" /></label>
+            <p id="general-diff-hint" class="field-hint">对应 IDEA 的 `diff.base` › settings.context.lines：统一差异（`git diff`）保留的上下文行数，TaoCode 会把它作为 <code>-U&lt;n&gt;</code> 传给 git（默认 3，与 git 一致）。</p>
+        </section>
+
+        <section v-show="section === 'build.tools'" :id="`${id}-panel-build.tools`" class="settings-panel" data-page="build.tools" role="tabpanel" :aria-labelledby="`${id}-tab-build.tools`" :aria-busy="busy">
+          <h3>构建、执行、部署 › 构建工具</h3>
+          <p class="section-description">对应 IDEA Settings › Build, Execution, Deployment › Build Tools（注册证据 platform/external-system-impl/resources/META-INF/ExternalSystemExtensions.xml:24 `groupId="build" id="build.tools"`）。这一页是 <code>ExternalSystemGroupConfigurable</code>（:22-26，projectConfigurable、BackedByPersistentState）。</p>
+                      <BuildToolsSettingsPage :build-tools="projectSettings?.buildTools ?? null" :busy="busy" @save="emit('saveBuildTools', $event)" />
+        </section>
+
+        <section v-show="section === 'reference.settingsdialog.project.gradle'" :id="`${id}-panel-reference.settingsdialog.project.gradle`" class="settings-panel" data-page="reference.settingsdialog.project.gradle" role="tabpanel" :aria-labelledby="`${id}-tab-reference.settingsdialog.project.gradle`" :aria-busy="busy">
+          <h3>构建、执行、部署 › 构建工具 › Gradle</h3>
+          <p class="section-description">对应 IDEA Settings › Build, Execution, Deployment › Build Tools › Gradle（注册证据 plugins/gradle/plugin-resources/intellij.gradle.xml:177-179 `groupId="build.tools" groupWeight="110" id="reference.settingsdialog.project.gradle"`）。三项都存**项目级**：用哪个 Gradle 在 <code>GradleProjectSettings.distributionType</code>、Gradle 用户主目录在 <code>GradleLocalSettings.getGradleUserHome()</code>、离线模式在 <code>GradleSettings.MyState.isOfflineMode</code>（<code>.idea/gradle.xml</code>）。</p>
+          <GradleSettingsPage :gradle="projectSettings?.buildTools?.gradle ?? null" :detection="gradleDetection ?? null" :busy="busy" @save="emit('saveBuildTools', { gradle: $event })" />
+        </section>
+
+        <section v-show="section === 'vcs.log'" :id="`${id}-panel-vcs.log`" class="settings-panel" data-page="vcs.log" role="tabpanel" :aria-labelledby="`${id}-tab-vcs.log`" :aria-busy="busy">
+          <h3>版本控制 › VCS 日志</h3>
+          <p class="section-description">对应 IDEA Settings › Version Control › VCS Log（注册证据 platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml:86 `id="vcs.log" parentId="project.propVCSSupport.Mappings"`）。</p>
+          
+          <!-- IDEA VcsLogApplicationSettings（vcs.log）：日志图的 UI 开关。 -->
+          <label class="checkbox-row"><input type="checkbox" :checked="projectSettings?.vcsLog?.showTagNames ?? true" :disabled="!projectSettings || busy" @change="emit('saveVcsLog', { showTagNames: !(projectSettings?.vcsLog?.showTagNames ?? true), showRootNames: projectSettings?.vcsLog?.showRootNames ?? true })" /><span>在日志行上显示标签名</span></label>
+          <label class="checkbox-row"><input type="checkbox" :checked="projectSettings?.vcsLog?.showRootNames ?? true" :disabled="!projectSettings || busy" @change="emit('saveVcsLog', { showTagNames: projectSettings?.vcsLog?.showTagNames ?? true, showRootNames: !(projectSettings?.vcsLog?.showRootNames ?? true) })" /><span>显示仓库根名</span></label>
+          <p class="field-hint">对应 IDEA 的 <code>vcs.log</code> 设置：只影响日志图的显示，历史数据不变。</p>
+        </section>
+
+        <section v-show="section === 'preferences.toDoOptions'" :id="`${id}-panel-preferences.toDoOptions`" class="settings-panel" data-page="preferences.toDoOptions" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.toDoOptions`" :aria-busy="busy">
+          <!-- 注册证据：platform/todo/resources/intellij.platform.todo.xml:49 `groupId="editor" id="preferences.toDoOptions"`。 -->
+          <h3>编辑器 › TODO</h3>
+          <TodoPatternsPage :patterns="projectSettings?.todoPatterns ?? null" :busy="busy" @save="emit('saveTodoPatterns', $event)" />
+        </section>
+
+        <section v-show="section === 'preferences.fileTypes'" :id="`${id}-panel-preferences.fileTypes`" class="settings-panel" data-page="preferences.fileTypes" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.fileTypes`" :aria-busy="busy">
+          <!-- 注册证据：intellij.platform.lang.impl.xml:992-994 `groupId="editor" groupWeight="120" id="preferences.fileTypes"`。 -->
+          <h3>编辑器 › 文件类型</h3>
+          <FileTypesPage :associations="projectSettings?.fileAssociations ?? null" :busy="busy" @save="emit('saveFileAssociations', $event)" />
+        </section>
+
+        <section v-show="section === 'editing.templates'" :id="`${id}-panel-templates`" class="settings-panel" data-page="editing.templates" role="tabpanel" :aria-labelledby="`${id}-tab-templates`">
           <h3>实时模板</h3>
           <p v-if="!projectSettings" class="section-description">尚未打开项目。模板开关与自定义模板随项目保存，请先打开一个项目。</p>
           <TemplateSettingsPage v-else :settings="projectSettings.templates" :language="templateLanguage" :busy="busy" @change="emit('saveTemplates', $event)" />
@@ -984,7 +1210,13 @@ defineExpose({ handleEscape })
           <p class="field-hint restore-hint">IDEA 的「显示右边距」（在提交框里画一条列宽参考线）未实现：它要求提交框使用等宽字体，而参考线在比例字体下没有确定的列位置；超出部分仍会逐条列出。详见 src/commitMessageInspection.ts 顶部说明。</p>
         </section>
 
-        <section v-show="section === 'general'" :id="`${id}-panel-general`" class="settings-panel" data-page="general" role="tabpanel" :aria-labelledby="`${id}-tab-general`" :aria-busy="busy">
+        <section v-show="section === 'project.scopes'" :id="`${id}-panel-scopes`" class="settings-panel" data-page="scopes" role="tabpanel" :aria-labelledby="`${id}-tab-scopes`" :aria-busy="busy">
+          <h3>作用域</h3>
+          <p class="section-description">对应 IDEA Settings › Appearance &amp; Behavior › Scopes（scopeChooser/ScopeChooserConfigurable.java）。作用域是一段文件模式，供「在文件中查找」等对话框限定范围；也可以给作用域配一种颜色，让落在其中的文件在编辑器标签页上显示这个底色（IDEA `FileColorsConfigurable`，本仓并在这一页）。</p>
+          <ScopesSettingsPage :scopes="projectSettings?.scopes ?? []" :root="projectRoot" :module-name="moduleName" :file-colors="projectSettings?.fileColors ?? []" :busy="busy" @save="emit('saveScopes', $event)" @save-colors="emit('saveFileColors', $event)" />
+        </section>
+
+        <section v-show="section === 'preferences.general'" :id="`${id}-panel-general`" class="settings-panel" data-page="general" role="tabpanel" :aria-labelledby="`${id}-tab-general`" :aria-busy="busy">
           <!-- Source: GeneralSettingsConfigurable.kt:95-185 (createPanel). Row order, groups
                and every option mirror the Kotlin DSL panel; labels follow IdeBundle /
                ProjectConceptBundle strings. -->
@@ -1043,8 +1275,8 @@ defineExpose({ handleEscape })
       </div>
     </div>
     <footer class="dialog-footer">
-      <span class="settings-hint"><CircleHelp :size="14" aria-hidden="true" /><span>项目级设置（项目结构、实时模板）仅应用于当前项目，随项目保存。</span></span>
-      <span class="save-status" role="status">{{ copyNote || (busy ? '正在保存，请稍候…' : section === 'appearance' ? '主题即时生效' : section === 'templates' ? '模板改动即时保存到本项目' : section === 'structure' ? '项目结构改动需保存' : dirty ? '有未应用的修改' : '已应用') }}</span>
+      <span class="settings-hint"><CircleHelp :size="14" aria-hidden="true" /><span>项目级设置（实时模板、TODO、文件类型、作用域、VCS 日志）只应用于当前项目，随项目保存；项目结构改在「文件 › 项目结构…」对话框里（IDEA 同样如此）。</span></span>
+      <span class="save-status" role="status">{{ copyNote || (busy ? '正在保存，请稍候…' : section === 'preferences.lookFeel' ? '主题即时生效' : section === 'editing.templates' ? '模板改动即时保存到本项目' : PROJECT_SCOPED_PAGES.has(section) ? '本页改动需保存后才写入项目' : dirty ? '有未应用的修改' : '已应用') }}</span>
       <div class="footer-actions">
         <button type="button" class="subtle-button" :disabled="busy || !dirty" title="应用 (Alt+A)" @click="applyAll">应用(A)</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="close">取消</button>
@@ -1135,4 +1367,14 @@ defineExpose({ handleEscape })
   .theme-option { padding: var(--space-3); }
   .restore-hint { padding-left: 0; }
 }
+.advanced-toolbar { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; }
+.advanced-table { display: flex; flex-direction: column; max-height: 52vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.advanced-row { display: grid; grid-template-columns: 60px minmax(200px, 32%) minmax(0, 1fr); gap: var(--space-2); padding: 3px var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; }
+.advanced-row:last-child { border-bottom: 0; }
+.advanced-group { color: var(--muted); }
+.advanced-key { color: var(--bright); overflow-wrap: anywhere; }
+.advanced-value { width: 100%; min-width: 0; padding: 1px 4px; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: inherit; }
+.advanced-value:hover { border-color: var(--line); }
+.advanced-value:focus { border-color: var(--accent); background: var(--editor); outline: none; }
+.advanced-value.invalid { border-color: var(--warning); color: var(--warning); }
 </style>

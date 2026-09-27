@@ -108,13 +108,39 @@ Json java_defaults() {
             {"outputPath", ""}, {"referencedLibraries", Json::array({"lib/**/*.jar"})}};
 }
 
+Json export_to_html_defaults() {
+    // IDEA `ExportToHTMLSettings.java:17-23`：三个布尔默认 false、OUTPUT_DIRECTORY 为空、printScope 默认 0。
+    return {{"scope", 0}, {"includeSubdirectories", false}, {"printLineNumbers", false},
+            {"openInBrowser", false}, {"outputDirectory", ""}};
+}
+
+Json build_tools_defaults() {
+    // IDEA 设置「构建、执行、部署 › 构建工具」：自动重载三档（默认 ALL）+ Gradle 三项（默认走 wrapper）。
+    return {{"autoReloadType", "ALL"}, {"previousAutoReloadType", "ALL"},
+            {"gradle", {{"useGradleFrom", "wrapper"}, {"gradlePath", ""}, {"gradleUserHome", ""},
+                        // 「Gradle JVM」默认 = `ExternalSystemJdkUtil.USE_PROJECT_JDK`。
+                        {"gradleJvm", "#USE_PROJECT_JDK"},
+                        // 「构建并运行使用」默认交给 Gradle（`GradleProjectSettings.java:40`）。
+                        {"delegatedBuild", true}, {"offline", false}}}};
+}
+
 Json exclusions() {
-    // Mirrors ProjectStore's per-project defaults, including the stored lists.
+    // 与 ProjectStore 的 per-project 默认值逐键对齐（含默认列表本身）：
+    // 少一个键，整对象比较就会失败，所以这里是 `project_defaults()` 的镜像。
     return {{"excludedDirs", Json::array({".git", "node_modules", "build", "dist"})},
             {"runConfigs", Json::array()}, {"bookmarks", Json::array()},
+            {"scopes", Json::array()},
+            // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认空，与 FileColorsModel 的两个空列表一致。
+            {"fileColors", Json::array()},
+            {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
+                               {"autoscrollFromSource", false}}},
+            {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_patterns()},
             {"templates", empty_templates()}, {"java", java_defaults()},
-            {"fileAssociations", Json::object()}};
+            {"fileAssociations", Json::object()},
+            {"buildTools", build_tools_defaults()},
+            // 导出到 HTML 的设置也是项目级（IDEA ExportToHTMLSettings 存在 workspace.xml 那一侧）。
+            {"exportToHtml", export_to_html_defaults()}};
 }
 
 Json document() {
@@ -479,11 +505,25 @@ int main() {
             check(editor.at("tabLimit") == 12, "tabLimit round-trips through the settings patch");
             check(second.state().at("settings") == editor, "Already-created store instances must not have stale caches");
             const Json custom = {{"excludedDirs", Json::array({".git", utf8(u8"临时 目录"), "out"})},
-                                 {"runConfigs", Json::array({{{"name", utf8(u8"构建")}, {"command", "cmake --build build"}}})},
+                                 {"runConfigs", Json::array({{{"name", utf8(u8"构建")}, {"command", "cmake --build build"},
+                                                              {"allowRunningInParallel", true}}})},
                                  {"bookmarks", Json::array({{{"path", "src/main.cpp"}, {"line", 7}, {"mnemonic", 2}}})},
+                                 {"scopes", Json::array()},
+                                 // 文件颜色（IDEA `FileColorsConfigurable`）：整表替换，顺序即优先级。
+                                 {"fileColors", Json::array()},
+                                 {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
+                                                    {"autoscrollFromSource", false}}},
+                                 {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
                                  {"todoPatterns", Json::array({{{"pattern", "REVIEW"}, {"description", utf8(u8"待评审")}}})},
                                  {"templates", empty_templates()}, {"java", java_defaults()},
-                                 {"fileAssociations", {{"conf", "typescript"}}}};
+                                 {"fileAssociations", {{"conf", "typescript"}}},
+                                 // 构建工具是项目级的（IDEA `build.tools` + Gradle 页），整对象比较要带上它。
+                                 {"buildTools", {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "ALL"},
+                                                 {"gradle", {{"useGradleFrom", "path"}, {"gradlePath", "C:/gradle/bin/gradle.bat"},
+                                                             {"gradleUserHome", "D:/gradle-home"}, {"gradleJvm", "#USE_PROJECT_JDK"}, {"delegatedBuild", false}, {"offline", true}}}}},
+                                 {"exportToHtml", {{"scope", 4}, {"includeSubdirectories", true},
+                                                   {"printLineNumbers", true}, {"openInBrowser", true},
+                                                   {"outputDirectory", "D:/export"}}}};
             check(second.update_project_settings(upper_ascii(root_a), custom) == custom, "Project update must return merged settings");
             check(first.project_settings(root_a) == custom && first.project_settings(root_b) == exclusions(), "Per-project settings must be isolated and case-insensitive");
             first.update_project_settings(root_b, {{"excludedDirs", Json::array()}});
@@ -501,7 +541,19 @@ int main() {
                 {{"fontSize", (std::numeric_limits<std::uint64_t>::max)()}},
                 {{"tabSize", 3}}, {{"tabSize", 2.0}}, {{"wordWrap", 1}}, {{"lineNumbers", nullptr}},
                 {{"showIndentGuides", "true"}}, {{"fontSize", 12}, {"unknown", true}},
-                {{"tabLimit", 0}}, {{"tabLimit", 101}}, {{"tabLimit", "30"}}, {{"tabLimit", 8.5}}
+                {{"tabLimit", 0}}, {{"tabLimit", 101}}, {{"tabLimit", "30"}}, {{"tabLimit", 8.5}},
+                // 面包屑（BreadcrumbsConfigurableUI.kt:44-70）：位置只有上下两个值。
+                // 'disabled' 是旧版的第三态，源码里「不显示」是 showBreadcrumbs 单独的开关；
+                // 旧文件由前端 normalizeEditorSettings 迁移，补丁里再出现就是无效值。
+                {{"breadcrumbsPlacement", "disabled"}}, {{"breadcrumbsPlacement", "left"}},
+                {{"breadcrumbsPlacement", 1}}, {{"breadcrumbsPlacement", nullptr}},
+                // mapLanguageBreadcrumbs：键必须是已知语言 id，值是布尔。
+                {{"breadcrumbsLanguages", Json::array()}}, {{"breadcrumbsLanguages", "java"}},
+                {{"breadcrumbsLanguages", {{"kotlin", true}}}},
+                {{"breadcrumbsLanguages", {{"java", "yes"}}}},
+                {{"breadcrumbsLanguages", {{"java", nullptr}}}},
+                {{"showStickyLines", "true"}}, {{"stickyLinesLimit", 11}}, {{"stickyLinesLimit", -1}},
+                {{"diffContextLines", 0}}, {{"diffContextLines", 101}}
             };
             for (const auto& patch : bad_editor) expect_error("INVALID_SETTINGS", [&] { first.update_settings(patch); });
             const std::vector<Json> bad_project{
@@ -519,13 +571,58 @@ int main() {
                 {{"fileAssociations", Json::array()}}, {{"fileAssociations", "conf"}},
                 {{"fileAssociations", {{"conf", "kotlin"}}}}, {{"fileAssociations", {{"conf", 7}}}},
                 {{"fileAssociations", {{"Conf", "java"}}}}, {{"fileAssociations", {{"", "java"}}}},
-                {{"fileAssociations", {{"a/b", "java"}}}}, {{"fileAssociations", {{std::string(17, 'a'), "java"}}}}
+                {{"fileAssociations", {{"a/b", "java"}}}}, {{"fileAssociations", {{std::string(17, 'a'), "java"}}}},
+                // 构建工具（IDEA `build.tools`）：三档枚举名是大写，Gradle 三项各有值域。
+                {{"buildTools", Json::array()}}, {{"buildTools", "ALL"}},
+                {{"buildTools", {{"autoReloadType", "all"}}}}, {{"buildTools", {{"autoReloadType", 1}}}},
+                {{"buildTools", {{"autoReloadType", nullptr}}}}, {{"buildTools", {{"autoReloadType", "OFF"}}}},
+                {{"buildTools", {{"previousAutoReloadType", "always"}}}}, {{"buildTools", {{"unknown", true}}}},
+                {{"buildTools", {{"gradle", "wrapper"}}}},
+                {{"buildTools", {{"gradle", {{"useGradleFrom", "remote"}}}}}},
+                {{"buildTools", {{"gradle", {{"useGradleFrom", "Wrapper"}}}}}},
+                {{"buildTools", {{"gradle", {{"gradlePath", 7}}}}}},
+                {{"buildTools", {{"gradle", {{"gradleUserHome", nullptr}}}}}},
+                {{"buildTools", {{"gradle", {{"gradlePath", std::string(513, 'a')}}}}}},
+                {{"buildTools", {{"gradle", {{"offline", "yes"}}}}}},
+                {{"buildTools", {{"gradle", {{"unknown", 1}}}}}},
+                // 导出到 HTML（IDEA ExportToHTMLSettings）：范围只允许 0/1/2/4，其余字段各有类型。
+                {{"exportToHtml", Json::array()}}, {{"exportToHtml", "file"}},
+                // 运行配置的「允许并行运行多个实例」只能是布尔（IDEA RunConfigurationOptions.kt:54-56）。
+                {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"allowRunningInParallel", "yes"}}})}},
+                {{"runConfigs", Json::array({{{"name", "x"}, {"command", "y"}, {"allowRunningInParallel", 1}}})}},
+                {{"exportToHtml", {{"scope", 3}}}}, {{"exportToHtml", {{"scope", "1"}}}},
+                {{"exportToHtml", {{"scope", nullptr}}}}, {{"exportToHtml", {{"scope", 5}}}},
+                {{"exportToHtml", {{"includeSubdirectories", 1}}}},
+                {{"exportToHtml", {{"printLineNumbers", "yes"}}}},
+                {{"exportToHtml", {{"openInBrowser", 0}}}},
+                {{"exportToHtml", {{"outputDirectory", 7}}}},
+                {{"exportToHtml", {{"outputDirectory", nullptr}}}},
+                {{"exportToHtml", {{"outputDirectory", std::string(513, 'a')}}}},
+                {{"exportToHtml", {{"unknown", true}}}}
             };
             for (const auto& patch : bad_project) expect_error("INVALID_SETTINGS", [&] { second.update_project_settings(root_a, patch); });
             expect_error("INVALID_PATH", [&] { first.update_project_settings("relative", custom); });
             check(get(file) == before && first.state() == before_state && first.project_settings(root_a) == custom, "Rejected patches must not pollute any settings");
+
+            // 合法的面包屑补丁必须能存下来（默认位置是「下方」，见 EditorSettingsExternalizable.OptionSet:91）。
+            // 这一段必须落在上面的「拒绝的补丁不能污染任何设置」之后：它确实会写盘。
+            const auto crumbs = first.update_settings({{"showBreadcrumbs", false}, {"breadcrumbsPlacement", "top"},
+                                                       {"breadcrumbsLanguages", {{"java", false}, {"cpp", true}}}});
+            check(crumbs.at("breadcrumbsPlacement") == "top" && crumbs.at("breadcrumbsLanguages").at("java") == false,
+                  "Breadcrumb flags must round-trip");
+            check(first.update_settings({{"breadcrumbsPlacement", "bottom"}}).at("breadcrumbsLanguages").at("cpp") == true,
+                  "Patching the placement must not drop the per-language table");
             first.forget(root_a);
             check(second.project_settings(root_a) == custom, "Forgetting a recent project must not discard its settings");
+            // 构建工具的局部补丁必须**合并**而不是整块替换（merge_patch）：只改自动重载那一档时，
+            // Gradle 的三项要原样留着 —— 否则「关掉自动重载」会把「用哪个 Gradle」一起清掉。
+            const auto partial = second.update_project_settings(root_a, {{"buildTools", {{"autoReloadType", "NONE"}, {"previousAutoReloadType", "SELECTIVE"}}}});
+            check(partial.at("buildTools").at("autoReloadType") == "NONE", "autoReloadType patch must land");
+            check(partial.at("buildTools").at("gradle") == custom.at("buildTools").at("gradle"),
+                  "A partial buildTools patch must not drop the Gradle settings");
+            check(second.update_project_settings(root_a, {{"buildTools", {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "ALL"}}}})
+                    .at("buildTools") == custom.at("buildTools"),
+                  "Restoring the reload type must return the whole buildTools block");
             check(first.update_settings({{"fontSize", 10}, {"tabSize", 2}}).at("fontSize") == 10, "Lower font boundary and tab size two are valid");
             check(first.update_settings({{"tabSize", 4}}).at("tabSize") == 4, "Tab size four is valid");
             ProjectStore isolated(temporary.path / "isolated.json");
@@ -670,6 +767,11 @@ int main() {
             check(store.update_project_settings(root_a, {{"runConfigs", configs}}).at("runConfigs") == configs,                  "Run configurations must round-trip with their own text");
             check(store.project_settings(root_b).at("runConfigs").empty(),
                   "A second project must not inherit another project's commands");
+            // 文件夹（IDEA RunConfigurable 的 FOLDER 节点）随配置一起存下来。
+            const Json grouped = Json::array({{{"name", "fmt"}, {"command", "clang-format -i src/x.cpp"}, {"folder", utf8(u8"格式化")}}});
+            check(store.update_project_settings(root_a, {{"runConfigs", grouped}}).at("runConfigs") == grouped,
+                  "A run configuration keeps its folder");
+            store.update_project_settings(root_a, {{"runConfigs", configs}});
             store.update_project_settings(root_a, {{"excludedDirs", Json::array({"out"})}});
             check(store.project_settings(root_a).at("runConfigs") == configs,
                   "Patching exclusions must not drop the run configurations");
@@ -685,6 +787,11 @@ int main() {
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", ""}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"kind", "shell"}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"type", "terminal"}}})}},
+                // folder 对应 RunConfigurable 的文件夹节点：≤80 字节、单行、UTF-8。
+                {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"folder", 7}}})}},
+                {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"folder", std::string(81, 'f')}}})}},
+                {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"folder", "a\nb"}}})}},
+                {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"folder", std::string("\xC0\xAF", 2)}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}, {"type", 3}}})}},
                 {{"runConfigs", Json::array({{{"name", 5}, {"command", "cmake"}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}},
@@ -758,11 +865,23 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}},
                                             {{"path", "src/x.cpp"}, {"line", 3}}})}},
                 {{"bookmarks", Json::array({{{"path", std::string("\xC0\xAF", 2)}, {"line", 3}}})}},
+                // bookmarksView（IDEA BookmarksViewState）：只接受三个有落点的布尔开关。
+                {{"bookmarksView", Json::array()}}, {{"bookmarksView", "on"}},
+                {{"bookmarksView", {{"groupLineBookmarks", "true"}}}},
+                {{"bookmarksView", {{"groupLineBookmarks", 1}}}},
+                {{"bookmarksView", {{"showPreview", true}}}},
+                {{"bookmarksView", {{"askBeforeDeletingLists", true}}}},
             };
             for (const auto& patch : rejected)
                 expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, patch); });
             check(store.project_settings(root_a).at("bookmarks") == marks,
                   "Rejected bookmark writes must change nothing");
+            // 正向：三个开关能存下来，并与默认值合并
+            check(store.update_project_settings(root_a, {{"bookmarksView", {{"groupLineBookmarks", false}}}})
+                      .at("bookmarksView").at("groupLineBookmarks") == false,
+                  "A bookmarks-view toggle must round-trip");
+            check(store.project_settings(root_a).at("bookmarksView").at("autoscrollToSource") == false,
+                  "The other toggles keep their defaults");
             Json too_many = Json::array();
             for (std::size_t i = 0; i != 201; ++i) too_many.push_back({{"path", "src/x.cpp"}, {"line", i + 1}});
             expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, {{"bookmarks", too_many}}); });
@@ -832,6 +951,81 @@ int main() {
             check(ProjectStore(file).project_settings(root_a).at("todoPatterns") == default_todo_patterns(),
                   "a project record written before TODO markers existed takes the defaults");
             check(ProjectStore(file).update_project_settings(root_a, {{"todoPatterns", custom}}).at("todoPatterns") == custom,
+                  "the migrated record accepts the new key");
+        });
+
+        // 命名作用域（IDEA project.scopes + NamedScopesHolder.writeScope/readScope）。
+        run("named scopes keep their order, their shared flag, and migrate when absent", [&] {
+            const auto file = temporary.path / "scopes.json";
+            ProjectStore store(file);
+            const auto a = create_project(temporary.path, "scopes-a", "empty");
+            const auto b = create_project(temporary.path, "scopes-b", "empty");
+            const auto root_a = open_result(a).at("root").get<std::string>();
+            const auto root_b = open_result(b).at("root").get<std::string>();
+            store.opened(open_result(a));
+            check(store.project_settings(root_a).at("scopes").empty(),
+                  "A new project has no scopes (NamedScope.EMPTY_ARRAY)");
+
+            const Json scopes = Json::array({
+                {{"name", "Sources"}, {"pattern", "file:src//*"}, {"shared", false}},
+                {{"name", "Headers"}, {"pattern", "file:**/*.h"}, {"shared", true}},
+            });
+            check(store.update_project_settings(root_a, {{"scopes", scopes}}).at("scopes") == scopes,
+                  "Scopes must round-trip name, pattern and shared flag");
+            check(store.project_settings(root_a).at("scopes").at(0).at("name") == "Sources",
+                  "The stored array keeps the order myOrder has to preserve");
+            check(store.project_settings(root_b).at("scopes").empty(), "Another project keeps its own scope list");
+            store.update_project_settings(root_a, {{"bookmarks", Json::array()}});
+            check(store.project_settings(root_a).at("scopes") == scopes, "Patching another key must not reset scopes");
+
+            // 模式**语法**非法也要能存下来：readScope 捕获 ParsingException 后落到 InvalidPackageSet。
+            const Json broken = Json::array({{{"name", "Broken"}, {"pattern", "file:*.cpp && file:*.h"}, {"shared", false}}});
+            check(store.update_project_settings(root_a, {{"scopes", broken}}).at("scopes") == broken,
+                  "An unparsable pattern is stored, exactly like InvalidPackageSet");
+            // 空模式是合法的空作用域（NamedScopesHolder.java:129 写的是 setAttribute(PATTERN_ATT, "")）。
+            const Json empty_pattern = Json::array({{{"name", "Blank"}, {"pattern", ""}, {"shared", false}}});
+            check(store.update_project_settings(root_a, {{"scopes", empty_pattern}}).at("scopes") == empty_pattern,
+                  "An empty pattern is the empty scope, not an error");
+            store.update_project_settings(root_a, {{"scopes", scopes}});
+
+            const std::vector<Json> rejected{
+                {{"scopes", nullptr}},
+                {{"scopes", Json::object()}},
+                {{"scopes", Json::array({Json::object()})}},
+                {{"scopes", Json::array({{{"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", ""}, {"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", std::string(81, 'n')}, {"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", "a\nb"}, {"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", std::string("\xC0\xAF", 2)}, {"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", "Big"}, {"pattern", std::string(1025, 'p')}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", "Bad"}, {"pattern", std::string("\xC0\xAF", 2)}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", 7}, {"pattern", "file:a"}, {"shared", false}}})}},
+                {{"scopes", Json::array({{{"name", "NoFlag"}, {"pattern", "file:a"}}})}},
+                {{"scopes", Json::array({{{"name", "Flag"}, {"pattern", "file:a"}, {"shared", "yes"}}})}},
+                {{"scopes", Json::array({{{"name", "Extra"}, {"pattern", "file:a"}, {"shared", false}, {"owner", "x"}}})}},
+                {{"scopes", Json::array({{{"name", "Same"}, {"pattern", "file:a"}, {"shared", false}},
+                                        {{"name", "Same"}, {"pattern", "file:b"}, {"shared", true}}})}},
+            };
+            for (const auto& patch : rejected)
+                expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, patch); });
+            check(store.project_settings(root_a).at("scopes") == scopes, "Rejected scope writes must change nothing");
+
+            Json many = Json::array();
+            for (std::size_t i = 0; i != 65; ++i)
+                many.push_back({{"name", "scope-" + std::to_string(i)}, {"pattern", "file:*." + std::to_string(i)}, {"shared", false}});
+            expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, {{"scopes", many}}); });
+            many.erase(64);
+            check(store.update_project_settings(root_a, {{"scopes", many}}).at("scopes").size() == 64,
+                  "The largest accepted scope list must be usable");
+
+            Json legacy = Json::parse(get(file));
+            const std::string key = legacy.at("perProject").begin().key();
+            legacy["perProject"][key] = {{"excludedDirs", Json::array({".git"})}, {"runConfigs", Json::array()},
+                                         {"bookmarks", Json::array()}, {"todoPatterns", default_todo_patterns()}};
+            put(file, legacy.dump());
+            check(ProjectStore(file).project_settings(root_a).at("scopes").empty(),
+                  "a project record written before scopes existed takes the empty default");
+            check(ProjectStore(file).update_project_settings(root_a, {{"scopes", scopes}}).at("scopes") == scopes,
                   "the migrated record accepts the new key");
         });
 
@@ -913,7 +1107,41 @@ int main() {
                   "nested partial patches preserve the other template list");
         });
 
-        run("Java project settings persist, migrate, and reach JDT LS shape", [&] {
+        run("file colors round-trip and reject anything outside the seven named colors", [&] {
+        const auto file = temporary.path / "file-colors.json";
+        ProjectStore store(file);
+        const auto root = open_result(create_project(temporary.path, "file-colors", "empty")).at("root").get<std::string>();
+        check(store.project_settings(root).at("fileColors").empty(), "no file colors by default");
+
+        // nlohmann 的老坑：内层 `{k1,v1,k2,v2}` 会被当成**数组**，对象必须写成
+        // `{{k1,v1},{k2,v2}}` 两个二元对（下面每条配置都是这个形状）。
+        // 数组顺序就是优先级（`FileColorsModel.findConfigurationWithScopeFilter` 首个命中就返回），
+        // 所以这条 round-trip 必须保序。
+        const Json colors = Json::array({
+            {{"scope", "生成物"}, {"color", "Gray"}},
+            {{"scope", "源码"}, {"color", "Blue"}},
+        });
+        check(store.update_project_settings(root, {{"fileColors", colors}}).at("fileColors") == colors,
+              "FileColorConfiguration entries round-trip in the stored order");
+        check(store.project_settings(root).at("fileColors") == colors, "the order is the priority and must survive a round-trip");
+
+        // 颜色名只认那七个（`FileColorManagerImpl.ourDefaultColors` 的键）；其余一律拒绝。
+        const std::vector<Json> rejected{
+            "not-an-array",
+            Json::array({42}),                                            // 元素不是对象
+            Json::array({{{"scope", "生成物"}, {"color", "#ff0000"}}}),  // 色值不是颜色名
+            Json::array({{{"scope", "生成物"}, {"color", "cyan"}}}),     // 不在那七个里
+            Json::array({{{"scope", "生成物"}}}),                        // 少 color
+            Json::array({{{"color", "Blue"}}}),                          // 少 scope
+            Json::array({{{"scope", 1}, {"color", "Blue"}}}),            // 形状不对
+            Json::array({{{"scope", "生成物"}, {"color", "Blue"}, {"x", 1}}}),  // 未知键
+            Json::array({{{"scope", "a"}, {"color", "Blue"}}, {{"scope", "a"}, {"color", "Rose"}}}),  // 同名两条
+        };
+        for (const auto& patch : rejected) expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root, {{"fileColors", patch}}); });
+        check(store.project_settings(root).at("fileColors") == colors, "a rejected fileColors patch changes nothing");
+    });
+
+    run("Java project settings persist, migrate, and reach JDT LS shape", [&] {
             const auto file = temporary.path / "java-settings.json";
             ProjectStore store(file);
             const auto root = open_result(create_project(temporary.path, "java-settings", "empty")).at("root").get<std::string>();

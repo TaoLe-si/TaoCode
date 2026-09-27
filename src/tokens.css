@@ -29,6 +29,10 @@
   --menu-radius: 6px;
   --menu-row-height: 28px;
   --chrome-height: 40px;
+  /* **整个顶栏**的高度。`SEPARATE_TOOLBAR`（IDEA 的默认档）是「菜单栏 + 主工具栏」两行，
+     `MERGED_WITH_MAIN_TOOLBAR` 才是一行 —— 浮层（配置选择器、汉堡菜单）必须按这个定位，
+     否则会盖住第二行。见 src/style.css 里按 `html[data-main-menu]` 的覆盖。 */
+  --topbar-height: calc(var(--chrome-height) * 2);
   --ctrl-height-sm: 24px;
   --ctrl-height: 28px;
   --ctrl-height-lg: 32px;
@@ -78,6 +82,16 @@
   --warning-bg: #faf0d8;
   --error: #9a3434;
   --error-bg: #fbeaea;
+
+  /* 文件颜色（IDEA `FileColorManagerImpl.ourDefaultColors` 的七个具名色）。
+     浅色主题这一组照抄源码里的 `new JBColor(light, dark)` 左边那一半。 */
+  --file-color-blue: #eaf6ff;
+  --file-color-green: #effae7;
+  --file-color-orange: #f6e9dc;
+  --file-color-rose: #f2dcda;
+  --file-color-violet: #e6e0f1;
+  --file-color-yellow: #ffffe4;
+  --file-color-gray: #f5f5f5;
 
   --syntax-keyword: #8b269e;
   --syntax-string: #15713c;
@@ -132,6 +146,15 @@
   --success-bg: #1f3a2e;
   --warning: #e6c68f;
   --warning-bg: #403625;
+
+  /* 深色主题：源码里 `new JBColor(light, dark)` 的右边那一半。 */
+  --file-color-blue: #4f556b;
+  --file-color-green: #49544a;
+  --file-color-orange: #806052;
+  --file-color-rose: #6e535b;
+  --file-color-violet: #534a57;
+  --file-color-yellow: #4f4b41;
+  --file-color-gray: #45484a;
   --error: #f0b9b4;
   --error-bg: #472c30;
 

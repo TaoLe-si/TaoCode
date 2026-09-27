@@ -22,14 +22,49 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     "presentationMode", "presentationModeFontSize", "mainMenuDisplayMode",
     // AppearanceConfigurable cdDifferentiateProjects / cdExpandNodesWithSingleClick
     // (UISettingsState.differentiateProjects / :141 expandNodesWithSingleClick).
-    "differentiateProjects", "expandNodesWithSingleClick"
+    "differentiateProjects", "expandNodesWithSingleClick",
+    // BreadcrumbsConfigurable (`editor.breadcrumbs`, platform-impl/.../breadcrumbs/
+    // BreadcrumbsConfigurable.java:24 + BreadcrumbsConfigurableUI.kt:44-70) 三项：
+    // 显示开关（isBreadcrumbsShown）、位置（isBreadcrumbsAbove，只有上/下）、
+    // 按语言开关（mapLanguageBreadcrumbs，只存被显式配置过的语言）。
+    "showBreadcrumbs", "breadcrumbsPlacement", "breadcrumbsLanguages",
+    // Editor | Error highlighting（`Errors` configurable + ErrorOptionsProvider 扩展点）：
+    // TaoCode 的等价物是 LSP 诊断的显示开关。
+    "showDiagnostics", "showErrorStripe",
+    // CodeInsightSettings.REFORMAT_ON_PASTE（analysis-impl/.../codeInsight/CodeInsightSettings.java:143-148，
+    // @Storage("editor.xml") 所以归编辑器设置；默认 INDENT_EACH_LINE）。设置行见
+    // EditorSmartKeysConfigurable.kt:185-197（编辑器 › 常规 › 智能键）。
+    "reformatOnPaste",
+    // EditorSettingsExternalizable.BIDI_TEXT_DIRECTION（ide-core-impl/.../editor/ex/EditorSettingsExternalizable.java:137，
+    // 默认 CONTENT_BASED；枚举见同目录 BidiTextDirection.java:21-23）。无设置页行，只有
+    // ViewMenu 末尾的「文本方向」子菜单（platform-impl/resources/idea/PlatformActions.xml:591-595）。
+    "bidiTextDirection",
+    // EditorSettingsExternalizable.java:87 `ARE_GUTTER_ICONS_SHOWN = true`（默认开）。
+    // 关掉后 gutter 不再画行内标记图标（标记本身仍在）。
+    "showGutterIcons",
+    // 文件颜色两层开关（IDEA `FileColorManagerImpl`：PropertiesComponent 的
+    // `FileColorsEnabled` / `FileColorsForTabsEnabled`，`_isEnabled()` :72-74 默认都是 true）。
+    // 颜色本身存在**项目**设置里（`fileColors`，`FileColorConfiguration` = scopeName + colorID）。
+    "fileColorsEnabled", "fileColorsForTabs",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     "defaultProjectDirectory", "reopenLastProject", "deleteToBin", "autoSyncFiles",
     "backgroundSyncFiles", "autoSaveFiles", "autoSaveIfInactive", "isUseSafeWrite", "confirmExit",
     "isShowWelcomeScreen", "confirmOpenNewProject2", "processCloseConfirmation", "inactiveTimeout",
-    "supportScreenReaders", "autoShowProcessPopup"
+    "supportScreenReaders", "autoShowProcessPopup",
+    // ConsoleConfigurable (`Console`, lang-impl/.../execution/console/ConsoleConfigurable.java:43-73)：
+    // 控制台行折叠规则 —— 要折叠的行 + 不折叠的例外两个列表。
+    "foldConsoleLines", "foldExceptions",
+    // DiffSettingsConfigurable（`diff.base`，diff-impl/.../DiffSettingsConfigurable.kt:31 `settings.context.lines`）：
+    // diff 的上下文行数。
+    "diffContextLines",
+    // StickyLinesConfigurable（`editor.stickyLines`，platform-impl/.../stickyLines/configurable/）：
+    // 粘性作用域行（显示当前所在方法/类的首行）+ 最多显示几层。
+    "showStickyLines", "stickyLinesLimit",
+    // ToolConfigurable（`preferences.externalTools`，lang-impl/.../tools/ToolConfigurable.java）：
+    // 外部工具 —— 应用级的命令收藏（名称 + 命令），可从菜单直接运行。
+    "externalTools"
 };
 
 
@@ -47,6 +82,18 @@ void validate_template_settings(const Json& value);
 void validate_bookmarks(const Json& values);
 void validate_java_settings(const Json& value);
 void validate_file_associations(const Json& value);
+// 命名作用域（IDEA `project.scopes`）：形状校验，不校验模式语法（源码允许存下解析不了的模式）。
+void validate_scopes(const Json& value);
+// 构建工具（IDEA `build.tools` 组：外部系统的自动重载 + Gradle 项目设置）。
+// **项目级**：`ExternalSystemGroupConfigurable` 是 `BackedByPersistentState` 的 projectConfigurable，
+// `GradleSettings` 的存储是 `.idea/gradle.xml`（GradleSettings.java:30-31），
+// 「离线模式」也在它里面（:118-131），「用哪个 Gradle」在 `GradleProjectSettings`（同文件，per linked project）。
+void validate_build_tools(const Json& value);
+// 导出到 HTML 的设置（IDEA `ExportToHTMLSettings`，`@Storage(StoragePathMacros.WORKSPACE_FILE)` ⇒ **项目级**）。
+// 字段与默认值取自 `ExportToHTMLSettings.java:17-19`（PRINT_LINE_NUMBERS / OPEN_IN_BROWSER / OUTPUT_DIRECTORY）
+// 与 `:21-23`（printScope / isIncludeSubdirectories）；范围值取 `PrintSettings.java:82-84`
+// （PRINT_FILE=1 / PRINT_SELECTED_TEXT=2 / PRINT_DIRECTORY=4）。
+void validate_export_to_html(const Json& value);
 void validate_project_patch(const Json& patch);
 inline bool valid_utf8(const std::string& text) {
     return text.find('\0') == std::string::npos &&
