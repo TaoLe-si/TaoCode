@@ -22,7 +22,7 @@ import { rankCommands, type Searchable } from './commandSearch.ts'
 
 export type SearchEverywhereTab = 'all' | 'project' | 'commands' | 'runConfigs'
 /** 一个供给者。`all` tab 是它们的并集。 */
-export type SearchEverywhereSource = 'project' | 'commands' | 'runConfigs'
+export type SearchEverywhereSource = 'project' | 'symbols' | 'commands' | 'runConfigs'
 
 export interface SearchEverywhereItem extends Searchable {
   id: string
@@ -44,8 +44,9 @@ export interface SearchEverywhereTabDef {
 
 /** 有真实供给者的 tab（顺序即显示顺序：All 在最前，与 IDEA 一致）。 */
 export const SEARCH_EVERYWHERE_TABS: readonly SearchEverywhereTabDef[] = [
-  { id: 'all', label: 'All', sources: ['project', 'commands', 'runConfigs'] },
-  { id: 'project', label: 'Project', sources: ['project'] },
+  { id: 'all', label: 'All', sources: ['project', 'symbols', 'commands', 'runConfigs'] },
+  // Project = 项目里的文件 + 项目里的类/符号（IDEA 的 project scope 就是这两类）。
+  { id: 'project', label: 'Project', sources: ['project', 'symbols'] },
   { id: 'commands', label: 'Commands', sources: ['commands'] },
   { id: 'runConfigs', label: 'Run Configurations', sources: ['runConfigs'] },
 ]
@@ -106,5 +107,7 @@ export function moveSearchEverywhereIndex(index: number, count: number, delta: n
 
 /** 来源的中文副标签，`all` tab 里用来说明这一条是谁贡献的。 */
 export function searchEverywhereSourceLabel(source: SearchEverywhereSource): string {
-  return source === 'project' ? 'Project' : source === 'commands' ? 'Commands' : 'Run Configuration'
+  if (source === 'project') return 'File'
+  if (source === 'symbols') return 'Symbol'
+  return source === 'commands' ? 'Commands' : 'Run Configuration'
 }

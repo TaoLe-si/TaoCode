@@ -19,7 +19,12 @@ import {
   type SearchEverywhereTab,
 } from '../searchEverywhere'
 
-const props = defineProps<{ open: boolean; items: SearchEverywhereItem[] }>()
+const props = defineProps<{
+  open: boolean
+  items: SearchEverywhereItem[]
+  /** 查询词变化时交给宿主：符号供给者要据此异步问语言服务（带防抖，在宿主那边）。 */
+  onQuery?: (query: string) => void
+}>()
 const emit = defineEmits<{ close: [] }>()
 
 const query = ref('')
@@ -34,8 +39,10 @@ const tabs = computed(() => availableSearchEverywhereTabs(props.items, query.val
 
 // 换了查询或 tab 就回到第一项 —— 否则选中项会停在一个已经不存在的下标上。
 watch([query, tab], () => { index.value = 0 })
+// 查询词交给宿主（符号供给者要用它去问语言服务）。
+watch(query, value => props.onQuery?.(value))
 watch(() => props.open, async open => {
-  if (!open) return
+  if (!open) { props.onQuery?.(''); return }
   query.value = ''
   tab.value = 'all'
   index.value = 0

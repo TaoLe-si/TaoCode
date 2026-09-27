@@ -31,7 +31,9 @@ test('tab 集合与顺序照 IdeBundle 的键，不按记忆', () => {
   // `searcheverywhere.*.tab.name` = All / Project / IDE / Commands / Run Configurations / Autocompletion。
   // 我们只渲染有真实供给者的四个：IDE 与 Autocompletion 还没有供给者，渲染出来就是放假控件。
   assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.label), ['All', 'Project', 'Commands', 'Run Configurations'])
-  assert.deepEqual(SEARCH_EVERYWHERE_TABS[0].sources, ['project', 'commands', 'runConfigs'], 'All 必须是并集')
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[0].sources, ['project', 'symbols', 'commands', 'runConfigs'], 'All 必须是并集')
+  // Project = 项目文件 + 项目类/符号（IDEA 的 project scope 就是这两类）。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[1].sources, ['project', 'symbols'])
 })
 
 test('每个 tab 只显示自己供给者的项', () => {
@@ -79,8 +81,18 @@ test('上下移动选中项会回绕', () => {
   assert.equal(moveSearchEverywhereIndex(0, 0, 1), 0, '没有结果时不该算出非法下标')
 })
 
+test('符号与文件同属 Project tab（IDEA 的 project scope）', () => {
+  const withSymbol = [...items, item('sym', 'DemoClass#parse', 'symbols', { subtitle: 'DemoClass.java:12' })]
+  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'project').map(each => each.id), ['file', 'class', 'sym'],
+    'Project 收文件与符号，不收动作与运行配置')
+  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'commands').map(each => each.id), ['cmd'])
+  // 符号只在 All 与 Project 里出现，Commands / Run Configurations 不该混进来。
+  assert.deepEqual(searchEverywhereResults(withSymbol, 'parse', 'runConfigs'), [])
+})
+
 test('来源副标签', () => {
-  assert.equal(searchEverywhereSourceLabel('project'), 'Project')
+  assert.equal(searchEverywhereSourceLabel('project'), 'File')
+  assert.equal(searchEverywhereSourceLabel('symbols'), 'Symbol')
   assert.equal(searchEverywhereSourceLabel('runConfigs'), 'Run Configuration')
 })
 
