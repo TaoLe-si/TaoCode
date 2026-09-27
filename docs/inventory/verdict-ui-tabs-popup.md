@@ -118,3 +118,51 @@
 7. **`tests/tab-strip-layout.test.mjs`** 11 条（含死区边界 90 不隐藏 / 89 隐藏、零宽条不产生负宽度、gap 双语义）。
 8. **接线**（`src/App.vue` + `src/style.css`）：按 `TabLabel.getPreferredSize()` 的等价物测量（**未加宽度时**测自然宽并缓存；`display:none` 的 0 宽不入缓存，避免把"被丢弃"误当自然宽）→ 计算布局 → 标签宽度按裁剪值写回、被丢弃的标签 `v-show=false`、溢出时渲染 `…` 按钮 + 隐藏标签下拉。`.editor-tabs { overflow: hidden }` 保证单行条不滚动。
 
+
+---
+
+## 补判：2026-09-27 重枚举带进来的 20 类
+
+原判决表是 107 类（`ui/tabs` 53 + `ui/popup` 54），按**包路径后缀**重枚举后这两个包真实是
+127 类（见 `docs/class-parity-todo.md` §0'）—— 也就是说**有 20 个类从来没被判决过**。
+它们不是散落的新功能，而是两个完整的族：
+
+### 族一 · 文件颜色（`ui/tabs`，9 类）—— 本轮已实现
+
+| 类 | 判定 | 依据 |
+|---|---|---|
+| `FileColorsModel.java` | `[x]` | 语义已移植为 `src/fileColors.ts` 的 `resolveFileColor` + `normalizeFileColors`；**首个命中即返回**照 `findConfigurationWithScopeFilter:247-260` |
+| `FileColorConfiguration.java` | `[x]` | 落成 `FileColorSetting { scope, color }`（= `getScopeName()` + `getColorID()`） |
+| `FileColorManagerImpl.java` | `[~]` | 七色与两层开关（`FileColorsEnabled` / `FileColorsForTabsEnabled`，`_isEnabled():72-74`）已实现；`getScopeColor` / `isShared` / 应用级-项目级两层存储未做（本仓只有项目级，已在文件头记为有意偏差） |
+| `FileColorsConfigurable.kt` | `[~]` | 功能可用，但**并进「作用域」页**而不是单开一页 —— 单开要占 `SettingsDialog.vue` 16 行，撞上 `tests/module-size.test.mjs` 的「行数上限只降不升」硬约束；配色的对象就是作用域本身 |
+| `EditorTabColorProviderImpl.java` | `[x]` | 落成 `src/fileColorsHost.ts` 的 `tabFileColor`，标签页背景着色 + tooltip 写明命中的作用域 |
+| `ColorSelectionComponent.java` | `[x]` | 落成作用域列表行内的七色色板 + 「无」 |
+| `ColorButtonBase.java` | `[-]` | Swing `JButton` 基类，纯 UI 壳 |
+| `FileColorModelStorageManager.kt` | `[-]` | 跨 team/user 的服务注册（`PerTeamFileColorModelStorageManager` / `PerUserFileColorModelStorageManager`），单隐式模块下无对应概念 |
+| `FileColorsUsagesCollector.kt` | `[-]` | 只为设置搜索（`FileColorsSearchOptionContributor`）收集"设置项在哪用过"；本仓设置搜索按 `keywords` 匹配，不查使用记录 |
+
+### 族二 · 弹层详情面板（`ui/popup/util`，7 类）—— 未移植，可移植
+
+IDEA 的"弹层右侧详情区"：列表在左、选中项的详情在右（`DetailController` 管尺寸与折叠、
+`MasterController` 管两栏、列表项经 `ItemWrapper` 补一个自定义 renderer）。
+
+| 类 | 判定 | 依据 |
+|---|---|---|
+| `DetailController.java` | `[ ]` | 两栏比例、展开/折叠、`JBSplitter` —— 是**布局行为**，Web 下可移植（CSS grid + 拖拽条） |
+| `MasterController.kt` | `[ ]` | 同上，详情侧的展开动画与滚动同步 |
+| `DetailView.java` / `DetailViewImpl.java` | `[ ]` | 详情区本体（`JComponent` 门面 → 换成 DOM） |
+| `ItemWrapper.java` | `[-]` | 抽象基类，签名是 `setupRenderer(ColoredListCellRenderer, …)` —— Swing 渲染器契约；**它承载的能力**归到下面那行 |
+| `ItemWrapperListRenderer.java` | `[ ]` | 列表项额外挂一个详情按钮/图标的渲染 —— 可移植 |
+| `SplitterItem.java` | `[-]` | `JBSplitter` 的行内实现细节 |
+
+### 族三 · 弹层位置与内容刷新（`ui/popup`，3 类）—— 部分可移植
+
+| 类 | 判定 | 依据 |
+|---|---|---|
+| `PopupPositionManager.java` | `[~]` | 弹层贴着**代码补全 lookup** 摆位（`import LookupEvent / LookupEx / EditorEx`）。「贴着锚点摆、越界就翻转」这段行为可移植且 Web 下由 CSS 定位承担；**lookup 专属的跟随补全框**在本仓无对应物（本仓没有补全弹窗） |
+| `PopupUpdateProcessor.java` | `[~]` | 弹窗已开着时，内容随 lookup / 文档 / 快速搜索的结果变化而**就地刷新**（`import DocumentationManager / LookupManager / QuickSearchComponent`）。「数据变了刷新已开的弹层」是真实缺口 —— 本仓的弹层都是一次性快照（Search Everywhere 重新打开才看到新数据）；三个触发源本仓无 |
+| `NotLookupOrSearchCondition.java` | `[-]` | 谓词对象，判断"当前不是 lookup/搜索态"；依附于上面两个的前提设施 |
+
+**这一族的真实落点**：`PopupUpdateProcessor` 那条 `[~]` 是本族唯一有用户可感差异的缺口 ——
+「弹层开着时数据变了要自己更新」对 Search Everywhere 尤其明显（改了文件、作用域配置变了，
+弹层还是旧快照）。可移植成一个 `while open: 监听数据源 → 重算 → 原地刷新` 的通道。
