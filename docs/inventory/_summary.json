@@ -1,39 +1,79 @@
 {
  "editor": {
-  "count": 569,
-  "missing_roots": [
-   "platform/lang-impl/src/com/intellij/codeInsight/folding"
-  ]
+  "count": 2551,
+  "roots": [
+   "com/intellij/application/options",
+   "com/intellij/codeInsight/daemon",
+   "com/intellij/codeInsight/folding",
+   "com/intellij/codeInsight/hint",
+   "com/intellij/codeInsight/template",
+   "com/intellij/codeStyle",
+   "com/intellij/injected/editor",
+   "com/intellij/openapi/editor",
+   "com/intellij/psi/impl/search"
+  ],
+  "missing_roots": []
  },
  "toolwindow": {
-  "count": 392,
+  "count": 350,
+  "roots": [
+   "com/intellij/openapi/wm",
+   "com/intellij/toolWindow"
+  ],
   "missing_roots": []
  },
  "vcs": {
-  "count": 1002,
-  "missing_roots": [
-   "platform/vcs-log/src/com/intellij/vcs/log"
-  ]
+  "count": 1783,
+  "roots": [
+   "com/intellij/openapi/vcs",
+   "com/intellij/vcs/commit",
+   "com/intellij/vcs/log"
+  ],
+  "missing_roots": []
  },
  "actions": {
-  "count": 115,
-  "missing_roots": [
-   "platform/searchEverywhere/src/com/intellij/ide/actions/searcheverywhere"
-  ]
+  "count": 317,
+  "roots": [
+   "com/intellij/ide/actions/searcheverywhere",
+   "com/intellij/openapi/actionSystem"
+  ],
+  "missing_roots": []
  },
  "settings-run": {
-  "count": 1676,
+  "count": 3247,
+  "roots": [
+   "com/intellij/diff",
+   "com/intellij/execution",
+   "com/intellij/find",
+   "com/intellij/ide/ui",
+   "com/intellij/openapi/options",
+   "com/intellij/xdebugger"
+  ],
   "missing_roots": []
  },
  "projectviews": {
-  "count": 342,
-  "missing_roots": [
-   "platform/platform-impl/src/com/intellij/ide/projectView",
-   "platform/projectView/src"
-  ]
+  "count": 755,
+  "roots": [
+   "com/intellij/history",
+   "com/intellij/ide/bookmarks",
+   "com/intellij/ide/projectView",
+   "com/intellij/ide/structureView",
+   "com/intellij/ide/todo",
+   "com/intellij/notification",
+   "com/intellij/openapi/command/impl",
+   "com/intellij/openapi/wm/impl/welcomeScreen",
+   "com/intellij/platform/ide/nonModalWelcomeScreen",
+   "com/intellij/platform/lvcs/impl",
+   "com/intellij/platform/welcomeScreen"
+  ],
+  "missing_roots": []
  },
  "ui": {
-  "count": 955,
+  "count": 1397,
+  "roots": [
+   "com/intellij/ui",
+   "com/intellij/util/ui"
+  ],
   "missing_roots": []
  }
 }

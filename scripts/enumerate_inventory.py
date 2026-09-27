@@ -162,7 +162,16 @@ def main() -> int:
         json.dump({"platform_total": len(platform), "covered": covered_total, "rest": len(rest_platform)},
                   handle, ensure_ascii=False, indent=1)
         handle.write("\n")
-    print("\n已写：%s/{7 个域}.txt + platform_rest.txt + _platform.json" % INV)
+    # _summary.json 也必须由本脚本维护：parity_scan.py 从它读域列表，
+    # 而旧版枚举留下的 count / missing_roots 已经过期（那正是"文档骗人"的源头）。
+    # missing_roots 现在恒为空 —— 上面的 exit 1 已经保证每个包都匹配到了东西。
+    with open(os.path.join(INV, "_summary.json"), "w", encoding="utf-8", newline="\n") as handle:
+        json.dump({domain: {"count": len(owned[domain]),
+                            "roots": domains.get(domain, []),
+                            "missing_roots": []} for domain in DOMAIN_ORDER},
+                  handle, ensure_ascii=False, indent=1)
+        handle.write("\n")
+    print("\n已写：%s/{7 个域}.txt + platform_rest.txt + _platform.json + _summary.json" % INV)
     return 0
 
 
