@@ -1,0 +1,51 @@
+{
+ "editor": [
+  "com/intellij/application/options",
+  "com/intellij/codeInsight/daemon",
+  "com/intellij/codeInsight/folding",
+  "com/intellij/codeInsight/hint",
+  "com/intellij/codeInsight/template",
+  "com/intellij/codeStyle",
+  "com/intellij/injected/editor",
+  "com/intellij/openapi/editor",
+  "com/intellij/psi/impl/search"
+ ],
+ "toolwindow": [
+  "com/intellij/openapi/wm",
+  "com/intellij/toolWindow"
+ ],
+ "vcs": [
+  "com/intellij/openapi/vcs",
+  "com/intellij/vcs/commit",
+  "com/intellij/vcs/log"
+ ],
+ "actions": [
+  "com/intellij/ide/actions/searcheverywhere",
+  "com/intellij/openapi/actionSystem"
+ ],
+ "settings-run": [
+  "com/intellij/diff",
+  "com/intellij/execution",
+  "com/intellij/find",
+  "com/intellij/ide/ui",
+  "com/intellij/openapi/options",
+  "com/intellij/xdebugger"
+ ],
+ "projectviews": [
+  "com/intellij/history",
+  "com/intellij/ide/bookmarks",
+  "com/intellij/ide/projectView",
+  "com/intellij/ide/structureView",
+  "com/intellij/ide/todo",
+  "com/intellij/notification",
+  "com/intellij/openapi/command/impl",
+  "com/intellij/openapi/wm/impl/welcomeScreen",
+  "com/intellij/platform/ide/nonModalWelcomeScreen",
+  "com/intellij/platform/lvcs/impl",
+  "com/intellij/platform/welcomeScreen"
+ ],
+ "ui": [
+  "com/intellij/ui",
+  "com/intellij/util/ui"
+ ]
+}

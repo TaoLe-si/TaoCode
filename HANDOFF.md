@@ -1,6 +1,77 @@
+# 交接说明（更新于 2026-09-27 晚）
+
+## 当前状态：全绿
+
+| 检查 | 结果 | 备注 |
+|---|---|---|
+| `npx vue-tsc --noEmit` | 0 错 | 2026-09-27 晚复跑 |
+| `npm test` | **769/769** | ⚠️ 旧版写 535，**已过期**；本轮新增 2 条回归用例 |
+| `npx vite build` | ✓（需**手动**跑，再 `build-native-locked.bat` 同步到 `build/ui`） | 构建脚本只做 `cmake --build` + 拷 `dist`，**不含 vite** |
+| `scripts\build-native-locked.bat` | RC 0 / **0 warning** | native 侧无改动时只跑 `[1/1]` 拷贝步 |
+| `ctest` | **27/27** | ⚠️ 旧版写 17，**已过期**；`ctest.exe` 不在 PATH，要用 CMake 全路径 |
+
+## 本轮（2026-09-27 晚）做了什么
+
+1. **修掉一次没做完的改名**：`javaRun.*` 的产物目录从 `outputPath: string` 改成 `outputPaths: string[]`
+   （`runtimeOutputPaths` 的设计，产物目录要跟着构建工具走），但只改了 `javaRun.ts` / `runTargets.ts`，
+   留下 4 处旧调用点，其中 2 处是**真实运行期 bug**：
+   - `src/runActions.ts` 运行路径传 `outputPath` → `outputPaths` 得 undefined → **运行 Java 文件抛 TypeError**；
+   - 同文件调试路径传字符串 → 字符串可迭代 → classpath 被逐字符展开成 `o;u;t;/;p;r;o;d;u;c;…`（**静默损坏**）；
+   - `src/runConfigurations.ts` 同样错键，但外面包着 `try/catch` → 异常被吞，`autoTargets` 恒为 `[]`
+     （就是最初报的"打开项目没有运行配置"）。
+   运行路径同时换成复用 `runtimeOutputPaths(plan_request)`，Gradle/Maven 才用上自己的产物目录。
+2. **核实出清单不可信，并重枚举**（详见 `docs/class-parity-todo.md` §0'）：7 域 **5 051 → 10 400 类**，
+   补回 Git Log 580 / editor 735 / projectView 163 / Search Everywhere 146 / folding 71；
+   新增 `scripts/enumerate_inventory.py` 与 `scripts/inventory_gaps.py`（**有洞就 exit 1**）。
+3. **查出两个待修缺陷**（尚未修，见下）。
+
+## 待修（本轮查实，尚未动手）
+
+| # | 缺陷 | 位置 | 性质 |
+|---|---|---|---|
+| 1 | 「布局」子菜单被插到**窗口菜单最顶上** | `src/menuUi.ts:64` | 锚点 id `window.searchEverywhere` **全仓不存在**（`windowMenu.ts` 里那行被删了，引用还在）→ `findIndex` 得 −1，`+1` 变 0 |
+| 2 | Search Everywhere 是**空壳** | `src/menus/navigateMenu.ts:63`、`src/keymap.ts:340` | 「随处搜索」(Shift+Shift) 与「查找操作」(Ctrl+Shift+A) **都调 `openActionSearch`**；仓库无 `SearchEverywhere.vue` / `searchEverywhere.ts` / 任何 tab 结构（IDEA 侧 146 类） |
+
+## 缺口清单现状
+
+- **`docs/enum-lsp-dap.md` §C（LSP 缺口）：0 条** —— 37 个 LSP 请求全部实现。
+- **§D（DAP 缺口）：3 条**，且**都是协议侧补齐**（`loadedSources` 按需重取 / `stepBack`+`reverseContinue` /
+  `readMemory`+`disassemble`）—— 三条在 IDEA 源码里**都没有对应类**（文档里附了搜索命令与零命中结果）。
+  它们排在 `docs/class-parity-todo.md` 的类清单之后。
+- **`docs/class-parity-todo.md`（总控）**：`[x]` 30 / `[~]` 15 / `[ ]` 13 / `[-]` 6。
+  ⚠️ 这里的 `[ ]`/`[~]` 标记**未经复核**（本轮只重枚举了类清单，没重判判决）；
+  §9 里 5 个"工作量大"的项目（`ToggleFullScreen` / `EditorToggleShowGutterIcons` / `Macros` /
+  `ExportImportGroup` / `EditorBidiTextDirection`）实际**都已落地**，代码在仓库里。
+  **下一批的起点应该是 §0' 的 10 400 类逐类判决，不是这份旧标记。**
+
+## 续做须知（今天新立的规矩）
+
+1. **文档里的 IDEA 依据必须带搜索命令或标 `待核`** —— 今天核对 6 条「IDEA：`XxxClass`」「与 IDEA 一致」
+   断言，**6 条全错**（详见 `.workbuddy/memory/2026-09-27.md`）。
+2. **大文件上限只能靠拆来下调**，不许抬（`tests/module-size.test.mjs`）：今天把
+   `lsp_fake_server.cpp`(762→4 文件)、`CodeEditor.vue`(1284→1211)、`lsp_session.cpp`(1973→1381) 都拆了。
+3. **脚本改代码**：优先 Edit（有唯一性校验）；必须用脚本时 `assert t.count(anchor) == 1`、每步一写、
+   改前备份、改完跑行为基线。中文引号一律「」（半角 `"` 会让脚本 `SyntaxError` 且整体不写盘 —— 今天 5 次）。
+4. **编译通过 ≠ 行为正确**：拆分后曾出现"零警告但服务器完全不响应"（漏了 `set_sender` 注入），只有测试抓到。
+5. 新增的 skill：`~/.workbuddy/skills/scripted-refactor-safety/`（脚本化重构的安全规程）。
+
+## 继续的起点
+
+- 类清单：`docs/class-parity-todo.md` 的 `[ ]` 与 `[~]` 行（每行都标了缺什么）。
+- 逐类明细：`docs/inventory/*_scan.md`（7 域 5051 行，每行一个源码类 + 机检状态）。
+- 机检：`scripts/parity_scan.py` + `node --test tests/routing-parity.test.mjs tests/module-size.test.mjs`。
+
 # HANDOFF · TaoCode IDEA UI 1:1 移植
 
 > 交接件。未来只读这一份即可接续，不需回读对话。路径索引见文末。
+
+---
+
+# 以下为**上一次会话**的交接（存档）
+
+> ⚠️ 里面的数字已过时（那时 `npm test` 是 138/138，现在是 **535/535**；验证口径里的
+> `vite build --emptyOutDir false` 也已被 `build-native-locked.bat` 的 dist→build/ui 复制取代）。
+> **最新状态以本文开头那几段为准。** 保留它是因为「踩过的坑」那张表仍然有效。
 
 ## 【主线状态】
 
