@@ -9,11 +9,15 @@
 //   · 动作   —— 菜单模块已经装配好的 `actionList`（Find Action 面板同一个源）
 //   · 运行配置 —— `allRunConfigNames`（用户配置 + 打开项目时自动发现的候选）
 //
+// **已开的弹层会跟着数据变化刷新**（IDEA `com.intellij.ui.tabs` 之外的
+// `com.intellij.ui.popup.PopupUpdateProcessor`）：宿主每次文件变化推 `fsChanges`，
+// 弹层开着就重取文件清单、并按同一个查询词重发符号请求 —— 关掉重开才能看到新数据是错的。
+//
 // **还没接的 tab**：IDE、Autocompletion（`IdeBundle.properties` 里确有这两个 tab）。
 // Autocompletion 要按当前文档取词（IDEA 的 `WordCompletionContributor`），IDE 要另一套范围 ——
 // 等有真实供给者再渲染，不塞一个永远空着的 tab。
 import { computed, ref, watch, type Ref } from 'vue'
-import { request, type Workspace } from './bridge'
+import { fsChanges, request, type Workspace } from './bridge'
 import type { ActionEntry } from './menuUi'
 import type { SymbolEntry } from './lspNavigation'
 import type { SearchEverywhereItem } from './searchEverywhere'
@@ -22,6 +26,8 @@ import type { SearchEverywhereItem } from './searchEverywhere'
 export const SEARCH_EVERYWHERE_SYMBOL_MIN = 2
 /** 防抖窗口（ms）。和语言服务那条链路一样，避免每敲一个字就发一次请求。 */
 const SYMBOL_DEBOUNCE_MS = 120
+/** 文件变化后重取清单的抖窗。一次保存会推多条 `fsChanges`，抖一下再打宿主。 */
+const REFRESH_DEBOUNCE_MS = 200
 
 export interface SearchEverywhereHostDeps {
   isDesktop: boolean
@@ -53,9 +59,22 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   let symbolTimer: ReturnType<typeof setTimeout> | undefined
   /** 只认最后发出的那次查询：迟到的响应不能盖掉新结果。 */
   let symbolQueryIssued = ''
+  /** 最近一次查询词 —— 数据源变化后要按同一个词重发符号请求（PopupUpdateProcessor 那一层）。 */
+  let lastQuery = ''
+
+  async function refreshSymbols(query: string) {
+    try {
+      const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>(
+        'lsp.request', { kind: 'workspaceSymbol', path: activePath.value, query })
+      // 对话框已经关了、或者用户又改了查询：这份结果直接丢。
+      if (!searchEverywhereOpen.value || symbolQueryIssued !== query) return
+      searchEverywhereSymbols.value = (result.symbols ?? []).slice(0, 100)
+    } catch { searchEverywhereSymbols.value = [] }
+  }
 
   function onSearchEverywhereQuery(raw: string) {
     const query = raw.trim()
+    lastQuery = query
     if (symbolTimer !== undefined) clearTimeout(symbolTimer)
     if (query.length < SEARCH_EVERYWHERE_SYMBOL_MIN || !isDesktop || !workspace.value || !lspReady.value) {
       symbolQueryIssued = query
@@ -63,17 +82,7 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       return
     }
     symbolQueryIssued = query
-    symbolTimer = setTimeout(() => {
-      void (async () => {
-        try {
-          const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>(
-            'lsp.request', { kind: 'workspaceSymbol', path: activePath.value, query: symbolQueryIssued })
-          // 对话框已经关了、或者用户又改了查询：这份结果直接丢。
-          if (!searchEverywhereOpen.value || symbolQueryIssued !== query) return
-          searchEverywhereSymbols.value = (result.symbols ?? []).slice(0, 100)
-        } catch { searchEverywhereSymbols.value = [] }
-      })()
-    }, SYMBOL_DEBOUNCE_MS)
+    symbolTimer = setTimeout(() => { void refreshSymbols(query) }, SYMBOL_DEBOUNCE_MS)
   }
 
   async function openSearchEverywhere() {
@@ -127,6 +136,28 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   watch(() => workspace.value?.root ?? '', () => {
     searchEverywhereFiles.value = []
     searchEverywhereSymbols.value = []
+  })
+
+  // ---- 已打开的弹层要自己跟上数据变化（IDEA `PopupUpdateProcessor`）----
+  // 源码那一族的含义：弹窗开着的时候，内容随底下的数据源变化**就地刷新**，而不是关掉重开。
+  // 本仓的弹层原来都是一次性快照 —— 弹开着改了文件/删了文件，列表还是旧的。
+  // 触发源：宿主每次文件变化都会推 `fsChanges`（version 自增）。只重取文件清单（符号按查询词重发）。
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined
+  watch(() => fsChanges.version, () => {
+    if (!searchEverywhereOpen.value || !isDesktop) return
+    if (refreshTimer !== undefined) clearTimeout(refreshTimer)
+    // 一次保存可能推好几条（多个文件），抖一下再取，别每个文件都打一次宿主。
+    refreshTimer = setTimeout(() => {
+      void (async () => {
+        const query = lastQuery
+        try {
+          const files = (await request<{ files: string[] }>('workspace.files')).files
+          if (!searchEverywhereOpen.value) return
+          searchEverywhereFiles.value = files
+          if (query.trim().length >= SEARCH_EVERYWHERE_SYMBOL_MIN) void refreshSymbols(query)
+        } catch { /* 取不到就保留旧清单，不把弹层清空 */ }
+      })()
+    }, REFRESH_DEBOUNCE_MS)
   })
 
   return { searchEverywhereOpen, searchEverywhereItems, openSearchEverywhere, onSearchEverywhereQuery }

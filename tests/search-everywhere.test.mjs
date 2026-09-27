@@ -90,6 +90,18 @@ test('符号与文件同属 Project tab（IDEA 的 project scope）', () => {
   assert.deepEqual(searchEverywhereResults(withSymbol, 'parse', 'runConfigs'), [])
 })
 
+// `PopupUpdateProcessor` 那一层：弹层开着的时候，数据源变了要自己跟上，而不是关掉重开。
+test('弹层开着时文件变化会重取清单并按同一查询词重发符号', () => {
+  const host = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'searchEverywhereHost.ts'), 'utf8')
+  assert.match(host, /watch\(\(\) => fsChanges\.version/, '没有监听文件变化')
+  assert.match(host, /if \(!searchEverywhereOpen\.value \|\| !isDesktop\) return/, '关着的弹层不该去打宿主')
+  assert.match(host, /refreshTimer = setTimeout/, '文件变化没有抖窗（一次保存会推多条）')
+  assert.match(host, /refreshSymbols\(query\)/, '重取清单后没有按同一个词重发符号')
+  assert.match(host, /let lastQuery = ''/, '没有记住最近一次查询词，刷新时就不知道该重发什么')
+  // 取不到清单时保留旧的，别把弹层清空（那比显示旧数据更糟）。
+  assert.match(host, /catch \{ \/\* 取不到就保留旧清单，不把弹层清空 \*\/ \}/, '取文件清单失败时不该清空弹层')
+})
+
 test('来源副标签', () => {
   assert.equal(searchEverywhereSourceLabel('project'), 'File')
   assert.equal(searchEverywhereSourceLabel('symbols'), 'Symbol')
