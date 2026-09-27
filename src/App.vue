@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, unref, watch } from 'vue'
 import { AnimatePresence, motion, useReducedMotion } from 'motion-v'
-import { ArrowLeft, ArrowRight, Braces, FlaskConical, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, MoreHorizontal, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Braces, Hammer, FlaskConical, Bookmark as BookmarkIcon, Bug, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Code2, Columns2, Crosshair, FileCode2, Files, FolderOpen, FolderTree, GitBranch, GitCommitHorizontal, GitGraph, History, ListChecks, ListTree, Loader2, Lock, Menu, MoreHorizontal, Zap, Moon, PanelBottom, PanelLeftClose, PanelLeftOpen, Pin, Play, Plus, RefreshCw, Square,  Rows3, Save, Search, ShieldCheck, SlidersHorizontal, Sparkles, SquareTerminal, Sun, TerminalSquare, Trash2, Workflow, X } from 'lucide-vue-next'
 import FileTree, { type SyntheticNode } from './components/FileTree.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import SourceControl from './components/SourceControl.vue'
@@ -16,12 +16,72 @@ import BookmarksPanel from './components/BookmarksPanel.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
+import PluginDialog from './components/PluginDialog.vue'
+import RunConfigurationsDialog from './components/RunConfigurationsDialog.vue'
+import ToolWindowView, { type ToolWindowViewContext } from './components/ToolWindowView.vue'
+import SearchEverywhereDialog from './components/SearchEverywhereDialog.vue'
+import { createSearchEverywhereHost } from './searchEverywhereHost'
 import ProjectDialog from './components/ProjectDialog.vue'
+import ProjectStructureDialog from './components/ProjectStructureDialog.vue'
+import MainToolbar, { type MainToolbarContext } from './components/MainToolbar.vue'
+import BranchPopup from './components/BranchPopup.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import ToolWindowHeader from './components/ToolWindowHeader.vue'
 import NoticeList from './components/NoticeList.vue'
-import { BridgeError, beginRun, clearLspDiagnostics, cloneProgress, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, defaultEditorSettings, defaultGeneralSettings, defaultJavaProjectSettings, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, historyNotes, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type GeneralSettingsState, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type LspTextEdit, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace } from './bridge'
-import { clampPanelSize, initialTheme, themeStorageKey, type Theme } from './appearance'
+import { appFullScreen, appSetFullScreen, BridgeError, beginRun, clearLspDiagnostics, cloneProgress, gradleSync, activeRunInstance, focusRunInstance, runInstanceList, dapBreakpoints, dapSetBreakpoints, dapStart, dapState, dapStep, dapGotoTargets, dapGoto, dapBreakpointLocations, defaultEditorSettings, defaultGeneralSettings, defaultJavaProjectSettings, breadcrumbsShownFor, defaultProjectSettings, endRun, encodingKeys, encodingLabels, fsChanges, gitProgress, historyNotes, isDesktop, lspDiagnostics, request, lspEdited, runOutput, runState, termOpened, watchStopped, setLspDiagnostics, setNativeDirty, setNativeTheme, traces, type AppState, type BinaryView, type Bookmark, type DiffRow, type DocumentData, type EditorSettings, type GeneralSettingsState, type EncodingKey, type Entry, type GitAheadBehind, type GitBlame, type GitBlameLine, type GitChange, type GitFileHistory, type GitShowCommit, type GitStatus, type GitSubmodule, type GitSubmodules, type GitWorktree, type GitWorktrees, type HistoryContent, type HistoryEntry, type JavaProjectSettings, type LspCodeAction, type LspCodeActionResults, type LspDocumentSymbol, type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspHierarchyItem, type LspHierarchyResult, type LspHoverResult, type LspLocation, type LspOpenResult, type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type LspSymbolsResult, type BookmarksViewState, type LspPrepareRenameResult, type LspTextEdit, type NamedScopeSetting, type ProjectForm, type ProjectSettings, type PluginInfo, type PluginList, type ProcessMemory, type RecentProject, type RunConfig, type RunStartParams, type SaveResult, type TemplateSettings, type TodoPattern, type UsageResult, type Workspace, normalizeEditorSettings } from './bridge'
+import { BreakpointLocationCache, breakpointPlacement } from './breakpointLocations'
+import { classifyLinkTarget, describeLink, type DocumentLink } from './documentLinks'
+import { runWorkspaceInspection } from './workspaceInspection'
+import { describeNavigationBoundary, navigateFrom, navigationPoints } from './navigateInFile'
+import { createDistractionFreeSession, createImmersiveMode } from './distractionFreeSession'
+// 行级 diff 是纯函数，单独成模块（可直接单测，见 tests/diff-text.test.mjs）。
+import { buildDiffRows, generateUnifiedDiff } from './diffText'
+import { createProjectExtras } from './projectExtras'
+import { createHierarchyView } from './hierarchyView'
+import { createSettingsPersistence } from './settingsPersistence'
+import { createSurroundTemplates } from './surroundTemplates'
+import { createBookmarkActions } from './bookmarkActions'
+import { createDiskSync } from './diskSync'
+// 标签与编辑器句柄是**共享类型**（抽出的模块都要用，见 src/editorTab.ts）。
+import type { EditorHandle, Tab } from './editorTab'
+import { createExplorerActions } from './explorerActions'
+import { createAppearanceActions } from './appearanceActions'
+import { createLspNavigation, CLASS_KINDS, type SymbolEntry } from './lspNavigation'
+import { createSemanticActions } from './semanticActions'
+import { createMenuUi } from './menuUi'
+import { createRunActions } from './runActions'
+import { createKeymap } from './keymap'
+import { createRunConfigurations } from './runConfigurations'
+import { createWorkspaceLifecycle, type LeaveChoice } from './workspaceLifecycle'
+import { createVcsActions } from './vcsActions'
+import { createEditorFileOps } from './editorFileOps'
+import { createTabDragDrop } from './tabDragDrop'
+import { createTabStripView } from './tabStripView'
+import { createPanelResize } from './panelResize'
+import { createGenerateRefactor } from './generateRefactor'
+import { createTreeActions } from './treeActions'
+import { copyToClipboard } from './clipboard'
+import { createPasteActions } from './pasteActions'
+import { createGutterIconHost } from './gutterIconHost'
+import { createHelpActions } from './helpActions'
+import AboutDialog from './components/AboutDialog.vue'
+import SpecialPathsDialog from './components/SpecialPathsDialog.vue'
+import { createHelpMenuRows, type HelpMenuContext } from './menus/helpMenu'
+import { createMacros } from './macroHost'
+import { recordTypingStep } from './macroHost'
+import MacrosDialog from './components/MacrosDialog.vue'
+import { allProblems, severityClass, severityLabel } from './problems'
+import { createGitWidget } from './gitWidget'
+import { createRunIssues } from './runIssues'
+import PasteHistoryDialog from './components/PasteHistoryDialog.vue'
+import { createEditorSplits } from './editorSplits'
+import { createToolLayouts } from './toolLayouts'
+import { createNotifications } from './notifications'
+import { createEditorSideViews } from './editorSideViews'
+import type { Place } from './lspNavigation'
+import { describeCopiedReference, primaryMoniker, referenceText, type MonikerResult } from './moniker'
+import type { WorkspaceDiagnosticsResult } from './bridge'
+import { clampPanelSize, initialTheme, projectTint, themeStorageKey, type Theme } from './appearance'
 import { parseAnyIssue } from './buildOutput'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings, type CommitMessageInspectionSettings } from './commitMessageInspection'
 import { rankCommands } from './commandSearch'
@@ -33,10 +93,40 @@ import { useSubmenuState } from './menus/submenuState'
 import { createExitConfirmation } from './confirmations/exitConfirmation'
 import { createProcessCloseConfirmation } from './confirmations/processClose'
 import { errorMessage } from './errors'
+import { applyTextEdits, offsetOf, wordAt } from './editorText'
+import { foldConsoleLines } from './consoleFold'
+import { TOOL_MNEMONIC_ALIASES, TOOL_MNEMONIC_BINDINGS, toolIcons, toolTitles, toolWindowMnemonic, toolWindowOrder, type BottomTabId, type ToolWindowId } from './toolWindowMeta'
+import { hiddenWidgets, showAllWidgets, showWidget, STATUS_WIDGETS, toggleWidget } from './statusWidgets'
+import { createSessionSnapshot, restorePrompt } from './sessionSnapshot'
+import { bottomContentUiType, createToolWindowActions, lastDockFocus, type ToolWindowActionsContext } from './toolWindowActions'
+import { createToolStripeDrag } from './toolStripeDrag'
+import { createToolWindowStripes, type Anchor } from './toolWindowStripes'
+import { createGradleHost } from './gradleHost'
+import { createSettingsTransfer } from './settingsTransfer'
+import { createHtmlExport } from './htmlExport'
+import ExportToHtmlDialog from './components/ExportToHtmlDialog.vue'
+import RunConsole from './components/RunConsole.vue'
+import { gradleViewContext } from './gradleHost'
+import { createProgressPanel } from './progressPanel'
+import { createMemoryWidget } from './memoryWidget'
 import type { MenuRow } from './menus/types'
+import { createToolsMenuRows } from './menus/toolsMenu'
+import { createFileMenuRows, type FileMenuContext } from './menus/fileMenu'
+import { createWindowMenuRows } from './menus/windowMenu'
+import { createToolViewContext } from './toolViewContext'
+import { createEditMenuRows, type EditMenuContext } from './menus/editMenu'
+import { createViewMenuRows, type ViewMenuContext } from './menus/viewMenu'
+import { createNavigateMenuRows, type NavigateContext } from './menus/navigateMenu'
+import { createCodeMenuRows, type CodeMenuContext } from './menus/codeMenu'
+import { createRefactorMenuRows, type RefactorMenuContext } from './menus/refactorMenu'
+import { createAnalyzeMenuRows, type AnalyzeMenuContext } from './menus/analyzeMenu'
+import { createBuildMenuRows, type BuildMenuContext } from './menus/buildMenu'
+import { createRunMenuRows, type RunMenuContext } from './menus/runMenu'
+import { createGitMenuRows, type GitMenuContext } from './menus/gitMenu'
 import { PROCESS_CLOSE_LABELS, TERMINAL_CAN_DISCONNECT, confirmationResult, processClosePromptText, rememberedSetting, resolveProcessClose, type ProcessCloseChoice, type ProcessCloseConfirmation, type ProcessCloseResult } from './processClose'
 import { locationSnippet } from './recentLocations'
-import { effectiveTemplates, type Template } from './templates'
+import { effectiveTemplates, languageFor, type Template } from './templates'
+import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView'
 import { surroundTemplates, type SurroundTemplate } from './surround'
 import { mnemonicBindings, mnemonicOf, sortedByTitle } from './toolWindows'
 import { lastActiveId, nextContentIndex, pushActive } from './activeToolWindow'
@@ -57,8 +147,6 @@ const reducedMotion = useReducedMotion()
 const popupEnter = computed(() => reducedMotion.value ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.985 })
 const popupExit = computed(() => ({ opacity: 0, y: reducedMotion.value ? 0 : -3, transition: { duration: reducedMotion.value ? 0 : 0.1 } }))
 const popupTransition = computed(() => ({ duration: reducedMotion.value ? 0 : 0.16, ease: [0.16, 1, 0.3, 1] as const }))
-interface Tab extends DocumentData { saving: boolean; dirty: boolean; line: number; column: number; lspRunning?: boolean; lspConfigured?: boolean; pinned?: boolean; preview?: boolean }
-interface EditorHandle { text(): string; markSaved(): void; setDraft(value: string): void; command(name: string): boolean; expandAtCursor(text: string): boolean; hasSelection(): boolean; setReadOnly(value: boolean): void; surroundWith(template: SurroundTemplate): void; getCursor(): { line: number; ch: number }; getCursorCoords(): { left: number; top: number; bottom: number } | null }
 const editorRefs = new Map<string, EditorHandle>()
 // CodeEditor is v-show'd per open file; with "split same" one path lives in both
 // panes, so refs are keyed by pane and the secondary instance never overwrites the primary.
@@ -108,36 +196,43 @@ function groupActive(pane: Pane) { return groups[pane].tabs.find(tab => tab.path
 const busy = ref(false)
 const opening = reactive(new Set<string>())
 let workspaceEpoch = 0
+// 上次运行的参数：宿主更早的阶段（运行菜单、外观动作、重新运行）就要读写它，
+// 所以它留在宿主 —— 运行动作模块通过 getter/setter 持有同一份。
+let lastRunParams: any = null
 // Bumped when a buffer must be rebuilt from its text (line-separator conversion).
 const bufferEpoch = ref(0)
+// 重命名/新建对话框的状态：宿主更早的阶段（文件菜单、快捷键）就要读写它，
+// 所以它留在宿主 —— 树操作模块通过 ctx 拿到它。
+// 上次运行的参数：宿主在启动/重跑后要写它，所以留在宿主（界面动作模块通过 ctx 读）。
+
+// 断点可放置位置的缓存：断点校验与 LSP 导航模块都要用，声明在这一层。
+const breakpointLocationCache = new BreakpointLocationCache()
+
+// Markdown 预览的三个状态：LSP/导航模块与更早的菜单都要读它们，所以声明在这一层。
+const markdownPreviewOn = ref(false)
+const markdownCapable = computed(() => /\.md$/i.test(active.value?.path ?? ''))
+const markdownSource = ref('')
+
+
+const nameDialog = ref<{ mode: 'createFile' | 'createDir' | 'rename' | 'newLayout' | 'renameLayout'; dir: string; entry?: Entry; value: string; template?: string } | null>(null)
+const nameInput = ref<HTMLInputElement>()
+
 const explorer = ref(window.innerWidth >= 700)
-const leftView = ref<'files' | 'git' | 'vcslog' | 'search' | 'todo' | 'outline' | 'bookmarks' | 'debug' | 'history' | 'tests'>('files')
+const leftView = ref<ToolWindowId>('files')
 const activity = ref(false)
 const bottom = ref(false)
-// IDEA's ToolWindowAnchor: every tool window remembers the stripe it lives on
-// (left/right; top is unused by TaoCode's panels) and the layout renders one
-// column per side. `showView` reads the anchor to decide which dock opens.
-// A stored 'bottom' is dropped: nothing sets it, and a docked bottom window would have no header to
-// move it back with (the bottom area is the output/problems/terminal panel, not a tool-window dock).
-type ToolWindowId = typeof leftView.value
-type Anchor = 'left' | 'right' | 'bottom'
-const toolAnchors = reactive<Record<ToolWindowId, Anchor>>({
-  files: 'left', git: 'left', vcslog: 'left', search: 'left', todo: 'left',
-  outline: 'left', bookmarks: 'left', debug: 'left', history: 'left', tests: 'left',
-})
-try {
-  const saved = JSON.parse(localStorage.getItem('taocode.toolAnchors') ?? '{}') as Partial<Record<ToolWindowId, Anchor>>
-  for (const key of Object.keys(toolAnchors) as ToolWindowId[])
-    if (saved[key] === 'left' || saved[key] === 'right') toolAnchors[key] = saved[key]!
-} catch { /* corrupted state falls back to defaults */ }
-function setToolAnchor(id: ToolWindowId, anchor: Anchor) {
-  toolAnchors[id] = anchor
-  try { localStorage.setItem('taocode.toolAnchors', JSON.stringify(toolAnchors)) } catch { /* storage unavailable: kept for this session */ }
-  // Moving to a side the panel is not shown on would leave it invisible.
-  explorer.value = anchor !== 'bottom' ? true : explorer.value
-}
-const activeAnchor = computed<Anchor>(() => toolAnchors[leftView.value] ?? 'left')
-
+// IDEA 的 ToolWindowAnchor：每个工具窗口记住自己停在哪一侧（`Anchor` 由状态域定义，见下）。
+// 工具窗口的停靠边 / 顺序 / 可用性是一个独立状态域，见 src/toolWindowStripes.ts
+// （2026-09-27 加 Gradle 工具窗口时从中拆出）。`toolDisabled` / `bottomAnchoredIds` 由它导出。
+const { toolAnchors, activeAnchor, setToolAnchor, toolOrder, saveToolOrder, stripeOrder, toolDisabled, bottomAnchoredIds } =
+  createToolWindowStripes({
+    isDesktop, explorer,
+    // `lspReady` / `gradleAvailable` 在宿主里声明得比这里晚（TDZ），只能惰性传。
+    workspace: { get value() { return workspace.value } },
+    lspReady: { get value() { return lspReady.value } },
+    gradleAvailable: { get value() { return gradleAvailable.value } },
+    activeView: { get value() { return leftView.value } },
+  })
 // IDEA's MaximizeToolWindow (MaximizeToolWindowAction.java:36 -> ToolWindowManagerImpl.setMaximized
 // -> ToolWindowPane.kt:544-560 `stretch(toolWindow, MAX)`): the dock is stretched over the whole
 // width and the previous size is remembered for the restore. Only one dock is stretched at a time;
@@ -158,73 +253,24 @@ watch([activeAnchor, explorer], () => {
   const side = activeAnchor.value
   maximizedSide.value = reconcileMaximized(maximizedSide.value, side === 'bottom' ? null : side, explorer.value)
 })
-// IDEA tool-window titles (UIBundle tool.window.name.*); TaoCode names its own.
-const toolTitles: Record<ToolWindowId, string> = {
-  files: '资源管理器', git: '源代码管理', vcslog: 'VCS 日志', search: '搜索', todo: '任务',
-  outline: '结构', bookmarks: '书签', debug: '调试', history: '本地历史', tests: '测试',
-}
-const toolIcons: Record<ToolWindowId, unknown> = {
-  files: Files, git: GitBranch, vcslog: GitGraph, search: Search, todo: ListChecks,
-  outline: FolderTree, bookmarks: BookmarkIcon, debug: Bug, history: History, tests: FlaskConical,
-}
-// IDEA binds Alt+<digit> to a tool window through the *keymap* — ActivateToolWindowAction
-// .Manager.getMnemonicForToolWindow reads the shortcut of `Activate<Id>ToolWindow`
-// (ActivateToolWindowAction.kt:88-111) and StripeButton prints it as "<digit>: <title>"
-// (StripeButton.kt:287-298). The number therefore belongs to the tool window and never to
-// its position on the stripe: dragging stripe buttons around must not renumber anything.
-// TaoCode keeps one stable order for the mnemonics, separate from the draggable
-// `toolOrder` that only decides where a button is drawn.
-const toolWindowOrder: ToolWindowId[] = ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'history', 'tests']
-// IDEA's keymap also binds Alt+0 to the Commit tool window; TaoCode's 源代码管理 panel
-// *is* the commit tool window (message box + changes + commit actions), so it answers
-// Alt+0 in addition to its own stripe number (ActivateToolWindowAction.kt:88-111).
-const TOOL_MNEMONIC_ALIASES: Record<string, ToolWindowId> = { '0': 'git' }
-const TOOL_MNEMONIC_BINDINGS = mnemonicBindings(toolWindowOrder, TOOL_MNEMONIC_ALIASES)
-function toolWindowMnemonic(id: ToolWindowId): string | undefined {
-  return mnemonicOf(toolWindowOrder, id)
-}
 // The ⋮ options menu on a tool-window strip: Move to Left/Right/Bottom + Hide
 // (UIBundle: tool.window.move.to.action.group.name, tool.window.hide.action.name).
 const toolMenu = ref<ToolWindowId | null>(null)
-// IDEA's AbstractDroppableStripe lets a stripe button be dragged to another stripe
-// (finishDrop -> setSideToolAndAnchor) or reordered in place. The order is a machine
-// preference, so it persists next to the anchors.
-const toolOrder = ref<Record<Anchor, ToolWindowId[]>>({
-  left: ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'history'],
-  right: [],
-  bottom: [],
-})
-try {
-  const saved = JSON.parse(localStorage.getItem('taocode.toolOrder') ?? 'null') as Partial<Record<Anchor, ToolWindowId[]>> | null
-  if (saved) {
-    for (const side of ['left', 'right', 'bottom'] as const) {
-      const list = saved[side]
-      if (!Array.isArray(list)) continue
-      const valid = list.filter((id): id is ToolWindowId => typeof id === 'string' && id in toolAnchors)
-      const rest = (Object.keys(toolAnchors) as ToolWindowId[]).filter(id => !valid.includes(id))
-      toolOrder.value[side] = side === 'left' ? [...valid, ...rest] : valid
-    }
-  }
-} catch { /* corrupted state falls back to the default order */ }
-function saveToolOrder() {
-  try { localStorage.setItem('taocode.toolOrder', JSON.stringify(toolOrder.value)) } catch { /* session-only */ }
-}
-const stripeOrder = computed(() => (side: Anchor) => toolOrder.value[side].filter(id => (toolAnchors[id] ?? 'left') === side))
-// Which tool windows can be opened right now (IDEA disables an unavailable window
-// instead of hiding it, so the stripe keeps a stable layout).
-function toolDisabled(id: ToolWindowId): boolean {
-  if (id === 'outline') return !lspReady.value
-  if (id === 'vcslog' || id === 'history') return !isDesktop || !workspace.value
-  return false
-}
 function activateToolWindow(id: ToolWindowId) {
   if (toolDisabled(id)) return
   if (id === 'files') { explorer.value = !explorer.value; leftView.value = 'files'; if (explorer.value) recordActiveToolWindow(id); return }
   if (id === 'outline') { toggleOutline(); if (explorer.value && leftView.value === 'outline') recordActiveToolWindow(id); return }
   const anchor = toolAnchors[id] ?? 'left'
-  if (anchor === 'bottom') bottom.value = true
-  else explorer.value = true
-  leftView.value = leftView.value === id && anchor !== 'bottom' ? 'files' : id
+  if (anchor === 'bottom') {
+    // 停靠在底部的工具窗口：显示在底部 dock（不占用左侧栏），再次点击即收起。
+    const wasShown = bottom.value && bottomTab.value === id
+    bottom.value = !wasShown
+    bottomTab.value = id
+    if (!wasShown) recordActiveToolWindow(id)
+    return
+  }
+  explorer.value = true
+  leftView.value = leftView.value === id ? 'files' : id
   // Only a click that *brings the window forward* counts as an activation; the second click hides
   // it, and hiding must leave the persistent stack alone (`setHiddenState`, :711-718).
   if (leftView.value === id) recordActiveToolWindow(id)
@@ -249,10 +295,10 @@ function focusToolWindowContent(id: ToolWindowId) {
 // focus, which is what F12 needs, and it is never cleared by a hide — `setHiddenState` (:711-718)
 // calls `remove(entry, false)`, and `false` means "leave the persistent stack alone". There is no
 // localStorage mirror because `ActiveStack` has no persistence of its own.
-type LeftViewId = typeof leftView.value
-type BottomTabId = typeof bottomTab.value
+// `LeftViewId` / `BottomTabId` 都由 `src/toolWindowMeta.ts` 提供（唯一来源）——
+// 这里原先各写了一份 `typeof xxx.value`，加窗口/加标签时必漏改。
 const activeToolWindows = ref<string[]>([])
-function recordActiveToolWindow(id: LeftViewId | BottomTabId) {
+function recordActiveToolWindow(id: ToolWindowId | BottomTabId) {
   activeToolWindows.value = pushActive(activeToolWindows.value, id)
 }
 // The `isAvailable` filter behind `getLastActiveToolWindows` (:749-753). A docked window is
@@ -278,109 +324,8 @@ function jumpToLastToolWindow() {
 // lives in `src/toolLayout.ts`. This block reads the live tool-window state into a snapshot and
 // writes one back. Restoring goes through `setPanelSize`, so a stored size is clamped exactly like
 // one the user dragged, and through `saveToolOrder`, so the stripe order is persisted too.
-const LAYOUT_STORAGE_KEY = 'taocode.toolWindowLayouts'
-/** The order the stripes start with — the same list `toolOrder` is initialised from. */
-const DEFAULT_TOOL_ORDER: readonly LeftViewId[] = ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'history']
-const BOTTOM_TABS: readonly BottomTabId[] = ['output', 'run', 'problems', 'references', 'hierarchy', 'terminal', 'blame', 'about']
-/**
- * `getFactoryDefaultLayoutCopy()` (`ToolWindowDefaultLayoutManager.kt:64`): the layout that always
- * answers to the empty name. The dock is visible in it (IDEA's factory default shows the project
- * tool window) even though a *fresh* session may start with it collapsed on a narrow window.
- */
-function factoryToolLayout(): ToolLayout {
-  return {
-    explorer: true,
-    bottom: false,
-    view: 'files',
-    tab: 'output',
-    anchors: { files: 'left', git: 'left', vcslog: 'left', search: 'left', todo: 'left', outline: 'left', bookmarks: 'left', debug: 'left', history: 'left' },
-    order: { left: [...DEFAULT_TOOL_ORDER], right: [], bottom: [] },
-    sizes: { explorer: 240, trace: 300, output: 180 },
-  }
-}
-function isLeftToolWindowId(id: string): id is LeftViewId { return id in toolAnchors }
-const toolLayoutStore = ref<ToolLayoutStore>(loadToolLayoutStore())
-function loadToolLayoutStore(): ToolLayoutStore {
-  try { return normalizeLayoutStore(JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')) }
-  catch { return emptyLayoutStore() }
-}
-function persistToolLayouts() {
-  try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(toolLayoutStore.value)) } catch { /* storage unavailable: session-only */ }
-}
-function captureToolLayout(): ToolLayout {
-  // A 'bottom' anchor is not snapshot-able: nothing sets one (see the `ToolWindowId` note above),
-  // and the bottom area is a panel, not a tool-window dock.
-  const anchors: Record<string, ToolWindowSide> = {}
-  for (const id of Object.keys(toolAnchors) as LeftViewId[]) {
-    const side = toolAnchors[id]
-    if (side === 'left' || side === 'right') anchors[id] = side
-  }
-  return {
-    explorer: explorer.value,
-    bottom: bottom.value,
-    view: leftView.value,
-    tab: bottomTab.value,
-    anchors,
-    order: { left: [...toolOrder.value.left], right: [...toolOrder.value.right], bottom: [...toolOrder.value.bottom] },
-    sizes: { ...panelSizes },
-  }
-}
-/** `ToolWindowManagerEx.setLayout` — write a snapshot back, ignoring ids that no longer exist. */
-function applyToolLayout(layout: ToolLayout) {
-  explorer.value = layout.explorer
-  bottom.value = layout.bottom
-  if (isLeftToolWindowId(layout.view)) leftView.value = layout.view
-  if (BOTTOM_TABS.includes(layout.tab as BottomTabId)) bottomTab.value = layout.tab as BottomTabId
-  for (const id of Object.keys(toolAnchors) as LeftViewId[]) {
-    const side = layout.anchors[id]
-    if (side === 'left' || side === 'right') toolAnchors[id] = side
-  }
-  for (const side of ['left', 'right'] as const) {
-    const list = (layout.order[side] ?? []).filter(isLeftToolWindowId)
-    // A window the snapshot never heard of stays reachable: it is appended to the left stripe,
-    // which is what the order loader does for a stored list that lost an entry.
-    const rest = (Object.keys(toolAnchors) as LeftViewId[]).filter(id => !list.includes(id))
-    toolOrder.value[side] = side === 'left' ? [...list, ...rest] : list
-  }
-  saveToolOrder()
-  for (const panel of ['explorer', 'trace', 'output'] as const) {
-    const size = layout.sizes[panel]
-    if (typeof size === 'number' && size > 0) setPanelSize(panel, size)
-  }
-}
-/** `activeLayoutName = name` + `setLayout(getLayoutCopy())` (`CustomLayoutsActionGroup` Apply). */
-function applyNamedToolLayout(name: string) {
-  toolLayoutStore.value = setActiveLayout(toolLayoutStore.value, name)
-  persistToolLayouts()
-  applyToolLayout(resolveLayout(toolLayoutStore.value, factoryToolLayout()))
-}
-/** `RestoreFactoryDefaultLayoutAction.kt:29-35` — also the 「默认布局」 row's toggle. */
-function useFactoryToolLayout() { applyNamedToolLayout(FACTORY_LAYOUT_NAME) }
-/** `RestoreDefaultLayoutAction.java:41-47`, bound to Shift+F12 (`$default.xml:864-866`). */
-function restoreCurrentToolLayout() {
-  applyToolLayout(resolveLayout(toolLayoutStore.value, factoryToolLayout()))
-}
-/** `StoreNamedLayoutAction.kt:22-25` ("Save Changes in Current Layout"). */
-function storeCurrentToolLayout() {
-  const name = toolLayoutStore.value.active
-  toolLayoutStore.value = saveLayout(toolLayoutStore.value, name, captureToolLayout())
-  persistToolLayouts()
-  notify(`布局「${name}」已保存。`)
-}
-function openLayoutNameDialog(mode: 'newLayout' | 'renameLayout') {
-  menu.value = null
-  nameDialog.value = { mode, dir: '', value: mode === 'renameLayout' ? toolLayoutStore.value.active : '' }
-  void nextTick(() => { nameInput.value?.focus(); if (mode === 'renameLayout') nameInput.value?.select() })
-}
-/** `DeleteNamedLayoutAction` — the active layout cannot be deleted, so the row is hidden for it. */
-function deleteCurrentToolLayout() {
-  const name = toolLayoutStore.value.active
-  const next = deleteLayout(toolLayoutStore.value, name)
-  if (next === toolLayoutStore.value) return
-  toolLayoutStore.value = next
-  persistToolLayouts()
-  notify(`布局「${name}」已删除。`)
-}
+// `isLeftToolWindowId` 收窄到统一的 `ToolWindowId`（不再引用已删除的本地 `LeftViewId`）。
+function isLeftToolWindowId(id: string): id is ToolWindowId { return id in toolAnchors }
 // --- hide / cycle the tool windows (the rest of WindowMenu > ActiveToolwindowGroup) ---------
 // The group in PlatformActions.xml:653-660 is: HideActiveWindow, HideSideWindows, HideBottomWindows,
 // HideAllWindows, PinToolwindowTab, JumpToLastWindow, MaximizeToolWindow, DockToolWindow,
@@ -390,232 +335,44 @@ function deleteCurrentToolLayout() {
  * owns the focused element is the active window. Anything else — the editor, a stripe button, a
  * menu — means no tool window is active and the *last focused* one answers instead.
  */
-function dockOf(element: Element | null): 'side' | 'bottom' | 'editor' {
-  if (element?.closest('.output-panel')) return 'bottom'
-  if (element?.closest('.explorer-panel')) return 'side'
-  return 'editor'
-}
-function focusedDock(): 'side' | 'bottom' | 'editor' {
-  return dockOf(document.activeElement)
-}
-/**
- * A Swing menu does **not** take focus, so IDEA's `getActiveToolWindowId()` still answers with the
- * dock the user was in while the Window menu is open. A DOM menu button does take it, which would
- * grey out every row that needs the active tool window exactly when its own menu opens — so while
- * the focus sits in the top bar, the last dock that really held focus answers instead. Focus
- * anywhere else (the editor, the status bar) keeps the strict answer: no active tool window.
- */
-const lastDockFocus = ref<'side' | 'bottom' | 'editor'>('editor')
-function noteDockFocus(event: FocusEvent) {
-  lastDockFocus.value = dockOf(event.target as Element | null)
-}
-function activeToolWindowDock(): 'side' | 'bottom' | null {
-  const live = focusedDock()
-  if (live !== 'editor') return live
-  const inTopBar = Boolean((document.activeElement as Element | null)?.closest('.topbar'))
-  const dock = inTopBar ? lastDockFocus.value : 'editor'
-  return dock === 'editor' ? null : dock
-}
-/** HideToolWindowAction.kt:21-29 — hide `activeToolWindowId ?: lastActiveToolWindowId`. */
-function hideActiveToolWindow() {
-  const dock = focusedDock()
-  if (dock === 'bottom') { bottom.value = false; return }
-  if (dock === 'side') { explorer.value = false; return }
-  const id = lastActiveId(activeToolWindows.value, toolWindowAvailable)
-  if (id === undefined) return
-  if (isLeftToolWindowId(id)) explorer.value = false
-  else bottom.value = false
-}
-/** HideSideWindowsAction.kt:18-25 — "Hide all windows on this side" (ActionsBundle:1136). */
-function hideSideToolWindows() { explorer.value = false }
-/** HideBottomToolWindowsAction.kt:19-24 — "Hide bottom tool windows" (ActionsBundle:1138). */
-function hideBottomToolWindows() { bottom.value = false }
-/**
- * The `v-if` on a bottom panel's own tab button is also its availability test, so a tab that cannot
- * be shown is never the target of a jump or a cycle. `blame` keeps its own clause: it stays a tab
- * while it is the one on screen, which is what its button does.
- */
-function bottomTabAvailable(tab: BottomTabId): boolean {
-  if (tab === 'references') return references.value.length > 0
-  if (tab === 'hierarchy') return hierRoot.value !== null
-  if (tab === 'blame') return blameLines.value.length > 0 || bottomTab.value === 'blame'
-  return true
-}
-/**
- * `TabNavigationActionBase.java:187-201`: the action is enabled only when the context it would act
- * on has more than one tab, which is why the two rows below are greyed out on a single tab.
- */
-function tabTargetCount(): number {
-  if (!workspace.value) return 0
-  if (focusedDock() === 'editor') return groups[focusedPane.value].tabs.length
-  return bottomContentCount()
-}
-/** The bottom dock's contents: the tab buttons' own `v-if`s are its availability test. */
-function bottomContentCount(): number {
-  return BOTTOM_TABS.filter(bottomTabAvailable).length
-}
-/**
- * `ToggleContentUiTypeMode` / `ShowContent` both ask `getActiveToolWindowId()` for the window they
- * act on, and neither falls back to a "last active" one. A side window shows one view, the bottom
- * dock holds the rest, and the editor means no tool window is active at all.
- */
-function activeContentCount(): number {
-  const dock = activeToolWindowDock()
-  if (!dock) return 0
-  return dock === 'side' ? 1 : bottomContentCount()
-}
-/**
- * `WindowInfo.contentUiType` (`ToolWindowImpl.kt:521`) travels with the window layout, so the choice
- * is remembered. `ToolWindowContentUiType.getInstance` (`:33-45`) falls back to TABBED on anything
- * unexpected, which is the `resolveContentUiType` default too.
- */
-const bottomContentUiType = ref<ToolWindowContentUiType>(readStoredContentUiType())
-function readStoredContentUiType(): ToolWindowContentUiType {
-  try { return resolveContentUiType(localStorage.getItem('taocode.toolWindowContentUi')) }
-  catch { return 'tabbed' }
-}
-watch(bottomContentUiType, type => {
-  try { localStorage.setItem('taocode.toolWindowContentUi', type) }
-  catch { /* storage unavailable: session-only */ }
+// 工具窗口的停靠判定/隐藏/循环/关闭：见 src/toolWindowActions.ts（一组一文件）。
+// lastDockFocus 与 bottomContentUiType（含持久化）由模块自持。
+const { focusedDock, noteDockFocus, activeToolWindowDock, hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows,
+  bottomTabAvailable, bottomContentCount, tabTargetCount, activeContentCount, bottomTabOptions, bottomTabLabel,
+  selectNextTab, selectPreviousTab, cycleTab, toolTabPresence, clearToolTab, closeActiveTab,
+  closeOtherToolTabs, closeOtherTabsTarget, closeAllToolTabs, closeAllTabsTarget, openToolMenu } = createToolWindowActions({
+  workspace: () => workspace,
+  explorer, bottom,
+  get bottomTab() { return bottomTab },
+  get hierRoot() { return hierRoot },
+  get hierTitle() { return hierTitle },
+  get references() { return references },
+  get active() { return active },
+  get toolMenu() { return toolMenu },
+  groups, focusedPane,
+  lastActiveId: (...args: any[]) => (lastActiveId as any)(...args),
+  activeToolWindows: () => activeToolWindows.value,
+  bottomAnchoredIds: () => bottomAnchoredIds.value,
+  toolWindowTitle: id => toolTitles[id as ToolWindowId] ?? String(id),
+  toolWindowAvailable: id => toolWindowAvailable(id),
+  isLeftToolWindowId: id => isLeftToolWindowId(id),
+  closeTab: tab => closeTab(tab),
+  switchTabIn: (pane, tab) => switchTabIn(pane, tab),
+  showOutput: tab => showOutput(tab),
+  resetHierarchy: () => resetHierarchy(),
+  toolDisabled: id => toolDisabled(id),
+  focusToolWindowContent: id => focusToolWindowContent(id),
 })
-/**
- * The combo form of the same list (`ContentComboLabel.java`) — the tab strip's own labels, in strip
- * order. The names are asserted against the strip's buttons in `tests/tool-window-content-ui.test.mjs`
- * so the two cannot drift apart.
- */
-const bottomTabOptions = computed<{ id: BottomTabId; label: string }[]>(() =>
-  BOTTOM_TABS.filter(bottomTabAvailable).map(id => ({ id, label: bottomTabLabel(id) })))
-function bottomTabLabel(tab: BottomTabId): string {
-  if (tab === 'output') return '操作输出'
-  if (tab === 'run') return '运行'
-  if (tab === 'problems') return '问题'
-  if (tab === 'references') return '引用'
-  if (tab === 'hierarchy') return hierTitle.value
-  if (tab === 'terminal') return '终端'
-  if (tab === 'blame') return '追溯'
-  return '工作区说明'
-}
-/** TabNavigationActionBase.java:71-78 — the editor answers when it has focus, the tool window else. */
-function selectNextTab() { cycleTab(1) }
-function selectPreviousTab() { cycleTab(-1) }
-function cycleTab(step: 1 | -1) {
-  if (!workspace.value) return
-  if (focusedDock() === 'editor') {
-    // Editor branch (:130-147): the tabs of the *current* editor window, wrapping around.
-    const pane = focusedPane.value
-    const tabs = groups[pane].tabs
-    const index = nextContentIndex(tabs.length, tabs.findIndex(tab => tab.path === groups[pane].activePath), step)
-    if (index === undefined) return
-    switchTabIn(pane, tabs[index]!)
-    return
-  }
-  // Tool-window branch (:156-171): selectNextContent / selectPreviousContent on the contents of the
-  // active window, which is the bottom panel's tab strip here.
-  const tabs = BOTTOM_TABS.filter(bottomTabAvailable)
-  const index = nextContentIndex(tabs.length, tabs.indexOf(bottomTab.value), step)
-  if (index === undefined) return
-  showOutput(tabs[index]!)
-}
-/**
- * The strip's closeable contents as `Content.isCloseable()` sees them (`ContentImpl.java:237-239`):
- * references / hierarchy / blame hold real content, the five fixed tabs never do. This is the one
- * place that answers the question, so CloseActiveTab / CloseOtherTabs / CloseAllTabs cannot end up
- * disagreeing about which tabs are removable.
- */
-function toolTabPresence(): ToolTabPresence {
-  return { references: references.value.length > 0, hierarchy: hierRoot.value !== null, blame: blameLines.value.length > 0 }
-}
-/** `ContentManager.removeContent(cur, true)` for one content. */
-function clearToolTab(tab: CloseableToolTabId) {
-  if (tab === 'references') references.value = []
-  else if (tab === 'hierarchy') resetHierarchy()
-  else blameLines.value = []
-}
-/**
- * CloseActiveTabAction.java:39-58 — close the selected content when it is closeable, otherwise hide
- * the whole tool window. In TaoCode only references / hierarchy / blame have content that can go
- * away, so those are the closeable ones; the fixed tabs fall through to hiding the panel.
- */
-function closeActiveTab() {
-  if (!workspace.value) return
-  if (focusedDock() !== 'editor') {
-    const current = bottomTab.value
-    if (isCloseableToolTab(current) && toolTabPresence()[current]) { clearToolTab(current); return }
-    bottom.value = false
-    return
-  }
-  const tab = active.value
-  if (tab) void closeTab(tab)
-}
-/**
- * ToolWindowCloseOtherTabsAction.kt:11-19 — remove every content of the tool window except the
- * active one, then re-select the active one. `bottomTab` is the selected content even when it is a
- * permanent tab (Output, …): `cur !== content` then matches every closeable content, so all of them
- * go — only the one the action was invoked on is spared.
- */
-function closeOtherToolTabs() {
-  for (const tab of tabsCloseOtherWouldRemove(bottomTab.value, toolTabPresence())) clearToolTab(tab)
-}
-/** ToolWindowCloseOtherTabsAction.kt:21-27 — enabled only when another content is closeable. */
-function closeOtherTabsTarget(): boolean {
-  return canCloseOtherContents(bottomTab.value, toolTabPresence())
-}
-/**
- * ToolWindowCloseAllTabsAction.kt:11-18 — remove every closeable content of the tool window,
- * *including* the one on screen (the only difference from CloseOtherTabs). `PlatformActions.xml:666`
- * mounts it directly after `TW.CloseOtherTabs`; it borrows the shortcut of `CloseAllEditors`
- * (`intellij.platform.ide.impl.actions.xml:462`), which has no binding in `$default.xml`, so the
- * row has no key here either — none is invented.
- */
-function closeAllToolTabs() {
-  for (const tab of tabsCloseAllWouldRemove(toolTabPresence())) clearToolTab(tab)
-}
-/** ToolWindowCloseAllTabsAction.kt:20-23 -> ContentManagerImpl.java:472-481. */
-function closeAllTabsTarget(): boolean {
-  return canCloseAllContents(toolTabPresence())
-}
-// The stripe button's context menu is the *tool window's* gear group (ToolWindowHeader.kt:345-368
-// `ShowOptionsAction` shows `gearProducer.get()`), so a right click must first make that window the
-// shown one — otherwise `toolMenu` would name a window whose header is not on screen.
-function openToolMenu(id: ToolWindowId) {
-  if (toolDisabled(id)) return
-  focusToolWindowContent(id)
-  toolMenu.value = id
-}
 // --- drag & drop of stripe buttons (IDEA AbstractDroppableStripe) -----------
-const draggingTool = ref<ToolWindowId | null>(null)
-const dropTarget = ref<{ side: Anchor | null; before: ToolWindowId | null } | null>(null)
-function onToolDragStart(id: ToolWindowId, event: DragEvent) {
-  draggingTool.value = id
-  event.dataTransfer?.setData('text/plain', id)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-}
-function onToolDragOver(side: Anchor, before: ToolWindowId | null, event: DragEvent) {
-  if (!draggingTool.value) return
-  event.preventDefault()
-  dropTarget.value = { side, before }
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-}
-function onToolDrop(side: Anchor, before: ToolWindowId | null, event: DragEvent) {
-  event.preventDefault()
-  const id = draggingTool.value
-  draggingTool.value = null
-  dropTarget.value = null
-  if (!id) return
-  // Dropping onto a stripe both moves the window to that side and reorders it there.
-  if ((toolAnchors[id] ?? 'left') !== side) setToolAnchor(id, side)
-  const order = toolOrder.value[side].filter(item => item !== id)
-  const index = before ? order.indexOf(before) : -1
-  if (index >= 0) order.splice(index, 0, id)
-  else order.push(id)
-  toolOrder.value[side] = order
-  saveToolOrder()
-}
-function onToolDragEnd() { draggingTool.value = null; dropTarget.value = null }
-function isDropBefore(side: Anchor, id: ToolWindowId) {
-  return dropTarget.value?.side === side && dropTarget.value.before === id && draggingTool.value !== id
-}
-const bottomTab = ref<'output' | 'run' | 'problems' | 'references' | 'hierarchy' | 'terminal' | 'blame' | 'about'>('output')
+// 工具窗口条按钮的拖放：见 src/toolStripeDrag.ts（状态自持）。
+const { draggingTool, dropTarget, onToolDragStart, onToolDragOver, onToolDrop, onToolDragEnd, isDropBefore } = createToolStripeDrag({
+  toolAnchors: () => toolAnchors,
+  toolOrder: () => toolOrder,
+  setToolAnchor: (id, side) => setToolAnchor(id as ToolWindowId, side),
+  saveToolOrder: () => saveToolOrder(),
+})
+// 底部 dock 既能显示固定底部 tab，也能显示「停靠在底部的工具窗口」（IDEA 的任意停靠）。
+const bottomTab = ref<BottomTabId | ToolWindowId>('output')
 const runCommand = ref('cmake --build build')
 const runInput = ref<HTMLInputElement>()
 const runLog = ref<HTMLElement>()
@@ -632,7 +389,6 @@ function openReplaceInPath() {
 const theme = ref<Theme>(initialTheme())
 const panelSizes = reactive({ explorer: 240, trace: 300, output: 180 })
 const resizing = ref(false)
-let resizeCleanup: (() => void) | undefined
 // Clearing the toast also drops its click action so a stale target can never fire.
 const notice = computed({ get: () => noticeRaw.value, set: value => { noticeRaw.value = value; if (!value) noticeAction.value = null } })
 const noticeRaw = ref('')
@@ -643,7 +399,7 @@ const query = ref('')
 const paletteIndex = ref(0)
 const queryInput = ref<HTMLInputElement>()
 const helpClose = ref<HTMLButtonElement>()
-const menu = ref<'file' | 'edit' | 'view' | 'navigate' | 'code' | 'refactor' | 'analyze' | 'build' | 'run' | 'tools' | 'git' | 'window' | null>(null)
+const menu = ref<'file' | 'edit' | 'view' | 'navigate' | 'code' | 'refactor' | 'analyze' | 'build' | 'run' | 'tools' | 'git' | 'window' | 'help' | null>(null)
 const help = ref(false)
 // ManageRecentProjectsAction mirrors JBPopupFactory.createComponentPopupBuilder:
 // a focused modal that hosts the recent-project tree, search field, and the same
@@ -729,7 +485,6 @@ const settingsOpen = ref(false)
 const settingsDialogRef = ref<{ handleEscape: () => boolean } | null>(null)
 const settingsBusy = ref(false)
 const settingsError = ref('')
-type LeaveChoice = 'save' | 'discard' | 'cancel'
 const leavePrompt = ref<{ title: string; paths: string[]; resolve: (choice: LeaveChoice) => void } | null>(null)
 const leaveCancel = ref<HTMLButtonElement>()
 const expandedTrace = ref<number | null>(null)
@@ -753,45 +508,34 @@ const invalidRenameName = computed(() => {
 })
 const references = ref<LspLocation[]>([])
 const outline = ref<LspDocumentSymbol[]>([])
+// 粘性作用域行（IDEA `editor.stickyLines`）：从 documentSymbol（扁平列表）里找出**包含当前光标行**的符号，
+// 按 startLine 升序取最内层 N 条 —— 外层作用域在上，最内层贴近编辑区顶边。
+const stickyLines = computed(() => {
+  const limit = editorSettings.value.stickyLinesLimit
+  const line = active.value?.line ?? 1
+  if (!editorSettings.value.showStickyLines || limit <= 0 || !active.value) return []
+  return outline.value
+    .filter(symbol => symbol.startLine < line && line <= symbol.endLine)
+    .sort((left, right) => left.startLine - right.startLine)
+    .slice(-limit)
+})
 const codeActions = ref<LspCodeAction[]>([])
 const actionPrompt = ref<{ path: string } | null>(null)
-interface SymbolEntry { name: string; kind: number; path: string; line: number; character: number }
-// IDEA's "Go to Class" (Ctrl+N) and "Go to Symbol" (Ctrl+Shift+Alt+N) are different
-// filters over the same workspace-symbol index; the class filter is the LSP kinds that
-// denote a type.
-const CLASS_KINDS = new Set([5, 11, 13, 19, 23, 26])
+// `SymbolEntry` / `CLASS_KINDS` 随符号搜索一起搬到 src/lspNavigation.ts（工作区符号索引的
+// 类型与"哪几类 LSP kind 算类型"的过滤器）。
 const symbolPrompt = ref<{ mode: 'file' | 'global' | 'class' } | null>(null)
 const symbolQuery = ref('')
 const symbolInput = ref<HTMLInputElement>()
 const symbolResults = ref<SymbolEntry[]>([])
 const symbolIndex = ref(0)
-let symbolTimer: number | undefined
 const dirty = computed(() => allTabs.value.some(tab => tab.dirty))
 // IDEA's status bar shows the current Git branch with ahead/behind counters and a
 // fetch/update widget. Poll the same bridge methods the 源代码管理 panel uses, only
 // while a workspace is open on the desktop; SourceControl refreshes on its own too.
-const gitHead = ref('')
-const gitAheadBehind = ref<GitAheadBehind>({ available: false, ahead: 0, behind: 0 })
-// The per-file change list behind `git.status`. IDEA colours the toolbar filename widget with
-// FileStatusManager's FileStatus for the selected file (FilenameToolbarWidgetAction.kt:63-73);
-// the change list gives the same information without a second round trip.
-const gitChanges = ref<GitChange[]>([])
-let gitStatusTimer: number | undefined
-async function refreshGitWidget() {
-  if (!isDesktop || !workspace.value || !gitAvailable.value) { gitHead.value = ''; gitChanges.value = []; return }
-  try {
-    const status = await request<GitStatus>('git.status')
-    gitHead.value = status.head ?? ''
-    gitChanges.value = status.changes ?? []
-    gitAheadBehind.value = await request<GitAheadBehind>('git.aheadBehind')
-  } catch { gitHead.value = ''; gitChanges.value = [] }
-}
-watch(workspace, value => {
-  if (gitStatusTimer !== undefined) { window.clearInterval(gitStatusTimer); gitStatusTimer = undefined }
-  if (!value) { gitHead.value = ''; gitChanges.value = []; return }
-  void refreshGitWidget()
-  gitStatusTimer = window.setInterval(() => { if (!document.hidden && !editorSettings.value.powerSaveMode) void refreshGitWidget() }, 30000)
-})
+// 状态栏的 Git 部件是一个域（分支 / 领先落后 / 变更表 / 20 秒轮询都在模块里自持）。
+const { gitHead, gitAheadBehind, gitChanges, gitBranches, refreshGitWidget, stopGitWidgetPolling } =
+  createGitWidget({ isDesktop, workspace, gitAvailable, editorSettings })
+
 // --- IDEA's main-toolbar filename widget -------------------------------------------------
 // FilenameToolbarWidgetAction.kt:49-181, the New UI `MainToolbarCenter` region
 // (PlatformActions.xml:846-848 -> `main.toolbar.Filename`): icon + name of the selected file,
@@ -840,51 +584,68 @@ function pickRecentFile(path: string) {
   filenamePopup.value = false
   void openFile(path)
 }
+// 删除确认一族（Safe Delete 的用法扫描 + 回收站开关）：宿主更早的菜单/快捷键就要用它，
+// 所以它留在宿主，树操作模块通过 ctx 与它的动作协作。
+const deleteTarget = ref<Entry | null>(null)
+// IDEA's Safe Delete: before removing a file, show what still refers to it. The
+// scan is a real workspace search (file + line + preview), not a guess.
+const deleteUsages = ref<UsageResult | null>(null)
+const deleteUsagesError = ref('')
+// IDEA puts the "Move files to the recycle bin instead of deleting permanently" checkbox in
+// the confirm dialog and remembers the choice. It is GeneralSettings.isDeletingToBin
+// (GeneralSettings.kt:55-60 -> state.deleteToBin, ide.general.xml), read by the delete paths
+// as `TrashBin.isSupported() && isDeletingToBin()` — DeleteHandler.java:345,
+// DeleteHandlerHelper.kt:30, FileDeleteAction.java:57, VirtualFileDeleteProvider.java:54.
+// It used to live in the editor settings under the name `deleteToTrash`, which was a second
+// name for this one option; the duplication is gone.
+const trashSaving = ref(false)
+const deleteToBin = computed({
+  get: () => generalSettings.value.deleteToBin,
+  set: value => {
+    if (trashSaving.value) return
+    const previous = generalSettings.value
+    generalSettings.value = { ...previous, deleteToBin: value }
+    trashSaving.value = true
+    void (async () => {
+      try { generalSettings.value = await request<GeneralSettingsState>('settings.general.update', { general: generalSettings.value }) }
+      catch (error) {
+        generalSettings.value = previous
+        notify(`回收站选项没有保存成功：${errorMessage(error)}`, true)
+      } finally { trashSaving.value = false }
+    })()
+  },
+})
+watch(deleteTarget, entry => {
+  deleteUsages.value = null
+  deleteUsagesError.value = ''
+  if (!entry || entry.kind === 'directory' || !isDesktop) return
+  const symbol = entry.path.split('/').pop() ?? ''
+  const path = entry.path
+  void (async () => {
+    try {
+      const result = await request<UsageResult>('file.usages', { path, symbol })
+      if (deleteTarget.value?.path !== path) return   // a newer confirm owns the dialog
+      deleteUsages.value = result
+    } catch (error) { if (deleteTarget.value?.path === path) deleteUsagesError.value = errorMessage(error) }
+  })()
+})
+
 const working = computed(() => loading.value || busy.value || projectBusy.value || allTabs.value.some(tab => tab.saving) || opening.size > 0)
-// IDEA's InfoAndProgressPanel collects the background tasks with a progress:
-// the git worker queue, the project clone, and a build/run. Indeterminate by
-// nature (a git command has no total), exactly like IDEA's spinner rows.
-const backgroundTasks = computed(() => {
-  const tasks: { title: string; detail: string; cancellable: false | 'git' | 'clone' | 'run' }[] = []
-  if (gitProgress.running) tasks.push({ title: 'Git 操作进行中', detail: gitProgress.queued > 0 ? `队列中还有 ${gitProgress.queued} 个操作` : '正在执行 Git 命令', cancellable: 'git' })
-  if (cancelling.value || cloneProgress.length) tasks.push({ title: '正在克隆项目', detail: cloneProgress.length ? cloneProgress[cloneProgress.length - 1].slice(0, 120) : '准备中', cancellable: 'clone' })
-  if (runState.running) tasks.push({ title: '构建/运行进行中', detail: '输出在下方控制台', cancellable: 'run' })
-  return tasks
+// 后台任务与进度面板：见 src/progressPanel.ts（状态自持）。
+const { backgroundTasks, progressOpen, allTasksFinishedOnce, progressRows, cancelProgressRow } = createProgressPanel({
+  gitProgress: () => gitProgress, cloneProgress: () => cloneProgress, cancelling: () => cancelling.value,
+  runState: () => runState, autoShowPopup: () => generalSettings.value.autoShowProcessPopup,
+  gradleSync: () => gradleSync,  // 惰性：Gradle 通道在更后面组装（ctx 全是惰性 getter）
+  notify: (message, error) => notify(message, error),  // 惰性：`notify` 声明在本块之后
 })
-const progressOpen = ref(false)
-// IDEA 的 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，默认 false；
-// InfoAndProgressPanel.kt:319-321 读一次）：有进程开始跑时自动弹出进度面板。TaoCode 没有注册表
-// 对话框，所以把它升格为持久化设置（系统设置页），语义与默认值都跟源码一致。
-watch(() => backgroundTasks.value.length, (count, previous) => {
-  if (count > (previous ?? 0) && generalSettings.value.autoShowProcessPopup) progressOpen.value = true
-})
-// ProcessPopup.java:100-133 + TasksFinishedDecorator.kt:19-46 — the popup is a real list, not only a
-// running-task list: with nothing running it either says "all background tasks completed" (once
-// something has run) or "no processes are running" (nothing ever did), and ShowProcessWindow
-// (status/ShowProcessWindowAction.java:16-55) can open it while idle.
-const allTasksFinishedOnce = ref(false)
-watch(() => backgroundTasks.value.length, (now, before) => {
-  allTasksFinishedOnce.value = updateFinishedLatch(allTasksFinishedOnce.value, now > 0, (before ?? 0) > 0)
-})
-const progressRows = computed(() => popupRows(backgroundTasks.value, allTasksFinishedOnce.value))
-function cancelProgressRow(row: { cancellable?: false | 'git' | 'clone' | 'run' }) {
-  if (row.cancellable) void cancelBackgroundTask(row.cancellable)
-}
 // IDEA MemoryUsagePanel: "NNN of MMM M", refreshed on a timer. Reads the host
 // process from the native side; nothing is shown in browser preview.
-const processMemory = ref<ProcessMemory | null>(null)
-let memoryTimer: number | undefined
-async function refreshMemory() {
-  if (!isDesktop || document.hidden || editorSettings.value.powerSaveMode) return
-  try {
-    const memory = await request<ProcessMemory>('app.memory')
-    if (memory.available) processMemory.value = memory
-  } catch { /* the widget simply keeps its last value */ }
-}
-onMounted(() => { if (isDesktop) { void refreshMemory(); memoryTimer = window.setInterval(() => void refreshMemory(), 5000) } })
-onBeforeUnmount(() => { if (memoryTimer !== undefined) window.clearInterval(memoryTimer) })
+// 内存部件：见 src/memoryWidget.ts（状态自持 + 生命周期）。
+const { processMemory, refreshMemory } = createMemoryWidget({ isDesktop, powerSaveEnabled: () => editorSettings.value.powerSaveMode })
 // IDEA's ColumnSelectionModePanel: the status bar shows that the editor is in
 // column-selection mode and clicking the widget turns it off again.
+// 运行实例标签（IDEA 的 Run 工具窗口按实例开标签）：状态在 src/runInstances.ts。
+const runTabs = computed(() => runInstanceList())
 const columnMode = ref(false)
 // IDEA PositionPanel: "N:M" normally, "N selected" (chars + lines spanned) with a
 // selection, and it opens the Go to Line dialog on click.
@@ -898,20 +659,7 @@ async function togglePowerSave() {
 }
 // The welcome page's 自定义 tab writes single settings through the same channel the
 // Settings dialog uses (IDEA: one settings model, several entry points).
-// Source: AppearanceConfigurable.kt cdDifferentiateProjects — the main toolbar wears
-// the project colour; TaoCode derives it from the same 9-gradient palette that
-// RecentProjectIconHelper.kt:289-326 assigns by abs(path.hashCode()) % 9.
-const PROJECT_TINTS: ReadonlyArray<readonly [string, string]> = [
-  ['#DB3D3C', '#FF8E42'], ['#F57236', '#FCBA3F'], ['#2BC8BB', '#36EBAE'],
-  ['#359AF2', '#57DBFF'], ['#8379FB', '#85A8FF'], ['#7E54B5', '#9486FF'],
-  ['#D63CC8', '#F582B9'], ['#954294', '#C87DFF'], ['#E75371', '#FF78B5'],
-]
-function projectTint(root: string): string {
-  let hash = 0
-  for (let i = 0; i < root.length; i += 1) hash = (hash * 31 + root.charCodeAt(i)) | 0
-  const [from, to] = PROJECT_TINTS[Math.abs(hash) % PROJECT_TINTS.length]!
-  return `linear-gradient(90deg, ${from}26, ${to}1A)`
-}
+// 「项目色」的调色板与取色规则在 src/appearance.ts（纯函数，可单测）—— 模板直接用 `projectTint(root)`。
 
 async function saveSettingsPatch(patch: Partial<EditorSettings>) {
   if (settingsBusy.value) return
@@ -920,6 +668,13 @@ async function saveSettingsPatch(patch: Partial<EditorSettings>) {
   catch (error) { notify(errorMessage(error), true) }
   finally { settingsBusy.value = false }
 }
+// IDEA 的面包屑有三层开关（BreadcrumbsConfigurableUI.kt:44-70）：总开关、
+// 位置（上方/下方，由模板里的 breadcrumbsPlacement 决定）、以及按语言的开关
+// （isBreadcrumbsShownFor：没被单独配置过的语言按显示处理）。
+function breadcrumbsOn(path: string) {
+  return editorSettings.value.showBreadcrumbs && breadcrumbsShownFor(editorSettings.value, languageFor(path))
+}
+
 function toggleColumnModeFromStatusBar() {
   const editor = editorFor(activePath.value) as unknown as { toggleColumnSelection?: () => void } | null
   editor?.toggleColumnSelection?.()
@@ -927,13 +682,6 @@ function toggleColumnModeFromStatusBar() {
 // IDEA's ProcessPopup rows each carry a cancel button (cancelRequest -> cancel()).
 // Each of TaoCode's background sources has a real stop: git.cancel terminates the
 // running git child, project.clone.cancel aborts the clone, run.stop the runner.
-async function cancelBackgroundTask(kind: 'git' | 'clone' | 'run') {
-  try {
-    if (kind === 'git') await request('git.cancel')
-    else if (kind === 'clone') await request('project.clone.cancel')
-    else await request('run.stop')
-  } catch (error) { notify(errorMessage(error), true) }
-}
 const errors = computed(() => traces.filter(trace => trace.status === 'error').length)
 const lspReady = computed(() => active.value ? lspOn(active.value) : false)
 const editingSettingsLoading = computed(() => settingsBusy.value || working.value)
@@ -957,411 +705,57 @@ const splitOrientation = computed(() => splitModel.orientation)
 const splitSize = ref(0)
 // Zen mode: hide all chrome except the editor.
 const zenMode = ref(false)
-function otherPane(pane: Pane): Pane { return pane === 0 ? 1 : 0 }
-function focusPane(pane: Pane) { splitModel.focused = pane }
-// IDEA's Split Right / Split Down act on the *selected* tab of the focused group.
-function splitTabOut(tab: Tab, orientation: 'horizontal' | 'vertical') {
-  splitTabOutIn(splitModel, (tab: Tab) => tab.path, tab, orientation)
-}
-function toggleSplit(orientation?: 'horizontal' | 'vertical') {
-  if (splitModel.orientation !== 'none') { unsplit(); return }
-  const selected = active.value
-  if (!selected) { notify('先打开一个文件再分屏。', true); return }
-  splitTabOut(selected, orientation ?? 'horizontal')
-}
-function unsplit() { unsplitModel(splitModel) }
-function unsplitAll() { unsplitAllModel(splitModel) }
-// EditorTabPopupMenu rows act on the right-clicked tab, not the focused one.
-function splitFromTabMenu(pane: Pane, path: string, orientation: 'horizontal' | 'vertical') {
-  tabMenu.value = null
-  const tab = groups[pane].tabs.find(item => item.path === path)
-  if (tab) splitTabOut(tab, orientation)
-}
-// OpenEditorInOppositeTabGroup: show the same file in both groups ("split same").
-function openInOppositeGroup(path: string) {
-  const other = otherPane(splitModel.focused)
-  if (groups[other].tabs.some(tab => tab.path === path)) return
-  const tab = groups[splitModel.focused].tabs.find(item => item.path === path) ?? findTab(path)
-  if (tab) splitTabOutIn(splitModel, (item: Tab) => item.path, tab, splitModel.orientation === 'none' ? 'horizontal' : splitModel.orientation)
-}
-// KeepTabOpen: a preview tab stops being replaceable by the next preview. The row
-// only makes sense while the tab is one, so it disables otherwise.
-function keepTabOpen(tab: Tab) { tab.preview = false }
-// IDEA's preview tab: opening from the tree replaces the previous preview; editing,
-// pinning or second-opening promotes it to a normal tab.
-function switchTabIn(pane: Pane, tab: Tab) {
-  splitModel.focused = pane
-  groups[pane].activePath = tab.path
-  if (tab.preview) tab.preview = false
-  rememberRecent(tab.path)
-  touchHistory(tab.path)
-  // The caret only moves through the editor's own cursor event; re-selecting the tab
-  // that already had focus would otherwise stamp line 1 into Recent Locations.
-  rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, tab.line - 1), label: tab.path })
-}
-// EditorHistoryManager.fileList, most recent first; drives the tab-limit closing order.
-const editorHistory = ref<string[]>([])
-function touchHistory(path: string) {
-  editorHistory.value = [path, ...editorHistory.value.filter(item => item !== path)].slice(0, 120)
-}
-async function enforceTabLimit(pane: Pane, justOpened: string) {
-  const limit = editorSettings.value.tabLimit
-  const group = groups[pane]
-  if (group.tabs.length <= limit) return
-  const history = [...editorHistory.value.filter(path => path !== justOpened), justOpened]
-  for (const victim of tabClosingOrder(group.tabs, justOpened, history, (tab: Tab) => tab.path, (tab: Tab) => tab.dirty)) {
-    if (group.tabs.length <= limit) break
-    await closeTabIn(pane, victim)
-  }
-}
-async function closeTabIn(pane: Pane, tab: Tab) {
-  if (working.value) return
-  if (tab.dirty && !await confirmLeave(`关闭 ${tab.path}`, [tab])) return
-  const index = groups[pane].tabs.indexOf(tab)
-  // The buffer may still be visible in the other pane ("split same"); only release
-  // the LSP document once no pane references it.
-  if (closeTabInPane(splitModel, (tab: Tab) => tab.path, pane, tab)) stopLspFile(tab.path)
-  // EditorWindow.removedTabs: remember what was here and where, so Reopen Closed Tab
-  // restores it to the original position (RemovedTabInfo carries the index).
-  if (index >= 0) {
-    const history = closedTabsPerPane[pane]
-    history.unshift({ path: tab.path, line: tab.line, index })
-    if (history.length > 20) history.pop()
-  }
-}
-const closedTabsPerPane = reactive<[ClosedTab[], ClosedTab[]]>([[], []])
-interface ClosedTab { path: string; line: number; index: number }
+// 编辑区的分栏与标签页开关是一个域（IDEA 的 SplitterAction + EditorWindow 标签页生命周期）。
+const {
+  otherPane, focusPane, splitTabOut, toggleSplit, unsplit, unsplitAll, splitFromTabMenu, openInOppositeGroup,
+  keepTabOpen, switchTabIn, editorHistory, touchHistory, enforceTabLimit, closeTabIn,
+  closedTabsPerPane, reopenClosedTab, setSplitOrientation, moveTabToOtherPane,
+} = createEditorSplits({
+  // 惰性：`notify` 由通知模块提供（装配在本块之后）。
+  notify: (...args) => notify(...args),
+  splitModel, groups, active, activePath, findTab, editorFor, openFile, reveal, focusedPane,
+  editorSettings, working, hasTabPath, rememberPlace, bufferEpoch, splitOrientation,
+  // 惰性：下面几个来自本块之后装配的模块（文件树模块、LSP 模块、工作区生命周期模块）。
+  tabMenu: { get value() { return tabMenu.value }, set value(v) { tabMenu.value = v } },
+  rememberRecent: (...a) => rememberRecent(...a),
+  stopLspFile: (...a) => stopLspFile(...a),
+  confirmLeave: (...a) => confirmLeave(...a),
+})
 // --- Crash recovery (IDEA's workspace.xml editor state + unsaved drafts) ---
 // The snapshot covers the split layout, each group's tabs and selections and, for
 // dirty buffers only, the draft text. It is saved debounced after any layout or
 // dirty change and cleared on a clean project close, so the restore prompt only
 // appears after a crash or an abandoned exit.
-interface SessionState { tabs: Array<{ path: string; line: number; column: number; pane: number; draft?: string }>; active: [string, string]; orientation: 'none' | 'horizontal' | 'vertical'; focused: Pane }
-const restorePrompt = ref<{ state: SessionState; drafts: number } | null>(null)
-let sessionTimer: number | undefined
-function sessionKey() {
-  return JSON.stringify([splitModel.orientation, splitModel.focused,
-    groups.map(group => [group.activePath, group.tabs.map(tab => `${tab.path}${tab.dirty ? '*' : ''}`)])])
-}
-function snapshotSession(): SessionState {
-  const tabs: SessionState['tabs'] = []
-  for (const pane of [0, 1] as const)
-    for (const tab of groups[pane].tabs) {
-      if (pane === 1 && groups[0].tabs.includes(tab)) continue  // shared buffer, already listed
-      const draft = tab.dirty ? editorFor(tab.path)?.text() ?? tab.content : undefined
-      tabs.push({ path: tab.path, line: tab.line, column: tab.column, pane, ...(draft !== undefined ? { draft } : {}) })
-    }
-  return { tabs, active: [groups[0].activePath, groups[1].activePath], orientation: splitModel.orientation, focused: splitModel.focused }
-}
-function scheduleSessionSave() {
-  if (!isDesktop || !workspace.value) return
-  if (sessionTimer) window.clearTimeout(sessionTimer)
-  sessionTimer = window.setTimeout(() => {
-    sessionTimer = undefined
-    if (!workspace.value) return
-    void request('session.save', { state: snapshotSession() }).catch(() => undefined)
-  }, 1500)
-}
-watch(sessionKey, () => scheduleSessionSave())
-// IDEA rewrites workspace.xml the moment an editor is removed instead of waiting for
-// the 1.5 s debounce: a crash inside that window would otherwise restore a tab the
-// user has just closed, still carrying the draft it had while it was open. Closing a
-// dirty tab goes through confirmLeave first, so the draft was either written to disk
-// or deliberately discarded by then — which is why this only has to flush the layout.
-watch(() => groups[0].tabs.length + groups[1].tabs.length, (next, previous) => {
-  if (next >= previous) return
-  if (!isDesktop || !workspace.value) return
-  if (sessionTimer) { window.clearTimeout(sessionTimer); sessionTimer = undefined }
-  void request('session.save', { state: snapshotSession() }).catch(() => undefined)
+// 崩溃恢复：状态与逻辑见 src/sessionSnapshot.ts（restorePrompt 由模块自持，模板直接引用）。
+const { snapshotSession, scheduleSessionSave, cancelSessionSave, offerSessionRestore, restoreSession, discardSession } = createSessionSnapshot({
+  isDesktop,
+  workspace: () => workspace,
+  workspaceEpoch: () => workspaceEpoch,
+  splitModel: () => splitModel,
+  groups: () => groups,
+  reveal: () => reveal,
+  editorFor: path => editorFor(path),
+  findTab: path => findTab(path),
+  notify: (message, error) => notify(message, error),
+  touchHistory: path => touchHistory(path),
+  rememberRecent: path => rememberRecent(path),
+  startLsp: tab => startLsp(tab),
 })
-async function offerSessionRestore() {
-  if (!isDesktop) return
-  try {
-    const saved = await request<{ found: boolean; corrupt?: boolean; state?: SessionState }>('session.load')
-    if (!saved.found) return
-    if (saved.corrupt || !saved.state) {
-      notify('上次会话的恢复数据已损坏，无法恢复未保存内容。', true)
-      void request('session.clear').catch(() => undefined)
-      return
-    }
-    const tabs = saved.state.tabs ?? []
-    if (!tabs.length) { void request('session.clear').catch(() => undefined); return }
-    // IDEA reopens a project's editors from workspace.xml silently; unsaved drafts
-    // only exist after a crash, and those are what deserve the prompt.
-    const drafts = tabs.filter(tab => tab.draft !== undefined).length
-    if (!drafts) { await restoreSession({ state: saved.state, drafts: 0 }); return }
-    restorePrompt.value = { state: saved.state, drafts }
-  } catch { /* sessions are best-effort */ }
-}
-async function restoreSession(prompt: { state: SessionState; drafts: number }) {
-  restorePrompt.value = null
-  const epoch = workspaceEpoch
-  const restored: Tab[] = []
-  for (const entry of prompt.state.tabs) {
-    try {
-      const doc = await request<DocumentData>('file.read', { path: entry.path })
-      if (epoch !== workspaceEpoch) return
-      const tab: Tab = { ...doc, saving: false, dirty: false, line: Math.max(1, entry.line), column: Math.max(1, entry.column) }
-      if (entry.draft !== undefined && entry.draft !== doc.content) { tab.content = entry.draft; tab.dirty = true }
-      const pane = entry.pane === 1 ? 1 : 0
-      if (!groups[pane].tabs.some(item => item.path === tab.path)) groups[pane].tabs.push(tab)
-      restored.push(tab)
-    } catch { /* the file vanished since the crash; skip it */ }
-  }
-  if (epoch !== workspaceEpoch) return
-  splitModel.orientation = prompt.state.orientation
-  splitModel.focused = prompt.state.focused
-  groups[0].activePath = groups[0].tabs.some(tab => tab.path === prompt.state.active[0]) ? prompt.state.active[0] : groups[0].tabs[0]?.path ?? ''
-  groups[1].activePath = groups[1].tabs.some(tab => tab.path === prompt.state.active[1]) ? prompt.state.active[1] : groups[1].tabs[0]?.path ?? ''
-  for (const tab of restored) {
-    touchHistory(tab.path)
-    rememberRecent(tab.path)
-    if (tab.dirty) await nextTick(), editorFor(tab.path)?.setDraft(tab.content)
-    if (isDesktop) void startLsp(tab)
-  }
-  const first = findTab(groups[splitModel.focused].activePath) ?? restored[0]
-  if (first) reveal.value = { path: first.path, line: Math.max(0, first.line - 1) }
-  notify(`已恢复 ${restored.length} 个文件${prompt.drafts ? `（含 ${prompt.drafts} 个未保存草稿）` : ''}`)
-}
-function discardSession() {
-  restorePrompt.value = null
-  void request<{ cleared: boolean }>('session.clear')
-    .then(reply => { if (reply && reply.cleared === false) notify('恢复草稿未能从磁盘清除，下次启动仍会提示。', true) })
-    .catch(() => undefined)
-}
-// ReopenClosedTabAction (Windows/Linux default: Ctrl+Shift+F4): restore the focused
-// window's most recently closed file at its old tab position and selection.
-async function reopenClosedTab() {
-  const history = closedTabsPerPane[focusedPane.value]
-  const last = history.shift()
-  if (!last) { notify('没有最近关闭的标签页。', true); return }
-  if (hasTabPath(last.path)) { activePath.value = last.path; return }
-  await openFile(last.path)
-  const tab = findTab(last.path)
-  if (!tab) return
-  const group = groups[focusedPane.value]
-  const moved = group.tabs.indexOf(tab)
-  if (moved >= 0 && moved !== last.index) {
-    group.tabs.splice(moved, 1)
-    group.tabs.splice(Math.min(last.index, group.tabs.length), 0, tab)
-  }
-  tab.line = last.line
-  reveal.value = { path: last.path, line: Math.max(0, last.line - 1) }
-}
-// Moving a tab to the other group honours the direction the menu promised: "to the
-// right" keeps/creates a horizontal split, "below" forces the vertical one.
-// The split axis is the only thing that has to change for "below" vs "right": both
-// groups already exist, so the layout follows the model.
-function setSplitOrientation(orientation: 'horizontal' | 'vertical') {
-  if (splitModel.orientation !== 'none' && splitModel.orientation !== orientation) splitModel.orientation = orientation
-}
-function moveTabToOtherPane(pane: Pane, tab: Tab, orientation: 'horizontal' | 'vertical' = 'horizontal') {
-  if (splitOrientation.value !== orientation) {
-    if (splitOrientation.value === 'none') toggleSplit(orientation)
-    else setSplitOrientation(orientation)
-  }
-  if (splitModel.orientation === 'none') { toggleSplit('horizontal'); return }
-  const from = groups[pane]
-  const to = groups[otherPane(pane)]
-  const index = from.tabs.indexOf(tab)
-  if (index < 0) return
-  from.tabs.splice(index, 1)
-  to.tabs.push(tab)
-  to.activePath = tab.path
-  from.activePath = from.tabs[Math.min(index, from.tabs.length - 1)]?.path ?? ''
-  splitModel.focused = otherPane(pane)
-}
-// IDEA's tab drag & drop: the strip itself is the drop target (reorder before the
-// tab under the pointer); dropping on the other group's strip moves the tab there.
-const dragTab = ref<{ pane: Pane; path: string } | null>(null)
-function onTabDragStart(pane: Pane, tab: Tab, event: DragEvent) {
-  // IDEA "Drag-and-drop with Alt pressed only": without Alt the drag never starts,
-  // so a slip of the mouse cannot reorder tabs.
-  if (editorSettings.value.dndWithPressedAltOnly && !event.altKey) {
-    event.preventDefault()
-    return
-  }
-  dragTab.value = { pane, path: tab.path }
-  event.dataTransfer?.setData('text/plain', tab.path)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-}
-function onTabDragOver(pane: Pane, event: DragEvent) {
-  if (!dragTab.value) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-}
-// IDEA's drag-to-split (TabsUtil.java:54-111): a tab dropped on the editor *area* near an
-// edge splits it, and the side is decided by which trapezoid the pointer sits in. The
-// preview is the half of the area the dropped file will take.
-const tabDropSide = ref<{ pane: Pane; side: DropSide; bounds: { x: number; y: number; width: number; height: number } } | null>(null)
-function onStageDragOver(pane: Pane, event: DragEvent) {
-  if (!dragTab.value) return
-  const target = event.currentTarget as HTMLElement | null
-  if (!target) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  const box = target.getBoundingClientRect()
-  const bounds = { x: 0, y: 0, width: box.width, height: box.height }
-  const side = dropSideFor({ x: event.clientX - box.left, y: event.clientY - box.top }, bounds)
-  if (!side) { tabDropSide.value = null; return }
-  tabDropSide.value = { pane, side, bounds: updateBoundsWithDropSide(bounds, side) }
-}
-function onStageDragLeave(event: DragEvent) {
-  // Only when the pointer really left the stage: dragging over a child fires dragleave on
-  // the parent as well, which would flicker the preview away.
-  const target = event.currentTarget as HTMLElement | null
-  const next = event.relatedTarget as Node | null
-  if (target && next && target.contains(next)) return
-  tabDropSide.value = null
-}
-function onStageDrop(pane: Pane, event: DragEvent) {
-  const dragged = dragTab.value
-  const preview = tabDropSide.value
-  dragTab.value = null
-  tabDropSide.value = null
-  if (!dragged) return
-  event.preventDefault()
-  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
-  if (!tab) return
-  const side: DropSide = preview && preview.pane === pane ? preview.side : 'CENTER'
-  const orientation = splitOrientationForSide(side)
-  if (!orientation) {
-    // The centre is a plain move into this group, which is what the strip drop does too.
-    if (dragged.pane === pane) return
-    dropTabOnGroup(splitModel, (item: Tab) => item.path, dragged.pane, tab, pane)
-    return
-  }
-  // splitTabOutIn acts on the focused group, so point it at the group the tab came from.
-  splitModel.focused = dragged.pane
-  splitTabOut(tab, orientation)
-  // IDEA puts the dragged file in the new group; LEFT / TOP ask for that group to come
-  // first, which the fixed pane order cannot express, so the two groups are exchanged.
-  const landedInFirst = groups[0].tabs.some(item => item.path === tab.path)
-  if (dropSidePutsNewGroupFirst(side)) {
-    if (!landedInFirst) swapGroups(splitModel)
-  } else if (landedInFirst) {
-    swapGroups(splitModel)
-  }
-  splitModel.focused = groups[0].tabs.some(item => item.path === tab.path) ? 0 : 1
-}
-function endTabDrag() { dragTab.value = null; tabDropSide.value = null }
-function onTabDrop(pane: Pane, path: string, event: DragEvent) {
-  const dragged = dragTab.value
-  dragTab.value = null
-  if (!dragged) return
-  event.preventDefault()
-  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
-  if (!tab) return
-  if (dragged.pane === pane && dragged.path === path) return
-  dropTabOnGroup(splitModel, (tab: Tab) => tab.path, dragged.pane, tab, pane, path)
-}
-// Dropping on the strip's empty tail (or the pane body) appends at the group's end.
-function onTabStripDrop(pane: Pane, event: DragEvent) {
-  if (event.defaultPrevented) return  // a tab row already handled this drop
-  const dragged = dragTab.value
-  dragTab.value = null
-  if (!dragged) return
-  event.preventDefault()
-  const tab = groups[dragged.pane].tabs.find(item => item.path === dragged.path)
-  if (!tab) return
-  dropTabOnGroup(splitModel, (tab: Tab) => tab.path, dragged.pane, tab, pane)
-}
-// IDEA's single-row tab strip (`ScrollableSingleRowLayout`, JBTabsImpl.kt:766-772): the tabs
-// that do not fit are clipped and then dropped behind a "…" button. The layout itself lives
-// in src/tabStripLayout.ts; here we measure the tabs the way the source measures
-// `TabLabel.getPreferredSize()` and feed the numbers in.
-//
-// The natural width is cached per tab key: once widths are applied, measuring the element
-// again would report the width we just set, so a tab is only measured while it is still free
-// to size itself (`node.style.width` cleared for the measurement and restored afterwards).
-const tabNaturalWidths = new Map<string, number>()
-const tabStripLayouts = ref<[TabStripLayout | null, TabStripLayout | null]>([null, null])
-const tabStripNodes: [HTMLElement | null, HTMLElement | null] = [null, null]
-const tabMoreButtonWidth = ref(28)
-const tabMore = ref<{ pane: Pane; x: number; y: number } | null>(null)
-function registerTabStrip(pane: Pane, element: unknown) {
-  tabStripNodes[pane] = (element as HTMLElement | null) ?? null
-}
-function tabKeyOf(pane: Pane, path: string) { return `${pane}:${path}` }
-function measureTabNaturalWidth(node: HTMLElement, key: string): number {
-  const cached = tabNaturalWidths.get(key)
-  if (cached !== undefined) return cached
-  const previousWidth = node.style.width
-  const previousMax = node.style.maxWidth
-  node.style.width = 'auto'
-  node.style.maxWidth = 'none'
-  const width = node.getBoundingClientRect().width
-  node.style.width = previousWidth
-  node.style.maxWidth = previousMax
-  // A dropped tab is `display: none` and reports no box; do not cache that, so the tab is
-  // measured for real the next time it is on screen.
-  if (width < 1) return 0
-  tabNaturalWidths.set(key, width)
-  return width
-}
-function recomputeTabStrip(pane: Pane) {
-  const strip = tabStripNodes[pane]
-  const tabs = groups[pane].tabs
-  if (!strip || !tabs.length) { tabStripLayouts.value[pane] = null; return }
-  const nodes = Array.from(strip.querySelectorAll<HTMLElement>('.file-tab'))
-  const preferredWidths = tabs.map((tab, index) => {
-    const node = nodes[index]
-    if (!node) return MIN_TAB_WIDTH
-    const natural = measureTabNaturalWidth(node, tabKeyOf(pane, tab.path))
-    return natural < 1 ? MIN_TAB_WIDTH : preferredTabWidth(natural, true)
-  })
-  const box = strip.getBoundingClientRect()
-  // `getToFitLength` (:132-150) subtracts the tab-side toolbar, so measure it here.
-  const toolbar = strip.querySelector<HTMLElement>('.tab-toolbar')
-  tabStripLayouts.value[pane] = layoutSingleRow({
-    preferredWidths,
-    stripWidth: box.width,
-    moreButtonWidth: tabMoreButtonWidth.value,
-    sideToolbarMinWidth: toolbar ? toolbar.getBoundingClientRect().width : 0,
-    insetLeft: 0,
-    insetRight: 0,
-    editorTabs: true,
-    gap: 0,
-  })
-}
-function placedTabFor(pane: Pane, index: number) {
-  return tabStripLayouts.value[pane]?.placed.find(entry => entry.index === index) ?? null
-}
-function isTabDropped(pane: Pane, index: number): boolean {
-  const layout = tabStripLayouts.value[pane]
-  return Boolean(layout && layout.dropped.includes(index))
-}
-// `isTabHidden` (ScrollableSingleRowLayout:139-147) — the clipped ones also belong in the
-// "…" list, because only a sliver of them is on screen.
-function tabWidthStyle(pane: Pane, index: number) {
-  const placed = placedTabFor(pane, index)
-  return placed ? { width: `${placed.width}px`, flex: '0 0 auto' } : undefined
-}
-function hiddenTabsFor(pane: Pane): Tab[] {
-  const layout = tabStripLayouts.value[pane]
-  if (!layout) return []
-  const tabs = groups[pane].tabs
-  const indices = new Set(layout.dropped)
-  for (const placed of layout.placed) if (placed.hidden) indices.add(placed.index)
-  return [...indices].sort((a, b) => a - b).map(index => tabs[index]).filter(Boolean)
-}
-function openTabMore(pane: Pane, event: MouseEvent) {
-  const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  tabMore.value = { pane, x: box.left, y: box.bottom }
-}
-let tabStripObserver: ResizeObserver | null = null
-function observeTabStrips() {
-  if (typeof ResizeObserver === 'undefined' || tabStripObserver) return
-  tabStripObserver = new ResizeObserver(() => { recomputeTabStrip(0); recomputeTabStrip(1) })
-  for (const node of tabStripNodes) if (node) tabStripObserver.observe(node)
-}
-// Re-measure whenever the tab set, the split size or the strip's own size changes.
-watch(() => [groups[0].tabs.map(tab => tab.path).join('|'), groups[1].tabs.map(tab => tab.path).join('|'), splitSize.value, splitOrientation.value].join('~'), async () => {
-  await nextTick()
-  recomputeTabStrip(0)
-  recomputeTabStrip(1)
-  observeTabStrips()
-}, { immediate: true })
+// 标签页的拖放是一个域（IDEA 的 TabbedPane 拖放 + TabsUtil 的拖到边缘即分屏）。
+const {
+  dragTab, tabDropSide, onTabDragStart, onTabDragOver, onStageDragOver, onStageDragLeave, onStageDrop,
+  endTabDrag, onTabDrop, onTabStripDrop,
+} = createTabDragDrop({
+  editorSettings, groups, splitModel,
+  // 惰性：`splitTabOut` 声明在本块之后（分栏动作的一部分）。
+  splitTabOut: (...a) => splitTabOut(...a),
+})
+// 标签条的单行布局是一个域（IDEA 的 ScrollableSingleRowLayout：装不下的标签落到「…」里）。
+const {
+  tabNaturalWidths, tabStripLayouts, tabMoreButtonWidth, tabMore, registerTabStrip, tabKeyOf,
+  measureTabNaturalWidth, recomputeTabStrip, placedTabFor, isTabDropped, tabWidthStyle, hiddenTabsFor,
+  openTabMore, observeTabStrips,
+} = createTabStripView({ groups, splitSize, splitOrientation })
 // IDEA maps a file to its type by extension; a project can override that mapping
 // ("Associate with File Type…"), and the override drives both the status-bar label
 // and the editor's syntax highlighting.
@@ -1388,209 +782,15 @@ const candidates = computed(() => {
   const paths = new Set([...allTabs.value.map(tab => tab.path), ...(workspace.value?.entries.filter(entry => entry.kind === 'file').map(entry => entry.path) ?? [])])
   return [...paths].filter(path => path.toLowerCase().includes(query.value.toLowerCase()))
 })
-const viewport = reactive({ width: window.innerWidth, height: window.innerHeight })
-type Panel = keyof typeof panelSizes
-function editorStageSize(axis: 'x' | 'y') {
-  const stage = document.querySelector<HTMLElement>('.editor-column')
-  if (!stage) return axis === 'x' ? viewport.width : viewport.height
-  const rect = stage.getBoundingClientRect()
-  return axis === 'x' ? rect.width : rect.height
-}
-// The split divider sizes the secondary pane (0 = 50/50 until first dragged).
-function setSplitSize(value: number) {
-  const max = Math.max(200, editorStageSize(splitOrientation.value === 'vertical' ? 'y' : 'x') - 200)
-  splitSize.value = clampPanelSize(value, 160, max)
-}
-function panelMax(panel: Panel) {
-  // IDEA "Widescreen tool window layout": maximizes the height of the vertical tool
-  // windows by limiting how tall the bottom (horizontal) one may grow — 40% of the
-  // window instead of everything but 300px.
-  if (panel === 'output') {
-    const limit = editorSettings.value.wideScreenSupport
-      ? Math.round(viewport.height * 0.4)
-      : viewport.height - 300
-    return Math.max(120, limit)
-  }
-  const other = panel === 'explorer' ? (activity.value && viewport.width >= 1000 ? panelSizes.trace : 0) : (explorer.value ? panelSizes.explorer : 0)
-  return Math.min(520, viewport.width - other - 340)
-}
-function setPanelSize(panel: Panel, value: number) {
-  const size = clampPanelSize(value, panel === 'output' ? 100 : 180, panelMax(panel))
-  panelSizes[panel] = size
-  // IDEA "Remember size for each tool window": with it on, dragging the dock edge
-  // resizes the tool window you are looking at, not the shared stripe.
-  if (editorSettings.value.rememberSizeForEachToolWindow && panel !== 'trace') {
-    const key = panel === 'output' ? 'bottom' : 'side'
-    toolSizes[`${leftView.value}:${key}`] = size
-    saveToolSizes()
-  }
-}
-// Per-tool-window sizes, keyed "<window>:side" / "<window>:bottom".
-const toolSizes = reactive<Record<string, number>>({})
-try {
-  const saved = JSON.parse(localStorage.getItem('taocode.toolSizes') ?? '{}') as Record<string, number>
-  for (const [key, value] of Object.entries(saved)) if (typeof value === 'number' && value >= 100 && value <= 900) toolSizes[key] = Math.round(value)
-} catch { /* corrupted state: fall back to the shared size */ }
-function saveToolSizes() {
-  try { localStorage.setItem('taocode.toolSizes', JSON.stringify(toolSizes)) } catch { /* storage unavailable: session-only */ }
-}
-// Apply the remembered size whenever the shown tool window (or its anchor) changes.
-watch([leftView, () => toolAnchors[leftView.value]], ([view, anchor]) => {
-  if (!editorSettings.value.rememberSizeForEachToolWindow) return
-  const key = `${view}:${anchor === 'bottom' ? 'bottom' : 'side'}`
-  const stored = toolSizes[key]
-  if (typeof stored !== 'number') return
-  if (anchor === 'bottom') panelSizes.output = clampPanelSize(stored, 100, panelMax('output'))
-  else panelSizes.explorer = clampPanelSize(stored, 180, panelMax('explorer'))
+// 分栏与面板尺寸是一个域（IDEA 的 WindowAction/ResizeToolWindowAction + SplitterAction）。
+const {
+  viewport, editorStageSize, setSplitSize, panelMax, setPanelSize, toolSizes, saveToolSizes, resizeKey,
+  resizeTarget, resizeTargetFor, resizeStep, stretchToolWindow, resizeSplitKey, startSplitResize, startResize,
+  onWindowResize, changeSplitOrientation, cancelResize,
+} = createPanelResize({
+  editorSettings, panelSizes, activity, explorer, leftView, toolAnchors, activeAnchor, bottom, workspace,
+  zenMode, resizing, splitModel, splitSize, splitOrientation, activeToolWindowDock,
 })
-function resizeKey(event: KeyboardEvent, panel: Panel) {
-  // A modified arrow belongs to the window-level shortcuts (Ctrl+Alt+Shift+arrows resize the active
-  // tool window); without this the separator would also move while the chord fired.
-  if (event.altKey || event.ctrlKey || event.metaKey) return
-  const previous = panel === 'output' ? 'ArrowDown' : panel === 'trace' ? 'ArrowRight' : 'ArrowLeft'
-  const next = panel === 'output' ? 'ArrowUp' : panel === 'trace' ? 'ArrowLeft' : 'ArrowRight'
-  if (event.key !== previous && event.key !== next) return
-  event.preventDefault()
-  setPanelSize(panel, panelSizes[panel] + (event.key === next ? 16 : -16))
-}
-/**
- * `ResizeToolWindowAction.update` (`:93-118`): the action acts on the active tool window
- * (`getToolWindow` `:83-87` = the window the action was invoked on, else the last active one), and
- * it hides itself the moment an *editor* holds the focus (`:52-56` `isActiveEditorPresented`), or
- * the window is unavailable / invisible (`:67-80`). `focusedDock()` answers both: a dock only
- * answers when it is the one with focus, and the editor answers when neither is.
- */
-function resizeTarget(): { panel: Panel; anchor: 'left' | 'right' | 'bottom' } | null {
-  if (!workspace.value || zenMode.value) return null
-  const dock = activeToolWindowDock()
-  if (!dock) return null
-  if (dock === 'bottom') return bottom.value ? { panel: 'output', anchor: 'bottom' } : null
-  const anchor = activeAnchor.value
-  return explorer.value && (anchor === 'left' || anchor === 'right') ? { panel: 'explorer', anchor } : null
-}
-/** The active tool window when `direction` is one of the two the anchor enables, else nothing. */
-function resizeTargetFor(direction: ResizeDirection): { panel: Panel; anchor: 'left' | 'right' | 'bottom' } | null {
-  const target = resizeTarget()
-  return target && resizeDirectionEnabled(target.anchor, direction) ? target : null
-}
-/**
- * `WindowAction.getPreferredDelta()` (`:113-118`) is the preferred size of a `JLabel("W")` — the UI
- * font's own metrics — multiplied by the registry's `ide.windowSystem.hScrollChars` /
- * `vScrollChars` (`:96-98`; both 5, `registry.properties:205-208`). So the step is measured from the
- * font the chrome actually renders with instead of being a hard-coded pixel count, and it follows
- * the 界面字体 setting for free.
- */
-let resizeProbe: HTMLSpanElement | null = null
-function resizeStep(horizontal: boolean): number {
-  if (!resizeProbe || !resizeProbe.isConnected) {
-    resizeProbe = document.createElement('span')
-    resizeProbe.textContent = 'W'
-    resizeProbe.setAttribute('aria-hidden', 'true')
-    resizeProbe.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;white-space:pre'
-    document.body.appendChild(resizeProbe)
-  }
-  const font = getComputedStyle(document.body)
-  resizeProbe.style.fontFamily = font.fontFamily
-  resizeProbe.style.fontSize = font.fontSize
-  resizeProbe.style.fontWeight = font.fontWeight
-  resizeProbe.style.lineHeight = font.lineHeight
-  const box = resizeProbe.getBoundingClientRect()
-  return Math.max(1, Math.round((horizontal ? box.width : box.height) * RESIZE_CHARS))
-}
-/** `ResizeToolWindowAction.actionPerformed` -> `stretch` (`:107-121`), through the shared clamp. */
-function stretchToolWindow(direction: ResizeDirection) {
-  const target = resizeTargetFor(direction)
-  if (!target) return
-  const horizontal = direction === 'left' || direction === 'right'
-  setPanelSize(target.panel, panelSizes[target.panel] + stretchDelta(target.anchor, direction, resizeStep(horizontal)))
-}
-function resizeSplitKey(event: KeyboardEvent) {
-  // Same guard as `resizeKey`: a chord-carrying arrow is the window-level shortcut's, not the
-  // separator's.
-  if (event.altKey || event.ctrlKey || event.metaKey) return
-  const vertical = splitOrientation.value === 'vertical'
-  const shrink = vertical ? 'ArrowDown' : 'ArrowRight'
-  const grow = vertical ? 'ArrowUp' : 'ArrowLeft'
-  if (event.key !== shrink && event.key !== grow) return
-  event.preventDefault()
-  if (splitSize.value === 0) splitSize.value = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
-  setSplitSize(splitSize.value + (event.key === grow ? -16 : 16))
-}
-function startSplitResize(event: PointerEvent) {
-  if (event.button !== 0) return
-  resizeCleanup?.()
-  event.preventDefault()
-  const target = event.currentTarget as HTMLElement
-  const vertical = splitOrientation.value === 'vertical'
-  if (splitSize.value === 0) splitSize.value = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
-  const origin = vertical ? event.clientY : event.clientX
-  const size = splitSize.value
-  const move = (next: PointerEvent) => {
-    if (next.pointerId !== event.pointerId) return
-    // Dragging the divider away from the secondary pane grows it.
-    const position = vertical ? next.clientY : next.clientX
-    setSplitSize(size + (vertical ? origin - position : position - origin))
-  }
-  const stop = () => {
-    for (const type of ['pointermove', 'pointerup', 'pointercancel', 'lostpointercapture'] as const) target.removeEventListener(type, stop as EventListener)
-    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
-    resizing.value = false
-    resizeCleanup = undefined
-  }
-  target.focus()
-  target.setPointerCapture(event.pointerId)
-  target.addEventListener('pointermove', move)
-  target.addEventListener('pointerup', stop)
-  target.addEventListener('pointercancel', stop)
-  target.addEventListener('lostpointercapture', stop)
-  resizing.value = true
-  resizeCleanup = stop
-}
-function startResize(event: PointerEvent, panel: Panel) {
-  if (event.button !== 0) return
-  resizeCleanup?.()
-  event.preventDefault()
-  const target = event.currentTarget as HTMLElement
-  const origin = panel === 'output' ? event.clientY : event.clientX
-  const size = panelSizes[panel]
-  const move = (next: PointerEvent) => {
-    if (next.pointerId !== event.pointerId) return
-    const position = panel === 'output' ? next.clientY : next.clientX
-    setPanelSize(panel, size + (position - origin) * (panel === 'explorer' ? 1 : -1))
-  }
-  const stop = () => {
-    target.removeEventListener('pointermove', move)
-    target.removeEventListener('pointerup', stop)
-    target.removeEventListener('pointercancel', stop)
-    target.removeEventListener('lostpointercapture', stop)
-    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
-    resizing.value = false
-    resizeCleanup = undefined
-  }
-  target.focus()
-  target.setPointerCapture(event.pointerId)
-  target.addEventListener('pointermove', move)
-  target.addEventListener('pointerup', stop)
-  target.addEventListener('pointercancel', stop)
-  target.addEventListener('lostpointercapture', stop)
-  resizing.value = true
-  resizeCleanup = stop
-}
-function onWindowResize() {
-  viewport.width = window.innerWidth
-  viewport.height = window.innerHeight
-  for (const panel of ['explorer', 'trace', 'output'] as const) setPanelSize(panel, panelSizes[panel])
-  if (splitSize.value) setSplitSize(splitSize.value)
-}
-// IDEA's editor-layout menu: Unsplit / Unsplit All / Split Right / Split Down act on
-// the selected tab; Move/Clone to Opposite Group shuffle tabs between panes.
-// SplitterAction.ChangeOrientation: rotate the divider between left/right and
-// up/down without touching either group's tabs.
-function changeSplitOrientation() {
-  if (splitModel.orientation === 'none') return
-  splitModel.orientation = splitModel.orientation === 'horizontal' ? 'vertical' : 'horizontal'
-  splitSize.value = 0
-}
 function currentChrome(): ToolWindowChrome {
   return { explorer: explorer.value, activity: activity.value, bottom: bottom.value }
 }
@@ -1661,115 +861,11 @@ function onMenuKeydown(event: KeyboardEvent, kind: NonNullable<typeof menu.value
     : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
   items[next]?.focus()
 }
-// IDEA keeps every notification in a log the status-bar widgets and the welcome screen's
-// notification toolbar list (Notifications widget / `createNotificationToolbar`): the transient
-// balloon is not the only place a message lives. `notice` stays the balloon; `noticeLog` is that
-// history, and its rules live in src/notices.ts so both surfaces share one definition.
-const noticeLog = ref<NoticeEntry[]>([])
-let noticeSeq = 0
-function notify(message: string, error = false, onClick?: () => void, detail?: string[], displayId?: string) {
-  notice.value = message
-  noticeError.value = error
-  noticeAction.value = onClick ?? null
-  const entry: NoticeEntry = { id: ++noticeSeq, message, error, at: new Date().toLocaleTimeString('zh-CN', { hour12: false }), detail, displayId }
-  // `pushNotice` carries IDEA's `expirePreviousAndNotify` rule (ShowNotificationCommitResultHandler
-  // .kt:97): the notification with the same display id is expired first, so repeated commits replace
-  // one entry instead of filling the notification centre with history.
-  noticeLog.value = pushNotice(noticeLog.value, entry)
-}
-// The commit panel reports its result through `notify` with a display id, so its handler ignores
-// the channel's transient-click action.
-function notifyFromPanel(message: string, error = false, displayId?: string, detail?: string[]) {
-  notify(message, error, undefined, detail, displayId)
-}
-const noticeOpen = ref(false)
-// IDEA's status bar answers a right click with ViewStatusBarWidgetsGroup: a checklist
-// of every registered widget plus "hide current". TaoCode keeps the same list and
-// remembers the unchecked ones across restarts.
-const STATUS_WIDGETS: { key: string; label: string }[] = [
-  { key: 'file', label: '当前文件' },
-  { key: 'branch', label: 'Git 分支' },
-  { key: 'bridge', label: '桥接状态' },
-  { key: 'progress', label: '后台任务' },
-  { key: 'smartMode', label: '语言服务状态' },
-  { key: 'problems', label: '问题计数' },
-  { key: 'position', label: '光标位置' },
-  { key: 'readonly', label: '只读' },
-  { key: 'lineSeparator', label: '行分隔符' },
-  { key: 'memory', label: '内存' },
-  { key: 'encoding', label: '文件编码' },
-  { key: 'indent', label: '缩进' },
-  { key: 'column', label: '列选择' },
-  { key: 'powerSave', label: '省电模式' },
-  { key: 'notices', label: '通知中心' },
-]
-const hiddenWidgets = ref<Set<string>>(new Set())
-try {
-  const saved = JSON.parse(localStorage.getItem('taocode.hiddenStatusWidgets') ?? '[]') as unknown
-  if (Array.isArray(saved)) hiddenWidgets.value = new Set(saved.filter((key): key is string => typeof key === 'string' && STATUS_WIDGETS.some(widget => widget.key === key)))
-} catch { /* corrupted state falls back to "everything visible" */ }
-function showWidget(key: string) { return !hiddenWidgets.value.has(key) }
-function toggleWidget(key: string) {
-  const next = new Set(hiddenWidgets.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  hiddenWidgets.value = next
-  try { localStorage.setItem('taocode.hiddenStatusWidgets', JSON.stringify([...next])) } catch { /* session-only */ }
-}
-function showAllWidgets() {
-  hiddenWidgets.value = new Set()
-  try { localStorage.setItem('taocode.hiddenStatusWidgets', '[]') } catch { /* session-only */ }
-}
-// --- Status bar keyboard navigation (IdeStatusBarImpl.kt:313-323,863-872,952-962) -------------
-// IDEA makes the status bar a focus cycle root (:313) whose traversal order is the visible+enabled
-// widgets in visual order (:874-880,901-902,953), adds RIGHT/LEFT to the traversal keys (:317-322)
-// and wraps at both ends (:955-959). `focusFirstWidget` (:863-872) — reached through
-// `FocusStatusBarAction` (status/FocusStatusBarAction.kt:10-21) — enters the bar; Escape walks back
-// out through `restoreFocusToPreviousComponent` (:579-596). The rules themselves live in
-// `src/statusBarNav.ts` so they are testable without a DOM.
-const statusBarRef = ref<HTMLElement>()
-let statusBarFocusBefore: HTMLElement | null = null
-const STATUS_WIDGET_SELECTOR = '.statusbar button:not([disabled]), .statusbar [tabindex="0"]:not([disabled])'
-// Rows *inside* a popup are not widgets: IDEA's traversal walks the components injected into the
-// three panels, and the popup contents are reached through the popup's own focus cycle
-// (ProcessPopup.java:98-100 sets up its own FocusTraversalPolicy).
-const STATUS_POPUP_SELECTOR = '.status-progress-list, .status-toolwindows-popup, .status-widget-menu, .status-notice-list'
-function statusWidgets(): HTMLElement[] {
-  const root = statusBarRef.value
-  if (!root) return []
-  const candidates = [...root.querySelectorAll<HTMLElement>(STATUS_WIDGET_SELECTOR)]
-    .filter(element => !element.closest(STATUS_POPUP_SELECTOR))
-    .map(element => ({ element, hidden: element.offsetParent === null, disabled: element instanceof HTMLButtonElement && element.disabled }))
-  return focusableWidgets(candidates).map(entry => entry.element)
-}
-function focusStatusBar() {
-  const widgets = statusWidgets()
-  const active = document.activeElement as HTMLElement | null
-  const inside = Boolean(active && statusBarRef.value?.contains(active))
-  if (!shouldFocusFirstWidget(inside, widgets.length)) return
-  if (!inside) statusBarFocusBefore = active
-  widgets[0].focus()
-}
-function restoreFocusFromStatusBar() {
-  const saved = statusBarFocusBefore
-  statusBarFocusBefore = null
-  const usable = Boolean(saved?.isConnected && !(saved as HTMLButtonElement).disabled)
-  if (resolveRestoreTarget(Boolean(saved), usable) === 'previous' && saved) { saved.focus(); return }
-  // `:583-590` — the saved owner is gone, so the focus goes back to the editor component.
-  document.querySelector<HTMLElement>('.editor-stage .cm-content, .editor-stage textarea')?.focus()
-}
-function onStatusBarKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && !event.defaultPrevented) { restoreFocusFromStatusBar(); return }
-  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
-  const widgets = statusWidgets()
-  if (widgets.length < 2) return
-  const active = document.activeElement as HTMLElement | null
-  const direction: NavDirection = event.key === 'ArrowRight' ? 'next' : 'previous'
-  const next = navigateWidget(active ? widgets.indexOf(active) : -1, widgets.length, direction)
-  if (next < 0) return
-  event.preventDefault()
-  widgets[next].focus()
-}
+// 通知与状态栏键盘导航是一个域（IDEA 的通知中心 + IdeStatusBarImpl 的焦点遍历）。
+const {
+  noticeLog, noticeOpen, notify, notifyFromPanel, statusBarRef, statusWidgets, focusStatusBar,
+  restoreFocusFromStatusBar, onStatusBarKeydown, statusMenu, openStatusMenu, clearNotices, closeFirstNotification,
+} = createNotifications({ notice, noticeError, noticeAction })
 // --- IDEA's ToolWindowsWidget (status/ToolWindowsWidget.java:62-299) ---------
 // It is built straight into the status bar's left panel (IdeStatusBarImpl.kt:286-297)
 // instead of going through a StatusBarWidgetFactory, so it is *not* one of the widgets
@@ -1799,23 +895,31 @@ function toggleToolWindowStripes() {
 // the stripe titles with (ToolWindowsWidget.java:168). See src/toolWindows.ts.
 // isAvailable() && isShowStripeButton() (:163-167), then sorted by stripe title (:168).
 const availableToolWindows = computed(() => sortedByTitle([...toolWindowOrder].filter(id => !toolDisabled(id)), id => toolTitles[id]))
-const statusMenu = ref<{ x: number; y: number } | null>(null)
-function openStatusMenu(event: MouseEvent) {
-  // Never hijack the menu while a status chip has its own action menu open.
-  event.preventDefault()
-  statusMenu.value = { x: event.clientX, y: event.clientY }
-}
-function clearNotices() { noticeLog.value = []; noticeOpen.value = false }
-// WindowMenu › Notifications（`PlatformActions.xml:726-728`）：CloseFirstNotification 关掉
-// **最新**一条 —— `pushNotice` 是前插（`[entry, ...kept]`），所以最新就是下标 0；
-// CloseAllNotifications 清空整条日志（复用通知中心的 clearNotices）。
-function closeFirstNotification() {
-  noticeLog.value = noticeLog.value.slice(1)
-  if (!noticeLog.value.length) noticeOpen.value = false
-}
+// 状态栏"工具窗口"弹窗按停靠边分组（IDEA 的 ToolWindowsWidget 主体就是按 anchor 分组的列表）。
+const groupedAvailableToolWindows = computed(() => {
+  const groups: { anchor: Anchor; label: string; ids: ToolWindowId[] }[] = [
+    { anchor: 'left', label: '左侧', ids: [] },
+    { anchor: 'bottom', label: '底部', ids: [] },
+    { anchor: 'right', label: '右侧', ids: [] },
+  ]
+  for (const group of groups) {
+    group.ids = sortedByTitle(
+      toolWindowOrder.filter(id => !toolDisabled(id) && (toolAnchors[id] ?? 'left') === group.anchor),
+      id => toolTitles[id])
+  }
+  return groups.filter(group => group.ids.length > 0)
+})
+// 工具窗口内容宿主的上下文：见 src/toolViewContext.ts（它是**所有面板的输入面**，
+// 字段清单在那边；注入的是宿主里同名变量的引用，`computed` 保证随状态变化）。
+const toolViewCtx = computed<ToolWindowViewContext>(() => createToolViewContext({
+  workspace, explorer, active, activePath, lspReady, outline, sortedAll, projectSettings, todoSource,
+  syntheticNodes, editorSettings, fileTreeRef, searchPanelRef, testRunnerRef, noticeLog, clearNotices, runConfigProgram, runConfigCwd,
+  evaluateRequest, commitMessageSettings, editorFor, onSearchOpen, onSearchReplaced, revealLocation,
+  dropBookmark, openMnemonicPrompt, revertHistory, onTreeContext, openFile, notify, refreshTree,
+  historyEpoch, leftView, saveSettingsPatch, gitCompareWith, saveBookmarksView, gradleHost, gradleViewContext, openSettings,
+}))
 // IDEA's "Recent Places" collects every place the caret has been: files, symbols and
 // bookmarks alike, most recent first.
-interface Place { kind: '文件' | '符号' | '书签'; path: string; line: number; label: string; edited?: boolean }
 const places = ref<Place[]>([])
 // IdeDocumentHistory keeps navigation and change places as two rings; TaoCode records
 // one list and flags the entries that came from an edit, so "Show edited only" (the
@@ -1829,315 +933,21 @@ function rememberPlace(place: Place) {
     changePlaces.value = [place, ...kept].slice(0, 60)
   }
 }
-async function refreshAppState() {
-  const state = await request<AppState>('app.state')
-  recentProjects.value = state.recentProjects
-  editorSettings.value = state.settings
-  generalSettings.value = state.general ? { ...defaultGeneralSettings, ...state.general } : { ...defaultGeneralSettings }
-  gitAvailable.value = state.gitAvailable
-  defaultParent.value = state.defaultParent
-  appError.value = ''
-  return state
-}
-async function refreshRecent() {
-  if (working.value) return
-  busy.value = true
-  try { await refreshAppState() }
-  catch (error) { appError.value = errorMessage(error) }
-  finally { busy.value = false }
-}
-async function bootstrap() {
-  try {
-    const state = await refreshAppState()
-    loading.value = false
-    // The welcome page shows the installed-plugin count next to its nav entry, so
-    // the list is read once at startup; openPlugins() refreshes it afterwards.
-    if (isDesktop) {
-      try { pluginList.value = (await request<PluginList>('plugin.list')).plugins }
-      catch { pluginList.value = [] }
-    }
-    if (generalSettings.value.reopenLastProject && state.lastProject) await openWorkspace(state.lastProject)
-  } catch (error) { appError.value = errorMessage(error) }
-  finally { loading.value = false }
-}
-async function confirmLeave(title: string, scope = allTabs.value.filter(tab => tab.dirty)): Promise<boolean> {
-  if (!scope.length) return true
-  if (leavePrompt.value) return false
-  const choice = await new Promise<LeaveChoice>(resolve => { leavePrompt.value = { title, paths: scope.map(tab => tab.path), resolve } })
-  if (choice === 'cancel') return false
-  if (choice === 'discard') return true
-  for (const tab of scope) if (!await save(tab)) return false
-  return true
-}
-function answerLeave(choice: LeaveChoice) {
-  const prompt = leavePrompt.value
-  leavePrompt.value = null
-  prompt?.resolve(choice)
-}
-async function activateWorkspace(result: Workspace) {
-  resetLsp()
-  resetHierarchy()
-  workspaceEpoch++
-  workspace.value = result
-  closeAllPanes()
-  navBack.value = []
-  navForward.value = []
-  treeVersion.value++
-  places.value = []
-  useProjectSettings(structuredClone(defaultProjectSettings))
-  try {
-    useProjectSettings(await request<ProjectSettings>('project.settings.get'))
-    await refreshAppState()
-    selectRunConfig()
-  } catch (error) { notify(`项目已打开，但读取设置失败：${errorMessage(error)}`, true) }
-  await refreshSyntheticNodes()
-  void offerSessionRestore()
-}
-// IDEA's Project view keeps two synthetic nodes below the module (ProjectFileNodeImpl):
-// "External Libraries" and "Scratches and Consoles". TaoCode has no SDK index, so the
-// libraries node lists the configured JAR globs as leaf entries; scratches is the real
-// scratch/ folder. Both stay empty when the folder/globs do not exist.
-const syntheticNodes = ref<SyntheticNode[]>([])
-async function refreshSyntheticNodes() {
-  // IDEA's Project view "External Libraries" shows glob strings as leaves (they
-  // do not exist on disk to expand), so the synthetic rows must report kind:'file'
-  // to stop FileTree from recursively listing them. The "Scratches and Consoles"
-  // list under the scratch/ folder keeps the real entries; the leading "scratch/"
-  // prefix is added by workspace.list itself, not here.
-  const nodes: SyntheticNode[] = [{ path: '\u0000libraries', label: '外部库', icon: 'libraries', entries: [] }]
-  for (const glob of projectSettings.value.java.referencedLibraries)
-    nodes[0]!.entries.push({ name: glob, path: `\u0000lib:${glob}`, kind: 'file' })
-  try {
-    const scratches = await request<Entry[]>('workspace.list', { path: 'scratch' })
-    nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: 'scratches', entries: scratches.map(item => ({ ...item, path: item.path })) })
-  } catch { /* scratch/ may not exist yet */ }
-  syntheticNodes.value = nodes
-}
-async function openWorkspace(path?: string) {
-  menu.value = null
-  if (working.value || !await confirmLeave('切换项目')) return
-  busy.value = true
-  try {
-    // The folder picker opens in the configured default project directory when there is one
-    // and the host's suggestion otherwise (see defaultProjectParent()).
-    const result = await request<Workspace | null>('workspace.open', path ? { path } : { initial: defaultProjectParent() })
-    if (!result) return
-    await activateWorkspace(result)
-    notify(isDesktop ? `已打开 ${result.root}` : '已打开内存示例；保存不会写入磁盘。')
-  } catch (error) { appError.value = errorMessage(error); notify(errorMessage(error), true) }
-  finally { busy.value = false }
-}
-async function closeWorkspace() {
-  menu.value = null
-  if (working.value || !await confirmLeave('关闭项目并返回欢迎页')) return
-  busy.value = true
-  try {
-    // The user settled every dirty buffer on the way out (save or discard), so the
-    // crash-recovery session must not survive as a phantom prompt. Cleared before
-    // workspace.close empties the native root.
-    if (isDesktop) void request('session.clear').catch(() => undefined)
-    await request('workspace.close')
-    resetLsp()
-    resetHierarchy()
-    workspaceEpoch++
-    workspace.value = null
-    closeAllPanes()
-    projectSettings.value = structuredClone(defaultProjectSettings)
-    bookmarks.value = []
-    places.value = []
-    runConfigName.value = ''
-    binaryView.value = null
-    palette.value = false
-    notice.value = ''
-    await refreshAppState()
-  } catch (error) { notify(errorMessage(error), true) }
-  finally { busy.value = false }
-}
-async function forgetProject(path: string) {
-  return forgetProjects([path])
-}
-// Source: RecentProjectsManagerBase.removePath + removePathsFromGroups
-// (platform-impl/.../RecentProjectsManagerBase.kt:270-301). IDEA fires one
-// fireChangeEvent() per call; RemoveSelectedProjectsAction drives a batch call
-// here, and the bridge wraps the loop into a single state mutation.
-async function forgetProjects(paths: string[]) {
-  if (working.value || paths.length === 0) return
-  busy.value = true
-  try {
-    const state = await request<AppState>('projects.forgetMany', { paths })
-    recentProjects.value = state.recentProjects
-    notify(paths.length === 1
-      ? '已从最近项目列表移除，磁盘文件未删除。'
-      : `已从最近项目列表移除 ${paths.length} 项，磁盘文件未删除。`)
-  } catch (error) { appError.value = errorMessage(error) }
-  finally { busy.value = false }
-}
-// IDEA's "Default project directory" is a *local* preference (GeneralSettings.kt:223-225 and
-// GeneralLocalSettings.kt:60-63, which is why the settings page calls it 默认项目目录) used by
-// the welcome screen and the attach dialog when a project has to be placed somewhere new —
-// WelcomeScreenProjectProvider.kt:231, AttachProjectAction.kt:73. It overrides the directory
-// the host suggests (the OS documents folder, `defaultParent` from app.state), so an empty
-// setting keeps today's behaviour.
-function defaultProjectParent(): string {
-  return generalSettings.value.defaultProjectDirectory.trim() || defaultParent.value
-}
-async function beginProject(mode: 'create' | 'clone') {
-  menu.value = null
-  if (working.value || !await confirmLeave(mode === 'create' ? '创建并打开新项目' : '克隆并打开项目')) return
-  projectError.value = ''
-  cloneProgress.splice(0)
-  projectForm.value = { parent: defaultProjectParent(), name: 'untitled', template: 'empty', source: '' }
-  projectMode.value = mode
-}
-async function browseParent() {
-  if (busy.value || projectBusy.value) return
-  busy.value = true
-  try {
-    // Re-open the picker where the form currently points (and in the configured default
-    // project directory when the form is still empty).
-    const start = projectForm.value.parent.trim() || defaultProjectParent()
-    const path = await request<string | null>('dialog.pickDirectory', { initial: start })
-    if (path) projectForm.value.parent = path
-  } catch (error) { projectError.value = errorMessage(error) }
-  finally { busy.value = false }
-}
-async function submitProject() {
-  if (projectBusy.value || busy.value || !projectMode.value) return
-  if (!isDesktop) { projectError.value = '请在桌面端创建或克隆项目，浏览器不访问磁盘。'; return }
-  const mode = projectMode.value
-  const form = { ...projectForm.value }
-  projectBusy.value = true
-  projectError.value = ''
-  try {
-    const result = await request<Workspace>(mode === 'create' ? 'project.create' : 'project.clone', form)
-    await activateWorkspace(result)
-    projectMode.value = null
-    notify(`${mode === 'create' ? '已创建' : '已克隆'}并打开 ${result.root}`)
-    if (mode === 'create' && form.template === 'java') await openFile('src/Main.java', true)
-  } catch (error) { projectError.value = errorMessage(error) }
-  finally { projectBusy.value = false; cancelling.value = false }
-}
-async function cancelProject() {
-  if (!projectBusy.value) { projectMode.value = null; return }
-  if (projectMode.value !== 'clone' || cancelling.value) return
-  cancelling.value = true
-  try { await request('project.clone.cancel') }
-  catch (error) { projectError.value = errorMessage(error); cancelling.value = false }
-}
 // IDEA remembers the last-edited configurable (project.structure.last.edited); the
 // Window menu jumps straight into a section, so the dialog needs the hint.
-const settingsSectionHint = ref<SettingsSectionHint>(null)
-// 编辑器设置已按 IDEA 拆成子页（编辑器 › 常规 › 外观 / 编辑器标签页、编辑器 › 代码风格 › 制表符与缩进、
-// 工具 › 保存时操作），所以跳转目标用的是具体的叶子页名，而不是一个笼统的 'editor'。
-type SettingsSectionHint = 'appearance' | 'editor.general' | 'editor.general.appearance' | 'editor.general.tabs'
-  | 'editor.codeStyle.indents' | 'tools.actionsOnSave' | 'structure' | 'templates' | 'commit' | 'general' | null
-async function openSettings(section?: SettingsSectionHint) {
-  settingsSectionHint.value = section ?? null
-  menu.value = null
-  if (working.value) return
-  settingsError.value = ''
-  settingsOpen.value = true
-  if (workspace.value) {
-    settingsBusy.value = true
-    try { projectSettings.value = await request<ProjectSettings>('project.settings.get') }
-    catch (error) { settingsError.value = errorMessage(error) }
-    finally { settingsBusy.value = false }
-  }
-}
-// `close` is false for the dialog's 应用 (Apply) button: IDEA's Apply commits the changes and
-// keeps the dialog open, only OK closes it (SettingsDialog.java's OK/Apply triple).
-async function saveSettings(settings: EditorSettings, close = true) {
-  if (settingsBusy.value) return
-  settingsBusy.value = true
-  settingsError.value = ''
-  try {
-    editorSettings.value = await request<EditorSettings>('settings.update', { settings })
-    if (close) settingsOpen.value = false
-    notify(isDesktop ? '编辑器设置已保存并生效。' : '编辑器设置已应用于当前预览会话。')
-  } catch (error) { settingsError.value = errorMessage(error) }
-  finally { settingsBusy.value = false }
-}
-// Source: GeneralSettingsConfigurable.kt — the System Settings page saves through the
-// same Settings dialog Apply/OK flow as the editor page.
-async function saveGeneralSettings(settings: GeneralSettingsState, close = true) {
-  if (settingsBusy.value) return
-  settingsBusy.value = true
-  settingsError.value = ''
-  try {
-    generalSettings.value = await request<GeneralSettingsState>('settings.general.update', { general: settings })
-    if (close) settingsOpen.value = false
-    notify(isDesktop ? '系统设置已保存并生效。' : '系统设置已应用于当前预览会话。')
-  } catch (error) { settingsError.value = errorMessage(error) }
-  finally { settingsBusy.value = false }
-}
-// IDEA's commit-message inspections live in Settings › Version Control › Commit
-// (CommitDialogConfigurable.kt:66-77) and are stored per project in vcs.xml; the values are
-// project-agnostic here, so they persist next to the other `taocode.*` front-end keys.
-const commitMessageSettings = ref<CommitMessageInspectionSettings>(readCommitMessageSettings())
-function readCommitMessageSettings(): CommitMessageInspectionSettings {
-  try { return resolveInspectionSettings(JSON.parse(localStorage.getItem(COMMIT_MESSAGE_INSPECTION_STORAGE_KEY) ?? 'null')) }
-  catch { return resolveInspectionSettings(null) }
-}
-function saveCommitMessageSettings(next: CommitMessageInspectionSettings, close = true) {
-  commitMessageSettings.value = resolveInspectionSettings(next)
-  try { localStorage.setItem(COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, JSON.stringify(commitMessageSettings.value)) }
-  catch { /* storage unavailable: session-only */ }
-  if (close) settingsOpen.value = false
-  notify('提交信息检查设置已保存。')
-}
-async function saveProjectSettings(patch: { excludedDirs: string[]; todoPatterns: TodoPattern[] }) {
-  if (settingsBusy.value || !workspace.value) return
-  settingsBusy.value = true
-  settingsError.value = ''
-  try {
-    const result = await request<{ settings: ProjectSettings; entries: Entry[] }>('project.settings.update', patch)
-    projectSettings.value = result.settings
-    workspace.value.entries = result.entries
-    treeVersion.value++
-    settingsOpen.value = false
-    notify('项目设置已更新；已打开文件不会关闭。')
-  } catch (error) { settingsError.value = errorMessage(error) }
-  finally { settingsBusy.value = false }
-}
-async function saveTemplateSettings(templates: TemplateSettings) {
-  if (!workspace.value || settingsBusy.value) return
-  const epoch = workspaceEpoch
-  settingsBusy.value = true
-  settingsError.value = ''
-  try {
-    const result = await request<{ settings: ProjectSettings }>('project.settings.update', { templates })
-    if (epoch !== workspaceEpoch) return
-    projectSettings.value = { ...projectSettings.value, templates: result.settings.templates }
-    notify('实时模板设置已保存。')
-  } catch (error) { if (epoch === workspaceEpoch) settingsError.value = errorMessage(error) }
-  finally { settingsBusy.value = false }
-}
-async function saveJavaSettings(java: JavaProjectSettings) {
-  if (!workspace.value || settingsBusy.value) return
-  const epoch = workspaceEpoch
-  settingsBusy.value = true
-  settingsError.value = ''
-  try {
-    const result = await request<{ settings: ProjectSettings }>('project.settings.update', { java })
-    if (epoch !== workspaceEpoch) return
-    projectSettings.value = result.settings
-    bookmarks.value = [...result.settings.bookmarks]
-    notify('Java 项目设置已保存并交给语言服务。')
-  } catch (error) { if (epoch === workspaceEpoch) settingsError.value = errorMessage(error) }
-  finally { settingsBusy.value = false }
-}
-// The Project Structure pane's Edit/Browse buttons: pick a directory with the native
-// dialog and write it straight into the stored Java settings.
-async function browseStructureDir(field: 'jdkHome' | 'outputPath') {
-  if (busy.value || settingsBusy.value || !isDesktop) return
-  busy.value = true
-  try {
-    const start = projectSettings.value.java[field] ?? ''
-    const path = await request<string | null>('dialog.pickDirectory', { initial: start })
-    if (path && workspace.value) await saveJavaSettings({ ...projectSettings.value.java, [field]: path })
-  } catch (error) { notify(errorMessage(error), true) }
-  finally { busy.value = false }
-}
+// 设置的持久化与各页保存是一个域（190 行）；注入的是宿主已有的 ref，模板零改动。
+const {
+  settingsSectionHint, commitMessageSettings, openSettings, saveSettings, saveGeneralSettings, readCommitMessageSettings, saveCommitMessageSettings,
+  saveProjectSettings, saveTemplateSettings, saveTodoPatterns, saveFileAssociations, saveVcsLog, saveBookmarksView,
+  saveScopes, saveJavaSettings, browseStructureDir, saveBuildTools,
+} = createSettingsPersistence({
+  // 惰性：`startLsp` 由 LSP 模块提供（解构在更后面），这里只要一个引用。
+  notify, isDesktop, startLsp: (...args) => startLsp(...args), settingsOpen, settingsBusy, settingsError,
+  editorSettings, generalSettings, projectSettings,
+  bookmarks: () => bookmarks.value, setBookmarks: value => { bookmarks.value = value },
+  busy, menu, allTabs, bufferEpoch, treeVersion,
+  workspaceEpoch: () => workspaceEpoch, working, workspace,
+})
 async function openFile(path: string, internal = false, options?: { preview?: boolean }) {
   if ((busy.value && !internal) || opening.has(path)) return
   const existing = findTab(path)
@@ -2193,568 +1003,93 @@ async function revealBinary() {
 // EXT-01 plugin extension points: a plugin is a directory under the profile holding a
 // plugin.json; it publishes commands and templates and is enabled/disabled by a
 // `.disabled` marker. No third-party code is loaded into the host.
-const pluginOpen = ref(false)
-const pluginBusy = ref(false)
-const pluginList = ref<PluginInfo[]>([])
-async function openPlugins() {
-  if (!isDesktop) { notify('浏览器预览不能读取本机插件目录，请在桌面端使用。', true); return }
-  pluginBusy.value = true
-  try { pluginList.value = (await request<PluginList>('plugin.list')).plugins; pluginOpen.value = true }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { pluginBusy.value = false }
-}
-async function togglePlugin(plugin: PluginInfo) {
-  try {
-    const result = await request<PluginList>('plugin.setEnabled', { id: plugin.id, enabled: !plugin.enabled })
-    pluginList.value = result.plugins
-    notify(`${plugin.enabled ? '已停用' : '已启用'}插件「${plugin.name || plugin.id}」`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// VCS-01/03: worktrees and submodules are two Git views the 源代码管理 tool window
-// does not cover, so they get their own dialogs.
-const worktreeOpen = ref(false)
-const worktreeBusy = ref(false)
-const worktrees = ref<GitWorktree[]>([])
-const worktreePath = ref('')
-const worktreeBranch = ref('')
-const worktreeNewBranch = ref(false)
-async function openWorktrees() {
-  if (!workspace.value || !isDesktop) { notify('请先打开一个 Git 项目。', true); return }
-  worktreeBusy.value = true
-  try { worktrees.value = (await request<GitWorktrees>('git.worktree.list')).worktrees; worktreeOpen.value = true }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { worktreeBusy.value = false }
-}
-async function addWorktree() {
-  const path = worktreePath.value.trim()
-  if (!path) { notify('请填写工作树路径。', true); return }
-  worktreeBusy.value = true
-  try {
-    const result = await request<GitWorktrees>('git.worktree.add', { path, branch: worktreeBranch.value.trim(), newBranch: worktreeNewBranch.value })
-    worktrees.value = result.worktrees
-    worktreePath.value = ''; worktreeBranch.value = ''
-    notify('已添加工作树。')
-  } catch (error) { notify(errorMessage(error), true) }
-  finally { worktreeBusy.value = false }
-}
-async function removeWorktree(path: string) {
-  worktreeBusy.value = true
-  try { worktrees.value = (await request<GitWorktrees>('git.worktree.remove', { path })).worktrees; notify('已移除工作树。') }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { worktreeBusy.value = false }
-}
-const submoduleOpen = ref(false)
-const submoduleBusy = ref(false)
-const submodules = ref<GitSubmodule[]>([])
-async function openSubmodules() {
-  if (!workspace.value || !isDesktop) { notify('请先打开一个 Git 项目。', true); return }
-  submoduleBusy.value = true
-  try { submodules.value = (await request<GitSubmodules>('git.submodules')).submodules; submoduleOpen.value = true }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { submoduleBusy.value = false }
-}
-async function updateSubmodules() {
-  submoduleBusy.value = true
-  try { submodules.value = (await request<GitSubmodules>('git.submodule.update')).submodules; notify('已更新子模块。') }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { submoduleBusy.value = false }
-}
-// VCS-01 "Show History for File": `--follow` keeps the log going across renames, and
-// picking a commit shows what that commit actually changed.
-const fileHistoryOpen = ref(false)
-const fileHistoryBusy = ref(false)
-const fileHistory = ref<GitFileHistory | null>(null)
-const fileHistoryCommit = ref<GitShowCommit | null>(null)
-const fileHistorySelected = ref('')
-async function showFileHistory(path: string) {
-  if (!isDesktop) { notify('浏览器预览不能读取 Git 历史，请在桌面端使用。', true); return }
-  fileHistoryBusy.value = true
-  fileHistoryCommit.value = null
-  fileHistorySelected.value = ''
-  try { fileHistory.value = await request<GitFileHistory>('git.fileHistory', { path }); fileHistoryOpen.value = true }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { fileHistoryBusy.value = false }
-}
-async function showCommit(revision: string) {
-  fileHistoryBusy.value = true
-  fileHistorySelected.value = revision
-  try { fileHistoryCommit.value = await request<GitShowCommit>('git.showCommit', { revision }) }
-  catch (error) { notify(errorMessage(error), true) }
-  finally { fileHistoryBusy.value = false }
-}
-async function startLsp(tab: Tab) {
-  setLspDiagnostics(tab.path, [])
-  try {
-    const opened = await request<LspOpenResult>('lsp.open', { path: tab.path, text: tab.content })
-    tab.lspRunning = opened.running
-    tab.lspConfigured = opened.configured === true
-  }
-  catch { tab.lspRunning = false }
-  if (tab.path === activePath.value) void refreshOutline(tab.path)
-}
-function lspOn(tab: Tab) {
-  // IDEA PowerSaveMode: code insight is switched off entirely while it is on.
-  if (editorSettings.value.powerSaveMode) return false
-  return isDesktop && tab.lspRunning === true && tab.content.length <= 5 * 1024 * 1024
-}
-// IDEA's "save files if the application is idle": GeneralSettings.isAutoSaveIfInactive
-// (GeneralSettings.kt:81-91 -> state.autoSaveIfInactive), with the delay from
-// SAVE_FILES_AFTER_IDLE_SEC (:163 = 15, range 1..300, read as `inactiveTimeout.seconds` at
-// :193-202). SaveAndSyncHandlerImpl.kt:332-350 pushes idle events through
-// `debounce(inactiveTimeout.seconds)` and then saves every document; the timer below is
-// restarted by every edit (onEditorChange), which is the same "idle" signal.
-// Only buffers that actually changed are written, and a failed save still surfaces through
-// save()'s own error.
-//
-// The editor page used to carry its own `autoSave` switch with a hard-coded 5s: a second name
-// for this one option, so it is gone and this key now has its consumer.
-const autoSaveDelay = computed(() => Math.min(300, Math.max(1, generalSettings.value.inactiveTimeout)) * 1000)
-let autoSaveTimer: number | undefined
-function clearAutoSave() { if (autoSaveTimer) { window.clearTimeout(autoSaveTimer); autoSaveTimer = undefined } }
-function scheduleAutoSave() {
-  clearAutoSave()
-  if (!generalSettings.value.autoSaveIfInactive || !isDesktop || !dirty.value) return
-  autoSaveTimer = window.setTimeout(() => {
-    autoSaveTimer = undefined
-    if (generalSettings.value.autoSaveIfInactive && dirty.value) void saveAll()
-  }, autoSaveDelay.value)
-}
-// SaveAndSyncHandlerImpl.kt:300-319 — on frame deactivation IDEA saves every document when
-// GeneralSettings.isSaveOnFrameDeactivation (:73-78 -> state.autoSaveFiles) is on. The
-// window's `blur` is the same signal as ApplicationActivationListener.applicationDeactivated.
-function onWindowBlur() {
-  if (!isDesktop || !generalSettings.value.autoSaveFiles || !dirty.value) return
-  void saveAll()
-}
-function onEditorChange(tab: Tab) {
-  tab.dirty = true
-  tab.preview = false
-  // IdeDocumentHistory.placeChanged(EditorEvent.DocumentChange): every user edit
-  // pushes the caret line onto the "changed places" ring.
-  rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true })
-  if (markdownPreviewOn.value && tab.path === activePath.value) refreshMarkdownSoon()
-  scheduleAutoSave()
-  scheduleSessionSave()  // drafts change on every keystroke, not just on dirty-flip
-}
-// IDEA's "Last Edit Location" is project-wide (JumpToLastChangeAction reads
-// IdeDocumentHistory.changePlaces), so Ctrl+Shift+Backspace follows edits across
-// files; the per-editor handler only covers jumps inside one buffer.
-function jumpLastEditLocation() {
-  const current = active.value
-  const here = current ? `${current.path}:${Math.max(0, (editorFor(current.path)?.getCursor().line ?? current.line - 1))}` : ''
-  const place = changePlaces.value.find(item => `${item.path}:${item.line}` !== here)
-  if (!place) { notify('没有上次编辑位置。', true); return }
-  void revealLocation(place)
-}
-function stopLspFile(path: string) {
-  clearLspDiagnostics(path)
-  if (isDesktop) void request('lsp.close', { path }).catch(() => undefined)
-}
-function resetLsp() {
-  for (const path of [...lspDiagnostics.keys()]) clearLspDiagnostics(path)
-  if (isDesktop) void request('lsp.stop').catch(() => undefined)
-}
-async function revealLocation(target: { path: string; line: number; column?: number; kind?: Place['kind']; label?: string }, record = true) {
-  const epoch = workspaceEpoch
-  if (record && activePath.value && (activePath.value !== target.path || (active.value?.line ?? 1) - 1 !== target.line)) {
-    navBack.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
-    if (navBack.value.length > 100) navBack.value.shift()
-    navForward.value = []
-  }
-  if (!hasTabPath(target.path)) {
-    await openFile(target.path)
-    if (epoch !== workspaceEpoch) return
-    if (!hasTabPath(target.path)) { notify(`无法打开定义位置 ${target.path}`, true); return }
-    // openFile records the fresh file at line 0; a jump owns the real destination.
-    places.value = places.value.filter(item => item.path !== target.path)
-  }
-  // IDEA jumps in whichever pane already shows the file; otherwise the focused pane.
-  const pane = groups[0].tabs.some(tab => tab.path === target.path) ? 0 as const : groups[1].tabs.some(tab => tab.path === target.path) ? 1 as const : splitModel.focused
-  splitModel.focused = pane
-  groups[pane].activePath = target.path
-  await nextTick()
-  if (epoch !== workspaceEpoch) return
-  reveal.value = { path: target.path, line: target.line, ...(target.column ? { column: target.column } : {}) }
-  rememberPlace({ kind: target.kind ?? '文件', path: target.path, line: target.line, label: target.label ?? target.path })
-}
-async function goBack() {
-  const from = navBack.value.pop()
-  if (!from) return
-  navForward.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
-  await revealLocation(from, false)
-}
-async function goForward() {
-  const to = navForward.value.pop()
-  if (!to) return
-  navBack.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
-  await revealLocation(to, false)
-}
-// Menu and keyboard reach the two prompts through the same opener, which owns the
-// focus/selection step the prompt needs.
-function openGoLine() { goLineValue.value = ''; goLinePrompt.value = true; void nextTick(() => goLineInput.value?.select()) }
-function openRecentFiles() { recentQuery.value = ''; recentPrompt.value = true; void nextTick(() => recentInput.value?.focus()) }
-const placesPrompt = ref(false)
-const placesQuery = ref('')
-const placesInput = ref<HTMLInputElement>()
-// RecentLocationsAction: the checkbox toggles navigation places vs change places, and
-// the popup title follows it ("Recent Locations" / "Recently Edited Locations").
-const placesEditedOnly = ref(false)
-const placesList = computed(() => placesEditedOnly.value ? changePlaces.value : places.value)
-// RecentLocationsRenderer shows the caret line's snippet; buffers are live in memory.
-function placeSnippet(place: Place): { text: string; firstLine: number } {
-  const tab = findTab(place.path)
-  if (!tab) return { text: '', firstLine: 0 }
-  return locationSnippet(tab.content.split(/\r?\n/), Math.min(place.line, Math.max(0, tab.content.split(/\r?\n/).length - 1)))
-}
-const placesFiltered = computed(() => {
-  const query = placesQuery.value.trim().toLowerCase()
-  return query ? placesList.value.filter(place => place.label.toLowerCase().includes(query) || place.path.toLowerCase().includes(query)) : placesList.value
+// 插件 / 工作树 / 子模块 / 文件历史是一个域（各自的 open/busy/数据都在模块里自持）。
+const {
+  pluginOpen, pluginBusy, pluginList, installingPlugins, openPlugins, togglePluginById, installPlugin, installPluginDirectory, setPluginsEnabled, uninstallPlugin, refreshPlugins, togglePlugin,
+  worktreeOpen, worktreeBusy, worktrees, worktreePath, worktreeBranch, worktreeNewBranch, openWorktrees, addWorktree, removeWorktree,
+  submoduleOpen, submoduleBusy, submodules, openSubmodules, updateSubmodules,
+  fileHistoryOpen, fileHistoryBusy, fileHistory, fileHistoryCommit, fileHistorySelected, showFileHistory, showCommit,
+} = createProjectExtras({ notify, isDesktop, workspace: () => workspace.value })
+// 代码洞察的语义动作是一个域：`onSemantic` 是编辑器 `@semantic` 的唯一入口，它分发到的
+// 重命名/格式化/签名帮助/代码动作/层级视图共享同一批弹窗状态（`signaturePopup` / `batchFixBusy`）。
+// 审阅入口：src/semanticActions.ts。
+const {
+  signaturePopup, closeSignaturePopup, navigateSignature, batchFixBusy, fixAllInFile,
+  onSemantic, runFormatting, runSignature, openCodeActions, caretPayload, runOrganizeImports,
+  applyCodeAction, renameEntryWithReferences, applyEditsToFiles, submitRename, applyRename,
+  toggleOutline, jumpDebugLocation,
+} = createSemanticActions({
+  notify, isDesktop, generalSettings, workspace: () => workspace.value, active, activePath, findTab, editorFor,
+  lspReady, save, references, codeActions, actionPrompt, renamePrompt, renameValue, renameInput, invalidRenameName,
+  baseName, explorer, leftView,
+  // 惰性：这些能力的声明都在本块之后（LSP 模块、层级视图模块、底部面板、标签标题），互为上下游。
+  lspOn: (...a) => lspOn(...a),
+  prepareHierarchy: (...a) => prepareHierarchy(...a),
+  showOutput: (...a) => showOutput(...a),
+  refreshOutline: (...a) => refreshOutline(...a),
+  revealLocation: (...a) => revealLocation(...a),
+  retitleTab: (...a) => retitleTab(...a),
 })
-// ScrollingUtil.installActions + ENTER: the list keeps a highlighted row, Enter jumps.
-const placesIndex = ref(0)
-function movePlace(step: number) {
-  const size = Math.max(1, placesFiltered.value.length)
-  placesIndex.value = (placesIndex.value + step + size) % size
-}
-watch(placesQuery, () => { placesIndex.value = 0 })
-watch(placesEditedOnly, () => { placesIndex.value = 0 })
-function openRecentPlaces() {
-  placesQuery.value = ''
-  menu.value = null
-  palette.value = false; symbolPrompt.value = null; recentPrompt.value = false
-  placesPrompt.value = true
-  void nextTick(() => placesInput.value?.focus())
-}
-function openPlace(place: Place) { placesPrompt.value = false; void revealLocation(place) }
-function fileSymbolEntries(query: string): SymbolEntry[] {
-  const path = activePath.value
-  if (!path) return []
-  const q = query.trim().toLowerCase()
-  return outline.value
-    .filter(symbol => !q || symbol.name.toLowerCase().includes(q))
-    .slice(0, 200)
-    .map(symbol => ({ name: symbol.name, kind: symbol.kind, path, line: symbol.startLine, character: symbol.startChar }))
-}
-async function globalSymbolEntries(query: string) {
-  const q = query.trim()
-  if (!isDesktop || !workspace.value || q.length < 2) { symbolResults.value = []; return }
+// Code Vision（LSP `codeLens`）的点击 —— IDEA 的 `CodeVisionProvider.handleClick`
+// （platform/lang-impl/src/com/intellij/codeInsight/codeVision/CodeVisionProvider.kt:76）。
+// 条目里的命令直接转成 `workspace/executeCommand`，复用既有链路。
+async function runCodeLensCommand(payload: { command: string; arguments?: unknown[] }) {
+  if (!payload?.command) return
   try {
-    const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>('lsp.request', { kind: 'workspaceSymbol', path: activePath.value ?? '', query: q })
-    const all = result.symbols ?? []
-    symbolResults.value = (symbolPrompt.value?.mode === 'class' ? all.filter(entry => CLASS_KINDS.has(entry.kind)) : all).slice(0, 200)
-  } catch { symbolResults.value = [] }
+    await request('lsp.request', {
+      kind: 'executeCommand', path: activePath.value, line: 0, character: 0, command: payload.command,
+      // `arguments` 是可选参数：没有就不发这个键（见 lsp_session.cpp 的整形）。
+      ...(payload.arguments ? { arguments: payload.arguments } : {}),
+    })
+  } catch (error) { notify(errorMessage(error), true) }
 }
-function openSymbol(mode: 'file' | 'global' | 'class') {
-  menu.value = null
-  if (!active.value) return
-  symbolPrompt.value = { mode }
-  symbolQuery.value = ''
-  symbolResults.value = mode === 'file' ? fileSymbolEntries('') : []
-  // 'class' needs two characters typed (the same threshold as the LSP query), so the
-  // list starts empty and fills as the user types.
-  symbolIndex.value = 0
-  void nextTick(() => symbolInput.value?.focus())
-}
-function onSymbolQuery() {
-  symbolIndex.value = 0
-  if (symbolPrompt.value?.mode === 'file') { symbolResults.value = fileSymbolEntries(symbolQuery.value); return }
-  if (symbolTimer !== undefined) clearTimeout(symbolTimer)
-  symbolTimer = window.setTimeout(() => void globalSymbolEntries(symbolQuery.value), 250)
-}
-function moveSymbol(delta: number) {
-  const count = symbolResults.value.length
-  if (!count) return
-  symbolIndex.value = (symbolIndex.value + delta + count) % count
-}
-async function jumpSymbol(entry: SymbolEntry) {
-  symbolPrompt.value = null
-  await revealLocation({ path: entry.path, line: entry.line, kind: '符号', label: entry.name })
-}
-async function onSearchOpen(payload: { path: string; line: number }) {
-  await revealLocation({ path: payload.path, line: Math.max(0, payload.line - 1) })
-}
-// A replace rewrites files behind the editors' backs: reload every open buffer whose
-// path was touched, then refresh the tree so the UI never shows stale content.
-async function onSearchReplaced(payload: { paths: string[] }) {
-  for (const path of payload.paths) {
-    const tab = findTab(path)
-    if (!tab || tab.dirty) continue   // never clobber unsaved edits
-    try {
-      const doc = await request<DocumentData>('file.read', { path })
-      tab.content = doc.content
-      tab.version = doc.version
-      tab.readOnly = doc.readOnly
-      // The editor holds its own buffer, so the new text has to be pushed into it.
-      editorFor(path)?.setDraft(doc.content)
-    } catch { /* the file may have been moved mid-replace */ }
-  }
-  await refreshTree()
-}
-function wordAt(text: string, line0: number, char0: number) {
-  const line = text.split('\n')[line0] ?? ''
-  const head = /[A-Za-z0-9_$]*$/.exec(line.slice(0, char0))?.[0] ?? ''
-  const tail = /^[A-Za-z0-9_$]*/.exec(line.slice(char0))?.[0] ?? ''
-  return head + tail
-}
-function offsetOf(lines: string[], line: number, character: number) {
-  let offset = 0
-  for (let i = 0; i < line; i++) offset += (lines[i]?.length ?? 0) + 1
-  return offset + Math.min(character, lines[line]?.length ?? 0)
-}
-// LSP TextEdits are 0-based half-open ranges; applied last→first so earlier
-// offsets stay valid. Ranges come from the language service, disjoint by design.
-function applyTextEdits(content: string, edits: LspTextEdit[]) {
-  const lines = content.split('\n')
-  return edits
-    .map(edit => ({ text: edit.text, from: offsetOf(lines, edit.startLine, edit.startChar), to: offsetOf(lines, edit.endLine, edit.endChar) }))
-    .sort((a, b) => b.from - a.from)
-    .reduce((text, edit) => text.slice(0, edit.from) + edit.text + text.slice(edit.to), content)
-}
-// GoToMenu › NavigateInFileGroup 的 MethodDown / MethodUp（`PlatformActions.xml:621-623`）。
-// 不需要新的语言服务能力：已实现的 `textDocument/documentSymbol` 就够 —— LSP SymbolKind
-// 6 = Method、12 = Function，只认这两类，避免把字段/变量也当方法。键位与 IDEA 一致（Alt+Down / Alt+Up）。
-const METHOD_SYMBOL_KINDS = [6, 12]
-async function jumpMethod(direction: 1 | -1) {
-  const tab = active.value
-  if (!tab || !lspOn(tab)) { notify('该文件未启用语言服务。', true); return }
-  await refreshOutline(tab.path)
-  const methods = [...new Set(outline.value
-    .filter(symbol => METHOD_SYMBOL_KINDS.includes(symbol.kind))
-    .map(symbol => symbol.startLine))].sort((a, b) => a - b)
-  if (!methods.length) { notify('该文件没有可跳转的方法。'); return }
-  const current = Math.max(0, editorFor(tab.path)?.getCursor().line ?? 0)
-  // 与 IDEA 一致：跳到光标**之后/之前**的最近一个方法起点，已经到头就提示而不是绕回。
-  const target = direction === 1
-    ? methods.find(start => start > current)
-    : [...methods].reverse().find(start => start < current)
-  if (target === undefined) { notify(direction === 1 ? '已经是最后一个方法。' : '已经是第一个方法。'); return }
-  void revealLocation({ path: tab.path, line: target, column: 1 })
-}
-async function refreshOutline(path: string) {
-  const tab = findTab(path)
-  if (!tab || !lspOn(tab)) { outline.value = []; return }
-  try {
-    const result = await request<{ available: boolean; symbols?: LspDocumentSymbol[] }>('lsp.request', { kind: 'documentSymbol', path })
-    outline.value = result.available ? result.symbols ?? [] : []
-  } catch { outline.value = [] }
-}
-async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }) {
-  const tab = findTab(payload.path)
-  if (!tab || !lspOn(tab)) { notify('该文件未启用语言服务。', true); return }
-  if (payload.kind === 'rename') {
-    if (tab.dirty && !await save(tab)) return
-    renamePrompt.value = { path: payload.path, line: payload.line, character: payload.character, current: wordAt(tab.content, payload.line, payload.character) }
-    renameValue.value = renamePrompt.value.current
-    await nextTick()
-    renameInput.value?.select()
+// LSP `documentLink` 的 Ctrl+Click（IDEA 侧的 Ctrl+Click 跳转 = `GotoDeclarationHandler`，
+// "点一下导航"的抽象 = `HyperlinkInfo.navigate`，见 `src/documentLinks.ts` 的模块注释）。
+// 外部链接交给系统（`shell.openUrl`，宿主会拒绝没有协议前缀的字符串），
+// 文件路径交给 IDE 自己打开 —— 这样才能定位到行、复用标签页。
+async function openDocumentLink(link: DocumentLink) {
+  const action = classifyLinkTarget(link.target)
+  if (action.kind === 'none') { notify(describeLink(link), true); return }
+  if (action.kind === 'external') {
+    if (!isDesktop) { notify(`浏览器预览里不能打开外部链接：${action.url}`); return }
+    try { await request('shell.openUrl', { url: action.url }) }
+    catch (error) { notify(errorMessage(error), true) }
     return
   }
-  if (payload.kind === 'format') { await runFormatting(payload.path, payload.range); return }
-  if (payload.kind === 'signature') { await runSignature(payload); return }
-  if (payload.kind === 'codeAction') { await openCodeActions(payload); return }
-  if (payload.kind === 'callHierarchy') { await prepareHierarchy('call', payload); return }
-  if (payload.kind === 'typeHierarchy') { await prepareHierarchy('type', payload); return }
-  try {
-    // references and implementation share the same "go to a list of locations" UI.
-    showOutput('references')
-    references.value = []
-    const result = await request<LspReferencesResult>('lsp.request', { kind: payload.kind, path: payload.path, line: payload.line, character: payload.character })
-    references.value = result.refs ?? []
-    if (!references.value.length) notify('没有找到结果。')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// Reformat: a live selection goes through rangeFormatting (IDEA's "reformat the
-// selected lines"), otherwise the whole buffer.
-async function runFormatting(path: string, range?: LspRange) {
-  try {
-    const result = await request<LspFormatResult>('lsp.request', {
-      kind: range ? 'rangeFormatting' : 'formatting', path, line: 0, character: 0, ...(range ? { range } : {}),
-    })
-    if (!result.available || !result.edits?.length) { notify(range ? '所选内容无需格式化，或语言服务不支持选区格式化。' : '无需格式化，或语言服务不支持格式化。'); return }
-    let touched = 0
-    for (const file of result.edits) {
-      const open = findTab(file.path)
-      if (!open) continue  // formatting only makes sense on an open buffer
-      const base = editorFor(file.path)?.text() ?? open.content
-      const next = applyTextEdits(base, file.textEdits)
-      if (next === base) continue
-      editorFor(file.path)?.setDraft(next)
-      open.dirty = true  // buffer preview; user reviews then Ctrl+S
-      ++touched
-    }
-    notify(touched ? '已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。' : '格式已是最新。')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function runSignature(payload: { path: string; line: number; character: number }) {
-  try {
-    const result = await request<LspSignatureHelpResult>('lsp.request', { kind: 'signatureHelp', path: payload.path, line: payload.line, character: payload.character })
-    if (!result.available || !result.signatures?.length) { notify('此处没有可用的签名信息。', true); return }
-    // Show as a persistent popup near the cursor instead of a transient toast.
-    const editor = editorFor(payload.path)
-    const rect = editor?.getCursorCoords()
-    signaturePopup.value = {
-      signatures: result.signatures,
-      activeIndex: result.activeSignature ?? 0,
-      activeParam: result.activeParameter ?? 0,
-      x: rect?.left ?? 200,
-      y: rect?.bottom ?? 200,
-    }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// Signature help popup state: IDEA's parameter info panel with overload navigation.
-const signaturePopup = ref<{ signatures: { label: string; documentation?: string }[]; activeIndex: number; activeParam: number; x: number; y: number } | null>(null)
-function closeSignaturePopup() { signaturePopup.value = null }
-function navigateSignature(delta: number) {
-  if (!signaturePopup.value) return
-  const total = signaturePopup.value.signatures.length
-  signaturePopup.value.activeIndex = (signaturePopup.value.activeIndex + delta + total) % total
-}
-// IDEA's Code Cleanup / batch quick-fix: walk the file's diagnostics and apply the
-// single unambiguous preferred fix per problem, looping while new diagnostics with
-// fixes keep appearing (bounded, so a fixer that keeps re-triggering cannot loop).
-const batchFixBusy = ref(false)
-async function fixAllInFile() {
-  const tab = active.value
-  if (!tab || !lspOn(tab) || batchFixBusy.value) { notify('批量修复需要语言服务。', true); return }
-  batchFixBusy.value = true
-  let applied = 0
-  try {
-    for (let pass = 0; pass < 25; ++pass) {
-      const problems = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.severity <= 2)
-      if (!problems.length) break
-      let fixedThisPass = 0
-      for (const problem of problems) {
-        const diagnostics = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.line === problem.line).map(item => ({
-          range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
-          severity: item.severity, message: item.message, ...(item.source ? { source: item.source } : {}) }))
-        const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: tab.path, line: problem.line, character: problem.character, diagnostics })
-        const fixes = (result.actions ?? []).filter(action => action.preferred || action.linkedDiagnostics)
-        if (fixes.length !== 1) continue  // ambiguous or nothing: leave for Alt+Enter
-        actionPrompt.value = { path: tab.path }
-        codeActions.value = fixes
-        await applyCodeAction(fixes[0]!)
-        actionPrompt.value = null
-        ++fixedThisPass
-        break  // diagnostics shifted under us; restart the pass from the new state
-      }
-      if (!fixedThisPass) break
-      applied += fixedThisPass
-    }
-    notify(applied ? `批量修复：已应用 ${applied} 处修复，剩余问题可在 Alt+Enter 中逐个处理。` : '没有可自动应用的快速修复（存在需要人工选择的操作）。')
-  } catch (error) { notify(errorMessage(error), true) }
-  finally { batchFixBusy.value = false }
-}
-async function openCodeActions(payload: { path: string; line: number; character: number }, onlyFixes = false) {
-  const diagnostics = (lspDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line).map(item => ({
-    range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
-    severity: item.severity, message: item.message, ...(item.source ? { source: item.source } : {}) }))
-  try {
-    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: payload.path, line: payload.line, character: payload.character, diagnostics })
-    // IDEA's "Show Fix…" variants keep only actions that actually fix a diagnostic;
-    // the server marks those with `isPreferred` or a `diagnostics` backlink.
-    let actions = result.actions ?? []
-    if (onlyFixes) actions = actions.filter(action => action.preferred || action.linkedDiagnostics)
-    if (!actions.length) { notify(onlyFixes ? '当前行没有与问题关联的快速修复。' : '此处没有可用的代码操作。'); return }
-    if (actions.length === 1) { await applyCodeAction(actions[0]!); return }
-    codeActions.value = actions
-    actionPrompt.value = { path: payload.path }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// Menu rows without an event payload ask for the caret position of the active file.
-function caretPayload() {
-  const tab = active.value!
-  const cursor = editorFor(tab.path)?.getCursor() ?? { line: tab.line - 1, ch: 0 }
-  return { path: tab.path, line: cursor.line, character: cursor.ch }
-}
-// IDEA's Code › 优化导入 (Optimize Imports, Ctrl+Alt+O): JDT/TS publish it as a
-// `source.organizeImports` code action; apply the first one directly.
-async function runOrganizeImports() {
-  const tab = active.value
-  if (!tab || !lspReady.value) { notify('优化导入需要语言服务。', true); return }
-  const payload = caretPayload()
-  try {
-    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: payload.path, line: payload.line, character: payload.character, diagnostics: [] })
-    const action = (result.actions ?? []).find(item =>
-      item.kind === 'source.organizeImports' || item.kind?.startsWith('source.organizeImports') ||
-      /organize\s*imports|优化导入/i.test(item.title))
-    if (!action) { notify('语言服务没有提供可用的导入优化。'); return }
-    actionPrompt.value = { path: payload.path }
-    await applyCodeAction(action)
-    actionPrompt.value = null
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function applyCodeAction(action: LspCodeAction) {
-  const path = actionPrompt.value?.path ?? activePath.value
-  actionPrompt.value = null
-  let edits = action.edits ?? []
-  if (!edits.length) {
-    if (!action.resolvable || !path) { notify('该操作没有可应用的编辑。', true); return }
-    // The server listed the action without its edit; codeAction/resolve hands it over.
-    try {
-      const resolved = await request<LspFormatResult>('lsp.request', { kind: 'codeActionResolve', path, line: 0, character: 0, index: action.index })
-      edits = resolved.edits ?? []
-    } catch (error) { notify(errorMessage(error), true); return }
-    if (!edits.length) { notify(`语言服务没有为「${action.title}」返回编辑（它可能需要执行命令）。`, true); return }
+  // 绝对路径要落回工作区相对路径才能被 openFile 找到；落在工作区外的如实说明，
+  // 而不是拿一个猜出来的路径去打开（那会开出完全不相关的文件）。
+  const root = workspace.value?.root?.replace(/\\/g, '/').replace(/\/+$/, '')
+  let path = action.path.replace(/\\/g, '/')
+  if (root && (/^[A-Za-z]:/.test(path) || path.startsWith('/'))) {
+    if (path.toLowerCase().startsWith(`${root.toLowerCase()}/`)) path = path.slice(root.length + 1)
+    else { notify(`该链接指向工作区外的文件：${action.path}`, true); return }
   }
-  await applyEditsToFiles(edits, `已应用代码操作：${action.title}`)
+  // `#L12` 是 1 基的行号，`revealLocation` 用的是 0 基。
+  await revealLocation({ path, line: Math.max(0, action.line - 1) })
 }
-// Apply a WorkspaceEdit (from rename or a code action) across files: write each
-// through the normal safe-save path, then refresh any open buffer + the server.
-// Each file keeps the encoding it was read with — otherwise refactoring one GBK file
-// would silently rewrite it as UTF-8.
-async function applyEditsToFiles(edits: LspFileEdits[], doneMessage: string) {
-  let count = 0
-  for (const file of edits) {
-    const open = findTab(file.path)
-    let content = open?.content
-    let version = open?.version
-    let encoding = open?.encoding ?? 'utf-8'
-    let bom = open?.bom ?? false
-    if (content === undefined || version === undefined) {
-      const doc = await request<DocumentData>('file.read', { path: file.path })
-      content = doc.content; version = doc.version; encoding = doc.encoding; bom = doc.bom
-    }
-    const next = applyTextEdits(content, file.textEdits)
-    if (next === content) continue
-    const saved = await request<SaveResult>('file.write', { path: file.path, content: next, expectedVersion: version, encoding, bom, safeWrite: generalSettings.value.isUseSafeWrite })
-    if (open) { open.content = next; open.version = saved.version; open.dirty = false; editorFor(file.path)?.setDraft(next) }
-    if (isDesktop) void request('lsp.change', { path: file.path, text: next }).catch(() => undefined)
-    ++count
-  }
-  notify(`${doneMessage} · 更新 ${count} 个文件`)
-  return count
-}
-function submitRename() {
-  const target = renamePrompt.value
-  const next = renameValue.value.trim()
-  if (!target || !next) return
-  if (invalidRenameName.value) { notify(invalidRenameName.value, true); return }
-  renamePrompt.value = null
-  void applyRename(target, next)
-}
-async function applyRename(target: { path: string; line: number; character: number; current: string }, newName: string) {
+// IDEA 的 `XLineBreakpointType.canPutAt` + `XDebuggerUtilImpl.getBreakpointTypeByPosition`
+// （platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointType.java:50-52，
+// platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebuggerUtilImpl.java:111-121）：
+// 没有任何断点类型说「这一行能放」时**拒绝**放断点（IDEA 报 "Cannot find appropriate
+// breakpoint type"），而不是放一个永远不会命中的断点。
+// DAP 的对应物是 `breakpointLocations`，但它只在会话里、且适配器声明了
+// `supportsBreakpointLocationsRequest` 时才问得到答案 —— 问不到就跳过校验（不因为服务器
+// 不支持就把功能禁掉），这个区分由 `breakpointPlacement` 的 `checked` 字段表达。
+async function queryBreakpointPlacement(path: string, line: number) {
   try {
-    const result = await request<LspRenameResult>('lsp.request', { kind: 'rename', path: target.path, line: target.line, character: target.character, newName })
-    if (!result.available || !result.edits?.length) { notify('语言服务无法重命名此符号。', true); return }
-    await applyEditsToFiles(result.edits, `已重命名为 ${newName}`)
-    if (target.path === activePath.value) await refreshOutline(target.path)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function toggleOutline() {
-  explorer.value = true
-  if (leftView.value === 'outline') { leftView.value = 'files'; return }
-  leftView.value = 'outline'
-  void refreshOutline(activePath.value)
-}
-async function jumpDebugLocation(target: { path?: string; line: number }) {
-  const path = target.path ?? activePath.value
-  if (!path) return
-  await revealLocation({ path, line: Math.max(0, target.line - 1) })  // DAP is 1-based; reveal is 0-based
+    const result = await dapBreakpointLocations(path, line)
+    return result.available ? result.locations ?? [] : null
+  } catch { return null }  // 没有会话 / 适配器没声明 / 请求失败 —— 一律算「问不到」
 }
 async function toggleBreakpointAt(path: string, line1: number) {
   if (!path || !isDesktop) return
   const current = dapBreakpoints.get(path) ?? []
-  const next = current.some(point => point.line === line1)
+  const existing = current.some(point => point.line === line1)
+  if (!existing) {
+    const answer = await breakpointPlacement(path, line1, breakpointLocationCache, queryBreakpointPlacement)
+    if (answer.checked && !answer.canPlace) { notify(answer.message, true); return }
+  }
+  const next = existing
     ? current.filter(point => point.line !== line1)
     : [...current, { line: line1 }].sort((a, b) => a.line - b.line)
   if (next.length) dapBreakpoints.set(path, next); else dapBreakpoints.delete(path)
@@ -2833,44 +1168,19 @@ async function save(tab = active.value): Promise<boolean> {
     return false
   } finally { tab.saving = false }
 }
-const conflictPrompt = ref<{ path: string } | null>(null)
-// IDEA's conflict dialog shows what actually differs before you choose; this
-// preview is the disk version (left) against the live buffer (right).
-const conflictDiff = ref<{ rows: DiffRow[]; unified: string } | null>(null)
-async function showConflictDiff() {
-  const target = conflictPrompt.value
-  if (!target) return
-  const tab = findTab(target.path)
-  if (!tab) return
-  try {
-    const doc = await request<DocumentData>('file.read', { path: target.path, encoding: tab.encoding })
-    const diskLines = doc.content.split('\n')
-    const bufferLines = (editorFor(target.path)?.text() ?? tab.content).split('\n')
-    conflictDiff.value = { rows: buildDiffRows(diskLines, bufferLines), unified: generateUnifiedDiff(diskLines, bufferLines) }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function resolveConflictReload() {
-  const target = conflictPrompt.value
-  conflictPrompt.value = null
-  conflictDiff.value = null
-  if (!target) return
-  const tab = findTab(target.path)
-  if (!tab || !isDesktop) return
-  try {
-    const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
-    Object.assign(tab, { content: doc.content, version: doc.version, encoding: doc.encoding, bom: doc.bom, dirty: false })
-    editorFor(tab.path)?.setDraft(doc.content)
-    editorFor(tab.path)?.markSaved()
-    if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
-    notify(`已重新载入磁盘上的 ${tab.path}`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function resolveConflictKeep() {
-  const target = conflictPrompt.value
-  conflictPrompt.value = null
-  conflictDiff.value = null
-  if (target) notify(`已保留 ${target.path} 的当前修改；外部改动不会被覆盖，下次保存前请先自行核对。`)
-}
+// 编辑器的文件级操作是一个域（保存冲突 / 快速文档 / 复制引用 / 缩进 / 行尾 / 编码）。
+const {
+  conflictPrompt, conflictDiff, showConflictDiff, resolveConflictReload, resolveConflictKeep,
+  quickDoc, showQuickDoc, closeQuickDoc, copyReference, showFileProperties,
+  convertIndents, convertLineSeparators, encodingPrompt, encodingSelect, openEncoding,
+  reloadWithEncoding, applyEncodingChoice,
+} = createEditorFileOps({
+  notify, isDesktop, active, findTab, editorFor, request, menu, editorSettings, bufferEpoch, lspReady,
+  // 惰性：`toggleReadOnly` 由文件树模块提供（装配在本块之后）。
+  toggleReadOnly: (...args) => toggleReadOnly(...args), buffer: () => bufferEpoch,
+  // `treeMenu` 由文件树模块（装配在本块之后）自持 —— 用 getter/setter 共享同一份。
+  treeMenu: { get value() { return treeMenu.value }, set value(v) { treeMenu.value = v } },
+})
 async function saveAll() {
   clearAutoSave()
   for (const tab of allTabs.value) if (!await save(tab)) return false
@@ -2892,1020 +1202,185 @@ async function createScratch() {
     notify(`已创建临时文件 ${path}`)
   } catch (error) { notify(errorMessage(error), true) }
 }
-// IDEA's Quick Documentation (Ctrl+Q): fetches hover at the caret and shows it in a
-// persistent popup instead of the transient tooltip. The popup closes on Escape or
-// any click outside, matching IDEA's own dismiss behavior.
-const quickDoc = ref<{ contents: string; x: number; y: number } | null>(null)
-async function showQuickDoc() {
-  const tab = active.value
-  if (!tab || !lspReady.value) { notify('请先打开一个有语言服务的文件。', true); return }
-  menu.value = null
-  const editor = editorFor(tab.path)
-  if (!editor) return
-  const pos = editor.getCursor()
-  try {
-    const result = await request<LspHoverResult>('lsp.request', { kind: 'hover', path: tab.path, line: pos.line, character: pos.ch })
-    if (!result.available || !result.contents) { notify('此处没有文档。', true); return }
-    const rect = editorFor(tab.path)?.getCursorCoords()
-    quickDoc.value = { contents: result.contents, x: rect?.left ?? 200, y: rect?.bottom ?? 200 }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function closeQuickDoc() { quickDoc.value = null }
-// IDEA's Copy Reference (Ctrl+Alt+Shift+C): copies the qualified name of the symbol
-// at the caret when LSP provides it, otherwise copies the file path.
-async function copyReference() {
-  const tab = active.value
-  if (!tab) return
-  menu.value = null
-  try {
-    if (lspReady.value) {
-      const editor = editorFor(tab.path)
-      if (editor) {
-        const pos = editor.getCursor()
-        const symbols = await request<LspSymbolsResult>('lsp.request', { kind: 'documentSymbol', path: tab.path })
-        if (symbols.available && symbols.symbols) {
-          const match = symbols.symbols.find(s => 'startLine' in s && s.startLine === pos.line)
-          if (match) { void navigator.clipboard?.writeText(match.name); notify(`已复制：${match.name}`); return }
-        }
-      }
-    }
-    void navigator.clipboard?.writeText(tab.path)
-    notify(`已复制路径：${tab.path}`)
-  } catch { notify('无法复制到剪贴板。', true) }
-}
-// IDEA has no "File Properties" dialog — the file's attributes live in the
-// FilePropertiesGroup popup (encoding, file type, read-only, line separators), so
-// the tree row toggles the one attribute with a backend here.
-async function showFileProperties() {
-  const entry = treeMenu.value?.entry
-  if (!entry) return
-  if (entry.kind !== 'file') { treeMenu.value = null; notify('目录没有只读属性操作。'); return }
-  await toggleReadOnly(entry.path)
-}
-// ConvertToWindows/UnixLineSeparatorsAction: rewrite the file on disk with every line
-// ending normalized, then reload the buffer (IDEA refreshes the document too). The
-// native side refuses a locked or externally modified file before touching anything.
-// EditMenu › ConvertIndentsGroup（`<group id="ConvertIndentsGroup" popup="true">`，
-// PlatformActions.xml:500-505）：IDEA 的 Convert Indents to Spaces / to Tabs，作用于**全文件**。
-// 纯文本变换：前导空白按当前 tabSize 在空格与制表符之间折算（已有 tab 先按宽度展开再重算列数），
-// 不需要语言服务与原生参与；与格式化相同只改缓冲并标脏，由用户 Ctrl+S 保存。
-function convertIndents(mode: 'spaces' | 'tabs') {
-  const tab = active.value
-  const editor = tab ? editorFor(tab.path) : undefined
-  if (!tab || !editor) { notify('请先打开一个文件。', true); return }
-  const width = Math.max(1, editorSettings.value.tabSize)
-  const text = editor.text()
-  const converted = text.split('\n').map(line => {
-    const indent = /^[ \t]*/.exec(line)?.[0] ?? ''
-    if (!indent) return line
-    const columns = indent.replace(/\t/g, ' '.repeat(width)).length
-    if (mode === 'tabs') return '\t'.repeat(Math.floor(columns / width)) + ' '.repeat(columns % width) + line.slice(indent.length)
-    return ' '.repeat(columns) + line.slice(indent.length)
-  }).join('\n')
-  if (converted === text) { notify(mode === 'tabs' ? '缩进已经是制表符，无需转换。' : '缩进已经是空格，无需转换。'); return }
-  editor.setDraft(converted)
-  tab.dirty = true
-  if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: converted }).catch(() => undefined)
-  notify(mode === 'tabs' ? '已将缩进转换为制表符（未保存），检查后按 Ctrl+S 保存。' : '已将缩进转换为空格（未保存），检查后按 Ctrl+S 保存。')
-}
-async function convertLineSeparators(separator: 'crlf' | 'lf', target?: Tab) {
-  const tab = target ?? active.value
-  if (!tab) { notify('请先打开一个文件。', true); return }
-  menu.value = null
-  treeMenu.value = null
-  if (!isDesktop) { notify('行分隔符转换需要桌面端。', true); return }
-  if (tab.dirty) { notify('请先保存修改，再转换行分隔符。', true); return }
-  try {
-    const result = await request<{ path: string; version: string; changed: boolean }>('file.lineSeparators',
-      { path: tab.path, separator, content: editorFor(tab.path)?.text() ?? tab.content, expectedVersion: tab.version })
-    if (!result.changed) { notify(`${tab.path} 已经全部是${separator === 'crlf' ? ' Windows (CRLF)' : ' Unix (LF)'}行尾，无需转换。`); return }
-    // Reload from disk so the buffer carries the file's own separators — CodeMirror
-    // splits with EditorState.lineSeparator and would otherwise re-save LF.
-    const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
-    Object.assign(tab, { content: doc.content, version: doc.version, readOnly: doc.readOnly })
-    // CodeMirror splits the document with EditorState.lineSeparator only at state
-    // creation, so a separator-only change needs one remount to show CRLF again.
-    bufferEpoch.value++
-    if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
-    notify(`已将 ${tab.path} 转换为${separator === 'crlf' ? ' Windows (CRLF)' : ' Unix and macOS (LF)'}行尾`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA's two encoding actions: re-read the same bytes under another code page (writes
-// nothing), or keep the buffer text and rewrite the file in another encoding.
-const encodingPrompt = ref<{ encoding: EncodingKey; bom: boolean } | null>(null)
-const encodingSelect = ref<HTMLSelectElement>()
-function openEncoding() {
-  const tab = active.value
-  if (!tab) { notify('请先打开一个文件。', true); return }
-  menu.value = null
-  encodingPrompt.value = { encoding: tab.encoding, bom: tab.bom }
-  void nextTick(() => encodingSelect.value?.focus())
-}
-async function reloadWithEncoding() {
-  const tab = active.value, choice = encodingPrompt.value
-  if (!tab || !choice || tab.dirty) return
-  try {
-    const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: choice.encoding })
-    // A re-read can land on a file that was locked meanwhile; refresh the flag too.
-    Object.assign(tab, { content: doc.content, version: doc.version, encoding: doc.encoding, bom: doc.bom, readOnly: doc.readOnly, dirty: false })
-    editorFor(tab.path)?.setReadOnly(Boolean(doc.readOnly))
-    editorFor(tab.path)?.setDraft(doc.content)
-    if (isDesktop) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
-    encodingPrompt.value = null
-    notify(`已按 ${encodingLabels[doc.encoding]} 重新读取 ${tab.path}`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function applyEncodingChoice() {
-  const tab = active.value, choice = encodingPrompt.value
-  if (!tab || !choice) return
-  tab.encoding = choice.encoding
-  tab.bom = choice.bom
-  // The text is unchanged; marking the buffer dirty is what makes the next save write
-  // the same characters back as new bytes.
-  tab.dirty = true
-  encodingPrompt.value = null
-  notify(`已切换为 ${encodingLabels[choice.encoding]}${choice.bom ? '（带 BOM）' : ''}，保存时按该编码写入 ${tab.path}`)
-}
 async function closeTab(tab: Tab) {
   const pane = (groups[0].tabs.includes(tab) ? 0 : 1) as 0 | 1
   await closeTabIn(pane, tab)
 }
-// Zen mode: IDEA's View → Appearance → Zen Mode hides every chrome element.
-function toggleZenMode() { zenMode.value = !zenMode.value }
-// IDEA's Markdown preview: a split beside the editor, toggled per file; the toggle
-// button only exists for .md buffers and the preview follows the live text.
-const markdownPreviewOn = ref(false)
-const markdownCapable = computed(() => /\.md$/i.test(active.value?.path ?? ''))
-const markdownSource = ref('')
-let markdownTimer: number | undefined
-function refreshMarkdownNow() {
-  const path = activePath.value
-  markdownSource.value = path && /\.md$/i.test(path) ? editorFor(path)?.text() ?? findTab(path)?.content ?? '' : ''
-}
-function refreshMarkdownSoon() {
-  if (!markdownPreviewOn.value) return
-  if (markdownTimer !== undefined) return
-  markdownTimer = window.setTimeout(() => { markdownTimer = undefined; refreshMarkdownNow() }, 300)
-}
-function toggleMarkdownPreview() {
-  markdownPreviewOn.value = !markdownPreviewOn.value
-  if (markdownPreviewOn.value) refreshMarkdownNow()
-}
-watch(activePath, () => {
-  if (!markdownCapable.value) markdownPreviewOn.value = false
-  else if (markdownPreviewOn.value) refreshMarkdownNow()
+// 沉浸模式（演示 / 专注 / Zen）的来源与协调见 src/distractionFreeSession.ts ——
+// Zen **不是**"隐藏一切"，而是"专注模式 + 全屏"（IDEA 的 ToggleZenModeAction.kt:59-80）。
+// IDEA 的**专注模式**（`ToggleDistractionFreeModeAction`）：把一批编辑器/UI 设置**批量**换成专注值，
+// 退出时把用户进之前的值恢复回去。双向语义（before/after）与 TaoCode 侧能映射的 6 项见
+// `src/distractionFreeMode.ts` 的模块注释（那里有 applyAndSave 的行号）。
+// 隐藏 chrome 的来源有**两个且相互独立**：Zen 与专注模式（IDEA 的专注模式也会 storeToolWindows，
+// 见 ToggleDistractionFreeModeAction.java:72/84）。所以判断必须是"或"，不能共用一个 ref。
+// 专注模式的会话状态在 `src/distractionFreeSession.ts`（自持三个 ref 的状态机）——
+// App 只组装依赖、只读 `enabled`。加这块逻辑会把本文件顶到机检上限，所以它必须住在模块里。
+const distractionFree = createDistractionFreeSession({
+  read: () => editorSettings.value,
+  write: patch => saveSettingsPatch(patch),
+  onError: message => notify(message, true),
 })
-async function refreshTree() {
-  if (!workspace.value || busy.value) return
-  busy.value = true
-  try {
-    workspace.value.entries = await request<Entry[]>('workspace.list', { path: '' })
-    treeVersion.value++
-  } catch (error) { notify(errorMessage(error), true) }
-  finally { busy.value = false }
-  await refreshSyntheticNodes()
-}
-function selectInTree() {
-  if (!active.value) return
-  explorer.value = true
-  leftView.value = 'files'
-  fileTreeRef.value?.reveal(active.value.path)
-}
-function openBreadcrumb(segmentIndex: number) {
-  if (!active.value) return
-  const dir = active.value.path.split('/').slice(0, segmentIndex + 1).join('/')
-  explorer.value = true
-  leftView.value = 'files'
-  fileTreeRef.value?.reveal(dir)
-}
-const treeMenu = ref<{ entry: Entry; x: number; y: number } | null>(null)
-// IDEA's project-view popup nests groups (WeighingNewGroup, AssociateWithFileType,
-// VersionControlsGroup); the submenu id tracks which one is unfolded.
-const treeSubmenu = ref<'new' | 'filetype' | null>(null)
-// IDEA's Cut/Copy/Paste on project-view selections: an internal clipboard, because
-// the WebView sandbox cannot carry CF_HDROP. Cut pastes as a move, copy as a copy;
-// a name collision pastes as "<stem> copy<ext>", then "copy 2", "copy 3"…
-const fileClipboard = ref<{ mode: 'cut' | 'copy'; entry: Entry } | null>(null)
-function copyCollisionName(existing: (name: string) => boolean, name: string): string {
-  if (!existing(name)) return name
-  const dot = name.lastIndexOf('.')
-  const stem = dot <= 0 ? name : name.slice(0, dot)
-  const extension = dot <= 0 ? '' : name.slice(dot)
-  let candidate = `${stem} copy${extension}`
-  for (let index = 2; existing(candidate); ++index) candidate = `${stem} copy ${index}${extension}`
-  return candidate
-}
-async function pasteFromClipboard() {
-  const clip = fileClipboard.value
-  const target = treeMenu.value?.entry
-  treeMenu.value = null
-  if (!clip || !workspace.value || !isDesktop) return
-  const dir = target ? (target.kind === 'directory' ? target.path : parentOf(target.path)) : ''
-  try {
-    // Probe the destination listing to pick a collision-free name (IDEA's pasted
-    // duplicates become "X copy.ext"); the native layer still guards EXISTS races.
-    let siblings: Entry[] = []
-    try { siblings = await request<Entry[]>('workspace.list', { path: dir }) } catch { /* empty/new dir */ }
-    const taken = (name: string) => siblings.some(entry => entry.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0)
-    const finalName = copyCollisionName(taken, baseName(clip.entry.path))
-    const destination = dir ? `${dir}/${finalName}` : finalName
-    if (clip.mode === 'copy') await request('file.copy', { from: clip.entry.path, to: destination })
-    else {
-      await request('file.rename', { from: clip.entry.path, to: destination })
-      await retitleTab(clip.entry.path, destination)
-    }
-    await refreshTree()
-    notify(clip.mode === 'copy' ? `已粘贴为 ${destination}` : `已移动到 ${destination}`)
-    if (clip.mode === 'cut') fileClipboard.value = null
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function cutTreeEntry() {
-  const entry = treeMenu.value?.entry
-  treeMenu.value = null
-  if (!entry) return
-  fileClipboard.value = { mode: 'cut', entry }
-  notify(`已剪切 ${entry.path}（在目标目录上右键粘贴）`)
-}
-function copyTreeEntry() {
-  const entry = treeMenu.value?.entry
-  treeMenu.value = null
-  if (!entry) return
-  fileClipboard.value = { mode: 'copy', entry }
-  notify(`已复制 ${entry.path}（在目标目录上右键粘贴）`)
-}
-async function revealInExplorer() {
-  const entry = treeMenu.value?.entry
-  treeMenu.value = null
-  if (!entry || !isDesktop) return
-  try { await request('file.reveal', { path: entry.path }) }
-  catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA's EditorTabPopup (ActionsBundle "Close All but Pinned", tab pinning): right-
-// click on a tab opens the group-scoped actions for that tab.
-const tabMenu = ref<{ pane: Pane; path: string; x: number; y: number } | null>(null)
-function onTabContext(pane: Pane, tab: Tab, event: MouseEvent) {
-  event.preventDefault()
-  menu.value = null
-  treeMenu.value = null
-  tabMenu.value = { pane, path: tab.path, x: event.clientX, y: event.clientY }
-}
-function togglePinTab(pane: Pane, tab: Tab) {
-  tab.pinned = !tab.pinned
-  tabMenu.value = null
-}
-async function closeOtherTabsIn(pane: Pane, keep: Tab) {
-  tabMenu.value = null
-  for (const tab of [...groups[pane].tabs]) if (tab !== keep) await closeTabIn(pane, tab)
-}
-async function closeAllTabsIn(pane: Pane) {
-  tabMenu.value = null
-  for (const tab of [...groups[pane].tabs]) await closeTabIn(pane, tab)
-}
-async function closeUnpinnedTabsIn(pane: Pane) {
-  tabMenu.value = null
-  // IDEA keeps pinned tabs out of every bulk close, including this one.
-  for (const tab of [...groups[pane].tabs]) if (!tab.pinned) await closeTabIn(pane, tab)
-}
-async function closeTabsToRightIn(pane: Pane, from: Tab) {
-  tabMenu.value = null
-  const group = groups[pane]
-  const index = group.tabs.indexOf(from)
-  if (index < 0) return
-  for (const tab of [...group.tabs.slice(index + 1)]) await closeTabIn(pane, tab)
-}
-// CloseAllToTheLeft in the same group.
-async function closeTabsToLeftIn(pane: Pane, from: Tab) {
-  tabMenu.value = null
-  const group = groups[pane]
-  const index = group.tabs.indexOf(from)
-  if (index <= 0) return
-  for (const tab of [...group.tabs.slice(0, index)]) await closeTabIn(pane, tab)
-}
-function hasTabsToRight(pane: Pane, path: string) {
-  const group = groups[pane]
-  const index = group.tabs.findIndex(tab => tab.path === path)
-  return index >= 0 && index < group.tabs.length - 1
-}
-function hasTabsToLeft(pane: Pane, path: string) {
-  return groups[pane].tabs.findIndex(tab => tab.path === path) > 0
-}
-function copyPathOfTab(tab: Tab) {
-  tabMenu.value = null
-  const fullPath = workspace.value ? `${workspace.value.root}/${tab.path}` : tab.path
-  void navigator.clipboard?.writeText(fullPath)
-  notify(`已复制路径：${fullPath}`)
-}
-const nameDialog = ref<{ mode: 'createFile' | 'createDir' | 'rename' | 'newLayout' | 'renameLayout'; dir: string; entry?: Entry; value: string; template?: string } | null>(null)
-const nameInput = ref<HTMLInputElement>()
-// The same dialog serves the layout actions, whose prompt is `IdeBundle`
-// `dialog.new.window.layout.prompt` / `dialog.rename.window.layout.prompt` (:426-429) instead of a
-// path. Everything else about the dialog is unchanged.
-const isLayoutDialog = computed(() => nameDialog.value?.mode === 'newLayout' || nameDialog.value?.mode === 'renameLayout')
-const nameDialogTitle = computed(() => {
-  switch (nameDialog.value?.mode) {
-    case 'rename': return '重命名'
-    case 'createDir': return '新建文件夹'
-    case 'newLayout': return '新建布局'
-    case 'renameLayout': return '重命名布局'
-    default: return '新建文件'
-  }
-})
-const deleteTarget = ref<Entry | null>(null)
-// IDEA's Safe Delete: before removing a file, show what still refers to it. The
-// scan is a real workspace search (file + line + preview), not a guess.
-const deleteUsages = ref<UsageResult | null>(null)
-const deleteUsagesError = ref('')
-// IDEA puts the "Move files to the recycle bin instead of deleting permanently" checkbox in
-// the confirm dialog and remembers the choice. It is GeneralSettings.isDeletingToBin
-// (GeneralSettings.kt:55-60 -> state.deleteToBin, ide.general.xml), read by the delete paths
-// as `TrashBin.isSupported() && isDeletingToBin()` — DeleteHandler.java:345,
-// DeleteHandlerHelper.kt:30, FileDeleteAction.java:57, VirtualFileDeleteProvider.java:54.
-// It used to live in the editor settings under the name `deleteToTrash`, which was a second
-// name for this one option; the duplication is gone.
-const trashSaving = ref(false)
-const deleteToBin = computed({
-  get: () => generalSettings.value.deleteToBin,
-  set: value => {
-    if (trashSaving.value) return
-    const previous = generalSettings.value
-    generalSettings.value = { ...previous, deleteToBin: value }
-    trashSaving.value = true
-    void (async () => {
-      try { generalSettings.value = await request<GeneralSettingsState>('settings.general.update', { general: generalSettings.value }) }
-      catch (error) {
-        generalSettings.value = previous
-        notify(`回收站选项没有保存成功：${errorMessage(error)}`, true)
-      } finally { trashSaving.value = false }
-    })()
+const distractionFreeMode = distractionFree.enabled
+const toggleDistractionFreeMode = distractionFree.toggle
+
+// 三种沉浸来源（演示模式 / 专注模式 / Zen）的协调也在那个模块里：Zen = **专注模式 + 全屏**
+// （IDEA 的 `ToggleZenModeAction.kt:59-80`），不是"再叠一层隐藏"。
+// 全屏状态由宿主持有，这里镜像一份给菜单勾选态与沉浸协调用（函数声明会提升，所以
+// `toggleFullScreen` 留在下面定义没问题，ref 必须先声明）。
+const fullScreen = ref(false)
+
+const immersive = createImmersiveMode({
+  distractionFree,
+  zenFlag: zenMode,
+  fullScreen,
+  setFullScreen: async state => {
+    if (!isDesktop) return null
+    try { return (await appSetFullScreen(state)).fullScreen }
+    // 全屏不可用时返回 null，让协调层保留其它部分的生效（对应 IDEA 的 isFullScreenApplicable）。
+    catch { return null }
   },
+  readFullScreen: async () => {
+    try { return (await appFullScreen()).fullScreen } catch { return null }
+  },
+  presentationMode: () => editorSettings.value.presentationMode,
+  exitPresentationMode: () => saveSettingsPatch({ presentationMode: false }),
 })
-watch(deleteTarget, entry => {
-  deleteUsages.value = null
-  deleteUsagesError.value = ''
-  if (!entry || entry.kind === 'directory' || !isDesktop) return
-  const symbol = entry.path.split('/').pop() ?? ''
-  const path = entry.path
-  void (async () => {
-    try {
-      const result = await request<UsageResult>('file.usages', { path, symbol })
-      if (deleteTarget.value?.path !== path) return   // a newer confirm owns the dialog
-      deleteUsages.value = result
-    } catch (error) { if (deleteTarget.value?.path === path) deleteUsagesError.value = errorMessage(error) }
-  })()
+const chromeHidden = immersive.chromeHidden
+const hideChromeLabel = immersive.exitLabel
+function toggleZenMode() { void immersive.toggleZen() }
+
+// 退出"隐藏 chrome"的三种来源：演示模式（持久化设置）、专注模式、Zen。
+// 演示模式必须写回设置 —— 只翻本地状态的话 watch 会把它覆盖回来，而且重启后设置仍为 true，
+// 表现为"一打开就自动进入 Zen"。
+function exitHideChrome() { void immersive.exitAll() }
+// 编辑器侧视图（Markdown 预览）与项目视图定位是一个域。
+const {
+  cancelMarkdownRefresh, refreshMarkdownNow, refreshMarkdownSoon, toggleMarkdownPreview,
+  refreshTree, selectInTree, openBreadcrumb,
+} = createEditorSideViews({
+  notify, workspace, busy, treeVersion, active, activePath, editorFor, findTab, explorer, leftView, fileTreeRef,
+  markdownPreviewOn, markdownCapable, markdownSource,
+  // 惰性：`refreshSyntheticNodes` 由工作区生命周期模块提供（装配在本块之后）。
+  refreshSyntheticNodes: (...a) => refreshSyntheticNodes(...a),
 })
-const goLinePrompt = ref(false)
-const goLineValue = ref('')
-const goLineInput = ref<HTMLInputElement>()
-const recentPrompt = ref(false)
-const recentQuery = ref('')
-const recentInput = ref<HTMLInputElement>()
-const recentFiles = ref<string[]>([])
-function rememberRecent(path: string) { recentFiles.value = [path, ...recentFiles.value.filter(item => item !== path)].slice(0, 40) }
-const recentFiltered = computed(() => { const query = recentQuery.value.toLowerCase(); return recentFiles.value.filter(path => path.toLowerCase().includes(query)) })
-function openRecent(path: string) { recentPrompt.value = false; void openFile(path) }
-async function goToLine() {
-  // IDEA's Jump to Line/Character accepts "line[:column]".
-  const match = /^(\d+)(?::(\d+))?$/.exec(goLineValue.value.trim())
-  goLinePrompt.value = false
-  const tab = active.value
-  if (!tab || !match) return
-  const line = Number(match[1])
-  const column = match[2] ? Math.max(1, Number(match[2])) : 0
-  if (line < 1) return
-  const total = tab.content.split('\n').length
-  await revealLocation({ path: tab.path, line: Math.min(line, total) - 1, column })
-}
-// IDEA's bookmarks are one project-wide list, optionally wearing a 0-9 mnemonic so
-// Ctrl+<digit> jumps to it from anywhere. The list lives with the project record.
-const bookmarks = ref<Bookmark[]>([])
-const sortedAll = computed(() => sortedBookmarks(bookmarks.value))
-const bookmarkLines = computed(() => {
-  const map: Record<string, number[]> = {}
-  for (const entry of bookmarks.value) (map[entry.path] ??= []).push(entry.line)
-  return map
+// 文件树与标签的上下文操作是一个域（菜单坐标状态在模块里自持）。
+const {
+  nameDialogTitle, isLayoutDialog,
+  treeMenu, treeSubmenu, fileClipboard, copyCollisionName, pasteFromClipboard, cutTreeEntry, copyTreeEntry, revealInExplorer,
+  tabMenu, onTabContext, togglePinTab, closeOtherTabsIn, closeAllTabsIn, closeUnpinnedTabsIn, closeTabsToRightIn,
+  closeTabsToLeftIn, hasTabsToRight, hasTabsToLeft, copyPathOfTab,
+  goLinePrompt, goLineValue, goLineInput, goToLine, recentPrompt, recentQuery, recentInput, recentFiles,
+  rememberRecent, recentFiltered, openRecent,
+} = createExplorerActions({
+  notify, isDesktop, menu, generalSettings, workspace, groups, active, reveal, query, baseName, parentOf, refreshTree,
+  nameDialog, nameInput,
+  // 惰性：`revealLocation` 由 LSP/导航模块提供、`renameEntryWithReferences` 由语义动作模块提供
+  // （两者都装配在本块之后），依赖互为上下游。
+  revealLocation: (...args) => revealLocation(...args), openFile, closeTabIn,
+  renameEntryWithReferences: (...args) => renameEntryWithReferences(...args),
 })
-const mnemonicPrompt = ref<{ path: string; line: number } | null>(null)
-const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-let bookmarkSave: number | undefined
-function useProjectSettings(settings: ProjectSettings) {
-  if (bookmarkSave) { window.clearTimeout(bookmarkSave); bookmarkSave = undefined }
-  projectSettings.value = settings
-  bookmarks.value = settings.bookmarks
-}
-function persistBookmarks() {
-  if (!isDesktop || !workspace.value) return
-  if (bookmarkSave) window.clearTimeout(bookmarkSave)
-  bookmarkSave = window.setTimeout(() => {
-    bookmarkSave = undefined
-    if (!workspace.value) return
-    void request<{ settings: ProjectSettings }>('project.settings.update', { bookmarks: bookmarks.value })
-      .then(result => { projectSettings.value = result.settings })
-      .catch(error => notify(`书签未能保存：${errorMessage(error)}`, true))
-  }, 600)
-}
-function placeAt(path: string, line: number, mnemonic?: number) {
-  bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic)
-  const keptEntry = bookmarks.value.find(entry => entry.path === path && entry.line === line)
-  if (keptEntry) rememberPlace({ kind: '书签', path, line: line - 1, label: keptEntry.mnemonic === undefined ? baseName(path) + ':' + line : `${keptEntry.mnemonic} · ${baseName(path)}:${line}` })
-  const kept = bookmarks.value.find(entry => entry.path === path && entry.line === line)
-  notify(kept ? (kept.mnemonic === undefined ? `书签 ${path}:${line}` : `书签 ${path}:${line} 编号 ${kept.mnemonic}（Ctrl+${kept.mnemonic} 跳转）`) : `已取消书签 ${path}:${line}`)
-  persistBookmarks()
-}
-function toggleBookmark(mnemonic?: number) {
-  const tab = active.value
-  if (!tab) return
-  placeAt(tab.path, tab.line, mnemonic)
-}
-function openMnemonicPrompt() {
-  const tab = active.value
-  if (!tab) return
-  menu.value = null
-  mnemonicPrompt.value = { path: tab.path, line: tab.line }
-}
-function pickMnemonic(digit: number) {
-  const at = mnemonicPrompt.value
-  if (!at) return
-  mnemonicPrompt.value = null
-  placeAt(at.path, at.line, digit)
-}
-function jumpMnemonic(digit: number) {
-  const found = bookmarkOwner(bookmarks.value, digit)
-  if (!found) { notify(`没有编号 ${digit} 的书签（Ctrl+F11 可以贴编号）。`, true); return }
-  void revealLocation({ path: found.path, line: found.line - 1 })
-}
-// IDEA walks the whole project, not just the open file, and wraps around.
-function cycleBookmark(reverse: boolean) {
-  const tab = active.value
-  const target = nextInList(bookmarks.value, tab?.path ?? '', tab?.line ?? 0, reverse)
-  if (!target) { notify(bookmarks.value.length ? '只有这一个书签。' : '还没有书签：F11 标记当前行，Ctrl+F11 编号。', true); return }
-  void revealLocation({ path: target.path, line: target.line - 1 })
-}
-function dropBookmark(entry: Bookmark) {
-  bookmarks.value = removeBookmark(bookmarks.value, entry)
-  persistBookmarks()
-}
-function mnemonicOwner(digit: number) {
-  const found = bookmarkOwner(bookmarks.value, digit)
-  return found ? `${found.path.split('/').pop()}:${found.line}` : '—'
-}
+
+// LSP 生命周期 + 导航 + 符号搜索是一个域（启动/停止语言服务与"跳到哪"共享同一批状态）。
+const {
+  startLsp, lspOn, autoSaveDelay, clearAutoSave, scheduleAutoSave, onWindowBlur, onEditorChange,
+  jumpLastEditLocation, stopLspFile, resetLsp, revealLocation, goBack, goForward, openGoLine,
+  openRecentFiles, placesPrompt, placesQuery, placesInput, placesEditedOnly, placesList, placeSnippet,
+  placesFiltered, placesIndex, movePlace, openRecentPlaces, openPlace,
+  fileSymbolEntries, globalSymbolEntries, openSymbol, onSymbolQuery, moveSymbol, jumpSymbol,
+  onSearchOpen, onSearchReplaced, jumpMethod, refreshOutline,
+} = createLspNavigation({
+  notify, isDesktop, scheduleSessionSave, goLineValue, goLinePrompt, goLineInput, recentPrompt, recentQuery, recentInput, editorSettings, generalSettings, workspace, workspaceEpoch: () => workspaceEpoch, active, activePath, groups, findTab, hasTabPath,
+  editorFor, refreshTree, refreshMarkdownSoon, markdownPreviewOn, menu, palette, outline, dirty, places, changePlaces,
+  rememberPlace, navBack, navForward, openFile, save, saveAll, reveal, splitModel, symbolPrompt, symbolQuery, symbolInput,
+  symbolResults, symbolIndex, breakpointLocationCache, references, bottomTab,
+})
+// 书签是一个域（书签表 + 助记符 + 跳转，状态在模块里自持）。
+const {
+  bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
+  useProjectSettings, digits, bookmarkSave,
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,
+} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation })
+
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
 // language-neutral templates in surround.ts.
-const surroundPrompt = ref(false)
-const surroundQuery = ref('')
-const surroundIndex = ref(0)
-const surroundInput = ref<HTMLInputElement>()
-const surroundChoices = computed(() => rankCommands(surroundTemplates, surroundQuery.value))
-function openSurround() {
-  if (!active.value) { notify('请先打开一个文件。', true); return }
-  menu.value = null
-  surroundQuery.value = ''
-  surroundIndex.value = 0
-  surroundPrompt.value = true
-  void nextTick(() => surroundInput.value?.focus())
-}
-function moveSurround(step: number) {
-  const size = Math.max(1, surroundChoices.value.length)
-  surroundIndex.value = (surroundIndex.value + step + size) % size
-}
-function applySurround(template: SurroundTemplate | undefined) {
-  const tab = active.value
-  if (!template || !tab) return
-  surroundPrompt.value = false
-  editorFor(tab.path)?.surroundWith(template)
-  notify(`已用「${template.title}」包裹`)
-}
-watch(surroundQuery, () => { surroundIndex.value = 0 })
-// Live Template Chooser: IDEA's "Surround/Expand Live Template" popup. The inventory
-// is whatever src/templates.ts actually offers for the current file (effectiveTemplates
-// already applies per-template overrides, disable flags and custom templates).
-const templateChooser = ref(false)
-const templateQuery = ref('')
-const templateIndex = ref(0)
-const templateInput = ref<HTMLInputElement>()
-interface TemplateChoice { id: string; title: string; keywords: string; template: Template }
-const templateChoices = computed<TemplateChoice[]>(() => {
-  const path = active.value?.path ?? ''
-  // rankCommands matches title+keywords (IDEA's Find Action rules), so each entry is
-  // searchable by both its trigger key and its Chinese description.
-  const entries = effectiveTemplates(path, projectSettings.value.templates).map((entry, index) => ({
-    id: `${entry.pattern}#${index}`,
-    title: entry.template.key,
-    keywords: `${entry.template.description} ${entry.template.postfix ? 'postfix 后置' : 'live template'}`,
-    template: entry.template,
-  }))
-  return rankCommands(entries, templateQuery.value)
+// 包围与模板选择器是一个域（提示/候选/应用三件套，状态在模块里自持）。
+const {
+  surroundPrompt, surroundQuery, surroundIndex, surroundInput, surroundChoices, openSurround, moveSurround, applySurround,
+  templateChooser, templateQuery, templateIndex, templateInput, templateChoices, openTemplateChooser, moveTemplate, applyTemplate,
+} = createSurroundTemplates({ notify, menu, projectSettings, workspace, active, editorFor, pluginList })
+// 运行/调试配置是一个域（IDEA 的 RunManager + RunConfigurationsDialog，含草稿编辑表单）。
+const {
+  runConfigs, runConfigName, runWidgetTitle, configChooser, configIndex, openConfigChooser, moveConfig,
+  applyConfigChoice, runConfigType, runConfigProgram, runConfigDebugAdapter, runConfigArgs, runConfigCwd,
+  runConfigEnv, runConfigBefore, runConfigFolder, runConfigEditorOpen, runConfigDebug, runConfigsOpen,
+  runConfigDraft, loadRunConfigDraft, saveRunConfigFromDialog, openRunConfigurations,
+  linesToArray, arrayToLines, currentRunConfig, selectRunConfig, pickConfig, persistRunConfigs, allRunConfigNames,
+  addBeforeLaunchStep, removeBeforeLaunchStep, removeRunConfigFromDialog, saveConfig, removeConfig,
+} = createRunConfigurations({
+  notify, workspace, projectSettings, runCommand, menu, isDesktop,
+  // 惰性：`runSelectedConfig` 由运行动作模块提供（装配在本块之后）。
+  runSelectedConfig: (...a) => runSelectedConfig(...a),
 })
-function openTemplateChooser() {
-  if (!active.value) { notify('请先打开一个文件。', true); return }
-  menu.value = null
-  templateQuery.value = ''
-  templateIndex.value = 0
-  templateChooser.value = true
-  void nextTick(() => templateInput.value?.focus())
-}
-function moveTemplate(step: number) {
-  const size = Math.max(1, templateChoices.value.length)
-  templateIndex.value = (templateIndex.value + step + size) % size
-}
-function applyTemplate(choice: TemplateChoice | undefined) {
-  if (!choice) return
-  const tab = active.value
-  templateChooser.value = false
-  if (!tab) return
-  // Postfix templates expand `receiver.key`; the caret must sit after a real receiver,
-  // so offer those only when the previous expansion would otherwise silently fail.
-  const ok = editorFor(tab.path)?.expandAtCursor(choice.template.postfix ? `.${choice.template.key}` : choice.template.key) ?? false
-  notify(ok ? `已展开模板 ${choice.template.key}` : `「${choice.template.key}」不是当前光标处的有效触发，未展开。`, !ok)
-}
-watch(templateQuery, () => { templateIndex.value = 0 })
-// IDEA stores run configurations with the project (.idea/runConfigurations), so the
-// list follows the workspace instead of the machine: `project.settings.*` owns it.
-const runConfigs = computed<RunConfig[]>(() => projectSettings.value.runConfigs)
-const runConfigName = ref('')
-// The header Run widget's tooltip: what pressing it will do right now.
-const runWidgetTitle = computed(() => runState.running
-  ? '停止运行 (Ctrl+F2)'
-  : `运行 ${runConfigName.value || '所选配置'} (Shift+F10)`)
-// IDEA's Alt+Shift+F10 "Choose Run Configuration" popup: pick the config to run or
-// debug without hunting through the Run tab's select.
-const configChooser = ref<{ debug: boolean } | null>(null)
-const configIndex = ref(0)
-function openConfigChooser(debug = false) {
-  if (!runConfigs.value.length) { notify('还没有运行配置：在“运行”面板里保存一个配置。', true); return }
-  configIndex.value = Math.max(0, runConfigs.value.findIndex(config => config.name === runConfigName.value))
-  configChooser.value = { debug }
-}
-function moveConfig(delta: number) {
-  const count = runConfigs.value.length
-  if (!count) return
-  configIndex.value = (configIndex.value + delta + count) % count
-}
-function applyConfigChoice(config: RunConfig) {
-  const debug = configChooser.value?.debug ?? false
-  configChooser.value = null
-  pickConfig(config.name)
-  if (debug) void runSelectedConfig(true); else void runSelectedConfig(false)
-}
-// The rest of the IDEA run-configuration shape: program, arguments, working
-// directory, environment and the before-launch steps. Only `command` used to be
-// editable, which made the other four fields decorative — they were persisted but
-// never sent and never shown.
-const runConfigType = ref<'shell' | 'application' | 'debug'>('shell')
-const runConfigProgram = ref('')
-const runConfigDebugAdapter = ref('cppvsdbg')
-const runConfigArgs = ref('')
-const runConfigCwd = ref('')
-const runConfigEnv = ref('')
-const runConfigBefore = ref<Array<{ name: string; command: string }>>([])
-const runConfigEditorOpen = ref(false)
-// One argument / one KEY=VALUE per line: a textarea is what IDEA uses for both, and
-// it keeps shell-quoting out of the persisted shape.
-function linesToArray(text: string): string[] {
-  return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-}
-function arrayToLines(values: string[] | undefined): string { return (values ?? []).join('\n') }
-function currentRunConfig(): RunConfig {
-  return {
-    name: runConfigName.value.trim(),
-    type: runConfigType.value,
-    command: runCommand.value.trim(),
-    ...(runConfigProgram.value.trim() ? { program: runConfigProgram.value.trim() } : {}),
-    ...(linesToArray(runConfigArgs.value).length ? { args: linesToArray(runConfigArgs.value) } : {}),
-    ...(runConfigCwd.value.trim() ? { cwd: runConfigCwd.value.trim() } : {}),
-    ...(runConfigType.value === 'debug' ? { adapter: runConfigDebugAdapter.value.trim() || 'cppvsdbg' } : {}),
-    ...(linesToArray(runConfigEnv.value).length ? { env: linesToArray(runConfigEnv.value) } : {}),
-    ...(runConfigBefore.value.filter(step => step.command.trim()).length
-      ? { beforeLaunch: runConfigBefore.value.filter(step => step.command.trim()).map(step => ({ name: step.name, command: step.command })) }
-      : {}),
-  }
-}
-function addBeforeLaunchStep() { runConfigBefore.value = [...runConfigBefore.value, { name: '', command: '' }] }
-function removeBeforeLaunchStep(index: number) { runConfigBefore.value = runConfigBefore.value.filter((_, i) => i !== index) }
-function selectRunConfig(name?: string) {
-  const wanted = name ?? runConfigName.value
-  const found = runConfigs.value.find(config => config.name === wanted) ?? runConfigs.value[0]
-  runConfigName.value = found?.name ?? ''
-  if (found?.adapter) runConfigDebugAdapter.value = found.adapter
-  if (!found) { runConfigType.value = 'shell'; runConfigProgram.value = ''; runConfigArgs.value = ''; runConfigCwd.value = ''; runConfigEnv.value = ''; runConfigBefore.value = []; runCommand.value = ''; runConfigDebug.value = false; return }
-  runCommand.value = found.command
-  runConfigType.value = found.type ?? 'shell'
-  runConfigDebug.value = runConfigType.value === 'debug'
-  runConfigProgram.value = found.program ?? ''
-  runConfigArgs.value = arrayToLines(found.args)
-  runConfigCwd.value = found.cwd ?? ''
-  runConfigEnv.value = arrayToLines(found.env)
-  runConfigBefore.value = (found.beforeLaunch ?? []).map(step => ({ name: step.name, command: step.command }))
-}
-function pickConfig(name: string) { runConfigName.value = name; selectRunConfig(name) }
-async function persistRunConfigs(configs: RunConfig[], message: string) {
-  if (!workspace.value) { notify('请先打开项目：运行配置随项目保存。', true); return }
+// IDEA「文件 › 项目结构…」（Ctrl+Alt+Shift+S）打开的是**独立对话框**（ShowStructureSettingsAction.java:26-32），
+// 不是设置树里的一页 —— 所以它是独立状态。
+const projectStructureOpen = ref(false)
+function openProjectStructure() { projectStructureOpen.value = true; menu.value = null }
+// IDEA 的 Run to Cursor（Alt+F9，`$default.xml:990-992`；ForceRunToCursor = Ctrl+Alt+F9）：
+// DAP 里是两步 —— `gotoTargets` 问"这一行能停在哪儿"，再 `goto` 跳过去。适配器没声明
+// `supportsGotoTargetsRequest` 时原生回 DAP_UNSUPPORTED，这里如实提示。
+async function runToCursor() {
+  if (!isDesktop || !workspace.value) { notify('桌面端才能运行到光标处。', true); return }
+  if (!dapState.running) { notify('先启动调试会话（Shift+F9），再运行到光标处。', true); return }
+  if (!dapState.paused) { notify('调试会话正在运行；运行到光标处需要先停在断点上。', true); return }
+  const target = caretPayload()
+  const line = target.line + 1   // 编辑器 0 基 → DAP 1 基
   try {
-    const result = await request<{ settings: ProjectSettings; entries: Entry[] }>('project.settings.update', { runConfigs: configs })
-    projectSettings.value = result.settings
-    workspace.value.entries = result.entries
-    selectRunConfig()
-    notify(message)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-const runConfigDebug = ref(false)
-// The debug checkbox and the type selector are one setting; keep them in sync in
-// both directions so "调试（DAP）" and type=debug never disagree.
-watch(runConfigDebug, debug => { if (debug) runConfigType.value = 'debug'; else if (runConfigType.value === 'debug') runConfigType.value = 'shell' })
-watch(runConfigType, type => { runConfigDebug.value = type === 'debug' })
-function saveConfig() {
-  const name = runConfigName.value.trim()
-  if (!name) { notify('请填写配置名。', true); return }
-  if (!runCommand.value.trim() && !runConfigProgram.value.trim()) { notify('请填写命令或可执行程序。', true); return }
-  for (const entry of linesToArray(runConfigEnv.value))
-    if (!entry.includes('=') || entry.startsWith('=')) { notify(`环境变量要写成 KEY=VALUE：「${entry}」不合法。`, true); return }
-  const next = currentRunConfig()
-  const configs = runConfigs.value.map(config => config.name === name ? next : config)
-  if (!configs.some(config => config.name === name)) configs.push(next)
-  void persistRunConfigs(configs, `已保存运行配置「${name}」`)
-}
-function removeConfig() {
-  const name = runConfigName.value
-  void persistRunConfigs(runConfigs.value.filter(config => config.name !== name), `已删除运行配置「${name}」`)
-}
-const blameLines = ref<GitBlameLine[]>([])
-const blamePath = ref('')
-const clipboardDiff = ref<{ path: string; rows: DiffRow[]; unified: string } | null>(null)
-const severityLabel = (s: number) => s === 1 ? '错误' : s === 2 ? '警告' : s === 3 ? '提示' : '信息'
-const severityClass = (s: number) => s === 1 ? 'sev-error' : s === 2 ? 'sev-warning' : 'sev-info'
-const allProblems = computed(() => {
-  const result: { path: string; line: number; character: number; severity: number; message: string; source: string }[] = []
-  for (const [path, items] of lspDiagnostics) {
-    for (const d of items) result.push({ path, line: d.line, character: d.character, severity: d.severity, message: d.message, source: d.source ?? '' })
-  }
-  result.sort((a, b) => a.severity - b.severity || a.path.localeCompare(b.path) || a.line - b.line)
-  return result
-})
-interface HierarchyNode {
-  item: LspHierarchyItem
-  parentPath: string
-  ancestors: string[]
-  children: HierarchyNode[] | null
-  expanded: boolean
-  loading: boolean
-  recursive: boolean
-  error: string
-}
-const hierKind = ref<'call' | 'type'>('call')
-const hierRoot = ref<LspHierarchyItem | null>(null)
-const hierItems = ref<HierarchyNode[]>([])
-const hierOrigin = ref('')
-const hierBusy = ref(false)
-const hierError = ref('')
-let hierGeneration = 0
-const hierDirection = ref<'incoming' | 'outgoing' | 'supertypes' | 'subtypes'>('incoming')
-const hierOptions = computed<readonly (readonly [typeof hierDirection.value, string])[]>(() =>
-  hierKind.value === 'call'
-    ? [['incoming', '调用方'], ['outgoing', '被调用']]
-    : [['supertypes', '父类型'], ['subtypes', '子类型']])
-const hierTitle = computed(() => hierKind.value === 'call' ? '调用层次' : '类型层次')
-const hierRows = computed(() => {
-  const rows: { node: HierarchyNode; depth: number }[] = []
-  const stack = hierItems.value.map(node => ({ node, depth: 0 })).reverse()
-  while (stack.length) {
-    const row = stack.pop()!
-    rows.push(row)
-    if (row.node.expanded && row.node.children) {
-      for (let i = row.node.children.length - 1; i >= 0; i--) stack.push({ node: row.node.children[i]!, depth: row.depth + 1 })
-    }
-  }
-  return rows
-})
-function hierarchyKey(item: LspHierarchyItem) {
-  return JSON.stringify([item.path, item.name, item.kind, item.line, item.character])
-}
-function hierarchyNodes(items: LspHierarchyItem[], parent: LspHierarchyItem, ancestors: string[]): HierarchyNode[] {
-  return items.map(item => ({ item, parentPath: parent.path, ancestors, children: null, expanded: false,
-    loading: false, recursive: ancestors.includes(hierarchyKey(item)), error: '' }))
-}
-async function hierarchyChildren(item: LspHierarchyItem) {
-  const kind = hierKind.value === 'call'
-    ? (hierDirection.value === 'incoming' ? 'callHierarchyIncoming' : 'callHierarchyOutgoing')
-    : (hierDirection.value === 'supertypes' ? 'typeHierarchySupertypes' : 'typeHierarchySubtypes')
-  // Route through the originating document; the echoed item may belong to an unopened file.
-  const result = await request<LspHierarchyResult>('lsp.request', { kind, path: hierOrigin.value, item })
-  return result.calls ?? result.items ?? []
-}
-function resetHierarchy() {
-  hierGeneration++
-  hierRoot.value = null
-  hierItems.value = []
-  hierOrigin.value = ''
-  hierBusy.value = false
-  hierError.value = ''
-}
-async function prepareHierarchy(kind: 'call' | 'type', payload: { path: string; line: number; character: number }) {
-  resetHierarchy()
-  const generation = hierGeneration
-  bottom.value = true
-  showOutput('hierarchy')
-  hierKind.value = kind
-  hierOrigin.value = payload.path
-  hierBusy.value = true
-  try {
-    const prepared = await request<LspHierarchyResult>('lsp.request', {
-      kind: kind === 'call' ? 'prepareCallHierarchy' : 'prepareTypeHierarchy',
-      path: payload.path, line: payload.line, character: payload.character,
-    })
-    if (generation !== hierGeneration) return
-    const items = prepared.items ?? []
-    if (!items.length) { hierError.value = kind === 'call' ? '此处没有可追溯调用关系的符号。' : '此处没有可追溯继承关系的类型。'; return }
-    if (items.length > 1) notify(`此处有 ${items.length} 个符号，按「${items[0]!.name}」查询。`)
-    hierRoot.value = items[0]!
-    hierDirection.value = kind === 'call' ? 'incoming' : 'supertypes'
-    await loadHierarchy()
-  } catch (error) { if (generation === hierGeneration) hierError.value = errorMessage(error) }
-  finally { if (generation === hierGeneration) hierBusy.value = false }
-}
-async function loadHierarchy() {
-  const root = hierRoot.value
-  if (!root) return
-  const generation = ++hierGeneration
-  showOutput('hierarchy')
-  hierItems.value = []
-  hierBusy.value = true
-  hierError.value = ''
-  try {
-    const items = await hierarchyChildren(root)
-    if (generation === hierGeneration) hierItems.value = hierarchyNodes(items, root, [hierarchyKey(root)])
-  } catch (error) { if (generation === hierGeneration) hierError.value = errorMessage(error) }
-  finally { if (generation === hierGeneration) hierBusy.value = false }
-}
-async function toggleHierarchy(node: HierarchyNode) {
-  if (node.recursive || node.loading) return
-  node.expanded = !node.expanded
-  if (!node.expanded || node.children !== null) return
-  const generation = hierGeneration
-  node.loading = true
-  node.error = ''
-  try {
-    const items = await hierarchyChildren(node.item)
-    if (generation === hierGeneration) node.children = hierarchyNodes(items, node.item, [...node.ancestors, hierarchyKey(node.item)])
+    const result = await dapGotoTargets(target.path, line, target.character)
+    const first = result.targets?.[0]
+    if (!first) { notify(`第 ${line} 行没有可执行的位置。`, true); return }
+    await dapGoto(dapState.threadId, first.id)
+    notify(`已运行到 ${target.path}:${first.line || line}。`)
   } catch (error) {
-    if (generation === hierGeneration) { node.error = errorMessage(error); node.expanded = false }
-  } finally { node.loading = false }
-}
-function pickHierarchyDirection(direction: typeof hierDirection.value) {
-  if (hierDirection.value === direction) return
-  hierDirection.value = direction
-  void loadHierarchy()
-}
-function callSiteTarget(node: HierarchyNode) {
-  const path = hierDirection.value === 'outgoing' ? node.parentPath : node.item.path
-  return { path, line: node.item.callLine ?? node.item.line ?? 0 }
-}
-async function showBlame() {
-  const path = activePath.value
-  if (!isDesktop || !path) { notify('请在桌面端为当前文件使用「追溯」。', true); return }
-  bottom.value = true
-  showOutput('blame')
-  blamePath.value = path
-  blameLines.value = []
-  try { blameLines.value = (await request<GitBlame>('git.blame', { path })).lines ?? [] }
-  catch (error) { notify(errorMessage(error), true) }
-}
-async function compareWithClipboard() {
-  const tab = active.value
-  if (!tab) return
-  try {
-    const clipText = await navigator.clipboard.readText()
-    if (!clipText) { notify('剪贴板为空或非文本。', true); return }
-    const currentLines = tab.content.split('\n')
-    const clipLines = clipText.split('\n')
-    clipboardDiff.value = { path: tab.path, rows: buildDiffRows(currentLines, clipLines), unified: generateUnifiedDiff(currentLines, clipLines) }
-  } catch { notify('无法读取剪贴板。', true) }
-}
-// Line-level diff rows shared by the clipboard compare and the save-conflict
-// preview (left/right aligned, change/delete/insert/equal kinds).
-function buildDiffRows(beforeLines: string[], afterLines: string[]): DiffRow[] {
-  const lcs = computeLCS(beforeLines, afterLines)
-  const rows: DiffRow[] = []
-  let bi = 0, ai = 0, li = 0
-  while (bi < beforeLines.length || ai < afterLines.length) {
-    if (li < lcs.length && bi < lcs[li].from && ai < lcs[li].to) {
-      rows.push({ kind: 'change', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
-      bi++; ai++
-    } else if (li < lcs.length && bi < lcs[li].from) {
-      rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
-      bi++
-    } else if (li < lcs.length && ai < lcs[li].to) {
-      rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
-      ai++
-    } else if (li < lcs.length) {
-      rows.push({ kind: 'equal', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
-      bi++; ai++; li++
-    } else {
-      if (bi < beforeLines.length) rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
-      if (ai < afterLines.length) rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
-      bi++; ai++
-    }
+    const code = error instanceof BridgeError ? error.code : ''
+    notify(code === 'DAP_UNSUPPORTED' ? '该调试适配器不支持运行到光标处。' : errorMessage(error), true)
   }
-  return rows
 }
-function computeLCS(a: string[], b: string[]): { from: number; to: number }[] {
-  const m = a.length, n = b.length
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
-  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) {
-    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
-  }
-  const result: { from: number; to: number }[] = []
-  let i = 0, j = 0
-  while (i < m && j < n) {
-    if (a[i] === b[j]) { result.push({ from: i, to: j }); i++; j++ }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++
-  }
-  return result
-}
-function generateUnifiedDiff(a: string[], b: string[]): string {
-  const lcs = computeLCS(a, b)
-  const lines: string[] = ['--- 当前文件', '+++ 剪贴板', '@@ -1 +1 @@']
-  let ci = 0, ki = 0, li = 0
-  while (ci < a.length || ki < b.length) {
-    if (li < lcs.length && ci < lcs[li].from) { lines.push(`-${a[ci]}`); ci++ }
-    else if (li < lcs.length && ki < lcs[li].to) { lines.push(`+${b[ki]}`); ki++ }
-    else if (li < lcs.length) { lines.push(` ${a[ci]}`); ci++; ki++; li++ }
-    else { if (ci < a.length) lines.push(`-${a[ci]}`); if (ki < b.length) lines.push(`+${b[ki]}`); ci++; ki++ }
-  }
-  return lines.join('\n')
-}
-function copyFilePath() {
-  const tab = active.value
-  if (!tab) return
-  const fullPath = workspace.value ? `${workspace.value.root}/${tab.path}` : tab.path
-  void navigator.clipboard?.writeText(fullPath)
-  notify(`已复制路径：${fullPath}`)
-}
-// IDEA RefactorMenu: 移动文件 (Move File, F6) relocates the active file into
-// another directory — file.rename moves across directories, open tabs are
-// retitled, and the LSP document is re-opened by retitleTab.
-async function moveActiveFile() {
-  const tab = active.value
-  if (!tab || !workspace.value) { notify('请先打开一个文件。', true); return }
-  const target = window.prompt(`移动 ${tab.path} 到目录（工作区相对路径，如 src/main）：`, parentOf(tab.path))
-  if (target === null) return
-  const dir = target.trim().replace(/\\/g, '/').replace(/\/+$/, '')
-  if (!dir || dir === parentOf(tab.path)) return
-  if (dir.startsWith('/') || dir.includes('..')) { notify('目录必须是工作区内相对路径。', true); return }
-  try {
-    await request('file.create', { path: dir, directory: true })
-  } catch { /* the directory may already exist */ }
-  const destination = `${dir}/${baseName(tab.path)}`
-  try {
-    await request('file.rename', { from: tab.path, to: destination })
-    await retitleTab(tab.path, destination)
-    await refreshTree()
-    notify(`已移动到 ${destination}`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA RefactorMenu: 复制文件 (Copy File, F5) — the copy lands next to the
-// original under an IDEA-style "X copy.ext" name unless the user types one.
-async function copyActiveFile() {
-  const tab = active.value
-  if (!tab || !workspace.value || !isDesktop) { notify('复制文件需要桌面端。', true); return }
-  const suggested = copyCollisionName(name => workspace.value!.entries.some(entry => entry.path === `${parentOf(tab.path)}/${name}`), baseName(tab.path))
-  const input = window.prompt(`复制为（${parentOf(tab.path) || '项目根'} 下）：`, suggested)
-  if (input === null) return
-  const name = input.trim()
-  if (!name || name === baseName(tab.path)) return
-  const destination = parentOf(tab.path) ? `${parentOf(tab.path)}/${name}` : name
-  try {
-    await request('file.copy', { from: tab.path, to: destination })
-    await refreshTree()
-    notify(`已复制为 ${destination}`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA's Generate popup (Alt+Insert) filters the code actions down to source
-// generations — constructors, getters/setters, toString, overrides, …; JDT LS
-// publishes exactly those under kind `source.*`.
-const GENERATE_WORDS = ['generate', 'override', 'implement', 'constructor', 'getter', 'setter', 'tostring', 'equals', 'hashcode', 'delegate', 'insert', '生成', '重写', '实现', '构造']
-async function openGeneratePopup() {
-  const tab = active.value
-  if (!tab || !lspReady.value) { notify('生成功能需要语言服务器支持。', true); return }
-  const cursor = editorFor(tab.path)?.getCursor() ?? { line: tab.line - 1, ch: 0 }
-  try {
-    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: tab.path, line: cursor.line, character: cursor.ch, diagnostics: [] })
-    const actions = (result.actions ?? []).filter(action =>
-      action.kind?.startsWith('source') || GENERATE_WORDS.some(word => action.title.toLowerCase().includes(word)))
-    if (!actions.length) { notify('当前语言服务没有在该处提供生成选项。', true); return }
-    codeActions.value = actions
-    actionPrompt.value = { path: tab.path }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA's refactor actions are code-action flows with a title filter (ExtractMethodAction
-// offers "Extract Method"); JDT LS publishes them as refactor.* CodeActions, so the
-// same Alt+Enter pipeline runs here with the titles narrowed to the requested kind.
-const refactorTitles: Record<string, string[]> = {
-  extractVariable: ['extract variable', '提取变量'],
-  extractConstant: ['extract constant', 'extract field', '提取常量'],
-  extractMethod: ['extract method', '提取方法'],
-  inlineVariable: ['inline', '内联'],
-}
-async function runRefactorFlow(kind: keyof typeof refactorTitles, needSelection: boolean, label: string) {
-  const tab = active.value
-  if (!tab || !lspReady.value) { notify(`${label}需要语言服务器支持。`, true); return }
-  const cursor = editorFor(tab.path)?.getCursor() ?? { line: tab.line - 1, ch: 0 }
-  if (needSelection && !(editorFor(tab.path)?.hasSelection() ?? false)) {
-    notify(`请先选中${label.replace('提取', '要提取的')}代码，再执行该重构。`, true)
-    return
-  }
-  const diagnostics = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.line === cursor.line).map(item => ({
-    range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
-    severity: item.severity, message: item.message, ...(item.source ? { source: item.source } : {}) }))
-  try {
-    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: tab.path, line: cursor.line, character: cursor.ch, diagnostics })
-    const wanted = refactorTitles[kind]
-    const actions = (result.actions ?? []).filter(action =>
-      action.kind?.startsWith('refactor') && wanted.some(word => action.title.toLowerCase().includes(word)))
-    if (!actions.length) { notify(`语言服务在当前光标处没有提供「${label}」。`, true); return }
-    if (actions.length === 1) { await applyCodeAction(actions[0]!); return }
-    codeActions.value = actions
-    actionPrompt.value = { path: tab.path }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function extractVariable() { void runRefactorFlow('extractVariable', true, '提取变量') }
-function extractConstant() { void runRefactorFlow('extractConstant', true, '提取常量') }
-function extractMethod() { void runRefactorFlow('extractMethod', true, '提取方法') }
-function inlineVariable() { void runRefactorFlow('inlineVariable', false, '内联') }
+// 版本控制动作是一个域（IDEA 的 Git 菜单 + GitBranchesPopup + Annotate）。
+const {
+  branchPopupOpen, openBranchPopup, onBranchAction, refreshTreeVersion, gitCompareWith, compareWithBranch,
+  blameEnabled, blameOf, clipboardDiff, showBlame, compareWithClipboard,
+  updateProject, resetHeadDialog, pushWithConfirm, gitMenuAction,
+} = createVcsActions({ notify, isDesktop, workspace, gitAvailable, refreshGitWidget, treeVersion, activePath, active, bottom, showOutput, showView,
+  // 惰性：gradleHost 在更后面组装（VCS 更新要触发构建工具的自动重载，见 src/gradleHost.ts）。
+  onVcsUpdated: () => onVcsUpdated() })
+// 调用/类型层级视图是一个域（方向/根符号/节点树都在模块里自持）。
+const {
+  hierKind, hierRoot, hierItems, hierOrigin, hierBusy, hierError, hierDirection, hierOptions, hierTitle, hierRows,
+  hierarchyKey, hierarchyNodes, hierarchyChildren, resetHierarchy, prepareHierarchy, loadHierarchy, toggleHierarchy, pickHierarchyDirection,
+  callSiteTarget,
+} = createHierarchyView({
+  notify, bottom: () => bottom.value, loading: () => loading.value,
+  setBottom: open => { bottom.value = open }, showOutput: id => showOutput(id),
+})
+// 生成 / 重构 / 文件移动是一个域（IDEA 的 Generate 菜单 + Refactor 菜单）。
+const {
+  copyFilePath, moveActiveFile, copyActiveFile, openGeneratePopup,
+  refactorTitles, runRefactorFlow, extractVariable, extractConstant, extractMethod, inlineVariable,
+} = createGenerateRefactor({
+  notify, isDesktop, workspace, active, editorFor, lspReady, request, parentOf, baseName, refreshTree,
+  renameEntryWithReferences, copyCollisionName, codeActions, actionPrompt, applyCodeAction,
+})
 function parentOf(path: string) { const index = path.lastIndexOf('/'); return index < 0 ? '' : path.slice(0, index) }
 function baseName(path: string) { return path.slice(path.lastIndexOf('/') + 1) }
-// Synthetic tree nodes (External Libraries / Scratches headers, glob leaves) carry a
-// \0 prefix; file operations must not be offered or attempted on them.
-function isSyntheticPath(path: string) { return path.startsWith('\u0000') }
-async function toggleReadOnly(path: string) {
-  treeMenu.value = null
-  tabMenu.value = null
-  if (!isDesktop) { notify('只读属性需要桌面端。', true); return }
-  const tab = findTab(path)
-  try {
-    const result = await request<{ path: string; readOnly: boolean }>('file.readOnly', { path, readOnly: !(tab?.readOnly ?? false) })
-    if (tab) {
-      tab.readOnly = result.readOnly
-      editorFor(path)?.setReadOnly(result.readOnly)
-    }
-    notify(result.readOnly ? `已将 ${baseName(path)} 标记为只读` : `${baseName(path)} 现在可写`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// AssociateWithFileTypeAction: map this file's extension to one of the languages
-// TaoCode can highlight. The association is stored with the project and applies to
-// every file sharing the extension, so remount the affected buffers after saving.
-const languageChoices: [string, string][] = [['java', 'Java'], ['cpp', 'C++'], ['typescript', 'TypeScript'], ['other', '纯文本']]
-async function associateFileType(path: string, choice: string) {
-  tabMenu.value = null
-  treeMenu.value = null
-  const dot = path.lastIndexOf('.')
-  const ext = dot < 0 ? '' : path.slice(dot + 1).toLowerCase()
-  if (!ext) { notify('该文件没有扩展名，无法关联文件类型。', true); return }
-  const next = { ...projectSettings.value.fileAssociations }
-  if (choice === 'auto') delete next[ext]
-  else next[ext] = choice
-  try {
-    const result = await request<{ settings: ProjectSettings }>('project.settings.update', { fileAssociations: next })
-    projectSettings.value = result.settings
-    // Syntax comes from the remount; the language server still keys documents by
-    // extension, so re-open every buffer this association touches.
-    for (const tab of allTabs.value) if (tab.path.toLowerCase().endsWith(`.${ext}`)) void startLsp(tab)
-    bufferEpoch.value++
-    notify(choice === 'auto' ? `已恢复按扩展名识别 .${ext}` : `*.${ext} 已关联到 ${languageLabels[choice] ?? choice}`)
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function onTreeContext(payload: { entry: Entry; x: number; y: number }) { if (isSyntheticPath(payload.entry.path)) return; treeMenu.value = payload; treeSubmenu.value = null; menu.value = null }
-// FindUsages from the tree: open the file first (usages ride on the LSP document),
-// then ask at its first symbol line.
-async function findUsagesOf(path: string) {
-  treeMenu.value = null
-  treeSubmenu.value = null
-  await openFile(path)
-  if (!findTab(path)) return
-  await refreshOutline(path)
-  // IDEA's FindUsages on a file targets the class the file declares: pick the
-  // class-like symbol named after the file stem, else the first symbol.
-  const stem = (path.split('/').pop() ?? '').replace(/\.[^.]+$/, '')
-  const classKinds = new Set([5, 11, 23, 26])  // class, interface, struct, enum per LSP
-  const target = outline.value.find(symbol => symbol.name === stem && classKinds.has(symbol.kind))
-    ?? outline.value.find(symbol => classKinds.has(symbol.kind))
-    ?? outline.value[0]
-  void onSemantic({ kind: 'references', path, line: target?.startLine ?? 0, character: target?.startChar ?? 0 })
-}
-function beginCreate(mode: 'createFile' | 'createDir') { const entry = treeMenu.value?.entry; if (!entry) return; const dir = entry.kind === 'directory' ? entry.path : parentOf(entry.path); treeMenu.value = null; nameDialog.value = { mode, dir, value: '', template: '' }; void nextTick(() => nameInput.value?.focus()) }
-function beginRename() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; nameDialog.value = { mode: 'rename', dir: parentOf(entry.path), entry, value: baseName(entry.path) }; void nextTick(() => { nameInput.value?.focus(); nameInput.value?.select() }) }
-function beginDelete() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; deleteTarget.value = entry }
-function copyPath() { const entry = treeMenu.value?.entry; if (!entry) return; treeMenu.value = null; try { void navigator.clipboard?.writeText(workspace.value ? `${workspace.value.root}/${entry.path}` : entry.path) } catch { /* clipboard may be unavailable in WebView2 */ } notify(`路径：${entry.path}`) }
-function openInTerminal() {
-  const entry = treeMenu.value?.entry
-  if (!entry || !isDesktop || !workspace.value) return
-  treeMenu.value = null
-  const dir = entry.kind === 'directory' ? entry.path : parentOf(entry.path)
-  // Bring the terminal tab up first so the panel is mounted; then ask the panel
-  // (via defineExpose) to spawn the shell in the chosen directory. Sending the
-  // cwd to the bridge directly would create an orphan terminal with no xterm
-  // subscribed to its output stream.
-  showOutput('terminal')
-  void terminalPanelRef.value?.openIn(dir)
-}
+// 文件树的操作是一个域（IDEA 的 ProjectView 右键菜单动作）。
+const {
+  isSyntheticPath, toggleReadOnly, languageChoices, associateFileType, onTreeContext, findUsagesOf,
+  beginCreate, beginRename, beginDelete, copyPath, openInTerminal,
+} = createTreeActions({
+  notify, isDesktop, menu, treeMenu, treeSubmenu, tabMenu, findTab, editorFor, request, projectSettings, allTabs,
+  startLsp, bufferEpoch, languageLabels, openFile, refreshOutline, outline, onSemantic, nameDialog, nameInput,
+  deleteTarget, workspace, terminalPanelRef, showOutput, parentOf, baseName,
+})
 // The menus drive the very functions the keymap binds: `runEditor` asks the active
 // CodeEditor instance, `showView` moves the left dock. `null` from the editor means
 // the buffer refused (nothing selected, or the panel is already open).
@@ -3917,8 +1392,15 @@ function runEditor(name: string) {
 }
 function showView(view: typeof leftView.value) {
   const anchor = toolAnchors[view] ?? 'left'
-  if (anchor === 'bottom') { bottom.value = true } else { explorer.value = true }
-  leftView.value = view
+  if (anchor === 'bottom') {
+    // 停靠在底部的工具窗口（IDEA 的任意停靠）：打开底部 dock 并**选中它**。
+    // 不能设 leftView —— 那会让左侧栏渲染一个属于底部的视图。
+    bottom.value = true
+    bottomTab.value = view
+  } else {
+    explorer.value = true
+    leftView.value = view
+  }
   recordActiveToolWindow(view)
   menu.value = null
 }
@@ -3945,338 +1427,174 @@ const toolWindow = (view: typeof leftView.value, title: string, keywords: string
   enabled: () => Boolean(workspace.value) && (!needsDesktop || isDesktop),
   run: () => showView(view),
 })
+// 文件菜单：见 src/menus/fileMenu.ts（一组一文件）。
+// 文件 › 导入/导出设置（IDEA `ExportImportGroup`）与「恢复默认设置」是一个域：见 src/settingsTransfer.ts。
+const { exportSettings, importSettings, restoreDefaultSettings } = createSettingsTransfer({
+  isDesktop, notify,
+  // 两个刷新函数是惰性的（由别的域提供，装配顺序在后）；文件对话框与确认框由模块自己发。
+  refreshAppState: () => refreshAppState(), refreshProjectSettings: () => refreshProjectSettings(),
+})
+const fileMenuContext: FileMenuContext = {
+  working, dirty, active, activePath, allTabs, groups, focusedPane, closedTabsPerPane, recentProjects,
+  isDesktop, hasEditor, beginProject: (...a) => beginProject(...a), openWorkspace: (...a) => openWorkspace(...a),
+  openManageRecents, closeWorkspace: (...a) => closeWorkspace(...a), saveAll,
+  createScratch, closeTab, reopenClosedTab, closeAllTabsIn, closeOtherTabsIn, openEncoding,
+  toggleReadOnly, convertLineSeparators, openBinary, openPlugins, openSettings, quitApp,
+  forceReloadFromDisk: () => forceReloadFromDisk(), notify, workspace, openProjectStructure,
+  // ExportImportGroup 三项 + PowerSaveGroup 一项（省电模式与状态栏那颗芯片是同一个动作）。
+  exportSettings: () => void exportSettings(), importSettings: () => void importSettings(),
+  restoreDefaultSettings: () => void restoreDefaultSettings(), togglePowerSave: () => void togglePowerSave(),
+  exportToHtml: () => openExportDialog(),
+  powerSaveMode: { get value() { return editorSettings.value.powerSaveMode } },
+}
+// 文件 › 导出 › 导出到 HTML（IDEA `ExportToHTMLAction`）：引擎、对话框状态与设置落盘都在 src/htmlExport.ts。
+// 「浏览…」选回来的目录：对话框把它回填进输出目录文本框（见 ExportToHtmlDialog 的 pickedDirectory）。
+const exportPickedDirectory = ref('')
+const { dialogOpen: exportDialogOpen, openExportDialog, closeExportDialog, exportToHtml: runExportToHtml, browseOutputDirectory } =
+  createHtmlExport({
+    isDesktop, notify, workspace, projectSettings,
+    activePath: () => activePath.value,
+    // 语法高亮与选区都从**编辑器已渲染的 DOM** 读（见 src/htmlExportDom.ts 的说明）。
+    readEditor: () => {
+      const handle = active.value ? editorFor(active.value.path) : null
+      return handle ? { lines: handle.exportStyledLines(), selection: handle.selectionText() } : null
+    },
+    theme: () => {
+      const style = getComputedStyle(document.documentElement)
+      const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
+      return { background: read('--panel', '#ffffff'), foreground: read('--text', '#000000'),
+               fontFamily: read('--font-mono', 'monospace'), fontSize: editorSettings.value.fontSize }
+    },
+    openExternal: url => { void request('shell.openUrl', { url }) },
+    pickDirectory: (title, initial) => request<string | null>('dialog.pickDirectory', { title, initial }),
+  })
+
+/** 导入设置后把当前项目的设置重新读一遍（包里可能换了它）；没开项目就是空操作。 */
+async function refreshProjectSettings() {
+  if (!workspace.value) return
+  try { projectSettings.value = await request<ProjectSettings>('project.settings.get') }
+  catch { /* 项目可能刚被关掉 */ }
+}
+const fileMenuRows = createFileMenuRows(fileMenuContext)
+// 编辑菜单：见 src/menus/editMenu.ts（一组一文件）。
+// 粘贴通道是一个域（IDEA $Paste / EditorPasteSimple / PasteMultiple + REFORMAT_ON_PASTE 后处理）。
+const {
+  pasteHistoryOpen, pasteHistoryEntries, pasteFromSystemClipboard, pasteAsPlainText, openPasteHistory,
+  pickPasteHistoryEntry, removePasteHistoryEntry, onEditorPaste,
+} = createPasteActions({ notify, active, editorFor, lspOn, editorSettings, runFormatting })
+// 行内 gutter 图标层（IDEA `GutterIconRenderer`：诊断 / 断点 / 书签，可点击）。
+const { gutterIcons, onGutterIcon } = createGutterIconHost({ active, editorSettings, diagnostics: lspDiagnostics, revealLocation, toggleBreakpointAt, notify, bookmarks: path => bookmarkLines.value[path] ?? [], breakpointLines: path => (dapBreakpoints.get(path) ?? []).map(point => point.line) })
+// 帮助菜单的动作（IDEA HelpMenu 里能落地的那些；其余在 src/menus/helpMenu.ts 里逐条登记为待办）。
+const {
+  aboutOpen, aboutInfo, specialPathsOpen, specialPaths, collectBusy, showLog, showAbout, browseSpecialPaths,
+  openSpecialPath, collectLogs, copyTroubleshooting, showKeymap,
+} = createHelpActions({ notify, isDesktop, helpPanel: help, openActionSearch: () => openActionSearch() })
+const helpMenuContext: HelpMenuContext = {
+  openActionSearch: () => openActionSearch(), showKeymap, showLog, collectLogs, collectBusy, browseSpecialPaths, copyTroubleshooting, showAbout, isDesktop }
+const helpMenuRows = createHelpMenuRows(helpMenuContext)
+// 宏（录制/回放）：IDEA 的 `ActionMacroManager`。`resolveAction` 惰性读 Find Action 的清单
+// （那份清单由 menuUi 装配在更后面，等价于源码的 `ActionManager.getAction(id)`）。
+const {
+  macros, namedMacros, macrosDialogOpen, openMacrosDialog, recording, playing, lastMacro,
+  toggleMacroRecording, playMacro, playLastMacro, deleteMacro, renameMacro, deleteMacroStep,
+} = createMacros({ notify, activePath, editorFor, resolveAction: id => actionList.value.find(entry => entry.id === id)?.run })
+const macrosMenuContext = { macros, namedMacros, recording, playing, lastMacro, toggleMacroRecording, playLastMacro, playMacro, openMacrosDialog }
+const editMenuContext: EditMenuContext = {
+  copyReference: copySymbolReference, runEditor, convertIndents, hasEditor, editable, toolWindow,
+  pasteFromSystemClipboard, pasteAsPlainText, openPasteHistory, macros: macrosMenuContext }
+const editMenuRows = createEditMenuRows(editMenuContext)
+// 视图菜单：见 src/menus/viewMenu.ts（一组一文件）。
+// IDEA 的 ToggleFullScreen（View → Appearance → ToggleFullScreenGroup）：宿主把窗口切成
+// "去装饰 + 铺满整个显示器"，退出时恢复原样式与位置（见 native/window_state.hpp）。
+// 切换流程与沉浸协调同域，所以实现也在 `src/distractionFreeSession.ts` 的 `createImmersiveMode`。
+async function toggleFullScreen() {
+  if (!isDesktop) { notify('全屏需要桌面端窗口。'); return }
+  await immersive.toggleFullScreen()
+}
+const viewMenuContext: ViewMenuContext = {
+  distractionFreeMode, toggleDistractionFreeMode,
+  fullScreen, toggleFullScreen, active, activity, bottom, changeTheme,
+  // 惰性：`chooseBackgroundImage` 由下面的界面动作模块提供（解构在更后面）。
+  chooseBackgroundImage: () => void chooseBackgroundImage(), editorSettings, explorer, fileTreeRef, saveSettingsPatch, showOutput, splitOrientation, splitTabOut, theme, togglePowerSave, toggleZenMode, unsplit, unsplitAll, workspace, zenMode, hasEditor, editable, toolWindow, changeSplitOrientation, isDesktop, activateToolWindow }
+const viewMenuRows = createViewMenuRows(viewMenuContext)
+// 导航菜单：见 src/menus/navigateMenu.ts（一组一文件）。
+const navigateMenuContext: NavigateContext = { active, cycleBookmark, goBack, goForward, hasEditor, jumpLastEditLocation, jumpMethod, lspReady, navBack, navForward, openActionSearch: () => openActionSearch(), openSearchEverywhere: () => openSearchEverywhere(), openGoLine, openMnemonicPrompt, openPalette, openRecentFiles, openRecentPlaces, openSymbol, runEditor, selectInTree, showView, toggleBookmark, workspace }
+const navigateMenuRows = createNavigateMenuRows(navigateMenuContext)
+// 代码菜单：见 src/menus/codeMenu.ts（一组一文件）。
+const codeMenuContext: CodeMenuContext = { hasEditor, active, lspReady, isDesktop, editable, semantic, openTemplateChooser, openSurround, openGeneratePopup, showQuickDoc, copyReference, runOrganizeImports, showBlame, blameEnabled: () => blameEnabled.value, compareWithClipboard, copyFilePath }
+const codeMenuRows = createCodeMenuRows(codeMenuContext)
+// 重构菜单：见 src/menus/refactorMenu.ts（一组一文件）。
+const refactorMenuContext: RefactorMenuContext = { active, lspReady, isDesktop, caretPayload, openCodeActions, extractVariable, extractConstant, extractMethod, inlineVariable, moveActiveFile, copyActiveFile, semantic }
+const refactorMenuRows = createRefactorMenuRows(refactorMenuContext)
+// 分析菜单：见 src/menus/analyzeMenu.ts（一组一文件）。
+// 整工程检查（IDEA 的 Analyze → Inspect Code）：跨次保留每文件的 resultId，
+// 这样服务器可以对没变的文件回 `unchanged`（见 src/workspaceInspection.ts）。
+const workspaceDiagnosticIds = new Map<string, string>()
+// 只做组装：跑一次检查、把结论报给用户。合并规则全在 workspaceInspection/workspaceDiagnostics 里。
+async function runWorkspaceInspectionAction() {
+  if (!isDesktop) { notify('整工程检查需要桌面端（语言服务）。'); return }
+  try {
+    const outcome = await runWorkspaceInspection({
+      // 整工程检查不绑文件，path 传空串 —— 原生侧会挑一个在跑的服务器（见 WorkspaceInspectionDeps）。
+      query: previousResultIds => request<WorkspaceDiagnosticsResult>('lsp.request',
+        { kind: 'workspaceDiagnostic', path: '', line: 0, character: 0, previousResultIds }),
+      diagnostics: lspDiagnostics,
+      resultIds: workspaceDiagnosticIds,
+    })
+    notify(outcome.message, !outcome.ok)
+  } catch (error) { notify(errorMessage(error), true) }
+}
+// IDEA 的 Copy Reference（Ctrl+Alt+Shift+C）：把当前位置的符号引用复制到剪贴板。
+// 引用串由 LSP `textDocument/moniker` 提供（见 src/moniker.ts 的模块注释）——
+// 剪贴板状态用户看不见，所以按"提示规范"这里**必须**给反馈。
+async function copySymbolReference() {
+  const tab = active.value
+  if (!tab || !isDesktop) { notify('复制引用需要打开一个文件并使用语言服务。'); return }
+  try {
+    const result = await request<MonikerResult>('lsp.request', {
+      kind: 'moniker', path: tab.path, line: Math.max(0, tab.line - 1), character: Math.max(0, tab.column - 1),
+    })
+    const moniker = primaryMoniker(result.available ? result.monikers : [])
+    if (!moniker) { notify('当前位置没有可用的符号引用。'); return }
+    await copyToClipboard(referenceText(moniker))
+    notify(describeCopiedReference(moniker))
+  } catch (error) { notify(errorMessage(error), true) }
+}
+const analyzeMenuContext: AnalyzeMenuContext = { active, lspReady, workspace, caretPayload, openCodeActions, showOutput, showView, runWorkspaceInspection: runWorkspaceInspectionAction }
+const analyzeMenuRows = createAnalyzeMenuRows(analyzeMenuContext)
+// 构建菜单：见 src/menus/buildMenu.ts（一组一文件）。
+const buildMenuContext: BuildMenuContext = { isDesktop, workspace, runState, startBuild: (...a) => startBuild(...a), stopRun: (...a) => stopRun(...a), showOutput }
+const buildMenuRows = createBuildMenuRows(buildMenuContext)
+// 运行菜单：见 src/menus/runMenu.ts（一组一文件）。
+const runMenuContext: RunMenuContext = { active, dapState, explorer, leftView, runState, workspace, isDesktop, get lastRunParams() { return lastRunParams }, notify, runSelectedConfig: (...a) => runSelectedConfig(...a), runContextConfiguration: (...a) => runContextConfiguration(...a), openConfigChooser, rerunLast, stopRun: (...a) => stopRun(...a), showOutput, toolWindow, editable, openRunConfigurations, runToCursor }
+const runMenuRows = createRunMenuRows(runMenuContext)
+// Git 菜单：见 src/menus/gitMenu.ts（一组一文件）。
+const gitMenuContext: GitMenuContext = { active, activePath, gitAvailable, working, workspace, isDesktop, beginProject: (...a) => beginProject(...a), gitMenuAction, openSettings, openBranchPopup, openSubmodules, openWorktrees, pushWithConfirm, resetHeadDialog, showBlame, blameEnabled: () => blameEnabled.value, showFileHistory, showView, updateProject, toolWindow }
+const gitMenuRows = createGitMenuRows(gitMenuContext)
 const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRow[] }[] = [
-  { menu: 'file', label: '文件', rows: [
-    { id: 'project.new', title: '新建项目…', keywords: 'new create project 新建', enabled: () => !working.value, run: () => beginProject('create') },
-    { id: 'project.open', title: '打开项目…', keywords: 'open project 打开', enabled: () => !working.value, run: () => void openWorkspace() },
-    { id: 'project.clone', title: '克隆仓库…', keywords: 'clone checkout vcs 克隆', enabled: () => !working.value, run: () => beginProject('clone') },
-    { id: 'project.recentSection', section: '最近项目' },
-    { id: 'project.recentList', recent: true },
-    // ManageRecentProjectsAction.java (PlatformActions.xml:386): opens a JBPopup
-    // with the filtered recent-projects tree and a search field; the popup also
-    // delegates to RemoveSelectedProjectsAction for the same Delete / multi-select
-    // behaviour the welcome screen exposes. TaoCode mirrors this with a focused
-    // modal dialog that reuses the welcome-screen list, so the user can manage
-    // recents without leaving the current project.
-    { id: 'project.manageRecent', title: '管理最近项目…', keywords: 'manage recent projects popup dialog 管理最近项目', enabled: () => recentProjects.value.length > 0 && !working.value, run: () => openManageRecents() },
-    { id: 'project.close', title: '关闭项目，返回欢迎页', keywords: 'close project 关闭', enabled: () => !working.value, run: () => void closeWorkspace() },
-    { id: 'file.rule1', rule: true },
-    // IDEA's FileMenu carries exactly one save action (SaveAll, Ctrl+S).
-    { id: 'file.saveAll', title: '全部保存', keys: 'Ctrl S', keywords: 'save all write 保存', enabled: () => dirty.value && !working.value, run: () => void saveAll() },
-    { id: 'file.scratch', title: '新建临时文件', keys: 'Ctrl Alt Shift Insert', keywords: 'scratch temp buffer 临时文件', enabled: () => Boolean(workspace.value) && !working.value, run: () => void createScratch() },
-    { id: 'file.closeTab', title: '关闭当前文件', keywords: 'close tab editor 关闭标签', enabled: () => Boolean(active.value) && !working.value, run: () => { const tab = active.value; if (tab) void closeTab(tab) } },
-    { id: 'file.reopenClosedTab', title: '重新打开已关闭的标签页', keywords: 'reopen closed tab restore editor 恢复关闭标签', enabled: () => closedTabsPerPane[focusedPane.value].length > 0, run: () => void reopenClosedTab() },
-    { id: 'file.closeAllTabs', title: '关闭所有文件', keywords: 'close all tabs editors 全部关闭', enabled: () => allTabs.value.length > 0 && !working.value, run: () => { void closeAllTabsIn(focusedPane.value) } },
-    { id: 'file.closeOthers', title: '关闭其他文件', keywords: 'close other tabs 关闭其他', enabled: () => Boolean(active.value) && groups[focusedPane.value].tabs.length > 1, run: () => { const tab = active.value; if (tab) void closeOtherTabsIn(focusedPane.value, tab) } },
-    { id: 'file.rule2', rule: true },
-    // FileMenu › FilePropertiesGroup —— **子菜单**（`<group id="FilePropertiesGroup" popup="true">`，
-    // PlatformActions.xml:400-412），子项顺序：ChangeFileEncodingAction · AssociateWithFileType ·
-    // ToggleReadOnlyAttribute · 以及**再嵌一层**的 ChangeLineSeparators（:405 自己也是 popup="true"）。
-    // TaoCode 没有独立的“关联文件类型”菜单行（它在标签页右键菜单里），所以这里不放。
-    { id: 'file.properties', title: '文件属性', keywords: 'file properties encoding read only line separators 文件属性 编码 只读 行分隔符', children: [
-      { id: 'file.encoding', title: '文件编码…', keywords: 'encoding charset gbk utf16 bom 编码', enabled: hasEditor, run: () => openEncoding() },
-      { id: 'file.toggleReadOnly', title: '切换只读属性', keywords: 'read only writable lock attribute 只读 可写', enabled: () => Boolean(active.value) && isDesktop, run: () => void toggleReadOnly(activePath.value) },
-      { id: 'file.lineSeparators', title: '行分隔符', keywords: 'line separators crlf lf 行尾 分隔符', children: [
-        { id: 'file.lineSeparatorWindows', title: '转换为 Windows (CRLF) 行尾', keywords: 'convert windows line separators crlf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('crlf') },
-        { id: 'file.lineSeparatorUnix', title: '转换为 Unix and macOS (LF) 行尾', keywords: 'convert unix macos line separators lf 行尾 换行', enabled: () => Boolean(active.value) && isDesktop, run: () => void convertLineSeparators('lf') },
-        // IDEA 还有 ConvertToMacLineSeparators(CR)：TaoCode 的换行转换只有 CRLF/LF 两种（见
-        // convertLineSeparators 的参数类型），不做只有名字没有实现的第三项。
-      ] },
-    ] },
-    { id: 'file.openBinary', title: '以二进制/十六进制方式打开', keywords: 'binary hex image 二进制 十六进制 图片', enabled: () => isDesktop && Boolean(activePath.value || workspace.value), run: () => { const path = activePath.value; if (path) void openBinary(path); else notify('请先选中一个文件。', true) } },
-    { id: 'plugin.manage', title: '插件…', keywords: 'plugin extension 插件 扩展', enabled: () => isDesktop, run: () => void openPlugins() },
-    { id: 'file.rule3', rule: true },
-    { id: 'app.settings', title: '设置…', keys: 'Ctrl Alt S', keywords: 'settings preferences config keymap 设置', enabled: () => !working.value, run: () => void openSettings() },
-    // IDEA File menu (real 2026.2 UI): 项目结构 (Ctrl+Alt+Shift+S) sits next to
-    // 设置, and 从磁盘全部重新加载 (Ctrl+Alt+Y) sits next to 全部保存.
-    { id: 'app.projectStructure', title: '项目结构…', keys: 'Ctrl Alt Shift S', keywords: 'project structure sdk modules 项目结构', enabled: () => !working.value && Boolean(workspace.value), run: () => void openSettings('structure') },
-    { id: 'file.reloadFromDisk', title: '从磁盘全部重新加载', keys: 'Ctrl Alt Y', keywords: 'reload from disk synchronize 从磁盘重新加载 刷新', enabled: () => Boolean(workspace.value) && isDesktop, run: () => void forceReloadFromDisk() },
-    { id: 'app.quit', title: '退出', keywords: 'exit quit 关闭程序 退出', enabled: () => !working.value, run: () => { void quitApp() } },
-  ] },
-  { menu: 'edit', label: '编辑', rows: [
-    // IDEA EditMenu order (PlatformActions.xml:446-518): Undo/Redo first, then the
-    // find group, selection, and the smart group ending ToggleCase -> JoinLines ->
-    // Duplicate. MoveLineUp/Down use Alt+Shift ($default.xml keeps Ctrl+Shift for
-    // MoveStatement, which TaoCode does not ship).
-    editable('undo', '撤销', 'Ctrl Z', 'undo revert 撤销'),
-    editable('redo', '重做', 'Ctrl Shift Z', 'redo 重做'),
-    { id: 'edit.rule1', rule: true },
-    // IDEA EditMenu › FindMenuGroup —— 也是**子菜单**（`<group id="FindMenuGroup" popup="true">`，
-    // PlatformActions.xml:465-486）。子项顺序按源码：Find · Replace · FindNext · FindPrevious ·
-    // 多光标选择 · (分隔) · 光标处查找 · (分隔) · FindInPath · ReplaceInPath。
-    // 说明：TaoCode 没有 IDEA 的编辑器内“替换条”，它的「替换下一个 / 替换全部」是那条替换条上的
-    // 两个按钮在这里的落点，所以随这一组一起放进子菜单，而不是发明两个新动作。
-    { id: 'edit.findMenu', title: '查找', keywords: 'find replace search 查找 替换', children: [
-      editable('find', '在文件中查找与替换', 'Ctrl F', 'find replace search 查找'),
-      editable('find.next', '查找下一个', 'F3', 'find next 下一个'),
-      editable('find.previous', '查找上一个', 'Shift F3', 'find previous 上一个'),
-      { id: 'edit.ruleFind1', rule: true },
-      editable('replace.next', '替换下一个', undefined, 'replace next 替换'),
-      editable('replace.all', '替换全部', undefined, 'replace all 全部替换'),
-      { id: 'edit.ruleFind2', rule: true },
-      toolWindow('search', '全局搜索与替换', 'search in files find in files global 全局搜索'),
-    ] },
-    { id: 'edit.rule2', rule: true },
-    editable('selectAll', '全选', 'Ctrl A', 'select all 全选'),
-    { id: 'edit.rule3', rule: true },
-    editable('case.toggle', '切换大小写', 'Ctrl Shift U', 'case upper lower 大小写'),
-    editable('line.join', '合并行', 'Ctrl Shift J', 'join lines 合并行'),
-    editable('line.duplicate', '复制行', 'Ctrl D', 'duplicate copy line 复制行'),
-    editable('line.delete', '删除行', 'Ctrl Y', 'delete line 删除行'),
-    editable('line.moveUp', '上移行', 'Alt Shift ↑', 'move line up 上移行'),
-    editable('line.moveDown', '下移行', 'Alt Shift ↓', 'move line down 下移行'),
-    // IDEA Edit menu: 缩进选区 (Tab) / 反缩进或缩进选区 (Shift+Tab).
-    editable('indent.selection', '缩进选区', 'Tab', 'indent selection 缩进'),
-    editable('indent.selection.less', '反缩进选区', 'Shift Tab', 'outdent selection 反缩进'),
-    // EditMenu › ConvertIndentsGroup —— IDEA 里是**子菜单**（:500-505），两项：To Spaces / To Tabs。
-    // 作用于全文件，宽度跟随「编辑器 › 代码风格 › 制表符与缩进」的 tabSize。
-    { id: 'edit.convertIndents', title: '转换缩进', keywords: 'convert indents spaces tabs 转换缩进 空格 制表符', children: [
-      { id: 'edit.indentsToSpaces', title: '转换为空格缩进', keywords: 'convert indents to spaces 空格', run: () => convertIndents('spaces') },
-      { id: 'edit.indentsToTabs', title: '转换为制表符缩进', keywords: 'convert indents to tabs 制表符', run: () => convertIndents('tabs') },
-    ] },
-    { id: 'edit.rule4', rule: true },
-    editable('comment.line', '行注释', 'Ctrl /', 'comment line 行注释'),
-    editable('comment.block', '块注释', 'Ctrl Shift /', 'comment block 块注释'),
-    { id: 'edit.rule4', rule: true },
-    editable('cursor.above', '在上行添加光标', 'Ctrl Alt Shift ↑', 'multiple cursors column 多光标'),
-    editable('cursor.below', '在下行添加光标', 'Ctrl Alt Shift ↓', 'multiple cursors column 多光标'),
-    editable('occurrence.next', '添加下一个匹配', 'Alt J', 'next occurrence multiple cursors 下一个匹配'),
-    editable('occurrence.select', '选中所有相同内容', 'Ctrl Shift Alt J', 'all occurrences 所有匹配'),
-    editable('fold', '折叠代码块', 'Ctrl Shift -', 'fold collapse 折叠'),
-    editable('unfold', '展开代码块', 'Ctrl Shift =', 'unfold expand 展开'),
-    { id: 'edit.rule5', rule: true },
-    editable('foldAll', '全部折叠', 'Ctrl Shift NumPad_Subtract', 'fold all recursively 全部折叠'),
-    editable('unfoldAll', '全部展开', 'Ctrl Shift NumPad_Add', 'unfold all expand all 全部展开'),
-    { id: 'edit.columnSelect', title: '列选择模式', keys: 'Alt Shift Insert', keywords: 'column selection block selection rectangular 列选择 块选择', enabled: hasEditor, run: () => runEditor('column.select') },
-  ] },
-  { menu: 'view', label: '视图', rows: [
-    { id: 'view.explorer', title: () => `${explorer.value ? '隐藏' : '显示'}文件面板`, keywords: 'project view files tool window 文件面板', run: () => { explorer.value = !explorer.value } },
-    { id: 'view.trace', title: () => `${activity.value ? '隐藏' : '显示'}处理记录`, keywords: 'activity trace bridge 处理记录', run: () => { activity.value = !activity.value } },
-    { id: 'view.output', title: () => `${bottom.value ? '隐藏' : '显示'}输出面板`, keywords: 'output bottom tool window 输出面板', run: () => { bottom.value = !bottom.value } },
-    { id: 'view.rule0', rule: true },
-    { id: 'view.splitH', title: '向右拆分并移动', keywords: 'split right move tab opposite group 分屏 右拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'horizontal') },
-    { id: 'view.splitV', title: '向下拆分并移动', keywords: 'split down move tab opposite group 分屏 下拆', enabled: () => Boolean(active.value), run: () => splitTabOut(active.value!, 'vertical') },
-    { id: 'view.unsplit', title: '取消拆分', keywords: 'unsplit close split 取消拆分', enabled: () => splitOrientation.value !== 'none', run: () => unsplit() },
-    { id: 'view.unsplitAll', title: '取消所有拆分', keywords: 'unsplit all 取消所有拆分', enabled: () => splitOrientation.value !== 'none', run: () => unsplitAll() },
-    { id: 'view.changeOrientation', title: '更改拆分方向', keywords: 'change orientation rotate split 切换拆分方向', enabled: () => splitOrientation.value !== 'none', run: changeSplitOrientation },
-    // ViewMenu (`PlatformActions.xml:521-597`) lists no maximize/hide-all action at all — the only
-    // entry point is `HideAllWindows` in the Window menu (`:656`), so the duplicate that used to
-    // sit here (same title prefix, same Ctrl+Shift+F12) is gone rather than kept as a second face
-    // of one action.
-    { id: 'view.rule1', rule: true },
-    { id: 'view.sectionWindows', section: '工具窗口' },
-    toolWindow('files', '项目文件', 'project files tree explorer 项目文件'),
-    toolWindow('git', '源代码管理', 'vcs git changes commit 源代码管理'),
-    toolWindow('vcslog', 'VCS 日志', 'vcs log commit graph history 提交图 日志'),
-    toolWindow('search', '全局搜索', 'search in files find 全局搜索'),
-    toolWindow('todo', '待办事项', 'todo tasks markers 待办'),
-    toolWindow('outline', '文件结构', 'structure file outline symbols 结构'),
-    toolWindow('bookmarks', '书签', 'bookmark mnemonic list 书签', false),
-    toolWindow('debug', '调试面板', 'debug debugger breakpoints run 调试', true),
-    toolWindow('history', '本地历史', 'local history rollback snapshot 历史', true),
-    { id: 'view.terminal', title: '终端', keywords: 'terminal console shell prompt 终端', enabled: () => Boolean(workspace.value), run: () => showOutput('terminal') },
-    { id: 'view.collapseAll', title: '全部折叠项目树', keywords: 'collapse tree folders 全部折叠', enabled: () => Boolean(workspace.value), run: () => fileTreeRef.value?.collapseAll() },
-    { id: 'view.expandAll', title: '全部展开项目树', keywords: 'expand tree folders 全部展开', enabled: () => Boolean(workspace.value), run: () => fileTreeRef.value?.expandAll() },
-    { id: 'view.rule2', rule: true },
-    // ViewMenu › ViewAppearanceGroup —— IDEA 里是**子菜单**（`<group id="ViewAppearanceGroup" popup="true">`，
-    // PlatformActions.xml:523-546）。它内部还有两个**不带 popup 的内联组**：`ToggleFullScreenGroup`
-    // （TogglePresentationMode / ToggleDistractionFreeMode / ToggleFullScreen / ToggleZenMode /
-    // ToggleCompactMode）与 `UIToggleActions`（主菜单模式、工具栏、状态栏…）。
-    // TaoCode 有真实落点的是：演示模式（TogglePresentationMode）、Zen Mode（ToggleZenMode）、
-    // 紧凑模式（ToggleCompactMode → editorSettings.compactMode）。内联组用分隔线表达同一层。
-    { id: 'view.appearanceGroup', title: '外观', keywords: 'appearance presentation zen compact 外观 演示 禅模式 紧凑', children: [
-      { id: 'view.presentation', title: '演示模式', keywords: 'presentation mode 演示 投屏', checked: () => editorSettings.value.presentationMode, run: () => void saveSettingsPatch({ presentationMode: !editorSettings.value.presentationMode }) },
-      { id: 'view.zenMode', title: () => `${zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen distraction free fullscreen immersive 禅模式 免打扰', run: () => toggleZenMode() },
-      { id: 'view.compactMode', title: '紧凑模式', keywords: 'compact mode density 紧凑 密度', checked: () => editorSettings.value.compactMode, run: () => void saveSettingsPatch({ compactMode: !editorSettings.value.compactMode }) },
-      { id: 'view.ruleAppearance', rule: true },
-      // IDEA 的 ToggleFullScreenGroup 里还有 ToggleDistractionFreeMode 与 ToggleFullScreen：
-      // 前者与 ToggleZenMode 在 TaoCode 里是同一件事（Zen 就是免打扰），不重复放两行；
-      // 后者要先给宿主加全屏通道（Win32 窗口态 / Fullscreen API），本轮不做，登记在审计文档里。
-      { id: 'view.background', title: '设置背景图像…', keywords: 'background image 背景图', enabled: () => isDesktop, run: () => void chooseBackgroundImage() },
-    ] },
-    { id: 'view.powerSave', title: '省电模式', keywords: 'power save mode 省电 节能', checked: () => editorSettings.value.powerSaveMode, run: () => void togglePowerSave() },
-    // ViewMenu › EditorToggleActions —— IDEA 里是**子菜单**（`<group id="EditorToggleActions"
-    // popup="true">`，PlatformActions.xml:572-586）。子项顺序照源码：UseSoftWraps · (分隔) ·
-    // ShowWhitespaces · ShowLineNumbers · ShowGutterIcons · ShowIndentLines · (分隔) ·
-    // IncreaseFontSize · DecreaseFontSize。这些都是 ToggleAction，落点是同一份编辑器设置
-    // （与 编辑器 › 常规 › 外观 页共用状态，改一处两边都变）。
-    // `EditorToggleShowGutterIcons` 没做：TaoCode 没有行内图标（gutter icons）这一层，不造空行。
-    { id: 'view.editorToggleActions', title: '编辑器开关', keywords: 'editor toggle soft wrap whitespaces line numbers indent guides font size 编辑器开关 软换行 空白 行号 缩进 字号', children: [
-      { id: 'view.toggleSoftWraps', title: '软换行', keywords: 'soft wrap word wrap 软换行 自动换行', checked: () => editorSettings.value.wordWrap, run: () => void saveSettingsPatch({ wordWrap: !editorSettings.value.wordWrap }) },
-      { id: 'view.ruleEditorToggles1', rule: true },
-      { id: 'view.toggleWhitespaces', title: '显示空白符号', keywords: 'show whitespaces 空白符号', checked: () => editorSettings.value.showWhitespaces, run: () => void saveSettingsPatch({ showWhitespaces: !editorSettings.value.showWhitespaces }) },
-      { id: 'view.toggleLineNumbers', title: '显示行号', keywords: 'show line numbers 行号', checked: () => editorSettings.value.lineNumbers, run: () => void saveSettingsPatch({ lineNumbers: !editorSettings.value.lineNumbers }) },
-      { id: 'view.toggleIndentGuides', title: '显示缩进参考线', keywords: 'show indent guides 缩进参考线', checked: () => editorSettings.value.showIndentGuides, run: () => void saveSettingsPatch({ showIndentGuides: !editorSettings.value.showIndentGuides }) },
-      { id: 'view.ruleEditorToggles2', rule: true },
-      // IDEA 的字号动作以 1 为步长、受同一份字号上下限约束（这里是 10–32，与设置页一致）。
-      { id: 'view.increaseEditorFont', title: '增大编辑器字号', keywords: 'increase editor font size bigger 增大 字号', enabled: () => editorSettings.value.fontSize < 32, run: () => void saveSettingsPatch({ fontSize: Math.min(32, editorSettings.value.fontSize + 1) }) },
-      { id: 'view.decreaseEditorFont', title: '减小编辑器字号', keywords: 'decrease editor font size smaller 减小 字号', enabled: () => editorSettings.value.fontSize > 10, run: () => void saveSettingsPatch({ fontSize: Math.max(10, editorSettings.value.fontSize - 1) }) },
-    ] },
-    { id: 'theme.light', title: '亮色主题', keywords: 'light theme bright 亮色', checked: () => theme.value === 'light', run: () => changeTheme('light') },
-    { id: 'theme.dark', title: '暗色主题', keywords: 'dark theme 暗色', checked: () => theme.value === 'dark', run: () => changeTheme('dark') },
-  ] },
-  { menu: 'navigate', label: '导航', rows: [
-    // GoToMenu opens with Back/Forward (PlatformActions.xml:600-604).
-    { id: 'navigate.back', title: '上一步', keys: 'Ctrl Alt ←', keywords: 'back navigate history 后退', enabled: () => Boolean(navBack.value.length), run: () => void goBack() },
-    { id: 'navigate.forward', title: '下一步', keys: 'Ctrl Alt →', keywords: 'forward navigate history 前进', enabled: () => Boolean(navForward.value.length), run: () => void goForward() },
-    { id: 'navigate.rule0', rule: true },
-    { id: 'navigate.actions', title: '查找操作…', keys: 'Ctrl Shift A', keywords: 'find action commands shortcuts keymap all actions 查找操作 命令', run: openActionSearch },
-    { id: 'navigate.file', title: '转到文件…', keys: 'Ctrl Shift N', keywords: 'goto file search everywhere 转到文件', enabled: () => Boolean(workspace.value), run: openPalette },
-    // IDEA's default keymap: Go to Class = Ctrl+N, Go to Symbol = Ctrl+Shift+Alt+N.
-    { id: 'navigate.class', title: '转到类…', keys: 'Ctrl N', keywords: 'goto class type 转到类', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('class') },
-    { id: 'navigate.symbol', title: '转到符号…', keys: 'Ctrl Shift Alt N', keywords: 'goto symbol global 转到符号', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('global') },
-    { id: 'navigate.fileSymbol', title: '转到当前文件符号', keys: 'Ctrl F12', keywords: 'symbol outline structure file 文件符号', enabled: () => Boolean(workspace.value) && lspReady.value, run: () => openSymbol('file') },
-    // GoToMenu › NavigateInFileGroup 的 MethodDown / MethodUp（`PlatformActions.xml:621-623`）。
-    { id: 'navigate.methodDown', title: '下一个方法', keys: 'Alt Down', keywords: 'next method down 下一个方法', enabled: () => Boolean(active.value) && lspReady.value, run: () => void jumpMethod(1) },
-    { id: 'navigate.methodUp', title: '上一个方法', keys: 'Alt Up', keywords: 'previous method up 上一个方法', enabled: () => Boolean(active.value) && lspReady.value, run: () => void jumpMethod(-1) },
-    { id: 'navigate.line', title: '转到行/列…', keys: 'Ctrl G', keywords: 'goto line number 转到行', enabled: hasEditor, run: () => openGoLine() },
-    // IDEA's Navigate menu puts `<group id="GoToErrorGroup">` between Go to Line and Jump to
-    // Last Change (PlatformActions.xml:609-617), with F2 / Shift+F2 ($default.xml:658-660,
-    // :679-681) and the ActionsBundle.properties:708-711 titles. Like every IDEA editor
-    // action in that family it needs a file whose highlighting is available
-    // (BaseGotoNextErrorAction.isValidForFile:52-54) — here, a live language server.
-    { id: 'navigate.nextError', title: '下一个高亮错误', keys: 'F2', keywords: 'next highlighted error next error problem 下一个错误 下一个问题', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('error.next') },
-    { id: 'navigate.previousError', title: '上一个高亮错误', keys: 'Shift F2', keywords: 'previous highlighted error previous error problem 上一个错误 上一个问题', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('error.previous') },
-    { id: 'navigate.lastEdit', title: '回到上次编辑位置', keys: 'Ctrl Shift Bksp', keywords: 'last edit location navigation 上次编辑', enabled: hasEditor, run: jumpLastEditLocation },
-    { id: 'navigate.recent', title: '最近文件', keys: 'Ctrl E', keywords: 'recent files switcher history 最近文件', enabled: () => Boolean(workspace.value), run: () => openRecentFiles() },
-    // IDEA's RecentLocations is Ctrl+Shift+E in $default.xml; inside the popup the
-    // same Ctrl+E toggles "Show edited only" (SwitcherRecentEditedChangedToggleCheckBox).
-    { id: 'navigate.places', title: '最近位置', keys: 'Ctrl Shift E', keywords: 'recent places locations 最近位置', enabled: () => Boolean(workspace.value), run: () => openRecentPlaces() },
-    // IDEA Navigate menu (real 2026.2 UI): 随处搜索 (Shift+Shift) opens Search
-    // Everywhere; the row keeps its honest title here.
-    { id: 'navigate.everywhere', title: '随处搜索', keys: 'Shift Shift', keywords: 'search everywhere 随处搜索 搜索', run: openActionSearch },
-    { id: 'navigate.declaration', title: '转到声明/定义', keys: 'Ctrl B', keywords: 'go to declaration definition 转到声明', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('definition') },
-    // IDEA Navigate: 类型声明 (GotoTypeDeclaration, Ctrl+Shift+B).
-    { id: 'navigate.typeDeclaration', title: '转到类型声明', keys: 'Ctrl Shift B', keywords: 'goto type declaration 类型声明', enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor('typeDeclaration') },
-    { id: 'navigate.rule1', rule: true },
-    // IDEA's "Jump to Line/Character" (Ctrl+L) opens the same line prompt as Go to
-    // Line:Column. Select Changed Text has no keymap entry in \$default.xml, so only
-    // the jump row appears here.
-    { id: 'navigate.rule2', rule: true },
-    { id: 'navigate.bookmark', title: '切换书签', keys: 'F11', keywords: 'bookmark toggle 书签', enabled: hasEditor, run: () => toggleBookmark() },
-    { id: 'navigate.bookmarkMnemonic', title: '为书签编号…', keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: hasEditor, run: openMnemonicPrompt },
-    { id: 'navigate.bookmarkNext', title: '下一个书签', keywords: 'next bookmark project wide 下一个书签', run: () => cycleBookmark(false) },
-    { id: 'navigate.bookmarkPrevious', title: '上一个书签', keywords: 'previous bookmark project wide 上一个书签', run: () => cycleBookmark(true) },
-    { id: 'navigate.selectInProject', title: '在项目中选中', keys: 'Alt F1 1', keywords: 'select in project view tree reveal 在项目中选中 定位文件', enabled: () => Boolean(active.value), run: selectInTree },
-    { id: 'view.bookmarks', title: '书签窗口', keys: 'Shift F11', keywords: 'bookmarks tool window list 书签窗口', enabled: () => Boolean(workspace.value), run: () => showView('bookmarks') },
-  ] },
-  { menu: 'code', label: '代码', rows: [
-    editable('completion', '代码补全', 'Ctrl Space', 'completion autocomplete suggest 补全'),
-    editable('template.expand', '展开实时模板', 'Ctrl Alt J', 'live template postfix expand 模板'),
-    { id: 'code.templateChooser', title: '实时模板列表…', keys: 'Ctrl J', keywords: 'live template list chooser insert 模板列表', enabled: hasEditor, run: openTemplateChooser },
-    { id: 'code.surround', title: '用模板包裹选中代码', keys: 'Ctrl Alt T', keywords: 'surround wrap try if block 包裹 模板', enabled: hasEditor, run: openSurround },
-    { id: 'code.generate', title: '生成…', keys: 'Alt Insert', keywords: 'generate constructor getter setter toString override 生成 构造器', enabled: () => Boolean(active.value) && lspReady.value, run: openGeneratePopup },
-    // ActionsBundle: ShowIntentionActions is "Show Context Actions" (Alt+Enter).
-    semantic('codeAction', '显示上下文操作', 'Alt Enter', 'intent quick fix refactor code action 意图 上下文操作'),
-    { id: 'code.rule1', rule: true },
-    semantic('definition', '跳转到定义', 'Ctrl B', 'goto definition 定义'),
-    semantic('implementation', '跳转到实现', 'Ctrl Alt B', 'goto implementation 实现'),
-    semantic('references', '查找用法', 'Alt F7', 'find usages references 用法'),
-    semantic('callHierarchy', '调用层次', 'Ctrl Alt H', 'call hierarchy incoming outgoing 调用层次'),
-    semantic('typeHierarchy', '类型层次', 'Ctrl H', 'type hierarchy supertypes subtypes 类型层次'),
-    semantic('rename', '重命名', 'Shift F6', 'rename refactor symbol 重命名'),
-    semantic('signature', '参数信息', 'Ctrl P', 'signature parameter info 参数信息'),
-    { id: 'code.quickDoc', title: '快速文档', keys: 'Ctrl Q', keywords: 'quick documentation hover 快速文档 文档', enabled: () => Boolean(active.value) && lspReady.value, run: () => void showQuickDoc() },
-    { id: 'code.copyRef', title: '复制引用', keys: 'Ctrl Alt Shift C', keywords: 'copy reference qualified name 复制引用 复制路径', enabled: () => Boolean(active.value), run: () => void copyReference() },
-    { id: 'code.rule2', rule: true },
-    semantic('selection.grow', '扩展到上一级语法单元', 'Ctrl W', 'extend selection syntax 扩展选区'),
-    semantic('selection.shrink', '缩小语法选区', 'Ctrl Shift W', 'shrink selection syntax 缩小选区'),
-    semantic('format', '重新格式化', 'Ctrl Alt L', 'format code reformat 格式化'),
-    // IDEA Code menu: 自动缩进 (Auto-Indent, Ctrl+Alt+I) and 优化导入 (Optimize
-    // Imports, Ctrl+Alt+O — a source.organizeImports code action).
-    editable('indent.selection', '自动缩进', 'Ctrl Alt I', 'auto indent selection 自动缩进'),
-    { id: 'code.optimizeImports', title: '优化导入', keys: 'Ctrl Alt O', keywords: 'optimize imports organize 优化导入', enabled: () => Boolean(active.value) && lspReady.value, run: () => void runOrganizeImports() },
-    { id: 'code.rule3', rule: true },
-    { id: 'code.blame', title: 'Git 追溯（Annotate）', keywords: 'blame annotate git history 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
-    { id: 'code.compareClipboard', title: '与剪贴板比较', keywords: 'compare clipboard diff 与剪贴板比较', enabled: () => Boolean(active.value), run: () => void compareWithClipboard() },
-    { id: 'code.copyPath', title: '复制文件路径', keywords: 'copy file path absolute 复制文件路径', enabled: () => Boolean(active.value), run: () => void copyFilePath() },
-    // ActionsBundle: "Toggle Read-Only Attribute" (synonyms Make File Writable /
-    // Read-Only); no default shortcut in $default.xml.
-  ] },
-  { menu: 'refactor', label: '重构', rows: [
-    // IDEA RefactorMenu: 重构... (Refactor This, Ctrl+Alt+Shift+T) first.
-    { id: 'refactor.this', title: '重构…', keys: 'Ctrl Alt Shift T', keywords: 'refactor this 重构', enabled: () => Boolean(active.value) && lspReady.value, run: () => void openCodeActions(caretPayload()) },
-    { id: 'refactor.extractVariable', title: '提取变量', keys: 'Ctrl Alt V', keywords: 'extract variable local 提取变量', enabled: () => Boolean(active.value) && lspReady.value, run: extractVariable },
-    { id: 'refactor.ExtractConstant', title: '提取常量', keys: 'Ctrl Alt C', keywords: 'extract constant field 提取常量', enabled: () => Boolean(active.value) && lspReady.value, run: extractConstant },
-    { id: 'refactor.ExtractMethod', title: '提取方法', keys: 'Ctrl Alt M', keywords: 'extract method function 提取方法', enabled: () => Boolean(active.value) && lspReady.value, run: extractMethod },
-    { id: 'refactor.rule1', rule: true },
-    semantic('rename', '重命名', 'Shift F6', 'rename refactor symbol 重命名'),
-    // IDEA RefactorMenu file rows: 移动文件 F6 / 复制文件 F5 (real 2026.2 UI).
-    { id: 'refactor.moveFile', title: '移动文件…', keys: 'F6', keywords: 'move file refactor 移动文件', enabled: () => Boolean(active.value) && isDesktop, run: () => void moveActiveFile() },
-    { id: 'refactor.copyFile', title: '复制文件…', keys: 'F5', keywords: 'copy file refactor 复制文件', enabled: () => Boolean(active.value) && isDesktop, run: () => void copyActiveFile() },
-    { id: 'refactor.inline', title: '内联', keys: 'Ctrl Alt N', keywords: 'inline variable method constant 内联', enabled: () => Boolean(active.value) && lspReady.value, run: inlineVariable },
-    { id: 'refactor.rule2', rule: true },
-    semantic('format', '重新格式化代码', 'Ctrl Alt L', 'format code reformat 格式化'),
-  ] },
+  { menu: 'file' as const, label: '文件', rows: fileMenuRows },
+  { menu: 'edit' as const, label: '编辑', rows: editMenuRows },
+  { menu: 'view' as const, label: '视图', rows: viewMenuRows },
+  { menu: 'navigate' as const, label: '导航', rows: navigateMenuRows },
+  { menu: 'code' as const, label: '代码', rows: codeMenuRows },
+  { menu: 'refactor' as const, label: '重构', rows: refactorMenuRows },
   // IDEA's Analyze menu (JavaActions.xml "AnalyzeMenu" = InspectCodeGroup + AnalyzeActions):
   // Inspect Code…, Code Cleanup… | Silent Code Cleanup, Run Inspection…. The cleanup and
   // offline-inspection rows are absent — no backend, not faked.
-  { menu: 'analyze', label: '分析', rows: [
-    { id: 'analyze.problemsView', title: '查看当前文件问题', keywords: 'inspect code problems view 检查 问题', enabled: () => Boolean(active.value), run: () => showOutput('problems') },
-    { id: 'analyze.runInspection', title: '运行单条检查…', keys: 'Ctrl Shift Alt I', keywords: 'run inspection single intent analysis 运行检查', enabled: () => Boolean(active.value) && lspReady.value, run: () => void openCodeActions(caretPayload(), true) },
-    { id: 'analyze.rule1', rule: true },
-    { id: 'analyze.todoTree', title: '待办事项（TODO 索引）', keywords: 'todo index analyze scan comments 待办', enabled: () => Boolean(workspace.value), run: () => showView('todo') },
-  ] },
+  { menu: 'analyze' as const, label: '分析', rows: analyzeMenuRows },
   // IDEA's Build menu (JavaActions.xml "Java.BuildMenu"): Build Project (CompileDirty,
   // Ctrl+F9), Rebuild (Compile, Ctrl+Shift+F9 — bound here to a full clean rebuild),
   // plus Stop Build. TaoCode builds through the configured shell command.
-  { menu: 'build', label: '构建', rows: [
-    { id: 'build.project', title: '构建项目', keys: 'Ctrl F9', keywords: 'build project make compile 构建', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void startBuild(false) },
-    { id: 'build.rebuild', title: '重新构建项目', keys: 'Ctrl Shift F9', keywords: 'rebuild project clean 重新构建', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void startBuild(true) },
-    { id: 'build.stop', title: '停止构建', keywords: 'stop build cancel 停止构建', enabled: () => runState.running, run: () => void stopRun() },
-    { id: 'build.rule1', rule: true },
-    { id: 'build.output', title: '构建结果窗口', keywords: 'build tab view tool window 构建输出', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
-  ] },
-  { menu: 'run', label: '运行', rows: [
-    { id: 'run.start', title: '运行', keys: 'Shift F10', keywords: 'run build execute task 运行', enabled: () => isDesktop && Boolean(workspace.value) && !runState.running, run: () => void runSelectedConfig(false) },
-    { id: 'run.debug', title: '调试', keys: 'Shift F9', keywords: 'debug start breakpoint dap 调试', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => void runSelectedConfig(true) },
-    { id: 'run.debugContext', title: '调试当前上下文配置', keywords: 'debug contextual configuration 调试上下文', enabled: () => isDesktop && Boolean(active.value) && !dapState.running, run: () => void runContextConfiguration(true) },
-    { id: 'run.pickConfig', title: '选择运行/调试配置', keys: 'Alt Shift F10', keywords: 'select run configuration choose active edit 选择配置', enabled: () => Boolean(workspace.value), run: () => openConfigChooser(false) },
-    { id: 'run.rerun', title: '重新运行', keys: 'Ctrl F5', keywords: 'rerun relaunch last 重新运行', enabled: () => Boolean(lastRunParams) && !runState.running, run: () => void rerunLast() },
-    { id: 'run.stop', title: '停止', keys: 'Ctrl F2', keywords: 'stop terminate kill 停止', enabled: () => runState.running, run: () => void stopRun() },
-    // RunClass in the default keymap: run whatever is under the caret.
-    { id: 'run.context', title: '运行当前上下文配置', keys: 'Ctrl Shift F10', keywords: 'run contextual configuration run class 运行上下文', enabled: () => isDesktop && Boolean(active.value) && !runState.running, run: () => void runContextConfiguration(false) },
-    { id: 'run.rule1', rule: true },
-    // IDEA Run menu (real 2026.2 UI): 附加到进程 Ctrl+Alt+F5, 查看断点 Ctrl+Shift+F8,
-    // 编辑配置 — the rows route to the debug/run panels that own those editors.
-    { id: 'run.attach', title: '附加到进程…', keys: 'Ctrl Alt F5', keywords: 'attach to process debug 附加进程', enabled: () => isDesktop && Boolean(workspace.value) && !dapState.running, run: () => { explorer.value = true; leftView.value = 'debug'; notify('在调试面板填写进程 PID 或管道名后点“附加”。') } },
-    { id: 'run.viewBreakpoints', title: '查看断点…', keys: 'Ctrl Shift F8', keywords: 'view breakpoints 断点 查看', enabled: () => isDesktop && Boolean(workspace.value), run: () => { explorer.value = true; leftView.value = 'debug' } },
-    { id: 'run.editConfigs', title: '编辑配置…', keywords: 'edit configurations run debug 配置 编辑', enabled: () => Boolean(workspace.value), run: () => { showOutput('run'); notify('在“运行”面板编辑配置后点“存为配置”保存。') } },
-    { id: 'run.output', title: '显示运行输出', keywords: 'run console output 运行输出', enabled: () => Boolean(workspace.value), run: () => showOutput('run') },
-    { id: 'run.log', title: '显示操作输出', keywords: 'trace bridge log 操作输出', enabled: () => Boolean(workspace.value), run: () => showOutput('output') },
-    toolWindow('debug', '显示调试面板', 'debug debugger tool window 调试面板', true),
-    editable('evaluate', '求值表达式', 'Alt F8', 'evaluate expression watch 求值'),
-  ] },
+  { menu: 'build' as const, label: '构建', rows: buildMenuRows },
+  { menu: 'run' as const, label: '运行', rows: runMenuRows },
   // IDEA's Git.MainMenu order (intellij.vcs.git.backend.xml): Commit, Push, Update
   // Project, Pull, Fetch | Merge, Rebase, Resolve Conflicts | Branches, New Branch,
   // Tag, Reset | Show Log | Stash/Shelf. Rows without a git4idea-equivalent backend
   // here (Fetch, Rebase, Tag dialog, Reset) are omitted rather than faked.
-  { menu: 'git', label: 'Git', rows: [
-    { id: 'git.commit', title: '提交项目…', keys: 'Ctrl K', keywords: 'commit checkin message 提交', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('git') },
-    { id: 'git.push', title: '推送…', keys: 'Ctrl Shift K', keywords: 'push remote upload 推送', enabled: () => isDesktop && gitAvailable.value, run: () => void pushWithConfirm() },
-    { id: 'git.update', title: '更新项目', keys: 'Ctrl T', keywords: 'update project pull merge incoming 更新', enabled: () => isDesktop && gitAvailable.value, run: () => void updateProject() },
-    { id: 'git.pull', title: '拉取（Pull）', keywords: 'pull fetch integrate 拉取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.pull') },
-    { id: 'git.fetch', title: '获取（Fetch）', keywords: 'fetch remote refs prune 获取', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.fetch') },
-    { id: 'git.rule1', rule: true },
-    { id: 'git.rebase', title: '变基当前分支到上游（Rebase）', keywords: 'rebase upstream onto 变基', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.rebase') },
-    // IDEA Git menu (real 2026.2 UI): 重置 HEAD… follows 新建标记.
-    { id: 'git.resetHead', title: '重置 HEAD…', keywords: 'reset head soft mixed hard 重置', enabled: () => isDesktop && gitAvailable.value, run: () => void resetHeadDialog() },
-    { id: 'git.branches', title: '分支…', keys: 'Ctrl Shift `', keywords: 'branches popup checkout switch widget 分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
-    { id: 'git.newBranch', title: '新建分支…', keywords: 'new branch create checkout 新建分支', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
-    { id: 'git.tag', title: '标签…（Tag）', keywords: 'tag create delete lightweight 标签', enabled: () => isDesktop && gitAvailable.value, run: () => showView('git') },
-    { id: 'git.rule2', rule: true },
-    { id: 'git.stash', title: '储藏（Stash）', keywords: 'stash shelve save changes 储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.save') },
-    { id: 'git.unstash', title: '取出储藏（Unstash）', keywords: 'unstash pop shelf 弹出储藏', enabled: () => isDesktop && gitAvailable.value, run: () => void gitMenuAction('git.stash.pop') },
-    { id: 'git.log', title: '显示日志', keywords: 'show log history graph 日志', enabled: () => Boolean(workspace.value) && gitAvailable.value, run: () => showView('vcslog') },
-    { id: 'git.fileHistory', title: '当前文件的历史（--follow）', keywords: 'file history follow rename log 文件历史', enabled: () => isDesktop && gitAvailable.value && Boolean(activePath.value), run: () => { const path = activePath.value; if (path) void showFileHistory(path) } },
-    { id: 'git.worktrees', title: '管理工作树…', keywords: 'worktree linked checkout 工作树', enabled: () => isDesktop && gitAvailable.value, run: () => void openWorktrees() },
-    { id: 'git.submodules', title: '管理子模块…', keywords: 'submodule update init 子模块', enabled: () => isDesktop && gitAvailable.value, run: () => void openSubmodules() },
-    toolWindow('history', '本地历史', 'local history snapshot 本地历史', true),
-    { id: 'code.blame.git', title: '追溯当前文件', keywords: 'blame annotate 追溯', enabled: () => Boolean(active.value) && isDesktop, run: () => void showBlame() },
-    { id: 'git.rule3', rule: true },
-    { id: 'git.clone', title: '从版本控制系统检出…', keywords: 'checkout from version control clone vcs 检出', enabled: () => !working.value, run: () => beginProject('clone') },
-    { id: 'app.settings.git', title: '版本控制与编辑器设置…', keys: 'Ctrl Alt S', keywords: 'vcs git settings 版本控制设置', enabled: () => isDesktop, run: () => void openSettings() },
-  ] },
+  { menu: 'git' as const, label: 'Git', rows: gitMenuRows },
+  // IDEA 主菜单以「帮助」收尾（PlatformActions.xml:746 的 HelpMenu）。menuUi 会把「窗口」插到
+  // Git 与帮助之间，得到 Git → Window → Help 的源码顺序。
+  { menu: 'help' as const, label: '帮助', rows: helpMenuRows },
 ]
 // IDEA 的 Window › LayoutsGroup 是一个**子菜单**（`<group id="LayoutsGroup" popup="true">`，
 // PlatformActions.xml:641）：出厂默认 · 命名布局列表（每项是 toggle，点即应用）· 分隔 ·
@@ -4284,6 +1602,15 @@ const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRo
 // TaoCode 的菜单模型现在带 children，所以这一组保持为一个嵌套菜单，不再被拍平进「窗口」里。
 // CustomLayoutActionGroup 每个布局名下的 Apply/Restore/Save/Rename/Delete 子菜单仍收敛为
 // 「当前布局的重命名/删除」加两条全局 Store —— 这是一张菜单能表达的部分中不发明第二种点击含义的做法。
+// 工具窗口的命名布局是一个域（IDEA 的 ToolWindowDefaultLayoutManager + LayoutsGroup 动作）。
+const {
+  LAYOUT_STORAGE_KEY, DEFAULT_TOOL_ORDER, BOTTOM_TABS, factoryToolLayout, toolLayoutStore, loadToolLayoutStore,
+  persistToolLayouts, captureToolLayout, applyToolLayout, applyNamedToolLayout, useFactoryToolLayout,
+  restoreCurrentToolLayout, storeCurrentToolLayout, openLayoutNameDialog, deleteCurrentToolLayout,
+} = createToolLayouts({
+  notify, menu, nameDialog, nameInput, explorer, bottom, leftView, bottomTab, panelSizes, toolAnchors, toolOrder,
+  saveToolOrder, setPanelSize, isLeftToolWindowId,
+})
 const layoutMenuRows = computed<MenuRow[]>(() => {
   const store = toolLayoutStore.value
   const children: MenuRow[] = [
@@ -4304,262 +1631,52 @@ const layoutMenuRows = computed<MenuRow[]>(() => {
   }
   return [{ id: 'window.layouts', title: '布局', keywords: 'layouts tool window layout 布局', children }]
 })
-// IDEA's Window menu (ActionsBundle: "Search Everywhere…", "Store Current Selection
-// as a Bookmark", the Activate-* tool-window actions, "Editor Tabs"). Same registry
-// rows the Find Action popup reads, so titles and keys can never drift.
-// IDEA's Window menu (PlatformActions.xml WindowMenu): layout switcher first,
-// then the activate-* tool-window rows, editor-tabs group, notifications. Rows
-// for search-everywhere/bookmarks live in Navigate/Code, not here.
-const windowMenuRows: MenuRow[] = [
-  toolWindow('files', '激活 项目 工具窗口', 'activate project tool window 项目'),
-  toolWindow('git', '激活 本地更改 工具窗口', 'activate commit changes tool window 本地更改'),
-  toolWindow('search', '激活 查找 工具窗口', 'activate find in files tool window 查找'),
-  toolWindow('outline', '激活 结构 工具窗口', 'activate structure tool window 结构'),
-  toolWindow('todo', '激活 待办事项 工具窗口', 'activate todo tool window 待办'),
-  toolWindow('bookmarks', '激活 书签 工具窗口', 'activate bookmarks tool window 书签'),
-  toolWindow('debug', '激活 调试 工具窗口', 'activate debug tool window 调试', true),
-  toolWindow('history', '激活 本地历史 工具窗口', 'activate local history tool window 历史', true),
-  { id: 'window.activateTerminal', title: '激活 终端 工具窗口', keys: 'Alt F12', keywords: 'activate terminal tool window 终端', enabled: () => Boolean(workspace.value), run: () => showOutput('terminal') },
-  { id: 'window.activateOutput', title: '激活 输出 工具窗口', keywords: 'activate output tool window 输出', enabled: () => Boolean(workspace.value), run: () => showOutput('output') },
-  { id: 'window.activateProblems', title: '激活 问题 工具窗口', keywords: 'activate problems tool window 问题', enabled: () => allProblems.value.length > 0, run: () => showOutput('problems') },
-  // WindowMenu > ActiveToolwindowGroup (`PlatformActions.xml:653-656`): the three narrower hides
-  // come before HideAllWindows. In TaoCode a dock shows one window at a time, so hiding the active
-  // window and hiding its side coincide for a docked one - they still differ for a bottom window.
-  { id: 'window.hideActiveWindow', title: '隐藏当前工具窗口', keys: 'Shift Esc', keywords: 'hide active tool window 隐藏当前工具窗口', enabled: () => (focusedDock() === 'bottom' ? bottom.value : focusedDock() === 'side' ? explorer.value : lastActiveId(activeToolWindows.value, toolWindowAvailable) !== undefined), run: hideActiveToolWindow },
-  { id: 'window.hideSideWindows', title: '隐藏侧边工具窗口', keywords: 'hide side tool windows 隐藏侧边', enabled: () => explorer.value, run: hideSideToolWindows },
-  { id: 'window.hideBottomWindows', title: '隐藏底部工具窗口', keywords: 'hide bottom tool windows 隐藏底部', enabled: () => bottom.value, run: hideBottomToolWindows },
-  // WindowMenu › HideAllWindows = `HideAllToolWindowsAction`, a *two-text* toggle: "Hide All
-  // Windows" while anything is still visible, "Restore Windows" once only the saved layout is left
-  // (`HideAllToolWindowsAction.kt:34-49`, texts `IdeBundle.properties:384-385`), disabled when
-  // there is neither (`:36, :48`). ViewMenu (`PlatformActions.xml:521-597`) has no maximize item,
-  // so this is the action's only row — the copy that used to sit in the View menu was dropped.
-  { id: 'window.hideAllWindows', title: () => hideAllToolWindowsTitle(currentChrome(), savedChrome.value), keys: 'Ctrl Shift F12', keywords: 'hide all tool windows restore windows 隐藏所有工具窗口 恢复', enabled: () => canHideAllToolWindows(currentChrome(), savedChrome.value), run: toggleMaximizeEditor },
-  // WindowMenu › ActiveToolwindowGroup (`PlatformActions.xml:653-660`) lists JumpToLastWindow
-  // between PinToolwindowTab and MaximizeToolWindow. The action disables itself when no tool
-  // window is left to go back to (`JumpToLastWindowAction.java:32-44`), which is what `enabled`
-  // repeats here so the row cannot fire a no-op.
-  { id: 'window.jumpToLastWindow', title: '跳到上一个工具窗口', keys: 'F12', keywords: 'jump to last tool window activate 上一个 最后 工具窗口', enabled: () => lastActiveId(activeToolWindows.value, toolWindowAvailable) !== undefined, run: jumpToLastToolWindow },
-  // MaximizeToolWindowAction.java:26/59-62 — the action is a Toggleable whose text flips between
-  // ActionsBundle `action.ResizeToolWindowMaximize.text` ("Maximize Tool Window") and `.text.alternative`
-  // ("Restore Tool Window Size"); `$default.xml:885-887` binds control shift QUOTE.
-  { id: 'window.maximizeToolWindow', title: () => (maximizedSide.value ? '恢复工具窗口大小' : '最大化工具窗口'), keys: MAXIMIZE_SHORTCUT_LABEL, keywords: 'maximize tool window restore size 最大化 恢复 工具窗口', enabled: () => canMaximize(Boolean(workspace.value), explorer.value), run: maximizeActiveToolWindow },
-  // WindowMenu › EditorTabsGroup —— IDEA 里是**子菜单**（`<group id="EditorTabsGroup" popup="true">`，
-  // PlatformActions.xml:688-705）。子项顺序照源码：NextTab · PreviousTab · PinActiveEditorTab ·
-  // KeepTabOpen · TabList · (分隔) · CloseEditorsGroup（**不带** popup，是内联组：CloseContent /
-  // CloseAllEditorsButActive / CloseAllEditors / CloseAllUnpinnedEditors / CloseAllToTheLeft …）。
-  // TaoCode 有对应物的五项都在下面；内联组用一条分隔线表达同一层。
-  { id: 'window.editorTabsGroup', title: '编辑器标签页', keywords: 'editor tabs next previous close 编辑器标签页 下一个 上一个 关闭', children: [
-    { id: 'window.nextTab', title: '选择下一个标签页', keys: 'Alt Right', keywords: 'select next tab activate 下一个标签页', enabled: () => tabTargetCount() > 1, run: selectNextTab },
-    { id: 'window.previousTab', title: '选择上一个标签页', keys: 'Alt Left', keywords: 'select previous tab activate 上一个标签页', enabled: () => tabTargetCount() > 1, run: selectPreviousTab },
-    { id: 'window.ruleCloseEditors', rule: true },
-    { id: 'window.closeActiveTab', title: '关闭当前标签页', keys: 'Ctrl Shift F4', keywords: 'close active tab tool window 关闭当前标签页', enabled: () => Boolean(workspace.value), run: closeActiveTab },
-    { id: 'window.closeOtherTabs', title: '关闭其他标签页', keywords: 'close other tabs tool window 关闭其他标签页', enabled: closeOtherTabsTarget, run: closeOtherToolTabs },
-    // `PlatformActions.xml:666` mounts TW.CloseAllTabs right after TW.CloseOtherTabs. Its shortcut
-    // comes from `use-shortcut-of="CloseAllEditors"` (`intellij.platform.ide.impl.actions.xml:462`),
-    // which has no entry in `$default.xml` at all — so no key is shown and none is invented.
-    { id: 'window.closeAllTabs', title: '关闭所有标签页', keywords: 'close all tabs tool window 关闭所有标签页', enabled: closeAllTabsTarget, run: closeAllToolTabs },
-  ] },
-  // `ActiveToolwindowGroup`'s split family (`PlatformActions.xml:668-675`: TW.SplitRight,
-  // TW.SplitAndMoveRight, TW.SplitDown, TW.SplitAndMoveDown, TW.Unsplit, TW.MoveToNextSplitter,
-  // TW.MoveToPreviousSplitter) is absent on purpose: every one of them is gated on
-  // `toolWindow.canSplitTabs()` (`ToolWindowSplitActions.kt:25`, `ToolWindowSplitAndMoveActions.kt:22`,
-  // `ToolWindowUnsplitAction.kt:21`) *and* on a `ToolWindowSplitContentProvider` registered for that
-  // tool window's id (`ToolWindowSplitContentProviderBean.getForToolWindow`), which is an
-  // `@ApiStatus.Experimental` extension point no platform tool window implements — in this source
-  // tree only the terminal frontend plugin registers one
-  // (`plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:95`). A tool window without
-  // a provider cannot split at all, so the rows would be permanently dead here.
-  //
-  // `PlatformActions.xml:680` — ToggleContentUiTypeMode, between TW.MoveToGroup and ShowContent.
-  // `ToggleContentUiTypeAction.isSelected` (`:10-12`) makes the **checked** state TABBED, and the
-  // toggle is enabled only with more than one content (`:19-21`) — in TaoCode that is the bottom
-  // dock alone, so the row stays inert while a single-view side window is the active one.
-  // The label is the action's own text (`ActionsBundle.properties:1167` "Group Tabs", description
-  // "Toggle between tabbed/combo presentation of contents").
-  { id: 'window.toggleContentUiType', title: '合并标签页', keywords: 'group tabs toggle tabbed combo presentation 合并标签页 内容呈现', checked: () => isTabbedContentUi(bottomContentUiType.value), enabled: () => canToggleContentUiType(activeContentCount()), run: () => { bottomContentUiType.value = toggledContentUiType(!isTabbedContentUi(bottomContentUiType.value)) } },
-  // WindowMenu › ActiveToolwindowGroup › ResizeToolWindowGroup —— IDEA 里这一组是**子菜单**
-  // (`<group id="ResizeToolWindowGroup" popup="true">`, PlatformActions.xml:680-686，子项依次是
-  // ResizeToolWindowLeft/Right/Up/Down)。以前用 section 标题顶替，现在菜单模型有 children，就真的做成子菜单。
-  // 四行各自带源码的步长 (`ResizeToolWindowAction.java:96-98`, `WindowAction.java:113-118`) 与
-  // 启用规则 (`:127-131`, `:161-165`)，实现在 `src/toolWindowResize.ts`。
-  { id: 'window.resizeToolWindow', title: '调整工具窗口', keywords: 'resize stretch tool window 调整工具窗口 拉伸', children: [
-    { id: 'window.resizeToolWindowLeft', title: '向左拉伸', keys: 'Ctrl Alt Shift ArrowLeft', keywords: 'resize stretch tool window left 向左拉伸 调整工具窗口', enabled: () => resizeTargetFor('left') !== null, run: () => stretchToolWindow('left') },
-    { id: 'window.resizeToolWindowRight', title: '向右拉伸', keys: 'Ctrl Alt Shift ArrowRight', keywords: 'resize stretch tool window right 向右拉伸 调整工具窗口', enabled: () => resizeTargetFor('right') !== null, run: () => stretchToolWindow('right') },
-    { id: 'window.resizeToolWindowUp', title: '向上拉伸', keys: 'Ctrl Alt Shift ArrowUp', keywords: 'resize stretch tool window top 向上拉伸 调整工具窗口', enabled: () => resizeTargetFor('up') !== null, run: () => stretchToolWindow('up') },
-    { id: 'window.resizeToolWindowDown', title: '向下拉伸', keys: 'Ctrl Alt Shift ArrowDown', keywords: 'resize stretch tool window bottom 向下拉伸 调整工具窗口', enabled: () => resizeTargetFor('down') !== null, run: () => stretchToolWindow('down') },
-  ] },
-  { id: 'window.rule4', rule: true },
-  // WindowMenu › BackgroundTasks (`PlatformActions.xml:637,723-726`): ShowProcessWindow +
-  // AutoShowProcessWindow. TaoCode's menus are flat, so the group becomes a section header — the
-  // same treatment the other WindowMenu popup groups get. `ShowProcessWindowAction.java:16-55` is a
-  // ToggleAction whose selected state *is* "the process popup is open" (`isProcessWindowOpen`,
-  // `InfoAndProgressPanel.kt:574-576`), so it renders as a checkbox row, not a 显示/隐藏 title.
-  // The second item, `AutoShowProcessPopupAction` (`AutoShowProcessPopupAction.java:12-24`), only
-  // flips the registry key `ide.windowSystem.autoShowProcessPopup` (`registry.properties:209-210`),
-  // read once at `InfoAndProgressPanel.kt:319-321`; it is a developer registry entry with no UI in
-  // TaoCode, so no fake setting is invented for it (default `false` = don't auto-open, which is also
-  // the behaviour TaoCode already has).
-  { id: 'window.sectionBackgroundTasks', section: '后台任务' },
-  { id: 'window.showProcessWindow', title: '显示进程窗口', keywords: 'show hide processes window background tasks 进程窗口 后台任务 运行中', checked: () => progressOpen.value, enabled: () => Boolean(workspace.value), run: () => { progressOpen.value = !progressOpen.value } },
-  // WindowMenu › Notifications —— IDEA 里是**子菜单**（`<group id="Notifications" popup="true">`，
-  // PlatformActions.xml:726-728），两个子项：CloseFirstNotification / CloseAllNotifications。
-  { id: 'window.notifications', title: '通知', keywords: 'notifications close clear 通知 关闭 清空', children: [
-    { id: 'window.closeFirstNotification', title: '关闭最新通知', keywords: 'close first notification 最新 关闭通知', enabled: () => noticeLog.value.length > 0, run: closeFirstNotification },
-    { id: 'window.closeAllNotifications', title: '关闭全部通知', keywords: 'close all notifications 清空 全部关闭', enabled: () => noticeLog.value.length > 0, run: clearNotices },
-  ] },
-  { id: 'window.rule3', rule: true },
-  { id: 'window.configureTabs', title: '编辑器标签页选项…', keywords: 'editor tabs configure pin tab placement 标签页设置', run: () => openSettings('editor.general.tabs') },
-  { id: 'window.activeToolList', title: '配置工具按钮列表…', keywords: 'configure buttons active tool list 工具按钮', run: () => openSettings('appearance') },
-]
+// 「窗口」菜单：见 src/menus/windowMenu.ts（一组一文件；它是最后一个从宿主搬走的菜单域）。
+const windowMenuRows = createWindowMenuRows({
+  toolWindow, active, activeToolWindows, toolWindowAvailable, lastActiveId, jumpToLastToolWindow,
+  hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows, focusedDock, currentChrome,
+  savedChrome, hideAllToolWindowsTitle, canHideAllToolWindows, toggleMaximizeEditor, maximizedSide,
+  canMaximize, maximizeActiveToolWindow, MAXIMIZE_SHORTCUT_LABEL, resizeTargetFor, stretchToolWindow,
+  tabTargetCount, selectNextTab, selectPreviousTab, closeActiveTab, closeOtherTabsTarget, closeOtherToolTabs,
+  closeAllTabsTarget, closeAllToolTabs, bottomContentUiType, isTabbedContentUi, canToggleContentUiType,
+  activeContentCount, toggledContentUiType, progressOpen, noticeLog, closeFirstNotification, clearNotices,
+  workspace, explorer, bottom, groups, allProblems, showOutput, openSettings,
+})
 // IDEA's Tools menu (intellij.platform.ide.impl.actions.xml "ToolsMenu"): the platform
 // rows are launcher-script creation plus OtherMenu (Terminal, task tools). Only rows
 // backed by a real TaoCode feature appear — no fake plugin services.
 // IDEA's menu order: File Edit View Navigate Code Refactor Analyze Build Run Tools Git Window Help.
-const toolsMenuRows: MenuRow[] = [
-  { id: 'tools.terminal', title: '打开终端', keys: 'Alt F12', keywords: 'terminal open shell tool window 终端', enabled: () => Boolean(workspace.value) && isDesktop, run: () => showOutput('terminal') },
-  { id: 'tools.taskList', title: '待办事项工具窗口', keywords: 'tasks todo context 任务', enabled: () => Boolean(workspace.value), run: () => showView('todo') },
-  { id: 'tools.rule1', rule: true },
-  // IDEA's CreateLauncherScriptAction on Windows only shows instructions — the `idea`
-  // .bat already ships in bin/. TaoCode has no CLI launcher yet, so the row is absent
-  // rather than faked.
-]
-const allMenuGroups = computed(() => {
-  const at = menus.findIndex(group => group.menu === 'git')
-  // The layout group sits directly under the window-strip rows and above ActiveToolwindowGroup, the
-  // way `PlatformActions.xml:641-651` orders it. Its rows are dynamic (one per named layout), so the
-  // splice happens here instead of inside the static `windowMenuRows` array.
-  const windowRows = [...windowMenuRows]
-  const afterSearch = windowRows.findIndex(row => row.id === 'window.searchEverywhere') + 1
-  windowRows.splice(afterSearch, 0, ...layoutMenuRows.value)
-  const windowGroup = { menu: 'window' as const, label: '窗口', rows: windowRows }
-  const toolsGroup = { menu: 'tools' as const, label: '工具', rows: toolsMenuRows }
-  const next = [...menus]
-  // IDEA's main-menu order ends ... Git, Window, Help; Tools sits before Git, and the
-  // build group is declared inline between Refactor and Run.
-  next.splice(at, 0, toolsGroup)
-  next.splice(at + 2, 0, windowGroup)
-  return next
+// 工具菜单：见 src/menus/toolsMenu.ts（一组一文件）。
+const toolsMenuRows = createToolsMenuRows({ isDesktop, hasWorkspace: () => Boolean(workspace.value), showOutput, showView,
+  externalTools: () => generalSettings.value.externalTools ?? [],
+  runExternalTool: (command, name) => { void runExternalTool(command, name) } })
+// 主菜单栏的模型与交互是一个域：菜单组的组装与排序（`allMenuGroups`）、子菜单浮层、
+// 行点击分发（`pickMenuRow`）、主菜单里的「查找操作」（Find Action）、以及标题栏的项目部件。
+// 它们共享同一份菜单开关状态 `menu` 与同一批行构造函数，审阅入口：src/menuUi.ts。
+const {
+  allMenuGroups, rowTitle, rowEnabled, submenuRows, hasSubmenu, submenuRow, submenuPlacement, submenuStyle,
+  openSubmenu, closeSubmenu, scheduleSubmenuClose, cancelSubmenuClose, pickMenuRow,
+  projectWidgetOpen, projectWidgetQuery, projectWidgetGroups, toggleProjectWidget, pickProjectFromWidget,
+  branchOfProject, openRecentProject,
+  actionSearch, actionQuery, actionIndex, actionInput, actionList, actionResults,
+  openActionSearch, moveAction, runAction, runActionResult, flattenMenuRows,
+} = createMenuUi({
+  notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows, pluginList,
+  digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working,
+  // 惰性：工作区生命周期模块装配在本块之后。
+  openWorkspace: (...a) => openWorkspace(...a),
 })
-function rowTitle(row: MenuRow) { return typeof row.title === 'function' ? row.title() : row.title ?? '' }
-function rowEnabled(row: { enabled?: () => boolean }) { return row.enabled ? row.enabled() : true }
-// 子菜单展开状态与定位：见 src/menus/submenuState.ts（对应 IDEA 菜单弹出二级浮层的行为）。
-const { hasSubmenu, submenuRow, submenuPlacement, submenuStyle, openSubmenu, closeSubmenu,
-  scheduleSubmenuClose, cancelSubmenuClose } = useSubmenuState()
-// 主菜单一旦切换或收起（键盘 ↓ 换菜单、Esc、点外部、打开任一对话框……），子菜单浮层必须跟着
-// 关闭 —— 不逐点补丁，用 watch 兜底覆盖全部路径（之前漏过 focusMenu/Tab/Esc/打开对话框四条）。
-watch(menu, () => { closeSubmenu() })
-function pickMenuRow(row: MenuRow) {
-  // 带 children 的行不是动作：点它只切换子菜单的展开状态，不动主菜单的开关。
-  if (hasSubmenu(row)) {
-    submenuRow.value = submenuRow.value === row.id ? null : row.id
-    return
-  }
-  // IDEA "Keep popups open for toggle items": a checkable row flips in place and the
-  // menu stays open, so several options can be switched in one go.
-  if (!(editorSettings.value.keepPopupsForToggles && row.checked)) menu.value = null
-  submenuRow.value = null
-  row.run?.()
-}
-// IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
-// the header carries the project name with a chevron, and the popup lists the open
-// projects and then the recent ones (ProjectConceptBundle.properties:22-23
-// "Open Projects" / "Recent Projects") with the project path and its branch. The list is
-// the first MAX_RECENT_COUNT recent actions (:98, :263-265), grouped by "is this project
-// open" (:262-276), and the popup searches over name *and* path (:367-372).
-const projectWidgetOpen = ref(false)
-const projectWidgetQuery = ref('')
-const projectWidgetGroups = computed(() => groupProjects(
-  filterProjects(recentProjects.value, projectWidgetQuery.value),
-  workspace.value?.root,
-))
-function toggleProjectWidget() {
-  projectWidgetOpen.value = !projectWidgetOpen.value
-  if (projectWidgetOpen.value) projectWidgetQuery.value = ''
-}
-function pickProjectFromWidget(project: RecentProject) {
-  projectWidgetOpen.value = false
-  // The current window's project is already open; IDEA brings that frame to front, which
-  // a single-project window has nothing to do for.
-  if (project.path === workspace.value?.root) return
-  openRecentProject(project)
-}
-// IDEA's popup rows print the branch the recent-project action carries
-// (ProjectToolbarWidgetPresentable.branchName, ReopenProjectAction.kt:48); TaoCode records
-// the branch the status bar already polls, keyed by root — the same store the welcome page
-// reads (see the gitHead watcher).
-function branchOfProject(path: string): string {
-  if (!isDesktop) return ''
-  try { return localStorage.getItem(`taocode.branch:${path}`) ?? '' } catch { return '' }
-}
-function openRecentProject(project: RecentProject) {
-  if (working.value || !project.available) return
-  menu.value = null
-  void openWorkspace(project.path)
-}
 
-interface ActionEntry { id: string; title: string; keywords?: string; keys?: string; group: string; enabled?: () => boolean; run: () => void }
-const actionSearch = ref(false)
-const actionQuery = ref('')
-const actionIndex = ref(0)
-const actionInput = ref<HTMLInputElement>()
-// Same command can sit in several menus (IDEA does too); Find Action lists it once.
-// IDEA 的 Find Action 会把**子菜单里的动作**一起列出来，所以索引时要把 children 递归摊平；
-// 父行本身没有 run，留在里面只会变成一条点不动的命令。
-function flattenMenuRows(rows: readonly MenuRow[]): MenuRow[] {
-  const flat: MenuRow[] = []
-  for (const row of rows) {
-    if (row.children?.length) flat.push(...flattenMenuRows(row.children))
-    else flat.push(row)
-  }
-  return flat
-}
-const actionList = computed<ActionEntry[]>(() => {
-  const seen = new Map<string, ActionEntry>()
-  for (const group of allMenuGroups.value) for (const row of flattenMenuRows(group.rows)) {
-    if (!row.run || seen.has(row.id)) continue
-    seen.set(row.id, { id: row.id, title: rowTitle(row), keywords: row.keywords, keys: row.keys, group: group.label, enabled: row.enabled, run: row.run })
-  }
-  const list = [...seen.values()]
-  // IDEA lists the ten mnemonic jumps as actions of their own, even though the menubar
-  // has no room for them.
-  for (const digit of digits) list.push({
-    id: `navigate.bookmark${digit}`, title: `跳转到书签 ${digit}`, keys: `Ctrl ${digit}`,
-    keywords: `bookmark mnemonic digit 书签 ${digit}`, group: '导航',
-    enabled: () => Boolean(bookmarkOwner(bookmarks.value, digit)), run: () => jumpMnemonic(digit),
-  })
-  // IDEA's `FocusStatusBar` (ActionsBundle.properties:81-82 `Focus Status Bar` /
-  // "Move focus to the first widget in the status bar") is not a menu item either: it lives in the
-  // `ToolbarPopupActions` group (PlatformActions.xml:1366) that CustomizationUtil.java:567-568
-  // injects into the *toolbar customization* popup, so it is a searchable action without a menu row.
-  list.push({
-    id: 'window.focusStatusBar', title: '聚焦状态栏', keys: '',
-    keywords: 'focus status bar first widget keyboard 状态栏 键盘 焦点 focus status bar', group: '窗口',
-    enabled: () => Boolean(workspace.value), run: focusStatusBar,
-  })
-  return list
+// ---- Search Everywhere（IDEA 263 新分屏实现）----
+// 改造前「随处搜索 Shift+Shift」打开的其实是**查找操作**面板（`openActionSearch`）——
+// 菜单行与键位都在，但没有 Search Everywhere 本身，属于项目硬规则禁掉的放假控件。
+// 装配在 src/searchEverywhereHost.ts（App.vue 是组装层，行数上限只降不升）。
+const {
+  searchEverywhereOpen, searchEverywhereItems, openSearchEverywhere,
+} = createSearchEverywhereHost({
+  isDesktop, menu, workspace, openFile, actionList, runAction,
+  allRunConfigNames, selectRunConfig, runSelectedConfig: debug => runSelectedConfig(debug), baseName,
 })
-const actionResults = computed(() => rankCommands(actionList.value, actionQuery.value))
-function openActionSearch() {
-  actionQuery.value = ''
-  actionIndex.value = 0
-  menu.value = null
-  actionSearch.value = true
-  void nextTick(() => actionInput.value?.focus())
-}
-function moveAction(step: number) {
-  const size = Math.max(1, actionResults.value.length)
-  actionIndex.value = (actionIndex.value + step + size) % size
-}
-function runAction(entry: ActionEntry) {
-  if (entry.enabled && !entry.enabled()) { notify(`「${entry.title}」当前不可用。`, true); return }
-  actionSearch.value = false
-  entry.run()
-}
-function runActionResult() {
-  const entry = actionResults.value[actionIndex.value]
-  if (entry) runAction(entry)
-}
-watch(actionQuery, () => { actionIndex.value = 0 })
 
 function closeAffectedTabs(path: string, isDir: boolean) {
   for (const pane of [0, 1] as const) {
@@ -4606,8 +1723,7 @@ async function applyNameDialog() {
         ? allTabs.value.filter(tab => tab.dirty && (tab.path === dialog.entry!.path || tab.path.startsWith(`${dialog.entry!.path}/`)))
         : allTabs.value.filter(tab => tab.dirty && tab.path === dialog.entry!.path)
       if (affected.length && !await confirmLeave('重命名前处理未保存的修改', affected)) return
-      await request('file.rename', { from: dialog.entry.path, to: target })
-      await retitleTab(dialog.entry.path, target)
+      await renameEntryWithReferences(dialog.entry.path, target)
       await refreshTree()
       notify(`已重命名 ${baseName(dialog.entry.path)} → ${name}`)
     } else {
@@ -4637,415 +1753,42 @@ async function confirmDelete() {
   } catch (error) { notify(errorMessage(error), true) }
 }
 function openPalette() { query.value = ''; palette.value = true; menu.value = null }
-// The whole configuration is sent, not just the command: program/args/cwd/env and
-// the before-launch steps are what make a run configuration a configuration.
-function runStartParams(label?: string): RunStartParams {
-  const config = currentRunConfig()
-  const params: RunStartParams = { command: config.command }
-  if (config.program) params.program = config.program
-  if (config.args?.length) params.args = config.args
-  if (config.cwd) params.cwd = config.cwd
-  if (config.env?.length) params.env = config.env
-  params.shell = config.type !== 'application'
-  if (label) params.label = label
-  return params
-}
-// Run one command to completion and hand back its exit code. run.output/run.exit
-// arrive as events; this watcher is what turns that stream into an awaitable so
-// before-launch tasks can gate the real run (IDEA's Before launch semantics).
-function runToExit(params: RunStartParams): Promise<number> {
-  return new Promise(resolve => {
-    beginRun()
-    const stop = watch(() => runState.exit, code => {
-      if (code === null || code === undefined) return
-      stop()
-      resolve(code)
-    })
-    void request('run.start', { ...params })
-      .catch(() => { stop(); resolve(-1) })
-  })
-}
-async function startRun() {
-  if (!runCommand.value.trim() && !runConfigProgram.value.trim()) { notify('请输入要运行的命令或可执行程序。', true); return }
-  if (runState.running) { notify('已有任务在运行，请先停止。', true); return }
-  if (!await saveAll()) { notify('请先保存修改再运行。', true); return }
-  showOutput('run')
-  // Before launch: every step runs in order; a non-zero exit aborts the launch
-  // naming the failed step, instead of silently running a stale binary.
-  const config = currentRunConfig()
-  for (const step of config.beforeLaunch ?? []) {
-    const code = await runToExit({ command: step.command, shell: true })
-    if (code !== 0) {
-      endRun()
-      notify(`启动前步骤「${step.name || step.command}」失败（退出码 ${code}），已中止运行。`, true)
-      return
-    }
-  }
-  beginRun()
-  const params = runStartParams()
-  lastRunParams = params
-  try { await request('run.start', { ...params }) }
-  catch (error) { endRun(); notify(`无法启动：${errorMessage(error)}`, true) }
-}
-// IDEA's Run/Debug act on the selected configuration. A debug-type config hands its
-// command line to the DAP session: first token is the program, the rest are arguments.
-async function runSelectedConfig(debug: boolean) {
-  if (!workspace.value || !isDesktop) { notify('桌面端才能运行或调试配置。', true); return }
-  const name = runConfigName.value
-  const found = runConfigs.value.find(config => config.name === name)
-  if (!found) { notify('请选择一个运行配置。', true); return }
-  if (debug && found.type !== 'debug') { notify(`配置「${name}」不是调试类型；在运行配置里勾选“调试”后才会交给 DAP。`, true); return }
-  if (!debug && found.type === 'debug') { notify(`配置「${name}」是调试类型；用 Shift+F9 调试它。`, true); return }
-  if (!debug) { void startRun(); return }
-  // A debug configuration carries its program/args/cwd/adapter as structured
-  // fields (IDEA's ApplicationConfiguration); tokenizing `command` again would
-  // break on paths with spaces and drop the configured environment.
-  const program = found.program?.trim() || found.command.trim().split(/\s+/)[0] || ''
-  if (!program) { notify('调试配置没有可执行程序。', true); return }
-  const args = found.args ?? found.command.trim().split(/\s+/).slice(1)
-  // IDEA runs "Build" before a debug launch too; a configured beforeLaunch chain
-  // gates the adapter the same way it gates a normal run.
-  for (const step of found.beforeLaunch ?? []) {
-    const code = await runToExit({ command: step.command, shell: true })
-    if (code !== 0) { notify(`启动前步骤「${step.name || step.command}」失败（退出码 ${code}），已中止调试。`, true); return }
-  }
-  explorer.value = true
-  leftView.value = 'debug'
-  try {
-    await dapStart({ command: '', args, kind: found.adapter?.trim() || debugKindFor(program), program, cwd: found.cwd || '.', stopOnEntry: false, env: envArrayToObject(found.env) })
-    notify(`已在调试 ${program}`)
-  } catch (error) { notify(`无法启动调试：${errorMessage(error)}`, true) }
-}
-// The bridge accepts env as an object or ["KEY=value"]; the config stores lines.
-function envArrayToObject(lines?: string[]): Record<string, string> | undefined {
-  if (!lines?.length) return undefined
-  const out: Record<string, string> = {}
-  for (const line of lines) {
-    const eq = line.indexOf('=')
-    if (eq > 0) out[line.slice(0, eq)] = line.slice(eq + 1)
-  }
-  return Object.keys(out).length ? out : undefined
-}
-// The DAP kind selects the adapter entry from TaoCode.dap.json; guessing cppvsdbg
-// for a Java or Python program would launch the wrong debugger.
-function debugKindFor(program: string): string {
-  const lower = program.toLowerCase()
-  if (/\.jar$/.test(lower) || /(^|[\\/])(java|javaw)(\.exe)?$/.test(lower) || lower === 'java' || lower === 'javaw') return 'java'
-  if (/\.py$/.test(lower) || lower === 'python' || lower === 'python3') return 'debugpy'
-  if (/\.dll$/.test(lower)) return 'cppvsdbg'
-  return 'cppvsdbg'
-}
-// RunClass ("run the configuration belonging to the context"): TaoCode's context is
-// the active file; a same-named `<basename>.exe` next to the configured output dir
-// is what the CMake templates produce, so that is the candidate.
-async function runContextConfiguration(debug: boolean) {
-  const tab = active.value
-  if (!tab || !workspace.value || !isDesktop) { notify('请先打开一个文件。', true); return }
-  const base = tab.path.split('/').pop() ?? ''
-  const stem = base.replace(/\.[^.]+$/, '')
-  const output = projectSettings.value.java.outputPath || 'build'
-  const candidates = [`${output}/${stem}.exe`, `${output}/${stem}`, `build/${stem}.exe`]
-  for (const candidate of candidates) {
-    try {
-      await request<DocumentData>('file.read', { path: candidate })
-    } catch { continue }
-    if (debug) {
-      explorer.value = true
-      leftView.value = 'debug'
-      try { await dapStart({ command: '', args: [], kind: debugKindFor(candidate), program: candidate, cwd: '.', stopOnEntry: false }); notify(`已在调试 ${candidate}`) }
-      catch (error) { notify(`无法启动调试：${errorMessage(error)}`, true) }
-    } else {
-      runCommand.value = candidate
-      await startRun()
-    }
-    return
-  }
-  notify(`找不到与 ${base} 对应的可执行文件（查过 ${candidates.join('、')}）。`, true)
-}
-  // IDEA's Build menu: CompileDirty ("Build Project", Ctrl+F9) builds incrementally;
-  // Compile ("Rebuild") is a full rebuild. TaoCode has no incremental compiler of its
-  // own, so both go through the project's configured build command — rebuild adds
-  // --clean-first, matching Rebuild's semantics.
-// The Git menu drives the same bridge methods as the 源代码管理 tool window. Stash
-// without a message would use git's default; keep IDEA's "Stash" dialog out of scope
-// and pass a timestamped label instead.
-// Vcs.UpdateProject: refresh remotes first, then integrate (pull). Distinct from
-// Git.Pull, which just integrates.
-async function updateProject() {
-  if (!workspace.value || !isDesktop) return
-  try {
-    await request('git.fetch')
-    await request('git.pull')
-    notify('已获取远端并合并到当前分支。')
-    showView('git')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA Git menu: 重置 HEAD… (Reset Current Branch). The two IDEA-visible choices
-// are the mode and the target; a hard reset gets a second confirm because it
-// discards commits and edits alike.
-async function resetHeadDialog() {
-  if (!workspace.value || !isDesktop) return
-  const target = window.prompt('重置到哪个提交？（分支名、哈希或 HEAD~N）', 'HEAD~1')
-  if (!target?.trim()) return
-  const mode = window.prompt('重置模式：\n  soft — 保留更改在暂存区\n  mixed — 保留更改在工作区\n  hard — 丢弃全部更改', 'mixed')
-  const chosen = (mode ?? '').trim().toLowerCase()
-  if (!chosen) return
-  if (!['soft', 'mixed', 'hard'].includes(chosen)) { notify('模式只能是 soft、mixed 或 hard。', true); return }
-  if (chosen === 'hard' && !window.confirm(`硬重置将丢弃 ${target.trim()} 之后的全部提交与未提交修改，且无法撤销。继续？`)) return
-  try {
-    const result = await request<{ head: string }>('git.reset', { target: target.trim(), mode: chosen })
-    notify(`已重置到 ${result.head}（${chosen}）。`)
-    showView('git')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-// IDEA's Push dialog confirms before any remote write; the confirm names the
-// branch so a push to the wrong remote is at least visible.
-async function pushWithConfirm() {
-  if (!workspace.value || !isDesktop) return
-  try {
-    const status = await request<{ head?: string }>('git.status')
-    const ahead = await request<GitAheadBehind>('git.aheadBehind')
-    const branch = status.head || '（游离 HEAD）'
-    const count = ahead.available ? ahead.ahead : 0
-    if (!window.confirm(`确认推送 ${branch} 到远端？${ahead.available ? `（领先 ${count} 个提交）` : '（未跟踪上游，将推送并设置上游）'}`)) return
-    await request('git.push')
-    notify('已推送。')
-    showView('git')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.fetch' | 'git.rebase' | 'git.stash.save' | 'git.stash.pop') {
-  if (!workspace.value || !isDesktop) return
-  try {
-    if (method === 'git.stash.save') await request(method, { message: `TaoCode 储藏 ${new Date().toISOString().slice(0, 19).replace('T', ' ')}` })
-    else await request(method)
-    notify(method === 'git.push' ? '已推送。' : method === 'git.pull' ? '已拉取（--ff-only）。' : method === 'git.fetch' ? '已获取远端引用（未合并）。' : method === 'git.rebase' ? '已变基到上游。' : method === 'git.stash.save' ? '已储藏当前更改。' : '已弹出最近的储藏。')
-    showView('git')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function startBuild(rebuild: boolean) {
-  if (!workspace.value || !isDesktop) { notify('桌面端才能构建项目。', true); return }
-  if (runState.running) { notify('已有任务在运行，请先停止。', true); return }
-  const command = runCommand.value.trim() || 'cmake --build build'
-  if (!await saveAll()) { notify('请先保存修改再构建。', true); return }
-  beginRun()
-  showOutput('run')
-  // A build never runs the program, so the application fields are dropped and the
-  // before-launch steps (which are build steps themselves) are not repeated.
-  const params: RunStartParams = { command: rebuild ? `${command}${command.startsWith('cmake') ? ' --clean-first' : ''}` : command, shell: true, label: rebuild ? '重新构建' : '构建' }
-  try { await request('run.start', { ...params }) }
-  catch (error) { endRun(); notify(`无法启动构建：${errorMessage(error)}`, true) }
-}
-async function stopRun() {
-  try { await request('run.stop') } catch (error) { notify(errorMessage(error), true) }
-}
-async function sendRunInput() {
-  const line = runInput.value?.value ?? ''
-  if (runInput.value) runInput.value.value = ''
-  if (!runState.running) { notify('没有正在运行的任务。', true); return }
-  try { await request('run.write', { line }) } catch { /* 进程可能刚结束 */ }
-}
-let lastShiftAt = 0
-function onKey(event: KeyboardEvent) {
-  // Every keystroke counts as activity for the idle-driven background refresh.
-  noteActivity()
-  // Alt+1..9 focus the tool windows (IDEA ActivateToolWindowAction is unconditional);
-  // modals and the palette keep the keyboard first.
-  if (event.altKey && workspace.value
-      && !palette.value && !settingsOpen.value && !help.value && !leavePrompt.value) {
-    focusToolWindowByNumber(event)
-    if (event.defaultPrevented) return
-  }
-  // $default.xml:867-869 — Shift+Esc is HideActiveWindow (`HideToolWindowAction.kt:21-29`).
-  // Overlays keep the keyboard first, the way the rest of this handler treats them.
-  if (event.key === 'Escape' && event.shiftKey && !event.ctrlKey && !event.altKey && workspace.value
-      && !palette.value && !settingsOpen.value && !help.value && !leavePrompt.value) { event.preventDefault(); hideActiveToolWindow(); return }
-  if (event.key === 'Escape') {
-    if (settingsOpen.value) {
-      // First ESC clears the settings search filter, the second one closes the dialog.
-      event.preventDefault()
-      if (settingsDialogRef.value?.handleEscape()) return
-      settingsOpen.value = false
-      return
-    }
-    palette.value = false; help.value = false; menu.value = null; settingsOpen.value = false; projectWidgetOpen.value = false; filenamePopup.value = false
-    if (leavePrompt.value) answerLeave('cancel')
-    else if (renamePrompt.value) renamePrompt.value = null
-    else if (symbolPrompt.value) symbolPrompt.value = null
-    else if (actionPrompt.value) actionPrompt.value = null
-    else if (surroundPrompt.value) surroundPrompt.value = false
-    else if (mnemonicPrompt.value) mnemonicPrompt.value = null
-    else if (actionSearch.value) actionSearch.value = false
-    else if (goLinePrompt.value) goLinePrompt.value = false
-    else if (conflictPrompt.value) resolveConflictKeep()
-    else if (encodingPrompt.value) encodingPrompt.value = null
-    else if (quickDoc.value) quickDoc.value = null
-    else if (recentPrompt.value) recentPrompt.value = false
-    else if (placesPrompt.value) placesPrompt.value = false
-    else if (configChooser.value) configChooser.value = null
-    else if (signaturePopup.value) closeSignaturePopup()
-    else if (templateChooser.value) templateChooser.value = false
-    return
-  }
-  const digit = /^Digit([0-9])$/.exec(event.code)?.[1]
-  if (digit !== undefined && mnemonicPrompt.value) { event.preventDefault(); pickMnemonic(Number(digit)); return }
-  // RecentLocations popup owns the keyboard while open (IDEA's popup list: Up/Down
-  // move, Enter jumps, Delete drops the place, Ctrl+E toggles the edited filter).
-  if (placesPrompt.value) {
-    if (event.key === 'ArrowDown') { event.preventDefault(); movePlace(1); return }
-    if (event.key === 'ArrowUp') { event.preventDefault(); movePlace(-1); return }
-    if (event.key === 'Enter') { event.preventDefault(); const place = placesFiltered.value[placesIndex.value]; if (place) openPlace(place); return }
-    if (event.key === 'Delete' || event.key === 'Backspace') {
-      event.preventDefault()
-      const place = placesFiltered.value[placesIndex.value]
-      if (place) { places.value = places.value.filter(item => item !== place); changePlaces.value = changePlaces.value.filter(item => item !== place) }
-      return
-    }
-    if (event.ctrlKey && event.key.toLowerCase() === 'e') { event.preventDefault(); placesEditedOnly.value = !placesEditedOnly.value; return }
-    return
-  }
-  // Choose Run/Debug Configuration popup (Alt+Shift+F10 / Alt+Shift+F9).
-  if (configChooser.value) {
-    if (event.key === 'ArrowDown') { event.preventDefault(); moveConfig(1); return }
-    if (event.key === 'ArrowUp') { event.preventDefault(); moveConfig(-1); return }
-    if (event.key === 'Enter') { event.preventDefault(); const config = runConfigs.value[configIndex.value]; if (config) applyConfigChoice(config); return }
-    return
-  }
-  if (projectMode.value || settingsOpen.value || leavePrompt.value || renamePrompt.value || symbolPrompt.value || actionPrompt.value || actionSearch.value || surroundPrompt.value || mnemonicPrompt.value || goLinePrompt.value || encodingPrompt.value || conflictPrompt.value || quickDoc.value || recentPrompt.value || templateChooser.value) return
-  // --- Debugger/build transport, from $default.xml ---
-  // F9 Resume, F8 Step Over, F7 Step Into, Shift+F8 Step Out, Ctrl+F8 Toggle Line
-  // Breakpoint, Shift+F9 Debug, Ctrl+F9 Build, Ctrl+Shift+F9 Rebuild.
-  if (event.key === 'F9' && event.ctrlKey && !event.shiftKey) { event.preventDefault(); void startBuild(false); return }
-  if (event.key === 'F9' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void startBuild(true); return }
-  if (event.key === 'F8' && event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void toggleBreakpointAt(activePath.value, active.value.line); return }
-  if (event.key === 'F9' && !event.shiftKey && !event.ctrlKey && dapState.paused) { event.preventDefault(); void dapStep('continue'); return }
-  if (event.key === 'F9' && event.shiftKey && isDesktop && workspace.value && !dapState.running) { event.preventDefault(); void runSelectedConfig(true); return }
-  if (dapState.paused && !event.ctrlKey && !event.altKey) {
-    if (event.key === 'F8' && !event.shiftKey) { event.preventDefault(); void dapStep('next'); return }
-    if (event.key === 'F7' && !event.shiftKey) { event.preventDefault(); void dapStep('stepIn'); return }
-    if (event.key === 'F8' && event.shiftKey) { event.preventDefault(); void dapStep('stepOut'); return }
-  }
-  if (event.key === 'F2' && event.ctrlKey && runState.running) { event.preventDefault(); void stopRun(); return }
-  if (event.key === 'F5' && event.ctrlKey && !event.shiftKey && !event.altKey && lastRunParams && !runState.running) { event.preventDefault(); void rerunLast(); return }
-  // IDEA Run menu: 附加到进程 Ctrl+Alt+F5, 查看断点 Ctrl+Shift+F8 (real 2026.2 UI).
-  if (event.key === 'F5' && event.ctrlKey && event.altKey && !event.shiftKey && workspace.value) { event.preventDefault(); explorer.value = true; leftView.value = 'debug'; return }
-  if (event.key === 'F8' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); explorer.value = true; leftView.value = 'debug'; return }
-  // IDEA Git menu: 更新项目 = Ctrl+T (Vcs.UpdateProject).
-  if (event.key.toLowerCase() === 't' && event.ctrlKey && !event.shiftKey && !event.altKey && workspace.value && gitAvailable.value) { event.preventDefault(); void updateProject(); return }
-  // IDEA File menu: 项目结构 Ctrl+Alt+Shift+S, 从磁盘全部重新加载 Ctrl+Alt+Y.
-  if (event.key.toLowerCase() === 's' && event.ctrlKey && event.altKey && event.shiftKey && workspace.value) { event.preventDefault(); void openSettings('structure'); return }
-  if (event.key.toLowerCase() === 'y' && event.ctrlKey && event.altKey && !event.shiftKey && workspace.value) { event.preventDefault(); void forceReloadFromDisk(); return }
-  // IDEA Refactor menu: 重构… Ctrl+Alt+Shift+T, 移动文件 F6, 复制文件 F5.
-  if (event.key.toLowerCase() === 't' && event.ctrlKey && event.altKey && event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void openCodeActions(caretPayload()); return }
-  if (event.key === 'F6' && !event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void moveActiveFile(); return }
-  if (event.key === 'F5' && !event.ctrlKey && !event.altKey && !event.shiftKey && active.value && isDesktop) { event.preventDefault(); void copyActiveFile(); return }
-  // Shift+F10 Run, Alt+Shift+F10 Choose Run Configuration, Alt+Shift+F9 Choose Debug
-  // Configuration, Ctrl+Shift+F10 Run Context Configuration.
-  if (event.key === 'F10' && event.shiftKey && event.altKey && workspace.value) { event.preventDefault(); openConfigChooser(); return }
-  if (event.key === 'F9' && event.shiftKey && event.altKey && isDesktop && workspace.value) { event.preventDefault(); openConfigChooser(); return }
-  if (event.key === 'F10' && event.shiftKey && !event.altKey && isDesktop && workspace.value && !runState.running) { event.preventDefault(); void runSelectedConfig(false); return }
-  if (event.key === 'F10' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void runContextConfiguration(false); return }
-  // --- Navigation, from $default.xml ---
-  // ResizeToolWindowLeft/Right/Up/Down = Ctrl+Alt+Shift+arrows (`$default.xml:873-884`). They act
-  // on the active tool window and are therefore checked *before* Back/Forward below, which use the
-  // same chord without Shift — and those two now exclude Shift so the resize chords stay reachable
-  // (the same shadowing the F12 fix had to undo).
-  if (event.ctrlKey && event.altKey && event.shiftKey) {
-    if (event.key === 'ArrowLeft') { event.preventDefault(); stretchToolWindow('left'); return }
-    if (event.key === 'ArrowRight') { event.preventDefault(); stretchToolWindow('right'); return }
-    if (event.key === 'ArrowUp') { event.preventDefault(); stretchToolWindow('up'); return }
-    if (event.key === 'ArrowDown') { event.preventDefault(); stretchToolWindow('down'); return }
-  }
-  // Back/Forward = Ctrl+Alt+Left/Right.
-  if (event.ctrlKey && event.altKey && !event.shiftKey && event.key === 'ArrowLeft') { event.preventDefault(); void goBack(); return }
-  if (event.ctrlKey && event.altKey && !event.shiftKey && event.key === 'ArrowRight') { event.preventDefault(); void goForward(); return }
-  if (event.key === 'F11') {
-    event.preventDefault()
-    if (event.ctrlKey) openMnemonicPrompt()
-    else if (event.shiftKey) showView('bookmarks')
-    else toggleBookmark()
-    return
-  }
-  if (digit !== undefined && event.ctrlKey && !event.altKey) {
-    event.preventDefault()
-    if (event.shiftKey) toggleBookmark(Number(digit)); else jumpMnemonic(Number(digit))
-    return
-  }
-  // Ctrl+Shift+Backspace = Jump to Last Change (project-wide).
-  if (event.key === 'Backspace' && event.ctrlKey && event.shiftKey && active.value) { event.preventDefault(); jumpLastEditLocation(); return }
-  // Alt+Insert Generate, Ctrl+Alt+Shift+Insert New Scratch File.
-  if (event.key === 'Insert' && event.altKey && !event.ctrlKey && !event.shiftKey && workspace.value) { event.preventDefault(); void openGeneratePopup(); return }
-  if (event.key === 'Insert' && event.altKey && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void createScratch(); return }
-  // Alt+F1 Select In (project view), Alt+F12 Terminal. Alt+<digit> is handled up front
-  // by focusToolWindowByNumber (IDEA ActivateToolWindowAction), never here.
-  if (event.key === 'F1' && event.altKey && !event.ctrlKey && !event.shiftKey && active.value) { event.preventDefault(); selectInTree(); return }
-  if (event.key === 'F12' && event.altKey && !event.ctrlKey && workspace.value) { event.preventDefault(); showOutput('terminal'); return }
-  // $default.xml:309-311 and :717-719 — Alt+Left/Right is PreviousTab/NextTab. They are tab
-  // navigation, not caret motion: `TabNavigationActionBase.java:71-78` hands them to the editor's
-  // tabs or to the active tool window's tabs, and `CodeEditor.vue` shadows CodeMirror's
-  // syntax-wise cursor motion on the same chord.
-  if (event.altKey && !event.ctrlKey && !event.metaKey && workspace.value) {
-    if (event.key === 'ArrowLeft') { event.preventDefault(); selectPreviousTab(); return }
-    if (event.key === 'ArrowRight') { event.preventDefault(); selectNextTab(); return }
-  }
-  // $default.xml:864-866 — Shift+F12 is RestoreDefaultLayout ("Restore Current Layout",
-  // `RestoreDefaultLayoutAction.java:41-47`), a different action from bare F12 below.
-  if (event.key === 'F12' && event.shiftKey && !event.ctrlKey && !event.altKey && workspace.value) { event.preventDefault(); restoreCurrentToolLayout(); return }
-  // $default.xml:846-848 — bare F12 is JumpToLastWindow ("Activate the last focused tool
-  // window"), *not* FileStructure: that one is Ctrl+F12 (:279-281 FileStructurePopup). This
-  // check has to sit above the "needs Ctrl or Alt" bail-out below, because F12 has neither.
-  // Zen 模式下 Esc 退出（IDEA 的免打扰/演示模式同样以 Esc 为退出键）。
-  if (event.key === 'Escape' && zenMode.value) { event.preventDefault(); toggleZenMode(); return }
-  if (event.key === 'F12' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && workspace.value) { event.preventDefault(); jumpToLastToolWindow(); return }
-  if (event.key === 'Backquote' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); showView('git'); return }
-  if (event.key === 'Backquote' && event.altKey && workspace.value) { event.preventDefault(); showView('git'); return }
-  // Ctrl+Shift+' — MaximizeToolWindow ($default.xml:885-887 `control shift QUOTE`, macOS keymap
-  // :394-396 `ctrl shift QUOTE`). The physical key is what the keymap stores, so the check uses
-  // `code` (Shift turns the produced character into `"` on most layouts).
-  if (event.code === MAXIMIZE_SHORTCUT_CODE && event.ctrlKey && event.shiftKey && !event.altKey) { event.preventDefault(); maximizeActiveToolWindow(); return }
-  // --- VCS, from VcsActions.xml (Ctrl+K Commit) and dvcs-impl (Ctrl+Shift+K Push) ---
-  if (event.key.toLowerCase() === 'k' && event.ctrlKey && event.shiftKey && workspace.value && gitAvailable.value) { event.preventDefault(); void gitMenuAction('git.push'); return }
-  if (event.key.toLowerCase() === 'k' && event.ctrlKey && workspace.value && gitAvailable.value) { event.preventDefault(); showView('git'); return }
-  if (!(event.ctrlKey || event.metaKey) && !event.altKey) return
-  // --- Files / actions / search / refactor, from $default.xml ---
-  // $default.xml:260-262 — Ctrl+Shift+F4 is CloseActiveTab (`CloseActiveTabAction.java:39-58`).
-  if (event.key === 'F4' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); closeActiveTab(); return }
-  if (event.key.toLowerCase() === 'a' && event.shiftKey) { event.preventDefault(); openActionSearch(); return }
-  if (event.key.toLowerCase() === 's' && event.altKey) { event.preventDefault(); void openSettings(); return }
-  if (event.key.toLowerCase() === 's') { event.preventDefault(); void (workspace.value ? saveAll() : save()) }
-  // Ctrl+Shift+N file, Ctrl+N class, Ctrl+Shift+Alt+N symbol.
-  if (event.key.toLowerCase() === 'n' && event.shiftKey && event.altKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
-  if (event.key.toLowerCase() === 'n' && event.shiftKey && workspace.value) { event.preventDefault(); openPalette(); return }
-  if (event.key.toLowerCase() === 'o' && event.shiftKey && !event.altKey) { event.preventDefault(); void openWorkspace(); return }
-  if (event.key.toLowerCase() === 'g' && event.shiftKey && !event.altKey && active.value) { event.preventDefault(); void showBlame(); return }
-  if (event.key.toLowerCase() === 'n' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('class'); return }
-  // Ctrl+Shift+F12 is HideAllWindows ($default.xml:870-872) and must be tested before the
-  // Ctrl+F12 branch, which used to swallow it because it did not look at Shift.
-  if (event.key === 'F12' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); toggleMaximizeEditor(); return }
-  // Ctrl+F12 = FileStructurePopup ($default.xml:279-281). Shift is excluded explicitly, so the
-  // two branches cannot both match even if their order is ever changed.
-  if (event.key === 'F12' && event.ctrlKey && !event.shiftKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('file'); return }
-  if (event.key === 'Shift' && !event.repeat) {
-    const now = event.timeStamp
-    if (now - lastShiftAt < 400) { lastShiftAt = 0; event.preventDefault(); openActionSearch(); return }
-    lastShiftAt = now
-  }
-  // Ctrl+Shift+F Find in Path, Ctrl+E recent files / Ctrl+Shift+E recent locations,
-  // Ctrl+G Goto Line.
-  if (event.key.toLowerCase() === 'f' && event.shiftKey && workspace.value) { event.preventDefault(); showView('search'); return }
-  if (event.key.toLowerCase() === 'e' && workspace.value) { event.preventDefault(); if (event.shiftKey) openRecentPlaces(); else openRecentFiles(); return }
-  if (event.key.toLowerCase() === 'g' && !event.shiftKey && active.value) { event.preventDefault(); openGoLine(); return }
-  // Introduce/Extract/Inline, from $default.xml (Ctrl+Alt+V/C/M/N).
-  if (event.altKey && event.ctrlKey && !event.shiftKey) {
-    if (event.key.toLowerCase() === 'v') { event.preventDefault(); extractVariable(); return }
-    if (event.key.toLowerCase() === 'c') { event.preventDefault(); extractConstant(); return }
-    if (event.key.toLowerCase() === 'm') { event.preventDefault(); extractMethod(); return }
-    if (event.key.toLowerCase() === 'n') { event.preventDefault(); inlineVariable(); return }
-  }
-  // Run Inspection (Ctrl+Shift+Alt+I), Quick Documentation (Ctrl+Q), Copy Reference.
-  if (event.key.toLowerCase() === 'i' && event.ctrlKey && event.shiftKey && event.altKey && lspReady.value && active.value) { event.preventDefault(); void openCodeActions(caretPayload(), true); return }
-  if (event.key.toLowerCase() === 'q' && !event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void showQuickDoc(); return }
-  if (event.key.toLowerCase() === 'c' && event.altKey && event.shiftKey && active.value) { event.preventDefault(); void copyReference(); return }
-}
+// 控制台标签页里的构建动作是同一个域的另一半（含内联终端）。见 src/runActions.ts。
+const {
+  runStartParams, runToExit, startRun, runSelectedConfig, envArrayToObject, debugKindFor,
+  runContextConfiguration, startBuild, runExternalTool, stopRun, debugButtonTitle, stopAnyProcess,
+  sendRunInput,
+} = createRunActions({
+  notify, isDesktop, workspace, active, runCommand, runConfigProgram, runConfigName, runConfigs, projectSettings,
+  currentRunConfig, showOutput, explorer, leftView, runInput,
+  // 惰性：`saveAll` 是骨架里的函数（本块之后），必须延后调用。
+  saveAll: () => saveAll(),
+  // 宿主是 `let`，用 getter/setter 共享同一份；`gradleDetection` 同理（Gradle 宿主在本块之后装配）。
+  lastRunParams: { get value() { return lastRunParams }, set value(v) { lastRunParams = v } }, saveJavaSettings, gradleDetection: { get value() { return gradleDetection.value } },
+})
+// 全局快捷键分派是一个域（IDEA 的 Keymap/KeymapImpl + $default.xml 的绑定表）。
+const { onKey } = createKeymap({
+  workspace, active, activePath, lspReady, lastRunParams: { get value() { return lastRunParams } }, runConfigs,
+  explorer, leftView, actionPrompt, actionSearch, changePlaces, configChooser, configIndex, conflictPrompt,
+  encodingPrompt, filenamePopup, gitAvailable, goLinePrompt, help, leavePrompt, menu, mnemonicPrompt, palette, places,
+  placesEditedOnly, placesFiltered, placesIndex, placesPrompt, projectMode, projectWidgetOpen, quickDoc, recentPrompt,
+  renamePrompt, settingsDialogRef, settingsOpen, signaturePopup, surroundPrompt, symbolPrompt, templateChooser, zenMode,
+  answerLeave: (...a) => answerLeave(...a), applyConfigChoice, caretPayload, closeActiveTab, closeSignaturePopup, copyActiveFile, copyReference,
+  createScratch, exitHideChrome, extractConstant, extractMethod, extractVariable, gitMenuAction, goBack, goForward,
+  hideActiveToolWindow, inlineVariable, jumpLastEditLocation, jumpMnemonic, jumpToLastToolWindow, maximizeActiveToolWindow,
+  moveActiveFile, moveConfig, movePlace, openActionSearch, openCodeActions, openConfigChooser, openGeneratePopup, openSearchEverywhere,
+  openGoLine, openMnemonicPrompt, openPalette, openPlace, openProjectStructure, openRecentFiles, openRecentPlaces,
+  openSettings, openSymbol, openWorkspace: (...a) => openWorkspace(...a), pickMnemonic, rerunLast, resolveConflictKeep, restoreCurrentToolLayout,
+  openPasteHistory: (...a) => openPasteHistory(...a), pasteAsPlainText: (...a) => pasteAsPlainText(...a),
+  copyPaths: () => copyFilePath(),
+  runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, selectInTree, selectNextTab, selectPreviousTab,
+  showBlame, showOutput, showQuickDoc, showView, startBuild, stopRun, stretchToolWindow, toggleBookmark,
+  toggleBreakpointAt, toggleMaximizeEditor, updateProject,
+  // 惰性：这三个由本块之后装配的模块提供（磁盘同步模块、外观动作模块）。
+  noteActivity: () => noteActivity(),
+  forceReloadFromDisk: (...a) => forceReloadFromDisk(...a),
+  focusToolWindowByNumber: (...a) => focusToolWindowByNumber(...a),
+})
 // IDEA's exit confirmation. ApplicationImpl.canExit (:1073, reached from :840) aborts the
 // exit when the DoNotAskOption (:998-1018) says so, and that option is shown only when
 // 退出确认与进程关闭确认：逻辑拆到 src/confirmations/（对应 ConfirmExitDialog 与
@@ -5081,337 +1824,43 @@ function onUnload(event: BeforeUnloadEvent) {
 // for the same option and has been removed.)
 const syncLimit = 4 * 1024 * 1024
 let syncing = false
-/** The body of the sync, without either trigger's gate. `quiet` keeps the background pass silent. */
-async function performDiskSync(quiet = false) {
-  if (!isDesktop || !workspace.value || syncing) return
-  syncing = true
-  try {
-    workspace.value = { ...workspace.value, entries: await request<Entry[]>('workspace.list', { path: '' }) }
-    treeVersion.value++
-  } catch { /* the project may have closed mid-flight */ }
-  for (const tab of allTabs.value) {
-    if (tab.dirty || tab.content.length > syncLimit) continue
-    try {
-      const disk = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
-      // A lock set outside the IDE must reach the buffer even when content is unchanged.
-      if (disk.readOnly !== tab.readOnly) {
-        tab.readOnly = disk.readOnly
-        editorFor(tab.path)?.setReadOnly(Boolean(disk.readOnly))
-      }
-      if (disk.version === tab.version) continue
-      Object.assign(tab, { content: disk.content, version: disk.version, encoding: disk.encoding, bom: disk.bom })
-      editorFor(tab.path)?.setDraft(disk.content)
-      if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: disk.content }).catch(() => undefined)
-      if (!quiet) notify(`磁盘上的 ${tab.path} 已变化，编辑器已同步`)
-    } catch { /* deleted or unreadable: keep the buffer as it is */ }
-  }
-  syncing = false
-}
-// Frame activation / editor-tab activation: GeneralSettings.isSyncOnFrameActivation, i.e. the
-// `autoSyncFiles` key (see its own comment above).
-async function syncFromDisk() {
-  if (!generalSettings.value.autoSyncFiles) return
-  await performDiskSync()
-}
-// IDEA's periodic background VFS refresh, a different switch on a different trigger:
-// GeneralSettings.isBackgroundSync (GeneralSettings.kt:67-71) gates both controllers
-// (SaveAndSyncHandlerImpl.kt:610 idle, :649 unfocused). Which one runs is the registry key
-// `vfs.background.refresh.on.idle`, whose default is **true** and whose own description says to
-// "refresh VFS periodically while there is no user activity in the IDE instead of when window
-// is not focused" (intellij.platform.ide.core.impl.xml:77-80). So this is the idle variant: the
-// delay is `vfs.background.refresh.interval` (registry.properties:1656 = 15s, read at
-// SaveAndSyncHandlerImpl.kt:750-752), the window starts after that much inactivity and stops
-// again on any activity (:596-611).
-const backgroundRefreshInterval = 15_000
-let backgroundTimer: number | undefined
-let lastActivityAt = Date.now()
-function noteActivity() { lastActivityAt = Date.now() }
-async function backgroundRefreshOnce() {
-  if (!generalSettings.value.backgroundSyncFiles || !isDesktop) return
-  // "no user activity for one interval" is exactly the source's `debounce(interval)`.
-  if (Date.now() - lastActivityAt < backgroundRefreshInterval) return
-  await performDiskSync(true)
-}
-function startBackgroundRefresh() {
-  stopBackgroundRefresh()
-  if (!isDesktop) return
-  backgroundTimer = window.setInterval(() => { void backgroundRefreshOnce() }, backgroundRefreshInterval)
-}
-function stopBackgroundRefresh() { if (backgroundTimer) { window.clearInterval(backgroundTimer); backgroundTimer = undefined } }
-function onWindowFocus() { void syncFromDisk() }
-function onVisibility() { if (document.visibilityState === 'visible') void syncFromDisk() }
-// IDEA File menu: 从磁盘全部重新加载 (Reload All from Disk, Ctrl+Alt+Y). The same
-// sync as frame activation, plus an explicit confirmation toast.
-async function forceReloadFromDisk() {
-  if (!isDesktop || !workspace.value) { notify('请先打开一个项目。', true); return }
-  await syncFromDisk()
-  await refreshTree()
-  notify('已从磁盘重新加载全部未修改文件。')
-}
-// IDE-03 live file watching: the native watcher already debounced the OS noise, so
-// this handler only coalesces UI work — refresh the tree once per batch and let
-// syncFromDisk pull the changed buffers (dirty ones are never touched).
-let fsWatchTimer: number | undefined
-let lastFsVersion = 0
-async function onFsChanges() {
-  if (!isDesktop || !workspace.value) return
-  if (fsWatchTimer !== undefined) return
-  fsWatchTimer = window.setTimeout(async () => {
-    fsWatchTimer = undefined
-    if (!workspace.value) return
-    // Ignore our own writes: the version snapshot only changes for external edits.
-    try {
-      workspace.value = { ...workspace.value, entries: await request<Entry[]>('workspace.list', { path: '' }) }
-      treeVersion.value++
-    } catch { /* the project may have closed mid-flight */ }
-    await syncFromDisk()
-  }, 400)
-}
-watch(() => fsChanges.version, value => { if (value !== lastFsVersion) { lastFsVersion = value; void onFsChanges() } })
-// `workspace/applyEdit` (a quick fix or organize-imports) writes the file natively:
-// the buffer must follow, or the editor keeps showing text that is no longer on disk.
-watch(() => lspEdited.version, async () => {
-  const path = lspEdited.path
-  if (!path) return
-  const tab = findTab(path)
-  if (!tab) return
-  try {
-    const doc = await request<DocumentData>('file.read', { path })
-    tab.content = doc.content
-    tab.version = doc.version
-    tab.readOnly = doc.readOnly
-    tab.dirty = false
-    editorFor(path)?.setDraft(doc.content)
-    notify(`「${path}」已被语言服务修改，编辑器已重新载入。`)
-  } catch (error) { notify(`语言服务改动了「${path}」，但重新载入失败：${errorMessage(error)}`, true) }
+// Gradle（IDEA Gradle 插件的「自动配置 / 同步 / 工具窗口」）是一个域，状态在 src/gradleHost.ts。
+// 它必须在磁盘同步之前组装：文件监听那一侧要把"这一批变了哪些文件"交给它按 build.tools 的三档判定。
+const gradleHost = createGradleHost({
+  isDesktop, workspace, projectSettings, notify,
+  // 双击任务 = IDEA 的 `GradleRunConfiguration`；复用外部工具那条运行通道（run.start + 输出面板）。
+  runInConsole: (command, label) => runExternalTool(command, label),
+  isOpenInEditor: path => Boolean(findTab(path)),
+  openSettings,
+  // `ExternalSystem.OpenConfig`（打开构建脚本）与 `CreateRunConfiguration`（任务 → 运行配置）。
+  openFile: path => openFile(path, false),
+  addRunConfiguration: (name, command) => { void persistRunConfigs([...runConfigs.value, { name, command }], `已把 Gradle 任务保存为运行配置「${name}」`) },
 })
-// A terminal the debug adapter opened (runInTerminal) belongs in the Terminal tool
-// window — the host already spawned it, the UI just has to show it.
-watch(() => termOpened.version, async () => {
-  if (!termOpened.id) return
-  showOutput('terminal')
-  await nextTick()
-  const panel = terminalPanelRef.value as unknown as { adopt?: (id: number, label?: string) => void } | null
-  panel?.adopt?.(termOpened.id, termOpened.cwd ? `调试终端 · ${termOpened.cwd.split(/[\\/]/).pop() || termOpened.cwd}` : undefined)
+// 只有这四项要在外壳里直接用：可用性（工具窗口的禁用判据）、检测结果（设置页显示）、
+// 两条"外部事件"入口。其余动作都由 gradleViewContext 转给工具窗口，不在这里抄一份。
+const { available: gradleAvailable, detection: gradleDetection, onBuildFilesChanged, onVcsUpdated } = gradleHost
+// 磁盘同步与后台刷新是一个域（计时器与版本号都在模块里自持）。
+const {
+  dispose: disposeDiskSync,
+  performDiskSync, syncFromDisk, forceReloadFromDisk, noteActivity, backgroundRefreshOnce,
+  startBackgroundRefresh, stopBackgroundRefresh, onWindowFocus, onVisibility, onFsChanges, trapFocus,
+} = createDiskSync({
+  notify, showOutput: id => showOutput(id), isDesktop, editorFor, findTab, refreshTree, menu, activity, theme, generalSettings, workspace, allTabs,
+  treeVersion, dirty, syncing: () => syncing, setSyncing: value => { syncing = value }, syncLimit, terminalPanelRef,
+  onBuildFilesChanged: paths => void onBuildFilesChanged(paths),
 })
-// The directory watcher died and was restarted (or gave up): say so instead of letting
-// the file tree silently go stale.
-watch(() => watchStopped.version, () => {
-  if (!watchStopped.reason) return
-  notify(watchStopped.restarting
-    ? `文件监听已重启（原因：${watchStopped.reason}，第 ${watchStopped.attempt} 次）。`
-    : `文件监听已停止：${watchStopped.reason}。文件树不再自动刷新，重新打开项目可恢复。`, !watchStopped.restarting)
-})
-// Local-history snapshot failures arrive as events (file.write must not block on
-// them); surface the newest one as a non-error toast.
-watch(() => historyNotes.length, () => {
-  const note = historyNotes[historyNotes.length - 1]
-  if (note) notify(`本地历史快照失败（${note.path}）：${note.message}。本次保存不受影响。`, true)
-})
-function trapFocus(event: KeyboardEvent) {
-  if (event.key !== 'Tab') return
-  const controls = (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')
-  const first = controls[0]
-  const last = controls[controls.length - 1]
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
-}
-watch(theme, value => {
-  document.documentElement.dataset.theme = value
-  document.documentElement.style.colorScheme = value
-  setNativeTheme(value)
-}, { immediate: true })
-// IDEA "Use contrast scrollbars": a thicker, high-contrast scrollbar.
-// IDEA mainMenuDisplayMode: one markup, three layouts — the menu bar stays where it
-// is and CSS decides whether it sits inline, wraps to its own row, or is hidden
-// behind a hamburger button.
-// IDEA's hamburger menu: one button that opens every menu group in a single popup.
-const hamburgerOpen = ref(false)
-const hamburgerGroup = ref<string | null>(null)
-watch(() => editorSettings.value.mainMenuDisplayMode, mode => {
-  document.documentElement.dataset.mainMenu = mode || 'merged'
-  if (mode !== 'hamburger') hamburgerOpen.value = false
-}, { immediate: true })
-// IDEA "Support screen readers": notifications are announced through a live region
-// and hover tooltips are suppressed (the IDEA checkbox says tooltips "will be disabled").
-// IDEA's checkbox says tooltips "will be disabled" while accessibility names stay:
-// every title attribute is copied into aria-label (when there is none) and removed,
-// and a MutationObserver keeps doing that for anything rendered later.
-let screenReaderObserver: MutationObserver | null = null
-function stripHoverTitles(root: ParentNode) {
-  for (const element of root.querySelectorAll<HTMLElement>('[title]')) {
-    if (!element.getAttribute('aria-label')) element.setAttribute('aria-label', element.getAttribute('title') ?? '')
-    element.removeAttribute('title')
-  }
-}
-// GeneralSettings.isSupportScreenReaders (GeneralSettings.kt:179-186): the state lives in
-// ide.general.xml, not the editor settings — AppearanceConfigurable.kt:363-372 is its row.
-watch(() => generalSettings.value.supportScreenReaders, on => {
-  document.documentElement.dataset.screenReader = on ? 'on' : 'off'
-  if (screenReaderObserver) { screenReaderObserver.disconnect(); screenReaderObserver = null }
-  if (!on) return
-  stripHoverTitles(document)
-  screenReaderObserver = new MutationObserver(records => {
-    for (const record of records)
-      for (const node of record.addedNodes)
-        if (node instanceof HTMLElement) {
-          if (node.hasAttribute('title')) {
-            if (!node.getAttribute('aria-label')) node.setAttribute('aria-label', node.getAttribute('title') ?? '')
-            node.removeAttribute('title')
-          }
-          stripHoverTitles(node)
-        }
-  })
-  screenReaderObserver.observe(document.body, { childList: true, subtree: true })
-}, { immediate: true })
-onBeforeUnmount(() => screenReaderObserver?.disconnect())
-// IDEA's "Bracket matching highlight" (editor setting): CodeMirror's basicSetup
-// keeps the matcher installed, so the setting controls the highlight itself —
-// switching it off removes the matching-bracket emphasis in every editor.
-watch(() => editorSettings.value.bracketMatching, on => {
-  document.documentElement.dataset.bracketMatching = on ? 'on' : 'off'
-}, { immediate: true })
-watch(() => editorSettings.value.useContrastScrollbars, on => {
-  document.documentElement.dataset.scrollbars = on ? 'contrast' : 'default'
-}, { immediate: true })
-// IDEA's colour-vision deficiency filter: an feColorMatrix applied to the whole UI.
-watch(() => editorSettings.value.colorBlindness, mode => {
-  document.documentElement.dataset.colorBlind = mode && mode !== 'none' ? mode : 'off'
-}, { immediate: true })
-// IDEA "Use custom font": the UI font stack (the editor font is its own setting).
-watch([() => editorSettings.value.uiFontFamily, () => editorSettings.value.uiFontSize], ([family, size]) => {
-  const root = document.documentElement.style
-  if (family) root.setProperty('--font-ui', `'${family.replace(/'/g, '')}', 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', sans-serif`)
-  else root.removeProperty('--font-ui')
-  document.documentElement.dataset.uiFontSize = String(size || 13)
-}, { immediate: true })
-// IDEA AppearanceConfigurable, applied for real:
-//  - ideScale: the whole UI scales (IDEA zooms the Swing hierarchy; a web UI does it
-//    with a rem multiplier, so every spacing tied to a token follows).
-//  - compactMode (IDEA "Compact mode - UI elements take up less screen space"):
-//    control heights and paddings shrink through density variables.
-watch(() => editorSettings.value.uiZoomPercent, percent => {
-  document.documentElement.style.fontSize = `${(percent ?? 100) / 100 * 16}px`
-}, { immediate: true })
-
-// IDEA Images.SetBackgroundImage: the chosen image is painted behind the editor
-// stage; fill/opacity/keep-ratio come from the same dialog IDEA shows.
-const backgroundImage = ref('')
-watch([() => editorSettings.value.backgroundImagePath, () => editorSettings.value.backgroundImageOpacity,
-       () => editorSettings.value.backgroundImageFill, () => editorSettings.value.backgroundImageKeepRatio],
-  async ([path, opacity, fill, keepRatio]) => {
-    if (!path) { backgroundImage.value = ''; applyBackground(''); return }
-    // The bytes are re-read on startup; a path that no longer exists just means
-    // "no background" (the setting stays so it comes back if the file returns).
-    try {
-      const image = await request<{ dataUrl: string } | null>('app.readImage', { path })
-      backgroundImage.value = image?.dataUrl ?? ''
-    } catch { backgroundImage.value = '' }
-    applyBackground(backgroundImage.value)
-    const stage = document.documentElement.style
-    stage.setProperty('--bg-image-opacity', String((opacity ?? 100) / 100))
-    stage.setProperty('--bg-image-size', fill === 'tile' ? 'auto' : fill === 'center' ? 'auto' : keepRatio ? 'contain' : '100% 100%')
-    stage.setProperty('--bg-image-repeat', fill === 'tile' ? 'repeat' : 'no-repeat')
-    stage.setProperty('--bg-image-position', fill === 'tile' ? 'top left' : 'center')
-    document.documentElement.dataset.background = backgroundImage.value ? 'on' : 'off'
-  }, { immediate: true })
-function applyBackground(dataUrl: string) {
-  if (dataUrl) document.documentElement.style.setProperty('--bg-image-url', `url("${dataUrl}")`)
-  else document.documentElement.style.removeProperty('--bg-image-url')
-}
-// IDEA presentation mode (UISettingsState.presentationMode + presentationModeFontSize):
-// hides the chrome and enlarges the text for screen sharing.
-watch([() => editorSettings.value.presentationMode, () => editorSettings.value.presentationModeFontSize], ([on, size]) => {
-  zenMode.value = on
-  document.documentElement.dataset.presentation = on ? 'on' : 'off'
-  if (on) document.documentElement.style.fontSize = `${Math.min(72, Math.max(12, size || 24))}px`
-}, { immediate: true })
-async function chooseBackgroundImage() {
-  try {
-    const image = await request<{ dataUrl: string; path: string } | null>('dialog.pickImage')
-    if (!image) return
-    await saveSettingsPatch({ backgroundImagePath: image.path })
-    notify('已设置背景图像。')
-  } catch (error) { notify(errorMessage(error), true) }
-}
-async function clearBackgroundImage() {
-  await saveSettingsPatch({ backgroundImagePath: '' })
-  notify('已移除背景图像。')
-}
-watch(() => editorSettings.value.compactMode, compact => {
-  document.documentElement.dataset.density = compact ? 'compact' : 'regular'
-}, { immediate: true })
-// IDEA "Smooth scrolling" (UISettings.smoothScrolling): the entire interface
-// scrolls smoothly instead of line by line — scroll-behavior on the root.
-watch([() => editorSettings.value.smoothScrolling, () => editorSettings.value.powerSaveMode], ([smooth, powerSave]) => {
-  // IDEA's power save mode stops animations too (JBAnimator/ScrollSettings), so the
-  // effective scrolling is "smooth AND not saving power".
-  document.documentElement.style.scrollBehavior = smooth && !powerSave ? 'smooth' : 'auto'
-  document.documentElement.dataset.motion = powerSave ? 'reduced' : 'full'
-}, { immediate: true })
-// IDEA "Side-by-side layout on the left": the project view keeps a pane of its own.
-const leftSideBySide = computed(() => editorSettings.value.leftSideBySide && Boolean(workspace.value))
-// The same option for the right stripe.
-const rightSideBySide = computed(() => editorSettings.value.rightSideBySide && Boolean(workspace.value))
-watch(() => editorSettings.value.wideScreenSupport, () => {
-  setPanelSize('output', panelSizes.output)
-}, { immediate: false })
-// IDEA "Show tool window bars" / "Show tool window names": the stripe rail can be
-// hidden entirely, and its buttons can carry the window's name under the icon.
-watch(() => editorSettings.value.showToolWindowBars, show => {
-  document.documentElement.dataset.toolStripes = show ? 'on' : 'off'
-}, { immediate: true })
-// IDEA "Display icons in menu items" (UISettings.showIconsInMenus): menus keep their
-// leading icon column only while this is on.
-watch(() => editorSettings.value.showIconsInMenus, show => {
-  document.documentElement.dataset.menuIcons = show ? 'on' : 'off'
-}, { immediate: true })
-watch(() => editorSettings.value.showToolWindowNames, show => {
-  document.documentElement.dataset.toolNames = show ? 'on' : 'off'
-}, { immediate: true })
-// IDEA "Show tool window numbers": the stripe buttons wear Alt+1..9 mnemonics and
-// those shortcuts really do focus the window (same order as the stripe).
-watch(() => editorSettings.value.showToolWindowNumbers, show => {
-  document.documentElement.dataset.toolNumbers = show ? 'on' : 'off'
-}, { immediate: true })
-function focusToolWindowByNumber(event: KeyboardEvent) {
-  // IDEA: ActivateToolWindowAction always answers Alt+N — showToolWindowsNumbers only
-  // decides whether the stripe button prints the number (StripeButton.kt:287-296),
-  // so the shortcut must not depend on that setting.
-  if (!event.altKey) return
-  const id = TOOL_MNEMONIC_BINDINGS[event.key]
-  if (!id) return
-  // An unavailable tool window has its action disabled (:131-137), so the shortcut does
-  // nothing at all — it must never fall through and open some *other* tool window.
-  if (toolDisabled(id)) return
-  event.preventDefault()
-  showView(id)
-}
-// IDEA's welcome page shows each recent project's git branch (RecentProjectPanel
-// reads it from persisted project state). TaoCode records the branch the status
-// bar already polled, keyed by root, and the welcome page reads it back.
-watch(gitHead, head => {
-  const root = workspace.value?.root
-  if (!root || !head) return
-  try { localStorage.setItem(`taocode.branch:${root}`, head) } catch { /* storage unavailable: the line is simply absent */ }
-})
-watch(dirty, value => setNativeDirty(value))
-watch(activePath, path => { references.value = []; if (bottomTab.value === 'references') bottomTab.value = 'output'; void refreshOutline(path) })
-watch(query, () => { paletteIndex.value = 0 })
-watch(palette, async value => { if (value) { paletteIndex.value = 0; await nextTick(); queryInput.value?.focus() } })
-watch(help, async value => { if (value) { await nextTick(); helpClose.value?.focus() } })
-watch(leavePrompt, async value => { if (value) { await nextTick(); leaveCancel.value?.focus() } })
-watch(() => runOutput.length, async () => {
-  await nextTick(); if (runLog.value) runLog.value.scrollTop = runLog.value.scrollHeight
-  // Feed the streamed lines to the test runner so per-test results accumulate
-  // (IDEA's test tree fills while the process runs, not after it exits).
-  for (const line of runOutput.slice(pumpedRunLines)) testRunnerRef.value?.ingest(line)
-  pumpedRunLines = runOutput.length
-})
-let pumpedRunLines = 0
-// Run an arbitrary command from a panel (e.g. the test runner's rerun command).
-// IDEA's Rerun (Ctrl+F5): relaunch the last run content with the same parameters.
-let lastRunParams: RunStartParams | null = null
+// 背景图与侧栏排布是一个域。
+const {
+  focusToolWindowByNumber,
+  hamburgerOpen, hamburgerGroup, stripHoverTitles,
+  backgroundImage, applyBackground, chooseBackgroundImage, clearBackgroundImage,
+  leftSideBySide, rightSideBySide,
+} = createAppearanceActions({ notify, isDesktop, generalSettings, zenMode, panelSizes, setPanelSize, saveSettingsPatch,
+  editorSettings, settingsBusy, settingsError,
+  lastRunParams: { get value() { return lastRunParams }, set value(v) { lastRunParams = v } } as any,
+  toolDisabled, showView, gitHead, activePath, bottomTab, dirty, help, helpClose, leavePrompt, leaveCancel,
+  menu, menus, palette, paletteIndex, query, queryInput, references, refreshOutline, runLog, save, testRunnerRef,
+  theme, workspace, explorer, saveGeneralSettings })
 async function rerunLast() {
   if (!lastRunParams) { notify('还没有可重新运行的任务。', true); return }
   if (runState.running) { notify('已有任务在运行，请先停止。', true); return }
@@ -5428,22 +1877,10 @@ async function startRunWith(command: string) {
 // Build-output navigation: the parsers live in src/buildOutput.ts (unit-tested
 // against MSVC, GCC/Clang/Rust, javac and CMake shapes); this only adapts them to
 // the live console and the workspace root.
-interface RunIssue { path: string; line: number; column: number }
-function parseRunIssue(text: string): RunIssue | null {
-  return parseAnyIssue(text, workspace.value?.root ?? '')
-}
-const runLines = computed(() => runOutput.join('').split('\n').slice(-2000).map(text => ({ text, issue: parseRunIssue(text) })))
-const runIssueList = computed(() => runLines.value.filter(line => line.issue).map(line => line.issue!))
-const runIssueCount = computed(() => runIssueList.value.length)
-let runIssueCursor = 0
-watch(() => runState.running, value => { if (value) runIssueCursor = 0 })
-function jumpToIssue(issue: RunIssue) { void revealLocation({ path: issue.path, line: Math.max(0, issue.line - 1) }) }
-function nextRunIssue() {
-  const issues = runIssueList.value
-  if (!issues.length) { notify('输出里没有可跳转的问题。', true); return }
-  jumpToIssue(issues[runIssueCursor % issues.length])
-  runIssueCursor++
-}
+// 运行输出里的问题定位是一个域（IDEA BuildView 的"带问题的行" + 跳到问题）。
+const {
+  runLines, runIssueList, runIssueCount, jumpToIssue, nextRunIssue,
+} = createRunIssues({ runOutput, workspace, generalSettings, notify, revealLocation: (...a) => revealLocation(...a) })
 // IDEA raises a balloon when the build/run tool window is not focused: green on exit
 // 0, red with "view detail" jumping to the console otherwise.
 let lastRunExit: number | null | undefined
@@ -5452,6 +1889,20 @@ watch(() => runState.exit, value => {
   lastRunExit = value
   if (bottom.value && bottomTab.value === 'run') return
   notify(value === 0 ? '构建/运行完成（退出码 0）。' : `构建/运行失败（退出码 ${value}）。`, value !== 0, () => { showOutput('run'); notice.value = '' })
+})
+// 工作区/项目的生命周期是一个域（IDEA 的 ProjectManager + RecentProjectsManager）。
+const {
+  refreshAppState, refreshRecent, bootstrap, confirmLeave, answerLeave, activateWorkspace,
+  syntheticNodes, refreshSyntheticNodes, openWorkspace, closeWorkspace, forgetProject, forgetProjects,
+  defaultProjectParent, beginProject, browseParent, submitProject, cancelProject,
+} = createWorkspaceLifecycle({
+  notify, isDesktop, recentProjects, editorSettings, generalSettings, gitAvailable, defaultParent, appError,
+  loading, pluginList, busy, working, leavePrompt, allTabs, save, resetLsp, resetHierarchy, workspace,
+  closeAllPanes, navBack, navForward, treeVersion, places, projectSettings, bookmarks, runConfigName,
+  selectRunConfig, useProjectSettings, offerSessionRestore, menu, palette, notice, binaryView,
+  projectError, projectForm, projectMode, projectBusy, cancelling, openFile,
+  // 宿主是 `let`（别处也自增它），用 getter/setter 共享同一份。
+  workspaceEpoch: { get value() { return workspaceEpoch }, set value(v) { workspaceEpoch = v } },
 })
 onMounted(() => {
   // Capture phase: CodeMirror's keymap binds Ctrl+Shift+Backspace per buffer, but
@@ -5471,7 +1922,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   answerLeave('cancel')
   resetLsp()
-  resizeCleanup?.()
+  cancelResize()
   window.removeEventListener('keydown', onKey, true)
   window.removeEventListener('beforeunload', onUnload)
   window.removeEventListener('resize', onWindowResize)
@@ -5483,11 +1934,16 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
   clearAutoSave()
   if (bookmarkSave) window.clearTimeout(bookmarkSave)
-  if (sessionTimer) { window.clearTimeout(sessionTimer); sessionTimer = undefined }
-  if (markdownTimer !== undefined) { window.clearTimeout(markdownTimer); markdownTimer = undefined }
-  if (fsWatchTimer !== undefined) { window.clearTimeout(fsWatchTimer); fsWatchTimer = undefined }
-  if (gitStatusTimer !== undefined) { window.clearInterval(gitStatusTimer); gitStatusTimer = undefined }
+  cancelSessionSave()
+  cancelMarkdownRefresh()
+  disposeDiskSync()
+  stopGitWidgetPolling()
 })
+  // 主工具栏的 ctx —— 照 IDEA `MainToolbarNewUI` 的三段组织（左：项目/分支/运行 widget；中：文件名；右：搜索/设置）。
+  // getter 一律用 `unref`：这样 ref 与普通值都能直接共享，不用逐个记哪个是 ref（写错就是"界面不刷新"那种隐蔽 bug）。
+  const mainToolbarCtx = {
+    get workspace() { return unref(workspace) }, get projectWidgetOpen() { return unref(projectWidgetOpen) }, get projectWidgetQuery() { return unref(projectWidgetQuery) }, get projectWidgetGroups() { return unref(projectWidgetGroups) }, toggleProjectWidget, closeProjectWidget: () => { projectWidgetOpen.value = false }, setProjectWidgetQuery: (value: string) => { projectWidgetQuery.value = value }, pickProjectFromWidget, branchOfProject, get gitHead() { return unref(gitHead) }, get gitAheadBehind() { return unref(gitAheadBehind) }, get branchPopupOpen() { return unref(branchPopupOpen) }, get gitBranches() { return unref(gitBranches) }, openBranchPopup, closeBranchPopup: () => { branchPopupOpen.value = false }, onBranchAction, get filenameShown() { return unref(filenameShown) }, get filenameLabel() { return unref(filenameLabel) }, get filenameStatusKind() { return unref(filenameStatusKind) }, get filenameTooltip() { return unref(filenameTooltip) }, get filenamePopup() { return unref(filenamePopup) }, toggleFilenamePopup, onFilenameMouseUp, get filenameRecentRows() { return unref(filenameRecentRows) }, pickRecentFile, recentFileKind, get runConfigName() { return unref(runConfigName) }, get configChooser() { return unref(configChooser) }, openConfigChooser, isDesktop, get runState() { return unref(runState) }, get runWidgetTitle() { return unref(runWidgetTitle) }, startBuild, stopRun, runSelectedConfig, get debugButtonTitle() { return unref(debugButtonTitle) }, get dapState() { return unref(dapState) }, stopAnyProcess, get working() { return unref(working) }, openSearchEverywhere, openSettings,
+  } as unknown as MainToolbarContext
 </script>
 
 <template>
@@ -5504,8 +1960,10 @@ onBeforeUnmount(() => {
        ("Use project colours in the main toolbar"); the palette reuses the
        RecentProjectIconHelper gradient assigned by path hash. -->
   <div class="ide-shell" :class="{ 'is-resizing': resizing }" :style="{ '--explorer-width': `${panelSizes.explorer}px`, '--trace-width': `${panelSizes.trace}px`, '--output-height': `${panelSizes.output}px`, ...(editorSettings.differentiateProjects && workspace ? { '--project-tint': projectTint(workspace.root) } : {}) }" @pointerdown.capture="dismissMenu" @focusin="noteDockFocus">
-    <header v-if="workspace && !zenMode" class="topbar">
-      <div class="brand">TaoCode</div>
+    <header v-if="workspace && !chromeHidden" class="topbar">
+      <!-- 行1：菜单栏。IDEA 的窗口顶部第一行就是菜单栏（File/Edit/…），应用名在标题栏上，不占这一行 ——
+           原先这里还有一个「TaoCode」品牌标签，已按源码去掉。 -->
+      <div class="topbar-menubar-row">
       <button v-if="editorSettings.mainMenuDisplayMode === 'hamburger'" class="icon-button hamburger-button" :aria-expanded="hamburgerOpen" aria-haspopup="menu" title="主菜单（汉堡按钮）" aria-label="打开主菜单" @click.stop="hamburgerOpen = !hamburgerOpen"><Menu :size="17" /></button>
       <nav class="menubar" aria-label="主菜单">
         <div v-for="group in allMenuGroups" :key="group.menu" class="menu-anchor">
@@ -5525,7 +1983,7 @@ onBeforeUnmount(() => {
                   </button>
                   <Teleport to="body">
                   <div v-if="submenuRow === row.id" class="dropdown menu-submenu" :class="{ 'menu-submenu-above': submenuPlacement === 'above' }" role="menu" :aria-label="rowTitle(row)" :style="submenuStyle" @mouseenter="cancelSubmenuClose" @mouseleave="scheduleSubmenuClose" @keydown.esc.stop="closeSubmenu()">
-                    <template v-for="child in row.children" :key="child.id">
+                    <template v-for="child in submenuRows(row)" :key="child.id">
                       <div v-if="child.rule" class="menu-rule" role="separator" />
                       <div v-else-if="child.section" class="menu-section-label" role="presentation">{{ child.section }}</div>
                       <button v-else class="menu-item" :role="child.checked ? 'menuitemcheckbox' : 'menuitem'" :aria-checked="child.checked ? child.checked() : undefined" :disabled="!rowEnabled(child)" @click="pickMenuRow(child)"><span class="menu-item-icon"><Check v-if="child.checked && child.checked()" :size="13" /></span><span class="menu-item-title">{{ rowTitle(child) }}</span><kbd v-if="child.keys">{{ child.keys }}</kbd></button>
@@ -5539,37 +1997,13 @@ onBeforeUnmount(() => {
           </AnimatePresence>
         </div>
       </nav>
-      <div class="project-widget"><button class="header-widget" :aria-expanded="projectWidgetOpen" aria-haspopup="menu" :aria-label="`项目 ${workspace.name}`" :title="workspace.root" @click.stop="toggleProjectWidget"><FolderOpen :size="14" /><span class="project-widget-name">{{ workspace.name }}</span><ChevronDown :size="12" :class="{ 'project-widget-caret': true, open: projectWidgetOpen }" /></button><div v-if="projectWidgetOpen" class="project-widget-popup" role="menu" :aria-label="`项目 ${workspace.name}`"><input v-model="projectWidgetQuery" class="project-widget-search" placeholder="搜索项目（名称或路径）" aria-label="搜索项目" @keydown.esc.stop="projectWidgetQuery ? (projectWidgetQuery = '') : (projectWidgetOpen = false)" /><template v-for="group in projectWidgetGroups" :key="group.label"><div class="project-widget-group" role="presentation">{{ group.label }}</div><button v-for="project in group.items" :key="`${group.label}:${project.path}`" class="menu-button project-widget-row" role="menuitem" :disabled="working || !project.available" :title="project.path" @click="pickProjectFromWidget(project)"><span class="menu-item-icon"><FolderOpen :size="13" /></span><span class="project-widget-details"><span class="project-widget-title">{{ project.name }}</span><span class="project-widget-path">{{ project.path }}</span><span v-if="branchOfProject(project.path)" class="project-widget-branch"><GitBranch :size="11" />{{ branchOfProject(project.path) }}</span></span></button></template><p v-if="!projectWidgetGroups.length" class="menu-empty">没有匹配的项目</p>}></div></div>
-      <!-- IDEA New UI header: the branch widget sits next to the project name,
-           top-left; there is no wide search box (search is the far-right icon). -->
-      <button v-if="gitHead" class="header-widget branch-widget" :title="`当前分支 ${gitHead}（点击打开源代码管理）`" aria-label="Git 分支" @click="showView('git')"><GitBranch :size="14" /><span>{{ gitHead }}</span><span v-if="gitAheadBehind.available && (gitAheadBehind.ahead || gitAheadBehind.behind)" class="header-widget-count">{{ gitAheadBehind.ahead ? `↑${gitAheadBehind.ahead}` : '' }}{{ gitAheadBehind.behind ? `↓${gitAheadBehind.behind}` : '' }}</span></button>
-      <div class="topbar-spacer" />
-      <!-- IDEA's main-toolbar centre region: the filename widget (FilenameToolbarWidgetAction.kt
-           :49-181). It replaces the file name the editor tabs carry, so IDEA shows it once the
-           window header holds the full path; clicking it lists the other recent files,
-           middle-click / Shift+click closes the file (UIUtil.java:1843-1846). -->
-      <div v-if="filenameShown" class="filename-widget">
-        <button
-          class="header-widget filename-button" :class="`filename-${filenameStatusKind}`"
-          :aria-expanded="filenamePopup" aria-haspopup="listbox"
-          :aria-label="`${ACCESSIBLE_NAME_PREFIX} ${filenameLabel}`" :title="filenameTooltip"
-          @click.stop="toggleFilenamePopup" @mouseup="onFilenameMouseUp"
-        ><FileCode2 :size="14" /><span class="filename-text">{{ filenameLabel }}</span></button>
-        <div v-if="filenamePopup" class="filename-popup" role="listbox" :aria-label="`${ACCESSIBLE_NAME_PREFIX} ${filenameLabel}`">
-          <button v-for="row in filenameRecentRows" :key="row.path" class="menu-button filename-row" role="option" :aria-selected="false" :title="row.path" @click="pickRecentFile(row.path)"><FileCode2 :size="13" :class="`filename-${recentFileKind(row.path)}`" /><span class="filename-row-text">{{ row.name }}</span></button>
-        </div>
       </div>
-      <div class="topbar-widgets"><!-- IDEA New UI header widgets: main.toolbar.git.Branches and the Run widget -->
-        
-        <div class="header-run">
-          <button class="header-widget run-button" :class="{ running: runState.running }" :title="runWidgetTitle" aria-label="运行" @click="runState.running ? void stopRun() : void runSelectedConfig(false)"><Play v-if="!runState.running" :size="14" /><Square v-else :size="12" /></button>
-          <button class="header-widget run-caret" :aria-expanded="configChooser !== null" aria-haspopup="menu" title="选择运行配置 (Alt+Shift+F10)" aria-label="选择运行配置" @click="openConfigChooser(false)">▾</button>
-        </div>
-      </div>
-      <div class="topbar-right"><button class="icon-button theme-toggle" :title="theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'" :aria-label="theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'" @click="changeTheme(theme === 'dark' ? 'light' : 'dark')"><Sun v-if="theme === 'dark'" :size="17" /><Moon v-else :size="17" /></button><button class="icon-button" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="working" @click="openSettings()"><SlidersHorizontal :size="17" /></button><button class="icon-button" title="快捷键与框架说明" aria-label="快捷键与框架说明" @click="help = true"><CircleHelp :size="17" /></button></div>
+      <!-- 行2：主工具栏（IDEA `MainToolbarNewUI`，PlatformActions.xml:839-854）——
+           左：项目 widget / 分支 / 运行 widget；中：文件名 widget；右：SearchEverywhere + SettingsEntryPoint。 -->
+      <MainToolbar :ctx="mainToolbarCtx" />
     </header>
 
-    <div v-if="configChooser && !zenMode" class="config-chooser" role="listbox" :aria-label="configChooser.debug ? '选择要调试的配置' : '选择要运行的配置'">
+    <div v-if="configChooser && !chromeHidden" class="config-chooser" role="listbox" :aria-label="configChooser.debug ? '选择要调试的配置' : '选择要运行的配置'">
       <p class="config-chooser-title">{{ configChooser.debug ? '调试配置' : '运行配置' }}</p>
       <p v-if="!runConfigs.length" class="config-chooser-empty">还没有运行配置：在「运行」面板里填好并保存一个。</p>
       <button
@@ -5584,7 +2018,7 @@ onBeforeUnmount(() => {
       <p class="config-chooser-hint">↑↓ 选择 · Enter 运行 · Esc 取消</p>
     </div>
     <div v-if="configChooser" class="config-chooser-backdrop" @click="configChooser = null" />
-    <div v-if="hamburgerOpen && !zenMode" class="hamburger-menu" role="menu" aria-label="主菜单">
+    <div v-if="hamburgerOpen && !chromeHidden" class="hamburger-menu" role="menu" aria-label="主菜单">
       <button v-for="group in allMenuGroups" :key="group.menu" class="menu-button hamburger-group" role="menuitem" :aria-expanded="hamburgerGroup === group.menu" @click="hamburgerGroup = hamburgerGroup === group.menu ? null : group.menu">{{ group.label }}</button>
       <template v-if="hamburgerGroup">
         <div class="menu-rule" role="separator" />
@@ -5594,7 +2028,7 @@ onBeforeUnmount(() => {
                 <!-- 子菜单：汉堡面板没有二级浮层，按 IDEA 的树展开成分组标题 + 缩进的行 -->
                 <template v-else-if="hasSubmenu(row)">
                   <div class="menu-section-label" role="presentation">{{ rowTitle(row) }}</div>
-                  <button v-for="child in row.children" v-show="!child.rule && !child.section" :key="child.id" class="menu-item hamburger-item hamburger-child" role="menuitem" :disabled="!rowEnabled(child)" @click="pickMenuRow(child); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(child) }}<kbd v-if="child.keys">{{ child.keys }}</kbd></button>
+                  <button v-for="child in submenuRows(row)" v-show="!child.rule && !child.section" :key="child.id" class="menu-item hamburger-item hamburger-child" role="menuitem" :disabled="!rowEnabled(child)" @click="pickMenuRow(child); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(child) }}<kbd v-if="child.keys">{{ child.keys }}</kbd></button>
                 </template>
                 <button v-else class="menu-item hamburger-item" role="menuitem" :disabled="!rowEnabled(row)" @click="pickMenuRow(row); hamburgerOpen = false; hamburgerGroup = null">{{ rowTitle(row) }}<kbd v-if="row.keys">{{ row.keys }}</kbd></button>
               </template>
@@ -5602,15 +2036,15 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="hamburgerOpen" class="hamburger-backdrop" @click="hamburgerOpen = false; hamburgerGroup = null" />
     <p v-if="generalSettings.supportScreenReaders" class="sr-live" role="status" aria-live="polite">{{ notice ?? '' }}</p>
-    <div v-if="!isDesktop && !zenMode" class="preview-banner"><span class="preview-dot" />浏览器预览<span class="preview-description">示例文件仅保存在内存。运行 C++ 桌面端以访问本地工作区。</span><span class="banner-right">Vue 3 / WebView2 / C++20</span></div>
+    <div v-if="!isDesktop && !chromeHidden" class="preview-banner"><span class="preview-dot" />浏览器预览<span class="preview-description">示例文件仅保存在内存。运行 C++ 桌面端以访问本地工作区。</span><span class="banner-right">Vue 3 / WebView2 / C++20</span></div>
 
     <WelcomePage v-if="!workspace" :projects="recentProjects" :busy="working" :error="appError" :git-available="gitAvailable" :is-desktop="isDesktop" :plugin-count="pluginList.length" :theme="theme" :settings="editorSettings" :notices="noticeLog" :screen-reader-live="generalSettings.supportScreenReaders" @open="openWorkspace" @create="beginProject('create')" @clone="beginProject('clone')" @settings="openSettings()" @forget="forgetProject" @forget-batch="forgetProjects" @refresh="refreshRecent" @help="help = true" @plugins="openPlugins" @theme="changeTheme" @settings-change="saveSettingsPatch" @clear-notices="clearNotices" />
 
-    <div v-else class="workbench" :class="{ 'zen-workbench': zenMode, 'tool-maximized': maximizedSide !== null }">
+    <div v-else class="workbench" :class="{ 'zen-workbench': chromeHidden, 'tool-maximized': maximizedSide !== null }">
       <!-- Zen 模式的退出入口：IDEA 的 Zen/免打扰模式保留 Esc 与顶部浮出工具栏，这里给常驻悬浮按钮，
            否则唯一入口（视图 › 外观）随 header 一起 v-if 掉，用户会被困在空界面里。 -->
-      <button v-if="zenMode" class="zen-exit" title="退出 Zen Mode（Esc）" aria-label="退出 Zen Mode" @click="toggleZenMode()"><X :size="13" />退出 Zen Mode</button>
-      <aside v-if="explorer && !zenMode" class="activity-bar" aria-label="工具栏">
+      <button v-if="chromeHidden" class="zen-exit" :title="`${hideChromeLabel}（Esc）`" :aria-label="hideChromeLabel" @click="exitHideChrome()"><X :size="13" />{{ hideChromeLabel }}</button>
+      <aside v-if="explorer && !chromeHidden" class="activity-bar" aria-label="工具栏">
         <template v-for="id in stripeOrder('left')" :key="id">
           <span v-if="isDropBefore('left', id)" class="stripe-drop-marker" aria-hidden="true" />
           <button
@@ -5627,7 +2061,7 @@ onBeforeUnmount(() => {
         <div class="rail-bottom"><button class="activity-button" title="设置 (Ctrl+Alt+S)" aria-label="设置" :disabled="working" @click="openSettings()"><SlidersHorizontal :size="20" /></button><span class="local-avatar" title="仅本地工作区">L</span></div>
       </aside>
 
-      <aside v-if="explorer && !zenMode && activeAnchor === 'left'" class="explorer-panel" tabindex="-1">
+      <aside v-if="explorer && !chromeHidden && activeAnchor === 'left'" class="explorer-panel" tabindex="-1">
         <ToolWindowHeader
           :id="leftView" :title="toolTitles[leftView] ?? '工具窗口'" anchor="left"
           :maximized="maximizedSide === 'left'" :menu-open="toolMenu === leftView"
@@ -5637,49 +2071,13 @@ onBeforeUnmount(() => {
           @move="setToolAnchor(leftView, $event); toolMenu = null"
           @menu="toolMenu = $event ? leftView : null"
         />
-        <template v-if="leftView === 'search'">
-          <SearchPanel ref="searchPanelRef" :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
-        </template>
-        <template v-else-if="leftView === 'todo'">
-          <TodoPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'todo'" :patterns="projectSettings.todoPatterns" :source="todoSource" @open="onSearchOpen" />
-        </template>
-        <template v-else-if="leftView === 'outline'">
-          <OutlinePanel :path="active?.path ?? ''" :symbols="outline" :available="lspReady" @jump="({ line, character }) => revealLocation({ path: activePath, line, column: (character ?? 0) + 1 })" />
-        </template>
-        <template v-else-if="leftView === 'bookmarks'">
-          <BookmarksPanel :entries="sortedAll" :active-path="activePath" @jump="entry => revealLocation({ path: entry.path, line: entry.line - 1 })" @remove="dropBookmark" @assign="openMnemonicPrompt" />
-        </template>
-        <template v-else-if="leftView === 'debug'">
-          <DebugPanel :active-path="activePath" :ready="isDesktop && Boolean(workspace)" :evaluate-request="evaluateRequest" :program="runConfigProgram" :cwd="runConfigCwd" :adapter-kind="runConfigDebugAdapter" @jump="jumpDebugLocation" />
-        </template>
-        <template v-else-if="leftView === 'history'">
-          <HistoryPanel :key="`hist:${activePath}:${historyEpoch}`" :path="activePath" :ready="isDesktop && Boolean(workspace)" @revert="revertHistory" />
-        </template>
-        <template v-else-if="leftView === 'tests'">
-          <TestRunnerPanel ref="testRunnerRef" :active-path="activePath" :file-text="active ? editorFor(active.path)?.text() ?? active.content : ''" :root="workspace?.root ?? ''" :ready="isDesktop && Boolean(workspace)" @jump="({ path, line }) => revealLocation({ path, line: Math.max(0, line - 1) })" @run-command="command => void startRunWith(command)" />
-        </template>
-        <template v-else-if="leftView === 'git'">
-          <SourceControl :root="workspace?.root ?? ''" :active="explorer && leftView === 'git'" :todo-patterns="projectSettings.todoPatterns" :commit-settings="commitMessageSettings" @notify="notifyFromPanel" />
-        </template>
-        <template v-else-if="leftView === 'vcslog'">
-          <VcsLog :root="workspace?.root ?? ''" :active="explorer && leftView === 'vcslog'" />
-        </template>
-        <template v-else>
-        <!-- IDEA's Project view header is ONE row: "项目 ∨" + toolbar buttons. The
-             duplicate 资源管理器 title row is gone; actions merged into the name row. -->
-        <div v-if="workspace" class="workspace-heading" :title="workspace.root"><ChevronDown :size="13" /><span>{{ workspace.name }}</span><span class="local-tag">{{ isDesktop ? '本地' : '示例' }}</span><div class="heading-actions"><button class="icon-button" title="全部折叠" aria-label="全部折叠" :disabled="!workspace" @click="fileTreeRef?.collapseAll()"><ChevronsDownUp :size="15" /></button><button class="icon-button" title="全部展开" aria-label="全部展开" :disabled="!workspace" @click="fileTreeRef?.expandAll()"><ChevronsUpDown :size="15" /></button><button class="icon-button" title="刷新目录" aria-label="刷新目录" :disabled="!workspace || busy" @click="refreshTree"><RefreshCw :size="14" /></button></div></div>
-        <div class="tree-scroll">
-          <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
-          <div v-else class="explorer-empty"><FolderOpen :size="26" /><p>尚未打开工作区</p><button class="subtle-button" @click="openWorkspace()">选择文件夹</button></div>
-        </div>
-        <!-- IDEA's Project view has no explanatory footer; the exclusion list lives
-             in Settings › Project, so the dev-note block is gone from the panel. -->
-        </template>
+        <!-- 视图宿主：左侧栏与底部停靠共用同一批组件（对照 IDEA 的任意停靠）。 -->
+        <ToolWindowView :view="leftView" :active="explorer" :ctx="toolViewCtx" />
         <!-- IDEA "Side-by-side layout on the left": the project view stays visible
              below the active left tool window instead of being replaced by it. -->
         <template v-if="leftSideBySide && leftView !== 'files' && workspace">
           <div class="dock-split" aria-hidden="true" />
-          <div class="panel-heading"><span>资源管理器</span></div>
+          <div class="panel-heading"><span>{{ toolTitles.files }}</span></div>
           <div class="tree-scroll side-by-side-tree">
             <FileTree :key="`side:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
           </div>
@@ -5688,7 +2086,7 @@ onBeforeUnmount(() => {
 
       <!-- IDEA's right dock: a tool window anchored right renders in its own column
            (ToolWindowAnchor.RIGHT), with the same ⋮ options menu as the left dock. -->
-      <aside v-if="explorer && !zenMode && activeAnchor === 'right'" class="explorer-panel right-dock" tabindex="-1">
+      <aside v-if="explorer && !chromeHidden && activeAnchor === 'right'" class="explorer-panel right-dock" tabindex="-1">
         <ToolWindowHeader
           :id="leftView" :title="toolTitles[leftView] ?? '工具窗口'" anchor="right"
           :maximized="maximizedSide === 'right'" :menu-open="toolMenu === leftView"
@@ -5698,52 +2096,13 @@ onBeforeUnmount(() => {
           @move="setToolAnchor(leftView, $event); toolMenu = null"
           @menu="toolMenu = $event ? leftView : null"
         />
-        <template v-if="leftView === 'search'">
-          <SearchPanel ref="searchPanelRef" :root="workspace?.root ?? ''" :active="explorer && leftView === 'search'" @open="onSearchOpen" @replaced="onSearchReplaced" />
-        </template>
-        <template v-else-if="leftView === 'todo'">
-          <TodoPanel :root="workspace?.root ?? ''" :active="explorer && leftView === 'todo'" :patterns="projectSettings.todoPatterns" :source="todoSource" @open="onSearchOpen" />
-        </template>
-        <template v-else-if="leftView === 'outline'">
-          <OutlinePanel :path="active?.path ?? ''" :symbols="outline" :available="lspReady" @jump="({ line, character }) => revealLocation({ path: activePath, line, column: (character ?? 0) + 1 })" />
-        </template>
-        <template v-else-if="leftView === 'bookmarks'">
-          <BookmarksPanel :entries="sortedAll" :active-path="activePath" @jump="entry => revealLocation({ path: entry.path, line: entry.line - 1 })" @remove="dropBookmark" @assign="openMnemonicPrompt" />
-        </template>
-        <template v-else-if="leftView === 'debug'">
-          <DebugPanel :active-path="activePath" :ready="isDesktop && Boolean(workspace)" :evaluate-request="evaluateRequest" :program="runConfigProgram" :cwd="runConfigCwd" :adapter-kind="runConfigDebugAdapter" @jump="jumpDebugLocation" />
-        </template>
-        <template v-else-if="leftView === 'history'">
-          <HistoryPanel :key="`hist:${activePath}:${historyEpoch}`" :path="activePath" :ready="isDesktop && Boolean(workspace)" @revert="revertHistory" />
-        </template>
-        <template v-else-if="leftView === 'tests'">
-          <TestRunnerPanel ref="testRunnerRef" :active-path="activePath" :file-text="active ? editorFor(active.path)?.text() ?? active.content : ''" :root="workspace?.root ?? ''" :ready="isDesktop && Boolean(workspace)" @jump="({ path, line }) => revealLocation({ path, line: Math.max(0, line - 1) })" @run-command="command => void startRunWith(command)" />
-        </template>
-        <template v-else-if="leftView === 'git'">
-          <SourceControl :root="workspace?.root ?? ''" :active="explorer && leftView === 'git'" :todo-patterns="projectSettings.todoPatterns" :commit-settings="commitMessageSettings" @notify="notifyFromPanel" />
-        </template>
-        <template v-else-if="leftView === 'vcslog'">
-          <VcsLog :root="workspace?.root ?? ''" :active="explorer && leftView === 'vcslog'" />
-        </template>
-        <template v-else>
-          <div class="panel-heading"><span>资源管理器</span></div>
-          <div v-if="workspace" class="workspace-heading" :title="workspace.root"><ChevronDown :size="13" /><span>{{ workspace.name }}</span></div>
-          <div class="tree-scroll">
-            <FileTree v-if="workspace" ref="fileTreeRef" :key="treeVersion" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
-          </div>
-          <template v-if="rightSideBySide && leftView !== 'files'">
-            <div class="dock-split" aria-hidden="true" />
-            <div class="panel-heading"><span>资源管理器</span></div>
-            <div class="tree-scroll side-by-side-tree">
-              <FileTree :key="`side-r:${treeVersion}`" :entries="workspace.entries" :active="activePath" :synthetic="syntheticNodes" :indent-guides="editorSettings.showTreeIndentGuides" :compact-indents="editorSettings.compactTreeIndents" :expand-with-single-click="editorSettings.expandNodesWithSingleClick" @open="path => void openFile(path, false, { preview: true })" @error="notify($event, true)" @context="onTreeContext" />
-            </div>
-          </template>
-        </template>
+        <!-- 同一个视图宿主：右 dock 与左栏/底部共用（IDEA 的同一份 content 可停靠任意边）。 -->
+        <ToolWindowView :view="leftView" :active="explorer" :ctx="toolViewCtx" />
       </aside>
 
       <!-- IDEA's right stripe (Stripe.java): a narrow rail listing the tool windows
            anchored right, clickable exactly like the left activity bar. -->
-      <aside v-if="!zenMode && stripeOrder('right').length" class="activity-bar right-stripe" aria-label="右侧工具窗口条" @dragover="onToolDragOver('right', null, $event)" @drop="onToolDrop('right', null, $event)">
+      <aside v-if="!chromeHidden && stripeOrder('right').length" class="activity-bar right-stripe" aria-label="右侧工具窗口条" @dragover="onToolDragOver('right', null, $event)" @drop="onToolDrop('right', null, $event)">
         <template v-for="id in stripeOrder('right')" :key="id">
           <span v-if="isDropBefore('right', id)" class="stripe-drop-marker" aria-hidden="true" />
           <button class="activity-button" :class="{ active: explorer && leftView === id, dragging: draggingTool === id }" draggable="true" :title="`${toolTitles[id]}（可拖到另一侧或拖动重排）`" :aria-label="`切换${toolTitles[id]}`" :disabled="toolDisabled(id)" @click="activateToolWindow(id)" @contextmenu.prevent="openToolMenu(id)" @dragstart="onToolDragStart(id, $event)" @dragover="onToolDragOver('right', id, $event)" @drop="onToolDrop('right', id, $event)" @dragend="onToolDragEnd"><component :is="toolIcons[id]" :size="21" /><span class="activity-name">{{ toolTitles[id] }}</span><span class="activity-number">{{ toolWindowMnemonic(id) }}</span></button>
@@ -5751,7 +2110,7 @@ onBeforeUnmount(() => {
         <span class="stripe-drop-hint" aria-hidden="true" />
       </aside>
 
-      <div v-if="explorer && !zenMode" class="resize-handle resize-explorer" role="separator" aria-label="调整资源管理器宽度" aria-orientation="vertical" :aria-valuenow="panelSizes.explorer" :aria-valuemin="180" :aria-valuemax="Math.max(180, panelMax('explorer'))" tabindex="0" @pointerdown="startResize($event, 'explorer')" @keydown="resizeKey($event, 'explorer')" />
+      <div v-if="explorer && !chromeHidden" class="resize-handle resize-explorer" role="separator" aria-label="调整项目面板宽度" aria-orientation="vertical" :aria-valuenow="panelSizes.explorer" :aria-valuemin="180" :aria-valuemax="Math.max(180, panelMax('explorer'))" tabindex="0" @pointerdown="startResize($event, 'explorer')" @keydown="resizeKey($event, 'explorer')" />
       <main class="editor-column" :class="{ 'split-horizontal': splitOrientation === 'horizontal', 'split-vertical': splitOrientation === 'vertical' }">
         <!-- IDEA: each pane is an editor group with its own tab bar; the focused group
              is marked by a stronger top border on its tabs. -->
@@ -5780,10 +2139,14 @@ onBeforeUnmount(() => {
                 </template>
               </div>
             </div>
-            <div v-if="groupActive(pane)" class="breadcrumbs"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span><span class="editor-save-state">{{ groupActive(pane)!.saving ? '保存中…' : groupActive(pane)!.dirty ? '有未保存修改' : isDesktop ? '已读取磁盘版本' : '内存示例' }}</span><button v-if="markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="status-chip md-toggle" :class="{ active: markdownPreviewOn }" title="切换 Markdown 预览" aria-label="切换 Markdown 预览" @click="toggleMarkdownPreview">预览</button></div>
-            <div class="editor-stage" :class="{ 'has-md-preview': markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath }">
+            <div v-if="groupActive(pane) && editorSettings.breadcrumbsPlacement === 'top' && breadcrumbsOn(groupActive(pane)!.path)" class="breadcrumbs"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span><span class="editor-save-state">{{ groupActive(pane)!.saving ? '保存中…' : groupActive(pane)!.dirty ? '有未保存修改' : isDesktop ? '已读取磁盘版本' : '内存示例' }}</span><button v-if="markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="status-chip md-toggle" :class="{ active: markdownPreviewOn }" title="切换 Markdown 预览" aria-label="切换 Markdown 预览" @click="toggleMarkdownPreview">预览</button></div>
+            <div class="editor-stage" :data-bidi="editorSettings.bidiTextDirection" :class="{ 'has-md-preview': markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath }">
+              <!-- 粘性作用域行：覆盖在编辑区顶边（对应 IDEA 的 sticky lines 层）。 -->
+              <div v-if="stickyLines.length && pane === focusedPane && !binaryView" class="sticky-lines" aria-hidden="true">
+                <div v-for="symbol in stickyLines" :key="symbol.startLine" class="sticky-line">{{ symbol.name }}</div>
+              </div>
               <BinaryViewer v-if="binaryView && pane === focusedPane" :path="binaryView.path" :data="binaryView.data" @close="closeBinary" @reveal="revealBinary" />
-              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @template-chooser="openTemplateChooser" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" />
+              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :plugin-templates="pluginList" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @link="openDocumentLink" @code-lens="runCodeLensCommand" @template-chooser="openTemplateChooser" @paste="onEditorPaste" @typing="recordTypingStep" :gutter-icons="gutterIcons" :blame="blameOf(tab.path)" @gutter-icon="onGutterIcon" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" />
               <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" @open="path => void openFile(path, false, { preview: true })" @error="message => notify(message, true)" />
               <!-- IDEA's empty editor: a right-aligned shortcut list plus the
                    drag-and-drop hint (verified on screen: 随处搜索 Shift Shift /
@@ -5791,7 +2154,7 @@ onBeforeUnmount(() => {
                    将文件拖放到此处以打开). -->
               <div v-if="!groups[pane].tabs.length && !binaryView && pane === 0" class="welcome-screen">
                 <ul class="empty-hints">
-                  <li><button class="empty-hint" @click="openActionSearch">随处搜索</button><span>Shift Shift</span></li>
+                  <li><button class="empty-hint" @click="openSearchEverywhere">随处搜索</button><span>Shift Shift</span></li>
                   <li><button class="empty-hint" @click="openPalette">转到文件</button><span>Ctrl+Shift+N</span></li>
                   <li><button class="empty-hint" @click="openRecentFiles">最近的文件</button><span>Ctrl+E</span></li>
                   <li><button class="empty-hint" @click="selectInTree">导航栏</button><span>Alt+Home</span></li>
@@ -5799,11 +2162,13 @@ onBeforeUnmount(() => {
                 </ul>
               </div>
             </div>
+            <!-- 面包屑位置 = 底部（IDEA BreadcrumbsPlacement.BOTTOM）：同一行内容渲染在编辑区下方。 -->
+            <div v-if="groupActive(pane) && editorSettings.breadcrumbsPlacement === 'bottom' && breadcrumbsOn(groupActive(pane)!.path)" class="breadcrumbs breadcrumbs-bottom"><button class="breadcrumb-seg" title="项目根" @click="explorer = true; leftView = 'files'">{{ workspace?.name }}</button><ChevronRight :size="12" /><template v-for="(seg, i) in groupActive(pane)!.path.split('/').slice(0, -1)" :key="i"><button class="breadcrumb-seg" :title="`转到 ${seg}`" @click="openBreadcrumb(i)">{{ seg }}</button><ChevronRight :size="12" /></template><span class="breadcrumb-file"><FileCode2 :size="12" />{{ groupActive(pane)!.path.split('/').pop() }}</span></div>
           </div>
         </template>
-        <div v-if="bottom && !zenMode" class="resize-handle resize-output" role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" :aria-valuenow="panelSizes.output" :aria-valuemin="100" :aria-valuemax="panelMax('output')" tabindex="0" @pointerdown="startResize($event, 'output')" @keydown="resizeKey($event, 'output')" />
-        <section v-if="bottom && !zenMode" class="output-panel">
-          <div class="output-heading"><div v-if="isTabbedContentUi(bottomContentUiType)" class="output-tabs"><button :class="{ selected: bottomTab === 'output' }" @click="showOutput('output')">操作输出 <span class="count-badge">{{ traces.length }}</span></button><button :class="{ selected: bottomTab === 'run' }" @click="showOutput('run')">{{ runConfigName ? `运行 '${runConfigName}'` : '运行' }} <span v-if="runState.running" class="count-badge">●</span><span v-else-if="runState.exit !== null" class="count-badge">exit {{ runState.exit }}</span></button><button :class="{ selected: bottomTab === 'problems' }" @click="showOutput('problems')">问题 <span class="count-badge">{{ allProblems.length }}</span></button><button v-if="references.length" :class="{ selected: bottomTab === 'references' }" @click="showOutput('references')">引用 <span class="count-badge">{{ references.length }}</span></button><button v-if="hierRoot" :class="{ selected: bottomTab === 'hierarchy' }" @click="showOutput('hierarchy')">{{ hierTitle }} <span class="count-badge">{{ hierItems.length }}</span></button><button :class="{ selected: bottomTab === 'terminal' }" @click="showOutput('terminal')"><SquareTerminal :size="11" /> 终端</button><button v-if="blameLines.length || bottomTab === 'blame'" :class="{ selected: bottomTab === 'blame' }" @click="showOutput('blame')"><GitCommitHorizontal :size="11" /> 追溯 <span class="count-badge">{{ blameLines.length }}</span></button><button :class="{ selected: bottomTab === 'about' }" @click="showOutput('about')">工作区说明</button></div><select v-else class="output-content-select" aria-label="工具窗口内容" :value="bottomTab" @change="showOutput(($event.target as HTMLSelectElement).value as BottomTabId)"><option v-for="option in bottomTabOptions" :key="option.id" :value="option.id">{{ option.label }}</option></select><div class="heading-actions"><span class="small-muted">{{ isDesktop ? 'C++ BRIDGE' : 'PREVIEW ADAPTER' }}</span><button class="icon-button" title="收起输出" aria-label="收起输出" @click="bottom = false"><X :size="14" /></button></div></div>
+        <div v-if="bottom && !chromeHidden" class="resize-handle resize-output" role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" :aria-valuenow="panelSizes.output" :aria-valuemin="100" :aria-valuemax="panelMax('output')" tabindex="0" @pointerdown="startResize($event, 'output')" @keydown="resizeKey($event, 'output')" />
+        <section v-if="bottom && !chromeHidden" class="output-panel">
+          <div class="output-heading"><div v-if="isTabbedContentUi(bottomContentUiType)" class="output-tabs"><button :class="{ selected: bottomTab === 'output' }" @click="showOutput('output')">操作输出 <span class="count-badge">{{ traces.length }}</span></button><button :class="{ selected: bottomTab === 'run' }" @click="showOutput('run')">{{ runConfigName ? `运行 '${runConfigName}'` : '运行' }} <span v-if="runState.running" class="count-badge">●</span><span v-else-if="runState.exit !== null" class="count-badge">exit {{ runState.exit }}</span></button><button :class="{ selected: bottomTab === 'problems' }" @click="showOutput('problems')">问题 <span class="count-badge">{{ allProblems.length }}</span></button><button v-if="references.length" :class="{ selected: bottomTab === 'references' }" @click="showOutput('references')">引用 <span class="count-badge">{{ references.length }}</span></button><button v-if="hierRoot" :class="{ selected: bottomTab === 'hierarchy' }" @click="showOutput('hierarchy')">{{ hierTitle }} <span class="count-badge">{{ hierItems.length }}</span></button><button :class="{ selected: bottomTab === 'terminal' }" @click="showOutput('terminal')"><SquareTerminal :size="11" /> 终端</button></div><select v-else class="output-content-select" aria-label="工具窗口内容" :value="bottomTab" @change="showOutput(($event.target as HTMLSelectElement).value as BottomTabId)"><option v-for="option in bottomTabOptions" :key="option.id" :value="option.id">{{ option.label }}</option></select><div class="heading-actions"><span class="small-muted">{{ isDesktop ? 'C++ BRIDGE' : 'PREVIEW ADAPTER' }}</span><button class="icon-button" title="收起输出" aria-label="收起输出" @click="bottom = false"><X :size="14" /></button></div></div>
           <div v-if="bottomTab === 'output'" class="output-lines" role="log" aria-label="操作输出">
             <div v-if="!traces.length" class="output-placeholder">等待操作。原生请求的结果会显示在这里，不采集文件正文。</div>
             <div v-for="trace in traces.slice(0, 30)" :key="trace.id" class="output-line" :class="{ failure: trace.status === 'error' }"><span class="log-time">{{ trace.started }}</span><span class="log-id">#{{ String(trace.id).padStart(3, '0') }}</span><span class="log-method">{{ trace.method }}</span><span class="log-result">{{ trace.status === 'pending' ? '处理中…' : trace.message }} <span class="log-target">{{ trace.target }}</span></span></div>
@@ -5859,17 +2224,9 @@ onBeforeUnmount(() => {
               <button v-if="!runState.running" class="primary-button" :disabled="!isDesktop || !workspace" :title="lastRunParams ? '重新运行上次任务 (Ctrl+F5)' : '运行'" @click="lastRunParams ? rerunLast() : startRun()">{{ lastRunParams ? '重新运行' : '运行' }}</button>
               <button v-else class="subtle-button" @click="stopRun">停止</button>
             </div>
-            <!-- IDEA's build console: recognised compiler diagnostics are clickable and
-                 jump to the offending line instead of being read as plain text. -->
-            <div ref="runLog" class="run-log" aria-label="运行输出">
-              <template v-if="runLines.length">
-                <div v-for="(line, index) in runLines" :key="index" class="run-line" :class="{ 'run-issue': line.issue }">
-                  <button v-if="line.issue" class="run-issue-link" :title="`跳转到 ${line.issue!.path}:${line.issue!.line}`" @click="jumpToIssue(line.issue!)">{{ line.text }}</button>
-                  <span v-else>{{ line.text }}</span>
-                </div>
-              </template>
-              <p v-else class="run-placeholder">{{ isDesktop ? '点击“运行”在项目根目录执行命令；输出与退出码会实时显示。' : '浏览器预览不能运行命令，请在桌面端使用。' }}</p>
-            </div>
+            <!-- 控制台 + 实例标签：IDEA 的 Run 工具窗口按实例开 Content，见 src/components/RunConsole.vue。 -->
+            <RunConsole ref="runLog" :instances="runTabs" :active="activeRunInstance" :lines="runLines" :is-desktop="isDesktop"
+              @select="focusRunInstance" @stop="id => void request('run.stop', { instance: id })" @jump="jumpToIssue" />
             <div v-if="runIssueCount" class="run-issues">
               <span class="run-issue-count">输出里有 {{ runIssueCount }} 处可跳转的问题</span>
               <button class="subtle-button" title="跳到下一处问题" @click="nextRunIssue">下一处问题</button>
@@ -5912,25 +2269,16 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-else-if="bottomTab === 'blame'" class="blame-panel">
-            <div class="blame-head"><span class="blame-file">{{ blamePath || '当前文件' }}</span><button class="icon-button" title="重新追溯" aria-label="重新追溯" @click="showBlame"><RefreshCw :size="14" /></button><span class="blame-hint">点击行可跳到编辑器对应位置</span></div>
-            <div class="blame-rows" role="list" :aria-label="`Git 追溯 ${blamePath}`">
-              <p v-if="!blameLines.length" class="blame-empty">正在追溯…（需要桌面端，且该文件已被提交）</p>
-              <button v-for="(entry, index) in blameLines" :key="`${entry.line}:${index}`" class="blame-row" :class="{ 'blame-new-commit': index === 0 || blameLines[index - 1].hash !== entry.hash }" @click="revealLocation({ path: blamePath, line: entry.line - 1 })">
-                <span class="blame-sha">{{ entry.hash }}</span>
-                <span class="blame-author" :title="entry.author">{{ entry.author }}</span>
-                <span class="blame-num">{{ entry.line }}</span>
-                <span class="blame-text">{{ entry.content || ' ' }}</span>
-              </button>
-            </div>
+          <!-- 停靠在底部的工具窗口内容：复用 ToolWindowView 宿主（同一份组件，任意停靠）。 -->
+          <div v-else-if="bottomAnchoredIds.includes(bottomTab as ToolWindowId)" class="bottom-view-host">
+            <ToolWindowView :view="bottomTab" :active="bottom" :ctx="toolViewCtx" />
           </div>
-          <div v-else-if="bottomTab === 'about'" class="workspace-about"><p><strong>工作区</strong>{{ workspace?.root ?? '尚未打开' }}</p><p><strong>文件支持</strong>UTF-8 文本（含 BOM），单文件最多 16 MiB；保留换行符；大文件自动降级语法高亮与语言服务以保持流畅。</p><p><strong>保存策略</strong>核对磁盘版本后原子替换；外部变更会阻止覆盖。</p><p><strong>范围</strong>支持项目管理、文件编辑、Git 克隆、语言服务、全局搜索/替换、重构与符号、集成终端与调试器。</p></div>
           <div v-show="bottomTab === 'terminal'" class="terminal-host-wrap"><TerminalPanel ref="terminalPanelRef" :active="bottomTab === 'terminal' && bottom" @focus-terminal="showOutput('terminal')" /></div>
         </section>
       </main>
 
-      <div v-if="activity && !zenMode" class="resize-handle resize-trace" role="separator" aria-label="调整处理记录宽度" aria-orientation="vertical" :aria-valuenow="panelSizes.trace" :aria-valuemin="180" :aria-valuemax="Math.max(180, panelMax('trace'))" tabindex="0" @pointerdown="startResize($event, 'trace')" @keydown="resizeKey($event, 'trace')" />
-      <aside v-if="activity && !zenMode" class="trace-panel">
+      <div v-if="activity && !chromeHidden" class="resize-handle resize-trace" role="separator" aria-label="调整处理记录宽度" aria-orientation="vertical" :aria-valuenow="panelSizes.trace" :aria-valuemin="180" :aria-valuemax="Math.max(180, panelMax('trace'))" tabindex="0" @pointerdown="startResize($event, 'trace')" @keydown="resizeKey($event, 'trace')" />
+      <aside v-if="activity && !chromeHidden" class="trace-panel">
         <div class="panel-heading"><span><Workflow :size="15" />处理记录</span><span class="observe-badge"><span class="status-dot" />可观察</span></div>
         <div class="trace-intro"><div class="eyebrow">NOT A BLACK BOX</div><h2>每一步，都有来处。</h2><p>请求、结果与错误保持可见。<br />你的代码不会在这里悄悄改变。</p></div>
         <div class="bridge-route"><div><span class="route-icon"><Code2 :size="16" /></span><strong>Vue 3</strong><span>交互</span></div><span class="route-line">JSON RPC</span><div><span class="route-icon native"><Braces :size="16" /></span><strong>{{ isDesktop ? 'C++' : '内存' }}</strong><span>{{ isDesktop ? '文件处理' : '预览适配' }}</span></div></div>
@@ -5950,10 +2298,12 @@ onBeforeUnmount(() => {
     <AnimatePresence>
       <motion.div v-if="notice" key="workspace-notice" class="notice workspace-notice" :class="{ error: noticeError, clickable: Boolean(noticeAction) }" role="status" :title="noticeAction ? '点击查看运行控制台' : undefined" @click="noticeAction?.()" :initial="reducedMotion ? { opacity: 1 } : { opacity: 0, y: 8 }" :animate="{ opacity: 1, y: 0 }" :exit="popupExit" :transition="popupTransition"><Check v-if="!noticeError" :size="15" class="notice-icon" /><CircleHelp v-else :size="15" class="notice-icon" /><span>{{ notice }}</span><button class="icon-button" title="关闭提示" aria-label="关闭提示" @click.stop="notice = ''"><X :size="13" /></button></motion.div>
     </AnimatePresence>
-    <footer v-if="workspace && !zenMode" ref="statusBarRef" class="statusbar" role="group" aria-label="状态栏" @contextmenu="openStatusMenu" @keydown="onStatusBarKeydown"><div class="status-left"><span class="status-brand"><Braces :size="13" /></span><button class="status-toolwindows" :aria-label="editorSettings.showToolWindowBars ? '隐藏工具窗口条' : '显示工具窗口条'" :aria-expanded="toolWindowsPopup" @click="toggleToolWindowStripes" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)"><PanelLeftClose v-if="editorSettings.showToolWindowBars" :size="13" /><PanelLeftOpen v-else :size="13" /></button><div v-if="toolWindowsPopup" class="status-toolwindows-popup" role="menu" aria-label="工具窗口" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)" @keydown.esc.stop="closeToolWindowsPopup()"><button v-for="id in availableToolWindows" :key="id" class="menu-button status-toolwindows-row" role="menuitem" @click="closeToolWindowsPopup(); showView(id)"><span class="menu-item-icon"><component :is="toolIcons[id]" :size="13" /></span><span class="status-toolwindows-name">{{ toolTitles[id] }}</span><span class="status-toolwindows-key">Alt+{{ toolWindowMnemonic(id) }}</span></button><p v-if="!availableToolWindows.length" class="status-toolwindows-empty">当前没有可用的工具窗口。</p></div><button v-if="active && showWidget('file')" class="status-file" :title="`在资源管理器中定位 ${active.path} (Alt+F1,1)`" @click="selectInTree"><span class="status-file-root">{{ workspace?.name }}</span><ChevronRight :size="11" /><span>{{ active.path }}</span></button><button v-if="gitHead && showWidget('branch')" class="status-branch" :title="`当前分支 ${gitHead}（点击打开源代码管理）`" @click="showView('git')"><GitBranch :size="12" />{{ gitHead }}<span v-if="gitAheadBehind.available && gitAheadBehind.ahead" class="status-count">↑{{ gitAheadBehind.ahead }}</span><span v-if="gitAheadBehind.available && gitAheadBehind.behind" class="status-count">↓{{ gitAheadBehind.behind }}</span></button><span v-if="showWidget('bridge')"><span class="status-dot" />{{ isDesktop ? '原生桥接已连接' : '浏览器示例模式' }}</span><span class="status-separator">|</span><span>{{ working ? '正在处理…' : '就绪' }}</span><span v-if="dirty" class="status-unsaved">有未保存修改</span></div><!-- IDEA's InfoAndProgressPanel: a compact indicator in the status bar; clicking it lists every running background task. --><div v-if="showProgressWidget(backgroundTasks.length > 0, progressOpen) && showWidget('progress')" class="status-progress" :class="{ open: progressOpen }"><button class="status-progress-toggle" :aria-expanded="progressOpen" :title="progressOpen ? '收起后台任务列表' : '查看所有运行中的进程'" aria-label="后台任务" @click.stop="progressOpen = !progressOpen"><Loader2 v-if="backgroundTasks.length" :size="12" class="status-spin" /><Check v-else :size="12" aria-hidden="true" /><span>{{ backgroundTasks.length ? `后台任务 ${backgroundTasks.length}` : '后台任务' }}</span></button><div v-if="progressOpen" class="status-progress-list" role="menu" aria-label="后台任务" @keydown.esc.stop="progressOpen = false"><p v-for="row in progressRows" :key="`${row.kind}:${row.title}`" class="status-progress-row" :class="[`status-progress-${row.kind}`, { 'has-separator': row.separator }]"><template v-if="row.kind === 'task'"><strong>{{ row.title }}</strong><span>{{ row.detail }}</span><button v-if="row.cancellable" class="status-progress-cancel" :aria-label="`取消：${row.title}`" title="取消此任务" @click="cancelProgressRow(row)"><X :size="12" />取消</button></template><template v-else><Check v-if="row.kind === 'finished'" :size="13" aria-hidden="true" class="status-progress-check" /><span>{{ row.title }}</span></template></p></div></div><div class="status-right"><button v-if="smartModeLabel && showWidget('smartMode')" class="status-chip status-smart" :title="`${smartModeLabel}（IDEA 的 Smart Mode 指示器）`" aria-label="语言服务状态" @click="showView('outline')">{{ smartModeLabel }}</button><button v-if="showWidget('problems')" class="status-problems" title="打开问题面板" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ allProblems.filter(p => p.severity === 1).length }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ allProblems.filter(p => p.severity === 2).length }} 警告</span></button><button v-if="active && showWidget('position')" class="status-chip status-position" :title="selectionInfo ? `已选中 ${selectionInfo.characters} 个字符，跨 ${selectionInfo.lines} 行；点击转到行` : '点击转到行 (Ctrl+G)'" aria-label="光标位置" @click="openGoLine()">{{ cursorCount > 1 ? `${cursorCount} 个光标` : selectionInfo ? `已选 ${selectionInfo.characters} 字符` : `${active.line}:${active.column}` }}</button><button v-if="active?.readOnly && showWidget('readonly')" class="status-chip status-locked" title="文件只读（点击切换为可写）" @click="void toggleReadOnly(active!.path)"><Lock :size="12" />只读</button><span v-if="active && showWidget('lineSeparator')">{{ active.content.includes('\r\n') ? 'CRLF' : 'LF' }}</span><button v-if="processMemory && showWidget('memory')" class="status-chip status-memory" :title="`进程工作集 ${processMemory.workingSetMb} MB（历史峰值 ${processMemory.peakWorkingSetMb} MB，提交 ${processMemory.privateMb} MB）。宿主没有 JVM 堆上限，峰值不是上限。`" aria-label="内存使用" @click="refreshMemory">{{ processMemory.workingSetMb }} MB</button><button v-if="active && isDesktop && showWidget('lineSeparator')" class="status-chip" title="转换行分隔符（点击在 Windows 与 Unix 之间切换）" aria-label="转换行分隔符" @click="convertLineSeparators(active.content.includes('\r\n') ? 'lf' : 'crlf')">转换行尾</button><button v-if="showWidget('encoding')" class="status-chip" title="文件编码（点击可重新读取或转换保存）" aria-label="文件编码" :disabled="!active" @click="openEncoding">{{ encodingLabels[active?.encoding ?? 'utf-8'] }}{{ active?.bom ? ' 带 BOM' : '' }}</button><button v-if="showWidget('indent')" class="status-chip" :title="editorSettings.useTabCharacter ? '使用制表符缩进，点击修改' : `使用 ${editorSettings.tabSize} 个空格缩进，点击修改`" aria-label="缩进设置" @click="openSettings('editor.codeStyle.indents')">{{ editorSettings.useTabCharacter ? '制表符' : `${editorSettings.tabSize} 个空格` }}</button><button v-if="columnMode && showWidget('column')" class="status-chip status-column" title="列选择模式已开启（Alt+Shift+Insert 或点击此处关闭）" aria-label="列选择模式" @click="toggleColumnModeFromStatusBar">列选择</button><button v-if="noticeLog.length && showWidget('notices')" class="status-chip status-notices" :class="{ 'has-error': noticeLevel(noticeLog) === 'error' }" :aria-expanded="noticeOpen" :title="noticeTitle(noticeLog)" aria-label="通知中心" @click.stop="noticeOpen = !noticeOpen">{{ noticeLog.length }} 条通知</button><button v-if="editorSettings.powerSaveMode && showWidget('powerSave')" class="status-chip status-powersave" title="省电模式已开启：语言服务与后台轮询暂停，点击关闭" aria-label="省电模式" @click="togglePowerSave"><Zap :size="12" />省电模式</button><span>{{ active ? language : 'TaoCode 0.1' }}</span><button title="切换输出面板" aria-label="切换底部面板" @click="bottom = !bottom"><PanelBottom :size="13" /></button><NoticeList v-if="noticeOpen" :entries="noticeLog" :live="generalSettings.supportScreenReaders" @clear="clearNotices" @close="noticeOpen = false" /></div><div v-if="statusMenu" class="status-widget-menu" role="menu" aria-label="状态栏组件" :style="{ left: `${statusMenu.x}px`, top: `${statusMenu.y}px` }"><span class="status-widget-title">状态栏组件</span><button v-for="widget in STATUS_WIDGETS" :key="widget.key" class="menu-button status-widget-item" role="menuitemcheckbox" :aria-checked="showWidget(widget.key)" @click="toggleWidget(widget.key)"><span class="menu-item-icon"><Check v-if="showWidget(widget.key)" :size="13" /></span><span>{{ widget.label }}</span></button><div class="menu-rule" role="separator" /><button class="menu-button status-widget-item" role="menuitem" @click="showAllWidgets(); statusMenu = null">全部显示</button></div><div v-if="statusMenu" class="status-widget-backdrop" @click="statusMenu = null" @contextmenu.prevent="statusMenu = null" /></footer>
+    <footer v-if="workspace && !chromeHidden && editorSettings.showStatusBar" ref="statusBarRef" class="statusbar" role="group" aria-label="状态栏" @contextmenu="openStatusMenu" @keydown="onStatusBarKeydown"><div class="status-left"><button class="status-toolwindows" :aria-label="editorSettings.showToolWindowBars ? '隐藏工具窗口条' : '显示工具窗口条'" :aria-expanded="toolWindowsPopup" @click="toggleToolWindowStripes" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)"><PanelLeftClose v-if="editorSettings.showToolWindowBars" :size="13" /><PanelLeftOpen v-else :size="13" /></button><div v-if="toolWindowsPopup" class="status-toolwindows-popup" role="menu" aria-label="工具窗口" @mouseenter="scheduleToolWindowsPopup(true)" @mouseleave="scheduleToolWindowsPopup(false)" @keydown.esc.stop="closeToolWindowsPopup()"><template v-for="group in groupedAvailableToolWindows" :key="group.anchor"><span class="status-toolwindows-group" role="presentation">{{ group.label }}</span><button v-for="id in group.ids" :key="id" class="menu-button status-toolwindows-row" role="menuitem" @click="closeToolWindowsPopup(); showView(id)"><span class="menu-item-icon"><component :is="toolIcons[id]" :size="13" /></span><span class="status-toolwindows-name">{{ toolTitles[id] }}</span><span v-if="toolWindowMnemonic(id)" class="status-toolwindows-key">Alt+{{ toolWindowMnemonic(id) }}</span></button></template><p v-if="!availableToolWindows.length" class="status-toolwindows-empty">当前没有可用的工具窗口。</p></div><button v-if="active && showWidget('file')" class="status-file" :title="`在资源管理器中定位 ${active.path} (Alt+F1,1)`" @click="selectInTree"><span class="status-file-root">{{ workspace?.name }}</span><ChevronRight :size="11" /><span>{{ active.path }}</span></button><button v-if="gitHead && showWidget('branch')" class="status-branch" :title="`当前分支 ${gitHead}（点击打开源代码管理）`" @click="showView('git')"><GitBranch :size="12" />{{ gitHead }}<span v-if="gitAheadBehind.available && gitAheadBehind.ahead" class="status-count">↑{{ gitAheadBehind.ahead }}</span><span v-if="gitAheadBehind.available && gitAheadBehind.behind" class="status-count">↓{{ gitAheadBehind.behind }}</span></button><span>{{ working ? '正在处理…' : '就绪' }}</span><span v-if="dirty" class="status-unsaved">有未保存修改</span></div><!-- IDEA's InfoAndProgressPanel: a compact indicator in the status bar; clicking it lists every running background task. --><div v-if="showProgressWidget(backgroundTasks.length > 0, progressOpen) && showWidget('progress')" class="status-progress" :class="{ open: progressOpen }"><button class="status-progress-toggle" :aria-expanded="progressOpen" :title="progressOpen ? '收起后台任务列表' : '查看所有运行中的进程'" aria-label="后台任务" @click.stop="progressOpen = !progressOpen"><Loader2 v-if="backgroundTasks.length" :size="12" class="status-spin" /><Check v-else :size="12" aria-hidden="true" /><span>{{ backgroundTasks.length ? `后台任务 ${backgroundTasks.length}` : '后台任务' }}</span></button><div v-if="progressOpen" class="status-progress-list" role="menu" aria-label="后台任务" @keydown.esc.stop="progressOpen = false"><p v-for="row in progressRows" :key="`${row.kind}:${row.title}`" class="status-progress-row" :class="[`status-progress-${row.kind}`, { 'has-separator': row.separator }]"><template v-if="row.kind === 'task'"><strong>{{ row.title }}</strong><span>{{ row.detail }}</span><button v-if="row.cancellable" class="status-progress-cancel" :aria-label="`取消：${row.title}`" title="取消此任务" @click="cancelProgressRow(row)"><X :size="12" />取消</button></template><template v-else><Check v-if="row.kind === 'finished'" :size="13" aria-hidden="true" class="status-progress-check" /><span>{{ row.title }}</span></template></p></div></div><div class="status-right"><button v-if="smartModeLabel && showWidget('smartMode')" class="status-chip status-smart" :title="`${smartModeLabel}（IDEA 的 Smart Mode 指示器）`" aria-label="语言服务状态" @click="showView('outline')">{{ smartModeLabel }}</button><button v-if="showWidget('problems')" class="status-problems" title="打开问题面板" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ allProblems.filter(p => p.severity === 1).length }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ allProblems.filter(p => p.severity === 2).length }} 警告</span></button><button v-if="active && showWidget('position')" class="status-chip status-position" :title="selectionInfo ? `已选中 ${selectionInfo.characters} 个字符，跨 ${selectionInfo.lines} 行；点击转到行` : '点击转到行 (Ctrl+G)'" aria-label="光标位置" @click="openGoLine()">{{ cursorCount > 1 ? `${cursorCount} 个光标` : selectionInfo ? `已选 ${selectionInfo.characters} 字符` : `${active.line}:${active.column}` }}</button><button v-if="active?.readOnly && showWidget('readonly')" class="status-chip status-locked" title="文件只读（点击切换为可写）" @click="void toggleReadOnly(active!.path)"><Lock :size="12" />只读</button><span v-if="active && showWidget('lineSeparator')">{{ active.content.includes('\r\n') ? 'CRLF' : 'LF' }}</span><button v-if="processMemory && showWidget('memory')" class="status-chip status-memory" :title="`进程工作集 ${processMemory.workingSetMb} MB（历史峰值 ${processMemory.peakWorkingSetMb} MB，提交 ${processMemory.privateMb} MB）。宿主没有 JVM 堆上限，峰值不是上限。`" aria-label="内存使用" @click="refreshMemory">{{ processMemory.workingSetMb }} MB</button><button v-if="active && isDesktop && showWidget('lineSeparator')" class="status-chip" title="转换行分隔符（点击在 Windows 与 Unix 之间切换）" aria-label="转换行分隔符" @click="convertLineSeparators(active.content.includes('\r\n') ? 'lf' : 'crlf')">转换行尾</button><button v-if="showWidget('encoding')" class="status-chip" title="文件编码（点击可重新读取或转换保存）" aria-label="文件编码" :disabled="!active" @click="openEncoding">{{ encodingLabels[active?.encoding ?? 'utf-8'] }}{{ active?.bom ? ' 带 BOM' : '' }}</button><button v-if="showWidget('indent')" class="status-chip" :title="editorSettings.useTabCharacter ? '使用制表符缩进，点击修改' : `使用 ${editorSettings.tabSize} 个空格缩进，点击修改`" aria-label="缩进设置" @click="openSettings('preferences.sourceCode.indents')">{{ editorSettings.useTabCharacter ? '制表符' : `${editorSettings.tabSize} 个空格` }}</button><button v-if="columnMode && showWidget('column')" class="status-chip status-column" title="列选择模式已开启（Alt+Shift+Insert 或点击此处关闭）" aria-label="列选择模式" @click="toggleColumnModeFromStatusBar">列选择</button><button v-if="noticeLog.length && showWidget('notices')" class="status-chip status-notices" :class="{ 'has-error': noticeLevel(noticeLog) === 'error' }" :aria-expanded="noticeOpen" :title="noticeTitle(noticeLog)" aria-label="通知中心" @click.stop="noticeOpen = !noticeOpen">{{ noticeLog.length }} 条通知</button><button v-if="editorSettings.powerSaveMode && showWidget('powerSave')" class="status-chip status-powersave" title="省电模式已开启：语言服务与后台轮询暂停，点击关闭" aria-label="省电模式" @click="togglePowerSave"><Zap :size="12" />省电模式</button><span>{{ active ? language : 'TaoCode 0.1' }}</span><button title="切换输出面板" aria-label="切换底部面板" @click="bottom = !bottom"><PanelBottom :size="13" /></button><NoticeList v-if="noticeOpen" :entries="noticeLog" :live="generalSettings.supportScreenReaders" @clear="clearNotices" @close="noticeOpen = false" /></div><div v-if="statusMenu" class="status-widget-menu" role="menu" aria-label="状态栏组件" :style="{ left: `${statusMenu.x}px`, top: `${statusMenu.y}px` }"><span class="status-widget-title">状态栏组件</span><button v-for="widget in STATUS_WIDGETS" :key="widget.key" class="menu-button status-widget-item" role="menuitemcheckbox" :aria-checked="showWidget(widget.key)" @click="toggleWidget(widget.key)"><span class="menu-item-icon"><Check v-if="showWidget(widget.key)" :size="13" /></span><span>{{ widget.label }}</span></button><div class="menu-rule" role="separator" /><button class="menu-button status-widget-item" role="menuitem" @click="showAllWidgets(); statusMenu = null">全部显示</button></div><div v-if="statusMenu" class="status-widget-backdrop" @click="statusMenu = null" @contextmenu.prevent="statusMenu = null" /></footer>
 
+    <ExportToHtmlDialog v-if="exportDialogOpen" :settings="projectSettings.exportToHtml ?? { scope: 0, includeSubdirectories: false, printLineNumbers: false, openInBrowser: false, outputDirectory: '' }" :file-name="activePath ? activePath.split('/').pop() ?? '' : ''" :directory-name="activePath.includes('/') ? activePath.slice(0, activePath.lastIndexOf('/')) : (activePath ? '(工作区根目录)' : '')" :selection-available="Boolean(active) && Boolean(editorFor(activePath)?.hasSelection?.())" :busy="busy" @save="draft => void runExportToHtml(draft)" @browse="initial => void browseOutputDirectory(initial).then(path => { if (path) exportPickedDirectory = path })" :picked-directory="exportPickedDirectory" @close="closeExportDialog()" />
     <ProjectDialog v-if="projectMode" v-model:form="projectForm" :mode="projectMode" :busy="projectBusy || busy" :cancelling="cancelling" :error="projectError" :progress="cloneProgress" :git-available="gitAvailable" :is-desktop="isDesktop" @browse="browseParent" @submit="submitProject" @cancel="cancelProject" />
-    <SettingsDialog v-if="settingsOpen" ref="settingsDialogRef" :settings="editorSettings" :project-settings="workspace ? projectSettings : null" :project-root="workspace?.root ?? null" :active-path="activePath" :theme="theme" :busy="settingsBusy" :error="settingsError" :initial-section="settingsSectionHint" @save="saveSettings" @save-project="saveProjectSettings" :commit-message-settings="commitMessageSettings" :general="generalSettings" @save-general="saveGeneralSettings" @save-commit-message="saveCommitMessageSettings" @save-templates="saveTemplateSettings" @save-java="saveJavaSettings" @browse-directory="browseStructureDir" @theme="changeTheme" @pick-background="void chooseBackgroundImage()" @clear-background="void clearBackgroundImage()" @close="settingsOpen = false" />
+    <ProjectStructureDialog v-if="projectStructureOpen" :settings="workspace ? projectSettings : null" :root="workspace?.root ?? null" :busy="settingsBusy" @save-java="saveJavaSettings" @save-project="saveProjectSettings" @browse="browseStructureDir" @close="projectStructureOpen = false" />
+    <SettingsDialog v-if="settingsOpen" ref="settingsDialogRef" :settings="editorSettings" :project-settings="workspace ? projectSettings : null" :project-root="workspace?.root ?? null" :active-path="activePath" :theme="theme" :busy="settingsBusy" :error="settingsError" :initial-section="settingsSectionHint" :gradle-detection="gradleDetection" @save="saveSettings" @save-project="saveProjectSettings" @saveVcsLog="saveVcsLog" @save-build-tools="saveBuildTools" :module-name="workspace?.name ?? ''" @saveScopes="saveScopes" @saveTodoPatterns="saveTodoPatterns" @saveFileAssociations="saveFileAssociations" :commit-message-settings="commitMessageSettings" :general="generalSettings" @save-general="saveGeneralSettings" @save-commit-message="saveCommitMessageSettings" @save-templates="saveTemplateSettings" @save-java="saveJavaSettings" @theme="changeTheme" @pick-background="void chooseBackgroundImage()" @clear-background="void clearBackgroundImage()" @close="settingsOpen = false" />
     <div v-if="leavePrompt" class="modal-backdrop">
       <section class="help-dialog leave-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trapFocus">
         <h2 id="leave-title">{{ leavePrompt.title }}</h2><p>以下文件尚未保存；保存失败时不会继续关闭或切换。</p>
@@ -6055,6 +2405,10 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
     <div v-if="recentPrompt" class="modal-backdrop" @click.self="recentPrompt = false">
+    <MacrosDialog v-if="macrosDialogOpen" :macros="macros" :playing="playing" @play="playMacro(namedMacros.find(m => m.name === $event.name) ?? macros.find(m => m.name === $event.name) ?? null)" @remove="deleteMacro($event.name)" @rename="renameMacro($event.from, $event.to)" @remove-step="deleteMacroStep($event.name, $event.index)" @close="macrosDialogOpen = false" />
+    <AboutDialog v-if="aboutOpen" :info="aboutInfo" @close="aboutOpen = false" />
+    <SpecialPathsDialog v-if="specialPathsOpen" :paths="specialPaths" @pick="openSpecialPath($event.path)" @close="specialPathsOpen = false" />
+    <PasteHistoryDialog v-if="pasteHistoryOpen" :entries="pasteHistoryEntries" @pick="pickPasteHistoryEntry($event.index)" @remove="removePasteHistoryEntry($event.index)" @close="pasteHistoryOpen = false" />
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="最近文件" @keydown="trapFocus"><div class="palette-input"><FileCode2 :size="18" /><input ref="recentInput" v-model="recentQuery" placeholder="最近打开的文件…（回车打开第一个）" aria-label="最近文件" @keydown.enter="recentFiltered[0] && openRecent(recentFiltered[0]!)" /><button class="icon-button" aria-label="关闭最近文件" @click="recentPrompt = false"><X :size="16" /></button></div><div class="palette-results"><button v-for="path in recentFiltered" :key="path" @click="openRecent(path)"><FileCode2 :size="15" /><span>{{ path }}</span><ArrowRight :size="14" /></button><p v-if="!recentFiltered.length" class="palette-empty">暂无最近文件记录。</p></div></section>
     </div>
     <div v-if="treeMenu" class="tree-menu-backdrop" @pointerdown="treeMenu = null; treeSubmenu = null" @contextmenu.prevent="treeMenu = null; treeSubmenu = null">
@@ -6138,7 +2492,7 @@ onBeforeUnmount(() => {
           <div class="menu-rule" />
           <button @click="const tab = findTab(menu.path); if (tab) togglePinTab(menu.pane, tab); tabMenu = null">{{ findTab(menu.path)?.pinned ? '取消固定' : '固定标签页' }}</button>
           <button :disabled="!findTab(menu.path)?.preview" @click="const tab = findTab(menu.path); if (tab) keepTabOpen(tab); tabMenu = null">保持打开</button>
-          <button @click="tabMenu = null; void openSettings('editor.general.tabs')">配置编辑器标签页…</button>
+          <button @click="tabMenu = null; void openSettings('editor.preferences.tabs')">配置编辑器标签页…</button>
         </template>
       </div>
     </div>
@@ -6205,24 +2559,9 @@ onBeforeUnmount(() => {
     </div>
     <!-- EXT-01: plugins contribute commands and templates only; enabling one writes or
          removes a `.disabled` marker beside its manifest. -->
-    <div v-if="pluginOpen" class="modal-backdrop" @click.self="pluginOpen = false">
-      <section class="help-dialog plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="plugin-title" @keydown="trapFocus">
-        <h2 id="plugin-title">插件</h2>
-        <p class="plugin-hint">插件目录：用户配置目录下的 <code>plugins</code>。一个插件是一个含 <code>plugin.json</code> 的子目录，只提供命令与模板入口，不加载任何外部代码。</p>
-        <p v-if="!pluginList.length" class="plugin-empty">还没有安装插件。</p>
-        <ul v-else class="plugin-list">
-          <li v-for="plugin in pluginList" :key="plugin.id" class="plugin-row">
-            <div class="plugin-main">
-              <span class="plugin-name">{{ plugin.name || plugin.id }} <span class="plugin-version">v{{ plugin.version || '0' }}</span></span>
-              <span class="plugin-desc">{{ plugin.error ? `清单无法读取：${plugin.error}` : (plugin.description || '没有描述。') }}</span>
-              <span v-if="!plugin.error" class="plugin-meta">{{ plugin.commands.length }} 个命令 · {{ plugin.templates.length }} 个模板</span>
-            </div>
-            <label class="plugin-toggle"><input type="checkbox" :checked="plugin.enabled" :disabled="pluginBusy || Boolean(plugin.error)" @change="togglePlugin(plugin)" />启用</label>
-          </li>
-        </ul>
-        <div class="dialog-actions"><button class="subtle-button" @click="pluginOpen = false">关闭</button></div>
-      </section>
-    </div>
+    <RunConfigurationsDialog v-if="runConfigsOpen" :configs="runConfigs" :draft="runConfigDraft" :busy="working" @save="saveRunConfigFromDialog" @remove="removeRunConfigFromDialog" @select="loadRunConfigDraft" @close="runConfigsOpen = false" />
+    <PluginDialog v-if="pluginOpen" :plugins="pluginList" :installing="installingPlugins" :busy="pluginBusy" :is-desktop="isDesktop"
+      @toggle="togglePluginById" @set-enabled="setPluginsEnabled" @install="installPlugin" @install-directory="installPluginDirectory" @uninstall="uninstallPlugin" @refresh="refreshPlugins" @close="pluginOpen = false" />
     <div v-if="fileHistoryOpen" class="modal-backdrop" @click.self="fileHistoryOpen = false">
       <section class="help-dialog file-history-dialog" role="dialog" aria-modal="true" aria-labelledby="file-history-title" @keydown="trapFocus">
         <h2 id="file-history-title">文件历史 · {{ fileHistory?.path }}</h2>
@@ -6324,14 +2663,15 @@ onBeforeUnmount(() => {
     <div v-if="actionSearch" class="modal-backdrop" @click.self="actionSearch = false">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="查找操作" @keydown="trapFocus"><div class="palette-input"><Search :size="18" /><input ref="actionInput" v-model="actionQuery" placeholder="查找操作…（名称、拼音提示或快捷键）" aria-label="查找操作" @keydown.down.prevent="moveAction(1)" @keydown.up.prevent="moveAction(-1)" @keydown.enter.prevent="runActionResult()" /><button class="icon-button" aria-label="关闭查找操作" @click="actionSearch = false"><X :size="16" /></button></div><div class="palette-scope">全部操作 · {{ actionResults.length }}/{{ actionList.length }} 项 · 回车执行</div><div class="palette-results"><button v-for="(entry, index) in actionResults" :key="entry.id" :class="{ highlighted: index === actionIndex, 'palette-disabled': !rowEnabled(entry) }" @click="runAction(entry)"><Sparkles :size="15" /><span>{{ entry.title }}</span><span class="action-group">{{ entry.group }}</span><kbd v-if="entry.keys">{{ entry.keys }}</kbd><ArrowRight :size="14" /></button><p v-if="!actionResults.length" class="palette-empty">没有匹配的操作。换个词试试，或清空输入框浏览全部命令。</p></div></section>
     </div>
-    <div v-if="placesPrompt" class="modal-backdrop" @click.self="placesPrompt = false">
+    <SearchEverywhereDialog :open="searchEverywhereOpen" :items="searchEverywhereItems" @close="searchEverywhereOpen = false" />
+<div v-if="placesPrompt" class="modal-backdrop" @click.self="placesPrompt = false">
       <section class="command-palette locations-dialog" role="dialog" aria-modal="true" aria-label="最近位置" @keydown="trapFocus"><div class="palette-input"><History :size="18" /><input ref="placesInput" v-model="placesQuery" placeholder="最近位置…（上下键选择，回车跳转）" aria-label="最近位置" @keydown.down.prevent="movePlace(1)" @keydown.up.prevent="movePlace(-1)" @keydown.enter.prevent="placesFiltered[placesIndex] && openPlace(placesFiltered[placesIndex]!)" /><button class="icon-button" aria-label="关闭最近位置" @click="placesPrompt = false"><X :size="16" /></button></div><div class="locations-header"><h2>{{ placesEditedOnly ? '最近更改的位置' : '最近位置' }} <span class="small-muted">({{ placesFiltered.length }})</span></h2><label class="locations-toggle"><input v-model="placesEditedOnly" type="checkbox" />仅显示已编辑的 <kbd>Ctrl E</kbd></label></div><div class="palette-results" role="listbox" aria-label="位置列表"><button v-for="(place, index) in placesFiltered" :key="`${place.kind}:${place.path}:${place.line}`" class="location-row" :class="{ highlighted: index === placesIndex }" role="option" :aria-selected="index === placesIndex" @click="openPlace(place)" @pointerenter="placesIndex = index"><component :is="place.kind === '书签' ? BookmarkIcon : place.kind === '符号' ? ListTree : FileCode2" :size="15" /><span class="location-main"><strong>{{ baseName(place.path) }}<template v-if="place.label !== place.path"> · {{ place.label }}</template></strong><pre v-if="placeSnippet(place).text" class="location-snippet">{{ placeSnippet(place).text }}</pre><span v-else class="location-snippet empty">{{ findTab(place.path) ? '空行' : '文件未打开：无代码预览' }}</span></span><span class="location-path">{{ place.path.split('/').slice(0, -1).join('/') }} · 第 {{ (placeSnippet(place).text ? placeSnippet(place).firstLine : place.line) + 1 }} 行</span></button><p v-if="!placesFiltered.length" class="palette-empty">没有找到最近位置</p></div></section>
     </div>
     <div v-if="symbolPrompt" class="modal-backdrop" @click.self="symbolPrompt = null">
       <section class="command-palette" role="dialog" aria-modal="true" :aria-label="symbolPrompt.mode === 'global' ? '转到符号（全局）' : '文件结构'" @keydown="trapFocus"><div class="palette-input"><Search :size="18" /><input ref="symbolInput" v-model="symbolQuery" :placeholder="symbolPrompt.mode === 'global' ? '转到符号…（全局，输入≥2字）' : '文件结构…（当前文件符号）'" aria-label="符号名称" @input="onSymbolQuery" @keydown.down.prevent="moveSymbol(1)" @keydown.up.prevent="moveSymbol(-1)" @keydown.enter="symbolResults[symbolIndex] && jumpSymbol(symbolResults[symbolIndex]!)" /><button class="icon-button" aria-label="关闭符号选择器" @click="symbolPrompt = null"><X :size="16" /></button></div><div class="palette-scope">{{ symbolPrompt.mode === 'global' ? '全局符号 · 由语言服务提供，需已就绪' : '当前文件符号 · ' + outline.length + ' 项' }}</div><div class="palette-results"><button v-for="(entry, index) in symbolResults" :key="`${entry.path}:${entry.line}:${entry.character}:${index}`" :class="{ highlighted: index === symbolIndex }" @click="jumpSymbol(entry)"><FileCode2 :size="15" /><span>{{ entry.name }}</span><span class="small-muted">{{ entry.path.split('/').pop() }}:{{ entry.line + 1 }}</span><ArrowRight :size="14" /></button><p v-if="!symbolResults.length" class="palette-empty">{{ symbolPrompt.mode === 'global' ? '输入至少两个字符以检索全局符号。' : '当前文件没有符号（或未启用语言服务）。' }}</p></div></section>
     </div>
     <div v-if="actionPrompt" class="modal-backdrop" @click.self="actionPrompt = null">
-      <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="15" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
+      <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="15" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="action.command" class="small-muted">由语言服务执行</span><span v-else-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
     </div>
     <!-- 退出确认：IDEA 的 ConfirmExitDialog（确认 + “不再询问”写回 GeneralSettings.confirmExit） -->
     <div v-if="exitPrompt" class="modal-backdrop" @click.self="resolveExit(false)">
