@@ -25,12 +25,14 @@
    新增 `scripts/enumerate_inventory.py` 与 `scripts/inventory_gaps.py`（**有洞就 exit 1**）。
 3. **查出两个待修缺陷**（尚未修，见下）。
 
-## 待修（本轮查实，尚未动手）
+## 本轮已修（原查实、已动手）
 
-| # | 缺陷 | 位置 | 性质 |
+| # | 缺陷 | 位置 | 怎么修的 |
 |---|---|---|---|
-| 1 | 「布局」子菜单被插到**窗口菜单最顶上** | `src/menuUi.ts:64` | 锚点 id `window.searchEverywhere` **全仓不存在**（`windowMenu.ts` 里那行被删了，引用还在）→ `findIndex` 得 −1，`+1` 变 0 |
-| 2 | Search Everywhere 是**空壳** | `src/menus/navigateMenu.ts:63`、`src/keymap.ts:340` | 「随处搜索」(Shift+Shift) 与「查找操作」(Ctrl+Shift+A) **都调 `openActionSearch`**；仓库无 `SearchEverywhere.vue` / `searchEverywhere.ts` / 任何 tab 结构（IDEA 侧 146 类） |
+| 1 | 「布局」子菜单被插到**窗口菜单最顶上** | `src/menuUi.ts` | 锚点 id `window.searchEverywhere` **全仓不存在** → `findIndex` 得 −1、`+1` 变 0，"碰巧"插对。IDEA 的窗口菜单里本就没有 Search Everywhere（它在 `GoToMenu`，`PlatformActions.xml:604`）。按 `PlatformActions.xml:637-651` 的真实顺序改为**直接置顶**（`[...layoutMenuRows.value, ...windowMenuRows]`），删掉 findIndex + splice。顺带删掉 `windowMenu.ts` 顶部一条与已修正注释**并存**的旧注释 |
+| 2 | Search Everywhere 是**空壳** | `src/menus/navigateMenu.ts`、`src/keymap.ts`、主工具栏 | 「随处搜索」(Shift+Shift) 与「查找操作」(Ctrl+Shift+A) **都调 `openActionSearch`**；仓库无任何 tab/贡献者结构（IDEA 侧 146 类）。已做成真对话框：纯逻辑 `src/searchEverywhere.ts`、装配 `src/searchEverywhereHost.ts`、UI `src/components/SearchEverywhereDialog.vue`；tab 取自 `IdeBundle.properties` 的 `searcheverywhere.*.tab.name`（旧那套 Classes/Symbols/… 所属的 `ContributorDefinedTabsCustomizationStrategy.kt` 已 `@Deprecated`），只渲染有真实供给者的 **All / Project / Commands / Run Configurations** |
+
+**仍未做**：Search Everywhere 的 **LSP 符号/类供给者**（要按查询词异步问语言服务 + 防抖），以及 `IDE` / `Autocompletion` 两个 tab（还没有对应贡献者，按"没有真实消费链路的项不渲染"不放假控件）。见 `src/searchEverywhereHost.ts` 文件头。
 
 ## 缺口清单现状
 
