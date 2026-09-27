@@ -1,5 +1,6 @@
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 import assert from 'node:assert/strict'
 import {
   FACTORY_LAYOUT_NAME,
@@ -140,7 +141,9 @@ test('the layout name validator mirrors the dialog', () => {
 // The wiring, checked against App.vue. Shift+F12 has to be handled before the handler's
 // "needs Ctrl or Alt" bail-out, which a Shift-only chord also fails.
 test('Shift+F12 restores the layout and the Window menu offers the whole group', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // Shift+F12 的绑定与菜单组的组装都在 2026-09-27 离开了 App.vue（src/keymap.ts / src/menuUi.ts），
+  // 所以这条「接线」用例读整个外壳；三段代码的相对顺序保持不变。
+  const app = shellSource()
   const lines = app.split('\n')
   const find = (...checks) => lines.findIndex(line => checks.every(check => line.includes(check)))
 
@@ -157,14 +160,24 @@ test('Shift+F12 restores the layout and the Window menu offers the whole group',
   // RestoreDefaultLayout keeps its keymap shortcut in the row, like every other row.
   const row = lines.find(line => line.includes("id: 'window.restoreLayout'"))
   assert.ok(row.includes("keys: 'Shift F12'"), 'the 恢复当前布局 row shows the wrong shortcut')
-  // The layout list is dynamic, so the group is spliced into the Window menu at render time.
-  assert.match(app, /windowRows\.splice\(afterSearch, 0, \.\.\.layoutMenuRows\.value\)/, 'the layout group is not spliced into the Window menu')
+  // The layout list is dynamic, so the group is assembled into the Window menu at render time.
+  // 菜单组的组装在 2026-09-27 从 App.vue 拆到 src/menuUi.ts（`allMenuGroups`），所以这条
+  // 「行为存在」的断言改用 shellSource()（App.vue + 各拆分模块）而不是只读 App.vue。
+  //
+  // 钉的是**位置不变量**而不是某一行写法：布局组必须在窗口菜单最顶部
+  // （`PlatformActions.xml:637-651`，前面那三条 Minimize/Zoom/MoveWindow 是 macOS 动作，本仓没有）。
+  // 原先这里钉的是 `windowRows.splice(afterSearch, 0, ...)` —— 而 `afterSearch` 来自一个全仓不存在的
+  // id（`window.searchEverywhere`），findIndex 得 −1、`+1` 变 0 才"碰巧"插对位置；实现换写法就误报。
+  assert.match(shellSource(), /\[\.\.\.layoutMenuRows\.value, \.\.\.windowMenuRows\]/,
+    'the layout group is not at the top of the Window menu')
 })
 
 // A snapshot is only worth restoring if it covers what the layout actually is, and only worth
 // storing if restoring writes those same places back.
 test('a snapshot covers every piece of the layout and is written back in full', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 快照的读写（captureToolLayout / applyToolLayout）在 2026-09-27 搬到 src/toolLayouts.ts，
+  // 所以这条用例读整个外壳。
+  const app = shellSource()
   const capture = app.slice(app.indexOf('function captureToolLayout'), app.indexOf('function applyToolLayout'))
   const apply = app.slice(app.indexOf('function applyToolLayout'), app.indexOf('function applyNamedToolLayout'))
   for (const field of ['explorer', 'bottom', 'view', 'tab', 'anchors', 'order', 'sizes'])
