@@ -126,7 +126,11 @@ test('拖出来的宽度跨重启保留，名称开关变化时由宿主调 appl
 // 所以宽度这一域只读存档，设置开关由宿主推。
 test('建模块时不许去读"宿主声明得更晚"的设置域（TDZ 回归）', () => {
   const stripes = read('src/toolWindowStripes.ts')
-  assert.ok(!/watch\(/.test(stripes), '这一层不能挂 watch：创建时求值会撞 TDZ')
+  // 允许 watch（换项目要换布局那一处），但它的源只能是**声明在模块之前**的 `workspace`；
+  // `showNames` / `compactMode` 声明在模块之后，任何在创建时求值的东西读它们都会撞 TDZ。
+  const sources = [...stripes.matchAll(/watch\(([^,]+),/g)].map(match => match[1])
+  assert.deepEqual(sources, ['() => deps.workspace.value?.root ?? null'], `watch 的源只有 workspace，实际：${sources.join(' | ')}`)
+  assert.ok(!/deps\.(showNames|compactMode)[^)]*\)\s*,/.test(stripes), '设置域只在函数体里读，不许进 watch 的源')
   assert.match(read('src/appearanceActions.ts'), /deps\.applyShowNamesWidths\?\.\(show\)/,
     'applyShowNames 要有宿主侧的触发点')
   assert.match(read('src/App.vue'), /applyShowNamesWidths/, '宿主要把这条接线接上')

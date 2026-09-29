@@ -6,8 +6,9 @@
 //
 // 状态自持（锚点表 + 顺序表 + 两份 localStorage 镜像），宿主只 import 同名变量，模板零改动 ——
 // 与 src/statusWidgets.ts、src/progressPanel.ts 同一个"状态模块"模式。
-import { computed, reactive, ref, type Ref } from 'vue'
+import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, shouldBeAvailable, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
+import { DEFAULT_PROJECT_FRAME_PROFILE, layoutMigrationKey, resolveProjectLayout, type LegacyMachineLayout, type StoredProjectLayout } from './toolLayoutProfiles.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
 import { sortedByMnemonicThenId } from './toolWindows.ts'
 import type { Workspace } from './bridge'
@@ -15,9 +16,16 @@ import type { Workspace } from './bridge'
 /** IDEA 的 `ToolWindowAnchor`（TaoCode 只用 left/right/bottom）。 */
 export type Anchor = 'left' | 'right' | 'bottom'
 
-const ANCHOR_STORAGE_KEY = 'taocode.toolAnchors'
-const ORDER_STORAGE_KEY = 'taocode.toolOrder'
-const HIDDEN_STRIPE_STORAGE_KEY = 'taocode.hiddenStripeButtons'
+// 布局是**项目级**的（上游：当前布局存在项目的 workspace 里，`WindowManagerImpl` 的 WindowInfo 集合；
+// 档案只负责"这个项目还没存过布局时给它种一套"，见 src/toolLayoutProfiles.ts）。
+// 旧版的三个**机器级**键保留：改版后第一次打开项目时把它们迁进来一次（`FORCE_ONCE` 的语义），
+// 之后新项目一律按档案播种 —— 不会把用户现有布局悄悄丢掉，也不会把它往每个项目上复制。
+const LEGACY_ANCHOR_STORAGE_KEY = 'taocode.toolAnchors'
+const LEGACY_ORDER_STORAGE_KEY = 'taocode.toolOrder'
+const LEGACY_HIDDEN_STRIPE_STORAGE_KEY = 'taocode.hiddenStripeButtons'
+const LAYOUT_MIGRATED_KEY = 'taocode.toolLayoutMigrated'
+/** 项目级布局的键：`taocode.toolLayout:<root>`（一份里含 anchors/order/hidden/version）。 */
+const projectLayoutKey = (root: string) => `taocode.toolLayout:${root}`
 
 export interface ToolWindowStripesDeps {
   isDesktop: boolean
@@ -59,14 +67,115 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   //   Local History 在 IDEA 是弹窗而非工具窗口（ShowHistoryAction）：TaoCode 同款为 App.vue
   //   里的 LocalHistoryDialog，不再占用磁贴。
   const toolAnchors = reactive<Record<ToolWindowId, Anchor>>({ ...DEFAULT_TOOL_ANCHORS })
-  try {
-    const saved = JSON.parse(localStorage.getItem(ANCHOR_STORAGE_KEY) ?? '{}') as Partial<Record<ToolWindowId, Anchor>>
-    for (const key of Object.keys(toolAnchors) as ToolWindowId[])
-      if (saved[key] === 'left' || saved[key] === 'right' || saved[key] === 'bottom') toolAnchors[key] = saved[key]!
-  } catch { /* corrupted state falls back to the anchors */ }
-  function saveToolAnchors() {
-    try { localStorage.setItem(ANCHOR_STORAGE_KEY, JSON.stringify(toolAnchors)) } catch { /* storage unavailable: kept for this session */ }
+  /** 当前布局属于哪个项目（null = 还没打开项目；档案馆与落盘都按它走）。 */
+  const layoutRoot = ref<string | null>(null)
+
+  function readJson<T>(key: string, fallback: T): T {
+    try {
+      const raw = JSON.parse(localStorage.getItem(key) ?? 'null') as unknown
+      return raw === null || raw === undefined ? fallback : raw as T
+    } catch { return fallback }
   }
+  function writeJson(key: string, value: unknown) {
+    try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* session-only */ }
+  }
+  function readStoredLayout(root: string): StoredProjectLayout | null {
+    const raw = readJson<unknown>(projectLayoutKey(root), null)
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const layout = raw as StoredProjectLayout
+    return {
+      anchors: layout.anchors && typeof layout.anchors === 'object' ? layout.anchors : {},
+      order: layout.order && typeof layout.order === 'object' ? layout.order : {},
+      hidden: Array.isArray(layout.hidden) ? layout.hidden.filter((id): id is ToolWindowId => typeof id === 'string') : [],
+    }
+  }
+  /** 旧版机器级布局（三键）——只在迁移那一次被读。 */
+  function readLegacyLayout(): LegacyMachineLayout | null {
+    const anchors = readJson<Partial<Record<ToolWindowId, Anchor>>>(LEGACY_ANCHOR_STORAGE_KEY, {})
+    const order = readJson<Partial<Record<Anchor, ToolWindowId[]>>>(LEGACY_ORDER_STORAGE_KEY, {})
+    const hidden = readJson<ToolWindowId[]>(LEGACY_HIDDEN_STRIPE_STORAGE_KEY, [])
+    const hasAnchors = anchors && typeof anchors === 'object' && Object.keys(anchors).length > 0
+    const hasOrder = order && typeof order === 'object' && Object.keys(order).length > 0
+    const hasHidden = Array.isArray(hidden) && hidden.length > 0
+    if (!hasAnchors && !hasOrder && !hasHidden) return null
+    return { anchors: hasAnchors ? anchors : {}, order: hasOrder ? order : {}, hidden: hasHidden ? hidden : [] }
+  }
+  function markLayoutMigrated() { try { localStorage.setItem(LAYOUT_MIGRATED_KEY, '1') } catch { /* session-only */ } }
+  function layoutMigrated(): boolean { try { return localStorage.getItem(LAYOUT_MIGRATED_KEY) === '1' } catch { return false } }
+  /** 该档案强推做到哪一版了（上游存在应用级 PropertiesComponent 里，`:13/57-63`）。 */
+  function appliedLayoutVersion(profileId: string): number {
+    const raw = readJson<unknown>(layoutMigrationKey(profileId), 0)
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
+  }
+  function markAppliedLayoutVersion(profileId: string, version: number) {
+    try { localStorage.setItem(layoutMigrationKey(profileId), String(version)) } catch { /* session-only */ }
+  }
+
+  /**
+   * 把一套存档布局叠到出厂默认上（键级覆盖 + 顺序补齐）。锚点表里出现过的窗口一律留在
+   * "出厂默认那一侧"或存档给的那一侧，之后 `normalizeOrder()` 会把每一侧补全。
+   */
+  function applyLayout(layout: StoredProjectLayout) {
+    for (const id of Object.keys(toolAnchors) as ToolWindowId[]) {
+      const anchor = layout.anchors?.[id]
+      toolAnchors[id] = anchor === 'left' || anchor === 'right' || anchor === 'bottom' ? anchor : DEFAULT_TOOL_ANCHORS[id]
+    }
+    toolOrder.value = {
+      left: [...DEFAULT_TOOL_ORDER.left], right: [...DEFAULT_TOOL_ORDER.right], bottom: [...DEFAULT_TOOL_ORDER.bottom],
+    }
+    for (const side of ['left', 'right', 'bottom'] as const) {
+      const list = layout.order?.[side]
+      if (Array.isArray(list))
+        toolOrder.value[side] = list.filter((id): id is ToolWindowId => typeof id === 'string' && Object.hasOwn(toolAnchors, id))
+    }
+    normalizeOrder()
+    hiddenStripeButtons.clear()
+    for (const id of layout.hidden ?? [])
+      if (Object.hasOwn(toolAnchors, id)) hiddenStripeButtons.add(id)
+  }
+  /** 锚点可能已保存而目标顺序缺失（旧版移动只写锚点）；每一侧都补齐自己的窗口。 */
+  function normalizeOrder() {
+    for (const side of ['left', 'right', 'bottom'] as const) {
+      const list = [...new Set(toolOrder.value[side])].filter(id => toolAnchors[id] === side)
+      const rest = (Object.keys(toolAnchors) as ToolWindowId[]).filter(id => toolAnchors[id] === side && !list.includes(id))
+      toolOrder.value[side] = [...list, ...rest]
+    }
+  }
+
+  /**
+   * 切到某个项目：读它的布局；没有就按**档案**播种（`resolveProjectLayout` 的两条应用模式 +
+   * 旧版机器级布局的一次性迁移）。上游等价物是 `ToolWindowLayoutProfileProviderService.getProfile()`
+   * + 项目打开时给窗口上种（`ToolWindowSetInitializer`）。
+   */
+  function applyProjectLayout(root: string | null) {
+    layoutRoot.value = root
+    if (!root) {
+      // 没打开项目时工作台根本不渲染（WelcomePage 那一支），布局保持出厂默认即可。
+      applyLayout({ anchors: {}, order: {}, hidden: [] })
+      return
+    }
+    const resolved = resolveProjectLayout({
+      stored: readStoredLayout(root),
+      appliedVersion: appliedLayoutVersion(DEFAULT_PROJECT_FRAME_PROFILE.id),
+      legacy: { layout: readLegacyLayout(), alreadyMigrated: layoutMigrated() },
+    })
+    applyLayout(resolved.layout)
+    if (resolved.persist) saveLayout()
+    if (resolved.migrated) markLayoutMigrated()
+    if (resolved.writeAppliedVersion !== null) markAppliedLayoutVersion(DEFAULT_PROJECT_FRAME_PROFILE.id, resolved.writeAppliedVersion)
+  }
+
+  /** 当前项目的整套布局落盘（一个键，三张表 + 档案版本）。 */
+  function saveLayout() {
+    const root = layoutRoot.value
+    if (!root) return
+    writeJson(projectLayoutKey(root), {
+      anchors: { ...toolAnchors },
+      order: { ...toolOrder.value },
+      hidden: [...hiddenStripeButtons],
+    } satisfies StoredProjectLayout)
+  }
+  function saveToolAnchors() { saveLayout() }
   function setToolAnchor(id: ToolWindowId, anchor: Anchor) {
     toolAnchors[id] = anchor
     for (const side of ['left', 'right', 'bottom'] as const) {
@@ -80,33 +189,16 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   }
   const activeAnchor = computed<Anchor>(() => toolAnchors[deps.activeView.value] ?? 'left')
   // IDEA's AbstractDroppableStripe lets a stripe button be dragged to another stripe
-  // (finishDrop -> setSideToolAndAnchor) or reordered in place. The order is a machine
-  // preference, so it persists next to the anchors.
+  // (finishDrop -> setSideToolAndAnchor) or reordered in place. The order belongs to the
+  // **project's** layout (upstream keeps it in the project's workspace file), so it
+  // persists inside the same per-project layout record as the anchors.
   // 每个锚点**只列属于它的**窗口 —— 之前这里把 `vcslog/todo/debug` 列在 `left` 下、`bottom` 却是空的，
   // 而 `stripeOrder` 是 `toolOrder[side].filter(id => toolAnchors[id] === side)`，于是底部那条的顺序
   // 永远排不出来（只能靠兜底顺序），左侧那条还得每次过滤掉三个不属于它的项。默认值要和 `toolAnchors` 一致。
   const toolOrder = ref<Record<Anchor, ToolWindowId[]>>({
     left: [...DEFAULT_TOOL_ORDER.left], right: [...DEFAULT_TOOL_ORDER.right], bottom: [...DEFAULT_TOOL_ORDER.bottom],
   })
-  try {
-    const saved = JSON.parse(localStorage.getItem(ORDER_STORAGE_KEY) ?? 'null') as Partial<Record<Anchor, ToolWindowId[]>> | null
-    if (saved) {
-      for (const side of ['left', 'right', 'bottom'] as const) {
-        const list = saved[side]
-        if (Array.isArray(list))
-          toolOrder.value[side] = list.filter((id): id is ToolWindowId => typeof id === 'string' && Object.hasOwn(toolAnchors, id))
-      }
-    }
-  } catch { /* corrupted state falls back to the default order */ }
-  // 锚点可能已保存而目标顺序缺失（旧版移动只写锚点）；每一侧都补齐自己的窗口。
-  for (const side of ['left', 'right', 'bottom'] as const) {
-    const list = [...new Set(toolOrder.value[side])].filter(id => toolAnchors[id] === side)
-    const rest = (Object.keys(toolAnchors) as ToolWindowId[]).filter(id => toolAnchors[id] === side && !list.includes(id))
-    toolOrder.value[side] = [...list, ...rest]
-  }
-  function saveToolOrder() {
-    try { localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(toolOrder.value)) } catch { /* session-only */ }
-  }
+  function saveToolOrder() { saveLayout() }
   /**
    * 「从侧栏移除」的窗口（`RemoveStripeButtonAction`，`ToolWindowImpl.kt:914-925`）：
    * 执行的是 `hideToolWindow(id, removeFromStripe = true)` —— 面板收起**并且**按钮从侧条上摘掉
@@ -114,15 +206,9 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
    * 这不是"隐藏"：隐藏只收面板，按钮还在（本仓的 `chromeHidden` / `explorer` 那条路）。
    * 与锚点/顺序一样是机器偏好，所以同样持久化。
    */
+  // 隐藏集与锚点/顺序同属项目的布局（`isShowStripeButton` 就存在 WindowInfo 里），所以一起落盘。
   const hiddenStripeButtons = reactive(new Set<ToolWindowId>())
-  try {
-    const saved = JSON.parse(localStorage.getItem(HIDDEN_STRIPE_STORAGE_KEY) ?? '[]') as unknown
-    if (Array.isArray(saved)) for (const id of saved)
-      if (typeof id === 'string' && Object.hasOwn(toolAnchors, id)) hiddenStripeButtons.add(id as ToolWindowId)
-  } catch { /* corrupted state falls back to "nothing was removed" */ }
-  function saveHiddenStripeButtons() {
-    try { localStorage.setItem(HIDDEN_STRIPE_STORAGE_KEY, JSON.stringify([...hiddenStripeButtons])) } catch { /* session-only */ }
-  }
+  function saveHiddenStripeButtons() { saveLayout() }
   /** `RemoveStripeButtonAction.actionPerformed`（`:923-925`）。 */
   function removeStripeButton(id: ToolWindowId) {
     hiddenStripeButtons.add(id)
@@ -258,6 +344,12 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   }
   // 该窗口当前的停靠边（`activeAnchor` 只回答"激活中的那个"，这里回答任意一个）。
   function anchorOf(id: ToolWindowId): Anchor { return toolAnchors[id] ?? 'left' }
+
+  // 建模块时按**当前项目**装配一次（`workspace` 在宿主里声明得比这里早，所以读它是安全的；
+  // `lspReady` / `gradleAvailable` 那类更晚声明的只在函数体里用，不走这条路）。
+  applyProjectLayout(deps.workspace.value?.root ?? null)
+  // 换项目 = 换一套布局（上游：项目的 workspace 里存着它自己的 WindowInfo）。
+  watch(() => deps.workspace.value?.root ?? null, root => applyProjectLayout(root))
 
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
            removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,

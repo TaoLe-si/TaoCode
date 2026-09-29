@@ -203,3 +203,17 @@
   与二进制查看器，两者都是**模式**不是标签。所以"把工具窗口/日志/引用拖进编辑区"这一族
   （`toolWindowInEditor`、`tabInEditor` 20 类）都等这条：先设计一个能承载任意组件的标签种类
   （上游是把它包装成 `FileEditor`），再谈那 20 个类。**不是不做，是排在那条机制之后**。
+
+## 13. 第四十批（布局档案 + 布局改成项目级）留下的
+
+- [x] **布局是项目级的**（`taocode.toolLayout:<root>`：anchors + order + hidden），旧的三键做了一次性迁移
+  （`taocode.toolLayoutMigrated`）。见 `docs/ui-placement-audit.md` §AR。
+- [x] **档案的两条应用模式**（`SEED_ONLY` / `FORCE_ONCE` + `migrationVersion`）与上游那条应用级迁移
+  标记（`toolwindow.layout.profile.migration.<profileId>` ⇒ 本仓 `taocode.toolLayoutMigration:<profileId>`）。
+- [~] **一个档案（`default`）**：本仓没有 EP，所以"某某框架一套自己的默认布局"就是往
+  `PROJECT_FRAME_PROFILES` 里加一条 —— 加的时候照 `ProjectFrameProfile` 的形状写覆盖即可。
+  上游是按产品/框架在 `com.intellij.projectFrameToolWindowLayout` 扩展点上各注册一份。
+- [~] **`ProjectFrameToolWindowLayoutBean` 里本仓模型没有的每窗口字段**：`weight`/`split`/`sideWeight`/
+  按窗口的 `contentUiType`/`visible`。它们要有落点，先得有**每窗口状态对象**（上游 `WindowInfoImpl`，
+  判决表 §C 第 9 条）—— 本仓现在把三张表平铺在一份项目布局里，没有 per-window 对象。
+  这不是"不做"，是排在那个对象之后（第 9 条现标"最有价值的下一条"）。

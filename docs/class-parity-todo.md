@@ -519,3 +519,17 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 `docs/ui-placement-audit.md` §AQ；判据 `tests/tool-window-registry.test.mjs`。
 
 **对后续批次的意义**：加一个工具窗口从"改 id 联合 + 四张表 + 一个可用性函数"降到"加一条记录 + 一个内容挂载点"。
+
+## 19. 布局档案与项目级布局（2026-09-29 第四十批）
+
+判决表 §C 第 10 条那一族已落地（明细见 `docs/ui-placement-audit.md` §AR）：
+
+- `src/toolLayoutProfiles.ts`：档案（出厂默认 + 每窗口覆盖）+ `SEED_ONLY` / `FORCE_ONCE` 两条应用模式
+  + 上游那条**应用级**迁移标记（`toolwindow.layout.profile.migration.<profileId>` 的等价键）。
+- 布局改成**项目级**（`taocode.toolLayout:<root>`：anchors + order + hidden），旧的三键一次性迁进
+  第一个打开的项目；此后新项目按档案播种。**这条改动对后续批次有两层意义**：
+  ① 用户的布局从此跟着项目走（与 IDEA 一致）；② 档案机制就位，将来"某框架一套默认布局"只是加一条记录。
+
+还差：档案里 `weight`/`split`/`sideWeight`/按窗口 `contentUiType` 这些字段要有落点，先得有每窗口状态
+对象（§C 第 9 条，现标"最有价值的下一条"）；理由是这些字段在 IDEA 里属于 `WindowInfoImpl`，
+而本仓把三张表平铺在一份项目布局记录里。

@@ -4,7 +4,7 @@
 
 四档（同 B1）：`[x]` 已移植 · `[~]` 部分 · `[ ]` 未移植（TODO）· `[-]` 不适用（附理由）
 
-> **本文档对 350 类逐条给判决**：§A/§B 讲有实现点的 84 条，§C 讲未移植 82 条，§D 讲不适用 182 条，§G 是**逐条总表**（350 行，机检对齐）。四档合计 9 + 75 + 82 + 184 = 350。
+> **本文档对 350 类逐条给判决**：§A/§B 讲有实现点的 87 条，§C 讲未移植 79 条，§D 讲不适用 182 条，§G 是**逐条总表**（350 行，机检对齐）。四档合计 11 + 76 + 79 + 184 = 350。
 >
 > 2026-09-29 第三十六批把 `ResizeStripeManager` 与 `MoreSquareStripeButton` 落了地（侧条拖宽 + 「更多」按钮，
 > 见 `docs/ui-placement-audit.md` §AN），顺带纠正三行写错的依据：`ToolWindowToolbar` / `ToolWindowLeftToolbar` /
@@ -130,7 +130,7 @@
 | `requestFocusInToolWindow` | `src/toolWindowActions.ts` 的 `focusToolWindowContent`（同名能力，形态不同） | 上游对具体组件类型的焦点偏好（表格/树/编辑器） |
 | `toolWindowNamesChange` / `toolwindow` | `src/toolWindowMeta.ts` 的 `toolTitles` 常量表 | 上游是运行时改名通道（本仓标题是常量，没有改名入口） |
 
-## C. 未移植（`[ ]`，82 类）—— 有真行为、本仓还没有
+## C. 未移植（`[ ]`，79 类）—— 有真行为、本仓还没有
 
 （第三十六批从这里移走 5 条：`ResizeStripeManager`、`MoreSquareStripeButton` 已落地；状态栏注册表那 5 行是第三十批的欠账，同批一起补判 —— 
 `ToolWindowToolbar` / `ToolWindowLeftToolbar` / `ToolWindowRightToolbar` 是侧条本体，原先按"窗口内工具栏"误判。）
@@ -148,7 +148,8 @@
 | 7 | `ToolWindowManager`（接口） | `ide-core/.../ToolWindowManager.java` | 上游查询面：`getToolWindow(id)`/`getToolWindows()`/`getToolWindowIds()`/`getActiveToolWindowId()`/`invokeLater(...)` |
 | ~~8~~ | `RegisterToolWindowTask` / `ToolWindowFactory` | `platform-api/.../wm/*` | **已落地（第三十九批）**：`src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY` 一条记录 = 一个工具窗口（id / 条纹标题 / 图标 / 锚点 / 助记符 / `shouldBeAvailable`），标题/图标/锚点/次序/助记符四张表全部由它派生。两处配套仍缺（`createToolWindowContent` 那一栏＝内容挂载点仍是模板链；EP 侧本就无宿主），见 `docs/ui-placement-audit.md` §AQ |
 | 9 | `ToolWindowManagerListener` / `ToolWindowManagerState` / `WindowInfoImpl` / `ToolWindowPaneState` / `ToolWindowEntry` / `ToolWindowSetInitializer` | `toolWindow/*`、`impl/*` | 上游的**每窗口状态对象**、状态持久化聚合、集合初始化 |
-| 10 | `ProjectFrameToolWindowLayout` / `ToolWindowLayoutProfileProvider` / `ToolWindowLayoutProfileMigrationHelper` | `toolWindow/*`、`impl/*` | 布局档案（每个项目/框架一套默认布局与 profile 迁移）。本仓只有工厂默认布局（`src/toolLayout.ts` 的命名布局是**用户**存的那一套，不是"按项目类型给的默认"）。**这是 §C 里最有价值的一条**：它缺的是**数据与一条设置键**（profile = 一组默认锚点/顺序），不像 13/14 那样等着一个还不存在的机制（编辑器标签承载任意内容） |
+| ~~10~~ | `ProjectFrameToolWindowLayout` / `ToolWindowLayoutProfileProvider` / `ToolWindowLayoutProfileMigrationHelper` | `toolWindow/*`、`impl/*` | **已落地（第四十批）**：`src/toolLayoutProfiles.ts`（档案 + `SEED_ONLY`/`FORCE_ONCE` + 上游那条应用级迁移标记）+ 布局改成**项目级**（`taocode.toolLayout:<root>`，旧的三键一次性迁进来）。`ProjectFrameToolWindowLayoutBean` 里还差几个本仓模型没有的每窗口字段（`weight`/`split`/`sideWeight`/按窗口的 `contentUiType`）—— 那属于下面第 9 条（每窗口状态对象），见 `docs/ui-placement-audit.md` §AR |
+| 9 | `ToolWindowManagerListener` / `ToolWindowManagerState` / `WindowInfoImpl` / `ToolWindowPaneState` / `ToolWindowEntry` / `ToolWindowSetInitializer` | `toolWindow/*`、`impl/*` | 上游的**每窗口状态对象**（`WindowInfoImpl`：anchor/order/`isVisible`/`isShowStripeButton`/`weight`/`split`/`contentUiType`/`sideWeight`）与状态持久化聚合。本仓现在把 anchor/顺序/隐藏集收在项目的**一份布局记录**里（第四十批），但没有 per-window 对象 —— **这是 §C 里最有价值的一条**：它是布局档案剩下那几个字段（weight/split/按窗口的 contentUiType）与"每窗口可见性/收藏"的前置，有真宿主（刚落地的那份项目布局记录） |
 | 11 | `ToolWindowHorizontalToolbar` / `ToolWindowStripeExtension` | `extendedToolWindowsUi/*` | TOP/底部的**横向**条纹与那套扩展点：本仓（与 2026.2 发货版）都没有这条形态 —— 2026.2 整包 jar 里已无 `ToolWindowStripeExtension`。`ToolWindowLeftToolbar` / `ToolWindowRightToolbar` / `ToolWindowToolbar` **不是**这一族（它们是侧条本体），第三十六批已实现 |
 | 12 | `ToolWindowButtonManager` / `ToolWindowPaneNewButtonManager` / `ToolWindowPaneOldButtonManager` / `StripeActionGroup` | `toolWindow/*` | 条纹按钮**管理器**（新/旧 UI 两套）与 `TopStripeActionGroup`（顶部条纹的动作组，本仓无顶部条纹）。拖条宽（`ResizeStripeManager`）与侧条「更多」（`MoreSquareStripeButton`）第三十六批已落地 |
 | 13 | `ToolWindowInnerDragHelper` / `ToolWindowToEditorTransfer` / `ToolWindowInEditorSupport` | `toolWindow/innerDrag/*`、`impl/content/*` | 跨区拖放（工具窗口 → 编辑区/另一窗口）。**前置机制**：编辑器标签现在绑定文件（`Tab extends DocumentData`），承载任意内容这件事还没有（登记在 `docs/source-todo.md` §12） |
@@ -291,7 +292,7 @@
 | `PowerSaveStatusWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/PowerSaveStatusWidgetFactory.java` | `[ ]` | §C：同上 |
 | `ProductTitleInfoProvider` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/simpleTitleParts/ProductTitleInfoProvider.kt` | `[ ]` | 标题分段 provider（产品名/版本/配置目录）：本仓窗口标题由宿主拼，没有分段模型 |
 | `ProductVersionTitleInfoProvider` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/simpleTitleParts/ProductVersionTitleInfoProvider.kt` | `[ ]` | 标题分段 provider（产品名/版本/配置目录）：本仓窗口标题由宿主拼，没有分段模型 |
-| `ProjectFrameToolWindowLayout` | `platform/platform-impl/src/com/intellij/toolWindow/ProjectFrameToolWindowLayout.kt` | `[ ]` | 按项目帧的布局档案 |
+| `ProjectFrameToolWindowLayout` | `platform/platform-impl/src/com/intellij/toolWindow/ProjectFrameToolWindowLayout.kt` | `[~]` | `src/toolLayoutProfiles.ts`：档案 = 出厂默认 + 每窗口覆盖（`anchor` / `hidden`＝上游 `register=false`）已落；bean 里本仓模型没有的字段（`visible`/`weight`/`split`/`sideWeight`/按窗口的 `contentUiType`）登记在 `docs/source-todo.md` §13 |
 | `ReadOnlyAttributeWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/ReadOnlyAttributeWidgetFactory.java` | `[ ]` | §C：行为在 App.vue 按钮里，无工厂层 |
 | `RegisterToolWindowTask` | `platform/platform-api/src/com/intellij/openapi/wm/RegisterToolWindowTask.kt` | `[x]` | `src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY`：一个窗口 = 一条声明式记录（id / 条纹标题 `stripeTitle` / 图标 / 锚点 `anchor` / 助记符），四张表全由它派生 |
 | `ResizeStripeManager` | `platform/platform-impl/src/com/intellij/toolWindow/ResizeStripeManager.kt` | `[x]` | `src/stripeResize.ts`（`checkMinMax` 的 [40,100]/33、`applyShowNames`、右侧取反、拖拽收尾）+ `src/toolWindowStripes.ts` 的两侧宽度 + `src/components/ToolStripe.vue` 的 1px 分隔线 |
@@ -339,8 +340,8 @@
 | `ToolWindowHorizontalToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/extendedToolWindowsUi/ToolWindowHorizontalToolbar.kt` | `[ ]` | 窗口内横向工具栏 |
 | `ToolWindowInEditorSupport` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/content/ToolWindowInEditorSupport.kt` | `[ ]` | 工具窗口进编辑器的支撑（同 tabInEditor 一族） |
 | `ToolWindowInnerDragHelper` | `platform/platform-impl/src/com/intellij/toolWindow/innerDrag/ToolWindowInnerDragHelper.kt` | `[ ]` | 跨区拖放内部实现 |
-| `ToolWindowLayoutProfileMigrationHelper` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/ToolWindowLayoutProfileMigrationHelper.kt` | `[ ]` | 档案迁移 |
-| `ToolWindowLayoutProfileProvider` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowLayoutProfileProvider.kt` | `[ ]` | 布局档案 provider |
+| `ToolWindowLayoutProfileMigrationHelper` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/ToolWindowLayoutProfileMigrationHelper.kt` | `[x]` | `src/toolLayoutProfiles.ts` 的 `layoutMigrationKey`（上游 `toolwindow.layout.profile.migration.<profileId>` 的等价键）+ `resolveProjectLayout` 的 `appliedVersion`/`writeAppliedVersion`（已应用版本 ≥ 档案版本就什么都不做） |
+| `ToolWindowLayoutProfileProvider` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowLayoutProfileProvider.kt` | `[x]` | `src/toolLayoutProfiles.ts` 的 `PROJECT_FRAME_PROFILES` / `projectFrameProfile(id)` / `resolveProjectLayout`（`SEED_ONLY` 与 `FORCE_ONCE` 两条语义 + `migrationVersion`） |
 | `ToolWindowLeftToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowLeftToolbar.kt` | `[~]` | `src/components/ToolStripe.vue`：左条与右条在本仓是**同一个组件**的 `side` 两个取值（上游也只是两个薄子类）；无 `bottomStripe` 那一半 |
 | `ToolWindowManager` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowManager.kt` | `[ ]` | 上游查询面：本仓散在 `src/toolWindowMeta.ts`/`src/toolWindowStripes.ts`/`src/toolWindowActions.ts` |
 | `ToolWindowManagerListener` | `platform/platform-api/src/com/intellij/openapi/wm/ex/ToolWindowManagerListener.java` | `[ ]` | 工具窗口事件监听（插件扩展点） |

@@ -35,8 +35,10 @@ test('moving a tool inserts one reachable stripe entry and persists both placeme
     assert.equal(h.stripeOrder.value(side).filter(id => id === 'files').length, 1)
     for (const other of ['left', 'right', 'bottom'].filter(anchor => anchor !== side))
       assert.equal(h.toolOrder.value[other].includes('files'), false)
-    assert.equal(JSON.parse(values.get('taocode.toolAnchors')).files, side)
-    assert.deepEqual(JSON.parse(values.get('taocode.toolOrder')), h.toolOrder.value)
+    // 布局是**项目级**的：一个键里含 anchors/order/hidden/version（src/toolLayoutProfiles.ts）。
+    const saved = JSON.parse(values.get('taocode.toolLayout:project') ?? '{"anchors":{},"order":{}}')
+    assert.equal(saved.anchors.files, side)
+    assert.deepEqual(saved.order, h.toolOrder.value)
   }
   assert.equal(h.deps.explorer.value, true)
   const order = [...h.stripeOrder.value('right')]
@@ -71,8 +73,12 @@ test('bottom content choices respect restored stripe order and availability', t 
 
 test('a saved anchor stays reachable when the saved target order is missing or stale', t => {
   const values = storage(t)
-  values.set('taocode.toolAnchors', JSON.stringify({ files: 'right', gradle: 'bottom' }))
-  values.set('taocode.toolOrder', JSON.stringify({ left: ['files', 'git'], bottom: ['todo', 'removed', 'todo'] }))
+  values.set('taocode.toolLayout:project', JSON.stringify({
+    anchors: { files: 'right', gradle: 'bottom' },
+    order: { left: ['files', 'git'], bottom: ['todo', 'removed', 'todo'] },
+    hidden: [],
+    version: 0,
+  }))
   const h = host()
   assert.deepEqual(h.stripeOrder.value('right'), ['notifications', 'files'])
   // 回填按 DEFAULT_TOOL_ORDER：bottom = vcslog→search→todo→debug→tests（search 已移到底部），

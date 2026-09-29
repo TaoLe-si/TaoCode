@@ -4,8 +4,8 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`929b947`（本机领先 `origin/main` 六个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
-  Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**，外加两份交接文档跟进）
+- HEAD：待提交（本机领先 `origin/main` 七个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+  Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**，外加两份交接文档跟进）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -20,7 +20,7 @@
 
 | 项 | 值 |
 |---|---|
-| 前端测试 | `npm test` → **1188 passed / 0 failed** |
+| 前端测试 | `npm test` → **1196 passed / 0 failed** |
 | 类型检查 | `npx vue-tsc --noEmit -p tsconfig.json` → 0 错 |
 | 前端构建 | `npx vite build --emptyOutDir false` → 成功 |
 | 原生构建 | `cmd //c scripts\build-native-locked.bat` → RC 0、0 error / 0 warning |
@@ -118,11 +118,13 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
    下一批候选在 `docs/class-parity-todo.md` §17 里逐窗口列了 —— `git` 提交窗口的「双击时显示」
    要先把"diff 开进编辑器标签"这个形态定下来（本仓 `DiffView` 只活在面板里），否则只能接「源」那一条
 4. `tabInEditor` 整组（20 类）——**先判断有没有宿主**，没有就如实记 `[-]`
-5. ~~工具窗口的注册机制~~ —— **已落地**（第三十九批，`docs/ui-placement-audit.md` §AQ：
-   `src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY`，一条记录 = 一个窗口，四张表由它派生）。
-   §C 现标"最有价值的下一条"的是**布局档案**（`ProjectFrameToolWindowLayout` /
-   `ToolWindowLayoutProfileProvider` / `…MigrationHelper`：本仓只有"用户存的命名布局"，
-   没有"按项目/框架给的默认布局档案"）—— 它缺的是数据与一条设置键。
+5. ~~工具窗口的注册机制~~ —— **已落地**（第三十九批，§AQ：`src/toolWindowMeta.ts` 的
+   `TOOL_WINDOW_REGISTRY`，一条记录 = 一个窗口，四张表由它派生）。
+   ~~布局档案~~ —— **已落地**（第四十批，§AR：`src/toolLayoutProfiles.ts` 的 `SEED_ONLY`/`FORCE_ONCE`
+   + 布局改成**项目级** `taocode.toolLayout:<root>`，旧三键一次性迁移）。
+   §C 现标"最有价值的下一条"的是**每窗口状态对象**（上游 `WindowInfoImpl`：anchor/order/visible/
+   isShowStripeButton/weight/split/contentUiType/sideWeight）—— 本仓现在把三张表平铺在一份项目布局里，
+   没有 per-window 对象；档案里剩下那几个字段、以及"每窗口可见性/收藏"都等它。
    §C 第 13/14 条（跨区拖放、`tabInEditor` 20 类）**共用同一个前置机制**：
    编辑器标签现在绑定文件（`Tab extends DocumentData`），"标签承载任意内容"这件事还没有，
    两条都排在它之后（登记在 `docs/source-todo.md` §12）
@@ -161,6 +163,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 ## 7. 最近的提交（知道上一批在干嘛）
 
 ```
+<待提交> feat(tool-windows): 布局档案 + 布局改成项目级（B2 §C 第 10 条）
 929b947 refactor(tool-windows): 工具窗口注册表 —— 一个窗口 = 一条记录
 607cf14 feat(vcs-log): 日志窗口自己的「视图选项」齿轮（标签名称 + 列的显示/隐藏）
 6044084 docs(handoff): 交接文档跟进（HEAD cd3622d）

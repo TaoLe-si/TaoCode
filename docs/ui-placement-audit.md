@@ -1979,3 +1979,43 @@ Alt+数字编号（只数 `numbered`）。
 判决表随之改：`RegisterToolWindowTask` `[x]`、`ToolWindowFactory` `[~]`、`ToolWindowEP` /
 `ToolWindowAllowlistEP` `[-]`（无插件运行时），四档计数 `8 + 74 + 86 + 182` → `9 + 75 + 82 + 184`；
 "最有价值的下一条"标记移到第 10 条（布局档案：缺的是数据与一条设置键，不像 13/14 那样等一个还不存在的机制）。
+
+## AR. 2026-09-29 第四十批：**布局档案** + 布局改成项目级（B2 §C 第 10 条）
+
+§C 里标着"最有价值的下一条"的就是这一族。做完它才发现：**档案本身只有一半** ——
+它要"项目还没存过布局时种一套"，而本仓的布局当时是**机器级**的（`taocode.toolAnchors` /
+`toolOrder` / `hiddenStripeButtons` 三个全局键），所以先把布局改成**项目级**，档案才有落点。
+两件事一起做，因为拆开任何一半都不可用。
+
+上游三条依据（`platform/platform-impl/src/com/intellij/`）：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `ToolWindowLayoutProfileProvider`：为一个档案解析布局，并给 `getApplyMode()` / `getMigrationVersion()` | `toolWindow/ToolWindowLayoutProfileProvider.kt`（`:20-34` 接口、`:36-46` 两个模式、`:63-110` 服务） | `src/toolLayoutProfiles.ts` 的 `ProjectFrameProfile` / `PROJECT_FRAME_PROFILES` / `resolveProjectLayout` |
+| `applyMode` 的两支：`SEED_ONLY` 直接 return、`FORCE_ONCE` 走一次强推 | `openapi/wm/impl/ToolWindowLayoutProfileMigrationHelper.kt:32-44` | `resolveProjectLayout` 的两条分支（`'stored'` / `'forced-profile'`） |
+| 强推的标记：应用级 `PropertiesComponent` 的 `toolwindow.layout.profile.migration.<profileId>` = **已应用的迁移版本**（≥ 档案版本就不再推） | 同文件 `:13`（键前缀）、`:52-70`（读→比→写） | `layoutMigrationKey(profileId)` = `taocode.toolLayoutMigration:<profileId>`；`appliedVersion` 进、`writeAppliedVersion` 出 |
+| 档案 = 出厂默认 + 每窗口覆盖（`anchor`/`visible`/`showStripeButton`/`weight`/`contentUiType`/`split`/`sideWeight`，`register=false` ⇒ 不注册这个窗口） | `toolWindow/ProjectFrameToolWindowLayout.kt` 的 `createLayout()`（`:141-190`） | `ProjectFrameWindowOverride`（`anchor`/`hidden` 两个本仓模型有的字段）+ `seededLayout()` 叠在注册表的出厂默认上 |
+| 布局属于**项目**（`WindowManagerImpl` 的 WindowInfo 集合住在项目的 workspace 文件里） | `openapi/wm/impl/WindowManagerImpl` | 一个项目一个键：`taocode.toolLayout:<root>`（anchors + order + hidden），换项目换一套 |
+
+**本仓特有的一步（如实登记）**：改版前那三个全局键没有上游对应物（IDEA 一开始就是 per-project），
+所以做了一次**一次性迁移**：第一次打开某个项目时，若它没有自己的布局而机器上有旧键，就把旧布局
+迁进**那个**项目并置 `taocode.toolLayoutMigrated`；此后新项目一律按档案播种 —— 既不丢用户现有布局，
+也不把它复制到每个项目上。这一步的语义正是 `FORCE_ONCE` 的"推一次就记账"。
+
+判据：`tests/tool-layout-profiles.test.mjs`（8 条：SEED_ONLY 不覆盖、没存过就播种、
+FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案表与迁移键、按项目分开存且换项目换布局、
+迁移的真行为、接线只写项目级键且旧键只读不写）。自证有牙：把"换项目换布局"那条 watch 拔掉，
+两条当场变红。另有三处旧测试的键名断言随改版更新（`tool-window-stripes` / `tool-layout-state` /
+`remove-stripe-button`），以及我上一批写的 TDZ 判据改成"watch 的源只能是 `workspace`"。
+
+**真 exe 取证（三个项目状态都走通）**：
+① 第一次打开项目 A（改版前机器上有旧全局布局）→ 生成 `taocode.toolLayout:E:/Applied Energistics 2 Acceleration`
+且内容就是旧布局（含用户当年排过的 `order.left = [git, outline, bookmarks, files]`）、`taocode.toolLayoutMigrated = '1'`、旧键原样保留（只读不写）；
+② 打开项目 B → 生成 B 自己的键，内容是**出厂默认**（`order.left = [files, git, outline, bookmarks]`），
+**没有**把 A 的布局复制过来（迁移只做一次）；
+③ 回到 A → A 的布局原样（含那条用户排过的顺序）。三次启动都是 **0 异常 0 报错**。
+
+判决表：`ToolWindowLayoutProfileProvider` / `ToolWindowLayoutProfileMigrationHelper` 判 `[x]`、
+`ProjectFrameToolWindowLayout` 判 `[~]`（差的是本仓模型没有的每窗口字段），四档计数
+`9 + 75 + 82 + 184` → `11 + 76 + 79 + 184`；"最有价值的下一条"随之移到第 9 条
+（每窗口状态对象 `WindowInfoImpl` —— 它正是剩下那几个字段的前置，有真宿主）。
