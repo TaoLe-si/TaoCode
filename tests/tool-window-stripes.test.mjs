@@ -35,10 +35,10 @@ test('moving a tool inserts one reachable stripe entry and persists both placeme
     assert.equal(h.stripeOrder.value(side).filter(id => id === 'files').length, 1)
     for (const other of ['left', 'right', 'bottom'].filter(anchor => anchor !== side))
       assert.equal(h.toolOrder.value[other].includes('files'), false)
-    // 布局是**项目级**的：一个键里含 anchors/order/hidden/version（src/toolLayoutProfiles.ts）。
-    const saved = JSON.parse(values.get('taocode.toolLayout:project') ?? '{"anchors":{},"order":{}}')
-    assert.equal(saved.anchors.files, side)
-    assert.deepEqual(saved.order, h.toolOrder.value)
+    // 布局是**项目级**的、每窗口一条记录（上游 WindowInfoImpl 的形状，src/toolLayoutProfiles.ts）。
+    const saved = JSON.parse(values.get('taocode.toolLayout:project') ?? '{"windows":{}}')
+    assert.equal(saved.windows.files?.anchor, side)
+    assert.equal(typeof saved.windows.files?.order, 'number', '顺序也写在同一条记录里')
   }
   assert.equal(h.deps.explorer.value, true)
   const order = [...h.stripeOrder.value('right')]
@@ -73,18 +73,19 @@ test('bottom content choices respect restored stripe order and availability', t 
 
 test('a saved anchor stays reachable when the saved target order is missing or stale', t => {
   const values = storage(t)
-  values.set('taocode.toolLayout:project', JSON.stringify({
-    anchors: { files: 'right', gradle: 'bottom' },
-    order: { left: ['files', 'git'], bottom: ['todo', 'removed', 'todo'] },
-    hidden: [],
-    version: 0,
-  }))
+  // 记录是**每窗口**的（`WindowInfo`）：`order` 是那一侧里的次序，没写的按出厂默认排在后面。
+  values.set('taocode.toolLayout:project', JSON.stringify({ windows: {
+    files: { anchor: 'right', order: 1 },
+    notifications: { anchor: 'right', order: 0 },
+    todo: { anchor: 'bottom', order: 0 },
+    gradle: { anchor: 'bottom', order: 1 },
+  } }))
   const h = host()
-  assert.deepEqual(h.stripeOrder.value('right'), ['notifications', 'files'])
-  // 回填按 DEFAULT_TOOL_ORDER：bottom = vcslog→search→todo→debug→tests（search 已移到底部），
-  // 挪过来的 gradle 排在默认成员之后；left = files→outline→bookmarks→history（无 search）。
-  assert.deepEqual(h.stripeOrder.value('bottom'), ['todo', 'vcslog', 'search', 'debug', 'gradle'])
-  assert.deepEqual(h.stripeOrder.value('left'), ['git', 'outline', 'bookmarks'])
+  assert.deepEqual(h.stripeOrder.value('right'), ['notifications', 'files'], 'order 0 在 1 之前')
+  // 记录里写过的按 `order` 排（它们就是用户排过的那些），没写过的按出厂默认接在后面
+  // （bottom 的默认 = vcslog→search→todo→debug）。
+  assert.deepEqual(h.stripeOrder.value('bottom'), ['todo', 'gradle', 'vcslog', 'search', 'debug'])
+  assert.deepEqual(h.stripeOrder.value('left'), ['git', 'outline', 'bookmarks'], 'left 一条记录都没有 ⇒ 全是出厂默认')
 })
 
 test('dragging across stripes still honors the requested insertion position', t => {

@@ -39,7 +39,7 @@ const editorState = orientation => ({
   groupActive: () => null, editorSettings: { bidiTextDirection: 'ltr' },
   markdownPreviewOn: false, markdownCapable: false, activePath: '', stickyLines: [],
   binaryView: null, bottom: true, chromeHidden: false, panelSizes: { output: 180 },
-  panelMax: () => 400, bottomContentUiType: 'tabbed', isTabbedContentUi: () => true,
+  panelMax: () => 400, contentUiType: () => 'tabbed', isTabbedContentUi: () => true,
   bottomTab: 'output', traces: [], runConfigName: '', runState: { running: false, exit: null },
   allProblems: [], references: [], hierRoot: null, isDesktop: false,
   bottomAnchoredIds: [], toolMenu: null, bottomTabIsToolWindow: false, openAnchorMenu: () => {},

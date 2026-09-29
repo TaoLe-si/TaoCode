@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { shellSource } from './shell-source.mjs'
 import { canToggleContentUiType, contentCountLabel, isTabbedContentUi, resolveContentUiType, toggledContentUiType } from '../src/toolWindowContentUi.ts'
+import { ref } from 'vue'
+import { createToolWindowStripes } from '../src/toolWindowStripes.ts'
 
 // ToolWindowContentUiType.getInstance (:33-45) only knows the two names, logs anything else and
 // returns TABBED — the same fallback a corrupted localStorage value must land on.
@@ -57,18 +59,79 @@ test('the content UI toggle is wired to a real combo rendering and is remembered
   const lines = app.split('\n')
   const row = lines.find(line => line.includes("id: 'window.toggleContentUiType'"))
   assert.ok(row, 'the Window menu has no 合并标签页 row')
-  assert.ok(row.includes('checked: () => isTabbedContentUi(bottomContentUiType.value)'), 'the row does not show the source checked state')
+  assert.ok(row.includes('checked: () => isTabbedContentUi(contentUiType())'), 'the row does not show the source checked state')
   assert.ok(row.includes('canToggleContentUiType(activeContentCount())'), 'the row does not use the source enable rule')
-  assert.ok(row.includes('toggledContentUiType('), 'the row does not flip the type')
+  assert.ok(row.includes('run: () => toggleContentUiType()'), 'the row does not flip the type')
 
-  assert.ok(strip.includes('v-if="isTabbedContentUi(bottomContentUiType)"'), 'the tab strip is not conditional on the type')
+  assert.ok(strip.includes('v-if="isTabbedContentUi(contentUiType())"'), 'the tab strip is not conditional on the type')
   assert.ok(strip.includes('class="output-content-select"'), 'there is no combo form of the content list')
   assert.ok(/<select[^>]*v-else class="output-content-select"/.test(strip), 'the combo is not the else branch of the strip')
   assert.ok(strip.includes('v-for="option in bottomTabOptions"'), 'the combo does not list the tool window contents')
-  assert.ok(app.includes("localStorage.setItem('taocode.toolWindowContentUi'"), 'the chosen type is not remembered')
-  assert.ok(app.includes('resolveContentUiType(localStorage.getItem('), 'the stored value is not validated on load')
+  // 形态改成**每个内容一份**、跟着项目布局走（上游 `WindowInfo.contentUiType`）：见第四十二批 §AT。
+  const stripes = readFileSync(new URL('../src/toolWindowStripes.ts', import.meta.url), 'utf8')
+  assert.ok(stripes.includes('function contentUiType(id: string)'), '内容形态不是每内容一份的读')
+  assert.ok(stripes.includes('function setContentUiType(id: string, type'), '内容形态没有写回项目布局')
+  assert.ok(stripes.includes("localStorage.getItem(LEGACY_CONTENT_UI_STORAGE_KEY)"), '旧全局键没有一次性采纳')
   // `getActiveToolWindowId()` — a single-view side window cannot use the toggle.
   assert.ok(/function activeContentCount\(\)[\s\S]{0,200}activeToolWindowDock\(\)/.test(app), 'the active tool window is not resolved from the focus owner')
+})
+
+// --- 内容形态是**每个内容一份**的（上游 `WindowInfo.contentUiType`，第四十二批）------------------
+
+function withStorage() {
+  const values = new Map()
+  const previous = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key),
+  }
+  return { values, restore: () => { globalThis.localStorage = previous } }
+}
+const stripes = workspace => createToolWindowStripes({
+  isDesktop: true, workspace, lspReady: { value: true }, gradleAvailable: { value: true },
+  explorer: { value: false }, activeView: { value: 'files' },
+})
+
+test('每个内容各记一份形态，默认都是 TABBED（WindowInfoImpl.contentUiType 的默认）', () => {
+  const storage = withStorage()
+  try {
+    const h = stripes({ value: { root: 'A' } })
+    for (const id of ['output', 'run', 'problems', 'references', 'vcslog', 'todo']) assert.equal(h.contentUiType(id), 'tabbed', id)
+    h.setContentUiType('output', 'combo')
+    assert.equal(h.contentUiType('output'), 'combo')
+    assert.equal(h.contentUiType('run'), 'tabbed', '只翻当前那一个，别的内容不动')
+    const saved = JSON.parse(storage.values.get('taocode.toolLayout:A'))
+    assert.equal(saved.windows.output?.contentUiType, 'combo', '形态跟着项目布局走（不是另一个全局键）')
+    assert.equal(saved.windows.run?.contentUiType, undefined, '没动过的内容不写死值')
+  } finally { storage.restore() }
+})
+
+test('形态跨重启保留，且按项目分开', () => {
+  const storage = withStorage()
+  try {
+    const workspace = ref({ root: 'A' })
+    stripes(workspace).setContentUiType('vcslog', 'combo')
+    assert.equal(stripes(workspace).contentUiType('vcslog'), 'combo', '重开还是那个形态')
+    const other = stripes({ value: { root: 'B' } })
+    assert.equal(other.contentUiType('vcslog'), 'tabbed', '另一个项目不受影响')
+    // 坏值当默认（`resolveContentUiType` 只认两个名字）。
+    storage.values.set('taocode.toolLayout:A', JSON.stringify({ windows: { vcslog: { contentUiType: 'COMBO' } } }))
+    assert.equal(stripes(workspace).contentUiType('vcslog'), 'tabbed')
+  } finally { storage.restore() }
+})
+
+test('改版前的全局键只做一次性采纳，用户点过的那个才有显式值', () => {
+  const storage = withStorage()
+  try {
+    storage.values.set('taocode.toolWindowContentUi', 'combo')   // 改版前的全局设置
+    const h = stripes({ value: { root: 'A' } })
+    assert.equal(h.contentUiType('output'), 'combo', '没写过记录的内容按旧键走（现状不变）')
+    assert.equal(h.contentUiType('terminal'), 'combo')
+    h.setContentUiType('terminal', 'tabbed')
+    assert.equal(h.contentUiType('terminal'), 'tabbed', '点过之后这一个有了显式值')
+    assert.equal(h.contentUiType('output'), 'combo', '别的仍按旧键')
+  } finally { storage.restore() }
 })
 
 // A Swing menu does not take focus, a DOM menu button does: without the top-bar fallback every row

@@ -546,3 +546,14 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 `ToolWindowHorizontalToolbar`、`ToolWindowStripeExtension`、`InspectionProfileWidgetFactory`、
 `TogglePopupHintsPanel`、`LibraryDependentToolWindow`、`LibrarySearchHelper`、`OpenProjectSelectionPredicateSupplier`。
 剩下的 `[ ]` 每一条都真有行为、都还没有。
+
+## 21. 每窗口状态对象第一刀（2026-09-29 第四十二批）
+
+§C 第 9 条落地一半：项目的布局记录改成**每窗口一条记录**（上游 `WindowInfoImpl` 的形状：
+`anchor`/`order`/`showStripeButton`/`contentUiType` + 上游默认值），`contentUiType` 因此从"一个全局键"
+变成**每个内容一份**（点「合并标签页」只影响当前那个内容，且跟着项目走）。明细见
+`docs/ui-placement-audit.md` §AT，还差的字段（`isVisible` / `weight` / `sideWeight` / `isSplit`）
+登记在 `docs/source-todo.md` §15。
+
+**对后续批次的意义**：布局记录从此是"每窗口一条"的，往里面加字段（下一个最可能是 `isVisible`）
+不用再动记录的形状 —— 那是这一批的主要收益。

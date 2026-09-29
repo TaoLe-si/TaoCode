@@ -54,16 +54,16 @@ test('扫描件是 350 类，且 §G 逐条覆盖（名字与路径都对得上�
 // 这里盯的是**自洽**：每档的数字与总数对得上，且判决表自己写的和数一致。
 // 计数随批次变化（第三十六批：`ResizeStripeManager` / `MoreSquareStripeButton` 判成 `[x]`、
 // 三行侧条本体类从误判的 `[ ]` 改成 `[~]`；同批把第三十批欠账的状态栏注册表 5 行补判：
-// 4 + 68 + 96 + 182 → 12 + 77 + 65 + 196）。这里盯的是**自洽**：每档数字与总数对得上，
+// 4 + 68 + 96 + 182 → 12 + 80 + 62 + 196）。这里盯的是**自洽**：每档数字与总数对得上，
 // 且判决表自己写的和数一致。
-test('四档计数自己加得起来（12 + 77 + 65 + 196 = 350）', () => {
+test('四档计数自己加得起来（12 + 80 + 62 + 196 = 350）', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
   assert.equal(count('[x]'), 12)
-  assert.equal(count('[~]'), 77)
-  assert.equal(count('[ ]'), 65)
+  assert.equal(count('[~]'), 80)
+  assert.equal(count('[ ]'), 62)
   assert.equal(count('[-]'), 196)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 350)
-  assert.match(verdict, /四档合计 12 \+ 77 \+ 65 \+ 196 = 350/, '文档头部的和数也要跟着改')
+  assert.match(verdict, /四档合计 12 \+ 80 \+ 62 \+ 196 = 350/, '文档头部的和数也要跟着改')
 })
 
 test('每个 [x]/[~] 行的依据必须指到真实存在的 src/ 或 native/ 文件（防"注释里提过就算移植"）', () => {

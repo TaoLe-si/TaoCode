@@ -103,7 +103,7 @@ import { foldConsoleLines } from './consoleFold'
 import { TOOL_MNEMONIC_ALIASES, TOOL_MNEMONIC_BINDINGS, toolIcons, toolTitles, toolWindowMnemonic, toolWindowOrder, type BottomTabId, type ToolWindowId } from './toolWindowMeta'
 import { listWidgets, showAllWidgets, showWidget, toggleWidget, widgetChecked, widgetClickable } from './statusWidgets'; import { statusLabel } from './statusBarText'
 import { createSessionSnapshot, restorePrompt } from './sessionSnapshot'
-import { bottomContentUiType, createToolWindowActions, lastDockFocus, type ToolWindowActionsContext } from './toolWindowActions'
+import { createToolWindowActions, lastDockFocus, type ToolWindowActionsContext } from './toolWindowActions'
 import { createToolStripeDrag } from './toolStripeDrag'
 import { createToolWindowStripes, type Anchor } from './toolWindowStripes'
 import { createGradleHost } from './gradleHost'; import { canLinkGradleProject } from './gradle'
@@ -230,7 +230,7 @@ const bottom = ref(false)
 // IDEA 的 ToolWindowAnchor：每个工具窗口记住自己停在哪一侧（`Anchor` 由状态域定义，见下）。
 // 工具窗口的停靠边 / 顺序 / 可用性是一个独立状态域，见 src/toolWindowStripes.ts
 // （2026-09-27 加 Gradle 工具窗口时从中拆出）。`toolDisabled` / `bottomAnchoredIds` 由它导出。
-const { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons, removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows, moreButtonVisible } = createToolWindowStripes({
+const { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons, removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows, moreButtonVisible, contentUiType: stripeContentUiType, setContentUiType: setStripeContentUiType } = createToolWindowStripes({
     isDesktop, explorer,
     // `lspReady` / `gradleAvailable` 在宿主里声明得比这里晚（TDZ），只能惰性传。
     workspace: { get value() { return workspace.value } },
@@ -349,11 +349,11 @@ function isLeftToolWindowId(id: string): id is ToolWindowId { return id in toolA
  * menu — means no tool window is active and the *last focused* one answers instead.
  */
 // 工具窗口的停靠判定/隐藏/循环/关闭：见 src/toolWindowActions.ts（一组一文件）。
-// lastDockFocus 与 bottomContentUiType（含持久化）由模块自持。
+// lastDockFocus 由模块自持；内容条形态（contentUiType）住在项目的布局记录里（src/toolWindowStripes.ts）。
 const { focusedDock, noteDockFocus, activeToolWindowDock, hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows,
   bottomTabAvailable, bottomContentCount, tabTargetCount, activeContentCount, bottomTabOptions, bottomTabLabel, selectReferenceTab, closeReferenceTab, pinReferenceTab, bottomSelectValue, pickBottomOption,
   selectNextTab, selectPreviousTab, cycleTab, toolTabPresence, clearToolTab, closeActiveTab, closeOtherToolTabs, closeOtherTabsTarget, closeAllToolTabs, closeAllTabsTarget, openToolMenu,
-  anchorMenu, anchorMenuAnchor, bottomTabIsToolWindow, openAnchorMenu, closeAnchorMenu, moveAnchorTo, canPinToolwindowTab, pinTabTitle, togglePinToolwindowTab } = createToolWindowActions({
+  anchorMenu, anchorMenuAnchor, bottomTabIsToolWindow, openAnchorMenu, closeAnchorMenu, moveAnchorTo, canPinToolwindowTab, pinTabTitle, togglePinToolwindowTab, contentUiType, toggleContentUiType } = createToolWindowActions({
   workspace: () => workspace,
   explorer, bottom,
   get bottomTab() { return bottomTab },
@@ -373,7 +373,7 @@ const { focusedDock, noteDockFocus, activeToolWindowDock, hideActiveToolWindow, 
   switchTabIn: (pane, tab) => switchTabIn(pane, tab),
   showOutput: tab => showOutput(tab),
   resetHierarchy: () => resetHierarchy(),
-  toolDisabled: id => toolDisabled(id), toolAnchors: () => toolAnchors, setToolAnchor, saveToolAnchors, showView,
+  toolDisabled: id => toolDisabled(id), toolAnchors: () => toolAnchors, setToolAnchor, saveToolAnchors, showView, contentUiType: id => stripeContentUiType(id), setContentUiType: (id, type) => setStripeContentUiType(id, type),
   focusToolWindowContent: id => focusToolWindowContent(id),
 })
 // --- drag & drop of stripe buttons (IDEA AbstractDroppableStripe) -----------
@@ -1652,7 +1652,7 @@ const windowMenuRows = createWindowMenuRows({
   savedChrome, hideAllToolWindowsTitle, canHideAllToolWindows, toggleMaximizeEditor, maximizedSide,
   canMaximize, maximizeActiveToolWindow, MAXIMIZE_SHORTCUT_LABEL, resizeTargetFor, stretchToolWindow,
   tabTargetCount, selectNextTab, selectPreviousTab, closeActiveTab, closeOtherTabsTarget, closeOtherToolTabs,
-  closeAllTabsTarget, closeAllToolTabs, bottomContentUiType, isTabbedContentUi, canToggleContentUiType,
+  closeAllTabsTarget, closeAllToolTabs, contentUiType, toggleContentUiType, isTabbedContentUi, canToggleContentUiType,
   activeContentCount, toggledContentUiType, progressOpen, noticeLog, closeFirstNotification, clearNotices,
   workspace, explorer, bottom, groups, allProblems, showOutput, openSettings,
   canPinToolwindowTab, pinTabTitle, togglePinToolwindowTab,
@@ -2179,7 +2179,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="bottom && !chromeHidden" class="resize-handle resize-output" role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" :aria-valuenow="panelSizes.output" :aria-valuemin="100" :aria-valuemax="panelMax('output')" tabindex="0" @pointerdown="startResize($event, 'output')" @keydown="resizeKey($event, 'output')" />
         <section v-if="bottom && !chromeHidden" class="output-panel">
-          <div class="output-heading"><div v-if="isTabbedContentUi(bottomContentUiType)" class="output-tabs"><button :class="{ selected: bottomTab === 'output' }" @click="showOutput('output')">操作输出 <span class="count-badge">{{ traces.length }}</span></button><button :class="{ selected: bottomTab === 'run' }" @click="showOutput('run')">{{ runConfigName ? `运行 '${runConfigName}'` : '运行' }} <span v-if="runState.running" class="count-badge">●</span><span v-else-if="runState.exit !== null" class="count-badge">exit {{ runState.exit }}</span></button><button :class="{ selected: bottomTab === 'problems' }" @click="showOutput('problems')">问题 <span class="count-badge">{{ allProblems.length }}</span></button><span v-for="tab in referenceTabs" :key="`ref:${tab.id}`" class="output-tab-closeable"><button :class="{ selected: bottomTab === 'references' && tab.selected }" :title="tab.tooltip" @click="selectReferenceTab(tab.id)">{{ tab.searching ? '正在查找…' : tab.label }} <span class="count-badge">{{ tab.count }}</span></button><button class="icon-button output-tab-pin" :class="{ pinned: tab.pinned }" :aria-pressed="tab.pinned" :aria-label="`${tab.pinned ? '取消钉住' : '钉住'}：${tab.label}`" :title="tab.pinned ? '取消钉住（钉住后不会被下一次搜索顶替）' : '钉住（钉住后不会被下一次搜索顶替）'" @click.stop="pinReferenceTab(tab.id)"><Pin :size="11" /></button><button class="icon-button output-tab-close" :aria-label="`关闭：${tab.label}`" title="关闭" @click.stop="closeReferenceTab(tab.id)"><X :size="11" /></button></span><button v-if="hierRoot" :class="{ selected: bottomTab === 'hierarchy' }" @click="showOutput('hierarchy')">{{ hierTitle }} <span class="count-badge">{{ hierItems.length }}</span></button><button :class="{ selected: bottomTab === 'terminal' }" @click="showOutput('terminal')"><SquareTerminal :size="11" /> 终端</button><!-- 停靠在底部的工具窗口（DEFAULT_TOOL_ANCHORS 里 vcslog/todo/debug/tests 默认就在底部）：
+          <div class="output-heading"><div v-if="isTabbedContentUi(contentUiType())" class="output-tabs"><button :class="{ selected: bottomTab === 'output' }" @click="showOutput('output')">操作输出 <span class="count-badge">{{ traces.length }}</span></button><button :class="{ selected: bottomTab === 'run' }" @click="showOutput('run')">{{ runConfigName ? `运行 '${runConfigName}'` : '运行' }} <span v-if="runState.running" class="count-badge">●</span><span v-else-if="runState.exit !== null" class="count-badge">exit {{ runState.exit }}</span></button><button :class="{ selected: bottomTab === 'problems' }" @click="showOutput('problems')">问题 <span class="count-badge">{{ allProblems.length }}</span></button><span v-for="tab in referenceTabs" :key="`ref:${tab.id}`" class="output-tab-closeable"><button :class="{ selected: bottomTab === 'references' && tab.selected }" :title="tab.tooltip" @click="selectReferenceTab(tab.id)">{{ tab.searching ? '正在查找…' : tab.label }} <span class="count-badge">{{ tab.count }}</span></button><button class="icon-button output-tab-pin" :class="{ pinned: tab.pinned }" :aria-pressed="tab.pinned" :aria-label="`${tab.pinned ? '取消钉住' : '钉住'}：${tab.label}`" :title="tab.pinned ? '取消钉住（钉住后不会被下一次搜索顶替）' : '钉住（钉住后不会被下一次搜索顶替）'" @click.stop="pinReferenceTab(tab.id)"><Pin :size="11" /></button><button class="icon-button output-tab-close" :aria-label="`关闭：${tab.label}`" title="关闭" @click.stop="closeReferenceTab(tab.id)"><X :size="11" /></button></span><button v-if="hierRoot" :class="{ selected: bottomTab === 'hierarchy' }" @click="showOutput('hierarchy')">{{ hierTitle }} <span class="count-badge">{{ hierItems.length }}</span></button><button :class="{ selected: bottomTab === 'terminal' }" @click="showOutput('terminal')"><SquareTerminal :size="11" /> 终端</button><!-- 停靠在底部的工具窗口（DEFAULT_TOOL_ANCHORS 里 vcslog/todo/debug/tests 默认就在底部）：
              IDEA 的底部工具窗口条列出该窗口的全部 content，TaoCode 的这条 tab 条就是那个入口 ——
              少了它，这四个窗口除了从条纹点进来之外没有任何常驻入口。 --><button v-for="id in bottomAnchoredIds" :key="`tool:${id}`" :class="{ selected: bottomTab === id }" :title="`${toolTitles[id]}（停靠在底部；右键可移回左侧/右侧）`" @click="showOutput(id)" @contextmenu.prevent="openAnchorMenu(id, $event)">{{ toolTitles[id] }}</button><button v-if="bottomTabIsToolWindow" class="icon-button output-tabs-options" aria-label="调整此工具窗口的停靠位置" title="调整此工具窗口的停靠位置（左侧 / 右侧 / 底部）" @click="openAnchorMenu(bottomTab, $event)"><MoreVertical :size="14" aria-hidden="true" /></button></div><select v-else class="output-content-select" aria-label="工具窗口内容" :value="bottomSelectValue" @change="pickBottomOption(($event.target as HTMLSelectElement).value)"><option v-for="option in bottomTabOptions" :key="option.id" :value="option.id">{{ option.label }}</option></select><div class="heading-actions"><span class="small-muted">{{ isDesktop ? 'C++ BRIDGE' : 'PREVIEW ADAPTER' }}</span><ToolWindowGear :rows="bottomGearRows" label="输出窗口选项" @pick="pickEditorPopup($event)" /><button class="icon-button" title="收起输出" aria-label="收起输出" @click="bottom = false"><X :size="14" /></button></div></div>
           <div v-if="bottomTab === 'output'" class="output-lines" role="log" aria-label="操作输出">

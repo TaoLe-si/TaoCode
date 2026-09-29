@@ -20,16 +20,16 @@ import { createToolWindowStripes } from '../src/toolWindowStripes.ts'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 
-const stored = (extra = {}) => ({ anchors: {}, order: {}, hidden: [], ...extra })
+const stored = (windows = {}) => ({ windows })
 const input = (extra = {}) => ({ stored: null, appliedVersion: 0, legacy: { layout: null, alreadyMigrated: true }, ...extra })
 
 test('项目存过布局就不再动它（SEED_ONLY 的本义：上游 applyProjectFrameLayoutPolicy 里 SEED_ONLY 直接 return）', () => {
-  const mine = stored({ anchors: { files: 'right' } })
+  const mine = stored({ files: { anchor: 'right' } })
   const result = resolveProjectLayout(input({ stored: mine }))
   assert.equal(result.reason, 'stored')
   assert.equal(result.persist, false, '不许覆盖用户的布局')
   assert.equal(result.writeAppliedVersion, null, 'SEED_ONLY 不写迁移版本')
-  assert.equal(result.layout.anchors.files, 'right')
+  assert.equal(result.layout.windows.files?.anchor, 'right')
 })
 
 test('项目没存过布局 ⇒ 按档案播种并落盘', () => {
@@ -43,10 +43,10 @@ test('FORCE_ONCE：已应用版本比档案旧才强推一次，推完记下版�
     windows: { files: { anchor: 'right' }, notifications: { hidden: true } } }
   const forced = resolveProjectLayout(input({ stored: stored(), appliedVersion: 1, profile }))
   assert.equal(forced.reason, 'forced-profile')
-  assert.equal(forced.layout.anchors.files, 'right', '档案的覆盖要生效')
-  assert.deepEqual(forced.layout.hidden, ['notifications'], 'hidden 覆盖也要生效')
+  assert.equal(forced.layout.windows.files?.anchor, 'right', '档案的覆盖要生效')
+  assert.equal(forced.layout.windows.notifications?.showStripeButton, false, 'hidden 覆盖也要生效')
   assert.equal(forced.writeAppliedVersion, 2, '推完要把版本写进迁移标记，下次不再推')
-  const current = resolveProjectLayout(input({ stored: stored({ anchors: { files: 'left' } }), appliedVersion: 2, profile }))
+  const current = resolveProjectLayout(input({ stored: stored({ files: { anchor: 'left' } }), appliedVersion: 2, profile }))
   assert.equal(current.reason, 'stored', '版本已经跟上了，就不再动用户的东西')
   const seeded = resolveProjectLayout(input({ stored: null, appliedVersion: 2, profile }))
   assert.equal(seeded.reason, 'seeded-profile', '没存过就是播种（不论 applyMode）')
@@ -54,14 +54,14 @@ test('FORCE_ONCE：已应用版本比档案旧才强推一次，推完记下版�
 })
 
 test('旧版机器级布局只迁一次，之后的新项目按档案播种', () => {
-  const legacy = { anchors: { outline: 'right' }, order: { right: ['outline'] }, hidden: [] }
+  const legacy = { windows: { outline: { anchor: 'right', order: 0 } } }
   const first = resolveProjectLayout(input({ legacy: { layout: legacy, alreadyMigrated: false } }))
   assert.equal(first.reason, 'legacy-migration')
-  assert.equal(first.layout.anchors.outline, 'right', '用户现有的布局不能被丢掉')
+  assert.equal(first.layout.windows.outline?.anchor, 'right', '用户现有的布局不能被丢掉')
   assert.equal(first.migrated, true, '要置迁移标记')
   const second = resolveProjectLayout(input({ legacy: { layout: legacy, alreadyMigrated: true } }))
   assert.equal(second.reason, 'seeded-profile', '迁过一次之后，新项目按档案来')
-  assert.equal(second.layout.anchors.outline, undefined)
+  assert.equal(second.layout.windows.outline, undefined)
 })
 
 test('档案表与版本读取', () => {
@@ -95,7 +95,7 @@ test('布局按项目分开存：改一个项目的布局不影响另一个', as
     const stripes = host(workspace)
     stripes.setToolAnchor('files', 'right')
     const savedA = JSON.parse(storage.values.get('taocode.toolLayout:A'))
-    assert.equal(savedA.anchors.files, 'right', '落在 A 的键上')
+    assert.equal(savedA.windows.files?.anchor, 'right', '落在 A 的键上')
     assert.equal(storage.values.has('taocode.toolLayout:B'), false, '不许顺手给 B 写一份')
 
     workspace.value = { root: 'B' }

@@ -22,14 +22,58 @@
 // 所以将来"某个框架一套默认布局"就是往 `PROJECT_FRAME_PROFILES` 里加一条 ——
 // 这也是 §C 第 10 条剩下的那一半（登记在 docs/source-todo.md §13）。
 import type { ToolWindowId, ToolWindowAnchor } from './toolWindowMeta.ts'
+import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
 
 /** `ToolWindowLayoutApplyMode`（`ToolWindowLayoutProfileProvider.kt:36-46`）。 */
 export type ToolWindowLayoutApplyMode = 'seedOnly' | 'forceOnce'
 
-/** 一个窗口在档案里的覆盖项 —— 对应上游 bean 里那些**可空**属性，没写的就沿用出厂默认。 */
-export interface ProfileWindowOverride {
-  /** `anchor`。 */
+/**
+ * 一个工具窗口在布局里的状态 —— IDEA `WindowInfoImpl`（`openapi/wm/impl/WindowInfoImpl.kt`）在本仓的那几个字段。
+ * 上游字段面与默认值（`:34-105`）：`anchor` = LEFT、`isVisible` = false、`isShowStripeButton` = true、
+ * `weight` = 0.33、`sideWeight` = 0.5、`isSplit` = false、`contentUiType` = TABBED、`order` = -1。
+ *
+ * 本仓能兑现的（只写这几个，别的登记在 `docs/source-todo.md` §15）：
+ *   · `anchor` / `order` —— 停靠边与条纹次序（`src/toolWindowStripes.ts` 的两张运行时表由它派生）；
+ *   · `showStripeButton` —— 上游同名字段（`RemoveStripeButtonAction` 把它置 false，本仓的"从侧栏移除"）；
+ *   · `contentUiType` —— 内容条是标签还是下拉（`src/toolWindowContentUi.ts`）。
+ * 没兑现的：`isVisible`（每窗口可见 + 打开项目时恢复）、`weight`/`sideWeight`/`isSplit`
+ * （本仓的"每个窗口各自尺寸"是另一条路：`panelResize.ts` 的 `rememberSizeForEachToolWindow`）。
+ */
+export interface WindowInfo {
   anchor?: ToolWindowAnchor
+  /** `WindowInfoImpl.order`（默认 -1 = 还没排过）。 */
+  order?: number
+  /** `isShowStripeButton`（默认 true）。 */
+  showStripeButton?: boolean
+  /** `contentUiType`（默认 TABBED）。 */
+  contentUiType?: ToolWindowContentUiType
+}
+
+/** 上游默认值里本仓会用到的那两个（`anchor`/`order` 的默认在注册表与顺序表里）。 */
+export const WINDOW_INFO_DEFAULTS = { showStripeButton: true, contentUiType: 'tabbed' } as const
+
+/** 空记录（"这个窗口在布局里还没有任何显式状态"）。 */
+export function windowInfoOf(layout: StoredProjectLayout | null, id: string): WindowInfo {
+  return layout?.windows?.[id] ?? {}
+}
+
+/** `WindowInfoImpl.isShowStripeButton` 的默认值 true ⇒ 只有显式 false 才是"摘掉了"。 */
+export function stripeButtonShown(info: WindowInfo): boolean {
+  return info.showStripeButton !== false
+}
+
+/** `WindowInfoImpl.contentUiType`：没写就是 TABBED（`resolveContentUiType` 也兜底到它）。 */
+export function contentUiTypeOf(info: WindowInfo): ToolWindowContentUiType {
+  return resolveContentUiType(info.contentUiType)
+}
+
+/** 写一个窗口的一段状态（不改原对象）。 */
+export function withWindowInfo(layout: StoredProjectLayout, id: string, patch: WindowInfo): StoredProjectLayout {
+  return { ...layout, windows: { ...layout.windows, [id]: { ...windowInfoOf(layout, id), ...patch } } }
+}
+
+/** 一个窗口在档案里的覆盖项 —— 与 `WindowInfo` 同一形状，没写的就沿用出厂默认。 */
+export interface ProfileWindowOverride extends WindowInfo {
   /** `showStripeButton = false`：这个档案里不注册这个窗口（`createLayout` 里 `infos.remove(id)`）。 */
   hidden?: boolean
 }
@@ -65,11 +109,12 @@ export function projectFrameProfile(id: string): ProjectFrameProfile | undefined
   return PROJECT_FRAME_PROFILES.find(profile => profile.id === id)
 }
 
-/** 项目里存过的那套布局（键是项目根；三个字段与 `toolWindowStripes` 的三张表一一对应）。 */
+/**
+ * 项目里存过的那套布局（键是项目根）：**按窗口一条记录**（上游 `ToolWindowManagerState` 存的就是
+ * 一串 `<window_info>`，每个窗口一条），不再是"锚点表 / 顺序表 / 隐藏集"三张投影。
+ */
 export interface StoredProjectLayout {
-  anchors: Partial<Record<ToolWindowId, ToolWindowAnchor>>
-  order: Partial<Record<ToolWindowAnchor, ToolWindowId[]>>
-  hidden: ToolWindowId[]
+  windows: Record<string, WindowInfo>
 }
 
 /** 旧版的**机器级**布局（改版前 `taocode.toolAnchors` 那一套）。只在迁移那一次被采纳。 */
@@ -143,14 +188,14 @@ export function resolveProjectLayout(input: ResolveLayoutInput): ResolveLayoutRe
 
 /** 档案的布局 = 出厂默认 + 覆盖（上游 `createLayout()` 的等价物）。 */
 function seededLayout(profile: ProjectFrameProfile): StoredProjectLayout {
-  const anchors: StoredProjectLayout['anchors'] = {}
-  const hidden: ToolWindowId[] = []
+  const windows: Record<string, WindowInfo> = {}
   for (const [id, override] of Object.entries(profile.windows ?? {}) as Array<[ToolWindowId, ProfileWindowOverride]>) {
-    if (override.anchor) anchors[id] = override.anchor
-    if (override.hidden) hidden.push(id)
+    const { hidden, ...info } = override
+    if (hidden) info.showStripeButton = false
+    windows[id] = info
   }
-  // `order` 留空：顺序的出厂默认在注册表里（`DEFAULT_TOOL_ORDER`），调用方叠的时候会补齐。
-  return { anchors, order: {}, hidden }
+  // `order` 不写：顺序的出厂默认在注册表里（`DEFAULT_TOOL_ORDER`），调用方铺的时候会补齐。
+  return { windows }
 }
 
 /**

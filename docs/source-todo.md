@@ -236,3 +236,21 @@
 - [~] **鼠标点击不把焦点带进工具栏**（`:56-58`：`isRequestFocusEnabled = false`）：
   浏览器里点按钮本来就会聚焦它，与上游相反。改它等于禁掉一个浏览器原生行为，
   先登记；真要改就在工具栏根上拦 `pointerdown` 的默认聚焦（会影响所有子控件）。
+
+## 15. 第四十二批（每窗口状态对象第一刀）留下的
+
+上游 `WindowInfoImpl` 的字段面（`platform/platform-impl/src/com/intellij/openapi/wm/impl/WindowInfoImpl.kt:34-105`），
+本仓已经兑现的与还差的：
+
+- [x] `anchor` / `order` / `showStripeButton` / `contentUiType`：住进项目的**每窗口记录**
+  （`src/toolLayoutProfiles.ts` 的 `WindowInfo`），形态按内容一份（`contentUiType`）。
+- [~] **`isVisible`**（上游默认 false，"打开项目时恢复上次那些工具窗口"）：本仓的可见性是
+  `explorer` / `bottom` / `leftView` / `bottomTab` 几个**全局 ref**，没有"每个窗口各自可见"这一层。
+  要做：记录里写 `isVisible`，项目打开时按它恢复侧栏与底部（宿主在 App.vue 的工作区生命周期里接线）。
+- [~] **`weight` / `sideWeight`**（上游 0.33 / 0.5，"这个窗口占内部桌面多大"）：本仓的等价物是
+  `panelResize.ts` 的"记住每个工具窗口各自的尺寸"（`rememberSizeForEachToolWindow`），
+  与布局记录是**两条路**；合并与否要看"尺寸该不该跟着项目走"（现在跟着项目走的是 `panelSizes`？不是）。
+- [~] **`isSplit`**（上游 V2 默认给 Structure 设 true，"与相邻窗口分成两栏"）：本仓没有"窗口内分栏"这个形态。
+- [~] `ToolWindowPaneState`（每 pane 的可见性/条纹叠加开关）与 `ToolWindowEntry`（运行期条目对象）：
+  本仓的 dock 是全局 ref、窗口集合是常量表，没有对应对象；`ToolWindowSetInitializer` 那一半
+  （建模块时装配 + 换项目再装配）已由 `applyProjectLayout` 承担。

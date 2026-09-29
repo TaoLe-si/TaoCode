@@ -52,7 +52,10 @@ export interface WindowMenuContext {
   closeAllTabsTarget: () => boolean
   closeAllToolTabs: () => unknown
   /** 底部 dock 的内容呈现方式（tabbed / combo）。 */
-  bottomContentUiType: { value: any }
+  /** 当前内容的内容条形态（`WindowInfo.contentUiType`，由 `src/toolWindowStripes.ts` 自持）。 */
+  contentUiType: () => any
+  /** 切**当前**内容的形态（上游 `ToggleContentUiTypeAction` 作用在活动工具窗口上）。 */
+  toggleContentUiType: () => void
   isTabbedContentUi: (mode: any) => boolean
   canToggleContentUiType: (count: number) => boolean
   activeContentCount: () => number
@@ -84,7 +87,7 @@ export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
     savedChrome, hideAllToolWindowsTitle, canHideAllToolWindows, toggleMaximizeEditor, maximizedSide,
     canMaximize, maximizeActiveToolWindow, MAXIMIZE_SHORTCUT_LABEL, resizeTargetFor, stretchToolWindow,
     tabTargetCount, selectNextTab, selectPreviousTab, closeActiveTab, closeOtherTabsTarget, closeOtherToolTabs,
-    closeAllTabsTarget, closeAllToolTabs, bottomContentUiType, isTabbedContentUi, canToggleContentUiType,
+    closeAllTabsTarget, closeAllToolTabs, contentUiType, toggleContentUiType, isTabbedContentUi, canToggleContentUiType,
     activeContentCount, toggledContentUiType, progressOpen, noticeLog, closeFirstNotification, clearNotices,
     workspace, explorer, bottom, groups, allProblems, showOutput, openSettings,
     pinTabTitle, canPinToolwindowTab, togglePinToolwindowTab,
@@ -170,7 +173,7 @@ export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
     // dock alone, so the row stays inert while a single-view side window is the active one.
     // The label is the action's own text (`ActionsBundle.properties:1167` "Group Tabs", description
     // "Toggle between tabbed/combo presentation of contents").
-    { id: 'window.toggleContentUiType', title: '合并标签页', keywords: 'group tabs toggle tabbed combo presentation 合并标签页 内容呈现', checked: () => isTabbedContentUi(bottomContentUiType.value), enabled: () => canToggleContentUiType(activeContentCount()), run: () => { bottomContentUiType.value = toggledContentUiType(!isTabbedContentUi(bottomContentUiType.value)) } },
+    { id: 'window.toggleContentUiType', title: '合并标签页', keywords: 'group tabs toggle tabbed combo presentation 合并标签页 内容呈现', checked: () => isTabbedContentUi(contentUiType()), enabled: () => canToggleContentUiType(activeContentCount()), run: () => toggleContentUiType() },
     // WindowMenu › ActiveToolwindowGroup › ResizeToolWindowGroup —— IDEA 里这一组是**子菜单**
     // (`<group id="ResizeToolWindowGroup" popup="true">`, PlatformActions.xml:680-686，子项依次是
     // ResizeToolWindowLeft/Right/Up/Down)。以前用 section 标题顶替，现在菜单模型有 children，就真的做成子菜单。

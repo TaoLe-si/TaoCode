@@ -73,7 +73,8 @@ test('再激活就回来（showToolWindowImpl 的 isShowStripeButton = true）',
 test('移除是持久化的（机器偏好，与锚点/顺序同类）', () => {
   withStorage(store => {
     makeStripes().removeStripeButton('bookmarks')
-    assert.ok(JSON.parse(store.get('taocode.toolLayout:D:/p')).hidden.includes('bookmarks'), '要落盘（项目级布局里的 hidden）')
+    assert.equal(JSON.parse(store.get('taocode.toolLayout:D:/p')).windows.bookmarks?.showStripeButton, false,
+      '要落盘（项目级布局里那条记录的 showStripeButton）')
     const reopened = makeStripes()
     assert.equal(reopened.stripeOrder.value('left').includes('bookmarks'), false, '重开之后仍然是移除状态')
   })
@@ -81,7 +82,9 @@ test('移除是持久化的（机器偏好，与锚点/顺序同类）', () => {
 
 test('坏掉的存档不会让侧条变空（只认表里存在的窗口 id）', () => {
   withStorage(store => {
-    store.set('taocode.toolLayout:D:/p', JSON.stringify({ anchors: {}, order: {}, hidden: ['outline', '不存在的窗口', 42, null], version: 0 }))
+    store.set('taocode.toolLayout:D:/p', JSON.stringify({ windows: {
+      outline: { showStripeButton: false }, '不存在的窗口': { showStripeButton: false },
+    } }))
     const stripes = makeStripes()
     assert.deepEqual([...stripes.hiddenStripeButtons], ['outline'], '认不出的项丢掉，其余照收')
     assert.equal(stripes.stripeOrder.value('left').includes('files'), true, '与坏存档无关的窗口不受影响')

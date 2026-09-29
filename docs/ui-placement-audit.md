@@ -2074,3 +2074,40 @@ FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案
 判决表四档计数随之 `11 + 76 + 79 + 184` → `12 + 77 + 65 + 196 = 350`。
 **剩下 65 条 `[ ]` 现在每一条都是"真有行为、本仓还没有"**（含 §C 里那 20 条 tabInEditor 与 13/14 的跨区拖放，
 它们等的是"编辑器标签承载任意内容"这个机制，登记在 `docs/source-todo.md` §12）。
+
+## AT. 2026-09-29 第四十二批：**每窗口状态对象**第一刀（`WindowInfo`）+ 内容条形态改成每内容一份
+
+§C 第 9 条（`WindowInfoImpl` 那一族）是现标"最有价值的下一条"。这一批落第一刀：
+项目的布局记录从"锚点表 / 顺序表 / 隐藏集"三张**投影**改成上游那种**每窗口一条记录**
+（`WindowInfo`），并顺手把 `contentUiType` 从"一个全局键"改成**每个内容一份**。
+
+上游 `WindowInfoImpl`（`platform/platform-impl/src/com/intellij/openapi/wm/impl/WindowInfoImpl.kt:34-105`）
+的字段面与默认值：`anchor` = LEFT、`isVisible` = **false**、`isShowStripeButton` = **true**、
+`weight` = **0.33**、`sideWeight` = 0.5、`isSplit` = false、`contentUiType` = **TABBED**、`order` = **-1**。
+本仓兑现的四个：`anchor` / `order` / `showStripeButton` / `contentUiType`（其余登记在 `docs/source-todo.md` §15）。
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `WindowInfoImpl` 的字段与默认值 | 同文件 `:34-105` | `src/toolLayoutProfiles.ts` 的 `WindowInfo` + `WINDOW_INFO_DEFAULTS`（`order` 的默认在注册表的顺序表里） |
+| `ToolWindowManagerState`：一串 `<window_info>` 按项目存 | `openapi/wm/impl/ToolWindowManagerState.kt` | `taocode.toolLayout:<root>` 里 `windows: Record<id, WindowInfo>`（每窗口一条） |
+| `order` 是"那一侧里的次序"（`getNextOrder` = 同侧 max+1） | `ProjectFrameToolWindowLayout.kt` 的 `getNextOrder` | 记录里按 `order` 排，没写过的按注册表的出厂默认接在后面；写回时每个窗口都写自己的次序 |
+| `WindowInfo.contentUiType` 跟窗口走（`ToolWindowImpl.kt:521`） | — | 每个内容一份：底部那几格固定内容（output/run/problems/…）与停靠在底部的工具窗口各有自己的形态 |
+| `ToggleContentUiTypeAction` 只作用在**活动**工具窗口上 | `ToggleContentUiTypeAction.java:8-21` | `window.toggleContentUiType` 翻的是当前内容；`src/toolWindowActions.ts` 不再自持全局 ref |
+
+**改版的一次性采纳**（本仓特有）：原先内容形态是**一个全局键**（`taocode.toolWindowContentUi`），
+上游没有这个物件（`WindowInfo.contentUiType` 一直是每窗口的）。所以项目记录里**没写过**的内容继续按
+旧键走（= "这台机器上的默认"），用户在某个内容上点过之后那一个就有了自己的显式值 —— 现状不变，
+也不把旧值硬盖到每个项目上。
+
+判据：`tests/tool-window-content-ui.test.mjs` 新增 3 条（每内容一份 + 默认 TABBED + 只翻当前那一个 +
+跟着项目布局落盘 + 跨重启按项目分开 + 坏值回落；旧全局键的一次性采纳），
+另有三处旧测试的存档形状断言随改版更新（`tool-window-stripes` / `tool-layout-state` / `remove-stripe-button`
+/ `tool-layout-profiles`），以及 `workbench-dock-render` 的 SSR 桩补上 `contentUiType()`。
+自证有牙：把"落盘时并上内容形态"那一句拔掉，新用例当场变红。
+
+**真 exe（读路径完整走通）**：给当前项目的布局记录里写死 `windows.output.contentUiType = 'combo'`
+再重启 ⇒ 底部 dock 渲染成**下拉**（`.output-content-select`，选项 = 操作输出/运行/问题/终端/VCS 日志/…），
+而不是标签条 —— 也就是形态真的从"每窗口记录"来、并且**只影响那一个内容**；全程 0 异常。
+**写路径**（点「合并标签页」那一行）这次没在 exe 里驱动（它在 Window 菜单的「激活工具窗口」**子菜单**里，
+子菜单要悬停才展开；手动驱动脚本的成本高于收益），由上面那 3 条单测 + `tool-window-content-ui` 的接线判据覆盖 ——
+**没有写成"已验证"**。

@@ -8,7 +8,11 @@
 // 与 src/statusWidgets.ts、src/progressPanel.ts 同一个"状态模块"模式。
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, shouldBeAvailable, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
-import { DEFAULT_PROJECT_FRAME_PROFILE, layoutMigrationKey, resolveProjectLayout, type LegacyMachineLayout, type StoredProjectLayout } from './toolLayoutProfiles.ts'
+import {
+  DEFAULT_PROJECT_FRAME_PROFILE, contentUiTypeOf, layoutMigrationKey, resolveProjectLayout, stripeButtonShown, windowInfoOf,
+  type LegacyMachineLayout, type StoredProjectLayout, type WindowInfo,
+} from './toolLayoutProfiles.ts'
+import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
 import { sortedByMnemonicThenId } from './toolWindows.ts'
 import type { Workspace } from './bridge'
@@ -24,6 +28,8 @@ const LEGACY_ANCHOR_STORAGE_KEY = 'taocode.toolAnchors'
 const LEGACY_ORDER_STORAGE_KEY = 'taocode.toolOrder'
 const LEGACY_HIDDEN_STRIPE_STORAGE_KEY = 'taocode.hiddenStripeButtons'
 const LAYOUT_MIGRATED_KEY = 'taocode.toolLayoutMigrated'
+/** 改版前的全局内容类型键（`src/toolWindowActions.ts` 曾自持它）——只读一次做采纳。 */
+const LEGACY_CONTENT_UI_STORAGE_KEY = 'taocode.toolWindowContentUi'
 /** 项目级布局的键：`taocode.toolLayout:<root>`（一份里含 anchors/order/hidden/version）。 */
 const projectLayoutKey = (root: string) => `taocode.toolLayout:${root}`
 
@@ -83,13 +89,13 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     const raw = readJson<unknown>(projectLayoutKey(root), null)
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
     const layout = raw as StoredProjectLayout
-    return {
-      anchors: layout.anchors && typeof layout.anchors === 'object' ? layout.anchors : {},
-      order: layout.order && typeof layout.order === 'object' ? layout.order : {},
-      hidden: Array.isArray(layout.hidden) ? layout.hidden.filter((id): id is ToolWindowId => typeof id === 'string') : [],
-    }
+    if (!layout.windows || typeof layout.windows !== 'object' || Array.isArray(layout.windows)) return null
+    return { windows: layout.windows }
   }
-  /** 旧版机器级布局（三键）——只在迁移那一次被读。 */
+  /**
+   * 旧版的**机器级**布局 —— 改版前是三个键（锚点表 / 顺序表 / 隐藏集），顺序表还是
+   * `{ side: [ids] }` 这个形状。只在迁移那一次被读，读完折成"每窗口一条记录"。
+   */
   function readLegacyLayout(): LegacyMachineLayout | null {
     const anchors = readJson<Partial<Record<ToolWindowId, Anchor>>>(LEGACY_ANCHOR_STORAGE_KEY, {})
     const order = readJson<Partial<Record<Anchor, ToolWindowId[]>>>(LEGACY_ORDER_STORAGE_KEY, {})
@@ -98,7 +104,23 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     const hasOrder = order && typeof order === 'object' && Object.keys(order).length > 0
     const hasHidden = Array.isArray(hidden) && hidden.length > 0
     if (!hasAnchors && !hasOrder && !hasHidden) return null
-    return { anchors: hasAnchors ? anchors : {}, order: hasOrder ? order : {}, hidden: hasHidden ? hidden : [] }
+    const windows: Record<string, WindowInfo> = {}
+    let rank = 0
+    for (const side of ['left', 'right', 'bottom'] as const) {
+      for (const id of Array.isArray(order?.[side]) ? order[side]! : []) {
+        if (typeof id !== 'string' || !Object.hasOwn(toolAnchors, id)) continue
+        windows[id] = { ...windows[id], order: rank++ }
+      }
+      rank = 0
+    }
+    for (const id of Object.keys(anchors ?? {}) as ToolWindowId[]) {
+      const anchor = anchors?.[id]
+      if (anchor === 'left' || anchor === 'right' || anchor === 'bottom') windows[id] = { ...windows[id], anchor }
+    }
+    for (const id of Array.isArray(hidden) ? hidden : []) {
+      if (typeof id === 'string' && Object.hasOwn(toolAnchors, id)) windows[id] = { ...windows[id], showStripeButton: false }
+    }
+    return { windows }
   }
   function markLayoutMigrated() { try { localStorage.setItem(LAYOUT_MIGRATED_KEY, '1') } catch { /* session-only */ } }
   function layoutMigrated(): boolean { try { return localStorage.getItem(LAYOUT_MIGRATED_KEY) === '1' } catch { return false } }
@@ -110,6 +132,39 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   function markAppliedLayoutVersion(profileId: string, version: number) {
     try { localStorage.setItem(layoutMigrationKey(profileId), String(version)) } catch { /* session-only */ }
   }
+  /**
+   * 改版前内容类型是**一个全局键**（`taocode.toolWindowContentUi`）。它在上游没有对应物
+   * （`WindowInfo.contentUiType` 一直是每窗口的），所以做一次性采纳：项目布局里**没写过**的内容
+   * 继续按这个旧值走（等价于"这台机器上的默认"），用户一旦在某一个内容上点过「合并标签页」，
+   * 那个内容就有了自己的显式值，此后各内容各管各的 —— 现状不变，也不把旧值硬盖到每个项目上。
+   */
+  function readLegacyContentUiType(): ToolWindowContentUiType | null {
+    try {
+      const raw = localStorage.getItem(LEGACY_CONTENT_UI_STORAGE_KEY)
+      return raw === null ? null : resolveContentUiType(raw)
+    } catch { return null }
+  }
+  const legacyContentUiType = readLegacyContentUiType()
+  /**
+   * 每个内容的 `WindowInfo.contentUiType`（`WindowInfoImpl` 默认 TABBED）。**存的是显式值**：
+   * 项目布局里写过的那个；没写过的先按旧全局键（迁移）或默认走，不写进表里。
+   */
+  const contentUiTypes = reactive<Record<string, ToolWindowContentUiType>>({})
+  function refreshContentUiTypes(layout: StoredProjectLayout) {
+    for (const key of Object.keys(contentUiTypes)) delete contentUiTypes[key]
+    for (const [id, info] of Object.entries(layout.windows ?? {})) {
+      if (info.contentUiType === 'tabbed' || info.contentUiType === 'combo') contentUiTypes[id] = info.contentUiType
+    }
+  }
+  /** 某个内容此刻的内容条形态（上游 `ToolWindowImpl.kt:521` 读的就是 `windowInfo.contentUiType`）。 */
+  function contentUiType(id: string): ToolWindowContentUiType {
+    return resolveContentUiType(contentUiTypes[id] ?? legacyContentUiType ?? 'tabbed')
+  }
+  /** `ToggleContentUiTypeAction.setSelected` 的落地：改的是**这一个**内容的记录，并落盘。 */
+  function setContentUiType(id: string, type: ToolWindowContentUiType) {
+    contentUiTypes[id] = resolveContentUiType(type)
+    saveLayout()
+  }
 
   /**
    * 把一套存档布局叠到出厂默认上（键级覆盖 + 顺序补齐）。锚点表里出现过的窗口一律留在
@@ -117,21 +172,26 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
    */
   function applyLayout(layout: StoredProjectLayout) {
     for (const id of Object.keys(toolAnchors) as ToolWindowId[]) {
-      const anchor = layout.anchors?.[id]
+      const anchor = windowInfoOf(layout, id).anchor
       toolAnchors[id] = anchor === 'left' || anchor === 'right' || anchor === 'bottom' ? anchor : DEFAULT_TOOL_ANCHORS[id]
     }
+    // 顺序：先按记录里的 `order`（上游 `WindowInfoImpl.order`）排，没写过的保持注册表默认次序。
     toolOrder.value = {
       left: [...DEFAULT_TOOL_ORDER.left], right: [...DEFAULT_TOOL_ORDER.right], bottom: [...DEFAULT_TOOL_ORDER.bottom],
     }
+    const ids = Object.keys(toolAnchors) as ToolWindowId[]
     for (const side of ['left', 'right', 'bottom'] as const) {
-      const list = layout.order?.[side]
-      if (Array.isArray(list))
-        toolOrder.value[side] = list.filter((id): id is ToolWindowId => typeof id === 'string' && Object.hasOwn(toolAnchors, id))
+      const ranked = ids.filter(id => toolAnchors[id] === side && typeof windowInfoOf(layout, id).order === 'number')
+      if (!ranked.length) continue
+      ranked.sort((a, b) => (windowInfoOf(layout, a).order ?? 0) - (windowInfoOf(layout, b).order ?? 0))
+      const rest = toolOrder.value[side].filter(id => !ranked.includes(id))
+      toolOrder.value[side] = [...ranked, ...rest]
     }
     normalizeOrder()
     hiddenStripeButtons.clear()
-    for (const id of layout.hidden ?? [])
-      if (Object.hasOwn(toolAnchors, id)) hiddenStripeButtons.add(id)
+    for (const id of Object.keys(toolAnchors) as ToolWindowId[])
+      if (!stripeButtonShown(windowInfoOf(layout, id))) hiddenStripeButtons.add(id)
+    refreshContentUiTypes(layout)
   }
   /** 锚点可能已保存而目标顺序缺失（旧版移动只写锚点）；每一侧都补齐自己的窗口。 */
   function normalizeOrder() {
@@ -151,7 +211,7 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     layoutRoot.value = root
     if (!root) {
       // 没打开项目时工作台根本不渲染（WelcomePage 那一支），布局保持出厂默认即可。
-      applyLayout({ anchors: {}, order: {}, hidden: [] })
+      applyLayout({ windows: {} })
       return
     }
     const resolved = resolveProjectLayout({
@@ -165,15 +225,29 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     if (resolved.writeAppliedVersion !== null) markAppliedLayoutVersion(DEFAULT_PROJECT_FRAME_PROFILE.id, resolved.writeAppliedVersion)
   }
 
-  /** 当前项目的整套布局落盘（一个键，三张表 + 档案版本）。 */
+  /**
+   * 当前项目的整套布局落盘：**每窗口一条记录**（上游 `ToolWindowManagerState` 存的就是一串
+   * `<window_info>`）。三张运行时表由这些记录派生 —— 写回时把当前值原样折回去，外加已存的
+   * `contentUiType`（那是直接躺在项目布局里的，见 `setContentUiType`）。
+   */
   function saveLayout() {
     const root = layoutRoot.value
     if (!root) return
-    writeJson(projectLayoutKey(root), {
-      anchors: { ...toolAnchors },
-      order: { ...toolOrder.value },
-      hidden: [...hiddenStripeButtons],
-    } satisfies StoredProjectLayout)
+    const windows: Record<string, WindowInfo> = {}
+    for (const id of Object.keys(toolAnchors) as ToolWindowId[]) {
+      const side = toolAnchors[id]
+      const rank = toolOrder.value[side].indexOf(id)
+      windows[id] = {
+        anchor: side,
+        order: rank >= 0 ? rank : undefined,
+        showStripeButton: !hiddenStripeButtons.has(id),
+        contentUiType: contentUiTypes[id],
+      }
+    }
+    // 内容条形态的键不止工具窗口：底部那几格固定内容（output/run/problems/…）也各有形态
+    // （上游它们各自就是工具窗口，WindowInfo 里一样有 `contentUiType`），所以显式值单独并进来。
+    for (const [id, type] of Object.entries(contentUiTypes)) windows[id] = { ...(windows[id] ?? {}), contentUiType: type }
+    writeJson(projectLayoutKey(root), { windows } satisfies StoredProjectLayout)
   }
   function saveToolAnchors() { saveLayout() }
   function setToolAnchor(id: ToolWindowId, anchor: Anchor) {
@@ -354,5 +428,5 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
            removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,
            stripeWidths, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows,
-           moreButtonAvailable, moreButtonVisible }
+           moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType }
 }

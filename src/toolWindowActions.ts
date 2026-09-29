@@ -9,7 +9,7 @@ import { canCloseAllContents, canCloseOtherContents, isCloseableToolTab, tabsClo
 import type { CloseableToolTabId, ToolTabPresence } from './toolTabs'
 import { closeAllReferences, closeReferences, closeOtherReferences, hasReferences, referenceTabs,
          selectedReferences, selectReferences, togglePinReferences } from './referenceContents.ts'
-import { resolveContentUiType } from './toolWindowContentUi'
+import { isTabbedContentUi, toggledContentUiType } from './toolWindowContentUi'
 import type { ToolWindowContentUiType } from './toolWindowContentUi'
 import { BOTTOM_TABS } from './toolWindowMeta'
 
@@ -39,6 +39,10 @@ export interface ToolWindowActionsContext {
   showOutput: (tab: any) => any
   resetHierarchy: () => void
   toolDisabled: (id: any) => boolean
+  /** 某个内容的内容条形态（`WindowInfo.contentUiType`，住在 src/toolWindowStripes.ts 的项目布局里）。 */
+  contentUiType: (id: string) => ToolWindowContentUiType
+  /** 改某个内容的形态（写回项目布局）。 */
+  setContentUiType: (id: string, type: ToolWindowContentUiType) => void
   focusToolWindowContent: (id: any) => void
   // --- 底部 dock 标签的「移动到…」菜单（锚点菜单）---
   /** 当前锚点表：`id -> 'left' | 'right' | 'bottom'`。 */
@@ -67,22 +71,10 @@ export function focusedDock(): 'side' | 'bottom' | 'editor' {
  */
 export const lastDockFocus = ref<'side' | 'bottom' | 'editor'>('editor')
 
-export function readStoredContentUiType(): ToolWindowContentUiType {
-  try { return resolveContentUiType(localStorage.getItem('taocode.toolWindowContentUi')) }
-  catch { return 'tabbed' }
-}
-
-/**
- * `WindowInfo.contentUiType` (`ToolWindowImpl.kt:521`) travels with the window layout, so the choice
- * is remembered. `ToolWindowContentUiType.getInstance` (`:33-45`) falls back to TABBED on anything
- * unexpected, which is the `resolveContentUiType` default too.
- */
-export const bottomContentUiType = ref<ToolWindowContentUiType>(readStoredContentUiType())
-
-watch(bottomContentUiType, type => {
-  try { localStorage.setItem('taocode.toolWindowContentUi', type) }
-  catch { /* storage unavailable: session-only */ }
-})
+// `WindowInfo.contentUiType`（`ToolWindowImpl.kt:521`）是**每个窗口**的状态，跟着项目布局走 ——
+// 所以它不在这里自持，而是由 `src/toolWindowStripes.ts` 的项目布局记录提供（第四十二批把
+// "一个全局 ref + 一个 localStorage 键"改成每窗口一条记录，见 docs/ui-placement-audit.md §AT）。
+// 这里只把它接成"当前那个内容"的读/写：上游 `ToggleContentUiTypeAction` 作用的就是活动工具窗口。
 
 export function createToolWindowActions(ctx: ToolWindowActionsContext) {
   function noteDockFocus(event: FocusEvent) {
@@ -365,7 +357,17 @@ export function createToolWindowActions(ctx: ToolWindowActionsContext) {
     ctx.showView(target.id)
   }
 
+  /** 当前内容的内容条形态（上游 `ToolWindowImpl.kt:521` 读的是活动窗口的 `windowInfo.contentUiType`）。 */
+  function currentContentUiType(): ToolWindowContentUiType {
+    return ctx.contentUiType(String(ctx.bottomTab.value))
+  }
+  /** `ToggleContentUiTypeAction.setSelected`（`:14-17`）：只翻**当前**这一个内容。 */
+  function toggleContentUiType(): void {
+    ctx.setContentUiType(String(ctx.bottomTab.value), toggledContentUiType(!isTabbedContentUi(currentContentUiType())))
+  }
+
   return {
+    contentUiType: currentContentUiType, toggleContentUiType,
     dockOf: (element: Element | null) => dockOf(element), focusedDock: () => focusedDock(),
     noteDockFocus, activeToolWindowDock, hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows,
     bottomTabAvailable, bottomContentCount, tabTargetCount, activeContentCount, bottomTabOptions, bottomTabLabel,
