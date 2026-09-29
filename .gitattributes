@@ -1,0 +1,19 @@
+# 行尾统一成 LF。**这不是风格偏好，是判据能不能跑的前提**。
+#
+# 本仓的机检大量用「从源码里切一段」的手法（`source.indexOf('function x')` 到
+# `indexOf('\n}\n')`），以及按 `split('\n').length` 数行数的模块大小门禁。工作树一旦是 CRLF，
+# `\n}\n` 永远匹配不到 ⇒ 切片吞掉整段 ⇒ 断言假失败（2026-09-29 实测：235 个 src 文件被
+# `core.autocrlf=true` 转成 CRLF，`popup-state` / `run-targets` 各挂一条）。
+#
+# 仓库里的 blob 一直是 LF，只有工作树被转 —— 所以固定成 LF 不会产生任何内容差异。
+* text=auto eol=lf
+# 二进制不碰。
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.obj binary
+*.zip binary
+*.jar binary
