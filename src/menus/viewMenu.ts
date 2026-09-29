@@ -52,6 +52,12 @@ export interface ViewMenuContext {
   toggleDistractionFreeMode: any
   /** `ToolWindowsGroup` 的子项要用它（宿主已有的 `activateToolWindow`）。 */
   activateToolWindow: (id: any) => void
+  /**
+   * 工具窗口此刻可不可用（`src/toolWindowStripes.ts` 的 `toolDisabled`）。`ActivateToolWindowAction
+   * .update`（`:130-137`）用 `toolWindow.isAvailable` 决定整行**消失**（弹层里）还是**灰着**
+   * （主菜单 / 查找操作），本仓的 View 菜单那一组是弹层，所以要它。
+   */
+  toolDisabled: (id: any) => boolean
 }
 
   export function createViewMenuRows(ctx: ViewMenuContext): MenuRow[] {
@@ -66,7 +72,18 @@ export interface ViewMenuContext {
     // 不是重复：IDEA 里两处都列同一批动作 —— View 菜单一个入口、Window 菜单一个内联组。
     { id: 'view.toolWindowsGroup', title: '工具窗口', keywords: 'tool windows activate show 工具窗口 显示 激活', children: toolWindowGroupOrder().map(id => ({
       id: `view.toolWindow.${id}`, title: `激活 ${toolTitles[id]}`,
-      keywords: `tool window ${id} activate 工具窗口 激活`, enabled: () => Boolean(ctx.workspace.value), run: () => ctx.activateToolWindow(id),
+      // 上游 `ActivateToolWindowAction.update`（`ActivateToolWindowAction.kt:130-137`）的可用性 =
+      // `toolWindow.isAvailable || hasEmptyState(project)`，且按**动作出现的位置**分派：
+      // `ActionPlaces.POPUP` 时 `isVisible = available`（整行不见），**其它位置**（含主菜单）
+      // `isEnabled = available`（灰着）。
+      // 本仓这一组是 View 菜单里的 `ToolWindowsGroup`（`ToolWindowsGroup.java:39-44`），而主菜单是
+      // `place = ActionPlaces.MAIN_MENU`（`JMenuBasedIdeMenuBarHelper.kt:69`），且 place 会**原样
+      // 传进子菜单**（`Utils.kt:708` 的 `ActionMenu(context, place, …)`）—— 所以这里走的是
+      // **灰着**那一支，不是隐藏。
+      // 原先 `enabled` 只看 `workspace`：未就绪的「结构」等行看着可点，点下去被
+      // `activateToolWindow` 的 `if (toolDisabled(id)) return` 静默吃掉（"看得见但点了没反应"）。
+      keywords: `tool window ${id} activate 工具窗口 激活`,
+      enabled: () => Boolean(ctx.workspace.value) && !ctx.toolDisabled(id), run: () => ctx.activateToolWindow(id),
     })) },
     { id: 'view.explorer', title: () => `${ctx.explorer.value ? '隐藏' : '显示'}文件面板`, keywords: 'project view files tool window 文件面板', run: () => { ctx.explorer.value = !ctx.explorer.value } },
     { id: 'view.trace', title: () => `${ctx.activity.value ? '隐藏' : '显示'}处理记录`, keywords: 'ctx.activity trace bridge 处理记录', run: () => { ctx.activity.value = !ctx.activity.value } },

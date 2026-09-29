@@ -1436,8 +1436,8 @@ const semantic = (name: string, title: string, keys: string, keywords: string): 
   id: name, title, keys, keywords, enabled: () => Boolean(active.value) && lspReady.value, run: () => runEditor(name),
 })
 const toolWindow = (view: typeof leftView.value, title: string, keywords: string, needsDesktop = false): MenuRow => ({
-  id: `view.${view}`, title, keywords,
-  enabled: () => Boolean(workspace.value) && (!needsDesktop || isDesktop),
+  id: `view.${view}`, title, keywords, // 可用性含 toolDisabled（ActivateToolWindowAction.update :130-137，主菜单是灰着）
+  enabled: () => Boolean(workspace.value) && (!needsDesktop || isDesktop) && !toolDisabled(view),
   run: () => showView(view),
 })
 const localHistoryDialogRow = localHistoryMenuRow(localHistoryState)
@@ -1529,7 +1529,7 @@ const viewMenuContext: ViewMenuContext = {
   distractionFreeMode, toggleDistractionFreeMode,
   fullScreen, toggleFullScreen, active, activity, bottom, changeTheme,
   // 惰性：`chooseBackgroundImage` 由下面的界面动作模块提供（解构在更后面）。
-  chooseBackgroundImage: () => void chooseBackgroundImage(), editorSettings, explorer, fileTreeRef, saveSettingsPatch, showOutput, splitOrientation, splitTabOut, theme, togglePowerSave, toggleZenMode, unsplit, unsplitAll, workspace, zenMode, hasEditor, editable, toolWindow, localHistoryDialog: localHistoryDialogRow, changeSplitOrientation, isDesktop, activateToolWindow }
+  chooseBackgroundImage: () => void chooseBackgroundImage(), editorSettings, explorer, fileTreeRef, saveSettingsPatch, showOutput, splitOrientation, splitTabOut, theme, togglePowerSave, toggleZenMode, unsplit, unsplitAll, workspace, zenMode, hasEditor, editable, toolWindow, localHistoryDialog: localHistoryDialogRow, changeSplitOrientation, isDesktop, activateToolWindow, toolDisabled }
 const viewMenuRows = createViewMenuRows(viewMenuContext)
 // 导航菜单：见 src/menus/navigateMenu.ts（一组一文件）。
 const navigateMenuContext: NavigateContext = { active, cycleBookmark, goBack, goForward, hasEditor, jumpLastEditLocation, jumpMethod, lspReady, navBack, navForward, openActionSearch: () => openActionSearch(), openSearchEverywhere: () => openSearchEverywhere(), openGoLine, openMnemonicPrompt, openPalette, openRecentFiles, openRecentPlaces, openSymbol, runEditor, openSelectIn, showNavBar, showView, toggleBookmark, workspace }

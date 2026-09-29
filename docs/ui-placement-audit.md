@@ -1670,3 +1670,44 @@ App.vue 装配 + 4 个非工厂条目 + 11 个真工厂都带 upstreamId、上�
 **顺带订正**：`src/menus/viewMenu.ts` 里 `EditorToggleShowGutterIcons` 那段注释还写着「待办」，
 但该组**早已落地**（`src/gutterIconHost.ts` 消费 `showGutterIcons`，三个生产者是 LSP 诊断/DAP 断点/
 书签，判据 `tests/gutter-icons.test.mjs`）—— 注释改为"已落地 + 仍待办的是 gutter 右键弹层"。
+
+## AL. 2026-09-29 第三十三批：工具窗口「激活」行的**假控件**（不可用时看着可点）
+
+**病因**：`ActivateToolWindowAction.update` 的可用性判据在 `ActivateToolWindowAction.kt:130-137`：
+
+```kotlin
+presentation.isVisible = true
+val available = toolWindow.isAvailable || hasEmptyState(project)
+if (e.place == ActionPlaces.POPUP) presentation.isVisible = available
+else                               presentation.isEnabled = available
+```
+
+也就是**按位置分派**：弹层里不可用 ⇒ 整行不见；其它位置（含主菜单）⇒ 灰着。本仓两处激活行都只判了
+`workspace`（外加一处 `needsDesktop`），于是**未就绪的「结构」等行看着可点，点下去被
+`activateToolWindow` 的 `if (toolDisabled(id)) return` 静默吃掉** —— 典型"看得见但点了没反应"。
+
+**先纠正我自己一个差点写错的判断**：我原以为 View 菜单那一组是弹层 ⇒ 该照 `POPUP` 那支**隐藏**，
+并据此加了 `MenuRow.hidden` + 渲染器/动作索引两处过滤。查证后**撤回**：
+
+- 主菜单的 place 是 `ActionPlaces.MAIN_MENU`（`JMenuBasedIdeMenuBarHelper.kt:69` 的
+  `ActionMenu(place = ActionPlaces.MAIN_MENU, …)`）；
+- 而且 place **原样传进子菜单**（`Utils.kt:708` 的 `ActionMenu(context, place, action, …)`）——
+  所以「视图 › 工具窗口」子菜单里报的仍是 `MAIN_MENU`，走的是**灰着**那一支。
+- 顺带确认 `filterInvisible`（`Utils.kt:786-802`）确实会丢掉 `isVisible == false` 的行，
+  机制是真的存在，只是**不适用于主菜单**。
+
+`hidden` 那套机制因此**没有消费者**（本仓没有以 `ActionPlaces.POPUP` 打开的 `ActivateToolWindowAction`
+宿主），已整组回滚（`types.ts` / `menuUi.ts` / `submenuState.ts` / App.vue destructure）——
+不做没有真宿主的抽象。
+
+**改动**（两处，都只加一个条件）：
+
+| 位置 | 原判据 | 现判据 |
+|---|---|---|
+| `src/menus/viewMenu.ts` 的 `view.toolWindow.<id>`（View › 工具窗口） | `Boolean(workspace)` | `&& !ctx.toolDisabled(id)` |
+| `src/App.vue` 的 `toolWindow` 助手（Window/Edit/Git/Run 菜单共用这一份） | `Boolean(workspace) && (!needsDesktop \|\| isDesktop)` | 再 `&& !toolDisabled(view)` |
+
+判据：`tests/view-menu-parity.test.mjs` 新增 3 条（不可用的行**仍在**但 `enabled()` 为假 ⇒ 灰着；
+工作区没开时整组仍不可用；`toolWindow` 助手带 `toolDisabled` 门禁）。已自证有牙：去掉助手那半句，
+"也带 toolDisabled 门禁"当场变红。另把 `makeContext` 补上 `toolDisabled`，并把原先那条只断
+`activateToolWindow }` 的接线断言改成同时断两个注入。
