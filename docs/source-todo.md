@@ -186,3 +186,20 @@
 - [~] 「左侧的引用」（`Vcs.Log.AlignLabels`）：本地引用固定在提交消息左侧，没有第二种排布。
 - [~] 着色器组（`Vcs.Log.HighlightersActionGroup`）：本地只按仓库根着色（`rootColor`），
   没有按作者/按日期的着色器族。
+
+## 12. 第三十九批（工具窗口注册表）留下的两处，以及它顺带判掉的两条
+
+- [x] **注册表**（`src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY`）：一条记录 = 一个工具窗口
+  （id / 标题 / 图标 / 锚点 / 助记符 / `shouldBeAvailable`），四张表由它派生。见
+  `docs/ui-placement-audit.md` §AQ。
+- [~] **`createToolWindowContent` 那一半（内容挂载点）仍是模板链**：`ToolWindowView.vue` 里
+  `v-else-if="view === '…'"` 逐个挂视图，每个视图的 props 都不一样（`VcsLog` 要 root、`FileTree` 要
+  entries、`GradlePanel` 要 ctx…）。要它数据化得先给所有视图一个统一的 `content(ctx)` 契约 ——
+  那是一次跨 13 个组件的接口改造，本次**没有假装数据化**，留作待办。
+- [~] **`ToolWindowEP` / `ToolWindowAllowlistEP`（插件扩展点 + 白名单）判 `[-]`**：本仓没有插件运行时
+  （硬规则 2 明确点名的例子），做出来只是一个没人会去注册的空注册表。
+- [~] **编辑器标签承载任意内容这个机制还没有**（§C 第 13/14 条的公共前置）：`Tab extends DocumentData`
+  —— 标签绑定文件（path + content），编辑器列里唯一的非文件形态是"当前文件的 Markdown 预览模式"
+  与二进制查看器，两者都是**模式**不是标签。所以"把工具窗口/日志/引用拖进编辑区"这一族
+  （`toolWindowInEditor`、`tabInEditor` 20 类）都等这条：先设计一个能承载任意组件的标签种类
+  （上游是把它包装成 `FileEditor`），再谈那 20 个类。**不是不做，是排在那条机制之后**。

@@ -1937,3 +1937,45 @@ description = 配置日志的表示）。逐条判过能否接住：
 **顺带查实（与本批无关但值得记）**：本机当前打开的项目 `E:/Applied Energistics 2 Acceleration`
 **没有 `.git`**（`git rev-parse --git-dir` 也这么说），所以日志窗口显示"读取 Git 日志失败：fatal: not a git
 repository" —— 那是**如实报错**，不是缺陷；同时也解释了为什么这台机器上 Git 相关面板大多是空的。
+
+## AQ. 2026-09-29 第三十九批：工具窗口**注册表**（B2 §C 第 8 条那四个类）
+
+判决表 §C 里我标了"最有价值的一条"= **工具窗口的注册机制**。这一批把它可做的那一半落了：
+`ToolWindowEP` + `ToolWindowFactory` + `RegisterToolWindowTask` 那一层在本仓的等价物 ——
+**一个工具窗口 = 一条记录**（`src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY`）。
+
+上游形状（逐条核过）：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `RegisterToolWindowTask`：registerToolWindow 拿到的声明式字段（id / anchor / `stripeTitle` / …） | `platform-api/.../wm/RegisterToolWindowTask.kt` | 注册表一条记录：`id` / `title` / `icon` / `anchor` / `numbered` |
+| `ToolWindowFactory.shouldBeAvailable(project)` | `platform-api/.../wm/ToolWindowFactory.kt`；带规则的实现见 `AbstractExternalSystemToolWindowFactory.java:32-34`、`vcsToolWindowFactories.kt:60-63` | 记录里的 `available?(deps)` + `shouldBeAvailable(id, deps)`；`toolWindowStripes.ts` 的 `toolDisabled` 只负责把项目状态递进去 |
+| `<toolWindow id="…" anchor="…">`（每个插件一份 XML） | `intellij.platform.lang.impl.xml` / `todo.xml` / `bookmarks.xml` / `intellij.gradle.xml:228` / `intellij.platform.ide.impl.xml:1210` | 每条记录上方那行注释就是出处 |
+| `Activate<Id>ToolWindow` 决定 Alt+数字 | `ActivateToolWindowAction.kt:88-111` | 记录里的 `numbered`（缺省 true；Gradle / Notifications 是 false） |
+| `createToolWindowContent(project, toolWindow)` | 同上 | **未落**：内容挂载仍是 `ToolWindowView.vue` 的模板链（每个视图 props 不同）。**没有假装数据化**，登记在 `docs/source-todo.md` §12 |
+| `ToolWindowEP` / `ToolWindowAllowlistEP`（插件声明 + 白名单） | `platform-api/.../wm/*` | `[-]`：本仓没有插件运行时（硬规则 2 的例子），不建空壳 |
+
+**改成了什么**：原先 `ToolWindowId` 联合 + `toolTitles` + `toolIcons` + `toolWindowOrder` +
+`DEFAULT_TOOL_ANCHORS` + `DEFAULT_TOOL_ORDER` + `TOOL_MNEMONIC_ORDER` 是**七张各写一份**的表
+（历史上还出现过"两张表互相不一致"的事故：`toolWindowStripes` 把 vcslog/todo/debug 列在 left、
+`toolLayouts` 把锚点全写成 left），可用性另在 `toolWindowStripes.ts` 里按 id 写死三条。
+现在：**只有注册表一份数据**，四张表由它派生（`derived()` 是唯一一处 `as`），可用性跟着记录走。
+
+**一条记录的三个"顺带"效果**（判据锁住）：枚举顺序（菜单/状态栏弹层）、各锚点内的默认次序
+（= 枚举顺序按锚点过滤，与上游 `defaultToolWindowlayoutProvider.kt:244-267` 的 V1/V2 一致）、
+Alt+数字编号（只数 `numbered`）。
+
+**一处差点踩坏的**：数组顺序同时决定 Alt+数字 —— 我最初按锚点分组排（files/git/outline/bookmarks/…），
+那会把结构与书签从 **Alt+6 / Alt+7** 变成 Alt+3 / Alt+4（`$default.xml` 的
+`ActivateOutlineToolWindow` / `ActivateBookmarksToolWindow`）。已改回历史上的枚举顺序，并在表头写明
+"这一列不能按锚点重排"，真 exe 复核过按钮上的编号仍是 1/2/6/7。
+
+判据：`tests/tool-window-registry.test.mjs`（6 条：记录齐全 + id 不重复、四张表必须等于派生结果、
+默认布局对得上上游 V1/V2、助记符只给 `numbered`、可用性逐条对得上且**状态域里不许再按 id 判**、
+状态域与条纹读同一条判据）。自证有牙：去掉一条记录的图标、把 `shouldBeAvailable` 改成恒真，
+三条当场变红。真 exe 复核：重构后启动 **0 异常**，条纹按钮 `切换结构` 仍灰着（disabled）且编号仍是 6、
+书签 7、源代码管理 2、项目 1、Gradle 无编号 —— 与重构前一致。
+
+判决表随之改：`RegisterToolWindowTask` `[x]`、`ToolWindowFactory` `[~]`、`ToolWindowEP` /
+`ToolWindowAllowlistEP` `[-]`（无插件运行时），四档计数 `8 + 74 + 86 + 182` → `9 + 75 + 82 + 184`；
+"最有价值的下一条"标记移到第 10 条（布局档案：缺的是数据与一条设置键，不像 13/14 那样等一个还不存在的机制）。

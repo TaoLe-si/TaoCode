@@ -503,3 +503,19 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 `terminal`（`TerminalToolWindowTabsManagerImpl.kt:300` 的标签动作）、`debug`/`services`
 （`ServiceViewSourceScrollHelper.java:41-47`）、`problems`（`InspectionResultsView.java:274-277`）、
 `maven`（`MavenProjectsNavigator.kt:306`，本仓无 Maven）。
+
+## 18. 工具窗口注册表落地（2026-09-29 第三十九批）
+
+判决表 §C 第 8 条（`RegisterToolWindowTask` / `ToolWindowFactory` / `ToolWindowEP` / `ToolWindowAllowlistEP`）
+可做的那一半已落：`src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY` —— 一个工具窗口 = 一条记录
+（id / 条纹标题 / 图标 / 锚点 / 助记符 / `shouldBeAvailable`），标题/图标/锚点/次序/助记符四张表全部由它派生，
+可用性从 `toolWindowStripes.ts` 里那三条 `if (id === …)` 搬进记录。
+
+`ToolWindowEP` / `ToolWindowAllowlistEP`（插件声明 + 白名单）判 `[-]`：本仓没有插件运行时。
+`createToolWindowContent`（内容挂载点）仍是 `ToolWindowView.vue` 的模板链 —— 登记在
+`docs/source-todo.md` §12（要它数据化得先给 13 个视图一个统一的 `content(ctx)` 契约）。
+
+明细与两条"差点踩坏"的记录（数组顺序 = Alt+数字的编号，不能按锚点重排）见
+`docs/ui-placement-audit.md` §AQ；判据 `tests/tool-window-registry.test.mjs`。
+
+**对后续批次的意义**：加一个工具窗口从"改 id 联合 + 四张表 + 一个可用性函数"降到"加一条记录 + 一个内容挂载点"。

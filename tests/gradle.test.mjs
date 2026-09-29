@@ -328,7 +328,7 @@ test('构建工具的默认值（AutoImportProjectTrackerSettings 默认 SELECTI
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TOOL_MNEMONIC_ORDER, toolTitles, toolWindowMnemonic, toolWindowOrder } from '../src/toolWindowMeta.ts'
+import { DEFAULT_TOOL_ANCHORS, TOOL_MNEMONIC_ORDER, toolTitles, toolWindowMnemonic, toolWindowOrder } from '../src/toolWindowMeta.ts'
 import { PAGE_KEYS, PROJECT_SCOPED_PAGES, SETTINGS_NODES, isParentOnly } from '../src/settingsTreeMeta.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -344,10 +344,10 @@ test('Gradle 工具窗口按 IDEA 的注册停靠右侧，且不占 Alt+数字',
   // `leftView` 现在直接引用 `src/toolWindowMeta.ts` 的 `ToolWindowId`（原先 App.vue 里还有一份
   // 手写的字面量联合，加了新窗口就会漏改 —— 那是重复定义，已删）。
   assert.match(app, /leftView = ref<ToolWindowId>\('files'\)/, 'leftView 要用统一的 ToolWindowId')
-  // 停靠边与顺序在 src/toolWindowStripes.ts（2026-09-27 从 App.vue 拆出的状态域）。
-  // 锚点的**唯一来源**是 src/toolWindowMeta.ts 的 DEFAULT_TOOL_ANCHORS（原先在 toolWindowStripes
-  // 与 toolLayouts 里各有一份且不一致，已统一）。
-  assert.match(read('src/toolWindowMeta.ts'), /gradle: 'right'/, 'DEFAULT_TOOL_ANCHORS 必须把 gradle 停在右侧')
+  // 停靠边与顺序的唯一来源是 src/toolWindowMeta.ts 的**注册表**（第三十九批起由
+  // TOOL_WINDOW_REGISTRY 派生；原先在 toolWindowStripes 与 toolLayouts 里各有一份且不一致）。
+  // 这里断言**派生出来的值**，不是源码里的写法 —— 表怎么组织是模块内部的事。
+  assert.equal(DEFAULT_TOOL_ANCHORS.gradle, 'right', 'DEFAULT_TOOL_ANCHORS 必须把 gradle 停在右侧')
 })
 
 test('工具窗口内容分派里有 Gradle 分支，且面板会被真的挂上', () => {

@@ -7,7 +7,7 @@
 // 状态自持（锚点表 + 顺序表 + 两份 localStorage 镜像），宿主只 import 同名变量，模板零改动 ——
 // 与 src/statusWidgets.ts、src/progressPanel.ts 同一个"状态模块"模式。
 import { computed, reactive, ref, type Ref } from 'vue'
-import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
+import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, shouldBeAvailable, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
 import { sortedByMnemonicThenId } from './toolWindows.ts'
 import type { Workspace } from './bridge'
@@ -224,13 +224,15 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   function moreButtonVisible(side: StripeSide): boolean { return moreButtonSide.value === side && moreButtonAvailable() }
   // Which tool windows can be opened right now (IDEA disables an unavailable window
   // instead of hiding it, so the stripe keeps a stable layout).
+  // 每条窗口的判据都住在**注册表**里（`ToolWindowFactory.shouldBeAvailable` 那一栏，
+  // 见 src/toolWindowMeta.ts 里每条记录上方的出处）；这里只把当前的项目状态递进去。
   function toolDisabled(id: ToolWindowId): boolean {
-    if (id === 'outline') return !deps.lspReady.value
-    if (id === 'vcslog') return !deps.isDesktop || !deps.workspace.value
-    // Gradle 窗口只在"项目确实是 Gradle 项目"时可用（IDEA 的 GradleToolWindowFactory
-    // 在没有链接外部工程时给的是空态）。
-    if (id === 'gradle') return !deps.isDesktop || !deps.workspace.value || !deps.gradleAvailable.value
-    return false
+    return !shouldBeAvailable(id, {
+      isDesktop: deps.isDesktop,
+      hasWorkspace: Boolean(deps.workspace.value),
+      lspReady: deps.lspReady.value,
+      gradleAvailable: deps.gradleAvailable.value,
+    })
   }
   // 「停靠在底部的工具窗口」（IDEA 的任意停靠）：底部 dock 的 tab 条与内容区都纳入它们。
   // 底部 dock 的那排 tab 也是"侧条按钮"的一种形态（`SquareStripeButton` 的底部版），

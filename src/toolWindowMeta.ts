@@ -1,79 +1,160 @@
-// 工具窗口元数据：标题 / 图标 / Alt+数字助记符顺序。
-// 从 App.vue 拆出（桃 2026-09-26：模块化）；纯数据 + 纯函数，无状态依赖。
+// 工具窗口的**注册表** —— IDEA `ToolWindowEP` + `ToolWindowFactory` + `RegisterToolWindowTask`
+// 那一层在本仓的等价物：**一个工具窗口 = 一条记录**（id / 条纹标题 / 图标 / 默认锚点 /
+// 助记符 / 可用性），其余几张表全部由它派生。
+//
+// 上游形状（逐条核过）：
+//   · `RegisterToolWindowTask`（`platform-api/.../wm/RegisterToolWindowTask.kt`）：registerToolWindow
+//     拿到的是 id + anchor + `stripeTitle` + `canCloseContents` … 这一组**声明式**字段；
+//   · `ToolWindowFactory.shouldBeAvailable(project)`（`platform-api/.../wm/ToolWindowFactory.kt`）：
+//     给不出内容的窗口在条纹上灰着 —— 平台实现里带规则的例子是
+//     `AbstractExternalSystemToolWindowFactory.java:32-34`（`!linkedProjectsSettings.isEmpty()`）；
+//   · `ToolWindowId.java` 的 id 常量 + 各插件的 `<toolWindow id="…" anchor="…">` 注册（每个插件一份 XML）。
+// 本仓没有 EP（没有插件运行时，硬规则 2），所以"注册"= 往下面这张表里加一条。
+//
+// **加一个工具窗口要改的地方**（这一批之后只剩两处）：
+//   1) 本文件 `TOOL_WINDOW_REGISTRY` 加一条；
+//   2) 内容挂载点（`ToolWindowView.vue` 的 `v-else-if="view === '…'"`）。
+//   第 2 条在 IDEA 里是 `ToolWindowFactory.createToolWindowContent(project, toolWindow)` —— 本仓每个
+//   视图组件的 props 各不相同（`VcsLog` 要 root、`FileTree` 要 entries…），所以那一半仍是模板链，
+//   **没有假装数据化**：要它数据化得先给所有视图一个统一的 `content(ctx)` 契约
+//   （登记在 `docs/source-todo.md` §12）。
+//
+// 原先这几张表各写一份、还互不一致（`toolWindowStripes` 把 vcslog/todo/debug 列在 left、
+// `toolLayouts` 把锚点全写成 left）—— 现在**只有本文件定义**，其余地方 import。
 import { Bell, Bookmark as BookmarkIcon, Boxes, Bug, Files, FolderTree, GitBranch, GitGraph, ListChecks, Search } from 'lucide-vue-next'
 import { mnemonicBindings, mnemonicOf } from './toolWindows.ts'
-// 与 App 的 `typeof leftView.value` 同值域（那边是 ref 推导，模块内显式写出，结构兼容）。
-// 'gradle' = IDEA 的 Gradle 工具窗口（`plugins/gradle/plugin-resources/intellij.gradle.xml:228`
-// `<toolWindow id="Gradle" anchor="right" …>` —— 默认停靠**右侧**）。
-// 'notifications' = IDEA 的 Notifications 工具窗口（`platform/platform-impl/resources/intellij.platform.ide.impl.xml:1210`：
-// `<toolWindow id="Notifications" anchor="right" secondary="true" …>`）—— 本仓原先只有状态栏的计数入口。
-// 'history' 不在列：IDEA 的 Local History 是 ShowHistoryAction 打开的**对话框**，不是工具窗口
-//（ToolWindowId.java / 各 <toolWindow> 注册里都没有它）；TaoCode 同款改为对话框（App.vue 的
-// LocalHistoryDialog）。'tests' 同理已移除：IDEA 没有 Tests 工具窗口，测试树长在 **Run 控制台**里
-//（SM test runner 渲染在 Run 工具窗口内容区），TestRunnerPanel 挂到底部 run 标签。
-export type ToolWindowId = 'files' | 'git' | 'vcslog' | 'search' | 'todo' | 'outline' | 'bookmarks' | 'debug' | 'gradle' | 'notifications'
 
-export const toolTitles: Record<ToolWindowId, string> = {
-  files: '项目', git: '源代码管理', vcslog: 'VCS 日志', search: '搜索', todo: '任务',
-  outline: '结构', bookmarks: '书签', debug: '调试',
-  gradle: 'Gradle', notifications: '通知',
-}
-
-export const toolIcons: Record<ToolWindowId, unknown> = {
-  files: Files, git: GitBranch, vcslog: GitGraph, search: Search, todo: ListChecks,
-  outline: FolderTree, bookmarks: BookmarkIcon, debug: Bug,
-  // lucide 没有 Gradle 图标；用"模块/构件"语义的 Boxes 表示工程结构树。
-  gradle: Boxes, notifications: Bell,
-}
-
-// IDEA binds Alt+<digit> to a tool window through the *keymap* — ActivateToolWindowAction
-// .Manager.getMnemonicForToolWindow reads the shortcut of `Activate<Id>ToolWindow`
-// (ActivateToolWindowAction.kt:88-111) and StripeButton prints it as "<digit>: <title>"
-// (StripeButton.kt:287-298). The number therefore belongs to the tool window and never to
-// its position on the stripe: dragging stripe buttons around must not renumber anything.
-// TaoCode keeps one stable order for the mnemonics, separate from the draggable
-// `toolOrder` that only decides where a button is drawn.
-// 工具窗口的**枚举顺序**（三条磁贴、底部分页条、状态栏弹窗都按它列）—— 与助记符顺序解耦，
-// 见下面 `TOOL_MNEMONIC_ORDER`。
-export const toolWindowOrder: ToolWindowId[] = ['files', 'git', 'vcslog', 'search', 'todo', 'outline', 'bookmarks', 'debug', 'gradle', 'notifications']
-
-/**
- * 每个停靠边的**默认顺序**（条纹上的排列）。
- *
- * **单一来源**：原先这张表在四处各写了一份（`toolWindowStripes` 的 `toolOrder`、
- * `toolLayouts` 的 `DEFAULT_TOOL_ORDER`，还有两份 `BOTTOM_TABS`），而且内容**互不一致** ——
- * `toolWindowStripes` 里把 `vcslog/todo/debug` 列在 `left` 下、`bottom` 却是空的，
- * `toolLayouts` 那份则是另一套旧顺序。改一处漏三处，正是"表抄多份"的典型代价。
- * 现在只在这里定义，且**必须与 `toolAnchors` 的默认值一致**。
- */
+/** IDEA 的 `ToolWindowAnchor`（TaoCode 只用 left/right/bottom；FLOATING 没有宿主）。 */
 export type ToolWindowAnchor = 'left' | 'right' | 'bottom'
 
 /**
- * 每个工具窗口的**默认停靠边** —— 唯一来源。依据是 IDEA 的 `<toolWindow id="…" anchor="…">` 注册：
- * Project/Commit/Bookmarks/Structure=`left`（`intellij.platform.lang.impl.xml:1329`、`bookmarks.xml:47`）、
- * TODO/Version/Problems/Terminal/Debug/Tests=`bottom`、Gradle/Notifications=`right`
- * （`intellij.gradle.xml:228`、`intellij.platform.ide.impl.xml:1210`）。
- *
- * 原先这张表在 `toolWindowStripes`（正确）与 `toolLayouts`（**全写成 left**）里各有一份，
- * 后者会让"工厂默认布局"把所有窗口都摆在左侧。
+ * `ToolWindowFactory.shouldBeAvailable(project)` 能看到的那些输入（本仓的"项目状态"面）。
+ * 传值而不是传 project：这个模块是纯数据，不持有任何状态。
  */
-export const DEFAULT_TOOL_ANCHORS: Record<ToolWindowId, ToolWindowAnchor> = {
-  // search = IDEA 的 Find：`defaultToolWindowlayoutProvider.kt:246` 把它配在 **bottom**
-  // （V1 默认布局 Bottom = Version Control / Find / Run / Debug / Inspection）。
-  files: 'left', git: 'left', outline: 'left', bookmarks: 'left',
-  vcslog: 'bottom', search: 'bottom', todo: 'bottom', debug: 'bottom',
-  gradle: 'right', notifications: 'right',
+export interface ToolWindowAvailability {
+  /** 桌面端（浏览器预览没有 git / 语言服务 / 外部系统通道）。 */
+  isDesktop: boolean
+  /** 打开了项目。 */
+  hasWorkspace: boolean
+  /** 语言服务是否就绪。 */
+  lspReady: boolean
+  /** 当前项目是不是已链接的 Gradle 项目。 */
+  gradleAvailable: boolean
 }
 
-export const DEFAULT_TOOL_ORDER: Record<'left' | 'right' | 'bottom', ToolWindowId[]> = {
-  // IDEA V2 左栏默认顺序 = Project → Commit → Structure（`defaultToolWindowlayoutProvider.kt:257-267`），
-  // 注册在 left 的 Bookmarks（`bookmarks.xml:47`）排在其后。
-  left: ['files', 'git', 'outline', 'bookmarks'],
-  // IDEA：Gradle(right) `intellij.gradle.xml:228`、Notifications(right) `ide.impl.xml:1210`
-  right: ['gradle', 'notifications'],
-  // IDEA V1 底部 = Version Control → Find → Run → Debug（`defaultToolWindowlayoutProvider.kt:244-249`），
-  // TODO/Debug 按 `todo.xml:60`、`:248` 的注册停靠底部。
-  bottom: ['vcslog', 'search', 'todo', 'debug'],
+export interface ToolWindowRegistration {
+  /** `<toolWindow id="…">` 的 id，也是锚点表/顺序表/助记符表与持久化键里的键。 */
+  id: string
+  /** 条纹标题（`RegisterToolWindowTask.stripeTitle`；也被状态栏弹层与菜单用作文案）。 */
+  title: string
+  icon: unknown
+  /** 默认停靠边（`<toolWindow anchor="…">` / `RegisterToolWindowTask.anchor`）。 */
+  anchor: ToolWindowAnchor
+  /**
+   * 有没有 `Activate<Id>ToolWindow` 动作 —— **只有有**的才占 Alt+数字
+   * （`ActivateToolWindowAction.Manager.getMnemonicForToolWindow` 读的是该动作的快捷键）。
+   * 缺省 true；Gradle 与 Notifications 是 false（它们没有那个动作）。
+   */
+  numbered?: boolean
+  /** 缺省 = 恒可用（上游没有 `shouldBeAvailable` 的那些窗口）。 */
+  available?: (deps: ToolWindowAvailability) => boolean
+}
+
+/** 注册表。每条上方的注释就是这条记录的上游依据（`<toolWindow>` 注册的出处 / 可用性出处）。 */
+export const TOOL_WINDOW_REGISTRY = [
+  // 数组顺序 = **枚举顺序**，它同时决定三件事：菜单/状态栏弹层里的排列、各锚点内的默认次序
+  // （按锚点过滤后的结果），以及 Alt+数字的编号（只数 `numbered !== false` 的那些）。
+  // 所以这一列**不能按锚点重排**：结构与书签在 IDEA 的 keymap 里是 Alt+6 / Alt+7
+  //（`$default.xml` 的 `ActivateOutlineToolWindow` / `ActivateBookmarksToolWindow`），
+  // 按锚点分组会把它们的编号换掉 —— 那是用户看得见的行为。
+  // `intellij.platform.lang.impl.xml` 的 `<toolWindow id="Project" anchor="left" …>`（项目视图）。
+  // 可用性：上游没有 `shouldBeAvailable` —— 空项目也显示空态，所以恒可用。
+  { id: 'files', title: '项目', icon: Files, anchor: 'left' },
+  // IDEA 的 Commit 工具窗口（本仓的源代码管理面板就是它：信息 + 变更 + 提交动作）。
+  // `CommitToolWindowFactory.isAvailable`（`vcsToolWindowFactories.kt:77-81`）要求项目里有 VCS 映射；
+  // 本仓的等价物不能在渲染前问（要跑一次 git 才知道），所以维持"恒可用 + 面板自己报空态/错误"——
+  // 真 exe 里打开一个没有 .git 的项目时它会如实说「读取 Git 日志失败…」（见 §AP 的取证记录）。
+  { id: 'git', title: '源代码管理', icon: GitBranch, anchor: 'left' },
+  // IDEA 的 Version Control / Log 窗口（`defaultToolWindowlayoutProvider.kt:246` 配在 bottom）。
+  // `ChangeViewToolWindowFactory.isAvailable`（`vcsToolWindowFactories.kt:60-63`）= `canBeAvailableInProject`；
+  // 本仓的等价物 = 桌面端 + 打开了项目（浏览器预览没有 git 通道，没有项目就没有仓库可读）。
+  { id: 'vcslog', title: 'VCS 日志', icon: GitGraph, anchor: 'bottom', available: deps => deps.isDesktop && deps.hasWorkspace },
+  // IDEA 的 Find 窗口（`:246` 同一条 V1 默认布局）。
+  { id: 'search', title: '搜索', icon: Search, anchor: 'bottom' },
+  // `todo.xml` 的 `<toolWindow id="TODO" anchor="bottom" …>`。
+  { id: 'todo', title: '任务', icon: ListChecks, anchor: 'bottom' },
+  // 结构视图：内容来自语言服务（`StructureView`）。上游没有对应的 `shouldBeAvailable`（IDEA 的结构
+  // 窗口恒可用、只显示空态），这条是**本仓的映射**：没有语言服务就没有结构可给 ⇒ 灰着。
+  // 它排在 TODO 之后不是随手写的：`$default.xml` 里 `ActivateOutlineToolWindow` 是 **Alt+6**、
+  // 书签是 Alt+7，枚举顺序（= 助记符顺序）必须与那套键位一致。
+  { id: 'outline', title: '结构', icon: FolderTree, anchor: 'left', available: deps => deps.lspReady },
+  // `bookmarks.xml` 的 `<toolWindow id="Bookmarks" anchor="left" …>`：本仓的书签是纯本地状态，恒可用。
+  { id: 'bookmarks', title: '书签', icon: BookmarkIcon, anchor: 'left' },
+  // IDEA 的 Debug 窗口（`:248`）。本仓的调试器是 DAP 客户端，窗口恒在、内容空态。
+  { id: 'debug', title: '调试', icon: Bug, anchor: 'bottom' },
+  // `plugins/gradle/.../intellij.gradle.xml:228`：`<toolWindow id="Gradle" anchor="right" …>`。
+  // `AbstractExternalSystemToolWindowFactory.java:32-34`：`shouldBeAvailable = !linkedProjectsSettings.isEmpty()`
+  // —— 本仓的等价物是"这个项目是已链接的 Gradle 项目"。
+  { id: 'gradle', title: 'Gradle', icon: Boxes, anchor: 'right', numbered: false,
+    available: deps => deps.isDesktop && deps.hasWorkspace && deps.gradleAvailable },
+  // `intellij.platform.ide.impl.xml:1210`：`<toolWindow id="Notifications" anchor="right" secondary="true" …>`。
+  // 没有 `ActivateNotificationsToolWindow` 动作 ⇒ 不占 Alt+数字。
+  { id: 'notifications', title: '通知', icon: Bell, anchor: 'right', numbered: false },
+] as const satisfies readonly ToolWindowRegistration[]
+
+export type ToolWindowId = (typeof TOOL_WINDOW_REGISTRY)[number]['id']
+
+type RegistryEntry = ToolWindowRegistration & { id: ToolWindowId }
+const REGISTRY = TOOL_WINDOW_REGISTRY as readonly RegistryEntry[]
+const BY_ID = new Map<string, RegistryEntry>(REGISTRY.map(entry => [entry.id, entry]))
+
+/** 按 id 取注册项（`ToolWindowManager.getToolWindow(id)` 的那一半；查不到就是没有这个窗口）。 */
+export function toolWindowRegistration(id: string): RegistryEntry | undefined {
+  return BY_ID.get(id)
+}
+
+/**
+ * `ToolWindowFactory.shouldBeAvailable(project)`：没有 `available` 的窗口恒可用。
+ * 条纹按钮的"灰着但还在"（`ToolWindowImpl.isAvailable`）与菜单行的可用性都读这一条。
+ */
+export function shouldBeAvailable(id: ToolWindowId, deps: ToolWindowAvailability): boolean {
+  const entry = BY_ID.get(id)
+  return entry?.available ? entry.available(deps) : true
+}
+
+/** 由注册表派生一张 `Record<ToolWindowId, T>`（唯一的一处 `as`，不让它散到各处）。 */
+function derived<T>(pick: (entry: RegistryEntry) => T): Record<ToolWindowId, T> {
+  return Object.fromEntries(REGISTRY.map(entry => [entry.id, pick(entry)])) as Record<ToolWindowId, T>
+}
+
+/** 条纹标题表（菜单/状态栏弹层/工具窗口标题栏都读它）。 */
+export const toolTitles: Record<ToolWindowId, string> = derived(entry => entry.title)
+
+/** 图标表。`gradle` 用 lucide 的 Boxes：lucide 没有 Gradle 图标，用"模块/构件"语义代替。 */
+export const toolIcons: Record<ToolWindowId, unknown> = derived(entry => entry.icon)
+
+/**
+ * 枚举顺序（三条磁贴、底部分页条、状态栏弹窗都按它列）= 注册表顺序，
+ * 与助记符顺序解耦（见下面 `TOOL_MNEMONIC_ORDER`）。
+ */
+export const toolWindowOrder: ToolWindowId[] = REGISTRY.map(entry => entry.id)
+
+/**
+ * 每个窗口的**默认停靠边** —— 唯一来源（原先在 `toolWindowStripes` 与 `toolLayouts` 各有一份，
+ * 后者会把所有窗口都摆到左侧）。
+ */
+export const DEFAULT_TOOL_ANCHORS: Record<ToolWindowId, ToolWindowAnchor> = derived(entry => entry.anchor)
+
+/**
+ * 每个停靠边内的**默认顺序** = 注册表顺序按锚点过滤。
+ * 上游依据是 `defaultToolWindowlayoutProvider.kt:244-267` 的 V1/V2 默认布局
+ * （left = Project → Commit → Structure → Bookmarks；bottom = Version Control → Find → TODO → Debug；
+ * right = Gradle → Notifications）；这张派生结果与它一致这一点由判据锁住。
+ */
+export const DEFAULT_TOOL_ORDER: Record<ToolWindowAnchor, ToolWindowId[]> = {
+  left: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'left'),
+  bottom: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'bottom'),
+  right: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'right'),
 }
 
 /**
@@ -93,15 +174,12 @@ export const BOTTOM_TABS = ['output', 'run', 'problems', 'references', 'hierarch
 export type BottomTabId = (typeof BOTTOM_TABS)[number]
 
 /**
- * 助记符只用**有 Alt+数字 动作的那些**窗口。
- *
+ * 助记符只用**有 Alt+数字 动作的那些**窗口（注册表里的 `numbered`）。
  * Gradle 工具窗口在 IDEA 里没有 `ActivateGradleToolWindow` 动作（插件注册里只有
  * `toolWindow id="Gradle" anchor="right"`，没有任何快捷键绑定），所以它不该出现在
  * Alt+数字 的编号里 —— 否则界面上会多出一个 IDEA 里不存在的 "Alt+11"。
  */
-// 只有 IDEA 里真有 `Activate<Id>ToolWindow` 动作的窗口才占编号：Gradle 与 Notifications 都没有
-// （Notifications 是 `secondary` 工具窗口，见 intellij.platform.ide.impl.xml:1210）。
-export const TOOL_MNEMONIC_ORDER: ToolWindowId[] = toolWindowOrder.filter(id => id !== 'gradle' && id !== 'notifications')
+export const TOOL_MNEMONIC_ORDER: ToolWindowId[] = REGISTRY.filter(entry => entry.numbered !== false).map(entry => entry.id)
 
 // IDEA's keymap also binds Alt+0 to the Commit tool window; TaoCode's 源代码管理 panel
 // *is* the commit tool window (message box + changes + commit actions), so it answers
