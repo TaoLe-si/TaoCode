@@ -167,6 +167,25 @@ std::int64_t number(const Json& object, const char* key, std::int64_t fallback) 
 int main(int argc, char** argv) {
     const std::vector<std::string> switches(argv + 1, argv + argc);
     const bool extras = std::find(switches.begin(), switches.end(), std::string("--extras")) != switches.end();
+    // 用来验证客户端的**能力回退**：不支持 terminate 的适配器要走 disconnect{terminateDebuggee:true}，
+    // 不支持 restart 的适配器要收到 DAP_UNSUPPORTED 而不是一个它答不上来的请求。
+    const bool no_terminate = std::find(switches.begin(), switches.end(), std::string("--no-terminate")) != switches.end();
+    const bool no_restart = std::find(switches.begin(), switches.end(), std::string("--no-restart")) != switches.end();
+    // Run to Cursor / 丢弃帧的能力开关（验证客户端的门控）。
+    const bool no_goto = std::find(switches.begin(), switches.end(), std::string("--no-goto")) != switches.end();
+    // 关掉 supportsCompletionsRequest（规范默认 false）：客户端必须本地拒绝调试表达式补全。
+    const bool no_completions =
+        std::find(switches.begin(), switches.end(), std::string("--no-completions")) != switches.end();
+    // 回一个「什么都没有」的 exceptionInfo 响应（description/exceptionId 都空）：
+    // 客户端应当回 available:false，而不是给 UI 一张空卡片。
+    const bool bare_exception_info =
+        std::find(switches.begin(), switches.end(), std::string("--bare-exception-info")) != switches.end();
+    // `stopped` 的 reason 用 exception（而不是 pause）：验证客户端只在异常停住时才问 exceptionInfo。
+    const bool stop_on_exception =
+        std::find(switches.begin(), switches.end(), std::string("--stop-on-exception")) != switches.end();
+    // 关掉 supportsBreakpointLocationsRequest：客户端必须回 DAP_UNSUPPORTED，而不是发请求。
+    const bool no_breakpoint_locations =
+        std::find(switches.begin(), switches.end(), std::string("--no-breakpoint-locations")) != switches.end();
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -244,11 +263,19 @@ int main(int argc, char** argv) {
 
             if (command == "initialize") {
                 respond(seq, command, Json{{"supportsConfigurationDoneRequest", true},
-                                           {"supportsTerminateRequest", true},
+                                           {"supportsTerminateRequest", !no_terminate},
+                                           {"supportsRestartRequest", !no_restart},
+                                           {"supportsGotoTargetsRequest", !no_goto},
+                                           {"supportsRestartFrame", !no_goto},
+                                           // 规范里 supportsBreakpointLocationsRequest 默认 false，
+                                           // 所以默认声明为真，另有开关把它关掉测降级。
+                                           {"supportsBreakpointLocationsRequest", !no_breakpoint_locations},
                                            {"supportsConditionalBreakpoints", false},
                                            {"supportsVariableType", true},
                                            {"supportsEvaluateForHovers", false},
-                                           {"supportsSetVariable", false},
+                                           // 这个假适配器实现了 setVariable/setExpression，能力位要如实声明。
+                                           {"supportsSetVariable", true},
+                                           {"supportsCompletionsRequest", !no_completions},
                                            {"exceptionBreakpointFilters", Json::array({
                                                Json{{"filter", "all"}, {"label", "All Exceptions"}},
                                                Json{{"filter", "uncaught"}, {"label", "Uncaught Exceptions"}},
@@ -385,15 +412,118 @@ int main(int argc, char** argv) {
                     values.push_back(Json{{"name", "child"}, {"value", "1"}, {"type", "int"}, {"variablesReference", 0}});
                 }
                 respond(seq, command, Json{{"variables", values}});
+            } else if (command == "setVariable") {
+                // Echo the container reference, name and new value so the client test can
+                // prove all three were sent as-is (DAP "Set Variable Response" is one variable).
+                const auto reference = number(arguments, "variablesReference", 0);
+                const auto name = arguments.value("name", std::string());
+                const auto value = arguments.value("value", std::string());
+                respond(seq, command, Json{{"value", name + "=" + value + " @" + std::to_string(reference)},
+                                           {"type", "int"}, {"variablesReference", 0}});
+            } else if (command == "setExpression") {
+                // `frameId` is optional in the spec, so the fake reports -1 when it is absent.
+                const auto expression = arguments.value("expression", std::string());
+                const auto value = arguments.value("value", std::string());
+                const auto frame = number(arguments, "frameId", -1);
+                respond(seq, command, Json{{"value", expression + " := " + value + " [" + std::to_string(frame) + "]"},
+                                           {"type", "int"}, {"variablesReference", 0}, {"namedVariables", 0}});
+            } else if (command == "exceptionInfo") {
+                // 响应里没有 threadId 字段（规范没有），所以把收到的值回声成一条 output，
+                // 客户端测试据此证明参数发出去了。
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: exceptionInfo threadId=" +
+                                                    std::to_string(number(arguments, "threadId", 0))}});
+                // 形状覆盖规范里的全部字段，含 `innerException` 的 cause 链（两层），
+                // 客户端整形必须逐层落地 —— 少一层就是 UI 上看不到根因。
+                if (bare_exception_info) {
+                    respond(seq, command, Json{{"exceptionId", ""}, {"description", ""}, {"breakMode", "always"}});
+                } else {
+                    respond(seq, command, Json{{"exceptionId", "java.lang.IllegalStateException"},
+                                               {"description", "IllegalStateException: boom"},
+                                               {"breakMode", "always"},
+                                               {"details", Json{{"message", "boom"},
+                                                                {"typeName", "IllegalStateException"},
+                                                                {"fullTypeName", "java.lang.IllegalStateException"},
+                                                                {"evaluateName", "this.cause"},
+                                                                {"stackTrace", "at Sample.run(Sample.java:3)"},
+                                                                {"innerException", Json::array({Json{
+                                                                    {"message", "disk full"},
+                                                                    {"typeName", "IOException"},
+                                                                    {"fullTypeName", "java.io.IOException"}}})}}}});
+                }
+            } else if (command == "completions") {
+                // 三种形状都覆盖：带 start/length 的（可精确替换一段）、只有 label 的（整段替换）、
+                // 以及一个**没有 label** 的项（客户端必须丢掉它 —— UI 里无法显示也选不中）。
+                const auto text_value = arguments.value("text", std::string());
+                const auto frame = number(arguments, "frameId", -1);
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: completions text=" + text_value +
+                                                    " column=" + std::to_string(number(arguments, "column", -1)) +
+                                                    " frameId=" + std::to_string(frame)}});
+                respond(seq, command, Json{{"targets", Json::array({
+                    Json{{"label", "counter"}, {"text", "counter"}, {"type", "variable"}, {"start", 0}, {"length", 7}},
+                    Json{{"label", "countLocal"}, {"type", "field"}},
+                    Json{{"type", "orphan"}}})}});
             } else if (command == "continue" || command == "next" || command == "stepIn" || command == "stepOut") {
                 respond(seq, command, command == "continue" ? Json{{"allThreadsContinuation", true}} : Json::object());
                 event("continued", Json{{"threadId", number(arguments, "threadId", 1)}, {"allThreadsContinued", true}});
                 ++control_steps;
-                if (control_steps == 1) event("stopped", Json{{"reason", "pause"}, {"threadId", 1}, {"allThreadsStopped", true}});
+                if (control_steps == 1) {
+                    // pause 事件的形状保持原样（不加 description 键），只有
+                    // `--stop-on-exception` 时才多一个描述 —— 否则会悄悄改变既有用例的输入。
+                    Json stopped{{"reason", stop_on_exception ? "exception" : "pause"},
+                                 {"threadId", 1}, {"allThreadsStopped", true}};
+                    if (stop_on_exception) stopped["description"] = "IllegalStateException: boom";
+                    event("stopped", stopped);
+                }
                 else {
                     event("terminated", Json{{"restartable", false}});
                     return 0;  // the session is over; let the pipes close
                 }
+            } else if (command == "breakpointLocations") {
+                // 把请求里的 line/endLine/column/endColumn 原样带回（客户端测试据此证明四个字段
+                // 都发出去了），并且**行号是奇数就回空数组** —— 空数组是"这一行没有可放置位置"
+                // （IDEA 的 "Cannot find appropriate breakpoint type"），必须与"请求失败"区分开。
+                const Json source = arguments.contains("source") && arguments.at("source").is_object()
+                                        ? arguments.at("source") : Json::object();
+                const auto source_path = text(source, "path");
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: breakpointLocations " + source_path}});
+                // 没有 source 就没法回答"哪个文件的这一行"。直接失败，而不是回一个空的位置列表
+                // 让客户端误以为"这一行不能放断点"。
+                if (source_path.empty()) {
+                    refuse(seq, command, "breakpointLocations needs a source path");
+                } else if (number(arguments, "line", 0) % 2 != 0) {
+                    respond(seq, command, Json{{"breakpoints", Json::array()}});
+                } else {
+                    const auto line = number(arguments, "line", 0);
+                    Json spots = Json::array();
+                    Json first{{"line", line}};
+                    if (arguments.contains("column")) first["column"] = number(arguments, "column", 0);
+                    spots.push_back(std::move(first));
+                    // 第二个位置带上 endLine/endColumn：可选的"范围"形式也要能整形出来。
+                    Json span{{"line", line}};
+                    if (arguments.contains("endLine")) span["endLine"] = number(arguments, "endLine", 0);
+                    if (arguments.contains("endColumn")) span["endColumn"] = number(arguments, "endColumn", 0);
+                    spots.push_back(std::move(span));
+                    respond(seq, command, Json{{"breakpoints", std::move(spots)}});
+                }
+            } else if (command == "gotoTargets") {
+                // 把请求里的行号原样带回（客户端测试据此证明行号与 source 路径都发出去了）。
+                const auto line = number(arguments, "line", 0);
+                const auto path = arguments.contains("source") && arguments.at("source").is_object()
+                                      ? arguments.at("source").value("path", std::string()) : std::string();
+                respond(seq, command, Json{{"targets", Json::array({Json{{"id", 7},
+                                                                       {"label", "line " + std::to_string(line)},
+                                                                       {"line", line},
+                                                                       {"column", 1},
+                                                                       {"endLine", line},
+                                                                       {"path", path}}})}});
+            } else if (command == "goto" || command == "restartFrame") {
+                respond(seq, command, Json::object());
+            } else if (command == "terminate" || command == "restart") {
+                // 两条都是"收到就答"，客户端测试据此证明请求真的发出去了。
+                respond(seq, command, Json::object());
             } else if (command == "pause") {
                 respond(seq, command, Json::object());
             } else if (command == "threads") {

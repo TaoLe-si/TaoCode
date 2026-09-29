@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 import {
   CLOSEABLE_TOOL_TABS,
   canCloseAllContents,
@@ -14,7 +15,7 @@ import {
   tabsCloseOtherWouldRemove,
 } from '../src/toolTabs.ts'
 
-const presence = (over = {}) => ({ references: false, hierarchy: false, blame: false, ...over })
+const presence = (over = {}) => ({ references: false, hierarchy: false, ...over })
 
 // `ContentManagerImpl.canCloseAllContents()` (:472-481): `canCloseContents() && any isCloseable`.
 // An empty tool window therefore disables the action instead of firing a no-op.
@@ -22,15 +23,14 @@ test('CloseAllTabs is enabled exactly while some closeable content is in the str
   assert.equal(canCloseAllContents(presence()), false)
   assert.equal(canCloseAllContents(presence({ references: true })), true)
   assert.equal(canCloseAllContents(presence({ hierarchy: true })), true)
-  assert.equal(canCloseAllContents(presence({ blame: true })), true)
-  assert.equal(canCloseAllContents(presence({ references: true, blame: true })), true)
+  assert.equal(canCloseAllContents(presence({ references: true, hierarchy: true })), true)
 })
 
 // `ToolWindowCloseOtherTabsAction.update` (:23-26) adds `it !== content`, so a single content the
 // action was invoked on is not enough to enable it.
 test('CloseOtherTabs needs one closeable content besides the one it was invoked on', () => {
   assert.equal(canCloseOtherContents('references', presence({ references: true })), false)
-  assert.equal(canCloseOtherContents('references', presence({ references: true, blame: true })), true)
+  assert.equal(canCloseOtherContents('references', presence({ references: true, hierarchy: true })), true)
   // A permanent content (Output, Problems, …) is a legal target: nothing is spared then.
   assert.equal(canCloseOtherContents('output', presence({ references: true })), true)
   assert.equal(canCloseOtherContents('output', presence()), false)
@@ -38,15 +38,15 @@ test('CloseOtherTabs needs one closeable content besides the one it was invoked 
 
 // ToolWindowCloseAllTabsAction.kt:11-18 — every closeable content, the selected one included.
 test('CloseAllTabs removes the whole closeable set, in strip order', () => {
-  assert.deepEqual(tabsCloseAllWouldRemove(presence({ references: true, hierarchy: true, blame: true })), ['references', 'hierarchy', 'blame'])
-  assert.deepEqual(tabsCloseAllWouldRemove(presence({ blame: true })), ['blame'])
+  assert.deepEqual(tabsCloseAllWouldRemove(presence({ references: true, hierarchy: true })), ['references', 'hierarchy'])
+  assert.deepEqual(tabsCloseAllWouldRemove(presence({ hierarchy: true })), ['hierarchy'])
   assert.deepEqual(tabsCloseAllWouldRemove(presence()), [])
 })
 
 // ToolWindowCloseOtherTabsAction.kt:11-19 — same loop with `content !== cur`, so the content the
 // action was invoked on survives whatever it is.
 test('CloseOtherTabs spares exactly the selected content', () => {
-  assert.deepEqual(tabsCloseOtherWouldRemove('hierarchy', presence({ references: true, hierarchy: true, blame: true })), ['references', 'blame'])
+  assert.deepEqual(tabsCloseOtherWouldRemove('hierarchy', presence({ references: true, hierarchy: true })), ['references'])
   assert.deepEqual(tabsCloseOtherWouldRemove('output', presence({ references: true, hierarchy: true })), ['references', 'hierarchy'])
   // Sparing a content that is not there changes nothing: the whole set goes.
   assert.deepEqual(tabsCloseOtherWouldRemove('references', presence({ hierarchy: true })), ['hierarchy'])
@@ -54,10 +54,12 @@ test('CloseOtherTabs spares exactly the selected content', () => {
 
 // The closeable set is the *subset* of the strip whose contents can go away; the fixed tabs are
 // never in it, and `isCloseableToolTab` is the narrowing test the callers use.
-test('the closeable set holds only the three removable contents', () => {
+test('the closeable set holds only the removable contents, and blame is not one', () => {
   for (const tab of CLOSEABLE_TOOL_TABS) assert.equal(isCloseableToolTab(tab), true)
-  for (const tab of ['output', 'run', 'problems', 'terminal', 'about']) assert.equal(isCloseableToolTab(tab), false)
-  assert.equal(presentCloseableTabs(presence({ references: true, hierarchy: true, blame: true })).length, 3)
+  // `blame` left the strip in 2026-09-27: IDEA's Annotate annotates an `Editor`
+  // (`AnnotateToggleAction.java:139-153`), it is not a `Content` of the tool window.
+  for (const tab of ['output', 'run', 'problems', 'terminal', 'blame', 'about']) assert.equal(isCloseableToolTab(tab), false)
+  assert.equal(presentCloseableTabs(presence({ references: true, hierarchy: true })).length, 2)
 })
 
 // HideAllToolWindowsAction: the row's text is what tells the user which way the toggle goes
@@ -85,8 +87,9 @@ test('HideAllWindows flips its text between hide and restore', () => {
 // `CLOSEABLE_TOOL_TABS` claims strip order, and the strip lives in App.vue's `BOTTOM_TABS`. The
 // iteration order of the removal loops follows it, so the two are compared mechanically rather
 // than by eye.
-test('the closeable set is BOTTOM_TABS filtered, in the strip order App.vue declares', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+test('the closeable set is BOTTOM_TABS filtered, in the strip order the tool-window metadata declares', () => {
+  // BOTTOM_TABS 在 2026-09-27 统一到 src/toolWindowMeta.ts（唯一来源）。
+  const app = shellSource()
   const line = app.split('\n').find(l => l.includes('const BOTTOM_TABS'))
   assert.ok(line, 'BOTTOM_TABS moved; revisit this assertion')
   const ids = [...line.matchAll(/'([a-z]+)'/g)].map(m => m[1])
@@ -98,7 +101,8 @@ test('the closeable set is BOTTOM_TABS filtered, in the strip order App.vue decl
 // The three WindowMenu rows (`PlatformActions.xml:664-666`), and the native key that must stay off
 // CloseAllTabs: it borrows `CloseAllEditors`, which `$default.xml` never binds.
 test('the Window menu carries CloseAllTabs right after CloseOtherTabs, without a shortcut', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 「窗口」菜单在 2026-09-27 搬进了 src/menus/windowMenu.ts（一类一文件）——行为没变，位置变了。
+  const app = readFileSync('src/menus/windowMenu.ts', 'utf8')
   const lines = app.split('\n')
   const other = lines.findIndex(l => l.includes("id: 'window.closeOtherTabs'"))
   const all = lines.findIndex(l => l.includes("id: 'window.closeAllTabs'"))
@@ -122,8 +126,9 @@ test('the Window menu carries CloseAllTabs right after CloseOtherTabs, without a
 // The actions share one content model instead of three copies of the same condition, which is the
 // whole reason `src/toolTabs.ts` exists.
 test('every tool-tab removal path goes through the shared module', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
-  for (const call of ['tabsCloseAllWouldRemove(toolTabPresence())', "tabsCloseOtherWouldRemove(bottomTab.value, toolTabPresence())", 'canCloseAllContents(toolTabPresence())', 'canCloseOtherContents(bottomTab.value, toolTabPresence())'])
+  const app = shellSource()
+  // 这些调用现在在 src/toolWindowActions.ts 里，经 ctx 取 bottomTab（行为与拆分前一致）。
+  for (const call of ['tabsCloseAllWouldRemove(toolTabPresence())', "tabsCloseOtherWouldRemove(ctx.bottomTab.value, toolTabPresence())", 'canCloseAllContents(toolTabPresence())', 'canCloseOtherContents(ctx.bottomTab.value, toolTabPresence())'])
     assert.ok(app.includes(call), `${call} is missing: a removal path re-implements the condition`)
   assert.equal(/bottomTab\.value !== '(references|hierarchy|blame)'/.test(app), false, 'a hand-rolled per-tab guard is back')
 })
@@ -132,7 +137,9 @@ test('every tool-tab removal path goes through the shared module', () => {
 // the snapshot when it restores; and the View menu must not carry a second face of the action
 // (`PlatformActions.xml:521-597` has no maximize item).
 test('HideAllWindows is a single Window-menu row that restores what it hid', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 菜单行在 src/menus/windowMenu.ts；`savedChrome` 的赋值仍在宿主（那是动作实现，不是菜单）。
+  const app = readFileSync('src/menus/windowMenu.ts', 'utf8')
+  const host = readFileSync('src/App.vue', 'utf8')
   const lines = app.split('\n')
   const row = lines.filter(l => l.includes("id: 'window.hideAllWindows'"))
   assert.equal(row.length, 1, 'HideAllWindows must have exactly one menu row')
@@ -141,7 +148,7 @@ test('HideAllWindows is a single Window-menu row that restores what it hid', () 
   assert.ok(row[0].includes('canHideAllToolWindows(currentChrome(), savedChrome.value)'), 'the row does not use the source enable test')
   assert.equal(app.includes("id: 'view.maximizeEditor'"), false, 'the View menu carries HideAllWindows a second time')
 
-  const save = app.indexOf('savedChrome.value = chrome')
-  const clear = app.indexOf('savedChrome.value = null')
+  const save = host.indexOf('savedChrome.value = chrome')
+  const clear = host.indexOf('savedChrome.value = null')
   assert.ok(save >= 0 && clear >= 0 && save < clear, 'the toggle no longer snapshots before it restores')
 })

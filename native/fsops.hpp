@@ -8,8 +8,37 @@
 
 #include <bcrypt.h>
 #include <filesystem>
+#include <limits>
+#include <string>
 
 namespace fs = std::filesystem;
+
+class Handle {
+public:
+    explicit Handle(HANDLE value = INVALID_HANDLE_VALUE) noexcept : value_(value) {}
+    ~Handle() { reset(); }
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+    Handle(Handle&& other) noexcept
+        : value_(std::exchange(other.value_, INVALID_HANDLE_VALUE)) {}
+    Handle& operator=(Handle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            value_ = std::exchange(other.value_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    HANDLE get() const noexcept { return value_; }
+    explicit operator bool() const noexcept {
+        return value_ != INVALID_HANDLE_VALUE && value_ != nullptr;
+    }
+    void reset() noexcept {
+        if (*this) CloseHandle(value_);
+        value_ = INVALID_HANDLE_VALUE;
+    }
+private:
+    HANDLE value_;
+};
 #include <string_view>
 
 namespace taocode {
@@ -18,23 +47,58 @@ namespace taocode {
     throw WorkspaceError(code, message);
 }
 
-std::string utf8_path(const fs::path& path) {
+[[noreturn]] void win_error(const std::string& message, DWORD error = GetLastError());
+
+[[noreturn]] inline void win_error(const std::string& message, DWORD error) {
+    const char* code = "IO_ERROR";
+    switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND: code = "NOT_FOUND"; break;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_PRIVILEGE_NOT_HELD: code = "ACCESS_DENIED"; break;
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION: code = "FILE_BUSY"; break;
+    case ERROR_FILE_EXISTS:
+    case ERROR_ALREADY_EXISTS: code = "ALREADY_EXISTS"; break;
+    case ERROR_INVALID_NAME:
+    case ERROR_BAD_PATHNAME:
+    case ERROR_FILENAME_EXCED_RANGE: code = "INVALID_PATH"; break;
+    case ERROR_DIRECTORY: code = "NOT_DIRECTORY"; break;
+    default: break;
+    }
+    fail(code, message + " (Windows error " + std::to_string(error) + ").");
+}
+
+inline std::string utf8_path(const fs::path& path) {
     const auto text = path.generic_u8string();
     return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
+/**
+ * 路径/设置文本的合法性判据：不含 NUL、长度不溢出 `int`、且是合法 UTF-8。
+ * 它属于**文件原语**（路径转换要用、设置校验也要用），所以定义在这里；
+ * 之前它住在 settings_schema.hpp，而 fsops.hpp 里的 `from_utf8` 已经在用它 ——
+ * 那个方向是编不过的（“valid_utf8: 未找到标识符”）。
+ */
+inline bool valid_utf8(const std::string& text) {
+    return text.find('\0') == std::string::npos &&
+           text.size() <= static_cast<std::size_t>((std::numeric_limits<int>::max)()) &&
+           (text.empty() || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                                                static_cast<int>(text.size()), nullptr, 0) != 0);
+}
 
-fs::path from_utf8(const std::string& text) {
+
+inline fs::path from_utf8(const std::string& text) {
     if (!valid_utf8(text)) fail("INVALID_PATH", "Paths must be UTF-8 without NUL bytes.");
     return fs::path(std::u8string(text.begin(), text.end()));
 }
 
-bool equal_name(std::wstring_view left, std::wstring_view right) {
+inline bool equal_name(std::wstring_view left, std::wstring_view right) {
     return CompareStringOrdinal(left.data(), static_cast<int>(left.size()), right.data(),
                                 static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
 }
 
-void validate_component(const std::wstring& name, const char* code = "INVALID_PATH") {
+inline void validate_component(const std::wstring& name, const char* code = "INVALID_PATH") {
     if (name.empty() || name.size() > 255 || name == L"." || name == L".." ||
         name.back() == L'.' || name.back() == L' ')
         fail(code, "A directory name must be a single ordinary Windows name.");
@@ -49,8 +113,8 @@ void validate_component(const std::wstring& name, const char* code = "INVALID_PA
     auto base = std::wstring_view(name).substr(0, name.find(L'.'));
     while (!base.empty() && base.back() == L' ') base.remove_suffix(1);
     if (equal_name(base, L"CON") || equal_name(base, L"PRN") || equal_name(base, L"AUX") ||
-        equal_name(base, L"NUL") || equal_name(base, L"CONIN$") ||
-        equal_name(base, L"CONOUT$") || equal_name(base, L"CLOCK$"))
+equal_name(base, L"NUL") || equal_name(base, L"CONIN$") ||
+equal_name(base, L"CONOUT$") || equal_name(base, L"CLOCK$"))
         fail(code, "Windows device names are not allowed.");
     if (base.size() == 4 &&
         (equal_name(base.substr(0, 3), L"COM") || equal_name(base.substr(0, 3), L"LPT")) &&
@@ -59,7 +123,7 @@ void validate_component(const std::wstring& name, const char* code = "INVALID_PA
         fail(code, "Windows device names are not allowed.");
 }
 
-fs::path absolute_path(fs::path path, bool require_absolute = false) {
+inline fs::path absolute_path(fs::path path, bool require_absolute = false) {
     if (path.empty() || path.native().find(L'\0') != std::wstring::npos)
         fail("INVALID_PATH", "A path cannot be empty or contain NUL characters.");
     path.make_preferred();
@@ -86,32 +150,32 @@ fs::path absolute_path(fs::path path, bool require_absolute = false) {
                     (root[0] >= L'a' && root[0] <= L'z')))))
         fail("INVALID_PATH", "Only ordinary drive paths and UNC shares are supported.");
     if (unc) {
-        validate_component(root.substr(2));
+validate_component(root.substr(2));
         if (path.relative_path().empty()) fail("INVALID_PATH", "A UNC path needs a share name.");
     }
     for (const auto& part : path.relative_path()) validate_component(part.native());
     return path;
 }
 
-std::wstring api_path(const fs::path& path) {
+inline std::wstring api_path(const fs::path& path) {
     const auto& text = path.native();
     return text.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + text.substr(2) : L"\\\\?\\" + text;
 }
 
-BY_HANDLE_FILE_INFORMATION file_info(HANDLE handle) {
+inline BY_HANDLE_FILE_INFORMATION file_info(HANDLE handle) {
     BY_HANDLE_FILE_INFORMATION info{};
     if (!GetFileInformationByHandle(handle, &info)) win_error("Cannot inspect filesystem object");
     return info;
 }
 
-void reject_reparse(const BY_HANDLE_FILE_INFORMATION& info) {
+inline void reject_reparse(const BY_HANDLE_FILE_INFORMATION& info) {
     if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
         fail("REPARSE_POINT", "Symbolic links, junctions and other reparse points are not allowed.");
     if (info.dwFileAttributes & FILE_ATTRIBUTE_DEVICE)
         fail("INVALID_PATH", "Device objects are not allowed.");
 }
 
-fs::path final_path(HANDLE handle) {
+inline fs::path final_path(HANDLE handle) {
     const DWORD size = GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
     if (!size) win_error("Cannot resolve canonical path");
     std::wstring text(size, L'\0');
@@ -132,7 +196,7 @@ struct PinnedDirectory {
     bool exists = true;
 };
 
-PinnedDirectory pin_directory(const fs::path& input, Missing missing = Missing::reject) {
+inline PinnedDirectory pin_directory(const fs::path& input, Missing missing = Missing::reject) {
     const auto directory = absolute_path(input);
     PinnedDirectory result;
     result.path = directory.root_path();
@@ -148,21 +212,21 @@ PinnedDirectory pin_directory(const fs::path& input, Missing missing = Missing::
         if (!handle) {
             const auto error = GetLastError();
             if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-                win_error("Cannot access directory", error);
+win_error("Cannot access directory", error);
             if (root || missing == Missing::reject) win_error("Directory does not exist", error);
             if (missing == Missing::allow) {
                 result.exists = false;
                 return;
             }
             if (!CreateDirectoryW(name.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
-                win_error("Cannot create application configuration directory");
+win_error("Cannot create application configuration directory");
             handle = Handle(CreateFileW(name.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr,
                                          OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS |
                                          FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
             if (!handle) win_error("Cannot access application configuration directory");
         }
         const auto info = file_info(handle.get());
-        reject_reparse(info);
+reject_reparse(info);
         if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
             fail("NOT_DIRECTORY", "The requested parent is not a directory.");
         result.path = final_path(handle.get());
@@ -176,13 +240,13 @@ PinnedDirectory pin_directory(const fs::path& input, Missing missing = Missing::
     return result;
 }
 
-void require_absent(const fs::path& path) {
+inline void require_absent(const fs::path& path) {
     const auto name = api_path(path);
     if (GetFileAttributesW(name.c_str()) != INVALID_FILE_ATTRIBUTES)
         fail("ALREADY_EXISTS", "An object already exists at the project destination.");
     const auto error = GetLastError();
     if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-        win_error("Cannot check project destination", error);
+win_error("Cannot check project destination", error);
     // OPEN_REPARSE_POINT also detects dangling links without following their target.
     Handle object(CreateFileW(name.c_str(), FILE_READ_ATTRIBUTES,
                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -191,10 +255,10 @@ void require_absent(const fs::path& path) {
     if (object) fail("ALREADY_EXISTS", "An object already exists at the project destination.");
     const auto open_error = GetLastError();
     if (open_error != ERROR_FILE_NOT_FOUND && open_error != ERROR_PATH_NOT_FOUND)
-        win_error("Cannot check project destination", open_error);
+win_error("Cannot check project destination", open_error);
 }
 
-std::string random_suffix() {
+inline std::string random_suffix() {
     std::array<UCHAR, 16> bytes{};
     if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()),
                         BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
@@ -254,20 +318,20 @@ struct OwnedObject {
     }
 };
 
-OwnedObject new_file(const fs::path& path) {
+inline OwnedObject new_file(const fs::path& path) {
     OwnedObject result;
     result.path = path;
     result.handle = Handle(CreateFileW(api_path(path).c_str(), GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES,
                                        0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!result.handle) {
         result.cleanup = false;
-        win_error("Cannot create project/configuration file");
+win_error("Cannot create project/configuration file");
     }
     result.identity = file_info(result.handle.get());
     return result;
 }
 
-OwnedObject new_directory(const fs::path& path) {
+inline OwnedObject new_directory(const fs::path& path) {
     if (!CreateDirectoryW(api_path(path).c_str(), nullptr)) win_error("Cannot create project directory");
     OwnedObject result;
     result.path = path;
@@ -278,14 +342,14 @@ OwnedObject new_directory(const fs::path& path) {
                                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!result.handle) win_error("Cannot pin project directory");
     result.identity = file_info(result.handle.get());
-    reject_reparse(result.identity);
+reject_reparse(result.identity);
     if (!(result.identity.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
         fail("NOT_DIRECTORY", "The project directory changed unexpectedly.");
     result.cleanup = true;
     return result;
 }
 
-OwnedObject temporary_object(const fs::path& parent, bool directory) {
+inline OwnedObject temporary_object(const fs::path& parent, bool directory) {
     for (int attempt = 0; attempt < 16; ++attempt) {
         const auto path = parent / (".taocode-project-" + random_suffix() + ".tmp");
         try { return directory ? new_directory(path) : new_file(path); }
@@ -294,20 +358,20 @@ OwnedObject temporary_object(const fs::path& parent, bool directory) {
     fail("IO_ERROR", "Cannot allocate a unique temporary name.");
 }
 
-void write_and_flush(HANDLE handle, std::string_view bytes) {
+inline void write_and_flush(HANDLE handle, std::string_view bytes) {
     std::size_t offset = 0;
     while (offset != bytes.size()) {
         DWORD written = 0;
         if (!WriteFile(handle, bytes.data() + offset, static_cast<DWORD>(bytes.size() - offset),
                        &written, nullptr))
-            win_error("Cannot write temporary file");
+win_error("Cannot write temporary file");
         if (!written) fail("IO_ERROR", "Writing the temporary file made no progress.");
         offset += written;
     }
     if (!FlushFileBuffers(handle)) win_error("Cannot flush temporary file to disk");
 }
 
-void rename_handle(HANDLE source, const fs::path& target, bool replace) {
+inline void rename_handle(HANDLE source, const fs::path& target, bool replace) {
     // SetFileInformationByHandle(FileRenameInfo) hands FileName to the DOS-namespace
     // parser, which reads until a NUL even though FileNameLength is authoritative.
     // Reserve a trailing NUL so it cannot read past the buffer (which otherwise
@@ -328,7 +392,7 @@ void rename_handle(HANDLE source, const fs::path& target, bool replace) {
     if (!SetFileInformationByHandle(source, FileRenameInfo, info, static_cast<DWORD>(buffer.size()))) {
         const auto error = GetLastError();
         if (!replace) require_absent(target);
-        win_error("Cannot atomically publish project/configuration", error);
+win_error("Cannot atomically publish project/configuration", error);
     }
 }
 

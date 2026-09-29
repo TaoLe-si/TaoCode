@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   NOTICE_LOG_LIMIT, NOTICE_PREVIEW_LIMIT, NOTICES_LABEL,
-  noticeButtonText, noticeButtonVisible, noticeLevel, noticePreview, noticeTitle, pushNotice,
+  noticeButtonText, noticeButtonVisible, noticeLevel, noticePreview, noticeProgressLabel, noticeTitle, pushNotice, upsertNotice,
 } from '../src/notices.ts'
 
 const entry = (id, error = false, displayId) => ({ id, message: `m${id}`, error, at: '00:00:00', displayId })
@@ -59,4 +59,35 @@ test('the log never grows past its limit and keeps the newest first', () => {
   assert.equal(log.length, NOTICE_LOG_LIMIT)
   assert.equal(log[0].id, NOTICE_LOG_LIMIT + 5)
   assert.equal(log.at(-1).id, 6)
+})
+
+// ---------------------------------------------------------------------------
+// 进度型通知（右下角消息窗口里那一行）—— 2026-09-29：语言服务与 Gradle 的进度都要能看见。
+// 一条**正在推进**的行必须是"同一个对象被反复刷新"，不是每拍重发一条：
+// 上游 `pushNotice` 那条 `expirePreviousAndNotify`（ShowNotificationCommitResultHandler.kt:97）
+// 是给"同一件事的第二次通知"用的，进度行用它会在列表里上下跳。
+// ---------------------------------------------------------------------------
+
+test('进度通知就地刷新：位置、时间、id 都不动，只有内容在动', () => {
+  let log = [entry(1), entry(2, false, 'gradle:sync'), entry(3)]
+  log = upsertNotice(log, { id: 9, message: '正在同步 Gradle 项目', error: false, at: '99:99:99', displayId: 'gradle:sync', percent: null })
+  assert.deepEqual(log.map(item => item.id), [1, 2, 3], '不能因为它在刷新就把整条行挪到最前面')
+  assert.equal(log[1].message, '正在同步 Gradle 项目')
+  assert.equal(log[1].at, '00:00:00', '时间戳保留第一次那一拍：这一行的含义是"这件事什么时候开始"')
+  log = upsertNotice(log, { id: 12, message: 'Gradle 同步完成（用时 75 秒）', error: false, at: '99:99:99', displayId: 'gradle:sync', percent: 100 })
+  assert.equal(log.length, 3, '刷新不是追加')
+  assert.equal(log[1].message, 'Gradle 同步完成（用时 75 秒）')
+})
+
+test('没有同 displayId 的旧行时，进度通知按新条目插入（仍然前插 + 限量）', () => {
+  const log = upsertNotice([entry(1)], { id: 2, message: 'Importing projects', error: false, at: '00:00:01', displayId: 'lsp:progress:java:0', percent: 5 })
+  assert.deepEqual(log.map(item => item.id), [2, 1])
+  assert.equal(upsertNotice([], { id: 3, message: 'x', error: false, at: '' }).length, 1)
+})
+
+test('进度文字分三种状态：不是通知 / 进行中 / 百分比', () => {
+  assert.equal(noticeProgressLabel({ id: 1, message: 'm', error: false, at: '' }), '', '普通通知没有进度栏')
+  assert.equal(noticeProgressLabel({ id: 1, message: 'm', error: false, at: '', percent: null }), '进行中')
+  assert.equal(noticeProgressLabel({ id: 1, message: 'm', error: false, at: '', percent: 0 }), '0%')
+  assert.equal(noticeProgressLabel({ id: 1, message: 'm', error: false, at: '', percent: 42 }), '42%')
 })

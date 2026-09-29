@@ -8,7 +8,7 @@ import {
 import { foldCode, unfoldCode, foldAll, unfoldAll } from '@codemirror/language'
 import { findNext, findPrevious, openSearchPanel, replaceAll, replaceNext, selectMatches, selectNextOccurrence } from '@codemirror/search'
 import { EditorSelection, type StateCommand } from '@codemirror/state'
-import type { Command } from '@codemirror/view'
+import type { Command, EditorView } from '@codemirror/view'
 
 // StateCommand only needs {state, dispatch}, which an EditorView satisfies.
 const fromState = (command: StateCommand): Command => view => command(view)
@@ -75,4 +75,11 @@ export const editingCommands: Record<string, Command> = {
   // IDEA's Code menu: 自动缩进 (Auto Indent, Ctrl+Alt+I) re-indents the selection
   // by one step per CodeMirror's indentUnit.
   'indent.selection': indentMore, 'indent.selection.less': indentLess,
+  // 复制/剪切命令在 src/editorClipboard.ts（那里能 import 剪贴板通道而不污染本模块的零依赖）。
+}
+
+// 命令分派（编辑器组件只保留一行包装）：表里没有的名字返回 false，调用方据此提示"这个操作没做事"。
+export function runEditorCommand(view: EditorView | undefined, table: Record<string, Command>, name: string): boolean {
+  const run = table[name]
+  return Boolean(view && run && run(view))
 }

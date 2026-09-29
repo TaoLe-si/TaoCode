@@ -24,6 +24,9 @@ type SettingsSectionHint = 'preferences.lookFeel' | 'editor' | 'editor.preferenc
   | 'preferences.sourceCode.indents' | 'tools.actionsOnSave' | 'editing.templates' | 'commit' | 'preferences.general'
   | 'build.tools' | 'reference.settingsdialog.project.gradle' | null
 
+import type { SettingsDraft } from './settingsDraft'
+export type { SettingsDraft } from './settingsDraft'
+
 /** 设置对话框要跳到哪一节（IDEA 的 Settings 树按 section 定位）。 */
 export interface SettingsPersistenceDeps {
   notify: (message: string, error?: boolean) => void
@@ -231,7 +234,7 @@ export function createSettingsPersistence(deps: SettingsPersistenceDeps) {
       if (epoch !== deps.workspaceEpoch()) return
       projectSettings.value = { ...projectSettings.value, fileColors: result.settings.fileColors }
       deps.notify('文件颜色已保存。')
-    } catch (error) { if (epoch !== deps.workspaceEpoch()) settingsError.value = errorMessage(error) }
+    } catch (error) { if (epoch === deps.workspaceEpoch()) settingsError.value = errorMessage(error) }
     finally { settingsBusy.value = false }
   }
   // 命名作用域（IDEA project.scopes）：整表替换。作用域只影响查询范围，不动文件树，
@@ -276,7 +279,46 @@ export function createSettingsPersistence(deps: SettingsPersistenceDeps) {
     finally { busy.value = false }
   }
 
+  // One Apply/OK owns the busy flag; project scope/color drafts are written together.
+  async function saveSettingsDraft(draft: SettingsDraft, close = false) {
+    if (settingsBusy.value) return
+    const epoch = deps.workspaceEpoch()
+    settingsBusy.value = true
+    settingsError.value = ''
+    try {
+      if (draft.scopes || draft.localFileColors || draft.fileColors) {
+        if (!workspace.value) throw new Error('请先打开项目。')
+        const result = await request<{ settings: ProjectSettings }>('project.settings.update', {
+          ...(draft.scopes ? { scopes: draft.scopes } : {}),
+          ...(draft.localFileColors ? { localFileColors: draft.localFileColors } : {}),
+          ...(draft.fileColors ? { fileColors: draft.fileColors } : {}),
+        })
+        if (epoch !== deps.workspaceEpoch()) return
+        projectSettings.value = {
+          ...projectSettings.value,
+          scopes: result.settings.scopes,
+          localFileColors: result.settings.localFileColors,
+          fileColors: result.settings.fileColors,
+        }
+      }
+      if (draft.editor) {
+        const result = await request<EditorSettings>('settings.update', { settings: draft.editor })
+        if (epoch !== deps.workspaceEpoch()) return
+        editorSettings.value = result
+      }
+      if (draft.general) {
+        const result = await request<GeneralSettingsState>('settings.general.update', { general: draft.general })
+        if (epoch !== deps.workspaceEpoch()) return
+        generalSettings.value = result
+      }
+      if (draft.commitMessage) saveCommitMessageSettings(draft.commitMessage, false)
+      if (close) settingsOpen.value = false
+    } catch (error) { if (epoch === deps.workspaceEpoch()) settingsError.value = errorMessage(error) }
+    finally { settingsBusy.value = false }
+  }
+
   return {
+    saveSettingsDraft,
     settingsSectionHint, commitMessageSettings, openSettings, saveSettings, saveGeneralSettings, readCommitMessageSettings, saveCommitMessageSettings,
     saveProjectSettings, saveTemplateSettings, saveTodoPatterns, saveFileAssociations, saveVcsLog, saveBookmarksView,
     saveBuildTools,

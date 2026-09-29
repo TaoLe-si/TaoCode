@@ -11,7 +11,7 @@
 `testSrc` / `testData` 排除在外（对标的是产品行为，不是 IDEA 自己的测试）。
 
 用法：
-    python scripts/inventory_gaps.py                # 查 _summary.json 记过的 missing_roots
+    python scripts/inventory_gaps.py                # 检查 _domains.json 定义的全部包
     python scripts/inventory_gaps.py com/intellij/ui/tabs com/intellij/openapi/editor
     python scripts/inventory_gaps.py --all          # 另查两个已知漏得最狠的整片区域
 
@@ -22,35 +22,14 @@ import json
 import os
 import sys
 
-IDEA_ROOT = r"D:\Backup\Downloads\intellij-community-master\intellij-community-master"
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INV = os.path.join(REPO, "docs", "inventory")
-# 枚举里那 7 个域（platform_rest.txt 是"platform 里没被逐类枚举的剩余"，不参与归属判定）
-DOMAINS = ("editor", "toolwindow", "vcs", "actions", "settings-run", "projectviews", "ui")
-TEST_MARKERS = ("/testSrc/", "/testData/", "/tests/testSrc/")
+# 源码枚举、排除规则和域顺序以生成器为唯一来源。
+if __package__:
+    from .enumerate_inventory import DOMAINS_JSON, DOMAIN_ORDER, IDEA_ROOT, INV, idea_classes
+else:
+    from enumerate_inventory import DOMAINS_JSON, DOMAIN_ORDER, IDEA_ROOT, INV, idea_classes
 
-# _summary.json 记过的 missing_roots（原始形态是模块路径，这里取包后缀）
-RECORDED = (
-    "com/intellij/codeInsight/folding",
-    "com/intellij/vcs/log",
-    "com/intellij/ide/actions/searcheverywhere",
-    "com/intellij/ide/projectView",
-)
+DOMAINS = DOMAIN_ORDER
 EXTRA = ("com/intellij/ui/tabs", "com/intellij/openapi/editor", "com/intellij/ui/popup")
-
-
-def idea_classes() -> set:
-    """全树扫一遍，返回相对源码根的类文件路径集合（正斜杠）。"""
-    found = set()
-    for dirpath, dirnames, filenames in os.walk(IDEA_ROOT):
-        dirnames[:] = [d for d in dirnames if d not in (".git", "out", "build")]
-        rel = os.path.relpath(dirpath, IDEA_ROOT).replace("\\", "/")
-        if any(marker in "/" + rel + "/" for marker in TEST_MARKERS):
-            continue
-        for name in filenames:
-            if name.endswith((".java", ".kt")):
-                found.add(rel + "/" + name)
-    return found
 
 
 def enumerated() -> set:
@@ -59,8 +38,7 @@ def enumerated() -> set:
     for domain in DOMAINS:
         path = os.path.join(INV, domain + ".txt")
         if not os.path.exists(path):
-            print("缺枚举文件：%s" % path, file=sys.stderr)
-            continue
+            raise FileNotFoundError("缺枚举文件：%s" % path)
         with open(path, encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
@@ -72,20 +50,22 @@ def enumerated() -> set:
 def in_platform_rest() -> set:
     path = os.path.join(INV, "platform_rest.txt")
     if not os.path.exists(path):
-        return set()
+        raise FileNotFoundError("缺枚举文件：%s" % path)
     with open(path, encoding="utf-8") as handle:
         return {line.strip() for line in handle if line.strip()}
 
 
 def report(suffixes, real_all, listed, rest) -> int:
     gaps = 0
+    empty = 0
     print("%-46s %7s %9s %9s" % ("包后缀", "真实类", "已枚举", "缺口"))
     print("-" * 76)
     for suffix in suffixes:
         needle = "/" + suffix.strip("/") + "/"
         real = {p for p in real_all if needle in "/" + p}
         if not real:
-            print("%-46s %7d %9s %9s  ← 包在 263 里不存在" % (suffix, 0, "-", "-"))
+            print("%-46s %7d %9s %9s  ← 包在基准源码中未匹配" % (suffix, 0, "-", "-"))
+            empty += 1
             continue
         hit = real & listed
         missing = real - listed
@@ -93,33 +73,38 @@ def report(suffixes, real_all, listed, rest) -> int:
         tail = "（其中 %d 个只躺在 platform_rest）" % len(missing & rest) if missing & rest else ""
         print("%-46s %7d %9d %9d%s" % (suffix, len(real), len(hit), len(missing), tail))
     print("-" * 76)
-    print("合计未枚举：%d 类" % gaps)
-    return gaps
+    print("合计未枚举：%d 类；零匹配包：%d" % (gaps, empty))
+    return gaps + empty
 
 
 def main() -> int:
     args = sys.argv[1:]
-    if "--all" in args:
-        suffixes = RECORDED + EXTRA
-    elif args:
+    if args and "--all" not in args:
         suffixes = tuple(args)
     else:
-        summary = os.path.join(INV, "_summary.json")
-        if not os.path.exists(summary):
-            print("缺 %s" % summary, file=sys.stderr)
+        try:
+            with open(DOMAINS_JSON, encoding="utf-8") as handle:
+                domains = json.load(handle)
+        except (OSError, ValueError) as error:
+            print("无法读取域定义 %s：%s" % (DOMAINS_JSON, error), file=sys.stderr)
             return 2
-        with open(summary, encoding="utf-8") as handle:
-            # 记过的是模块路径；这里只取结尾的包路径，模块前缀交给后缀匹配忽略
-            suffixes = tuple(
-                sorted({"/".join(root.replace("\\", "/").split("/")[-6:]) for roots in data.get("missing_roots", []) for root in roots})
-            )
+        suffixes = tuple(sorted({suffix for roots in domains.values() for suffix in roots}))
+        if "--all" in args:
+            suffixes = tuple(dict.fromkeys(suffixes + EXTRA))
+    if not suffixes:
+        print("没有待检查的包后缀，检查失败", file=sys.stderr)
+        return 1
     if not IDEA_ROOT or not os.path.isdir(IDEA_ROOT):
         print("IDEA 源码根不存在：%s" % IDEA_ROOT, file=sys.stderr)
         return 2
     print("基准源码：%s" % IDEA_ROOT)
     real_all = idea_classes()
     print("全树类文件：%d（已排除 testSrc/testData）\n" % len(real_all))
-    gaps = report(suffixes, real_all, enumerated(), in_platform_rest())
+    try:
+        gaps = report(suffixes, real_all, enumerated(), in_platform_rest())
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     return 1 if gaps else 0
 
 

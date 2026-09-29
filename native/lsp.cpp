@@ -467,13 +467,23 @@ void Client::receive(const Json& message) {
         return;
     }
     if (is_notification(message)) {
-        if (message.at("method") != "textDocument/publishDiagnostics") return;
+        const auto& method = message.at("method");
+        if (!method.is_string()) return;
+        const auto name = method.get<std::string>();
         Notify handler;
-        {
+        if (name == "textDocument/publishDiagnostics") {
             std::lock_guard lock(mutex_);
             handler = diagnostics_;
         }
-        if (handler) handler(message.contains("params") ? message.at("params") : Json(nullptr));
+        // LSP `$/progress`（`window/workDoneProgress/create` 之后服务器发的那条）—— 上游
+        // `LspServerNotificationsHandlerImpl.notifyProgress`（:257-328）把它变成一条带百分比的
+        // 后台任务；本仓同样交出去，不再像以前那样直接丢弃。
+        else if (name == "$/progress") {
+            std::lock_guard lock(mutex_);
+            handler = progress_;
+        }
+        if (!handler) return;
+        handler(message.contains("params") ? message.at("params") : Json(nullptr));
         return;
     }
     if (is_server_request(message)) {

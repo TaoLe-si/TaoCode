@@ -86,3 +86,19 @@ test('帮助菜单的源码字符串不会漂移成「谁都能改的空壳」',
   assert.ok(source.includes("id: 'help.showLog'"), 'shellSource 里没有帮助菜单（说明它没被装进菜单表）')
   assert.ok(source.includes('createHelpMenuRows'), '帮助菜单的工厂没有被调用')
 })
+
+test('「关于」带构建号：界面是哪一版必须能自证（IDEA About 的 `Build #` 那一行）', () => {
+  // 起因：前端改了但 exe 没重链时（原生层没改就不会重链），"exe 的时间戳"证明不了界面新旧。
+  // 可靠的证据只有页面**真正引用**的那个入口包文件名 —— 它由宿主写进日志、由界面写进「关于」。
+  const about = readFileSync('src/components/AboutDialog.vue', 'utf8')
+  assert.match(about, /<dt>构建<\/dt><dd>\{\{ entryScript \|\| '—' \}\}/, '「关于」没有构建号这一行')
+  assert.match(about, /document\.querySelector<HTMLScriptElement>\('script\[src\]'\)/,
+    '构建号必须是运行时读到的入口脚本，不是写死的常量')
+  // 反例：把某个具体哈希写进源码（那等于假装自己是新版本）。
+  assert.doesNotMatch(about, /index-[A-Za-z0-9_-]{8}\.js/, '构建号被写死成了一个具体哈希')
+  // 原生侧同一件事：启动行带上 `界面 <入口包>`（native/diagnostics.cpp 的 ui_bundle）。
+  const diagnostics = readFileSync('native/diagnostics.cpp', 'utf8')
+  assert.ok(diagnostics.includes('assets/index-') && diagnostics.includes('界面 '), '启动日志没有带界面包名')
+  assert.ok(readFileSync('native/main.cpp', 'utf8').includes('diagnostics::init(app.profile, taocode::kAppVersion, app.ui)'),
+    '启动时没把 ui 目录交给日志（那行包名就永远是空的）')
+})

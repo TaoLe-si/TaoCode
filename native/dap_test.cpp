@@ -149,6 +149,15 @@ bool is_event(const Json& event, const std::string& name) {
            event.at("event").get<std::string>() == name;
 }
 
+// 适配器把收到的请求参数回声成一条 output（规范响应里没有那些字段），测试据此证明参数
+// 真的发出去了 —— 与 `command == "runInTerminal"` 那条回声是同一种做法。
+std::function<bool(const Json&)> is_output_containing(std::string fragment) {
+    return [fragment = std::move(fragment)](const Json& event) {
+        return is_event(event, "output") && event.contains("text") && event.at("text").is_string() &&
+               event.at("text").get<std::string>().find(fragment) != std::string::npos;
+    };
+}
+
 void expect_event(Recorder& recorder, const std::function<bool(const Json&)>& predicate, const std::string& what, Json* found) {
     check(recorder.wait_for(predicate, 25, found), "timed out waiting for " + what);
 }
@@ -290,6 +299,150 @@ void scenario_full_session() {
     check(number_at(variables[0], "reference") == 0, "a scalar has no child reference");
     check(flag_at(variables[1], "named") && number_at(variables[1], "reference") == 4000,
           "an expandable variable reports its child reference");
+
+    // DAP `setVariable`（IDEA 的 XValue.setValue）：容器 reference、变量名、新值三者都要原样到达，
+    // 响应只有一条变量（规范里没有 variables 数组），字段与 `variables` 的一条一致。
+    Waiter assigned;
+    client.set_variable(static_cast<long>(local_reference), "counter", "42", assigned.reply());
+    check(assigned.await_for(), "no setVariable response");
+    check(assigned.ok(), "setVariable failed: " + assigned.failure_text());
+    check(string_at(assigned.result, "value") == "counter=42 @" + std::to_string(local_reference),
+          "setVariable must send reference, name and value as-is, got: " + string_at(assigned.result, "value"));
+    check(string_at(assigned.result, "type") == "int", "the new type survives");
+    check(!flag_at(assigned.result, "named"), "a scalar replacement is not a named container");
+
+    // DAP `setExpression`（IDEA Watches 的「Set Value…」）：带上 frameId。
+    Waiter assigned_expression;
+    client.set_expression("counter + 1", "42", static_cast<long>(number_at(frames[0], "id")), assigned_expression.reply());
+    check(assigned_expression.await_for(), "no setExpression response");
+    check(assigned_expression.ok(), "setExpression failed: " + assigned_expression.failure_text());
+    check(string_at(assigned_expression.result, "value") == "counter + 1 := 42 [" + std::to_string(number_at(frames[0], "id")) + "]",
+          "setExpression must send expression, value and frameId, got: " + string_at(assigned_expression.result, "value"));
+
+    // frameId 在规范里可选：0 表示不指定栈帧，此时请求里**不能**出现该字段。
+    Waiter assigned_global;
+    client.set_expression("global_counter", "1", 0, assigned_global.reply());
+    check(assigned_global.await_for(), "no global setExpression response");
+    check(string_at(assigned_global.result, "value") == "global_counter := 1 [-1]",
+          "a zero frameId must be omitted from the request, got: " + string_at(assigned_global.result, "value"));
+
+    // DAP `exceptionInfo`（IDEA 的 `JavaStackFrame.createExceptionNodes`，只在最顶层帧显示
+    // 异常节点）：异常停住时问适配器停在什么异常上。`exceptionId`/`description`/`breakMode`
+    // 是规范必填，`details` 全可选，而 `innerException` 是 cause 链 —— 必须递归整形，
+    // 少一层 UI 就看不到根因。
+    Waiter exception;
+    client.exception_details(1, exception.reply());
+    check(exception.await_for(), "no exceptionInfo response");
+    check(exception.ok(), "exceptionInfo failed: " + exception.failure_text());
+    check(flag_at(exception.result, "available"), "a described exception is available");
+    check(string_at(exception.result, "exceptionId") == "java.lang.IllegalStateException", "exceptionId survives");
+    check(string_at(exception.result, "description") == "IllegalStateException: boom", "description survives");
+    check(string_at(exception.result, "breakMode") == "always", "breakMode survives");
+    const Json& details = exception.result.at("details");
+    check(string_at(details, "typeName") == "IllegalStateException", "typeName stays the short name");
+    check(string_at(details, "fullTypeName") == "java.lang.IllegalStateException", "fullTypeName survives");
+    check(string_at(details, "evaluateName") == "this.cause",
+          "evaluateName is what lets the UI expand the exception object as a value");
+    check(string_at(details, "stackTrace") == "at Sample.run(Sample.java:3)", "stackTrace survives");
+    const auto& cause = details.at("innerException");
+    check(cause.is_array() && cause.size() == 1, "one cause level, got " + std::to_string(cause.size()));
+    check(string_at(cause[0], "typeName") == "IOException" && string_at(cause[0], "message") == "disk full",
+          "the cause chain is shaped recursively");
+    check(!cause[0].contains("innerException"), "an absent inner list must not be invented");
+    // threadId 真的发出去了 —— 适配器把收到的值回声成一条 output（响应里没有这个字段）。
+    Json echoed;
+    check(recorder.wait_for(is_output_containing("exceptionInfo threadId=1"), 10, &echoed),
+          "the adapter never saw the requested threadId");
+
+    // DAP `completions`：调试表达式输入框的补全。**IDEA 侧没有平台级对应类**（见 dap.hpp 的长注释：
+    // `XDebuggerEvaluator` 只有 evaluate，debugger 域也没注册 CompletionContributor），
+    // 所以这里按协议口径验证：三条形状（带替换区间 / 只有 label / 没有 label）。
+    check(client.supports_completions(), "the fake advertises supportsCompletionsRequest");
+    Waiter typed;
+    client.completions("counter", 8, 1, 3, typed.reply());
+    check(typed.await_for(), "no completions response");
+    check(typed.ok(), "completions failed: " + typed.failure_text());
+    check(flag_at(typed.result, "available"), "completions are available");
+    // 名字不能叫 `targets`：后面的 Run to Cursor 用例已经用了这个名字。
+    const auto& completion_items = typed.result.at("items");
+    check(completion_items.is_array() && completion_items.size() == 2,
+          "the label-less target is dropped (it cannot be shown or picked), got " +
+              std::to_string(completion_items.size()));
+    check(string_at(completion_items[0], "label") == "counter" && string_at(completion_items[0], "text") == "counter",
+          "an item with a separate insert text keeps both");
+    check(number_at(completion_items[0], "start") == 0 && number_at(completion_items[0], "length") == 7,
+          "the replace range survives — the UI needs it to substitute a fragment");
+    check(!completion_items[1].contains("start") && !completion_items[1].contains("length"),
+          "an item the adapter sent without a range must not get a half-invented one");
+    Json completion_echo;
+    check(recorder.wait_for(is_output_containing("completions text=counter column=8 frameId=1"), 10, &completion_echo),
+          "the adapter never saw the expression text or the 1-based column");
+
+    // DAP `gotoTargets` + `goto`（IDEA 的 Run to Cursor，Alt+F9）：先问目标再跳过去。
+    check(client.supports_goto_targets(), "the fake advertises supportsGotoTargetsRequest");
+    Waiter targets;
+    client.goto_targets("dap/main.cpp", 12, 5, targets.reply());
+    check(targets.await_for(), "no gotoTargets response");
+    check(targets.ok(), "gotoTargets failed: " + targets.failure_text());
+    const auto& list = targets.result.at("targets");
+    check(list.is_array() && list.size() == 1, "one target, got " + std::to_string(list.size()));
+    check(number_at(list[0], "id") == 7, "the target id survives");
+    check(number_at(list[0], "line") == 12, "the requested line comes back");
+    check(string_at(list[0], "label") == "line 12", "the label survives");
+    Waiter jumped;
+    client.goto_target(1, static_cast<long>(number_at(list[0], "id")), jumped.reply());
+    check(jumped.await_for(), "no goto response");
+    check(jumped.ok(), "goto failed: " + jumped.failure_text());
+
+    // DAP `breakpointLocations`（IDEA 的 `XLineBreakpointType.canPutAt`）：问"这一行哪些位置
+    // 可以放断点"。四个可选字段（endLine/column/endColumn）与 line 都要原样到达。
+    check(client.supports_breakpoint_locations(), "the fake advertises supportsBreakpointLocationsRequest");
+    Waiter spots;
+    client.breakpoint_locations("dap/main.cpp", 4, 6, 3, 9, spots.reply());
+    check(spots.await_for(), "no breakpointLocations response");
+    check(spots.ok(), "breakpointLocations failed: " + spots.failure_text());
+    check(flag_at(spots.result, "available"), "an answer is available");
+    const auto& locations = spots.result.at("locations");
+    check(locations.is_array() && locations.size() == 2, "two locations, got " + std::to_string(locations.size()));
+    check(number_at(locations[0], "line") == 4, "the requested line comes back");
+    check(number_at(locations[0], "column") == 3, "an optional column survives when it was sent");
+    check(number_at(locations[1], "endLine") == 6 && number_at(locations[1], "endColumn") == 9,
+          "an optional endLine/endColumn survive");
+    check(!locations[1].contains("column"), "a field the adapter did not send must not be invented");
+    // 假适配器在没有 source.path 时会**直接失败**（而不是回空位置列表），所以"能拿到两个位置"
+    // 本身就证明了 source 真的发出去了。这条 output 回声是额外一道确认：命令到达过。
+    Json heard;
+    check(recorder.wait_for(is_output_containing("breakpointLocations"), 10, &heard),
+          "the adapter never saw a breakpointLocations request");
+
+    // **空数组是有意义的答案**：IDEA 的 "Cannot find appropriate breakpoint type"。它必须
+    // 与"请求失败"区分开 —— available 仍为 true，locations 为空。
+    Waiter none;
+    client.breakpoint_locations("dap/main.cpp", 3, 0, 0, 0, none.reply());
+    check(none.await_for(), "no breakpointLocations response for an unavailable line");
+    check(none.ok(), "an empty answer is not a protocol error: " + none.failure_text());
+    check(flag_at(none.result, "available"), "the adapter answered");
+    check(none.result.at("locations").is_array() && none.result.at("locations").empty(),
+          "an empty location list means \"this line cannot take a breakpoint\"");
+
+    // DAP `restartFrame`（IDEA Frames 视图的「丢弃帧」）。
+    check(client.supports_restart_frame(), "the fake advertises supportsRestartFrame");
+    Waiter dropped;
+    client.restart_frame(static_cast<long>(number_at(frames[0], "id")), dropped.reply());
+    check(dropped.await_for(), "no restartFrame response");
+    check(dropped.ok(), "restartFrame failed: " + dropped.failure_text());
+
+    // DAP `terminate` / `restart`（IDEA 的「停止」与「重新运行」）：
+    // 适配器声明了能力就发规范请求，没声明就走回退路 —— 这正是文档里那条"待核"的结论。
+    check(client.supports_terminate() && client.supports_restart(), "the fake advertises both capabilities");
+    Waiter terminate_reply;
+    client.terminate(terminate_reply.reply());
+    check(terminate_reply.await_for(), "no terminate response");
+    check(terminate_reply.ok(), "terminate failed: " + terminate_reply.failure_text());
+    Waiter restart_reply;
+    client.restart(Json{{"arguments", Json{{"noDebug", true}}}}, restart_reply.reply());
+    check(restart_reply.await_for(), "no restart response");
+    check(restart_reply.ok(), "restart failed: " + restart_reply.failure_text());
 
     // `evaluate` through the generic request escape hatch: the arguments must reach
     // the adapter verbatim, and the raw body comes back untouched.
@@ -745,6 +898,69 @@ void scenario_reverse_requests() {
 
 // disconnect() waits for the reader thread, so dropping the Client the moment it
 // returns can never leave a callback running against destroyed state.
+// 适配器**没有**声明 terminate / restart 能力时的回退：terminate 走
+// `disconnect{terminateDebuggee:true}`（同样是"目标进程结束"），restart 直接回 DAP_UNSUPPORTED，
+// 让前端退化成"停止 + 重新启动"，而不是把一个适配器答不上来的请求发出去。
+void scenario_terminate_and_restart_fall_back() {
+    const auto root = workspace_root();
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {L"--no-terminate", L"--no-restart", L"--no-goto", L"--bare-exception-info",
+                                  L"--no-breakpoint-locations"},
+                 root, [](Json) {});
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for(), "dap.start never replied");
+    check(started.ok(), "dap.start failed: " + started.failure_text());
+
+    check(!client.supports_terminate() && !client.supports_restart(),
+          "the fake was told to advertise neither capability");
+
+    // `exceptionInfo` **没有**能力位可声明（适配器不会声明 supportsExceptionInfo），所以它
+    // 不做能力门控：适配器答不上来时靠响应本身表达。description/exceptionId 都空 →
+    // available:false，UI 就不会去渲染一张空卡片。
+    // 必须在 terminate 之前问 —— 那个回退会真的结束适配器进程。
+    Waiter bare;
+    client.exception_details(1, bare.reply());
+    check(bare.await_for(), "exceptionInfo must answer even when the adapter has nothing to say");
+    check(bare.ok(), "an empty exception answer is not a protocol error: " + bare.failure_text());
+    check(!flag_at(bare.result, "available"), "an exception with no id and no description is not available");
+    check(!bare.result.contains("details"), "and no details object is invented");
+
+    Waiter terminated;
+    client.terminate(terminated.reply());
+    check(terminated.await_for(), "the disconnect fallback must still answer");
+    check(terminated.ok(), "the fallback failed: " + terminated.failure_text());
+
+    Waiter restarted;
+    client.restart(Json::object(), restarted.reply());
+    check(restarted.await_for(), "an unsupported restart must answer instead of hanging");
+    check(!restarted.ok(), "an unsupported restart is not a success");
+    check(string_at(restarted.error, "code") == "DAP_UNSUPPORTED",
+          "the caller needs the code to fall back to stop+start, got: " + string_at(restarted.error, "code"));
+
+    // 同一个开关也关掉了 Run to Cursor 与丢弃帧：两者都要回 DAP_UNSUPPORTED，而不是发出去没人答。
+    check(!client.supports_goto_targets() && !client.supports_restart_frame(),
+          "the fake was told to advertise neither");
+    Waiter no_targets;
+    client.goto_targets("dap/main.cpp", 3, 0, no_targets.reply());
+    check(no_targets.await_for(), "an unsupported gotoTargets must answer instead of hanging");
+    check(string_at(no_targets.error, "code") == "DAP_UNSUPPORTED", "gotoTargets needs the code too");
+    Waiter no_frame;
+    client.restart_frame(1, no_frame.reply());
+    check(no_frame.await_for(), "an unsupported restartFrame must answer instead of hanging");
+    check(string_at(no_frame.error, "code") == "DAP_UNSUPPORTED", "restartFrame needs the code too");
+
+    // 规范里 `supportsBreakpointLocationsRequest` **默认 false**：没声明的适配器必须本地拒绝，
+    // 而不是发出去等一个答不上来的请求。调用方据此保持旧行为（照旧放断点）。
+    check(!client.supports_breakpoint_locations(), "the fake was told to advertise no breakpoint locations");
+    Waiter no_spots;
+    client.breakpoint_locations("dap/main.cpp", 4, 0, 0, 0, no_spots.reply());
+    check(no_spots.await_for(), "an unsupported breakpointLocations must answer instead of hanging");
+    check(string_at(no_spots.error, "code") == "DAP_UNSUPPORTED", "breakpointLocations needs the code too");
+    client.shutdown();
+}
+
 void scenario_disconnect_then_destroy() {
     const auto root = workspace_root();
     int events = 0;
@@ -756,7 +972,7 @@ void scenario_disconnect_then_destroy() {
         client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
         check(started.await_for() && started.ok(), "dap.start failed: " + started.failure_text());
         Waiter closed;
-        client.disconnect(closed.reply());
+        client.disconnect(true, closed.reply());
         check(closed.await_for(5), "disconnect must answer");
         check(client.exited(), "disconnect waits for the adapter to be gone");
     }
@@ -789,6 +1005,7 @@ int main() {
     run("exited / module / loadedSource / progress arrive in the UI's own shape", scenario_event_shaping);
     run("runInTerminal and startDebugging are answered for real", scenario_reverse_requests);
     run("disconnect waits for the reader thread, so the client can be dropped", scenario_disconnect_then_destroy);
+    run("terminate and restart fall back when the adapter lacks the capability", scenario_terminate_and_restart_fall_back);
 
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;

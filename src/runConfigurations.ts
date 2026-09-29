@@ -146,7 +146,7 @@ function selectRunConfig(name?: string) {
     runConfigType.value = target.program ? 'application' : 'shell'
     runCommand.value = target.command
     runConfigProgram.value = target.program ?? ''
-    runConfigArgs.value = (target.args ?? []).join(' ')
+    runConfigArgs.value = arrayToLines(target.args)  // one argv per line (linesToArray reads it back)
     runConfigCwd.value = ''
     runConfigEnv.value = ''
     runConfigBefore.value = []
@@ -200,7 +200,7 @@ function loadRunConfigDraft(name: string) {
   runConfigType.value = found.type ?? 'shell'
   runCommand.value = found.command ?? ''
   runConfigProgram.value = found.program ?? ''
-  runConfigArgs.value = (found.args ?? []).join(' ')
+  runConfigArgs.value = arrayToLines(found.args)
   runConfigCwd.value = found.cwd ?? ''
   runConfigEnv.value = arrayToLines(found.env)
   runConfigBefore.value = (found.beforeLaunch ?? []).map(step => ({ name: step.name, command: step.command }))

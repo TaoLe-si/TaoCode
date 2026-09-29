@@ -116,7 +116,10 @@ export interface KeymapContext {
   runToCursor: () => unknown
   save: (tab?: Tab) => Promise<boolean>
   saveAll: () => unknown
-  selectInTree: () => void
+  /** IDEA 的 `SelectIn`：Alt+F1 打开目标列表（SelectInAction.java:44-48 → :62-72）。 */
+  openSelectIn: () => void
+  /** IDEA 的 `ShowNavBar`：Alt+HOME 把焦点交给当前编辑器的导航条（`keymaps/$default.xml:14-15`）。 */
+  showNavBar: () => void
   selectNextTab: () => void
   selectPreviousTab: () => void
   showBlame: () => unknown
@@ -145,7 +148,7 @@ export function createKeymap(ctx: KeymapContext) {
           movePlace, noteActivity, openActionSearch, openPasteHistory, pasteAsPlainText, copyPaths, openCodeActions, openConfigChooser, openGeneratePopup, openGoLine,
           openMnemonicPrompt, openPalette, openPlace, openProjectStructure, openRecentFiles, openRecentPlaces, openSearchEverywhere, openSettings,
           openSymbol, openWorkspace, pickMnemonic, rerunLast, resolveConflictKeep, restoreCurrentToolLayout,
-          runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, selectInTree, selectNextTab,
+          runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, openSelectIn, showNavBar, selectNextTab,
           selectPreviousTab, showBlame, showOutput, showQuickDoc, showView, startBuild, stopRun, stretchToolWindow,
           toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject } = ctx
   // IDEA 的 Keymap 没有"双击 Shift"这条绑定，它是 SearchEverywhere 的默认手势；宿主原先用
@@ -284,9 +287,13 @@ function onKey(event: KeyboardEvent) {
   // Alt+Insert Generate, Ctrl+Alt+Shift+Insert New Scratch File.
   if (event.key === 'Insert' && event.altKey && !event.ctrlKey && !event.shiftKey && workspace.value) { event.preventDefault(); void openGeneratePopup(); return }
   if (event.key === 'Insert' && event.altKey && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); void createScratch(); return }
-  // Alt+F1 Select In (project view), Alt+F12 Terminal. Alt+<digit> is handled up front
-  // by focusToolWindowByNumber (IDEA ActivateToolWindowAction), never here.
-  if (event.key === 'F1' && event.altKey && !event.ctrlKey && !event.shiftKey && active.value) { event.preventDefault(); selectInTree(); return }
+  // Alt+F1 = `SelectIn`（`keymaps/$default.xml:968-969`），Alt+F12 = Terminal。
+  // 上游这一步是**开目标列表**（SelectInAction.java:62-72 `popup.showInBestPositionFor`），
+  // 再由用户按编号/方向键选一个落点 —— 本仓现在照做，不再是直达第一项。 Alt+<digit> is handled
+  // up front by focusToolWindowByNumber (IDEA ActivateToolWindowAction), never here.
+  if (event.key === 'F1' && event.altKey && !event.ctrlKey && !event.shiftKey && active.value) { event.preventDefault(); openSelectIn(); return }
+  // Alt+HOME = `ShowNavBar`：把焦点交给当前编辑器导航条的最内层目录段。
+  if (event.key === 'Home' && event.altKey && !event.ctrlKey && !event.shiftKey && active.value) { event.preventDefault(); showNavBar(); return }
   if (event.key === 'F12' && event.altKey && !event.ctrlKey && workspace.value) { event.preventDefault(); showOutput('terminal'); return }
   // $default.xml:309-311 and :717-719 — Alt+Left/Right is PreviousTab/NextTab. They are tab
   // navigation, not caret motion: `TabNavigationActionBase.java:71-78` hands them to the editor's

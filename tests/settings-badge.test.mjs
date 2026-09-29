@@ -23,7 +23,7 @@ test('only a page that declares itself new qualifies', () => {
   const declared = NEW_OPTION_PAGES[0]
   assert.ok(declared, '至少有一页声明自己是新的')
   assert.equal(isNewOptions(declared), true)
-  assert.equal(isNewOptions('appearance'), false)
+  assert.equal(isNewOptions('preferences.lookFeel'), false)
   assert.equal(isNewOptions('commit'), false)
   assert.equal(isNewOptions(declared, ['commit']), false)
   assert.ok(NEW_OPTION_PAGES.includes(declared))
@@ -42,9 +42,9 @@ test('a new page keeps the dot until it has been shown once', () => {
 // :32-36 — a composite reports new options when one of its children does.
 test('a group reports new options when a child page has one pending', () => {
   const declared = NEW_OPTION_PAGES[0]
-  assert.equal(showNewOptionsInGroup(['appearance', declared], {}), true)
-  assert.equal(showNewOptionsInGroup(['appearance', declared], { [declared]: MAX_SHOWS }), false)
-  assert.equal(showNewOptionsInGroup(['appearance', 'structure'], {}), false)
+  assert.equal(showNewOptionsInGroup(['preferences.lookFeel', declared], {}), true)
+  assert.equal(showNewOptionsInGroup(['preferences.lookFeel', declared], { [declared]: MAX_SHOWS }), false)
+  assert.equal(showNewOptionsInGroup(['preferences.lookFeel', 'structure'], {}), false)
   assert.equal(showNewOptionsInGroup([], {}), false)
 })
 

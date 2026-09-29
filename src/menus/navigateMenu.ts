@@ -22,7 +22,10 @@ export interface NavigateContext {
   openRecentPlaces: any
   openSymbol: any
   runEditor: any
-  selectInTree: any
+  /** IDEA 的 `SelectIn`（Alt+F1）：打开目标列表弹窗。 */
+  openSelectIn: any
+  /** IDEA 的 `ShowNavBar`（Alt+HOME）。 */
+  showNavBar: any
   showView: any
   toggleBookmark: any
   workspace: any
@@ -63,6 +66,13 @@ export function createNavigateMenuRows(ctx: NavigateContext): MenuRow[] {
     // Everywhere. 改造前这里调的是 `openActionSearch` —— 打开的是「查找操作」面板，
     // 与 GoToMenu 里的 `SearchEverywhere`（PlatformActions.xml:604）不是一回事。
     { id: 'navigate.everywhere', title: '随处搜索', keys: 'Shift Shift', keywords: 'search everywhere 随处搜索 搜索', run: () => ctx.openSearchEverywhere() },
+    // IDEA 的 GoToCodeGroup **开头**两项（actionGroupStructure.txt:2243-2247：`<sep>` → SelectIn →
+    // ShowNavBar → `<sep>` → GotoDeclaration…）。标题按 ActionsBundle.properties:524
+    // `action.SelectIn.text=Se_lect In…`（带助记符的那条），ShowNavBar 的键是 $default.xml:14-15 的 Alt HOME。
+    { id: 'navigate.ruleBefore', rule: true },
+    { id: 'navigate.selectIn', title: '在…中选择…', keys: 'Alt F1', keywords: 'select in project view structure commit explorer 定位 选择位置', enabled: () => Boolean(ctx.active.value), run: ctx.openSelectIn },
+    { id: 'navigate.showNavBar', title: '显示导航栏', keys: 'Alt Home', keywords: 'show nav bar breadcrumb 导航栏 面包屑', enabled: () => Boolean(ctx.active.value), run: ctx.showNavBar },
+    { id: 'navigate.rule0', rule: true },
     { id: 'navigate.declaration', title: '转到声明/定义', keys: 'Ctrl B', keywords: 'go to declaration definition 转到声明', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => ctx.runEditor('definition') },
     // IDEA Navigate: 类型声明 (GotoTypeDeclaration, Ctrl+Shift+B).
     { id: 'navigate.typeDeclaration', title: '转到类型声明', keys: 'Ctrl Shift B', keywords: 'goto type declaration 类型声明', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => ctx.runEditor('typeDeclaration') },
@@ -75,7 +85,6 @@ export function createNavigateMenuRows(ctx: NavigateContext): MenuRow[] {
     { id: 'navigate.bookmarkMnemonic', title: '为书签编号…', keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: ctx.hasEditor, run: ctx.openMnemonicPrompt },
     { id: 'navigate.bookmarkNext', title: '下一个书签', keywords: 'next bookmark project wide 下一个书签', run: () => ctx.cycleBookmark(false) },
     { id: 'navigate.bookmarkPrevious', title: '上一个书签', keywords: 'previous bookmark project wide 上一个书签', run: () => ctx.cycleBookmark(true) },
-    { id: 'navigate.selectInProject', title: '在项目中选中', keys: 'Alt F1 1', keywords: 'select in project view tree reveal 在项目中选中 定位文件', enabled: () => Boolean(ctx.active.value), run: ctx.selectInTree },
     { id: 'view.bookmarks', title: '书签窗口', keys: 'Shift F11', keywords: 'bookmarks tool window list 书签窗口', enabled: () => Boolean(ctx.workspace.value), run: () => ctx.showView('bookmarks') },
   ]
   return rows

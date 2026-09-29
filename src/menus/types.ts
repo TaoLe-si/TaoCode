@@ -8,6 +8,11 @@ export interface MenuRow {
   //  FilePropertiesGroup / ExportImportGroup / Macros / HelpDiagnosticTools 等十几处）。
   // 这里用 children 表达同一层结构，而不是把子菜单的行拍平到父菜单里。
   children?: MenuRow[]
+  // IDEA 的 ActionGroup 是**动态**的：`getChildren(null)` 每次打开菜单都能返回不同的行
+  // （例如「已保存的宏」随用户新增宏而变化）。静态 `children` 表达不了这种情况 ——
+  // 早先用「装配时按当前状态生成」绕过去，结果宏表一变菜单就不刷新。
+  // 需要动态子菜单时用 `childrenOf`，渲染与扁平化都优先取它。
+  childrenOf?: () => MenuRow[]
   title?: string | (() => string)
   keywords?: string
   keys?: string

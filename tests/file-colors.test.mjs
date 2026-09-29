@@ -60,12 +60,21 @@ test('作用域没定义 / 表达式非法都算这一条不匹配', () => {
   assert.equal(hit('src/main.cpp', [{ scope: '文档', color: 'Blue' }]), null, '不匹配就跳过')
 })
 
-test('存的是颜色名：认不出的值按 Gray 兜底（与 getColor 的 Map 语义一致）', () => {
+test('具名色与 RGB/RGBA 自定义色可解析，未知值没有 Gray 兜底', () => {
   assert.equal(isFileColorName('Blue'), true)
   assert.equal(isFileColorName('#ff0000'), false)
   assert.equal(normalizeFileColor('Violet'), 'Violet')
-  assert.equal(normalizeFileColor('#ff0000'), 'Gray')
-  assert.equal(normalizeFileColor(undefined), 'Gray')
+  for (const [input, expected] of [['#ff0000', '#ff0000'], ['ABC', '#aabbcc'], ['#aBcD', '#aabbccdd'], ['0xABCDEF80', '#abcdef80']]) {
+    assert.equal(normalizeFileColor(input), expected)
+  }
+  for (const input of [undefined, null, 'unknown', '#12', '#12345', '#gggggg', ' Blue']) assert.equal(normalizeFileColor(input), null)
+})
+
+test('首个命中即停止：未知色不回退到后续规则，本地规则先于共享规则', () => {
+  assert.equal(hit('build/out.js', [{ scope: '生成物', color: 'unknown' }, { scope: '构建产物', color: 'Blue' }]), null)
+  assert.deepEqual(resolveFileColor({ path: 'src/main.cpp', scopes,
+    localFileColors: [{ scope: '源码', color: '#abc8' }], fileColors: [{ scope: '源码', color: 'Blue' }],
+  }), { scope: '源码', color: '#aabbcc88' })
 })
 
 test('总开关与标签页开关是两层，默认都开', () => {
@@ -75,14 +84,18 @@ test('总开关与标签页开关是两层，默认都开', () => {
   assert.equal(tabFileColorEnabled({ fileColorsEnabled: true, fileColorsForTabs: false }), false, '标签页开关单独也能关')
 })
 
-test('归一化：丢掉作用域不存在的、同名的只留第一条（与「首个命中」一致）', () => {
+test('存储归一化保留未知作用域、未知颜色、重复规则与顺序，仅过滤无效结构', () => {
   const normalized = normalizeFileColors([
     { scope: '源码', color: 'Blue' },
     { scope: '源码', color: 'Rose' },
     { scope: '没了', color: 'Blue' },
     { scope: '文档', color: 'nonsense' },
-    null,
+    null, {}, { scope: '', color: 'Blue' }, { scope: '源码', color: 123 },
   ], scopes)
-  assert.deepEqual(normalized, [{ scope: '源码', color: 'Blue' }, { scope: '文档', color: 'Gray' }])
+  assert.deepEqual(normalized, [
+    { scope: '源码', color: 'Blue' }, { scope: '源码', color: 'Rose' },
+    { scope: '没了', color: 'Blue' }, { scope: '文档', color: 'nonsense' },
+  ])
+  assert.deepEqual(normalizeFileColors(normalized, []), normalized, '作用域变化不得静默删掉已存规则')
   assert.deepEqual(normalizeFileColors('不是数组', scopes), [])
 })

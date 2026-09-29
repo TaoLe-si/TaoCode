@@ -1,16 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 
 // IDEA 的菜单是一棵 ActionGroup 树：`<group popup="true">` 就是**子菜单**
 // （PlatformActions.xml 里 LayoutsGroup / ViewAppearanceGroup / FindMenuGroup /
 // FilePropertiesGroup / ExportImportGroup / Macros / HelpDiagnosticTools 等十几处）。
 // TaoCode 原来把子菜单的行拍平进父菜单，这里锁住"模型 + 渲染 + 交互"三处都真的有层级。
-const app = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+const app = shellSource()
 // 拆分后子菜单的状态与定位在独立模块、MenuRow 在共享类型文件（模仿 IDEA 一类一文件）。
 const submenuSrc = readFileSync(new URL('../src/menus/submenuState.ts', import.meta.url), 'utf8')
 const menuTypes = readFileSync(new URL('../src/menus/types.ts', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8')
+const appearance = readFileSync(new URL('../src/appearanceActions.ts', import.meta.url), 'utf8')
 
 test('MenuRow carries children so a group can stay a submenu', () => {
   assert.match(menuTypes, /interface MenuRow \{[\s\S]*?children\?: MenuRow\[\]/, 'MenuRow 必须有 children')
@@ -60,14 +62,17 @@ test('the editor tabs group is a submenu with the close group inlined', () => {
 // 编辑器设置；`EditorToggleShowGutterIcons` 在 TaoCode 没有落点（没有行内图标层），不造空行。
 test('the editor toggle actions submenu flips real editor settings', () => {
   assert.match(app, /id: 'view\.editorToggleActions', title: '[^']*', keywords: '[^']*', children: \[/)
-  const body = app.slice(app.indexOf("id: 'view.editorToggleActions'"), app.indexOf("id: 'view.editorToggleActions'") + 2400)
-  for (const setting of ['wordWrap', 'showWhitespaces', 'lineNumbers', 'showIndentGuides'])
-    assert.match(body, new RegExp(`saveSettingsPatch\\(\\{ ${setting}: !editorSettings\\.value\\.${setting} \\}\\)`),
+  const body = app.slice(app.indexOf("id: 'view.editorToggleActions'"), app.indexOf("id: 'view.editorToggleActions'") + 3200)
+  // 菜单模块通过 ctx 注入编辑器设置与保存动作（src/menus/viewMenu.ts）。
+  for (const setting of ['wordWrap', 'showWhitespaces', 'lineNumbers', 'showGutterIcons', 'showIndentGuides'])
+    assert.match(body, new RegExp(`ctx\\.saveSettingsPatch\\(\\{ ${setting}: !ctx\\.editorSettings\\.value\\.${setting} \\}\\)`),
       `${setting} 的开关要有真实落点`)
   // 字号动作受与设置页相同的上下限约束（10–32）
-  assert.match(body, /Math\.min\(32, editorSettings\.value\.fontSize \+ 1\)/)
-  assert.match(body, /Math\.max\(10, editorSettings\.value\.fontSize - 1\)/)
-  assert.doesNotMatch(body, /GutterIcons|gutter icons/i, '没有落点的子项不造空行')
+  assert.match(body, /Math\.min\(32, ctx\.editorSettings\.value\.fontSize \+ 1\)/)
+  assert.match(body, /Math\.max\(10, ctx\.editorSettings\.value\.fontSize - 1\)/)
+  // 原先这里断言「不许出现 gutter icons 一项」（当时 TaoCode 没有行内图标层）。2026-09-27 已把
+  // 宿主能力补齐（src/gutterIcons.ts + src/editorGutterIcons.ts，IDEA `GutterIconRenderer`），
+  // 所以守卫改成上面 `showGutterIcons` 的**正向**断言：这一行必须写回真实设置。
 })
 
 // PlatformActions.xml:726-728 —— `<group id="Notifications" popup="true">`：CloseFirstNotification
@@ -119,7 +124,9 @@ test('the renderer has a submenu branch ahead of the plain row branch', () => {
   const plainAt = loop.indexOf('v-else class="menu-item"')
   assert.ok(submenuAt > 0, '必须有子菜单分支')
   assert.ok(plainAt > submenuAt, '子菜单分支必须排在普通行之前（v-else 链按顺序求值）')
-  assert.match(loop, /v-for="child in row\.children"/, '子菜单要渲染 children')
+  // 2026-09-27：渲染改用 `submenuRows(row)` —— 它优先取动态组（`childrenOf`，IDEA `ActionGroup.getChildren()`），
+  // 静态 `children` 仍然走同一条路（见 src/menus/submenuState.ts）。
+  assert.match(loop, /v-for="child in submenuRows\(row\)"/, '子菜单要渲染 children')
   assert.match(loop, /role="separator"/, '子菜单里也要能放分隔线')
 })
 
@@ -154,12 +161,17 @@ test('the action index flattens submenus instead of losing their rows', () => {
   assert.match(app, /if \(!row\.run \|\| seen\.has\(row\.id\)\) continue/)
 })
 
-// 汉堡面板没有二级浮层，所以按 IDEA 的树展开成"分组标题 + 缩进的行"。
-test('the hamburger panel expands a submenu instead of rendering a dead row', () => {
-  const panel = app.slice(app.indexOf('hamburger-group'), app.indexOf('hamburger-backdrop'))
-  assert.match(panel, /v-else-if="hasSubmenu\(row\)"/, '汉堡里也要判子菜单')
-  assert.match(panel, /v-for="child in row\.children"/, '子行要列出来')
-  assert.match(css, /\.hamburger-item\.hamburger-child \{ margin-left:/, '子行需要缩进')
+// IDEA ExpandableMenu.switchState: 点左上角按钮是把真正的菜单栏横着展开，
+// 不是另开一棵分组树。菜单栏本来就有子菜单，所以不再需要汉堡面板的缩进行。
+test('the hamburger button expands the real menu bar instead of a second menu tree', () => {
+  assert.match(app, /hamburgerOpen = !hamburgerOpen/, '按钮仍是开关')
+  assert.doesNotMatch(app, /class="hamburger-menu"/, '不再渲染另一套菜单树')
+  assert.match(css, /html\[data-main-menu='hamburger'\]:not\(\[data-menu-expanded='on'\]\) \.menubar \{ display: none; \}/,
+    '未展开时菜单栏隐藏')
+  // merged 档的溢出按钮点开的是同一个弹层（上游两档共用 MainMenuButton），所以这条规则是两条选择器。
+  assert.match(css, /html\[data-main-menu='hamburger'\]\[data-menu-expanded='on'\] \.menubar,\s*html\[data-main-menu='merged'\]\[data-menu-expanded='on'\] \.menubar \{ display: flex;/,
+    '展开时显示真正的菜单栏（汉堡档与 merged 溢出档共用同一条规则）')
+  assert.match(appearance, /dataset\.menuExpanded = 'on'/, '展开状态写到根节点')
 })
 
 // 父级弹层是 motion.div，动画会留下 transform —— transformed 祖先会让 position:fixed 退化成
@@ -168,7 +180,7 @@ test('the hamburger panel expands a submenu instead of rendering a dead row', ()
 test('the submenu is teleported to body and click-through is whitelisted', () => {
   assert.match(app, /<Teleport to="body">\s*<div v-if="submenuRow === row\.id" class="dropdown menu-submenu"/,
     '浮层必须 Teleport 到 body')
-  assert.match(app, /closest\('\.menu-submenu'\)/, 'dismissMenu 必须放行子菜单，否则点子项会关掉整条菜单')
+  assert.match(app, /closest\('[^']*\.menu-submenu[^']*'\)/, 'dismissMenu 必须放行子菜单，否则点子项会关掉整条菜单')
 })
 
 // 鼠标从父行移向浮层的路上不能立刻关：延迟关闭、进入浮层取消。
@@ -191,8 +203,13 @@ test('the submenu parent row is styled on hover and while its submenu is open', 
 })
 
 // 父级弹层有入场动画（motion.div），子菜单不该突然弹出；且要尊重系统的减少动态设置。
+// 时长/缓动已搬进 tokens.css 的 --dur-submenu / --ease（原先就地写死 160ms + cubic-bezier），
+// 所以这里断言的是**令牌引用**，再单独钉住令牌的值 —— 数值本身不能被悄悄改掉。
 test('the submenu entrance animation matches the parent and honours reduced motion', () => {
-  assert.match(css, /animation: menu-submenu-in \.16s cubic-bezier\(\.16, 1, \.3, 1\)/)
+  const tokens = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8')
+  assert.match(tokens, /--dur-submenu: 160ms;/, '子菜单入场时长令牌不能变')
+  assert.match(tokens, /--ease: cubic-bezier\(\.16, 1, \.3, 1\);/, '缓动令牌不能变')
+  assert.match(css, /animation: menu-submenu-in var\(--dur-submenu\) var\(--ease\)/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.dropdown\.menu-submenu \{ animation: none; \} \}/)
 })
 

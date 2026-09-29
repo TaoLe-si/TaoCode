@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shellSource } from './shell-source.mjs'
+import ts from 'typescript'
+import * as vue from 'vue'
 
 import {
   SEARCH_EVERYWHERE_LIMIT,
@@ -90,17 +92,141 @@ test('符号与文件同属 Project tab（IDEA 的 project scope）', () => {
   assert.deepEqual(searchEverywhereResults(withSymbol, 'parse', 'runConfigs'), [])
 })
 
-// `PopupUpdateProcessor` 那一层：弹层开着的时候，数据源变了要自己跟上，而不是关掉重开。
-test('弹层开着时文件变化会重取清单并按同一查询词重发符号', () => {
-  const host = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'searchEverywhereHost.ts'), 'utf8')
-  assert.match(host, /watch\(\(\) => fsChanges\.version/, '没有监听文件变化')
-  assert.match(host, /if \(!searchEverywhereOpen\.value \|\| !isDesktop\) return/, '关着的弹层不该去打宿主')
-  assert.match(host, /refreshTimer = setTimeout/, '文件变化没有抖窗（一次保存会推多条）')
-  assert.match(host, /refreshSymbols\(query\)/, '重取清单后没有按同一个词重发符号')
-  assert.match(host, /let lastQuery = ''/, '没有记住最近一次查询词，刷新时就不知道该重发什么')
-  // 取不到清单时保留旧的，别把弹层清空（那比显示旧数据更糟）。
-  assert.match(host, /catch \{ \/\* 取不到就保留旧清单，不把弹层清空 \*\/ \}/, '取文件清单失败时不该清空弹层')
+// Execute the production host with real Vue reactivity and a controlled native transport.
+// As in scope-persistence.test.mjs, transpilation only replaces runtime imports.
+const hostJs = ts.transpileModule(readFileSync(new URL('../src/searchEverywhereHost.ts', import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText
+function lifecycleHost(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const fsChanges = vue.reactive({ version: 0, paths: [] })
+  const calls = []
+  const request = (method, params) => new Promise((resolve, reject) => calls.push({ method, params, resolve, reject }))
+  const exports = {}
+  new Function('require', 'exports', hostJs)(name => {
+    if (name === 'vue') return vue
+    if (name === './bridge') return { fsChanges, request }
+    throw new Error(`Unexpected host dependency: ${name}`)
+  }, exports)
+  const deps = {
+    isDesktop: true, menu: vue.ref(null), workspace: vue.ref({ root: 'project' }),
+    activePath: vue.ref('Main.java'), lspReady: vue.ref(true), actionList: vue.ref([]), allRunConfigNames: vue.ref([]),
+    openFile() {}, jumpSymbol() {}, runAction() {}, selectRunConfig() {}, runSelectedConfig() {}, baseName: path => path,
+  }
+  const scope = vue.effectScope()
+  const host = scope.run(() => exports.createSearchEverywhereHost(deps))
+  t.after(() => scope.stop())
+  return { ...host, deps, calls, fsChanges, scope,
+    files: () => host.searchEverywhereItems.value.filter(item => item.source === 'project').map(item => item.title),
+    symbols: () => host.searchEverywhereItems.value.filter(item => item.source === 'symbols').map(item => item.title),
+  }
+}
+const symbolResult = name => ({ available: true, symbols: [{ name, path: 'Main.java', line: 0, character: 0 }] })
+
+test('关闭时不请求宿主，关闭和卸载均取消待发出的刷新', t => {
+  const h = lifecycleHost(t)
+  h.fsChanges.version++
+  h.onSearchEverywhereQuery('Main')
+  t.mock.timers.tick(1000)
+  assert.equal(h.calls.length, 0)
+  h.openSearchEverywhere()
+  assert.equal(h.calls.length, 1)
+  h.onSearchEverywhereQuery('Main')
+  h.fsChanges.version++
+  h.searchEverywhereOpen.value = false
+  h.fsChanges.version++
+  t.mock.timers.tick(1000)
+  assert.equal(h.calls.length, 1, '关闭必须取消文件与符号两个定时器')
+  h.openSearchEverywhere()
+  h.onSearchEverywhereQuery('Main')
+  h.fsChanges.version++
+  h.scope.stop()
+  t.mock.timers.tick(1000)
+  assert.equal(h.calls.length, 2, '卸载后不得继续请求')
 })
+
+test('文件变化防抖刷新清单并用同一查询词独立刷新符号；清单失败保留原结果', async t => {
+  const h = lifecycleHost(t)
+  h.openSearchEverywhere()
+  h.calls[0].resolve({ files: ['Main.java'] })
+  await Promise.resolve()
+  h.onSearchEverywhereQuery(' Main ')
+  t.mock.timers.tick(120)
+  assert.deepEqual(h.calls[1].params, { kind: 'workspaceSymbol', path: 'Main.java', query: 'Main' })
+  h.calls[1].resolve(symbolResult('Main'))
+  await Promise.resolve()
+  h.fsChanges.version++
+  h.fsChanges.version++
+  t.mock.timers.tick(119)
+  assert.equal(h.calls.length, 2)
+  t.mock.timers.tick(1)
+  assert.equal(h.calls.length, 3, '符号刷新不等待清单请求')
+  assert.deepEqual(h.calls[2].params, h.calls[1].params)
+  t.mock.timers.tick(80)
+  assert.equal(h.calls.length, 4, '连续文件事件只重取一次清单')
+  assert.equal(h.calls[3].method, 'workspace.files')
+  h.calls[3].reject(new Error('disk unavailable'))
+  h.calls[2].resolve(symbolResult('MainUpdated'))
+  await Promise.resolve()
+  assert.deepEqual(h.files(), ['Main.java'])
+  assert.deepEqual(h.symbols(), ['MainUpdated'])
+})
+
+test('同词重发后旧文件和符号响应不得覆盖新结果或在防抖期回填', async t => {
+  const h = lifecycleHost(t)
+  h.openSearchEverywhere()
+  h.onSearchEverywhereQuery('Main')
+  t.mock.timers.tick(120)
+  const [oldFiles, oldSymbols] = h.calls
+  h.fsChanges.version++
+  oldSymbols.resolve(symbolResult('stale-before-debounce'))
+  await Promise.resolve()
+  assert.deepEqual(h.symbols(), [], '新查询开始即作废旧符号响应')
+  t.mock.timers.tick(200)
+  h.calls[2].resolve(symbolResult('fresh'))
+  h.calls[3].resolve({ files: ['fresh.java'] })
+  await Promise.resolve()
+  oldFiles.resolve({ files: ['stale.java'] })
+  await Promise.resolve()
+  assert.deepEqual(h.files(), ['fresh.java'])
+  assert.deepEqual(h.symbols(), ['fresh'])
+  h.onSearchEverywhereQuery('Main')
+  t.mock.timers.tick(120)
+  const late = h.calls[4]
+  h.onSearchEverywhereQuery('Main')
+  t.mock.timers.tick(120)
+  h.calls[5].resolve(symbolResult('newest'))
+  await Promise.resolve()
+  late.reject(new Error('obsolete failure'))
+  await Promise.resolve()
+  assert.deepEqual(h.symbols(), ['newest'], '旧请求失败也不得清空新结果')
+})
+
+for (const transition of ['close/reopen', 'workspace replacement']) {
+  test(`${transition} 隔离旧会话的文件和符号响应`, async t => {
+    const h = lifecycleHost(t)
+    h.openSearchEverywhere()
+    h.onSearchEverywhereQuery('Main')
+    t.mock.timers.tick(120)
+    const [oldFiles, oldSymbols] = h.calls
+    if (transition === 'close/reopen') {
+      h.searchEverywhereOpen.value = false
+      h.openSearchEverywhere()
+      h.onSearchEverywhereQuery('Main')
+    } else {
+      h.deps.workspace.value = { root: 'project' } // Same root, different workspace identity.
+    }
+    t.mock.timers.tick(120)
+    h.calls[2].resolve({ files: ['current.java'] })
+    h.calls[3].resolve(symbolResult('current'))
+    await Promise.resolve()
+    oldFiles.resolve({ files: ['old.java'] })
+    oldSymbols.resolve(symbolResult('old'))
+    await Promise.resolve()
+    assert.deepEqual(h.files(), ['current.java'])
+    assert.deepEqual(h.symbols(), ['current'])
+  })
+}
 
 test('来源副标签', () => {
   assert.equal(searchEverywhereSourceLabel('project'), 'File')

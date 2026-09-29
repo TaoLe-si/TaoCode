@@ -29,7 +29,7 @@ export const INITIAL_LAYOUT_NAME = '自定义'
 /** `ide.max.tool.window.layout.name.length` (`registry.properties:2198`). */
 export const MAX_LAYOUT_NAME_LENGTH = 50
 
-export type ToolWindowSide = 'left' | 'right'
+export type ToolWindowSide = 'left' | 'right' | 'bottom'
 
 /** One snapshot of the tool window layout. */
 export interface ToolLayout {
@@ -62,7 +62,7 @@ export function normalizeToolLayout(raw: unknown, fallback: ToolLayout): ToolLay
   const anchors: Record<string, ToolWindowSide> = { ...fallback.anchors }
   if (isRecord(raw.anchors))
     for (const [id, side] of Object.entries(raw.anchors))
-      if (side === 'left' || side === 'right') anchors[id] = side
+      if (side === 'left' || side === 'right' || side === 'bottom') anchors[id] = side
   const order: Record<string, string[]> = { ...fallback.order }
   if (isRecord(raw.order))
     for (const [side, list] of Object.entries(raw.order))

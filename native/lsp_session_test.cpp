@@ -57,6 +57,65 @@ int main() {
         const auto result = session.open("src/中文 File.java", "class A {}");
         check(result.at("running") == false, "no server configured yet");
         check(result.at("language") == "java", "language detected");
+        check(result.at("configured") == false && result.at("ready") == false, "missing Java server is explicit");
+    });
+
+    run("a spawn failure preserves its error instead of a silent running=false", [&] {
+        Session session([](std::string, Json) {});
+        session.set_root(fs::path(L"C:\\ws"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"missing-taocode-java-server.exe").native();
+        session.configure({{"java", config}});
+        const auto opened = session.open("Main.java", "class Main {}");
+        check(opened.at("running") == false && opened.at("ready") == false, "spawn failure cannot look ready");
+        check(opened.at("configured") == true, "failed executable is distinct from no configuration");
+        check(opened.at("error").at("code") == "LSP_SPAWN", "preserve spawn failure code");
+        check(!opened.at("error").at("message").get<std::string>().empty(), "preserve Windows spawn reason");
+        // Reopening after the user fixed the configuration must not replay the
+        // stale failure: the error is cleared and the launch is attempted again.
+        session.configure({});
+        Session::ServerConfig fixed;
+        fixed.command = (self_directory() / L"lsp_fake_server.exe").native();
+        session.configure({{"java", fixed}});
+        const auto retried = session.open("Main.java", "class Main {}");
+        check(retried.at("running") == true, "a fixed configuration starts the server: " + retried.dump());
+        check(!retried.contains("error"), "the previous failure is not replayed");
+        session.shutdown_all();
+    });
+
+    run("a failed initialize stays diagnosable through the status route", [&] {
+        Session session([](std::string, Json) {});
+        session.set_root(fs::path(L"C:\\ws"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        config.arguments = {L"--hang=initialize"};
+        session.configure({{"java", config}});
+        session.set_timeout(std::chrono::milliseconds(100));
+        const auto opened = session.open("Main.java", "class Main {}");
+        check(opened.at("running") == true && opened.at("ready") == false, "spawned is not initialized");
+        Json status;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+            session.semantic("status", "Main.java", 0, 0, Json::object(), [&](Json value, Json error) {
+                check(error.is_null(), "status must be queryable after initialization fails");
+                status = std::move(value);
+            });
+            if (status.contains("error")) break;
+            Sleep(10);
+        } while (std::chrono::steady_clock::now() < deadline);
+        check(status.at("running") == false && status.at("ready") == false, "failed handshake does not enable completion");
+        check(status.at("error").at("message") == "TIMEOUT", "initialize timeout reaches the frontend");
+        // Same retry contract as a spawn failure: the dead client is replaced,
+        // not reused, and the failure is not reported twice.
+        session.set_timeout(std::chrono::seconds(10));
+        Session::ServerConfig fixed;
+        fixed.command = (self_directory() / L"lsp_fake_server.exe").native();
+        session.configure({{"java", fixed}});
+        const auto retried = session.open("Main.java", "class Main {}");
+        check(retried.at("running") == true, "the retry starts a fresh client: " + retried.dump());
+        check(!retried.contains("error"), "the initialize failure is not replayed");
+        session.shutdown_all();
+        check(!session.status("Main.java").contains("error"), "shutdown clears startup errors");
     });
 
     run("session drives a real server: open->diagnostics->hover->definition", [&] {
@@ -91,6 +150,7 @@ int main() {
         };
 
         check(wait_for(got_diagnostics), "no diagnostics after deferred didOpen");
+        check(session.status("src/Sample.java").at("ready") == true, "only a successful handshake enables completion");
         check(diag_path == "src/Sample.java", "diagnostics path is workspace-relative: " + diag_path);
         check(diag_payload.is_array() && diag_payload.size() == 1 && diag_payload[0].at("message") == "fake diagnostic",
               "diagnostic payload mapped");

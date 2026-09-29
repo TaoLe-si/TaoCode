@@ -154,7 +154,7 @@ watch(() => props.activePath, () => refreshFile())
 .testrun-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: 0; color: var(--text); font-size: 12px; }
 .testrun-meta { color: var(--muted); font-size: 10px; }
 .testrun-outcome { width: 14px; text-align: center; }
-.testrun-outcome.passed { color: var(--success, #3fb950); }
+.testrun-outcome.passed { color: var(--success); }
 .testrun-outcome.failed { color: var(--error); }
 .testrun-outcome.skipped { color: var(--muted); }
 .testrun-empty { margin: 0; padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 12px; line-height: 1.7; }

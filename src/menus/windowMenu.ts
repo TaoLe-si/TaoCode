@@ -13,6 +13,7 @@
 // `HideAllToolWindowsAction.kt:34-49`、`MaximizeToolWindowAction.java:26/59-62`、
 // `ResizeToolWindowAction.java:96-98`、`WindowAction.java:113-131`。
 import type { MenuRow } from './types'
+import { referencesInNewTab } from '../referenceContents.ts'
 
 export interface WindowMenuContext {
   /** 工具窗口行的工厂（宿主提供：它同时被别的菜单用）。 */
@@ -69,6 +70,10 @@ export interface WindowMenuContext {
   allProblems: { value: readonly unknown[] }
   showOutput: (id: any) => unknown
   openSettings: (section?: any) => unknown
+  /** `PinToolwindowTab`：标题按当前那条 content 的钉住状态换，只有引用内容可钉。 */
+  pinTabTitle: () => string
+  canPinToolwindowTab: () => boolean
+  togglePinToolwindowTab: () => void
 }
 
 export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
@@ -82,6 +87,7 @@ export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
     closeAllTabsTarget, closeAllToolTabs, bottomContentUiType, isTabbedContentUi, canToggleContentUiType,
     activeContentCount, toggledContentUiType, progressOpen, noticeLog, closeFirstNotification, clearNotices,
     workspace, explorer, bottom, groups, allProblems, showOutput, openSettings,
+    pinTabTitle, canPinToolwindowTab, togglePinToolwindowTab,
   } = ctx
   return [
 // IDEA's Window menu (PlatformActions.xml WindowMenu): layout switcher first,
@@ -94,7 +100,6 @@ export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
   toolWindow('todo', '激活 待办事项 工具窗口', 'activate todo tool window 待办'),
   toolWindow('bookmarks', '激活 书签 工具窗口', 'activate bookmarks tool window 书签'),
   toolWindow('debug', '激活 调试 工具窗口', 'activate debug tool window 调试', true),
-  toolWindow('history', '激活 本地历史 工具窗口', 'activate local history tool window 历史', true),
   { id: 'window.activateTerminal', title: '激活 终端 工具窗口', keys: 'Alt F12', keywords: 'activate terminal tool window 终端', enabled: () => Boolean(workspace.value), run: () => showOutput('terminal') },
   { id: 'window.activateOutput', title: '激活 输出 工具窗口', keywords: 'activate output tool window 输出', enabled: () => Boolean(workspace.value), run: () => showOutput('output') },
   { id: 'window.activateProblems', title: '激活 问题 工具窗口', keywords: 'activate problems tool window 问题', enabled: () => allProblems.value.length > 0, run: () => showOutput('problems') },
@@ -108,6 +113,15 @@ export function createWindowMenuRows(ctx: WindowMenuContext): MenuRow[] {
     { id: 'window.hideActiveWindow', title: '隐藏当前工具窗口', keys: 'Shift Esc', keywords: 'hide active tool window 隐藏当前工具窗口', enabled: () => (focusedDock() === 'bottom' ? bottom.value : focusedDock() === 'side' ? explorer.value : lastActiveId(activeToolWindows.value, toolWindowAvailable) !== undefined), run: hideActiveToolWindow },
     { id: 'window.hideSideWindows', title: '隐藏侧边工具窗口', keywords: 'hide side tool windows 隐藏侧边', enabled: () => explorer.value, run: hideSideToolWindows },
     { id: 'window.hideBottomWindows', title: '隐藏底部工具窗口', keywords: 'hide bottom tool windows 隐藏底部', enabled: () => bottom.value, run: hideBottomToolWindows },
+    // `PinToolwindowTab`（`intellij.platform.ide.impl.actions.xml:455` = `PinActiveTabAction.TW`）就排在
+    // HideAllWindows 之后（`PlatformActions.xml:657`）。它钉的是**工具窗口的内容**：钉住的那条不会被下一次
+    // 搜索顶替（`UsageViewContentManagerImpl.java:158`）。本仓只有引用那一格有多条 content，所以只在那里可用。
+    { id: 'window.pinToolwindowTab', title: pinTabTitle, keywords: 'pin tab keep results 钉住 固定标签', enabled: () => canPinToolwindowTab(), run: togglePinToolwindowTab },
+    // `find.open.in.new.tab.action`（`FindBundle.properties:23` "Open Results in New Ta&b"）是 Find 窗口
+    // 齿轮里的那个勾选项（`UsageViewContentManagerImpl.java:59-74` 造它，`:114-116` 挂进齿轮组），
+    // 状态存在 `FindUsagesSettings.showResultsInSeparateView`。本仓它同时出现在 Window 菜单里，
+    // 因为这一格的齿轮只挂"工具窗口自己的动作"，而它是**搜索**的设置。
+    { id: 'window.referencesInNewTab', title: '在新标签页中打开结果', keywords: 'open results in new tab find usages separate view 新标签页 结果', checked: () => referencesInNewTab.value, run: () => { referencesInNewTab.value = !referencesInNewTab.value } },
     // WindowMenu › HideAllWindows = `HideAllToolWindowsAction`, a *two-text* toggle: "Hide All
     // Windows" while anything is still visible, "Restore Windows" once only the saved layout is left
     // (`HideAllToolWindowsAction.kt:34-49`, texts `IdeBundle.properties:384-385`), disabled when

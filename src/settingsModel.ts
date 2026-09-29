@@ -47,7 +47,8 @@ export interface TodoPattern {
   caseSensitive?: boolean
 }
 export interface JavaProjectSettings { jdkHome: string; jdkName: string; sourcePaths: string[]; outputPath: string; referencedLibraries: string[] }
-export const defaultJavaProjectSettings: JavaProjectSettings = { jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] }
+// jdkName 存 IDEA 的 SDK 显示名（`17`/`1.8`，JdkUtil.suggestJdkName），jdt.ls 的 JavaSE-x 只在原生 runtimes 边界归一。
+export const defaultJavaProjectSettings: JavaProjectSettings = { jdkHome: '', jdkName: '17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] }
 // 命名作用域（IDEA `project.scopes`）。IDEA 把它拆成两个持有者存：本地作用域在 workspace.xml 的
 // `NamedScopeManager`、共享作用域在 .idea 的 `DependencyValidationManager`（NamedScopesHolder.java:125-165，
 // 每条只有 name/pattern）。TaoCode 用一条数组保存，`shared` 表示归属哪个持有者；
@@ -55,7 +56,8 @@ export const defaultJavaProjectSettings: JavaProjectSettings = { jdkHome: '', jd
 export interface NamedScopeSetting { name: string; pattern: string; shared: boolean }
 // 文件颜色（IDEA `com.intellij.ui.tabs`）：`FileColorConfiguration` 只有 scopeName + colorID，
 // 数组顺序即优先级（`FileColorsModel.findConfigurationWithScopeFilter:247-260` 首个命中就返回）。
-export interface FileColorSetting { scope: string; color: 'Blue' | 'Green' | 'Orange' | 'Rose' | 'Violet' | 'Yellow' | 'Gray' }
+export type { FileColorSetting } from './fileColors.ts'
+import type { FileColorSetting } from './fileColors.ts'
 // 书签工具窗口的视图状态（IDEA `BookmarksViewState`）：只收录有真实落点的三个开关。
 export interface BookmarksViewState { groupLineBookmarks: boolean; autoscrollToSource: boolean; autoscrollFromSource: boolean }
 /**
@@ -77,7 +79,7 @@ export interface ExportToHtmlSettings {
 export const defaultExportToHtmlSettings: ExportToHtmlSettings = {
   scope: 0, includeSubdirectories: false, printLineNumbers: false, openInBrowser: false, outputDirectory: '',
 }
-export interface ProjectSettings { excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
+export interface ProjectSettings { excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; localFileColors: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
 export interface ProjectForm { parent: string; name: string; template: 'empty' | 'cpp' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
 export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; general?: GeneralSettingsState; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
 // Source: platform/ide-core/src/com/intellij/ide/GeneralSettings.kt:227-266
@@ -136,22 +138,21 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   foldExceptions: [],
   externalTools: [],
 }
-export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'separate', differentiateProjects: false, expandNodesWithSingleClick: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 3, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true }
+export const defaultEditorSettings: EditorSettings = { fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 3, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
   bookmarks: [],
+  // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只有两条，正则逐字照抄。
   todoPatterns: [
-    { pattern: 'TODO', description: '待办' },
-    { pattern: 'FIXME', description: '需要修' },
-    { pattern: 'XXX', description: '警告' },
-    { pattern: 'HACK', description: '临时办法' },
+    { pattern: '\\btodo\\b.*', description: '待办' },
+    { pattern: '\\bfixme\\b.*', description: '需要修' },
   ],
   templates: { overrides: [], customs: [] },
   java: structuredClone(defaultJavaProjectSettings),
   fileAssociations: {},
   // NamedScope.EMPTY_ARRAY: a fresh project has no scopes.
-  scopes: [],
+  scopes: [], fileColors: [], localFileColors: [],
   // BookmarksViewState 的默认值（platform/bookmarks/.../BookmarksViewState.kt:23-29）。
   bookmarksView: { groupLineBookmarks: true, autoscrollToSource: false, autoscrollFromSource: false },
   // 构建工具（IDEA 设置「构建、执行、部署 › 构建工具」）。**项目级**：IDEA 的
@@ -185,7 +186,7 @@ export interface RecentProject {
 // AppearanceConfigurable (IdeScaleTransformer bounds 50-400, compact mode, full
 // paths in the window header). They are appearance state but ride the same
 // settings.update channel as the editor flags, so one save covers both pages.
-export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; showIndentGuides: boolean; bracketMatching: boolean; tabLimit: number; useTabCharacter: boolean; showWhitespaces: boolean; formatOnSave: boolean; uiZoomPercent: number; compactMode: boolean; fullPathsInWindowHeader: boolean;
+export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; showIndentGuides: boolean; bracketMatching: boolean; tabLimit: number; /** IDEA「显示一行」（`UISettings.scrollTabLayoutInEditor`）：true = 单行裁切 + 「…」，false = 多行换行不裁切。 */ tabsInOneRow: boolean; useTabCharacter: boolean; showWhitespaces: boolean; formatOnSave: boolean; uiZoomPercent: number; compactMode: boolean; fullPathsInWindowHeader: boolean;
   // IDEA AppearanceConfigurable 'Tree Views' group: indent guides and smaller
   // tree indents; FileTree renders both.
   showTreeIndentGuides: boolean; compactTreeIndents: boolean;
@@ -209,10 +210,9 @@ export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: b
   // `EditorSettingsExternalizable.java:87` 默认 true）。开关动作 `EditorToggleShowGutterIcons`
   // （`intellij.platform.ide.impl.actions.xml:415`），设置页 `editor.preferences.gutterIcons`。
   showGutterIcons: boolean;
-  // 文件颜色总开关与「标签页这一档」（IDEA `FileColorManagerImpl`）：两层都是
-  // PropertiesComponent 布尔键（`FileColorsEnabled` / `FileColorsForTabsEnabled`，
-  // `_isEnabled()` :72-74 默认 true），颜色本身存在项目设置里（`fileColors`）。
-  fileColorsEnabled: boolean; fileColorsForTabs: boolean;
+  // FileColorManagerImpl.java:75-106: all switches true.
+  // FileColorModelStorageManager.kt:27-38: both color lists belong to the project, not editor settings.
+  fileColorsEnabled: boolean; fileColorsForTabs: boolean; fileColorsForProjectView: boolean;
   // 双向文本方向（IDEA `EditorSettingsExternalizable.BIDI_TEXT_DIRECTION`，`EditorSettingsExternalizable.java:137`
   // 默认 CONTENT_BASED；枚举只有三个值，见 `BidiTextDirection.java:21-23`）。
   // 它不是设置页里的行，而是「视图 › 文本方向」子菜单的三个 ToggleAction（PlatformActions.xml:591-595）。
@@ -269,6 +269,17 @@ export interface EditorSettings { fontSize: number; tabSize: number; wordWrap: b
   // default false): when off, project-view directories expand on double click and
   // single click only selects (FileTree honours both modes).
   expandNodesWithSingleClick: boolean;
+  // IDEA 高级设置 `editor.maximize.on.double.click`（`intellij.platform.ide.impl.xml:1511`，默认 **true**）：
+  // 双击编辑器标签时执行「隐藏全部工具窗口 / 恢复窗口」。同组另一条
+  // `editor.maximize.in.splits.on.double.click`（`:1512`，默认 false）在 TaoCode 没有对应形态
+  // （本仓的"最大化编辑器"是整体布局动作，不是"编辑器内分屏最大化"那一档），所以只落前一条。
+  maximizeEditorOnTabDoubleClick: boolean;
+  // IDEA 设置页「在单独一行中显示固定标签」(`showPinnedTabsInASeparateRow`，
+  // `UISettingsState.kt:127` 默认 false；文案 `ApplicationBundle.properties:324`)。
+  // 上游还要**同时**打开高级设置 `editor.keep.pinned.tabs.on.left`(默认 true)才生效
+  // （`TabLayout.showPinnedTabsSeparately():75-78`）—— 本仓那条高级设置没有消费者，
+  // 所以这里按"设置页开关"这一档落，恒成立的那半不另造一个开关。
+  pinnedTabsInSeparateRow: boolean;
   /** StickyLinesConfigurable：粘性作用域行开关与层数上限（IDEA editor.stickyLines）。 */
   showStickyLines: boolean
   stickyLinesLimit: number

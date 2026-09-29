@@ -1,4 +1,5 @@
 #include "workspace.hpp"
+#include "base64.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -733,24 +735,7 @@ Json Workspace::read(const std::string& relative, const std::string& encoding) {
 // opened with attribute access only — a read-only file must still be toggleable.
 // JSON is text, so raw file bytes travel base64-encoded to the renderer. Used only
 // by read_binary, which caps the payload before this ever sees a large buffer.
-std::string base64_encode(std::string_view in) {
-    static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve((in.size() + 2) / 3 * 4);
-    std::size_t i = 0;
-    for (; i + 3 <= in.size(); i += 3) {
-        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8) | static_cast<unsigned char>(in[i + 2]);
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += table[n & 63];
-    }
-    if (i + 1 == in.size()) {
-        const unsigned n = static_cast<unsigned char>(in[i]) << 16;
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += "==";
-    } else if (i + 2 == in.size()) {
-        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8);
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += '=';
-    }
-    return out;
-}
+// base64_encode 已并入 native/base64.hpp（三处重复实现合并）。
 
 // Sniffs the leading bytes for the formats TaoCode can render without a plugin.
 // Everything else falls back to the hex viewer, which is always correct but never
@@ -1267,6 +1252,53 @@ Json reveal_absolute(const std::string& absolute) {
         if (reinterpret_cast<std::intptr_t>(instance) <= 32)
             fail("IO_ERROR", "无法打开资源管理器。");
         return {{"path", utf8_path(target)}, {"revealed", true}};
+    });
+}
+
+// 这两个 helper 只服务 `open_external`，放进匿名 namespace —— 它们没有任何外部链接需求，
+// 而 `utf8_wide` 这种通用名字放进 `taocode` 命名空间就是等着和别的 TU 撞符号。
+namespace {
+// UTF-8 -> UTF-16LE。调用点都已用 `valid_utf8` 校验过，所以这里不需要 MB_ERR_INVALID_CHARS
+// 的失败判定。**不能**用 `fs::path` 走这条路：`lexically_normal()` 会把 URL 里的 `//` 吃掉。
+std::wstring utf8_wide(const std::string& text) {
+    if (text.empty()) return {};
+    const auto needed = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (needed <= 0) return {};
+    std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), needed);
+    return wide;
+}
+
+// 协议名按 RFC 3986：`scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`，冒号必须出现。
+// **Windows 盘符必须排除**：`C:/x.exe` 完全符合上面的语法，而 `ShellExecuteW(L"open", …)`
+// 会把它当程序**执行**掉 —— 这是安全边界上最容易漏的一种输入。
+bool has_url_scheme(const std::string& url) {
+    const auto colon = url.find(':');
+    if (colon == std::string::npos || colon == 0) return false;
+    if (!std::isalpha(static_cast<unsigned char>(url.front()))) return false;
+    // 单字母 scheme 后面紧跟 `/` 或 `\` → 盘符，不是协议。
+    if (colon == 1 && colon + 1 < url.size() && (url[colon + 1] == '/' || url[colon + 1] == '\\'))
+        return false;
+    for (std::size_t i = 1; i < colon; ++i) {
+        const auto character = static_cast<unsigned char>(url[i]);
+        if (!std::isalnum(character) && character != '+' && character != '-' && character != '.') return false;
+    }
+    return true;
+}
+}  // namespace
+
+Json open_external(const std::string& url) {
+    return boundary([&]() -> Json {
+        if (url.empty() || !valid_utf8(url) || url.find('\0') != std::string::npos)
+            fail("INVALID_PATH", "链接必须是没有 NUL 字节的 UTF-8 文本。");
+        // **这是安全边界，不是格式检查**：`ShellExecuteW(L"open", …)` 对 `"calc.exe"`、
+        // `"C:\tools\x.exe"` 这类没有协议前缀的字符串会直接执行它。而 `url` 可能来自语言服务器
+        // （LSP `documentLink.target` 完全由服务器给），放行就是给了服务器一个任意命令执行的入口。
+        // 所以只接受带合法协议名的绝对 URL，其余一律拒绝。
+        if (!has_url_scheme(url)) fail("INVALID_PATH", "只允许带协议的绝对链接（例如 https://…）。");
+        const auto instance = ShellExecuteW(nullptr, L"open", utf8_wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<std::intptr_t>(instance) <= 32) fail("IO_ERROR", "无法打开该链接。");
+        return {{"url", url}, {"opened", true}};
     });
 }
 

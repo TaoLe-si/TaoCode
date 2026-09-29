@@ -1,11 +1,13 @@
 import { reactive } from 'vue'
+import { normalizeFileColor, normalizeFileColors } from './fileColors.ts'
 // base64（桥上的二进制载荷）与 Gradle 同步通道都拆成了独立模块；这里转出给既有调用方。
 import { fromBase64, toBase64 } from './base64.ts'
 import { handleGradleEvent } from './gradleEvents.ts'
+import { handleLspProgressEvent } from './lspProgress.ts'
 import { decodeRunChunk, flushRunDecoder, handleRunExit, handleRunOutput, handleRunStarted } from './runInstances.ts'
 import { deliverTermOutput, emitTermExit, subscribeTerm, subscribeTermExit, type TermCreateResult } from './terminalEvents.ts'
 export { fromBase64, toBase64 } from './base64.ts'
-export { GRADLE_OUTPUT_LIMIT, gradleSync } from './gradleEvents.ts'
+export { GRADLE_OUTPUT_LIMIT, gradleSync } from './gradleEvents.ts'; export { lspProgressInterrupted, lspProgressTasks, runningLspTasks, type LspProgressTask } from './lspProgress.ts'
 export { subscribeTerm, subscribeTermExit, type TermCreateResult } from './terminalEvents.ts'
 import { EDITOR_LANGUAGES } from './languages.ts'
 import type { Bookmark } from './bookmarks'
@@ -89,29 +91,9 @@ export function normalizeEditorSettings(settings: EditorSettings): EditorSetting
   return { ...settings, showBreadcrumbs: false, breadcrumbsPlacement: 'bottom' }
 }
 
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
-export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string }
-// The repository's configured author (`git config user.name` / `user.email`), which IDEA's
-// CommitAuthorComponent shows above the commit actions and can override per commit.
-export interface GitUser { name: string; email: string }
-export interface GitStatus { available: boolean; head?: string; branches?: string[]; changes?: GitChange[] }
-export interface GitDiff { diff: string }
-export interface GitCommit { hash: string; shortHash: string; author: string; date: string; subject: string }
-export interface GitLog { commits: GitCommit[] }
-export interface GitRef { name: string; type: 'local' | 'remote' | 'tag' }
-export interface GitFullCommit { hash: string; shortHash: string; author: string; date: string; subject: string; parents: string[]; refs: GitRef[] }
-export interface GitFullLog { commits: GitFullCommit[] }
-export interface GitStashEntry { ref: string; message: string }
-export interface GitStash { entries: GitStashEntry[] }
-export interface GitAheadBehind { available: boolean; ahead: number; behind: number }
-// One selectable hunk of a unified diff (IDEA's commit-viewer stage/unstage rows).
-export interface GitHunk { index: number; header: string; body: string; additions: number; deletions: number }
-export interface GitHunks { hunks: GitHunk[]; header: string }
-export interface GitTags { tags: string[] }
-export interface GitCompareFile { status: string; path: string }
-export interface GitCompare { base: string; files: GitCompareFile[] }
-export interface GitBlameLine { line: number; hash: string; author: string; email: string; date: string; summary: string; content: string }
-export interface GitBlame { lines: GitBlameLine[] }
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
+export type { GitChange, GitUser, GitStatus, GitDiff, GitCommit, GitLog, GitRef, GitFullCommit, GitFullLog, GitLogQuery, GitCommitDetails, GitCommitChange, GitCommitComparison, GitCommitChanges, GitCommitFileDiff, GitStashEntry, GitStash, GitAheadBehind, GitHunk, GitHunks, GitTags, GitCompareFile, GitCompare, GitBlameLine, GitBlame } from './vcsLogTypes'
+import type { GitCommit } from './vcsLogTypes'
 // One aligned row of the side-by-side viewer. Marks are [start, length] byte ranges
 // into that side's own text, so a change highlights only the words that differ.
 export interface DiffCell { no: number; text: string }
@@ -275,6 +257,7 @@ interface Reply {
   cwd?: string; reason?: string; restarting?: boolean; attempt?: number
   // gradle.started 带回同步用的命令行；gradle.exit 带回"是被取消的吗"。
   command?: string; cancelled?: boolean
+  language?: string; token?: string; kind?: string; title?: string; percentage?: number; cancellable?: boolean  // lsp.progress：`$/progress` 的一条报告（整形见 native/lsp_host_bootstrap.cpp）
   // run.* 都带**实例 id**（多实例运行：IDEA 的 Run 工具窗口按实例开标签）。
   instance?: number; label?: string
   error?: { code: string; message: string }; durationMs?: number
@@ -380,6 +363,11 @@ export function handleHostEvent(data: Reply | undefined): boolean {
     // 终端输出：订阅表与"订阅前的缓冲"都在 src/terminalEvents.ts。
     case 'term.output':
       return deliverTermOutput(data.id, data.dataB64)
+    // `$/progress` 的三支语义与"停机就整条收掉"都在 src/lspProgress.ts
+    // （上游 LspServerNotificationsHandlerImpl.kt:257-339）。
+    case 'lsp.progress':
+    case 'lsp.progressReset':
+      return handleLspProgressEvent(data.event, data)
     case 'lsp.edited':
       if (typeof data.path !== 'string') return false
       lspEdited.path = data.path
@@ -406,7 +394,7 @@ export function handleHostEvent(data: Reply | undefined): boolean {
       if (historyNotes.length > 50) historyNotes.shift()
       return true
     }
-    case 'git.progress':
+    case 'git.progress':''
       gitProgress.running = data.running === true
       gitProgress.queued = typeof data.queued === 'number' && data.queued > 0 ? Math.floor(data.queued) : 0
       return true
@@ -953,6 +941,18 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
         if (malformed) throw new BridgeError('INVALID_SETTINGS', '作用域要写成 {name, pattern, shared}：名称非空且不重名，模式不超过 1024 字节。')
         next.scopes = list.map(entry => ({ name: entry.name, pattern: entry.pattern, shared: entry.shared }))
       }
+      for (const key of ['fileColors', 'localFileColors'] as const) {
+        const value = params[key]
+        if (value === undefined) continue
+        const malformed = !Array.isArray(value) || value.length > 64 || normalizeFileColors(value).length !== value.length ||
+          value.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry) ||
+            Object.keys(entry).some(key => key !== 'scope' && key !== 'color') ||
+            typeof entry.scope !== 'string' || !entry.scope || new TextEncoder().encode(entry.scope).length > 80 ||
+            /[\r\n\t]/.test(entry.scope) || normalizeFileColor(entry.color) === null) ||
+          new Set(value.map(entry => entry.scope)).size !== value.length
+        if (malformed) throw new BridgeError('INVALID_SETTINGS', `无效文件颜色：${key}`)
+        next[key] = normalizeFileColors(value)
+      }
       if (params.templates !== undefined) {
         const value = params.templates as Partial<TemplateSettings>
         const encoder = new TextEncoder()
@@ -984,7 +984,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           if (!raw || Array.isArray(raw) || Object.keys(raw).some(key => !['jdkHome', 'jdkName', 'sourcePaths', 'outputPath', 'referencedLibraries'].includes(key))) return null
           if (typeof raw.jdkHome !== 'string' || raw.jdkHome.length > 1024 || /[\u0000-\u001f]/.test(raw.jdkHome) ||
             (raw.jdkHome && !/^[A-Za-z]:[\\/]|^\\\\/.test(raw.jdkHome))) return null
-          if (typeof raw.jdkName !== 'string' || !/^JavaSE-(1\.8|9|[1-9][0-9])$/.test(raw.jdkName)) return null
+          if (typeof raw.jdkName !== 'string' || !/^(1\.[1-8]|[1-9][0-9](-ea)?|JavaSE-1\.8|JavaSE-(9|[1-9][0-9]))$/.test(raw.jdkName)) return null
           if (typeof raw.outputPath !== 'string' || (raw.outputPath && !relative(raw.outputPath))) return null
           const list = (paths: unknown, glob: boolean) => {
             if (!Array.isArray(paths) || paths.length > 64 || !paths.every(path => relative(path, glob))) return null
@@ -1115,13 +1115,13 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
       for (const [key, value] of Object.entries(patch)) {
         const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
           key === 'lineNumbers' ||
-          key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' ||
+          key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' || key === 'tabsInOneRow' ||
           key === 'useTabCharacter' || key === 'showWhitespaces' || key === 'formatOnSave' ||
           key === 'uiZoomPercent' || key === 'compactMode' || key === 'fullPathsInWindowHeader' ||
           key === 'showTreeIndentGuides' || key === 'compactTreeIndents' ||
           key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' ||
           key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
-          key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
+          key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || key === 'fileColorsForProjectView' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
           key === 'smoothScrolling' || key === 'showIconsInMenus' ||
           key === 'rememberSizeForEachToolWindow' || key === 'showToolWindowNames' || key === 'showToolWindowBars' ||
           key === 'leftSideBySide' || key === 'wideScreenSupport' || key === 'rightSideBySide' ||
@@ -1131,7 +1131,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           key === 'backgroundImagePath' || key === 'backgroundImageOpacity' || key === 'backgroundImageFill' ||
           key === 'backgroundImageKeepRatio' || key === 'presentationMode' || key === 'presentationModeFontSize' ||
           key === 'showStatusBar' || key === 'rightMargin' ||
-          key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick'
+          key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick' || key === 'maximizeEditorOnTabDoubleClick' || key === 'pinnedTabsInSeparateRow'
         if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
         if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
           : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'

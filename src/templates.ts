@@ -86,20 +86,53 @@ const allTemplates = [...templates, ...postfixTemplates]
 
 interface EffectiveTemplate { template: Template; pattern: string }
 
-export function effectiveTemplates(path: string, settings: TemplateSettings): EffectiveTemplate[] {
+/**
+ * 插件贡献的实时模板 —— 形状与 `CustomTemplate` 一致（`plugin.json` 的 `contributes.templates`），
+ * 所以直接传 `PluginInfo[]` 就行。字段都是可选的，测试里可以只给 `{ id, templates }`。
+ */
+export interface PluginTemplateSource {
+  id: string
+  /** 只有**启用的**插件贡献模板（IDEA 只加载启用的插件）；缺省视为启用。 */
+  enabled?: boolean
+  /** 清单读不出来的插件不贡献任何东西。 */
+  error?: string
+  templates: readonly CustomTemplate[]
+}
+
+/** 插件模板的 pattern：`plugin:<插件 id>:<key>` —— 与用户自定义模板分开，避免混进设置页那张表。 */
+export function pluginTemplatePattern(id: string, template: CustomTemplate): string {
+  return `plugin:${id}:${template.key}`
+}
+
+export function effectiveTemplates(
+  path: string,
+  settings: TemplateSettings,
+  plugins: readonly PluginTemplateSource[] = [],
+): EffectiveTemplate[] {
   const language = languageFor(path)
   const usable = (languages: string[]) => languages.length === 0 || languages.includes(language)
   const disabled = new Set(settings.overrides.filter(entry => entry.disabled).map(entry => entry.pattern))
   const customs = settings.customs.filter(custom => usable(custom.languages) && !disabled.has(customPattern(custom)))
     .map(custom => ({ template: custom, pattern: customPattern(custom) }))
-  const shadowed = new Set(customs.map(entry => entry.template.key))
+  // 插件模板：与自定义模板同形（一个 key 一个 body），也参与"遮蔽同 key 的内建模板"，
+  // 但排在最前面的是**用户自己的**模板 —— 用户能盖掉插件（IDEA 里用户模板优先级最高）。
+  const contributed = plugins
+    .filter(plugin => plugin.enabled !== false && !plugin.error)
+    .flatMap(plugin => plugin.templates
+      .filter(template => usable(template.languages))
+      .map(template => ({ template, pattern: pluginTemplatePattern(plugin.id, template) })))
+  const shadowed = new Set([...customs.map(entry => entry.template.key), ...contributed.map(entry => entry.template.key)])
   const builtins = allTemplates.filter(template => (template.postfix || !shadowed.has(template.key)) && usable(template.languages))
     .map(template => ({ template, pattern: templatePattern(template) }))
-  return [...builtins, ...customs].filter(entry => !disabled.has(entry.pattern))
+  return [...builtins, ...customs, ...contributed].filter(entry => !disabled.has(entry.pattern))
 }
 
-export function availableTemplates(path: string, settings: TemplateSettings = defaultTemplateSettings): Template[] {
-  return effectiveTemplates(path, settings).map(entry => entry.template)
+export function availableTemplates(
+  path: string,
+  settings: TemplateSettings = defaultTemplateSettings,
+  plugins: readonly PluginTemplateSource[] = [],
+): Template[] {
+  return effectiveTemplates(path, settings, plugins).map(entry => entry.template)
 }
 
 function indentOf(line: string) {
@@ -165,10 +198,16 @@ function postfixAt(prefix: string) {
 }
 
 // Expand the template the caret sits on: `receiver.postfix` first, then a keyword.
-export function expand(line: string, caret: number, path: string, settings: TemplateSettings = defaultTemplateSettings): Expansion | null {
+export function expand(
+  line: string,
+  caret: number,
+  path: string,
+  settings: TemplateSettings = defaultTemplateSettings,
+  plugins: readonly PluginTemplateSource[] = [],
+): Expansion | null {
   const prefix = line.slice(0, caret)
   const indent = indentOf(line)
-  const usable = effectiveTemplates(path, settings)
+  const usable = effectiveTemplates(path, settings, plugins)
   const trigger = postfixAt(prefix)
   // Nothing to expand until the user has typed the key after the dot.
   if (trigger?.key) {
@@ -190,9 +229,15 @@ export interface Candidate { key: string; description: string; detail: string }
 
 // What the completion popup offers for the text before the caret: keyword templates
 // matching the typed word, and postfix templates matching what follows `expr.`.
-export function candidates(line: string, caret: number, path: string, settings: TemplateSettings = defaultTemplateSettings): Candidate[] {
+export function candidates(
+  line: string,
+  caret: number,
+  path: string,
+  settings: TemplateSettings = defaultTemplateSettings,
+  plugins: readonly PluginTemplateSource[] = [],
+): Candidate[] {
   const prefix = line.slice(0, caret)
-  const usable = effectiveTemplates(path, settings)
+  const usable = effectiveTemplates(path, settings, plugins)
   const trigger = postfixAt(prefix)
   if (trigger) {
     return usable.filter(entry => entry.template.postfix && entry.template.key.startsWith(trigger.key))

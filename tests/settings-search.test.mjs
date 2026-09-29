@@ -101,7 +101,7 @@ const groups = [
   { key: 'group:project', label: '项目' },
 ]
 const nodes = [
-  { key: 'appearance', label: '外观', parent: 'group:appearance' },
+  { key: 'preferences.lookFeel', label: '外观', parent: 'group:appearance' },
   { key: 'editor', label: '编辑器', parent: null },
   { key: 'structure', label: '项目结构', parent: 'group:project' },
 ]
@@ -109,7 +109,7 @@ const nodes = [
 test('a pasted path resolves to the deepest page it names', () => {
   assert.deepEqual(
     resolveSettingsPath('文件 | 设置 | 外观与行为 | 外观', groups, nodes),
-    { parent: 'group:appearance', key: 'appearance', spotlight: '' },
+    { parent: 'group:appearance', key: 'preferences.lookFeel', spotlight: '' },
   )
   assert.deepEqual(resolveSettingsPath('设置 | 编辑器', groups, nodes), { parent: null, key: 'editor', spotlight: '' })
 })
@@ -128,7 +128,7 @@ test('a path that names a group stops at the group and spotlights the rest', () 
   )
   assert.deepEqual(
     resolveSettingsPath('设置 | 外观与行为 | 外观 | 主题', groups, nodes),
-    { parent: 'group:appearance', key: 'appearance', spotlight: '主题' },
+    { parent: 'group:appearance', key: 'preferences.lookFeel', spotlight: '主题' },
   )
 })
 

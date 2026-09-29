@@ -7,11 +7,17 @@ export const ALL_TASKS_FINISHED = '全部后台任务已完成'
 /** `IdeBundle.properties:951` — `progress.window.empty.text`. */
 export const NO_PROCESSES_RUNNING = '无进程正在运行。'
 
-export interface RunningTask {
+export interface RunningTask<C = unknown> {
   title: string
   detail: string
   /** Present when the task can be cancelled (`ProgressComponent.cancel`). */
-  cancellable?: unknown
+  cancellable?: C
+  /**
+   * 0-100 的完成度；`null`/缺省 = **不确定式**（上游那条判据：`ExternalSystemTaskProgressIndicatorUpdater.kt`
+   * 的 `if (total <= 0) indicator.setIndeterminate(true)` —— 拿不到总数就不画百分比，而不是编一个）。
+   * 弹窗里每行本身就是一条进度条（`ProcessPopup.java:331` 遍历的行里有 `JProgressBar`）。
+   */
+  percent?: number | null
 }
 
 export type ProcessRowKind = 'task' | 'finished' | 'empty'
@@ -21,6 +27,8 @@ export interface ProcessRow<C = unknown> {
   title: string
   detail: string
   cancellable?: C
+  /** 从任务带过来：有数字才画条，null 就是那条转圈的（见 RunningTask.percent）。 */
+  percent: number | null
   /** `SeparatorDecorator.placeSeparators` — only set when this row is a progress indicator. */
   separator: boolean
 }
@@ -39,18 +47,19 @@ export interface ProcessRow<C = unknown> {
  * task row never draws one — and neither does the finished label, which additionally has its
  * separator switched off explicitly (`TasksFinishedDecorator.kt:42` -> `ProcessPopup.java:251-256`).
  */
-export function popupRows<C>(tasks: readonly { title: string; detail: string; cancellable?: C }[], finishedOnce: boolean): ProcessRow<C>[] {
+export function popupRows<C>(tasks: readonly RunningTask<C>[], finishedOnce: boolean): ProcessRow<C>[] {
   if (tasks.length) {
     return tasks.map((task, index) => ({
       kind: 'task' as const,
       title: task.title,
       detail: task.detail,
       cancellable: task.cancellable,
+      percent: task.percent ?? null,
       separator: index > 0,
     }))
   }
-  if (finishedOnce) return [{ kind: 'finished', title: ALL_TASKS_FINISHED, detail: '', separator: false }]
-  return [{ kind: 'empty', title: NO_PROCESSES_RUNNING, detail: '', separator: false }]
+  if (finishedOnce) return [{ kind: 'finished', title: ALL_TASKS_FINISHED, detail: '', percent: null, separator: false }]
+  return [{ kind: 'empty', title: NO_PROCESSES_RUNNING, detail: '', percent: null, separator: false }]
 }
 
 /**

@@ -21,6 +21,34 @@ test('startup restores the stored theme and tolerates blocked storage', () => {
   delete globalThis.localStorage
 })
 
+/**
+ * 按 CSS 的层叠方式把令牌解析成**实际色值**。
+ * tokens.css 现在是三层：月相原色（`--m-*`，每档一套）→ 语义别名（只声明一次，`var(--m-*)`）。
+ * 所以判对比度必须顺着 `var()` 解析到底，不能只看语义名后面写没写十六进制 ——
+ * 那样只会因为"改成引用"而误报，也会漏掉"引用了一个没在暗面重声明的原色"。
+ */
+function paletteOf(theme) {
+  const css = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8')
+  const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf("[data-theme='light']"))
+  const darkBlock = css.slice(css.indexOf(":root[data-theme='dark']"))
+  const decls = new Map()
+  const collect = block => {
+    for (const match of block.matchAll(/--([a-z0-9-]+):\s*([^;]+);/gi)) decls.set(match[1].toLowerCase(), match[2].trim())
+  }
+  // 亮面基底 = `:root`（语义别名 + 亮面月相）；暗面在它之上**只覆盖自己重声明的那些**
+  // （深色块只写月相原色，语义名靠继承 —— 这正是三层结构想要的效果）。
+  collect(rootBlock)
+  if (theme === 'dark') collect(darkBlock)
+  const resolve = (name, depth = 0) => {
+    if (depth > 12) return undefined
+    const value = decls.get(name.toLowerCase())
+    if (!value) return undefined
+    const ref = /^var\(--([a-z0-9-]+)(?:,[^)]*)?\)$/i.exec(value)
+    return ref ? resolve(ref[1], depth + 1) : value
+  }
+  return { get: name => resolve(name), names: [...decls.keys()] }
+}
+
 test('both palettes keep small UI text at WCAG AA contrast', () => {
   const luminance = hex => {
     const rgb = hex.match(/[\da-f]{2}/gi).map(part => parseInt(part, 16) / 255)
@@ -33,29 +61,38 @@ test('both palettes keep small UI text at WCAG AA contrast', () => {
   }
   assert.equal(contrast('#ffffff', '#000000'), 21)
   assert.ok(contrast('#bbbbbb', '#ffffff') < 4.5, 'low contrast must fail the same threshold')
-  const css = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8')
-  for (const section of css.split(":root[data-theme='dark']")) {
-    const palette = Object.fromEntries([...section.matchAll(/--([a-z-]+):\s*(#[\da-f]{6});/gi)].map(match => [match[1], match[2]]))
+  for (const theme of ['light', 'dark']) {
+    const palette = paletteOf(theme)
+    const color = name => {
+      const value = palette.get(name)
+      assert.ok(typeof value === 'string' && /^#[\da-f]{6}$/i.test(value),
+        `${theme}: --${name} 解析出来不是六位色（拿到 ${value}）—— 月相层大概漏了这个名字`)
+      return value
+    }
     for (const text of ['text', 'secondary', 'muted']) for (const surface of ['editor', 'panel', 'rail', 'elevated']) {
-      const ratio = contrast(palette[text], palette[surface])
-      assert.ok(ratio >= 4.5, `${text} on ${surface}: ${ratio.toFixed(2)}`)
+      const ratio = contrast(color(text), color(surface))
+      assert.ok(ratio >= 4.5, `${theme} ${text} on ${surface}: ${ratio.toFixed(2)}`)
     }
-    assert.ok(contrast(palette['on-accent'], palette.accent) >= 4.5, 'primary button text')
-    for (const [name, color] of Object.entries(palette).filter(([name]) => name.startsWith('syntax-'))) {
-      assert.ok(contrast(color, palette.editor) >= 4.5, `${name} on editor`)
+    assert.ok(contrast(color('on-accent'), color('accent')) >= 4.5, `${theme} primary button text`)
+    for (const name of palette.names.filter(name => name.startsWith('syntax-'))) {
+      const ratio = contrast(color(name), color('editor'))
+      assert.ok(ratio >= 4.5, `${theme} ${name} on editor: ${ratio.toFixed(2)}`)
     }
-    assert.notEqual(palette.selection, palette['selection-inactive'], 'focused and unfocused selection are distinct')
+    assert.notEqual(color('selection'), color('selection-inactive'), 'focused and unfocused selection are distinct')
   }
 })
 
 test('line and occurrence backgrounds cannot hide the selection layer beneath them', () => {
-  const css = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8')
   const alpha = color => color.length === 9 ? parseInt(color.slice(7), 16) / 255 : 1
   assert.equal(alpha('#f4f6fa'), 1, 'the old opaque active-line color would cover a drawn selection')
-  for (const name of ['active-line', 'symbol-highlight', 'debug-line']) {
-    const values = [...css.matchAll(new RegExp(`--${name}:\\s*(#[\\da-f]+);`, 'gi'))]
-    assert.equal(values.length, 2, `${name} needs both themes`)
-    for (const match of values) assert.ok(alpha(match[1]) < 0.2, `${name} must let the selection show through`)
+  for (const theme of ['light', 'dark']) {
+    const palette = paletteOf(theme)
+    for (const name of ['active-line', 'symbol-highlight', 'debug-line']) {
+      const value = palette.get(name)
+      assert.ok(typeof value === 'string' && /^#[\da-f]{6}[\da-f]{2}$/i.test(value),
+        `${theme}: --${name} 必须是带 alpha 的色值（拿到 ${value}）`)
+      assert.ok(alpha(value) < 0.2, `${theme}: ${name} 要让选区透出来（alpha=${alpha(value).toFixed(2)}）`)
+    }
   }
 })
 

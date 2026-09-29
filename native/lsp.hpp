@@ -110,6 +110,10 @@ public:
     void notify(std::string_view method, Json params);
 
     void on_diagnostics(Notify handler) { diagnostics_ = std::move(handler); }
+    // LSP `$/progress`（begin/report/end）—— 上游把它变成一条带百分比的后台任务，
+    // 见 `LspServerNotificationsHandlerImpl.notifyProgress`（platform/lsp-impl/src/impl/
+    // LspServerNotificationsHandlerImpl.kt:257-328）。
+    void on_progress(Notify handler) { progress_ = std::move(handler); }
     void set_configuration(Json settings);
 
     // Feed one parsed message received from the server.
@@ -150,6 +154,7 @@ private:
     State state_ = State::fresh;
     Writer writer_;
     Notify diagnostics_;
+    Notify progress_;
     Json configuration_ = Json::object();
     std::unordered_map<std::int64_t, Pending> pending_;
     std::unordered_map<std::string, std::string> synced_;  // uri -> last text sent

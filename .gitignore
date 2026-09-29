@@ -7,3 +7,27 @@ build/
 *.log
 *.tsbuildinfo
 third_party/
+
+# 构建产物：另一份配置/基线构建的输出（内含内置 JRE、jdtls 与 .obj/.lib，约 1.2 GB）。
+# 源码入库，这些一律不入库。
+build-validation/
+build-baseline/
+build-dbg/
+dist-validation/
+*.obj
+*.lib
+*.pdb
+*.ilk
+
+# 本机临时件（调试脚本、探针工作区、截图、误建的字面 "nul" 文件）。
+.tmp-*
+.java-launch-regression/
+screenshots/
+nul
+
+# 重构过程的中间备份与临时片段（不是源码）。
+*.bak
+*.bak[0-9]*
+*.bak[0-9][0-9]*
+split-backups/
+src/_*.txt

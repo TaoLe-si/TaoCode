@@ -323,6 +323,12 @@ int main() {
         check(lines[0].at("line").get<int>() == 1, "blame lines are 1-based");
         check(lines[0].at("hash").get<std::string>().size() == 8, "blame reports the short sha");
         check(lines[0].at("author").get<std::string>() == "Test", "blame reports the commit author");
+        // The annotation column also shows the commit date, and the tooltip needs the
+        // mail + summary (IDEA's FileAnnotation); all three come out of --line-porcelain.
+        const auto& date = lines[0].at("date").get<std::string>();
+        check(date.size() == 10 && date[4] == '-' && date[7] == '-', "blame reports a YYYY-MM-DD date");
+        check(lines[0].at("email").get<std::string>().find('@') != std::string::npos, "blame reports the author mail");
+        check(!lines[0].at("summary").get<std::string>().empty(), "blame reports the commit summary");
     });
 
     run("tags list, create at a target and delete", [&] {

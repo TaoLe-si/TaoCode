@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
-import { Minus, Plus, Trash2, X } from 'lucide-vue-next'
-import type { JavaProjectSettings, ProjectSettings, TodoPattern } from '../bridge'
+import { Minus, Plus, X } from 'lucide-vue-next'
+import type { JavaProjectSettings, ProjectSettings } from '../bridge'
 
 // Mirrors intellij-community's Project Structure dialog:
 // java/idea-ui/src/com/intellij/openapi/roots/ui/configuration/
@@ -10,17 +10,25 @@ import type { JavaProjectSettings, ProjectSettings, TodoPattern } from '../bridg
 //   JavaContentEntriesEditor.java    — source roots with a type popup (Sources / Tests).
 // TaoCode has one implicit module, so the Modules subtree collapses into this panel;
 // Artifacts/Facets/SDKs-list have no backend here and are deliberately absent.
-const props = defineProps<{ settings: ProjectSettings | null; root: string | null; busy: boolean }>()
+// `category` 对应 IDEA `ProjectStructureConfigurable` 的 SidePanel 分类（Project / Modules /
+// Libraries / Facets / Artifacts / SDKs / Global Libraries / Problems）。TaoCode 只有前三类有真实内容，
+// 所以只声明三类；缺省（不传）时全部显示，方便单独渲染整页。
+const props = defineProps<{
+  settings: ProjectSettings | null
+  root: string | null
+  busy: boolean
+  category?: 'project' | 'modules' | 'libraries'
+}>()
+const shows = (section: 'project' | 'modules' | 'libraries') => !props.category || props.category === section
 const emit = defineEmits<{
   saveJava: [settings: JavaProjectSettings]
-  saveProject: [patch: { excludedDirs: string[]; todoPatterns: TodoPattern[] }]
+  saveProject: [patch: { excludedDirs: string[] }]
   browse: [field: 'jdkHome' | 'outputPath']
 }>()
 const id = useId()
 
 const java = ref<JavaProjectSettings>({ jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] })
 const excludedText = ref('')
-const patterns = ref<TodoPattern[]>([])
 // Roots added through the popup remember whether they were picked as test roots;
 // stored ones fall back to the name heuristic below.
 const testRoots = ref<string[]>([])
@@ -40,7 +48,6 @@ const isTestRoot = (path: string) => testRoots.value.includes(path) || /test/i.t
 function fillFrom(source: ProjectSettings | null, root: string | null) {
   java.value = structuredClone(source?.java ?? emptyJava())
   excludedText.value = source?.excludedDirs.join('\n') ?? ''
-  patterns.value = (source?.todoPatterns ?? []).map(entry => ({ ...entry }))
   testRoots.value = (source?.java.sourcePaths ?? []).filter(path => /test/i.test(path))
   formRoot.value = root
   snapshot.value = currentShape()
@@ -52,7 +59,7 @@ function resetForm() {
   discarded.value = ''
 }
 function currentShape() {
-  return JSON.stringify([java.value, excludedText.value.split(/\r?\n/), patterns.value])
+  return JSON.stringify([java.value, excludedText.value.split(/\r?\n/)])
 }
 const dirty = computed(() => currentShape() !== snapshot.value)
 // Not `deep`: reloading on any nested write to `props.settings` would throw away
@@ -77,16 +84,10 @@ const invalidJdkHome = computed(() => !!java.value.jdkHome && !/^([A-Za-z]:[\\/]
 const listLines = (value: string[]) => [...new Set(value.map(line => line.trim()).filter(Boolean))]
 const invalidRelative = (paths: string[], glob = false) => paths.length > 64 || paths.some(path => path.startsWith('/') || /[\\:<>"\u0000-\u001f]/.test(path) || (!glob && /[*?]/.test(path)) || path.split('/').some(part => !part || part === '..'))
 const invalidExclusion = computed(() => listLines(excludedText.value.split(/\r?\n/)).some(name => name === '.' || name === '..' || /[\\/:*?"<>|\u0000-\u001f]/.test(name)))
-const invalidPatterns = computed(() => {
-  const list = patterns.value
-  return list.length > 20 || list.some((entry, index) => !entry.pattern.trim() || !entry.description.trim()
-    || entry.pattern.length > 200 || /[\r\n]/.test(entry.pattern)
-    || list.some((other, position) => position !== index && other.pattern === entry.pattern))
-})
 const invalidJava = computed(() => invalidJdkHome.value
   || invalidRelative(java.value.sourcePaths) || (!!java.value.outputPath && invalidRelative([java.value.outputPath]))
   || invalidRelative(java.value.referencedLibraries, true))
-const invalidAll = computed(() => invalidJava.value || invalidExclusion.value || invalidPatterns.value)
+const invalidAll = computed(() => invalidJava.value || invalidExclusion.value)
 
 function addSourceRoot() { sourceDraft.value = ''; sourcePopup.value = true; void nextTick(() => sourceInput.value?.focus()) }
 function applySourceRoot(kind: 'sources' | 'tests') {
@@ -108,8 +109,6 @@ function applyLibrary() {
   libraryPopup.value = false
 }
 function dropLibrary(index: number) { java.value.referencedLibraries.splice(index, 1) }
-function addPattern() { patterns.value = [...patterns.value, { pattern: '', description: '' }] }
-function dropPattern(index: number) { patterns.value = patterns.value.filter((_, position) => position !== index) }
 
 const sourcePopup = ref(false)
 const sourceDraft = ref('')
@@ -117,6 +116,9 @@ const sourceInput = ref<HTMLInputElement>()
 const libraryPopup = ref(false)
 const libraryDraft = ref('')
 const libraryInput = ref<HTMLInputElement>()
+
+// 宿主（对话框/设置页）通过 ref 调这两个方法 —— 内容与按钮分离后，保存时机由宿主决定。
+defineExpose({ save, resetForm, isDirty: () => dirty.value })
 
 function save() {
   stale.value = ''
@@ -129,20 +131,20 @@ function save() {
   }
   if (invalidAll.value) return
   emit('saveJava', { ...java.value, sourcePaths: listLines(java.value.sourcePaths), referencedLibraries: listLines(java.value.referencedLibraries) })
-  emit('saveProject', { excludedDirs: listLines(excludedText.value.split(/\r?\n/)), todoPatterns: patterns.value.map(entry => ({ ...entry })) })
+  emit('saveProject', { excludedDirs: listLines(excludedText.value.split(/\r?\n/)) })
 }
 </script>
 
 <template>
   <div class="ps-panel">
-    <p v-if="!settings" class="section-description">尚未打开项目。项目结构（SDK、内容根、输出目录、排除目录与 TODO 标记）随项目保存，请先打开一个项目。</p>
+    <p v-if="!settings" class="section-description">尚未打开项目。项目结构（SDK、内容根、输出目录与排除目录）随项目保存，请先打开一个项目。</p>
     <form v-else :id="`${id}-form`" class="ps-form" :aria-busy="busy" @submit.prevent="save">
       <!-- Category header, like SidePanel's selected place in ProjectStructureConfigurable -->
       <h3 class="ps-title">项目：{{ root?.split('/').pop() || root }}</h3>
       <p v-if="stale" class="ps-error ps-banner" role="alert">{{ stale }}</p>
       <p v-else-if="discarded" class="ps-notice" role="status">{{ discarded }}</p>
 
-      <fieldset class="ps-group" :disabled="busy">
+      <fieldset v-if="shows('project')" class="ps-group" :disabled="busy">
         <legend class="ps-group-label">项目设置</legend>
 
         <div class="ps-row">
@@ -179,7 +181,7 @@ function save() {
         </div>
       </fieldset>
 
-      <fieldset class="ps-group" :disabled="busy">
+      <fieldset v-if="shows('modules')" class="ps-group" :disabled="busy">
         <legend class="ps-group-label">模块「{{ root?.split('/').pop() }}」· 内容根</legend>
         <div class="ps-tree" role="tree" aria-label="内容根">
           <div class="ps-tree-node ps-content">内容根 {{ root || '.' }}</div>
@@ -202,7 +204,7 @@ function save() {
         </div>
       </fieldset>
 
-      <fieldset class="ps-group" :disabled="busy">
+      <fieldset v-if="shows('libraries')" class="ps-group" :disabled="busy">
         <legend class="ps-group-label">依赖库</legend>
         <div class="ps-tree" role="list" aria-label="依赖 JAR">
           <div v-for="(library, index) in java.referencedLibraries" :key="library" class="ps-tree-node" role="listitem">
@@ -221,32 +223,15 @@ function save() {
         </div>
       </fieldset>
 
-      <fieldset class="ps-group" :disabled="busy">
+      <fieldset v-if="shows('modules')" class="ps-group" :disabled="busy">
         <legend class="ps-group-label">排除的目录</legend>
         <textarea v-model="excludedText" rows="4" spellcheck="false" class="ps-textarea" aria-label="排除的目录名，每行一个" :aria-invalid="invalidExclusion" placeholder="每行一个目录名，例如 build" />
         <p v-if="invalidExclusion" class="ps-error" role="alert">请输入目录名，不要使用路径、通配符、“.”或“..”。</p>
       </fieldset>
 
-      <fieldset class="ps-group" :disabled="busy">
-        <legend class="ps-group-label">TODO 标记</legend>
-        <div class="ps-todos" role="group" aria-label="TODO 标记列表">
-          <div v-for="(entry, index) in patterns" :key="index" class="ps-todo-row">
-            <input v-model="entry.pattern" class="ps-todo-pattern" :aria-label="`第 ${index + 1} 条标记`" spellcheck="false" placeholder="TODO" />
-            <input v-model="entry.description" class="ps-todo-desc" :aria-label="`第 ${index + 1} 条说明`" spellcheck="false" placeholder="待办" />
-            <button type="button" class="icon-button" :aria-label="`删除第 ${index + 1} 条标记`" @click="dropPattern(index)"><Trash2 :size="13" /></button>
-          </div>
-          <button type="button" class="subtle-button ps-todo-add" :disabled="patterns.length >= 20" @click="addPattern"><Plus :size="13" /> 添加标记</button>
-        </div>
-        <p v-if="invalidPatterns" class="ps-error" role="alert">每条标记都要有标记文字和说明，且标记不能重复。</p>
-      </fieldset>
-      <!-- Without an explicit submit button the browser silently drops Enter in the
-           various inputs; add one so the form is actually saveable. -->
-      <div class="ps-actions">
-        <button type="submit" :form="`${id}-form`" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存项目结构' }}</button>
-        <!-- type="reset" only restores the DOM defaults, which are the values the form
-             was built with — it never put back the saved project settings. -->
-        <button type="button" class="subtle-button" :disabled="busy || !dirty" title="放弃未保存的改动，回到已保存的项目结构" @click="resetForm">还原</button>
-      </div>
+      <!-- 动作按钮由宿主提供（项目结构对话框的 确定/应用/取消，或设置对话框的 应用）——
+           IDEA 的 Configurable 自己不带确定按钮。这个隐藏的 submit 只是让回车能提交表单。 -->
+      <button type="submit" class="ps-submit" tabindex="-1" aria-hidden="true" />
     </form>
   </div>
 </template>
@@ -285,13 +270,7 @@ function save() {
 .ps-popup { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--shadow-2); }
 .ps-textarea { display: block; width: 100%; min-width: 0; max-width: 100%; resize: vertical; padding: var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.7 var(--font-mono); }
 .ps-textarea[aria-invalid='true'], .ps-popup input:focus-visible { border-color: var(--error); }
-.ps-todos { display: flex; flex-direction: column; gap: var(--space-2); }
-.ps-todo-row { display: flex; align-items: center; gap: var(--space-2); }
-.ps-todo-row input { min-width: 0; min-height: var(--ctrl-height-sm); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.5 var(--font-mono); }
-.ps-todo-pattern { flex: 1 1 45%; }
-.ps-todo-desc { flex: 1 1 55%; font-family: var(--font-ui) !important; }
-.ps-todo-add { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-1); }
-.ps-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+.ps-submit { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
 @media (max-width: 560px) {
   .ps-row { grid-template-columns: minmax(0, 1fr); }
   .ps-label { text-align: left; }

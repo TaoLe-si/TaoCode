@@ -333,6 +333,37 @@ bool walk(const fs::path& root, Scan& scan, Visit&& visit) {
     return true;
 }
 
+// Same directory policy as walk(), but it stops at the file and never opens it:
+// the scope editor only needs the project's relative path list. Returns false when
+// the walk hit max_scanned_files, so a partial list is never passed off as complete.
+bool walk_paths(const fs::path& root, std::vector<std::string>& out) {
+    std::error_code ec;
+    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
+    if (ec) fail("NOT_OPEN", "无法读取工作区目录。");
+    const fs::recursive_directory_iterator end{};
+    std::size_t scanned = 0;
+    for (; it != end; it.increment(ec)) {
+        if (ec) { ec.clear(); continue; }
+        const auto& entry = *it;
+        std::error_code leec;
+        if (entry.is_symlink(leec)) {  // never follow or list links/junctions
+            if (entry.is_directory(leec)) it.disable_recursion_pending();
+            continue;
+        }
+        if (entry.is_directory(leec)) {
+            if (excluded_dir_name(utf8_path(entry.path().filename()))) it.disable_recursion_pending();
+            continue;
+        }
+        if (!entry.is_regular_file(leec) || leec) continue;
+        if (entry.path().filename().native().starts_with(replace_prefix)) continue;  // our own scratch
+        if (++scanned > max_scanned_files) return false;
+        const auto rel = utf8_path(fs::relative(entry.path(), root, ec));
+        if (ec) { ec.clear(); continue; }
+        out.push_back(rel);
+    }
+    return true;
+}
+
 }  // namespace
 
 std::vector<std::string> parse_patterns(const std::string& text) {
@@ -389,6 +420,19 @@ Json run(const fs::path& root, const Options& options) {
     if (!complete) truncated = true;
     return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files},
             {"skippedNonUtf8", skipped_non_utf8.load()}};
+}
+
+// The whole project file list, workspace-relative and '/'-separated. IDEA's scope
+// editor walks the content root for two things: the package tree it lets you
+// include/exclude from (`ProjectPatternProvider.createTreeModel` ->
+// `FileTreeModelBuilder`) and the "Scope contains N of total M files" counter
+// (`ScopeEditorPanel.java:796`). Both need the same list, so it comes from one walk.
+Json list_files(const fs::path& root) {
+    if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
+    std::vector<std::string> files;
+    const bool complete = walk_paths(root, files);
+    std::sort(files.begin(), files.end());
+    return {{"files", std::move(files)}, {"truncated", !complete}};
 }
 
 Json replace(const fs::path& root, const Options& options) {

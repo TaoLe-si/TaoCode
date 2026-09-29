@@ -24,12 +24,25 @@ export type SearchEverywhereTab = 'all' | 'project' | 'commands' | 'runConfigs'
 /** 一个供给者。`all` tab 是它们的并集。 */
 export type SearchEverywhereSource = 'project' | 'symbols' | 'commands' | 'runConfigs'
 
+export interface SearchEverywherePreviewData {
+  path: string
+  content: string
+  origin?: 'buffer' | 'disk'
+  line?: number
+  character?: number
+  /** 仅使用供给者真实返回的结束位置；没有时只标记行/插入点，不猜符号长度。 */
+  endLine?: number
+  endCharacter?: number
+}
+
 export interface SearchEverywhereItem extends Searchable {
   id: string
   title: string
   /** 副文本：路径 / 所属分组 / 快捷键。 */
   subtitle?: string
   source: SearchEverywhereSource
+  /** 只读磁盘预览；不打开编辑器、不触发导航。过期会话返回 null。 */
+  preview?: () => Promise<SearchEverywherePreviewData | null>
   /** 打开该项（跳文件 / 执行动作 / 选中运行配置）。 */
   open: () => void
 }

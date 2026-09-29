@@ -25,7 +25,25 @@ export interface NoticeEntry {
   at: string
   detail?: string[]
   displayId?: string
+  /**
+   * 0-100 = 确定式（画一条带百分比的进度条）；`null` = **进行中但没有百分比**；
+   * 缺省（undefined）= 这根本不是一条进度通知。
+   * 三种状态要分开：IDEA 的进度行在 `total <= 0` 时是 indeterminate
+   * （`ExternalSystemTaskProgressIndicatorUpdater.kt` 的 `if (total <= 0) indicator.setIndeterminate(true)`），
+   * 跑完之后那条行就只剩文字，不再是个"永远在转"的东西。
+   */
+  percent?: number | null
+  /**
+   * 通知自带的那几个按钮。上游是 `Notification.addAction(AnAction)`：
+   * 点了动作的人自己负责把通知收掉 —— `LspServerNotificationsHandlerImpl.kt:443-454` 就是
+   * `getNotificationGroup(...).also { notification -> notification.addAction(AnAction(label) { ...; notification.expire() }) }`；
+   * Gradle 那边同一形状（`GradleBundle.properties:343-345` 的 Migrate / Ignore / Learn more）。
+   */
+  actions?: NoticeAction[]
 }
+
+/** 一条通知上的一个动作（`AnAction` 的最小可用投影：文字 + 点了做什么）。 */
+export interface NoticeAction { label: string; run: () => void }
 
 export type NoticeLevel = 'error' | 'info' | 'none'
 
@@ -65,4 +83,28 @@ export function noticePreview(entries: readonly NoticeEntry[], limit = NOTICE_PR
 export function pushNotice(entries: readonly NoticeEntry[], entry: NoticeEntry, limit = NOTICE_LOG_LIMIT): NoticeEntry[] {
   const kept = entry.displayId ? entries.filter(existing => existing.displayId !== entry.displayId) : entries
   return [entry, ...kept].slice(0, limit)
+}
+
+/**
+ * 进度通知的"就地更新"：同一个 `displayId` 已经存在就**原位替换内容**（保留位置与 id，
+ * 于是列表不会每来一拍就重排），否则按 `pushNotice` 的规矩新插一条。
+ *
+ * 这里刻意和 `pushNotice` 的 `expirePreviousAndNotify`（先删旧的再前插）不同：那条规则是给
+ * "同一件事的第二次通知"用的（提交结果那类），而一条**正在推进**的进度每 100ms 换一次文字时
+ * 不该在列表里跳来跳去 —— 上游对应的是同一个 `Notification` 对象被反复刷新，不是重发。
+ */
+export function upsertNotice(entries: readonly NoticeEntry[], entry: NoticeEntry, limit = NOTICE_LOG_LIMIT): NoticeEntry[] {
+  if (!entry.displayId) return pushNotice(entries, entry, limit)
+  const index = entries.findIndex(existing => existing.displayId === entry.displayId)
+  if (index < 0) return pushNotice(entries, entry, limit)
+  const next = [...entries]
+  // `at` 保留第一次那条的时间：进度行的时间戳应该是"这件事什么时候开始"。
+  next[index] = { ...entry, id: entries[index]!.id, at: entries[index]!.at }
+  return next
+}
+
+/** 一行进度通知右侧的文字；没有百分比就是"进行中"。 */
+export function noticeProgressLabel(entry: NoticeEntry): string {
+  if (entry.percent === undefined) return ''
+  return entry.percent === null ? '进行中' : `${entry.percent}%`
 }

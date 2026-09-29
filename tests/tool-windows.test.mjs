@@ -55,7 +55,7 @@ test('natural compare falls back to code-unit order for non-digit text', () => {
 test('the tool windows widget lists windows by stripe title', () => {
   const windows = [
     { id: 'todo', title: '任务' },
-    { id: 'files', title: '资源管理器' },
+    { id: 'files', title: '项目' },
     { id: 'search', title: '搜索' },
   ]
   assert.deepEqual(sortedByTitle(windows, window => window.title).map(window => window.id), ['todo', 'search', 'files'])

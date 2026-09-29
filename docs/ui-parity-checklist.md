@@ -81,7 +81,8 @@
 
 ### A5 状态栏 `IdeStatusBarImpl.kt`
 
-- [x] **已修** 左侧当前文件 widget `status-file`（项目名 › 相对路径，点击定位到文件树 = IDEA 的 Alt+F1,1，App.vue:3576 区域）。
+- [x] **已修** 左侧当前文件 widget `status-file`（项目名 › 相对路径）。点击 = IDEA 的 **Alt+F1 `SelectIn` 目标列表弹窗**
+  （2026-09-28：不再是"直达文件树"，`src/components/SelectInPopup.vue` + `src/selectIn.ts`，证据与六个落点登记在 `docs/class-parity-todo.md` §12.1）。
 - [x] **已修** 缩进 widget（`4 个空格`/`制表符`，点击打开设置编辑器页）。
 - [x] **已修** 诊断计数改为常驻（0 也显示，IDEA 行为）。
 - [x] **已实现** 行/列、CRLF/LF 点击转换、编码点击重读、只读切换、分支+ahead/behind。
@@ -126,7 +127,7 @@
 - [x] **已修（第二十三批，代码审查发现）** 第 6 个装饰性设置：`bracketMatching` 有控件与持久化但编辑器从未读取（CodeMirror `basicSetup` 一直开着匹配）→ 新增 `data-bracket-matching` 开关与对应 CSS（关闭时去掉 `.cm-matchingBracket`/`.cm-nonmatchingBracket` 强调），设置真实生效。同时审查确认：41 个 EditorSettings 键在「前端接口 / 前端默认值 / 前端白名单 / 原生默认值 / 原生 known_keys」五处**完全一致**，其余 5 个"App.vue 零引用"键的消费方分别在 `CodeEditor.vue`（wordWrap/lineNumbers/showIndentGuides/showWhitespaces）与 `native/main.cpp`（fullPathsInWindowHeader）。
 - [x] **已修（第二十四批，todolist 四项一次性完成）**
   1. **欢迎页项目分组**（IDEA `NewRecentProjectPanel.java:170 isUseGroups`）：分组表与折叠状态持久化到 `taocode.projectGroups`；组头可点击/左右键折叠、带项目计数；行菜单新增「移出分组 / 移入「X」/ 新建分组并移入…」。
-  2. **主菜单位置三模式**（IDEA `UISettingsState.kt:207 mainMenuDisplayMode`）：`merged`（默认，合并进工具栏）/ `separate`（独立一行，靠 CSS 换行）/ `hamburger`（☰ 按钮 + 单一弹层列出全部分组与命令）。**一处 markup 三种布局**，未复制菜单代码。
+  2. **主菜单位置三模式**（IDEA `UISettingsState.kt:207 mainMenuDisplayMode`）：`hamburger`（**默认档**，☰ 按钮 + 单一弹层列出全部分组与命令）/ `merged`（顶层菜单横向并进工具栏行，宽度不够时尾部折进溢出按钮）/ `separate`（菜单栏独立一行，工具栏另起一行）。~~`merged`（默认）~~ 是当初读错 `UISettings.kt:863` 的迁移分支得到的，见 `docs/ui-placement-audit.md` §K.3。**一处 markup 三种布局**，未复制菜单代码。
   3. **屏幕阅读器支持**（IDEA `AppearanceConfigurable.kt:364-375` + `GeneralSettings.isSupportScreenReaders`）：开启后 `title` 全部转成 `aria-label` 并移除（真实关掉悬停提示，MutationObserver 覆盖后续渲染），并新增视觉隐藏的 `aria-live` 实时区域朗读通知。
   4. **工具窗口条拖放换边与重排**（IDEA `AbstractDroppableStripe.kt:242-259`）：条纹按钮可拖动重排、拖到右条纹或底部面板即换边，顺序与停靠边都持久化（`taocode.toolOrder` / `taocode.toolAnchors`）；顺带把 9 个硬编码按钮改为数据驱动（`stripeOrder(side)`），并删除两个因重构失效的 computed。
 - [ ] **仍缺失（无消费链路，不放假控件，每项 IDEA 源码行号已核对）**：透明度（`:629-653`，需原生分层窗口，CSS 等效会连文字一起透明，不做）、抗锯齿（`:655-691`，浏览器不暴露，N/A）；状态栏 `WriteThread`/`VfsRefresh`/索引 flush 三个 widget 判定为 **N/A**（监督代理已核源码：`WriteThreadIndicatorWidgetFactory.kt:34-50` 依赖 AWT/EDT 写线程、`VfsRefreshIndicatorWidgetFactory.java:28-122` 依赖 VFS 刷新窗口期、`IndexesAndVfsFlushIndicatorWidgetFactory.kt:20-43` 依赖 `FSRecords.connection().isDirty`，TaoCode 均无对应机制，不做装饰性闪动）；`SmartModeIndicator` 已实现（见上）；`ClockPanel.java` 实际用于新 UI 浮动菜单栏而非状态栏，N/A。

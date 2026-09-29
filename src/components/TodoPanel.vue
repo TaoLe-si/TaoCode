@@ -27,13 +27,14 @@ const selected = ref<{ path: string; line: number } | null>(null)
 const preview = ref<{ path: string; line: number; lines: string[]; start: number } | null>(null)
 const previewError = ref('')
 
-const badge = (preview: string) => props.patterns.find(pattern => markerMatches(preview, pattern.pattern))?.description ?? ''
+const badge = (preview: string) => props.patterns.find(pattern => markerMatches(preview, pattern.pattern, pattern.caseSensitive))?.description ?? ''
 // The scan queries the markers as a regex alternation (`\b(TODO|FIXME[:\s])\b`), so the
 // badge and the filter have to test with the same semantics; a broken pattern falls back
 // to a literal search instead of throwing on every row.
-function markerMatches(text: string, pattern: string) {
-  try { return new RegExp(`\\b(${pattern})\\b`, 'i').test(text) }
-  catch { return text.toLowerCase().includes(pattern.toLowerCase()) }
+// IDEA TodoPattern.isCaseSensitive()：默认不区分大小写，勾上后按原样匹配。
+function markerMatches(text: string, pattern: string, caseSensitive = false) {
+  try { return new RegExp(`\\b(${pattern})\\b`, caseSensitive ? '' : 'i').test(text) }
+  catch { return caseSensitive ? text.includes(pattern) : text.toLowerCase().includes(pattern.toLowerCase()) }
 }
 
 const filtered = computed(() => filterPattern.value ? items.value.filter(item => markerMatches(item.text, filterPattern.value)) : items.value)
@@ -232,7 +233,7 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
 .todo-filter-button:hover { background: var(--hover); color: var(--bright); }
 .todo-filter-button select { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: inherit; }
 .todo-groupby { position: relative; }
-.groupby-popup { position: absolute; left: 26px; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 2px; min-width: 148px; padding: var(--space-1) var(--space-2); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); }
+.groupby-popup { position: absolute; left: 26px; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 2px; min-width: 148px; padding: var(--space-1) var(--space-2); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--shadow-2); }
 .groupby-popup label { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; color: var(--text); }
 .groupby-popup label.disabled { color: var(--muted); }
 .groupby-popup input { accent-color: var(--accent); }

@@ -23,11 +23,11 @@
 | `JBTabsPresentation.kt`（50L） | `[ ]` | 呈现开关（side/scroll/hideTabs/singleRow/sideComponent/toolbarLeft…）真实可移植模型，TaoCode 无 |
 | `TabInfo.kt`（420L） | `[~]` | TaoCode 的 `Tab` 有 path/pinned/preview/dirty/line/column；缺 `enabled`、`hidden`（被折叠进"更多"下拉）、`alert/blink`、`tooltip` 覆盖、`actionGroup` |
 | `TabInfoIconHolder.kt`（32L） | `[ ]` | 图标持有者（懒加载图标），TaoCode 用固定 `FileCode2` 图标 |
-| `TabsListener.java`（19L） | `[ ]` | **更正（B1-c）**：`beforeSelectionChanged(old, new)` 返回 **void**，是**通知**不是否决 —— `JBTabsImpl.kt:1680-1691` 的 `fireBeforeSelectionChanged` 只遍历调用，不看返回值。它期间的可见副作用是 `oldSelection` 被置上（`:1682`）并在 `finally` 里清空（`:1689`），于是 `getOldSelection()`（`:1957`）在回调内可查。真实消费者两处：`EditorWindow.kt:210-219`（`selectionChanged` → 若 `isSyncOnFrameActivation` 就 `VfsUtil.markDirtyAndRefresh` 该文件，即**切标签时从磁盘重新同步**）与 `JBEditorTabsBorder.kt:34-60`（下划线**滑动动画**，100ms、收缩侧延迟 50ms）。另有 `tabRemoved` / `tabsMoved` 两个通知。TaoCode 无监听器抽象，且上述两个行为都能直接由选中态变化驱动，因此判 `[ ]` 但落点应是**行为**（切标签重同步、下划线滑动），不是这套接口 |
+| `TabsListener.java`（19L） | `[ ]` | **更正（B1-c）**：`beforeSelectionChanged(old, new)` 返回 **void**，是**通知**不是否决 —— `JBTabsImpl.kt:1680-1691` 的 `fireBeforeSelectionChanged` 只遍历调用，不看返回值。它期间的可见副作用是 `oldSelection` 被置上（`:1682`）并在 `finally` 里清空（`:1689`），于是 `getOldSelection()`（`:1957`）在回调内可查。真实消费者两处：`EditorWindow.kt:210-219`（`selectionChanged` → 若 `isSyncOnFrameActivation` 就 `VfsUtil.markDirtyAndRefresh` 该文件，即**切标签时从磁盘重新同步**）与 `JBEditorTabsBorder.kt:34-60`（下划线**滑动动画**，100ms、收缩侧延迟 50ms）。另有 `tabRemoved` / `tabsMoved` 两个通知。TaoCode 无监听器抽象，且上述两个行为都能直接由选中态变化驱动，因此判 `[~]`：**切标签重同步已落**（2026-09-29，`diskSync.syncTabOnActivation` + `editorSplits.switchTabIn`，见 `docs/ui-placement-audit.md` §AB）；下划线滑动动画**不做**并登记理由（本仓反馈纪律不加动效），不是这套接口 |
 | `TabsUtil.java` | 见 A | |
 | `UiDecorator.kt`（34L） | `[-]` | Laf 更新钩子 |
 | `ActionButton.java`（189L） | `[~]` | 标签上的动作按钮（悬停才显示、带 tooltip）；TaoCode 只有固定 `tab-close` |
-| `ActionPanel.java`（149L，ACTGRP） | `[ ]` | 一个标签右侧排布**多个**动作按钮的容器（含 `MorePopupAware`），可移植 |
+| `ActionPanel.java`（149L，ACTGRP） | `[~]` | 标签右侧排布多个动作按钮的容器。**已落**（2026-09-29）：标签条右端的常驻「更多」下拉（=`EditorTabsEntryPoint`，`PlatformActions.xml:804-816`），"不可用就不画"与"一条可见都没有就不占位置"两条规则照 `ActionPanel.java:118-160`；成员只放本仓真接得住的七条。见 `docs/ui-placement-audit.md` §AD |
 | `DefaultEditorTabsPainter.java` / `DefaultTabPainterAdapter.kt` / `JBDefaultTabPainter.kt` / `JBDefaultTabsBorder.kt` / `JBEditorTabPainter.kt` / `JBEditorTabsPainter.java` / `JBEditorTabsBorder.kt` / `ToolWindowTabPainter.kt` / `TabPainterAdapter.kt` / `SingleHeightTabs.kt` | `[-]` | 全部是 `Graphics2D` 绘制/边框（机械信号 G2D），Web 由 CSS 承担。**但** `JBEditorTabsBorder.kt`（144L，REG）里的下划线/拖拽描边常量若要 1:1 需在 CSS 里对齐数值 → 已在 `TabTheme` row 记 |
 | `DragHelper.java`（369L，JC） | `[~]` | TaoCode 用 HTML5 DnD：重排 `[x]`、拖到编辑区分屏 `[x]`（本轮）；IDEA 的"拖出窗口成新 frame"=`[-]`（单窗口架构） |
 | `JBTabsImpl.kt`（3896L） | `[~]` | Swing 组件本体 `[-]`；其**行为**（选中、重排、显示/隐藏策略、`selectNextTab`、`blink`）部分已在 TaoCode，`blink`/`more popup` 缺 |
@@ -35,18 +35,18 @@
 | `LayoutPassInfo.java`（39L） | `[ ]` | 布局通过程的数据持有者；与 `SingleRowLayout` 一起才有意义 |
 | `MorePopupAware.java`（14L） | `[ ]` | `hasMorePopup()` ——"被挤掉的标签进 `…` 下拉"这一行为的接口；TaoCode 无标签溢出概念 |
 | `ShapeTransform.java`（358L） | `[-]` | Swing2D 形状几何（绘制用） |
-| `TabLabel.kt`（928L，G2D/JC/A11Y/ACTGRP） | `[~]` | Swing 标签组件 `[-]`；其中**双击就地重命名标签**、关闭按钮悬停态是可移植行为，TaoCode 缺重命名 |
+| `TabLabel.kt`（928L，G2D/JC/A11Y/ACTGRP） | `[~]` | Swing 标签组件 `[-]`；关闭按钮悬停态是可移植行为。**更正（2026-09-29 核对原文）**：本表原写的「双击就地重命名标签」是**误读** —— `TabLabel.kt:151-153` 的 `mouseClicked` 只做 `handlePopup(e)`，整个 `ui/tabs` 包里搜不到 rename 字样与任何文本域，**IDEA 没有「就地重命名标签」这个行为**。双击的真语义在 `EditorTabbedContainer.kt:348-361`：① 预览标签晋升常驻（`:349-356`，随后 return）；② 按 `editor.maximize.on.double.click`（`intellij.platform.ide.impl.xml:1511`，默认 true）执行「隐藏全部工具窗口 / 恢复窗口」。两条**已落**（见 `docs/ui-placement-audit.md` §AC） |
 | `TabLayout.java`（79L，REG） | `[ ]` | 布局基类（`isScrollable`、`morePopup`、`lastSingularLayoutPass`） |
 | `TabSideSplitter.java`（96L，JC） | `[ ]` | 标签条"侧边组件"与标签区的分隔；依赖 `JBTabsPresentation.sideComponent` |
 | `UIThemeCustomization.kt`（46L） | `[-]` | 主题绘制定制钩子 |
-| `CompressibleMultiRowLayout.kt`（24L） | `[ ]` | 多行布局：**压缩**策略（标签变窄） |
+| `CompressibleMultiRowLayout.kt`（24L） | `[ ]` | 多行布局的**压缩**策略（标签变窄）。上游在"非单行 + 未开 `hideTabsIfNeeded`"时用它（`EditorTabbedContainer.kt:667`）；本仓多行只换行、不在多行里压宽标签，如实未做 |
 | `CompressibleTabsRow.kt`（280L） | `[ ]` | 压缩行的实现 |
 | `MultiRowLayout.kt`（196L） | `[ ]` | 多行布局基类 + 行分配算法 |
 | `MultiRowPassInfo.kt`（31L） | `[ ]` | 多行布局通过程数据 |
-| `ScrollableMultiRowLayout.kt`（66L） | `[ ]` | 多行 + 滚动 |
+| `ScrollableMultiRowLayout.kt`（66L） | `[ ]` | 多行 + 滚动。上游在"非单行 + 开 `hideTabsIfNeeded`"时用它（`EditorTabbedContainer.kt:662-666`，且**强制** `showPinnedTabsSeparately = true`）；本仓多行不做滚动条，如实未做 |
 | `ScrollableTabsRow.kt`（49L） | `[ ]` | 可滚动行实现 |
 | `SimpleTabsRow.kt`（21L） / `TabsRow.kt`（32L） | `[ ]` | 行模型的基类/简单实现 |
-| `WrapMultiRowLayout.kt`（66L） | `[ ]` | 多行**换行**策略 |
+| `WrapMultiRowLayout.kt`（66L） | `[~]` | 多行换行策略。**已落**：本仓 `src/tabStripLayout.ts` 的 `layoutMultiRow`（按宽度分行、第一行扣掉侧工具条）＋本批补上的**固定标签单独成排**（`splitPinnedRow` / `showsPinnedTabsSeparately`，见 `docs/ui-placement-audit.md` §AH）。**未落**：上游 `splitToPinnedUnpinned:111-114` 那条"下一项是拖放占位就并入固定排"—— 本仓多行布局没有拖放占位模型 |
 | `ScrollableSingleRowLayout.java`（183L） | `[ ]` | 单行 + 滚动按钮（`scrollableTabs` 开启时的模式） |
 | `SingleRowLayout.java`（337L） | `[ ]` | **单行压缩布局本体**：标签宽度压缩到最小宽 + 溢出标签进 `…`；TaoCode 标签条完全不处理溢出（`div.editor-tabs` 无任何策略）→ 本轮 B1 的头号缺口 |
 | `SingleRowLayoutStrategy.java`（595L，JC/PT） | `[ ]` | 压缩/滚动的具体位置计算（含 `MorePopupAware` 驱动） |
@@ -60,16 +60,16 @@
 | 类 | 判定 | 依据 |
 |---|---|---|
 | `AbstractPopup.java`（3220L） | `[ ]` | 弹层核心：`requestFocus` / `cancelOnClickOutside` / `cancelKeyEnabled` / `modalContext` / `resizable` / `movable` / `autoselectOnMouseMove` / `hideOnKeyOutside` / `showBorder` / `dimensionServiceKey` / `okHandler` + 定位（`showInCenterOf`、`showUnderneathOf`、`showInBestPositionFor`）。TaoCode 的弹层各写一套，无共享核心与这些选项 → 头号缺口之一 |
-| `PopupState.java`（192L，POPUP/REG/DIM） | `[ ]` | 弹层**尺寸/位置记忆**（`DimensionService` + registry）；TaoCode 不记忆弹层尺寸 |
-| `PopupState.java`（63L 变体，POPUP/REG） | `[ ]` | 同上（旧版实现），随上一同移植 |
+| `PopupState.java`（192L，POPUP/REG/DIM） | `[x]` | **更正（2026-09-29 核对原文）**：原写「尺寸/位置记忆」是**误读** —— 该类只有 `isRecentlyHidden()`（registry `ide.popup.hide.show.threshold` 默认 200ms），**一个 size 字段都没有**（本仓对应物 = `src/popupState.ts` 的 `createPopupGate`，早已落地）。尺寸/位置记忆的真出处是 `AbstractPopup`（见下一行）。 |
+| `PopupState.java`（63L 变体，POPUP/REG） | `[-]` | 同一个类的旧版实现，语义同上（`isRecentlyHidden`），无独立移植价值 |
 | `PopupDispatcher.java`（195L） | `[ ]` | 全局弹层栈 + `AWTEventListener`/`KeyEventDispatcher`：点击外部/按 Esc 自动收起、`hidePopups` 批量收起 |
 | `StackingPopupDispatcherImpl.java`（316L） | `[ ]` | 上述栈的实现（含"重开上层"逻辑） |
 | `WizardPopup.java`（655L，JC/POPUP/REG/SPEED） | `[ ]` | 分步弹层基类：键盘导航、speed search、列表滚动、`NextStepHandler` |
-| `ListPopupImpl.java`（1157L） | `[ ]` | 列表弹层：speed search、mnemonics、滚动、行内动作、多选 |
+| `ListPopupImpl.java`（1157L） | `[~]` | 列表弹层：speed search、mnemonics、滚动、行内动作、多选。**已落三条**：speed search（`src/speedSearch.ts`，见 `docs/ui-placement-audit.md` §Y）、mnemonics（`src/selectIn.ts`）、行内动作（欢迎页项目行与通知列表行，见 §AF）。**未落**：多选（本仓的列表弹层都是单选） |
 | `ListPopupModel.java`（163L，SPEED） | `[ ]` | 列表模型 + speed search 过滤 |
 | `ComboBoxPopup.java`（343L） | `[~]` | 下拉弹层（复用 `ListPopupImpl`）；TaoCode 用原生 `<select>`，行为不等价（无 speed search/自定义行） |
-| `MnemonicsSearch.java`（50L，SPEED） | `[ ]` | **助记符匹配算法**（键入字母跳转到项）：纯逻辑、小、可测 → 建议尽早做 |
-| `NumericMnemonicItem.java`（12L） | `[ ]` | 助记符承载接口，随上一条 |
+| `MnemonicsSearch.java`（50L，SPEED） | `[x]` | **助记符匹配**。**已落（2026-09-29 核对原文）**：本仓 `src/selectIn.ts` 的 `selectInMnemonicHit` 逐条照 `MnemonicsSearch.java:34-46` —— 只在 KEY_TYPED、只认字母数字、速度搜索框**已有字时让路**（`:37`）、命中即吞事件（`:44`）；助记符表大小写各登记一份（`:25-31`）。调用点在 `src/components/SelectInPopup.vue:37`，且在**速度搜索之前**判定，与上游 `WizardPopup.java:489-490`（先 `myMnemonicsSearch.processKeyEvent(event)` 再 `processKeyEvent(event)`）同序。判据：`tests/select-in.test.mjs`。**唯一差距**：上游 `ActionPopupStep.getMnemonicString`（`:197-205`）在动作声明了数字助记符时走 `NumericMnemonicItem.getMnemonicChar` 分支 —— 本仓没有「动作自带数字助记符」的模型，主菜单/右键菜单也不带 `_X` 标记，那一支无从消费，**不放假实现** |
+| `NumericMnemonicItem.java`（12L） | `[-]` | 数字助记符的承载接口（`digitMnemonicsEnabled`/`getMnemonicChar`）。本仓没有「动作自带数字助记符」的模型，随上一行登记为不移植 |
 | `AsyncPopupStep.kt`（27L） / `AsyncPopupWaiter.kt`（62L） | `[ ]` | 弹层列表的**异步填充**（先显示加载项，再替换） |
 | `ActionStepBuilder.java`（168L，ACTGRP） | `[~]` | 把 `ActionGroup` 展开成弹层项；TaoCode 的菜单是数据驱动，等价能力部分存在 |
 | `ActionPopupStep.java`（401L，JC/ACTGRP/SPEED） | `[~]` | 动作组弹层 + `MnemonicNavigation`；缺助记符导航 |
@@ -92,7 +92,7 @@
 | `BackendRenderedPopup.kt`（6L） | `[-]` | 后端渲染弹层（远程/JCEF 场景） |
 | `LocalPopupComponentFactory.kt`（163L，POPUP/REG） | `[-]` | Swing 组件工厂 |
 | `FilterableListPopupStep.kt`（8L） | `[~]` | 可过滤的分步弹层，随 `ListPopupImpl` |
-| `PopupInlineActionsSupport.kt`（49L）/ `PopupInlineActionsSupportImpl.kt`（99L）/ `NonActionsPopupInlineSupport.kt`（46L）/ `InlineActionsUtil.kt`（47L） | `[ ]` | **列表项右侧的行内动作**（悬停显示）：可移植的交互 |
+| `PopupInlineActionsSupport.kt`（49L）/ `PopupInlineActionsSupportImpl.kt`（99L）/ `NonActionsPopupInlineSupport.kt`（46L）/ `InlineActionsUtil.kt`（47L） | `[~]` | 列表项右侧的行内动作（悬停显示）。**本仓已有等价交互**（见 `docs/ui-placement-audit.md` §AF）：欢迎页项目行 = 上游 `ProjectsTabFactory.kt:285-300` 的「组首项当主行、其余进行内动作」，次级动作悬停/聚焦才浮现（CSS `opacity: 0 → 1`，`:741-742`）；通知列表行同规格。**未落**：装不下时的「更多」收纳（`calcExtraButtonsCount` 那半）—— 本仓这两处用 `flex-wrap` 换行、不会溢出，所以不做没有消费者的抽象 |
 | `PopupImplUtil.java`（113L，POPUP/JLIST/DIM） | `[~]` | 弹层尺寸计算工具（与 `PopupState` 的尺寸记忆配套） |
 | `MockConfirmation.java`（26L） | `[-]` | 测试用假确认框 |
 | `package-info.java` ×3 | `[-]` | 包声明 |

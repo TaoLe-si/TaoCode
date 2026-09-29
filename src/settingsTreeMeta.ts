@@ -37,6 +37,7 @@ export const SETTINGS_GROUPS = [
 export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs' | 'editor.preferences.smartKeys' | 'editor.preferences.gutterIcons' | 'advanced'
   | 'preferences.sourceCode' | 'preferences.sourceCode.indents' | 'tools.actionsOnSave'
   | 'preferences.general' | 'editing.templates' | 'commit' | 'project.scopes'
+  | 'reference.settings.ide.settings.file-colors'
   | 'editor.breadcrumbs' | 'editor.stickyLines' | 'Console' | 'Errors'
   | 'preferences.toDoOptions' | 'preferences.fileTypes' | 'preferences.externalTools'
   | 'diff.base' | 'build.tools' | 'vcs.log'
@@ -59,6 +60,8 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // IDEA 的高级设置本质是内部注册表（Registry）编辑器；TaoCode 没有注册表对话框，
   // 等价物是把内部设置（editor/general 的键）集中成一个可编辑页。
   { key: 'advanced', label: '高级设置', icon: SlidersHorizontal, parent: 'group:appearance', keywords: '高级设置 registry 注册表 内部 键值 advanced' },
+  // intellij.platform.lang.impl.xml:1341-1343: appearance, groupWeight=112（Scopes=111）。
+  { key: 'reference.settings.ide.settings.file-colors', label: '文件颜色', icon: Palette, parent: 'group:appearance', keywords: '文件颜色 作用域 标签页 File Colors Folder Colors Directory Colors scope tabs' },
   // 注册证据：intellij.platform.lang.impl.xml:1825 `groupId="appearance" groupWeight="111" id="project.scopes"`。
   { key: 'project.scopes', label: '作用域', icon: Filter, parent: 'group:appearance', keywords: '作用域 范围 scope scopes 文件模式 file: pattern 作用 in project 查找范围' },
   // 注册证据：`intellij.platform.lang.impl.xml:1341-1343`
@@ -129,11 +132,13 @@ export const EXPANDED_DEFAULT: readonly string[] = [
  */
 export const PROJECT_SCOPED_PAGES: ReadonlySet<string> = new Set<PageKey>([
   'editing.templates', 'preferences.toDoOptions', 'preferences.fileTypes', 'project.scopes', 'vcs.log',
+  'reference.settings.ide.settings.file-colors',
   'build.tools', 'reference.settingsdialog.project.gradle',
 ])
 
 /** 真正会渲染内容的叶子页（`initialSection` 的取值域与校验都靠它）。 */
 export const PAGE_KEYS: PageKey[] = ['preferences.lookFeel', 'editor', 'editor.preferences.appearance', 'editor.preferences.tabs', 'editor.preferences.smartKeys', 'editor.preferences.gutterIcons',
   'preferences.sourceCode.indents', 'tools.actionsOnSave', 'editing.templates', 'commit', 'preferences.general', 'project.scopes',
+  'reference.settings.ide.settings.file-colors',
   'editor.breadcrumbs', 'editor.stickyLines', 'Console', 'Errors', 'preferences.toDoOptions', 'preferences.fileTypes',
   'preferences.externalTools', 'diff.base', 'build.tools', 'vcs.log', 'reference.settingsdialog.project.gradle']

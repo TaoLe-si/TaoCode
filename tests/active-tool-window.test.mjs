@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 import { lastActiveId, nextContentIndex, pushActive, removeActive } from '../src/activeToolWindow.ts'
 
 const always = () => true
@@ -77,7 +78,9 @@ test('F12 returns to the window focused before the editor was used', () => {
 // the handler sent F12 into FileStructure ($default.xml:279-281) and that branch swallowed
 // Ctrl+Shift+F12 (HideAllWindows, :870-872) because it never looked at Shift.
 test('F12 is JumpToLastWindow, Ctrl+F12 is FileStructure, Ctrl+Shift+F12 is HideAllWindows', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 快捷键分派在 2026-09-27 从 App.vue 拆到 src/keymap.ts，所以这里读整个外壳（App.vue + 各模块）；
+  // 三条绑定仍在同一个函数体内，相对顺序不变，`bare < bail` 的断言依然成立。
+  const app = shellSource()
   const lines = app.split('\n')
   const find = (...checks) => lines.findIndex(line => checks.every(check => line.includes(check)))
 
@@ -149,7 +152,8 @@ test('a stale index outside the strip is treated as nothing selected', () => {
 // The rest of WindowMenu > ActiveToolwindowGroup (PlatformActions.xml:653-660): the three narrower
 // hides, the tab rows, and CloseActiveTab on the key the source gives it.
 test('the remaining ActiveToolwindowGroup actions are wired', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 菜单行现在在 src/menus/*.ts 里，所以看整个外壳（App.vue 仍在最前）。
+  const app = shellSource()
   const lines = app.split('\n')
   const find = (...checks) => lines.findIndex(line => checks.every(check => line.includes(check)))
 
@@ -188,9 +192,9 @@ test('the remaining ActiveToolwindowGroup actions are wired', () => {
   // and is unit-tested there; what is asserted here is that this call site did not go back to a
   // hand-rolled per-tab guard that would drift from it.
   const other = app.slice(app.indexOf('function closeOtherToolTabs'), app.indexOf('function closeAllToolTabs'))
-  assert.ok(other.includes('tabsCloseOtherWouldRemove(bottomTab.value, toolTabPresence())'),
+  assert.ok(other.includes('tabsCloseOtherWouldRemove(ctx.bottomTab.value, toolTabPresence())'),
     'closeOtherToolTabs no longer spares the selected tab through the shared content model')
-  assert.equal(/bottomTab\.value !== '(references|hierarchy|blame)'/.test(other), false,
+  assert.equal(/bottomTab\.value !== '(references|hierarchy)',/.test(other), false,
     'a hand-rolled per-tab guard is back in closeOtherToolTabs')
 
   // CodeMirror binds Alt+Left/Right to syntax-wise caret motion; the tab pair would fight it.

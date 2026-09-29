@@ -29,6 +29,13 @@ struct Options {
 // Splits a user filter box ("*.cpp, src/** build/**") on commas/whitespace.
 std::vector<std::string> parse_patterns(const std::string& text);
 
+// Every project file as a workspace-relative '/'-separated path, sorted. Used by the
+// scope editor: its package tree and its "Scope contains N of total M files" counter
+// (ScopeEditorPanel.java:796) both read the same listing. Returns `{ files, truncated }`
+// where `truncated` is true when the walk hit max_scanned_files, so a partial list is
+// never presented as the whole project.
+Json list_files(const std::filesystem::path& root);
+
 // Returns { matches: [{path,line,column,preview,length}], truncated, fileCount }
 // with workspace-relative '/'-separated paths and 1-based line/column. `truncated`
 // is true when the walk hit max_scanned_files or max_results, so the visible

@@ -1,4 +1,5 @@
 #include "runner.hpp"
+#include "base64.hpp"
 
 #include "workspace.hpp"
 
@@ -67,37 +68,7 @@ std::wstring environment_block(const std::vector<std::wstring>& overrides) {
     return block;
 }
 
-std::string base64_encode(std::string_view bytes) {
-    static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((bytes.size() + 2) / 3) * 4);
-    std::size_t index = 0;
-    for (; index + 2 < bytes.size(); index += 3) {
-        const auto triplet = (static_cast<unsigned>(static_cast<unsigned char>(bytes[index])) << 16) |
-                             (static_cast<unsigned>(static_cast<unsigned char>(bytes[index + 1])) << 8) |
-                             static_cast<unsigned>(static_cast<unsigned char>(bytes[index + 2]));
-        encoded.push_back(table[(triplet >> 18) & 0x3f]);
-        encoded.push_back(table[(triplet >> 12) & 0x3f]);
-        encoded.push_back(table[(triplet >> 6) & 0x3f]);
-        encoded.push_back(table[triplet & 0x3f]);
-    }
-    const auto remaining = bytes.size() - index;
-    if (remaining == 1) {
-        const auto value = static_cast<unsigned>(static_cast<unsigned char>(bytes[index])) << 16;
-        encoded.push_back(table[(value >> 18) & 0x3f]);
-        encoded.push_back(table[(value >> 12) & 0x3f]);
-        encoded.push_back('=');
-        encoded.push_back('=');
-    } else if (remaining == 2) {
-        const auto value = (static_cast<unsigned>(static_cast<unsigned char>(bytes[index])) << 16) |
-                           (static_cast<unsigned>(static_cast<unsigned char>(bytes[index + 1])) << 8);
-        encoded.push_back(table[(value >> 18) & 0x3f]);
-        encoded.push_back(table[(value >> 12) & 0x3f]);
-        encoded.push_back(table[(value >> 6) & 0x3f]);
-        encoded.push_back('=');
-    }
-    return encoded;
-}
+// base64_encode 已并入 native/base64.hpp（main.cpp / workspace.cpp / runner.cpp 三份重复实现合并）。
 
 // Decodes the longest prefix of `bytes` that `codepage` can render, reporting in
 // `carried` how many trailing bytes belong to an incomplete sequence and must wait

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { FolderOpen, GitBranch, X } from 'lucide-vue-next'
 import type { ProjectForm } from '../bridge'
+import { projectDestination, projectNameError, projectParentError, projectPathTooLong } from '../projectPath.ts'
 
 const props = defineProps<{
   mode: 'create' | 'clone'
@@ -22,50 +23,14 @@ const sourceInput = ref<HTMLInputElement>()
 const progressLog = ref<HTMLElement>()
 const followProgress = ref(true)
 const locked = computed(() => props.busy || props.cancelling)
-// Windows reserves legacy device names in every directory, with or without an
-// extension: "CON", "CON.txt" and "NUL.log" are all unusable as file names.
-const RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i
-const ILLEGAL_NAME = /[\\/:*?"<>|\u0000-\u001f]/
-const ILLEGAL_PATH = /[<>:"|?*\u0000-\u001f]/
-const reservedName = (name: string) => RESERVED.test(name)
-const nameError = computed(() => {
-  const name = form.value.name
-  if (!name) return ''
-  if (name !== name.trim() || ILLEGAL_NAME.test(name) || name === '.' || name === '..' || name.endsWith('.'))
-    return '名称不能含路径分隔符或特殊字符，不能以空白开头或以空白、句点结尾。'
-  if (reservedName(name)) return '名称使用了 Windows 保留名（CON、PRN、AUX、NUL、COM1-9、LPT1-9），请更换。'
-  if (name.length > 80) return '名称过长：单个目录名请控制在 80 个字符以内。'
-  return ''
-})
-const parentError = computed(() => {
-  const parent = form.value.parent.trim()
-  if (!parent) return ''
-  if (ILLEGAL_PATH.test(parent)) return '路径不能包含 : * ? " < > | 或控制字符。'
-  // Accept either a drive path or a UNC share; anything else cannot be resolved to
-  // a real directory by the native file layer.
-  const normalized = parent.replace(/\\/g, '/')
-  if (!/^[A-Za-z]:\//.test(normalized) && !normalized.startsWith('//'))
-    return '请填写绝对路径，例如 D:\\projects 或 \\\\server\\share。'
-  const parts = normalized.replace(/^\/+/, '').split('/').filter(Boolean)
-  if (parts.some(part => part === '.' || part === '..')) return '路径里的“.”或“..”段无法定位父目录，请直接填写完整路径。'
-  if (parts.some(part => part.endsWith('.'))) return '路径的每一段都不能以句点结尾。'
-  if (parts.some(reservedName)) return '路径包含 Windows 保留名（CON、PRN、AUX、NUL、COM1-9、LPT1-9）。'
-  return ''
-})
-const pathTooLong = computed(() => {
-  const destination = `${form.value.parent.trim()}/${form.value.name.trim()}`
-  // MAX_PATH leaves no room for the generated build trees once the project is open.
-  return Boolean(form.value.parent.trim() && form.value.name.trim()) && destination.replace(/^\\\\\?\\/, '').length > 240
-    ? '最终路径超过 240 个字符，Windows 将无法完整创建子目录，请换更短的位置或名称。'
-    : ''
-})
-const destination = computed(() => {
-  const parent = form.value.parent.trim()
-  const name = form.value.name.trim()
-  if (!parent || !name) return ''
-  const separator = parent.includes('\\') ? '\\' : '/'
-  return `${parent.replace(/[\\/]+$/, '')}${separator}${name}`
-})
+// 路径与名称的校验是**纯函数**，放在 src/projectPath.ts（有单测）——这里曾经把盘符的 `:`
+// 当成非法字符，于是任何 `D://…` 都无法提交，用户看到的就是"无法新建项目"。
+const nameError = computed(() => projectNameError(form.value.name))
+const parentError = computed(() => projectParentError(form.value.parent))
+const destination = computed(() => projectDestination(form.value.parent, form.value.name))
+const pathTooLong = computed(() => (projectPathTooLong(form.value.parent, form.value.name)
+  ? '最终路径超过 240 个字符，Windows 将无法完整创建子目录，请换更短的位置或名称。'
+  : ''))
 const cloneSourceError = computed(() => {
   const source = form.value.source.trim()
   if (!source) return ''

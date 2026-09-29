@@ -12,7 +12,7 @@ namespace taocode {
 // extern constexpr 数组跨 TU 是不完整类型，无法构造 std::span（踩过：C2664/C2665）。
 inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     "fontSize", "tabSize", "wordWrap", "lineNumbers", "showIndentGuides", "bracketMatching",
-    "tabLimit", "useTabCharacter", "showWhitespaces", "formatOnSave", "uiZoomPercent",
+    "tabLimit", "tabsInOneRow", "useTabCharacter", "showWhitespaces", "formatOnSave", "uiZoomPercent",
     "compactMode", "fullPathsInWindowHeader", "showTreeIndentGuides", "compactTreeIndents",
     "smoothScrolling", "showIconsInMenus", "rememberSizeForEachToolWindow", "showToolWindowNames",
     "showToolWindowBars", "leftSideBySide", "wideScreenSupport", "rightSideBySide",
@@ -23,6 +23,9 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // AppearanceConfigurable cdDifferentiateProjects / cdExpandNodesWithSingleClick
     // (UISettingsState.differentiateProjects / :141 expandNodesWithSingleClick).
     "differentiateProjects", "expandNodesWithSingleClick",
+    // editor.maximize.on.double.click（intellij.platform.ide.impl.xml:1511）。
+    "maximizeEditorOnTabDoubleClick",
+    "pinnedTabsInSeparateRow",
     // BreadcrumbsConfigurable (`editor.breadcrumbs`, platform-impl/.../breadcrumbs/
     // BreadcrumbsConfigurable.java:24 + BreadcrumbsConfigurableUI.kt:44-70) 三项：
     // 显示开关（isBreadcrumbsShown）、位置（isBreadcrumbsAbove，只有上/下）、
@@ -42,10 +45,9 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // EditorSettingsExternalizable.java:87 `ARE_GUTTER_ICONS_SHOWN = true`（默认开）。
     // 关掉后 gutter 不再画行内标记图标（标记本身仍在）。
     "showGutterIcons",
-    // 文件颜色两层开关（IDEA `FileColorManagerImpl`：PropertiesComponent 的
-    // `FileColorsEnabled` / `FileColorsForTabsEnabled`，`_isEnabled()` :72-74 默认都是 true）。
-    // 颜色本身存在**项目**设置里（`fileColors`，`FileColorConfiguration` = scopeName + colorID）。
-    "fileColorsEnabled", "fileColorsForTabs",
+    // FileColorManagerImpl.java:75-106: all switches default true.
+    // Both local and shared color lists are project-owned (FileColorModelStorageManager.kt:27-38).
+    "fileColorsEnabled", "fileColorsForTabs", "fileColorsForProjectView",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
@@ -84,6 +86,7 @@ void validate_java_settings(const Json& value);
 void validate_file_associations(const Json& value);
 // 命名作用域（IDEA `project.scopes`）：形状校验，不校验模式语法（源码允许存下解析不了的模式）。
 void validate_scopes(const Json& value);
+void validate_file_colors(const Json& value);
 // 构建工具（IDEA `build.tools` 组：外部系统的自动重载 + Gradle 项目设置）。
 // **项目级**：`ExternalSystemGroupConfigurable` 是 `BackedByPersistentState` 的 projectConfigurable，
 // `GradleSettings` 的存储是 `.idea/gradle.xml`（GradleSettings.java:30-31），
@@ -95,12 +98,8 @@ void validate_build_tools(const Json& value);
 // （PRINT_FILE=1 / PRINT_SELECTED_TEXT=2 / PRINT_DIRECTORY=4）。
 void validate_export_to_html(const Json& value);
 void validate_project_patch(const Json& patch);
-inline bool valid_utf8(const std::string& text) {
-    return text.find('\0') == std::string::npos &&
-           text.size() <= static_cast<std::size_t>((std::numeric_limits<int>::max)()) &&
-           (text.empty() || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
-                                                static_cast<int>(text.size()), nullptr, 0) != 0);
-}
+
+// `valid_utf8` 是文件原语（fsops.hpp），路径转换与这里共用同一份定义。
 
 std::string text_or(const Json& object, const char* key);
 

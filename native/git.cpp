@@ -1,6 +1,8 @@
 #include "git.hpp"
+#include "git_log.hpp"
 #include "git_clone.hpp"
 #include "history.hpp"
+#include "time_format.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -13,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <ctime>
 #include <fstream>
 #include <iterator>
 #include <mutex>
@@ -289,8 +292,9 @@ std::vector<Change> status(const fs::path& repo) {
     return changes;
 }
 
-std::string diff(const fs::path& repo, const std::string& path, bool staged, const std::string& base) {
+std::string diff(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context) {
     std::vector<std::wstring> arguments = {L"diff", L"--no-color"};
+    if (context > 0) arguments.push_back(L"-U" + std::to_wstring(context));
     if (!base.empty()) { const auto range = range_args(repo, base); arguments.insert(arguments.end(), range.begin(), range.end()); }
     else if (staged) arguments.push_back(L"--cached");
     if (!path.empty()) {
@@ -302,10 +306,10 @@ std::string diff(const fs::path& repo, const std::string& path, bool staged, con
     return result.out;
 }
 
-Json diff_sides(const fs::path& repo, const std::string& path, bool staged, const std::string& base) {
+Json diff_sides(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context) {
     // The unified text is the single source of truth: parsing it keeps the side-by-side
     // view agreeing with the unified one, and needs no second read of the worktree.
-    return history::diff_sides_from_unified(diff(repo, path, staged, base));
+    return history::diff_sides_from_unified(diff(repo, path, staged, base, context));
 }
 
 Json compare(const fs::path& repo, const std::string& base) {
@@ -490,57 +494,19 @@ Json authors(const fs::path& repo) {
     return {{"authors", std::move(list)}};
 }
 
-Json log_full(const fs::path& repo, int limit) {
-    const int count = limit <= 0 ? 200 : (limit > 1000 ? 1000 : limit);
-    // %P = parent hashes (space-separated), %d = ref names like " (HEAD -> main, origin/main)"
-    std::vector<std::wstring> args = {L"log", L"--date=iso-strict",
-        L"--pretty=%H\x1f%h\x1f%an\x1f%ad\x1f%s\x1f%P\x1f%d",
-        L"--decorate=full", L"-n", utf8_to_wide(std::to_string(count))};
-    const auto result = run(repo, args);
-    require_ok(result, "读取提交历史");
-    Json commits = Json::array();
-    for (const auto& record : parse_records(result.out)) {
-        if (record.size() < 7) continue;
-        Json parents = Json::array();
-        const std::string parents_raw = record[5].get<std::string>();
-        if (!parents_raw.empty()) {
-            std::istringstream stream(parents_raw);
-            std::string token;
-            while (stream >> token) parents.push_back(std::move(token));
-        }
-        Json refs = Json::array();
-        // %d output: " (HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1.0)"
-        const std::string raw = record[6].get<std::string>();
-        std::size_t start = raw.find('(');
-        if (start != std::string::npos) {
-            auto end = raw.rfind(')');
-            if (end > start) {
-                std::istringstream stream(raw.substr(start + 1, end - start - 1));
-                std::string token;
-                while (std::getline(stream, token, ',')) {
-                    while (!token.empty() && token.front() == ' ') token.erase(token.begin());
-                    while (!token.empty() && token.back() == ' ') token.pop_back();
-                    if (token.empty()) continue;
-                    // Strip refs/heads/, refs/remotes/, refs/tags/ prefixes for display.
-                    std::string display = token;
-                    bool is_tag = false;
-                    if (display.starts_with("HEAD -> ") || display.starts_with("HEAD->")) continue;
-                    if (display.starts_with("tag: ")) { display = display.substr(5); is_tag = true; }
-                    const std::string_view heads = "refs/heads/";
-                    const std::string_view remotes = "refs/remotes/";
-                    const std::string_view tags = "refs/tags/";
-                    if (!is_tag && display.starts_with(heads)) display = display.substr(heads.size());
-                    else if (!is_tag && display.starts_with(remotes)) display = display.substr(remotes.size());
-                    else if (is_tag && display.starts_with(tags)) display = display.substr(tags.size());
-                    refs.push_back({{"name", display}, {"type", is_tag ? "tag" : (token.find("refs/remotes/") != std::string::npos ? "remote" : std::string("local"))}});
-                }
-            }
-        }
-        commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]},
-                           {"date", record[3]}, {"subject", record[4]},
-                           {"parents", std::move(parents)}, {"refs", std::move(refs)}});
+std::string log_command(const fs::path& repo, const std::vector<std::string>& arguments) {
+    std::vector<std::wstring> args;
+    for (const auto& argument : arguments) {
+        const auto value = utf8_to_wide(argument);
+        if (argument.find('\0') != std::string::npos || (!argument.empty() && value.empty()))
+            throw WorkspaceError("INVALID_REQUEST", "Git 参数必须是有效的 UTF-8 文本且不能包含 NUL。");
+        args.push_back(value);
     }
-    return {{"commits", std::move(commits)}};
+    const auto result = run(repo, args);
+    require_ok(result, "读取 Git 日志");
+    if (result.out.size() >= max_output)
+        throw WorkspaceError("GIT_OUTPUT_LIMIT", "Git 输出超过大小限制，请缩小查询范围。");
+    return result.out;
 }
 
 // IDEA's Git.Pull defaults to merge (not --ff-only); ff-only is an opt-in variant
@@ -593,6 +559,8 @@ Json ahead_behind(const fs::path& repo) {
 
 // --line-porcelain repeats every field per annotated line, so a single forward
 // scan yields a {line, hash, author, content} record for each source line.
+// The annotation column also needs the commit date / mail / summary (IDEA's
+// `FileAnnotation.getDate()` / `getAuthor()` / tooltip), so those are captured too.
 Json blame(const fs::path& repo, const std::string& path) {
     if (path.empty()) throw WorkspaceError("INVALID_REQUEST", "追溯需要一个文件路径。");
     const auto result = run(repo, {L"blame", L"--line-porcelain", L"--", utf8_to_wide(path)});
@@ -600,6 +568,9 @@ Json blame(const fs::path& repo, const std::string& path) {
     Json lines = Json::array();
     std::string hash;
     std::string author;
+    std::string mail;
+    std::string date;
+    std::string summary;
     int final_line = 0;
     std::size_t start = 0;
     while (start <= result.out.size()) {
@@ -610,7 +581,8 @@ Json blame(const fs::path& repo, const std::string& path) {
         else start = newline + 1;
         if (line.empty()) continue;
         if (line[0] == '\t') {
-            lines.push_back({{"line", final_line}, {"hash", hash.size() >= 8 ? hash.substr(0, 8) : hash}, {"author", author}, {"content", line.substr(1)}});
+            lines.push_back({{"line", final_line}, {"hash", hash.size() >= 8 ? hash.substr(0, 8) : hash},
+                {"author", author}, {"email", mail}, {"date", date}, {"summary", summary}, {"content", line.substr(1)}});
             continue;
         }
         const bool header = line.size() >= 41 && std::isxdigit(static_cast<unsigned char>(line[0])) &&
@@ -624,6 +596,19 @@ Json blame(const fs::path& repo, const std::string& path) {
             continue;
         }
         if (line.rfind("author ", 0) == 0) { author = line.substr(7); continue; }
+        if (line.rfind("author-mail ", 0) == 0) {
+            // porcelain wraps the address in angle brackets: <someone@example.com>
+            std::string value = line.substr(12);
+            if (value.size() >= 2 && value.front() == '<' && value.back() == '>') value = value.substr(1, value.size() - 2);
+            mail = value;
+            continue;
+        }
+        if (line.rfind("author-time ", 0) == 0) {
+            // `author-time` 是 epoch 秒；注解列显示的是日期（IDEA 的注解列给的就是日期）。
+            try { date = format_local_time(std::stoll(line.substr(12)), "%Y-%m-%d", 16); } catch (...) { date.clear(); }
+            continue;
+        }
+        if (line.rfind("summary ", 0) == 0) { summary = line.substr(8); continue; }
     }
     return {{"lines", std::move(lines)}};
 }

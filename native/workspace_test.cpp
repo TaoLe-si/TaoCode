@@ -1,4 +1,5 @@
 #include "workspace.hpp"
+#include "window_state.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -574,6 +575,30 @@ int main() {
             expect_error("INVALID_PATH", [&] { taocode::reveal_absolute(std::string("bad\0tail", 8)); });
             const auto orphan = std::string("C:\\taocode-reveal-missing-parent\\project");
             expect_error("NOT_FOUND", [&] { taocode::reveal_absolute(orphan); });
+        });
+
+        // `shell.openUrl` 的**安全边界**（LSP `documentLink.target` 由语言服务器给，
+        // 所以这个入口是外部输入）：`ShellExecuteW(L"open", …)` 对没有协议前缀的字符串会
+        // **执行**它。最阴的是 `C:/x.exe` —— 它完全符合 URL scheme 的语法。
+        // 只测拒绝路径：被放行的 URL 会真的打开浏览器，测试里不能跑。
+        run("open_external refuses anything that is not a scheme-prefixed URL", [&] {
+            for (const char* rejected : {"calc.exe",
+                                         "C:/Windows/System32/calc.exe",
+                                         "C:\\Windows\\System32\\calc.exe",
+                                         "\\\\server\\share\\payload.exe",
+                                         "./relative/x.exe",
+                                         "not a url",
+                                         ""}) {
+                expect_error("INVALID_PATH", [&] { taocode::open_external(rejected); });
+            }
+        });
+
+        // IDEA 的 ToggleFullScreen 需要**宿主窗口**（native/window_state.cpp）。在没有窗口的测试进程里
+        // 切换必须如实失败 —— 不能静默返回一个假的成功（那样 UI 会显示"已全屏"而窗口纹丝不动）。
+        run("set_full_screen refuses without a window instead of pretending to work", [&] {
+            expect_error("NO_WINDOW", [&] { taocode::set_full_screen(true); });
+            // 只读状态不需要窗口：它只是镜像一个标志。
+            check(taocode::full_screen_state().at("fullScreen") == false, "no window means not full screen");
         });
     } catch (const std::exception& error) {
         ++failures;

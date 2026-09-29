@@ -6,7 +6,7 @@ body { background: var(--editor); color: var(--text); font-family: var(--font-ui
 /* Compact mode (IDEA AppearanceConfigurable "UI elements take up less screen space"):
    control heights, panel headings and tab strips shrink. Only density variables are
    touched, so layout rules never fork. */
-html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ctrl-height-lg: 27px; --panel-heading-h: 26px; --tab-h: 28px; --chrome-height: 34px; }
+html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ctrl-height-lg: 27px; --panel-heading-h: 26px; --tab-h: 28px; --chrome-height: 32px; }
 /* IDEA "Display icons in menu items" off: the icon column collapses so the titles
    move to the left, exactly like a Swing menu without icons. */
 html[data-menu-icons='off'] .menu-item-icon { display: none; }
@@ -43,25 +43,64 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 .ide-shell { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ide-shell.is-resizing, .ide-shell.is-resizing * { user-select: none !important; }
-.topbar { flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; padding: 0 var(--space-3); background: var(--project-tint, var(--rail)); border-bottom: 1px solid var(--line); z-index: 10; }
-/* 行1 菜单栏 / 行2 主工具栏 —— IDEA `MainMenuDisplayMode.SEPARATE_TOOLBAR`（默认值，UISettings.kt:863）*/
-.topbar-menubar-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--chrome-height); min-width: 0; }
-.topbar-toolbar { display: flex; align-items: center; gap: var(--space-4); min-height: var(--chrome-height); min-width: 0; }
-/* `MERGED_WITH_MAIN_TOOLBAR`：菜单栏与主工具栏并成一行（IDEA 三档里的中间那档）*/
-html[data-main-menu='merged'] .topbar { flex-direction: row; align-items: center; gap: var(--space-4); }
+/* 颜色滤镜的 <defs> 宿主：它必须**留在渲染树里**（`filter: url(#cb-*)` 要能解析到它），
+   又不能参与布局。作为 App 的第一个根节点它是 `#app` 里的行内替换元素，会按 body 的
+   line-height 生成一个 ~18px 的空行盒 —— 表现就是工具栏上方那条毫无意义的矩形长条。
+   绝对定位 + 零尺寸把它移出文档流（`display:none` 会让部分引擎解析不到 filter 引用）。 */
+.color-blind-defs { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+/* 顶栏**不留整体内边距** —— 上游的每一行各自决定自己的左边距（见 tokens.css 的那一段引用）：
+   菜单/汉堡格 = --header-inset(16)，紧跟其后的主工具栏 = --header-menu-gap(4)，
+   `SEPARATE_TOOLBAR` 档独立成行的主工具栏 = --toolbar-row-inset(5)；右侧一律贴边
+   （HorizontalLayout.kt:135 `rightX = width`，右组与窗口控制按钮之间没有留白）。 */
+/* 底色与项目色是**两层**，不是一个可替换值 —— 上游也是这样：`ToolbarFrameHeader.kt:308-316`
+   先让 `ProjectWindowCustomizerService.paint(...)` 画渐变，画了就不填底色、没画才 `fillRect(background)`；
+   而渐变本身是半透明叠加（`src/appearance.ts:17-29` 用的是同一批 RecentProjectIconHelper 颜色 + alpha 后缀）。
+   所以必须 `background-color` + `background-image` 分开写：用 `background: var(--project-tint, …)` 这种
+   "二选一"的写法会让带项目色时底色变成 transparent，深色顶栏上浅色文字直接看不见。 */
+.topbar { flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; background-color: var(--header-bg); background-image: var(--project-tint, none); border-bottom: 1px solid var(--header-line); color: var(--header-fg); z-index: 10; }
+/* 窗口失焦时顶栏换色：`mainToolbarBackground(isActive)`（JBUI.java:564-572）—— 浅色主题用
+   Gray3（expUI_light.theme.json:762），深色主题没有该键、回退到激活色本身（见 tokens.css 的注释）。
+   激活态由 src/appearanceActions.ts 写在根节点的 data-window-active 上。 */
+html[data-window-active='inactive'] .topbar { background-color: var(--header-bg-inactive); }
+/* 顶栏里的控件住在深色面上，字色/悬停色不能沿用面板那套浅色令牌：
+   Icon.hoverBackground 与 pressedBackground 都是 Gray3（expUI_light.theme.json:766-767）。 */
+.topbar .menu-button, .topbar .header-widget, .topbar .icon-button { color: var(--header-fg); }
+.topbar .menu-button:hover, .topbar .menu-button[aria-expanded=true],
+.topbar .header-widget:hover, .topbar .icon-button:hover:not(:disabled) { background: var(--header-hover); color: var(--header-fg); }
+.topbar .header-widget:active, .topbar .icon-button:active:not(:disabled) { background: var(--header-hover); }
+/* 行1 菜单栏 / 行2 主工具栏 —— 这是 IDEA 三档里的 `SEPARATE_TOOLBAR`（CoreBundle.properties:157
+   "Show above Main Toolbar"）。**它不是默认档**：默认是 `UNDER_HAMBURGER_BUTTON`
+   （UISettingsState.kt:207），即下面 `html[data-main-menu='hamburger']` 的单行布局。 */
+.topbar-menubar-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--chrome-height); min-width: 0; padding-left: var(--header-inset); }
+/* Fill the remaining header width in hamburger/merged modes; spacing belongs between toolbar groups.
+   左右各 4px = ToolbarFrameHeader.kt:271 的 `JBUI.Borders.empty(0, JBUI.scale(4))`（第二个参数是**横向**，
+   两侧同时生效）：主工具栏装在 toolbarPlaceholder 里，所以它与「菜单格」之间、与行右边缘之间都是 4。 */
+.topbar-toolbar { display: flex; flex: 1 1 0; align-items: center; gap: var(--toolbar-group-gap); min-height: var(--chrome-height); min-width: 0; padding: 0 var(--header-menu-gap); }
+/* `MERGED_WITH_MAIN_TOOLBAR`：菜单栏与主工具栏并成一行（IDEA 三档里的中间那档）。
+   两格之间就是那个 4px 的 placeholder 边距，不是 16。 */
+html[data-main-menu='merged'] .topbar { flex-direction: row; align-items: center; gap: 0; position: relative; }
 html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
+/* `SEPARATE_TOOLBAR`：主工具栏不在窗口标题里，而是客户端区独立的一行 —— 它的边框只有
+   `emptyLeft(5)`（ProjectFrameCustomHeaderHelper.kt:364），右侧没有内缩。 */
+html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-row-inset); }
 .brand { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-2); font-family: var(--font-brand); font-size: 15px; letter-spacing: .3px; color: var(--bright); }
 .menubar { display: flex; flex-shrink: 0; gap: 2px; }
 .menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: 28px; color: var(--secondary); border-radius: var(--radius-xs); }
 .menu-button:hover, .menu-button[aria-expanded=true] { color: var(--bright); background: var(--hover); }
 .menu-anchor { position: relative; }
-.dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; width: max-content; min-width: 244px; max-width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 80px); overflow: auto; z-index: 20; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--menu-radius); padding: var(--space-1); box-shadow: var(--menu-shadow); transform-origin: top left; }
+.dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; width: max-content; min-width: 244px; max-width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 80px); overflow: auto; z-index: 20; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); padding: var(--space-1); color: var(--popup-foreground); box-shadow: var(--popup-shadow); transform-origin: top left; }
 .dropdown > .menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--menu-row-height); background: transparent; border: 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); text-align: left; font-size: 12px; line-height: 20px; }
 .dropdown > .menu-item:hover:not(:disabled), .dropdown > .menu-item:focus-visible { background: var(--selected); color: var(--bright); outline: none; }
+/* 禁用行必须自己写颜色：不写就退化成 Chrome 对 `disabled` 按钮的 UA 淡化（两档主题一个灰法，
+   深色主题里几乎看不出来、浅色主题里糊成一片）。上游给的是通配组的 `*.disabledForeground`：
+   浅色 Gray8 = #A8ADBD（expUI_light.theme.json:16,114）、深色 Gray6 = #5A5D63（expUI_dark.theme.json:14,123）。
+   这一档**故意**低于 AA —— 它表达的是"不可用"，所以不进对比度门禁（门禁只管正文三档）。 */
+.menu-item:disabled, .menu-button:disabled, .select-in-row:disabled { color: var(--popup-disabled); }
+.menu-item:disabled .menu-item-icon, .menu-item:disabled > kbd { color: inherit; }
 /* IDEA 的子菜单（ActionGroup popup="true"）：在父行右侧展开。用 fixed 定位，否则会被父菜单的
    overflow:auto 裁掉；坐标与 maxHeight 在 openSubmenu() 里按父行 rect 计算，放不下向上翻转。 */
 .dropdown.menu-submenu { position: fixed; top: auto; left: 0; z-index: 901; transform-origin: top left;
-  animation: menu-submenu-in .16s cubic-bezier(.16, 1, .3, 1); }
+  animation: menu-submenu-in var(--dur-submenu) var(--ease); }
 /* Teleport 到 body 后不再继承父菜单的层叠上下文，必须自己抬到编辑器浮层（quickdoc/signature 是
    900）之上，否则会被它们或 z-40 的工具弹层盖住。仍低于模态遮罩（50 之上的模态内容层）。 */
 .dropdown.menu-submenu.menu-submenu-above { transform-origin: bottom left; }
@@ -77,8 +116,6 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .menu-submenu-trigger[aria-expanded='true'] { background: var(--selected); color: var(--bright); outline: none; }
 .menu-submenu-trigger .menu-item-title { flex: 1; }
 .menu-submenu-caret { margin-left: auto; color: var(--muted); }
-/* 汉堡面板里子菜单的行（没有二级浮层，所以用缩进表达层级）。 */
-.hamburger-item.hamburger-child { margin-left: var(--space-4); }
 /* Zen 模式的悬浮退出按钮：常驻右上角，盖过画布内容。 */
 .zen-exit { position: fixed; z-index: 60; top: var(--space-2); right: var(--space-2);
   display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2);
@@ -97,20 +134,33 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .menu-empty { display: block; padding: 3px 8px 6px 30px; font-size: 11px; color: var(--muted); }
 /* IDEA New UI header widgets (RunToolbarWidgetAction / main.toolbar.git.Branches). */
 .topbar-widgets { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
+/* 工具栏按钮的 hover 圆角。HeaderToolbarButtonLook.kt:58-59 `getButtonArc()` 返回
+   JBUI.CurrentTheme.MainToolbar.Button.hoverArc() = `MainToolbar.Button.arc` 默认 **12**
+   （JBUI.java:1420）。同一个 Look 还消费图标尺寸（:56 experimentalToolbarButtonIconSize = 20），
+   所以按钮尺寸/图标/圆角三项是**同一个常量族**：--toolbar-btn-size / --toolbar-icon-size / --toolbar-btn-arc。
+   原先是 --radius-xs = 3px，hover 时能明显看出方角。 */
+.topbar .header-widget, .topbar .icon-button, .topbar-menubar-row .menu-button { border-radius: var(--toolbar-btn-arc); }
 .header-widget { display: inline-flex; align-items: center; gap: 5px; max-width: 200px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 11px; white-space: nowrap; }
 .header-widget:hover { background: var(--hover); color: var(--bright); }
 .header-widget > span { overflow: hidden; text-overflow: ellipsis; }
 .header-widget-count { color: var(--accent); }
 .header-run { display: inline-flex; align-items: center; }
-.run-button { color: var(--success, var(--accent)); }
-.run-button.running { color: var(--error); }
+/* 运行 widget 的图标**不上色**：`RunWidget.iconColor = Gray12`（expUI_light.theme.json:1095，
+   深色主题同值 :1064），也就是与顶栏前景同一个颜色；只有「正在运行」那一格换成绿底
+   （:1096 runningBackground），且图标仍然是 Gray12（:1097 runningIconColor）。
+   原先写的「播放=绿字、运行中=红字」两个都不在上游的模型里。 */
+.run-button.running { background: var(--header-run-bg); color: var(--header-fg); }
+/* 这一族的悬停/按下用的是 RunWidget 自己的那两个叠色（:1098-1099，两套主题字面量相同），
+   不是 MainToolbar.Icon 的 Gray3。 */
+.header-run .header-widget:hover { background: var(--header-run-hover); }
+.header-run .header-widget:active:not(:disabled) { background: var(--header-run-pressed); }
 .run-caret { padding: 2px 3px; font-size: 10px; }
 /* IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
    the project name with a chevron, whose popup lists the open projects and then the recent
    ones (ProjectConceptBundle.properties:22-23) with the project path and its branch. */
 .project-widget { position: relative; display: flex; align-items: center; flex-shrink: 0; }
 .project-widget-name { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
-.project-widget-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 300px; max-width: 420px; max-height: 360px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.project-widget-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 300px; max-width: 420px; max-height: 360px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .project-widget-search { margin-bottom: var(--space-2); padding: 4px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--bright); font-size: 11px; }
 .project-widget-group { padding: 4px var(--space-2) 2px; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .project-widget-row { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; text-align: left; }
@@ -120,30 +170,63 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .project-widget-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
 .project-widget-caret { transition: transform .15s ease; }
 .project-widget-caret.open { transform: rotate(180deg); }
-.topbar-spacer { flex: 1 1 0; min-width: var(--space-3); }
+/* 中段（文件名 widget）的定位基准 = **整条工具栏宽度的中线**，不是「左右两组之间」。
+   上游 HorizontalLayout.kt:143 `var centerX = (width - center.width) / 2` 以整条宽度居中，
+   再被左右组夹逼（:144-152，越界就收到 leftX 或 rightX - width - 2*gap）。
+   原先这里用两个 `flex:1`（.topbar-spacer 与 .topbar-right）把文件名夹在两组**之间**，
+   于是左右组宽度不等时文件名会漂 —— 打开一个带长分支名的 Git widget 就会看到它移动。
+   现在改成绝对定位锚到中线；左右两组仍占满剩余空间，夹逼由 overflow 自然完成。 */
+.topbar-toolbar { position: relative; }
+.filename-widget { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 40%; }
+/* 左组与右组之间的最小间隔 = **双倍**间距：`.topbar-toolbar` 的 `gap: 10` 在 spacer 两侧各出一份，
+   spacer 自己不再要宽度（HorizontalLayout.kt:19「组间是双倍间距」、:145 `+ gap + gap`）。 */
+.topbar-spacer { flex: 1 1 0; min-width: 0; }
 .branch-widget { flex-shrink: 0; }
 /* 分支弹窗的定位锚点（弹窗相对分支 widget 展开） */
 .branch-widget-anchor { position: relative; display: inline-flex; flex-shrink: 0; }
 /* 补全项的文档（`completionItem/resolve` 回来的内容）：按纯文本渲染，限制宽度便于阅读 */
 .completion-info { max-width: 420px; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+/* 补全弹窗的出现动效：一层短促淡入 + 2px 上浮，与菜单弹层同一套动效语汇（--dur-1 / --ease）。
+   CodeMirror 自己插 DOM，所以只能挂在 CSS 上；用独立的 `translate` 属性而不是 `transform`
+   （CM 用 transform 做翻转定位时不会互相覆盖）。prefers-reduced-motion 由全局那条规则统一关掉。 */
+.cm-tooltip.tc-completion { animation: completion-in var(--dur-1) var(--ease); }
+@keyframes completion-in { from { opacity: 0; translate: 0 2px; } }
 /* 运行 widget 的配置选择器现在带配置名（IDEA 的 RedesignedRunConfigurationSelector 显示当前配置） */
 .run-config-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 /* IDEA's main-toolbar filename widget (FilenameToolbarWidgetAction.kt:49-181): the selected file
    name in the centre region, coloured with its FileStatus (ADDED/MODIFIED/DELETED — the same
    tokens the commit legend uses), with a recent-files popup under it. */
-.filename-widget { position: relative; display: flex; align-items: center; flex-shrink: 0; margin-left: var(--space-2); }
+.filename-widget { position: relative; display: flex; align-items: center; min-width: 0; flex: 0 1 auto; }
 .filename-button { max-width: 320px; color: var(--text); font-size: 12px; }
 .filename-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filename-added { color: var(--success); }
 .filename-modified { color: var(--accent); }
 .filename-deleted { color: var(--error); }
 .filename-none { color: var(--text); }
-.filename-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 220px; max-width: 420px; max-height: 320px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--menu-shadow); }
+/* 顶栏是深色面，状态色要换成「同一 key 的深色配色版本」（FilenameToolbarWidgetAction.kt:67-70）。
+   只改行面上那一格：`.filename-popup` 里的行是浅色弹层，用上面那组。 */
+.topbar .filename-button.filename-added { color: var(--header-success); }
+.topbar .filename-button.filename-modified { color: var(--header-accent); }
+.topbar .filename-button.filename-deleted { color: var(--header-error); }
+.topbar .filename-button.filename-none { color: var(--header-fg); }
+.topbar .header-widget-count { color: var(--header-accent); }
+.filename-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 220px; max-width: 420px; max-height: 320px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .filename-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; text-align: left; }
 .filename-row > svg { flex-shrink: 0; }
 .filename-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.topbar-right { margin-left: auto; display: flex; flex-shrink: 0; gap: var(--space-2); align-items: center; }
+.topbar-right { display: flex; flex: 1 0 0; justify-content: flex-end; gap: var(--space-2); align-items: center; }
 .icon-button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--secondary); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+/* 主工具栏里的图标按钮 = 30x30（--toolbar-btn-size，上游 experimentalToolbarMinimumButtonSize）。
+   通用 .icon-button 仍是 28x28，那是对话框/面板里的控件尺寸；用在工具栏上整行偏矮 2px。 */
+.topbar .icon-button, .topbar-menubar-row .icon-button { width: var(--toolbar-btn-size); height: var(--toolbar-btn-size); }
+/* 工具栏图标统一 20px = JBUI.java:1286 `MainToolbar.Button.iconSize`（New UI 的
+   HeaderToolbarButtonLook.kt:56 消费该值）。组件里曾逐个写死 14 / 17 px，整行图标大小不一 ——
+   这里按上游统一。`.topbar` 之外的图标（面板、对话框）不受影响。 */
+.topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); }
+/* 停止/运行态的实心方块是状态指示而非主图标；下拉箭头同理 —— 保持小一号，
+   放在统一规则之后以覆盖它。 */
+.topbar .run-button > svg, .topbar .stop-button > svg { width: 14px; height: 14px; }
+.topbar .project-widget-caret, .topbar-menubar-row .project-widget-caret { width: 12px; height: 12px; }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .theme-toggle { color: var(--text); }
 .preview-banner { min-height: 29px; flex-shrink: 0; padding: var(--space-1) var(--space-3); display: flex; align-items: center; gap: var(--space-2); background: var(--warning-bg); border-bottom: 1px solid var(--line); color: var(--warning); font-size: 11px; }
@@ -152,9 +235,16 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .preview-description { min-width: 0; margin-left: var(--space-2); }
 .banner-right { margin-left: auto; font: 10px var(--font-mono); white-space: nowrap; }
 .workbench { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-.activity-bar { width: 44px; min-width: 44px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; background: var(--rail); border-right: 1px solid var(--line); padding: var(--space-1) 0; }
-.activity-button { position: relative; height: 34px; width: 34px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
-.activity-button > svg { width: 18px; height: 18px; stroke-width: 1.7; }
+/* ToolWindow stripe（New UI）。这里原先引的是 `StripeToolbar.Button.size`（JBUI.java:1322-1325，
+   默认 40x40），但那条**不是当前 New UI 实际生效的尺寸**：stripe 按钮在
+   toolWindow/StripeActionGroup.kt:160/:214 显式传 `ActionToolbar.experimentalToolbarMinimumButtonSize()`
+   → ActionToolbar.java:84 → JBUI CurrentTheme.Toolbar.experimentalToolbarButtonSize()
+   → JBUI.java:1276 `defaultExperimentalToolbarButtonSize() = size(30, 30)`。
+   也就是 stripe 按钮和主工具栏按钮**同尺寸 30x30**（原先 40x40 每格高了 10px）。
+   图标 20px = JBUI.java:1334 `defaultStripeToolbarButtonIconSize() = 20`。 */
+.activity-bar { width: 31px; min-width: 31px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; background: var(--rail); border-right: 1px solid var(--line); padding: var(--space-1) 0; }
+.activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
+.activity-button > svg { width: 20px; height: 20px; stroke-width: 1.7; }
 .activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
 .activity-button:hover { color: var(--text); background: var(--hover); }
 .activity-button.active { color: var(--accent); background: var(--selected); }
@@ -170,8 +260,19 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 /* The ⋮ strip on a tool window: title + Move to Left/Right/Bottom + Hide
    (UIBundle tool.window.move.to.action.group.name). */
 .tool-strip-heading { position: relative; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: var(--panel-heading-h); padding: 0 var(--space-2) 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; border-bottom: 1px solid var(--line); }
-.tool-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 60; display: flex; flex-direction: column; min-width: 170px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.tool-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 60; display: flex; flex-direction: column; min-width: 170px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+/* 锚点菜单（底部 dock 标签右击）Teleport 到 body：位置由指针给出，所以不能吃 .tool-menu 的 absolute/top/right 那套"贴着父容器"的定位。 */
+.tool-anchor-menu { position: fixed; top: auto; right: auto; }
+/* 底部 dock 的齿轮弹层（ToolWindowGear.vue）：fixed + 往上长 —— `.output-panel` 是 overflow:hidden，
+   长在里面的菜单会被裁掉；`left` 给的是按钮右沿，所以再往回挪一个自身宽度对齐右边缘。 */
+.tool-gear-menu { position: fixed; top: auto; right: auto; transform: translateX(-100%); max-width: min(320px, calc(100vw - 16px)); }
+/* 标签条右端的「更多」下拉（IDEA `EditorTabsEntryPoint`）：它挂在标签条那一层（overflow:hidden），
+   所以必须 Teleport 出来；浮层的**外观不另立配方** —— 直接复用 `.dropdown`（浮层族，
+   自带前景色/边框/圆角/阴影都走 --popup-* 令牌），与其它菜单眼里的规格完全一致。 */
+.tab-entry-point { display: inline-flex; align-items: center; }
 .tool-menu-item { justify-content: flex-start; gap: var(--space-2); }
+/* 齿轮菜单里"组行"的成员（上游 ResizeActionGroup 那一层）：缩进一档，与项目树子项同度量。 */
+.tool-menu-item.is-child { padding-left: 26px; font-size: 12px; }
 .tool-menu-item:disabled { opacity: .5; }
 .panel-heading { height: var(--panel-heading-h); min-height: var(--panel-heading-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .panel-heading > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -209,11 +310,13 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 .resize-handle:hover, .resize-handle:focus-visible { background: var(--accent); }
 .resize-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .editor-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--editor); }
-.editor-column.split-horizontal { flex-direction: row; }
-.editor-column.split-vertical { flex-direction: column; }
+/* 分屏容器：只装编辑器组与分隔条，底部工具窗口条在它外面（IDEA 的 split 是 EditorWindowSplitters）。 */
+.editor-groups { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.editor-groups.split-horizontal { flex-direction: row; }
+.editor-groups.split-vertical { flex-direction: column; }
 .editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
 .secondary-pane { border-left: 1px solid var(--line); }
-.split-vertical .secondary-pane { border-left: 0; border-top: 1px solid var(--line); }
+.split-vertical .secondary-pane, .editor-groups.split-vertical .secondary-pane { border-left: 0; border-top: 1px solid var(--line); }
 /* IDEA marks the focused editor group by tinting its tab strip. */
 .pane-focused > .editor-tabs { background: var(--rail); box-shadow: inset 0 -2px 0 var(--accent); }
 /* Preview tabs (opened from the tree, replaceable) show their title in italics. */
@@ -234,7 +337,7 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
    `maximizedProportion` was only ever a copy. */
 .tool-maximized .explorer-panel { width: 100%; max-width: none; border-right: 0; border-left: 0; }
 .tool-maximized .editor-column { display: none; }
-.editor-tabs { display: flex; height: 34px; min-height: 34px; flex-shrink: 0; background: var(--editor); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.editor-tabs { display: flex; height: var(--tab-strip-row); min-height: var(--tab-strip-row); flex-shrink: 0; background: var(--editor); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .file-tab { display: flex; align-items: center; border-right: 1px solid var(--line); border-top: 2px solid transparent; padding: 0 5px 0 0; flex-shrink: 0; transition: background-color var(--dur-1) var(--ease), border-color var(--dur-2) var(--ease); }
 .file-tab.selected { background: var(--editor); border-top-color: var(--accent); }
 /* IDEA's pinned tab: the pin glyph replaces the file icon; bulk close skips it. */
@@ -267,18 +370,23 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
    its full-area outline is dashed to read as "stays in this group". */
 .tab-drop-preview { position: absolute; pointer-events: none; z-index: 6; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-xs); }
 .tab-drop-preview.side-center { border-style: dashed; }
-/* ScrollableSingleRowLayout: a single-row strip never overflows — the tab that stops fitting
-   is clipped and the rest move behind the "…" button, so the row must not scroll. */
+/* ScrollableSingleRowLayout：滚动是**布局里算出来的偏移**（第一条的负左边距），不是原生滚动条
+   —— 上游给编辑器标签条的滚动条本身就是关掉的（`isWithScrollBar` false，:24-26/:703-705），
+   而且放开了原生滚动就会和 JS 的偏移两套打架。溢出靠裁切 + 滚轮。 */
 .editor-tabs { overflow: hidden; }
+/* 关掉「显示一行」= 上游 WrapMultiRowLayout：标签按布局算出的行/列**绝对**落到自己那一格
+   （`SimpleTabsRow.layoutTabs` 逐标签推进 `curX += len + gap`），条高随行数长；
+   工具条只占**第一行**右侧 —— 对应 `TabsRow.layoutTitleAndEntryPoint` 里
+   `withEntryPointToolbar` 只在 `isFirst` 时才保留的那一段宽度。多行既不裁切也不滚动。 */
+.editor-tabs.tabs-wrapped { position: relative; }
+.editor-tabs.tabs-wrapped .file-tab { position: absolute; top: 0; }
+.editor-tabs.tabs-wrapped .tab-toolbar { position: absolute; top: 0; right: 0; height: var(--tab-strip-row); margin-left: 0; }
 .editor-tabs .file-tab { overflow: hidden; flex: 0 0 auto; }
 .editor-tabs .file-tab .tab-select { min-width: 0; }
-.tab-more { flex: 0 0 auto; }
-.tab-more-menu { min-width: 200px; max-width: 320px; }
-.tab-more-menu .tab-more-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 /* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
    above the caret line, dismissed by the next key, a text change or a scroll. */
-.editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--menu-shadow); pointer-events: none; }
+.editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }
 .welcome-screen { margin: auto; width: 100%; max-width: 520px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; }
 .welcome-symbol { display: inline-flex; margin-bottom: 8px; color: var(--muted); padding: 0; }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
@@ -302,6 +410,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .output-tabs { height: 100%; display: flex; flex-shrink: 1; min-width: 0; gap: var(--space-4); overflow-x: auto; }
 .output-tabs > button { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .output-tabs > button.selected { color: var(--text); border-bottom-color: var(--accent); }
+/* 引用那一格的每条 content（IDEA 的 Find 窗口）：标签 + 钉住 + 关闭，后两个只在悬停/选中时露出来，
+   与工具窗口标签的关闭按钮一致（`TabbedPaneImpl`/`ContentTabLabel` 的那套 hover 行为）。 */
+.output-tab-closeable { height: 100%; display: inline-flex; align-items: center; gap: 2px; }
+.output-tab-closeable > button:first-child { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.output-tab-closeable > button:first-child.selected { color: var(--text); border-bottom-color: var(--accent); }
+.output-tab-close, .output-tab-pin { width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); opacity: 0; }
+.output-tab-closeable:hover .output-tab-close, .output-tab-closeable:hover .output-tab-pin,
+.output-tab-close:focus-visible, .output-tab-pin:focus-visible { opacity: 1; }
+.output-tab-pin.pinned { opacity: 1; color: var(--accent); }
+.output-tab-close:hover, .output-tab-pin:hover { background: var(--selected); color: var(--text); }
 .count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 16px; padding: 0 5px; margin-left: 5px; background: var(--selected); color: var(--secondary); border-radius: var(--radius-pill); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 /* COMBO content UI (`ToggleContentUiTypeMode`, `ContentComboLabel.java`): the same list of contents
    as the tab strip above, presented as one combo box instead. */
@@ -440,16 +558,39 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .capabilities > div:not(.capabilities-heading) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1); font-size: 11px; color: var(--secondary); margin: var(--space-2) 0; }
 .capabilities > div > span:last-child { color: var(--muted); }
 .capabilities > div > span.capability-ready { color: var(--success); background: var(--success-bg); border-radius: var(--radius-xs); padding: var(--space-1); }
-.statusbar { position: relative; min-height: 26px; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; color: var(--secondary); font-size: 11px; }
-.status-left, .status-right { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-width: 0; min-height: 25px; }
+/* 状态栏高度不是拍脑袋的常数，IDEA 是算出来的（platform-impl/.../status/）：
+     :266  getTopWidth()   = JBUI.getInt("StatusBar.topBorderWidth", 1)        → 顶边框 1px
+     :169  minIconHeight   = JBUIScale.scale(18 + 1 + 1)                       → 20
+     TextPanel.kt:65 computeTextHeight() = 一个 "XXX" JLabel 的 preferredSize.height（跟着 UI 字号/缩放走）
+     IdeStatusBarImpl.kt:803 preferredTextHeight = computeTextHeight() + Widget.border() 上下内边距
+     IdeStatusBarImpl.kt:351 minHeight = insets.top + insets.bottom + max(minIconHeight, preferredTextHeight)
+     IdeStatusBarImpl.kt:269 内容区 border = JBUI.Borders.empty(0, 10)          → 左右各 10px
+   默认缩放 + 11px 字体下 minHeight ≈ 22px。原先这里写死 26px、行高 25px，比 IDEA 高 3~4px，
+   而且漏了 :269 的左右 10px 内边距。
+   --statusbar-height 同时供状态栏内的按钮/品牌块取高（都用 calc(高度 - 1px 顶边框)），
+   改这里要一起生效。 */
+.statusbar { position: relative; min-height: var(--statusbar-height); flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; padding: 0 10px; color: var(--secondary); font-size: 11px; }
+.status-left, .status-right { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-width: 0; min-height: calc(var(--statusbar-height) - 1px); }
 .status-left > span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
-.status-brand { display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); width: 33px; height: 25px; }
+.status-brand { display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); width: 30px; height: calc(var(--statusbar-height) - 1px); }
 /* IDEA's ToolWindowsWidget (status/ToolWindowsWidget.java:62-299) sits in the status
    bar's left panel (IdeStatusBarImpl.kt:286-297): an icon-only stripe toggle whose
    hover list carries the tool windows and their Alt+<digit> mnemonics. */
-.status-toolwindows { display: flex; align-items: center; justify-content: center; width: 26px; height: 25px; border: 0; background: none; color: var(--secondary); cursor: pointer; }
+.status-toolwindows { display: flex; align-items: center; justify-content: center; width: 24px; height: calc(var(--statusbar-height) - 1px); border: 0; background: none; color: var(--secondary); cursor: pointer; }
 .status-toolwindows:hover { background: var(--hover); color: var(--bright); }
-.status-toolwindows-popup { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 60; display: flex; flex-direction: column; min-width: 220px; max-height: 320px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-toolwindows-popup { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 60; display: flex; flex-direction: column; min-width: 220px; max-height: 320px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+/* Select In（Alt+F1 的目标列表）。规格与补全弹窗同族：同一套底色、24px 行高、4px 内缩的选中条。
+   行首那一列是**独立的编号**（PopupListElementRenderer.java:363-369 的 myMnemonicLabel），
+   不是文案里的 "1. " 前缀；置灰的行仍留在表里（SelectInAction.java:99-105 showDisabledActions=true）。 */
+.select-in { position: fixed; z-index: 70; display: flex; flex-direction: column; min-width: 220px; max-width: 340px; padding: var(--popup-pad) 0; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--popup-background); color: var(--popup-foreground); box-shadow: var(--popup-shadow); outline: none; }
+.select-in-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
+.select-in-row.is-selected { background: var(--popup-selection); }
+.select-in-row:disabled { color: var(--popup-disabled); }
+.select-in-number { flex: 0 0 auto; min-width: 1ch; color: var(--popup-mnemonic); font-variant-numeric: tabular-nums; }
+.select-in-row.is-selected .select-in-number { color: inherit; }
+.select-in-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-in-filter { margin: 0; padding: 2px 10px 4px; color: var(--completion-info); }
+.select-in-empty { margin: 0; padding: 4px 10px; color: var(--completion-info); }
 .status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); }
 .status-toolwindows-group { display: block; margin: 4px 0 2px; padding: 0 8px; color: var(--muted); font-size: 10px; text-transform: none; }
 .status-toolwindows-name { flex: 1; text-align: left; }
@@ -474,10 +615,15 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-progress-toggle:hover { background: var(--hover); color: var(--bright); }
 .status-spin { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-.status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
 .status-progress-row strong { color: var(--text); font-size: 11px; font-weight: 600; }
 .status-progress-row span { color: var(--secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 确定式进度：上游 ProcessPopup 的每一行本身就是一条 JProgressBar（ProcessPopup.java:331 遍历的行里
+   有它），而"有没有百分比"由任务自己说了算 —— `total <= 0` 时上游是 setIndeterminate(true)，
+   所以这里只在 row.percent 不为 null 时画条，不确定式那一行仍然只有转圈的图标。 */
+.status-progress-track { align-self: stretch; width: 100%; height: 3px; margin-top: 2px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.status-progress-track > i { display: block; height: 100%; background: var(--accent); }
 /* IDEA ProcessPopup: every row ends in a real cancel button. */
 .status-progress-cancel { display: inline-flex; align-items: center; gap: 3px; align-self: flex-end; margin-top: 2px; padding: 1px var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 10px; }
 .status-progress-cancel:hover { background: var(--error-bg, transparent); color: var(--error); border-color: var(--error); }
@@ -495,7 +641,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-column { color: var(--accent) !important; background: var(--accent-soft); border-radius: var(--radius-xs); padding: 0 4px; }
 /* IDEA PowerSaveStatusWidgetFactory: the icon that flags power save mode. */
 /* IDEA IdeStatusBarImpl/ViewStatusBarWidgetsGroup: right-click lists the widgets. */
-.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .status-widget-title { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
 .status-widget-item { justify-content: flex-start; gap: var(--space-2); width: 100%; }
 .status-widget-backdrop { position: fixed; inset: 0; z-index: 55; }
@@ -529,7 +675,7 @@ html[data-ui-font-size='24'] { font-size: 24px; }
 .stripe-drop-hint { flex: 1 1 auto; min-height: 8px; }
 /* IDEA's "Choose Run Configuration" popup (Alt+Shift+F10): the header Run widget's
    caret opens this list; keyboard navigation is handled by the global key handler. */
-.config-chooser { position: fixed; top: var(--topbar-height); right: var(--space-3); z-index: 70; display: flex; flex-direction: column; min-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.config-chooser { position: fixed; top: var(--topbar-height); right: var(--space-3); z-index: 70; display: flex; flex-direction: column; min-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .config-chooser-title { margin: 0 0 var(--space-1); padding: 0 var(--space-2); color: var(--muted); font-size: 11px; }
 .config-chooser-empty { margin: 0; padding: var(--space-2); color: var(--secondary); font-size: 11px; }
 .config-chooser-row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; }
@@ -543,15 +689,32 @@ html[data-ui-font-size='24'] { font-size: 24px; }
 /* 结构上已经是两行（`.topbar-menubar-row` / `.topbar-toolbar`），所以这里只剩「汉堡模式隐藏菜单栏」。
    原来还有一条 `separate` 的 `flex: 1 1 100%; order: 9` —— 那是靠排序把菜单栏挤到第二行的旧做法，
    在新的 column 布局下反而会把它排到工具栏**之后**。 */
-html[data-main-menu='hamburger'] .menubar { display: none; }
-/* 顶栏高度按显示模式：合并成一行时矮一半；汉堡模式仍是「按钮行 + 工具栏行」两行。 */
+/* IDEA ExpandableMenu.switchState: the hamburger button toggles the real menu bar across
+   the toolbar row. It stays hidden until that toggle, instead of opening a second menu tree. */
+html[data-main-menu='hamburger']:not([data-menu-expanded='on']) .menubar { display: none; }
+/* ExpandableMenu.updateBounds: the expanded bar is laid over the header content (burger button
+   included), not inserted into the row. HeaderColorfulPanel is the menu's preferred width + 12 and
+   paints the header background; ShadowComponent fills the rest with that colour at ALPHA 0.6 and
+   hides the menu on mouse press (ExpandableMenu.kt:46, 212-215, 231-247). */
+html[data-main-menu='hamburger'] .topbar { position: relative; }
+/* 溢出按钮（merged 档）点开的是**同一个**完整菜单弹层 —— 上游两档共用一个 `MainMenuButton`
+   （`MainMenuWithButton.kt:47`），只是 merged 档的图标换成 `ChevronRight`（:142）。 */
+html[data-main-menu='hamburger'][data-menu-expanded='on'] .menubar,
+html[data-main-menu='merged'][data-menu-expanded='on'] .menubar { display: flex; position: absolute; top: 0; bottom: 0; left: var(--header-inset); z-index: 31; align-items: center; padding-right: 12px; background-color: var(--header-bg); background-image: var(--project-tint, none); }
+/* merged 档折进溢出按钮的顶层菜单：行面上不出现，但**留在 DOM 里**（弹层展开时要列出全部项，
+   而且 `display:none` 之后 offsetWidth 归零 —— 宽度按 MergedMainMenu.kt:171-176 的同一个理由缓存）。 */
+.menu-folded { display: none; }
+.menu-expand-shadow { position: absolute; inset: 0; z-index: 30; background: color-mix(in srgb, var(--header-bg) 60%, transparent); }
+/* 汉堡模式 = 菜单**并进主工具栏**，所以只有一行：`.topbar-menubar-row` 里只剩汉堡按钮，
+   与工具栏同一行（和 merged 的差别只是菜单换成按钮）。原先这里保留 column 布局，
+   于是汉堡模式仍是两行，第二行只有一个孤零零的按钮 —— 也就是顶部那条多余的空条。 */
+html[data-main-menu='hamburger'] .topbar { flex-direction: row; align-items: center; gap: 0; }
+html[data-main-menu='hamburger'] .topbar-menubar-row { min-height: var(--chrome-height); }
+/* 顶栏高度按显示模式：合并成一行时矮一半；汉堡模式同样是「按钮 + 工具栏」一行。 */
 html[data-main-menu='merged'] { --topbar-height: var(--chrome-height); }
-html[data-main-menu='hamburger'] { --topbar-height: calc(var(--chrome-height) * 2); }
-.hamburger-button { flex-shrink: 0; }
-.hamburger-menu { position: fixed; top: var(--topbar-height); left: var(--space-2); z-index: 70; display: flex; flex-direction: column; min-width: 240px; max-height: 70vh; overflow: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
-.hamburger-group { justify-content: flex-start; width: 100%; font-weight: 600; }
-.hamburger-item { justify-content: flex-start; gap: var(--space-2); width: 100%; padding-left: var(--space-4); }
-.hamburger-backdrop { position: fixed; inset: 0; z-index: 65; }
+html[data-main-menu='hamburger'] { --topbar-height: var(--chrome-height); }
+/* MainMenuButton: experimentalToolbarButtonSize 30x30, burgerMenuButtonIconSize 20 (JBUI.java:1277-1315). */
+.icon-button.hamburger-button { flex-shrink: 0; width: 30px; height: 30px; }
 /* Visually hidden live region that announces notifications to assistive technology. */
 .sr-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* IDEA 'Support screen readers': the tooltip suppression itself is done by removing
@@ -566,7 +729,7 @@ html[data-background='on'] .editor-stage { background-image: var(--bg-image-url)
 html[data-background='on'] .editor-stage .cm-editor { background: color-mix(in srgb, var(--editor) calc((1 - var(--bg-image-opacity, 1)) * 100%), transparent); }
 /* Presentation mode: bigger text, no chrome (IDEA presentationMode). */
 html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-banner { font-size: 1.15em; }
-.status-notice-list { position: absolute; bottom: 100%; right: 8px; z-index: 50; display: flex; flex-direction: column; gap: 2px; min-width: 300px; max-width: 420px; max-height: 280px; overflow: auto; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.status-notice-list { position: absolute; bottom: 100%; right: 8px; z-index: 50; display: flex; flex-direction: column; gap: 2px; min-width: 300px; max-width: 420px; max-height: 280px; overflow: auto; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .status-notice-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
 .status-notice-row { display: flex; gap: var(--space-2); margin: 0; color: var(--text); font-size: 11px; line-height: 1.6; }
 .status-notice-row.error { color: var(--error); }
@@ -575,17 +738,23 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
    failures *under* the title, so they read as the notification body rather than as more titles. */
 .status-notice-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .status-notice-detail { color: var(--secondary); font-size: 10px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.status-notice-progress { display: flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.status-notice-actions, .notice-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: 2px; }
+/* 通知上的动作按钮（`Notification.addAction`）：小、贴左，与正文一样宽的一栏里，不抢主操作的视觉重量。 */
+.notice-action { padding: 1px var(--space-2); font-size: 11px; }
+.status-notice-track { flex: 0 0 74px; height: 3px; border-radius: 2px; background: var(--accent); }
 .status-powersave { display: inline-flex; align-items: center; gap: 3px; color: var(--warning) !important; background: var(--warning-bg); border-radius: var(--radius-xs); padding: 0 4px; }
-.status-right { margin-left: auto; padding-right: 10px; }
+.status-right { margin-left: auto; gap: 0; padding-right: 10px; }
 .status-right > span { white-space: nowrap; font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
-.status-right > button { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: transparent; border: 0; border-radius: var(--radius-xs); padding: 0; color: var(--secondary); }
+/* IDEA StatusBar.Widget.border: New UI insets(6, 8) (JBUI.java:1021-1026), content-sized. */
+.status-right > button { display: flex; align-items: center; justify-content: center; white-space: nowrap; background: transparent; border: 0; border-radius: var(--radius-xs); padding: 6px 8px; color: var(--secondary); }
 .status-right > button:hover { background: var(--hover); color: var(--bright); }
 /* Notices reserve space above the status bar; long messages scroll within three lines. */
 .notice { display: flex; align-items: flex-start; gap: var(--space-2); flex-shrink: 0; min-width: 0; max-width: 100%; padding: var(--space-1) var(--space-2); border-top: 1px solid var(--line-strong); background: var(--success-bg); color: var(--success); font-size: 11px; line-height: 1.6; }
 .notice > span { flex: 1; min-width: 0; max-height: 4.8em; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
 .notice > .icon-button { width: 24px; height: 24px; color: inherit; }
 .notice.error { background: var(--error-bg); color: var(--error); }
-.workspace-notice { position: fixed; z-index: 30; right: 14px; bottom: 36px; width: max-content; max-width: min(420px, calc(100vw - 28px)); align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); background: var(--elevated); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-2); }
+.workspace-notice { position: fixed; z-index: 30; right: 14px; bottom: 36px; width: max-content; max-width: min(420px, calc(100vw - 28px)); align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); background: var(--elevated); color: var(--text); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); }
 .workspace-notice.error { background: var(--elevated); border-color: var(--error); color: var(--text); }
 .notice-icon { flex-shrink: 0; color: var(--success); }
 .workspace-notice.error .notice-icon { color: var(--error); }
@@ -714,6 +883,10 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .rename-target code { color: var(--accent); font-family: var(--font-mono); }
 .rename-input { width: 100%; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: 13px/1.5 var(--font-mono); }
 .rename-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* IDEA LocalHistoryDialog：时间线+diff 的对话框（ShowHistoryAction），宽而高，占屏 70%。 */
+.local-history-dialog { width: min(920px, 92vw); max-height: 78vh; display: flex; flex-direction: column; gap: var(--space-2); }
+.local-history-dialog > :first-of-type { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.local-history-dialog .small-muted { font-weight: 400; }
 .rename-note { margin: var(--space-2) 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 .ref-list { flex: 1; min-height: 0; overflow: auto; padding: var(--space-1) 0; }
@@ -727,18 +900,22 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .problems-list { flex: 1; min-height: 0; overflow: auto; }
 .problem-row { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
 .problem-sev { flex-shrink: 0; font-size: 10px; font-weight: 600; padding: 0 var(--space-1); border-radius: var(--radius-xs); text-transform: uppercase; }
-.sev-error { color: var(--error, #e5484d); background: color-mix(in srgb, var(--error, #e5484d) 14%, transparent); }
-.sev-warning { color: var(--warning, #f5a623); background: color-mix(in srgb, var(--warning, #f5a623) 14%, transparent); }
-.sev-info { color: var(--accent, #4673d1); background: color-mix(in srgb, var(--accent, #4673d1) 14%, transparent); }
+.sev-error { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.sev-warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.sev-info { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .problem-msg { flex: 1; min-width: 120px; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .problem-src { flex-shrink: 0; font-size: 10px; color: var(--muted); font-style: italic; }
 
 /* Integrated terminal (xterm host) */
 .terminal-host-wrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* 停靠在底部的工具窗口正文（vcslog / todo / debug / tests …）：与 terminal 宿主同一套伸缩规则，
+   否则这块内容在底部条里没有高度，正文会塌成 0。 */
+.bottom-view-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.bottom-view-host > * { flex: 1 1 auto; min-height: 0; }
 
 /* File-tree context menu */
 .tree-menu-backdrop { position: fixed; inset: 0; z-index: 40; }
-.tree-menu { position: fixed; min-width: 168px; padding: 4px; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--menu-radius); box-shadow: var(--menu-shadow); display: flex; flex-direction: column; transform-origin: top left; }
+.tree-menu { position: fixed; min-width: 168px; padding: 4px; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); color: var(--popup-foreground); box-shadow: var(--popup-shadow); display: flex; flex-direction: column; transform-origin: top left; }
 .tree-menu > button { text-align: left; background: transparent; border: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; }
 .tree-menu > button:hover { background: var(--hover); color: var(--bright); }
 .tree-menu .menu-danger { color: var(--error); }
@@ -800,7 +977,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .delete-usages { max-height: 180px; overflow: auto; margin: var(--space-2) 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
 .delete-usages-head, .delete-usages-empty, .delete-usages-error { margin: 0 0 var(--space-1); color: var(--secondary); font-size: 11px; }
 .delete-usages-scope { margin: 0 0 var(--space-1); padding: 3px 5px; border-left: 2px solid var(--muted); color: var(--secondary); font-size: 11px; line-height: 1.5; }
-.delete-usages-error { color: var(--danger, #c0392b); }
+.delete-usages-error { color: var(--error); }
 .delete-usages-more { color: var(--muted); }
 .delete-usages-list { margin: 0; padding: 0; list-style: none; }
 .delete-usage-row { display: block; width: 100%; padding: 1px 0; border: 0; background: transparent; color: var(--text); text-align: left; font: 11px var(--font-mono); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -824,7 +1001,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .worktree-branch { flex-shrink: 0; color: var(--accent); font: 11px var(--font-mono); }
 .worktree-flag, .submodule-commit { flex-shrink: 0; color: var(--muted); font-size: 10px; }
 .submodule-status { flex-shrink: 0; color: var(--muted); font-size: 10px; }
-.submodule-status.dirty { color: var(--danger, #c0392b); }
+.submodule-status.dirty { color: var(--error); }
 .worktree-add { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .worktree-add input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
 .worktree-new { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; color: var(--secondary); font-size: 11px; cursor: pointer; }
@@ -885,12 +1062,12 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .encoding-bom { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--secondary); font-size: 11px; }
 
 /* 快速文档（Quick Documentation） */
-.quickdoc-popup { position: fixed; z-index: 900; width: 460px; max-height: 300px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow) 30%, transparent); }
+.quickdoc-popup { position: fixed; z-index: 900; width: 460px; max-height: 300px; display: flex; flex-direction: column; background: var(--panel); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow) 30%, transparent); }
 .quickdoc-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .quickdoc-body { margin: 0; padding: var(--space-2) var(--space-3); overflow: auto; flex: 1; font: 12px var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
 
 /* Signature help (参数信息) — IDEA's parameter info panel with overload navigation */
-.signature-popup { position: fixed; z-index: 900; width: 500px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-2); outline: none; }
+.signature-popup { position: fixed; z-index: 900; width: 500px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); outline: none; }
 .signature-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-md) var(--radius-md) 0 0; }
 .signature-overload { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
 .signature-nav { display: flex; gap: 1px; }
@@ -935,6 +1112,9 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 /* IDEA's project-view popup submenus (New ▸, Associate with File Type ▸) */
 .tree-menu > button.has-sub::after { content: '›'; margin-left: auto; opacity: 0.7; }
 .tree-menu > button.sub-item { padding-left: 26px; font-size: 12px; }
+/* 编辑器右键菜单（EditorPopupMenu）：浮在光标处，而不是贴在父容器下沿。
+   复用 `.tree-menu` 的底色/前景/描边，只把定位换成 fixed —— 见 popup-foreground 判据。 */
+.editor-popup-menu { position: fixed; top: auto; right: auto; max-height: min(70vh, 520px); overflow-y: auto; }
 
 /* IDEA's Markdown preview split: editor left, rendered document right */
 .editor-stage.has-md-preview .code-editor { width: 50%; }
@@ -963,7 +1143,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .settings-search-hint { margin: calc(var(--space-2) * -1) 0 var(--space-2); padding: 0 var(--space-1); color: var(--muted); font-size: 10px; line-height: 1.6; }
 .settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px 4px; }
 .settings-crumbs[tabindex]:hover, .settings-crumbs[tabindex]:focus-visible { background: var(--hover); outline: none; }
-.settings-crumb-menu { position: fixed; z-index: 30; min-width: 150px; box-shadow: var(--menu-shadow); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.settings-crumb-menu { position: fixed; z-index: 30; min-width: 150px; color: var(--popup-foreground); box-shadow: var(--popup-shadow); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); }
 .settings-crumb-backdrop { position: fixed; inset: 0; z-index: 20; }
 .settings-spotlight { outline: 2px solid var(--spotlight); outline-offset: 2px; border-radius: var(--radius-xs); }
 .settings-spotlight-on .settings-panel :is(.checkbox-row, .input-row, .theme-option):not(.settings-spotlight) { opacity: 0.4; }
@@ -992,37 +1172,45 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .sticky-line { height: 20px; min-height: 20px; padding: 0 var(--space-3) 0 52px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 20px; }
 
 /* IDEA 的右边距线（Editor → General → Appearance → Show hard wrap guide，默认第 120 列）——
-   专注模式会把它关掉（ToggleDistractionFreeModeAction.applyAndSave:108 的 IS_RIGHT_MARGIN_SHOWN）。 */
+   专注模式会把它关掉（ToggleDistractionFreeModeAction.applyAndSave:108 的 IS_RIGHT_MARGIN_SHOWN）。
+   线的颜色跟着主题走 `--line-strong`：原先写的是 `var(--border, var(--muted))`，而 tokens.css 里
+   根本没有 `--border`，于是整条线永远退化成 `--muted` 文字色，换主题时也不跟随。 */
 .editor-right-margin .cm-content {
   background-image: linear-gradient(to right, transparent 0, transparent 120ch,
-                    var(--border, var(--muted)) 120ch, var(--border, var(--muted)) calc(120ch + 1px),
+                    var(--line-strong) 120ch, var(--line-strong) calc(120ch + 1px),
                     transparent calc(120ch + 1px));
   background-repeat: no-repeat;
   background-size: 100% 100%;
 }
 
-/* 主题切换的水纹：从点击位置扩散的一圈，用**目标主题的底色**铺满，于是亮色主题看起来在
-   「变亮」、暗色主题看起来在「变暗」（颜色不在这里写死 —— src/themeRipple.ts 从
-   `:root[data-theme]` 的 `--editor` 现取，主题改了不用同步这里）。
-   形状与动画都在 src/themeRipple.ts；`prefers-reduced-motion` 由它挡掉，这里不重复判断。 */
-.theme-ripple {
-  position: fixed;
-  z-index: 9999;
+/* 新主题完整快照在上层，从点击点揭示；旧快照保持不透明，不做默认交叉淡入淡出。 */
+:root.theme-transition::view-transition {
   pointer-events: none;
-  border-radius: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  /* 一圈更亮/更暗的水痕：中心实、边缘虚，扩出去时像一圈波纹推过去 */
-  box-shadow: 0 0 0 1px rgb(127 127 127 / .18) inset;
-  animation: theme-ripple-spread 560ms cubic-bezier(.16, 1, .3, 1) forwards;
 }
-.theme-ripple.to-dark { box-shadow: 0 0 0 1px rgb(0 0 0 / .22) inset; }
-
-@keyframes theme-ripple-spread {
-  from { transform: translate(-50%, -50%) scale(0); opacity: .88; }
-  to   { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+:root.theme-transition::view-transition-group(root) {
+  animation: none;
+}
+:root.theme-transition::view-transition-image-pair(root) {
+  isolation: isolate;
+}
+:root.theme-transition::view-transition-old(root),
+:root.theme-transition::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+:root.theme-transition::view-transition-old(root) { z-index: 1; }
+:root.theme-transition::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-reveal var(--dur-theme-reveal) var(--ease) both;
 }
 
-/* 系统里关了动画就不要这圈（themeRipple 也会提前返回，这里是双保险：万一动画被别处触发）。 */
+@keyframes theme-reveal {
+  from { clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y)); }
+  to { clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y)); }
+}
+
+/* 也覆盖动画播放期间系统设置发生改变的情况。 */
 @media (prefers-reduced-motion: reduce) {
-  .theme-ripple { animation: none; display: none; }
+  :root.theme-transition::view-transition-new(root) { animation: none; }
 }

@@ -1,69 +1,105 @@
-// 主题切换的水纹：从**点击位置**扩散的一圈，逐渐把界面变亮（切到月之亮面）或变暗（切到月之暗面）。
-//
-// 为什么自己写而不是用现成的：项目里已装的 motion-v 有过渡，但那套是"元素自己动"，
-// 而这里是**整屏底色**从点击点扩散 —— 需要一个 fixed 定位、盖住视口的圆，
-// 动画结束后自己删掉。现成的库没有这个形状。
-//
-// 无障碍：尊重 `prefers-reduced-motion` —— 用户在系统里关了动画，这里就**什么都不做**，
-// 不是"缩短一点"，是不做（硬规则：本仓对可访问性不省事）。
+import { nextTick } from 'vue'
+
 export type ThemeTarget = 'light' | 'dark'
 
-/** 涟漪从点击点扩到"能盖住整个视口"所需的半径。 */
+type ThemeTransition = {
+  ready: Promise<void>
+  finished: Promise<void>
+  updateCallbackDone: Promise<void>
+  skipTransition(): void
+}
+
+type TransitionDocument = Document & {
+  startViewTransition?: (update: () => Promise<void>) => ThemeTransition
+}
+
+let activeTransition: ThemeTransition | undefined
+let generation = 0
+
+/** 涟漪从点击点扩到能盖住整个视口所需的半径（含边角的一像素容差）。 */
 export function rippleRadius(point: { x: number; y: number }, viewport: { width: number; height: number }): number {
   const dx = Math.max(point.x, viewport.width - point.x)
   const dy = Math.max(point.y, viewport.height - point.y)
-  // 四个角里最远的那个在「远的那一侧 x」×「远的那一侧 y」上，距离就是 hypot(dx, dy)
-  // —— 不是 max(dx,dy)：后者在视口不是正方形时盖不住角。
-  // +1 容差把最后一像素也盖住，免得边角漏出旧主题。
   return Math.hypot(dx, dy) + 1
 }
 
-/** 点击落在视口外（理论上不会）时退化到中心，避免算出 NaN 半径。 */
-function normalizePoint(event: { clientX: number; clientY: number }, viewport: { width: number; height: number }) {
-  const x = Number.isFinite(event.clientX) ? event.clientX : viewport.width / 2
-  const y = Number.isFinite(event.clientY) ? event.clientY : viewport.height / 2
-  return { x, y }
+/** 键盘触发或无有效点击位置时从中心展开。 */
+function normalizePoint(event: { clientX: number; clientY: number; detail?: number } | null, viewport: { width: number; height: number }) {
+  const valid = event && event.detail !== 0
+    && Number.isFinite(event.clientX) && event.clientX >= 0 && event.clientX <= viewport.width
+    && Number.isFinite(event.clientY) && event.clientY >= 0 && event.clientY <= viewport.height
+  return valid ? { x: event.clientX, y: event.clientY } : { x: viewport.width / 2, y: viewport.height / 2 }
 }
 
 function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  return typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function targetBackground(): string {
-  if (typeof document === 'undefined') return '#ffffff'
-  // 换完主题再取：`:root[data-theme=…]` 里的 `--editor` 已经是**目标主题**的底色，
-  // 所以圆圈用的就是这个色 —— 亮色主题铺亮底（看起来在变亮），暗色主题铺暗底（在变暗）。
-  // 不在这里硬编码两套色值，主题改了也不用同步。
-  const value = getComputedStyle(document.documentElement).getPropertyValue('--editor').trim()
-  return value || (document.documentElement.getAttribute('data-theme') === 'dark' ? '#22252c' : '#f7f8fa')
-}
-
 /**
- * 播一圈水纹。`event` 给点击位置，`target` 决定这一圈是"变亮"还是"变暗"。
- *
- * 返回 true 表示真的播了动画（便于测试与调用方判断），false 表示被 reduced-motion 挡掉了。
+ * 揭示真正的新主题快照，而非用纯色圆遮住界面。
+ * 调用方必须把主题赋值放进 applyTheme，不能在调用前改变主题。
+ * 返回 true 表示已请求原生过渡；API 不可用/减少动态效果时仍立即应用主题。
  */
-export function themeRipple(event: { clientX: number; clientY: number } | null, target: ThemeTarget): boolean {
-  if (typeof document === 'undefined') return false
-  if (prefersReducedMotion()) return false
+export function themeRipple(
+  event: { clientX: number; clientY: number; detail?: number } | null,
+  target: ThemeTarget,
+  applyTheme: () => void,
+): boolean {
+  const current = ++generation
+  activeTransition?.skipTransition()
+  activeTransition = undefined
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    applyTheme()
+    return false
+  }
+
+  const root = document.documentElement
+  const clear = () => {
+    root.classList.remove('theme-transition')
+    root.style.removeProperty('--theme-reveal-x')
+    root.style.removeProperty('--theme-reveal-y')
+    root.style.removeProperty('--theme-reveal-radius')
+  }
+  clear()
+  const transitionDocument = document as TransitionDocument
+  if (!transitionDocument.startViewTransition || prefersReducedMotion() || root.dataset.theme === target) {
+    applyTheme()
+    return false
+  }
 
   const viewport = { width: window.innerWidth, height: window.innerHeight }
-  const point = normalizePoint(event ?? { clientX: Number.NaN, clientY: Number.NaN }, viewport)
-  const size = rippleRadius(point, viewport) * 2
+  const point = normalizePoint(event, viewport)
+  root.style.setProperty('--theme-reveal-x', `${point.x}px`)
+  root.style.setProperty('--theme-reveal-y', `${point.y}px`)
+  root.style.setProperty('--theme-reveal-radius', `${rippleRadius(point, viewport)}px`)
+  root.classList.add('theme-transition')
 
-  const circle = document.createElement('div')
-  circle.className = `theme-ripple to-${target}`
-  circle.setAttribute('aria-hidden', 'true')
-  circle.style.left = `${point.x}px`
-  circle.style.top = `${point.y}px`
-  circle.style.width = `${size}px`
-  circle.style.height = `${size}px`
-  circle.style.background = targetBackground()
-  // 动画可能因为页面隐藏/节流没跑完 —— 留个兜底移除，别把一个满屏的 div 留在 DOM 里。
-  const drop = () => circle.remove()
-  circle.addEventListener('animationend', drop, { once: true })
-  setTimeout(drop, 900)
-  document.body.appendChild(circle)
+  const update = async () => {
+    // skipTransition 不取消待执行的更新回调；旧点击不能覆盖更新的主题选择。
+    if (current !== generation) return
+    applyTheme()
+    // 等 Vue 的主题 watcher、子组件和编辑器样式更新完再捕获新快照。
+    await nextTick()
+  }
+
+  let transition: ThemeTransition
+  try {
+    transition = transitionDocument.startViewTransition(update)
+  } catch {
+    clear()
+    applyTheme()
+    return false
+  }
+  activeTransition = transition
+  const cleanup = () => {
+    if (current !== generation) return
+    activeTransition = undefined
+    clear()
+  }
+  // 页面隐藏、快速重入等都可能使 ready 拒绝；主题更新仍由原生更新回调执行。
+  void transition.ready.catch(() => transition.skipTransition())
+  void transition.updateCallbackDone.catch(() => transition.skipTransition())
+  void transition.finished.then(cleanup, cleanup)
   return true
 }

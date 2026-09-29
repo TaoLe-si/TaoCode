@@ -25,8 +25,12 @@ const props = defineProps<{
   root: string
   active: boolean
   todoPatterns: TodoPattern[]
+  /** 统一 diff 的上下文行数（IDEA diff 设置 settings.context.lines；0/未传 = git 默认）。 */
+  diffContextLines?: number
   /** IDEA's commit-message inspections (Settings › Version Control › Commit). */
   commitSettings: CommitMessageInspectionSettings
+  /** 「与某分支比较」的目标（工具栏分支弹窗 → 比较）：设好后本面板直接跑一次比较。 */
+  compareWith?: string
 }>()
 const status = ref<GitStatus>({ available: true, changes: [] })
 const loading = ref(false)
@@ -464,7 +468,10 @@ async function toggleHistory() {
 async function showDiff(target: { path: string; staged: boolean; base?: string }) {
   const base = target.base ?? ''
   hunkError.value = ''
-  const params = base ? { path: target.path, staged: target.staged, base } : { path: target.path, staged: target.staged }
+  // context：把设置里的 diff 上下文行数透给 native（拼成 git 的 -U<n>）。
+  const params = base
+    ? { path: target.path, staged: target.staged, base, context: props.diffContextLines ?? 0 }
+    : { path: target.path, staged: target.staged, context: props.diffContextLines ?? 0 }
   try {
     // Both views come from the same `git diff`; the aligned rows are parsed natively
     // from that text, so the two modes can never disagree.
@@ -487,6 +494,13 @@ async function showDiff(target: { path: string; staged: boolean; base?: string }
     }
   } catch (caught) { error.value = errorText(caught) }
 }
+// 外部请求的「与某分支比较」（分支弹窗 → 比较）：设好 base 后直接跑一次，
+// 结果就出现在本面板已有的比较列表里（不另造一套展示）。
+watch(() => props.compareWith, base => {
+  if (!base) return
+  compareBase.value = base
+  runCompare()
+})
 function runCompare() {
   const base = compareBase.value
   if (!base) { compared.value = []; compareTo.value = ''; return }

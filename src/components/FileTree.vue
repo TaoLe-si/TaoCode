@@ -1,17 +1,41 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { getProjectTreeState } from '../projectTreeState'
 import { ChevronRight, Folder, FileCode2, FileText, Package, NotebookPen } from 'lucide-vue-next'
-import { request, type Entry } from '../bridge'
+import type { Entry } from '../bridge'
+import { createProjectTreeModel, type SyntheticNode } from '../projectTreeModel'
+import type { ProjectTreeSortSettings } from '../projectTreeSort'
+import { treeClickOpensFile, treeOpenUsesPreviewTab, type ProjectViewBehavior } from '../projectViewBehavior'
+import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
+import SpeedSearchBar from './SpeedSearchBar.vue'
 
-// Synthetic nodes (ProjectFileNodeImpl: "External Libraries", "Scratches and
-// Consoles") carry a fixed pseudo-path so they expand like real directories.
-export interface SyntheticNode { path: string; label: string; icon: 'libraries' | 'scratches'; entries: Entry[] }
-const props = defineProps<{ entries: Entry[]; active?: string; depth?: number; synthetic?: SyntheticNode[]; indentGuides?: boolean; compactIndents?: boolean; expandWithSingleClick?: boolean }>()
-// IDEA TreeUI: with UISettings.expandNodesWithSingleClick off (the default,
-// UISettingsState.kt:141) a single click only selects a node and the second
-// click expands a directory; with it on, one click expands right away.
-// IDEA's "Use smaller indents" (compactTreeIndents) shrinks the per-level step;
-// the base keeps room for the chevron either way.
+export type { SyntheticNode } from '../projectTreeModel'
+const props = defineProps<{
+  entries: Entry[]; active?: string; depth?: number; synthetic?: SyntheticNode[]
+  indentGuides?: boolean; compactIndents?: boolean; expandWithSingleClick?: boolean
+  fileColor?: (path: string, isDirectory: boolean) => string | null
+  workspaceKey?: string; projectName?: string
+  sortSettings?: ProjectTreeSortSettings
+  /** 项目视图自己的三条行为（IDEA `additionalGearActions` 那一组）。 */
+  behavior?: ProjectViewBehavior
+}>()
+const emit = defineEmits<{ open: [path: string, preview: boolean]; error: [message: string]; context: [payload: { entry: Entry; x: number; y: number }] }>()
+// A flattened visible tree uses one shared model for every depth. Directory rows
+// no longer instantiate independent caches/selection models, so toolbar actions
+// and keyboard navigation address exactly the rows rendered here.
+const sharedSortSettings = computed(() => props.sortSettings ?? getProjectTreeState(props.workspaceKey ?? '').state)
+const model = createProjectTreeModel({
+  entries: () => props.entries,
+  synthetic: () => props.synthetic ?? [],
+  depth: () => props.depth ?? 0,
+  projectName: () => props.projectName,
+  sortSettings: () => sharedSortSettings.value,
+  error: message => emit('error', message),
+})
+const { rows, expanded, selected, selection, loading, tabStop } = model
+watch(() => props.workspaceKey, () => model.reset(), { flush: 'sync' })
+watch(() => [props.entries, props.synthetic], () => { void model.refresh() }, { flush: 'pre' })
+onBeforeUnmount(model.dispose)
 const step = () => (props.compactIndents ? 11 : 15)
 const base = () => (props.compactIndents ? 10 : 12)
 const indentStyle = (level: number) => ({ paddingLeft: `${base() + level * step()}px` })
@@ -19,164 +43,152 @@ const guideStyle = () => ({
   backgroundImage: `repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px ${step()}px)`,
   backgroundPositionX: `${base() + step()}px`,
 })
-const emit = defineEmits<{ open: [path: string]; error: [message: string]; context: [payload: { entry: Entry; x: number; y: number }] }>()
-const expanded = reactive(new Set<string>())
-const selected = ref('')
-const loading = reactive(new Set<string>())
-const children = reactive(new Map<string, Entry[]>())
-// `entries` is replaced whenever another project becomes active or the tree is
-// refreshed; every request started before that belongs to the previous listing and
-// must not write its answer into the cache of the new one.
-let epoch = 0
-watch(() => props.entries, () => { epoch++ })
-const stale = (token: number) => token !== epoch
-async function loadChildren(path: string, token: number): Promise<Entry[]> {
-  const entries = await request<Entry[]>('workspace.list', { path })
-  // A result whose listing is gone (project switched mid-request) is dropped.
-  if (stale(token)) return []
-  children.set(path, entries)
-  return entries
+function bindRow(path: string, element: unknown) {
+  if (element instanceof HTMLElement) model.elements.set(path, element)
+  else model.elements.delete(path)
 }
-async function activate(entry: Entry) {
-  // Synthetic library leaves (path starts with "\u0000lib:") never exist on disk;
-  // the row is a glob string and clicking it must not try to open a workspace
-  // file. The owning App layer renders the actual glob path in the row tooltip.
+function activate(entry: Entry, event: MouseEvent) {
+  model.select(entry.path, event)
+  void model.focus(entry.path)
+  if (event.ctrlKey || event.metaKey || event.shiftKey) return
+  if (entry.kind === 'directory') {
+    // Ignore the second click of a double click in single-click expansion mode.
+    if (props.expandWithSingleClick && event.detail < 2) model.toggle(entry)
+    return
+  }
   if (entry.path.startsWith('\u0000')) return
-  if (entry.kind === 'file') { emit('open', entry.path); return }
-  if (!props.expandWithSingleClick && !expanded.has(entry.path)) { selected.value = entry.path; return }
-  if (loading.has(entry.path)) return
-  if (expanded.has(entry.path)) { expanded.delete(entry.path); return }
-  try {
-    loading.add(entry.path)
-    await loadChildren(entry.path, epoch)
-    expanded.add(entry.path)
-  } catch (error) { emit('error', error instanceof Error ? error.message : String(error)) }
-  finally { loading.delete(entry.path) }
+  // 「单击打开文件」（`ProjectView.AutoscrollToSource`，与目录的 `OpenDirectoriesWithSingleClick` 同一组）：
+  // 开关关着时只有双击才开（见 doubleClick），打开时单击就开。
+  if (treeClickOpensFile(behavior(), 'file', event.detail) === 'open') emit('open', entry.path, treeOpenUsesPreviewTab(behavior()))
 }
-// Double click expands a directory without selecting-opening it (the IDE's
-// default project-view behaviour when expandNodesWithSingleClick is off).
-async function expandEntry(entry: Entry) {
-  if (entry.kind !== 'directory' || loading.has(entry.path)) return
-  if (expanded.has(entry.path)) return
-  try {
-    loading.add(entry.path)
-    await loadChildren(entry.path, epoch)
-    expanded.add(entry.path)
-  } catch (error) { emit('error', error instanceof Error ? error.message : String(error)) }
-  finally { loading.delete(entry.path) }
+function doubleClick(entry: Entry) {
+  if (entry.kind === 'directory') { if (!props.expandWithSingleClick) model.toggle(entry); return }
+  if (entry.path.startsWith('\u0000')) return
+  if (treeClickOpensFile(behavior(), 'file', 2) === 'open') emit('open', entry.path, treeOpenUsesPreviewTab(behavior()))
 }
-function toggleSynthetic(node: SyntheticNode) {
-  if (expanded.has(node.path)) expanded.delete(node.path)
-  else expanded.add(node.path)
+/**
+ * 三条行为的当前值。来源是**项目视图设置**（`props.sortSettings`，宿主两处都传了
+ * `projectTreeState.state`；缺字段按上游默认 false）。`props.behavior` 是给纯渲染用例
+ * （SSR 夹具）直接注入三值的口子。
+ */
+function behavior(): ProjectViewBehavior {
+  const settings = props.sortSettings as Partial<ProjectViewBehavior> | undefined
+  return props.behavior ?? {
+    autoscrollToSource: settings?.autoscrollToSource ?? false,
+    autoscrollFromSource: settings?.autoscrollFromSource ?? false,
+    openInPreviewTab: settings?.openInPreviewTab ?? false,
+  }
+}
+function toggleChevron(entry: Entry) {
+  model.select(entry.path)
+  void model.focus(entry.path)
+  model.toggle(entry)
 }
 function showMenu(entry: Entry, event: MouseEvent) {
   event.preventDefault()
-  emit('context', { entry, x: event.clientX, y: event.clientY })
+  model.select(entry.path, {}, selection.has(entry.path))
+  void model.focus(entry.path)
+  // Synthetic library descriptors are not real filesystem context targets.
+  if (!entry.path.startsWith('\u0000')) emit('context', { entry, x: event.clientX, y: event.clientY })
 }
-function collapseAll() {
-  expanded.clear()
+const { collapseAll, expandAll, reveal, expandRecursively, getSelectedEntries, canExpandRecursively } = model
+// 速度搜索（IDEA 的 `SpeedSearch`，项目视图装的是 `TreeSpeedSearch`）：Ctrl+F 在树上打开搜索框，
+// 输入即选中第一条命中，上下键在命中项之间走，Enter/Esc 收起搜索框。
+// 匹配（驼峰子序列）与按键归属都在 src/speedSearch.ts，这里只管 DOM 与焦点。
+const rootRef = ref<HTMLElement | null>(null)
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const searchLabels = () => rows.value.map(row => row.synthetic?.label ?? row.entry.name)
+/** 选中第 index 行并滚到可见处。`reveal` 就是上游"展开折叠的祖先再选中"的等价物。 */
+async function gotoHit(index: number) {
+  const row = rows.value[index]
+  if (!row) return
+  reveal(row.entry.path)
+  await model.focus(row.entry.path)
 }
-async function expandAll() {
-  const dirs: string[] = []
-  function collect(entries: Entry[]) {
-    for (const e of entries) {
-      if (e.kind === 'directory') { dirs.push(e.path); collect(children.get(e.path) ?? []) }
-    }
-  }
-  collect(props.entries)
-  const token = epoch
-  const unreadable: string[] = []
-  for (const dir of dirs) {
-    if (expanded.has(dir) || loading.has(dir)) continue
-    try {
-      loading.add(dir)
-      await loadChildren(dir, token)
-      expanded.add(dir)
-    } catch (error) {
-      // Report what could not be read instead of leaving the rows silently missing.
-      unreadable.push(dir.split('/').pop() || dir)
-    } finally { loading.delete(dir) }
-  }
-  if (stale(token)) return
-  if (unreadable.length) emit('error', `${unreadable.length} 个目录无法读取：${unreadable.slice(0, 5).join('、')}${unreadable.length > 5 ? ' …' : ''}`)
-  for (const node of props.synthetic ?? []) expanded.add(node.path)
+async function onSearchInput(value: string) {
+  searchQuery.value = value
+  const index = firstSpeedSearchHit(searchLabels(), searchQuery.value)
+  if (index >= 0) await gotoHit(index)
 }
-// Expands the parent directories of `path` and returns whether every one of them is
-// already known, so the caller knows the row can be selected right away.
-function reveal(path: string): boolean {
-  const parts = path.split('/')
-  let ready = true
-  for (let i = 1; i < parts.length; i++) {
-    const dir = parts.slice(0, i).join('/')
-    if (dir && !expanded.has(dir)) {
-      expanded.add(dir)
-      if (!children.has(dir)) {
-        ready = false
-        const token = epoch
-        request<Entry[]>('workspace.list', { path: dir }).then(
-          entries => { if (!stale(token)) children.set(dir, entries) },
-          () => { expanded.delete(dir) },
-        )
-      }
-    }
-  }
-  return ready
+function openSpeedSearch() {
+  if (!rows.value.length) return
+  searchOpen.value = true
+  // 焦点交给搜索框：组件把它渲染在 `.project-view` 下的 `.speed-search-input` 上。
+  void nextTick(() => (rootRef.value?.querySelector('.speed-search-input') as HTMLInputElement | null)?.focus())
 }
-defineExpose({ collapseAll, expandAll, reveal })
+async function closeSpeedSearch() {
+  searchOpen.value = false
+  searchQuery.value = ''
+  await model.focus(selected.value)
+}
+async function onSearchKeydown(event: KeyboardEvent) {
+  const query = searchQuery.value
+  const action = speedSearchKeyAction(event.key, query)
+  if (action === 'accept' || action === 'hide') { event.preventDefault(); await closeSpeedSearch(); return }
+  if (action === 'ignore') return
+  const step = speedSearchStepForKey(event.key)
+  if (!step) return
+  event.preventDefault()
+  const labels = searchLabels()
+  const current = rows.value.findIndex(row => row.entry.path === selected.value)
+  const target = step.kind === 'first' ? firstSpeedSearchHit(labels, query)
+    : step.kind === 'last' ? lastSpeedSearchHit(labels, query)
+    : nextSpeedSearchHit(labels, query, current, step.kind === 'next' ? 1 : -1)
+  if (target >= 0) await gotoHit(target)
+}
+// Existing public method signatures are retained. workspaceKey is an optional
+// host identity boundary for project switches whose relative root names match.
+defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEntries, canExpandRecursively, openSpeedSearch, selected, selection })
 </script>
 
 <template>
-  <!-- The root frame renders the module node plus the synthetic nodes below it; nested
-       instances are plain recursive directory lists. -->
-  <div v-if="!depth" class="project-view">
-    <p v-if="!entries.length && !synthetic?.length" class="tree-empty">此项目没有可见文件；排除的目录在“设置 → 项目结构”里调整。</p>
-    <ul class="tree-list" role="tree" aria-label="项目文件">
-      <li v-for="entry in entries" :key="entry.path" role="none">
+  <div ref="rootRef" class="project-view" @keydown.ctrl.f.prevent.stop="openSpeedSearch()">
+    <!-- 速度搜索的搜索框：只有打开时才占位。命中后上下键在命中项之间走，Enter/Esc 收起。 -->
+    <SpeedSearchBar :open="searchOpen" :query="searchQuery" @input="onSearchInput" @keydown="onSearchKeydown" />
+    <p v-if="!rows.length" class="tree-empty">此项目没有可见文件；排除的目录在“设置 → 项目结构”里调整。</p>
+    <ul class="tree-list" :role="depth ? 'group' : 'tree'" aria-label="项目文件" aria-multiselectable="true">
+      <li v-for="row in rows" :key="row.entry.path" role="none">
         <button
-          class="tree-entry" role="treeitem" aria-level="1" :class="{ selected: active === entry.path || selected === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @dblclick="expandEntry(entry)" @contextmenu="showMenu(entry, $event)"
+          :ref="element => bindRow(row.entry.path, element)"
+          class="tree-entry" role="treeitem"
+          :class="{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }"
+          :style="[indentStyle(row.level), indentGuides ? guideStyle() : undefined, { '--tree-file-color': !row.synthetic && !row.entry.path.startsWith('\u0000') ? fileColor?.(row.entry.path, row.entry.kind === 'directory') ?? undefined : undefined }]"
+          :title="row.synthetic?.label ?? (row.entry.path === '' ? workspaceKey ?? row.entry.name : row.entry.path)"
+          :aria-level="row.level + 1"
+          :aria-expanded="row.entry.kind === 'directory' ? expanded.has(row.entry.path) : undefined"
+          :aria-selected="selection.has(row.entry.path)"
+          :aria-current="row.entry.kind === 'file' && active === row.entry.path ? 'page' : undefined"
+          :aria-busy="loading.has(row.entry.path) || undefined"
+          :tabindex="tabStop === row.entry.path ? 0 : -1"
+          @focus="model.onFocus(row.entry.path)"
+          @click="activate(row.entry, $event)"
+          @dblclick="doubleClick(row.entry)"
+          @contextmenu="showMenu(row.entry, $event)"
+          @keydown="model.navigate($event, row.entry, path => emit('open', path, treeOpenUsesPreviewTab(behavior())))"
+          @keyup.space.prevent
         >
-          <ChevronRight v-if="entry.kind === 'directory'" :size="12" class="tree-chevron" :class="{ expanded: expanded.has(entry.path) }" />
+          <span v-if="row.entry.kind === 'directory'" class="tree-expander" @click.stop="toggleChevron(row.entry)" @dblclick.stop>
+            <ChevronRight :size="12" class="tree-chevron" :class="{ expanded: expanded.has(row.entry.path) }" />
+          </span>
           <span v-else class="tree-spacer" />
-          <Folder v-if="entry.kind === 'directory'" :size="15" class="folder-icon" />
-          <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(entry.name)" :size="15" class="code-icon" />
+          <Package v-if="row.synthetic?.icon === 'libraries'" :size="15" class="synthetic-icon" />
+          <NotebookPen v-else-if="row.synthetic?.icon === 'scratches'" :size="15" class="synthetic-icon" />
+          <Folder v-else-if="row.entry.kind === 'directory'" :size="15" class="folder-icon" />
+          <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(row.entry.name)" :size="15" class="code-icon" />
           <FileText v-else :size="15" class="muted" />
-          <span class="tree-name">{{ entry.name }}</span><span v-if="loading.has(entry.path)">…</span>
+          <span class="tree-name">{{ row.entry.name }}</span><span v-if="loading.has(row.entry.path)">…</span>
         </button>
-        <FileTree v-if="expanded.has(entry.path)" :entries="children.get(entry.path) ?? []" :active="active" :depth="(depth ?? 0) + 1" :indent-guides="indentGuides" :compact-indents="compactIndents" @open="emit('open', $event)" @error="emit('error', $event)" @context="emit('context', $event)" />
-        <div v-if="expanded.has(entry.path) && children.get(entry.path)?.length === 0" class="empty-folder" :style="indentStyle(2)">空目录</div>
-      </li>
-      <li v-for="node in synthetic" :key="node.path" role="none">
-        <button class="tree-entry tree-synthetic" role="treeitem" aria-level="1" :style="indentStyle(0)" :aria-expanded="expanded.has(node.path)" :title="node.label" @click="toggleSynthetic(node)">
-          <ChevronRight :size="12" class="tree-chevron" :class="{ expanded: expanded.has(node.path) }" />
-          <Package v-if="node.icon === 'libraries'" :size="15" class="synthetic-icon" />
-          <NotebookPen v-else :size="15" class="synthetic-icon" />
-          <span class="tree-name">{{ node.label }}</span>
-        </button>
-        <FileTree v-if="expanded.has(node.path)" :entries="node.entries" :active="active" :depth="1" :indent-guides="indentGuides" :compact-indents="compactIndents" @open="emit('open', $event)" @error="emit('error', $event)" @context="emit('context', $event)" />
-        <div v-if="expanded.has(node.path) && !node.entries.length" class="empty-folder" :style="indentStyle(2)">（空）</div>
+        <div v-if="expanded.has(row.entry.path) && (row.synthetic ? row.synthetic.entries.length === 0 : row.entry.path === '' && projectName !== undefined && !depth ? entries.length === 0 : model.children.get(row.entry.path)?.length === 0)" class="empty-folder" :style="indentStyle(row.level + 1)">{{ row.synthetic ? '（空）' : '空目录' }}</div>
       </li>
     </ul>
   </div>
-  <ul v-else class="tree-list" role="group">
-    <li v-for="entry in entries" :key="entry.path" role="none">
-      <button
-        class="tree-entry" role="treeitem" :aria-level="(depth ?? 0) + 1" :class="{ selected: active === entry.path || selected === entry.path, 'indent-guides': indentGuides }" :style="[indentStyle(depth ?? 0), indentGuides ? guideStyle() : undefined]" :title="entry.path" :aria-expanded="entry.kind === 'directory' ? expanded.has(entry.path) : undefined" :aria-current="active === entry.path ? 'page' : undefined" :disabled="loading.has(entry.path)" @click="activate(entry)" @dblclick="expandEntry(entry)" @contextmenu="showMenu(entry, $event)"
-      >
-        <ChevronRight v-if="entry.kind === 'directory'" :size="12" class="tree-chevron" :class="{ expanded: expanded.has(entry.path) }" />
-        <span v-else class="tree-spacer" />
-        <Folder v-if="entry.kind === 'directory'" :size="15" class="folder-icon" />
-        <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(entry.name)" :size="15" class="code-icon" />
-        <FileText v-else :size="15" class="muted" />
-        <span class="tree-name">{{ entry.name }}</span><span v-if="loading.has(entry.path)">…</span>
-      </button>
-      <FileTree v-if="expanded.has(entry.path)" :entries="children.get(entry.path) ?? []" :active="active" :depth="(depth ?? 0) + 1" :indent-guides="indentGuides" :compact-indents="compactIndents" @open="emit('open', $event)" @error="emit('error', $event)" @context="emit('context', $event)" />
-      <div v-if="expanded.has(entry.path) && children.get(entry.path)?.length === 0" class="empty-folder" :style="indentStyle((depth ?? 0) + 2)">空目录</div>
-    </li>
-  </ul>
 </template>
 
 <style scoped>
 .tree-synthetic { color: var(--secondary); font-style: italic; }
 .synthetic-icon { color: var(--syntax-meta); flex-shrink: 0; }
+.tree-expander { display: inline-flex; flex-shrink: 0; }
+.tree-entry:not(.selected):not(:hover) { background-color: var(--tree-file-color, transparent); }
 .tree-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
 </style>

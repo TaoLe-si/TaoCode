@@ -188,6 +188,40 @@ public:
     // {ok, verifiedLines:[1-based int], path, deferred?}.
     void set_breakpoints(const std::string& rel_path, const Json& requested, Reply on_reply);
     void continue_execution(long thread_id, bool all, Reply on_reply);
+    // DAP `gotoTargets`（IDEA 的 Run to Cursor，Alt+F9）：问适配器"这一行能停在哪儿"。
+    // Reply result: {targets:[{id, label, line?, column?}]}。
+    void goto_targets(const std::string& rel_path, long line, long column, Reply on_reply);
+    // DAP `goto`：跳到 gotoTargets 给出的目标 —— 「运行到光标处」的第二步。
+    void goto_target(long thread_id, long target_id, Reply on_reply);
+    // DAP `restartFrame`（IDEA Frames 视图的「丢弃帧」）：回滚到该帧重新执行。
+    void restart_frame(long frame_id, Reply on_reply);
+    // DAP `breakpointLocations`（规范 "Breakpoint Locations Request"）—— IDEA 的
+    // `XLineBreakpointType.canPutAt(file, line, project)`
+    // （`platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointType.java:50-52`，
+    // 默认返回 false；挑选逻辑见 `XDebuggerUtilImpl.java:111-121`：`canPutAt` 为真且 priority
+    // 最高的类型胜出，**一个都没有就拒绝放断点**并报 "Cannot find appropriate breakpoint type"，
+    // 布尔版 `canPutBreakpointAt` 在 `:134-136`）。
+    // 规范里由能力位 `supportsBreakpointLocationsRequest` 门控，**默认 false**；没声明的适配器
+    // 回 `DAP_UNSUPPORTED`，调用方据此保持旧行为（不因为服务器不支持就把功能禁掉）。
+    // `end_line`/`column`/`end_column` 都按规范可选：<= 0 表示不发该字段。
+    // Reply result: {available, locations:[{line, column?, endLine?, endColumn?}]}，
+    // **空数组是有意义的答案**（= IDEA 的 "没有可放置位置"），不是错误。
+    void breakpoint_locations(const std::string& rel_path, long line, long end_line, long column, long end_column,
+                              Reply on_reply);
+    // DAP `completions`（规范 "Completions Request"）：调试表达式输入框的补全。
+    //
+    // **IDEA 侧没有平台级对应类**（这点查过源码，不要照抄一个看起来像的名字）：
+    // `XDebuggerEvaluator`（`platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/XDebuggerEvaluator.java:25`）
+    // 只有 `evaluate`，没有补全方法；debugger 域也没有注册 `CompletionContributor`。
+    // 真实链路是「**调试上下文的可见符号** + 语言的通用补全」：Java/JDI 侧由
+    // `StackFrameProxyImpl.visibleVariables()` 提供可见变量（被
+    // `java/debugger/impl/src/com/intellij/debugger/engine/ContextUtil.java:91` 使用），
+    // 补全本身走语言插件那套。对 DAP 来说这件事被收进协议：适配器自己知道可见符号，
+    // 所以客户端只要发 `completions`。
+    //
+    // 由能力位 `supportsCompletionsRequest` 门控（**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
+    // Reply result: {available, items:[{label, text?, type?, start?, length?}]}。
+    void completions(const std::string& text, long column, long frame_id, long line, Reply on_reply);
     void pause(long thread_id, Reply on_reply);
     void next(long thread_id, Reply on_reply);
     void step_in(long thread_id, Reply on_reply);
@@ -198,10 +232,49 @@ public:
     void scopes(long frame_id, Reply on_reply);
     // Reply result: {variables:[{name, value, type?, reference, named}]}.
     void variables(long variables_reference, Reply on_reply);
+    // DAP `setVariable`（规范 "Set Variable Request"）：改一个变量的值。
+    void set_variable(long variables_reference, const std::string& name, const std::string& value, Reply on_reply);
+    // DAP `setExpression`（规范 "Set Expression Request"）：给一个表达式赋值 —— IDEA 的
+    // Watches 视图里「Set Value」走的就是它；`frame_id` 可选（0 = 不传）。
+    void set_expression(const std::string& expression, const std::string& value, long frame_id, Reply on_reply);
+    // DAP `exceptionInfo`（规范 "Exception Info Request"）：异常断点命中时问适配器"停在什么
+    // 异常上"。IDEA 的对应物是 `JavaStackFrame.createExceptionNodes`
+    // （`java/debugger/impl/src/com/intellij/debugger/engine/JavaStackFrame.java:319-331`）：
+    // 异常停住时把抛出的异常对象作为一个变量节点插进 Variables 树，**且只在最顶层帧**
+    // （`myDescriptor.getUiIndex() != 0` 时直接返回空列表）。那半条规则属于 UI 的展示逻辑，
+    // 不在这里 —— 原生只负责把适配器的回答整形。
+    // 规范**没有**对应的能力位（适配器不会声明 supportsExceptionInfo），所以不做能力门控：
+    // 由调用方在 `stopped` 的 `reason` 是 `exception` 时发。
+    // Reply result: {available, exceptionId, description, breakMode, details?}，
+    // `details` = {message?, typeName?, fullTypeName?, evaluateName?, stackTrace?, innerException?[]}，
+    // `innerException` 按 cause 链递归。
+    void exception_details(long thread_id, Reply on_reply);
     // Ends the session: asks the adapter to disconnect and then waits for its
     // reader thread to actually exit, so a caller that drops the Client right
     // afterwards can never race a callback still running.
-    void disconnect(Reply on_reply);
+    // `terminate_debuggee` 是 DAP `disconnect` 的那个字段：true = 连被调试进程一起结束
+    // （IDEA 的「停止」），false = 只断开、让目标进程继续跑（IDEA 的「断开」，远程附加常用的那条）。
+    void disconnect(bool terminate_debuggee, Reply on_reply);
+
+    // 适配器在 `initialize` 响应里声明的能力（只读快照，UI 线程可安全读取）。
+    Json capabilities() const;
+    // `supportsTerminateRequest` / `supportsRestartRequest`：决定 terminate/restart 走哪条路。
+    bool supports_terminate() const;
+    bool supports_restart() const;
+    // `supportsGotoTargetsRequest` / `supportsRestartFrame`：Run to Cursor 与「丢弃帧」的可用性。
+    bool supports_goto_targets() const;
+    bool supports_restart_frame() const;
+    // `supportsBreakpointLocationsRequest`（**默认 false**）：能否问"这一行哪些列可以放断点"。
+    bool supports_breakpoint_locations() const;
+    // `supportsCompletionsRequest`（**默认 false**）：调试表达式补全的可用性。
+    bool supports_completions() const;
+    // DAP `terminate`（IDEA 的「停止」）：适配器支持就发规范请求，否则退化成
+    // `disconnect{terminateDebuggee: true}` —— 两条路都是"把目标进程结束掉"。
+    // 无论哪条路，调用方仍应在回调里 `shutdown()` 收摊。
+    void terminate(Reply on_reply);
+    // DAP `restart`（IDEA 的「重新运行」，Ctrl+F5）：**只有**适配器声明 `supportsRestartRequest`
+    // 才发；否则回 DAP_UNSUPPORTED，调用方据此退化成"停止 + 重新启动"。
+    void restart(Json arguments, Reply on_reply);
 
     // Escape hatch for adapter-specific commands (`evaluate`, `source`,
     // `readMemory`, ...). The raw success body is handed to the Reply untouched.

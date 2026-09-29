@@ -1,79 +1,31 @@
-#include "projects.hpp"
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
-#include <algorithm>
-#include <cstdint>
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <string_view>
-#include <system_error>
-#include <vector>
+// 项目层原生回归：创建/校验路径、通用与项目设置、最近项目、运行配置、书签、TODO 模式、
+// 命名作用域、实时模板、Java 项目设置与 1 MiB 状态上限。
+//
+// 文件颜色（`.idea` 两层 XML）是另一个模块，回归在 project_file_colors_test.cpp；
+// 两边共用的临时根目录、文件读写与断言在 project_test_support.hpp。
+#include "project_test_support.hpp"
 
 namespace {
 namespace fs = std::filesystem;
 using taocode::Json;
 using taocode::ProjectStore;
 using taocode::Workspace;
-using taocode::WorkspaceError;
 using taocode::create_project;
 using taocode::java_lsp_settings;
 using taocode::project_destination;
+using taocode::test::check;
+using taocode::test::expect_error;
+using taocode::test::get;
+using taocode::test::names;
+using taocode::test::NativeHandle;
+using taocode::test::open_result;
+using taocode::test::path_from;
+using taocode::test::put;
+using taocode::test::symlink;
+using taocode::test::TempRoot;
+using taocode::test::text;
+using taocode::test::utf8;
 constexpr std::size_t state_limit = 1024 * 1024;
-
-std::string utf8(std::u8string_view value) {
-    return {reinterpret_cast<const char*>(value.data()), value.size()};
-}
-
-std::string text(const fs::path& path) { return utf8(path.generic_u8string()); }
-fs::path path_from(const std::string& value) { return fs::path(std::u8string(value.begin(), value.end())); }
-
-void check(bool condition, const std::string& message) {
-    if (!condition) throw std::runtime_error(message);
-}
-
-template <class Operation>
-void expect_error(const std::string& code, Operation&& operation) {
-    try {
-        operation();
-    } catch (const WorkspaceError& error) {
-        check(error.code == code, "Expected " + code + ", got " + error.code + ": " + error.what());
-        check(*error.what() != '\0', "WorkspaceError must explain its failure");
-        return;
-    }
-    throw std::runtime_error("Expected WorkspaceError: " + code);
-}
-
-void put(const fs::path& path, const std::string& bytes) {
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    check(stream.is_open(), "Cannot create test fixture: " + text(path));
-    stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    stream.close();
-    check(!stream.fail(), "Cannot write test fixture: " + text(path));
-}
-
-std::string get(const fs::path& path) {
-    std::ifstream stream(path, std::ios::binary);
-    check(stream.is_open(), "Cannot read test fixture: " + text(path));
-    std::string result{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-    check(!stream.bad(), "Cannot read fixture bytes");
-    return result;
-}
-
-std::vector<std::string> names(const fs::path& directory) {
-    std::vector<std::string> result;
-    for (const auto& entry : fs::directory_iterator(directory)) result.push_back(text(entry.path().filename()));
-    std::sort(result.begin(), result.end());
-    return result;
-}
 
 std::string upper_ascii(std::string value) {
     for (auto& ch : value) {
@@ -82,21 +34,15 @@ std::string upper_ascii(std::string value) {
     return value;
 }
 
-Json open_result(const fs::path& path) {
-    Workspace workspace;
-    return workspace.open(path);
-}
-
 // The real defaults, not a copy: a mirror drifts the moment a setting is added and
 // then every migration assertion fails for no reason.
 Json defaults() { return taocode::editor_defaults(); }
 Json general_defaults() { return taocode::general_defaults(); }
 
 Json default_todo_patterns() {
-    return Json::array({{{"pattern", "TODO"}, {"description", "待办"}},
-                        {{"pattern", "FIXME"}, {"description", "需要修"}},
-                        {{"pattern", "XXX"}, {"description", "警告"}},
-                        {{"pattern", "HACK"}, {"description", "临时办法"}}});
+    // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发 todo/fixme 两条，正则逐字照抄。
+    return Json::array({{{"pattern", "\\btodo\\b.*"}, {"description", "待办"}},
+                        {{"pattern", "\\bfixme\\b.*"}, {"description", "需要修"}}});
 }
 
 Json empty_templates() {
@@ -104,7 +50,9 @@ Json empty_templates() {
 }
 
 Json java_defaults() {
-    return {{"jdkHome", ""}, {"jdkName", "JavaSE-17"}, {"sourcePaths", Json::array()},
+    // jdkName 存 IDEA 的 SDK 显示名（JdkUtil.suggestJdkName：`17`/`1.8`），jdt.ls 的
+    // JavaSE-<x> 由 java_lsp_settings 的 normalize_runtime_name 在边界归一。
+    return {{"jdkHome", ""}, {"jdkName", "17"}, {"sourcePaths", Json::array()},
             {"outputPath", ""}, {"referencedLibraries", Json::array({"lib/**/*.jar"})}};
 }
 
@@ -115,13 +63,15 @@ Json export_to_html_defaults() {
 }
 
 Json build_tools_defaults() {
-    // IDEA 设置「构建、执行、部署 › 构建工具」：自动重载三档（默认 ALL）+ Gradle 三项（默认走 wrapper）。
-    return {{"autoReloadType", "ALL"}, {"previousAutoReloadType", "ALL"},
+    // AutoImportProjectTrackerSettings.kt:16-26：无 DefaultAutoReloadTypeProvider 实现 ⇒ 默认 SELECTIVE。
+    return {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "SELECTIVE"},
             {"gradle", {{"useGradleFrom", "wrapper"}, {"gradlePath", ""}, {"gradleUserHome", ""},
                         // 「Gradle JVM」默认 = `ExternalSystemJdkUtil.USE_PROJECT_JDK`。
                         {"gradleJvm", "#USE_PROJECT_JDK"},
                         // 「构建并运行使用」默认交给 Gradle（`GradleProjectSettings.java:40`）。
-                        {"delegatedBuild", true}, {"offline", false}}}};
+                        {"delegatedBuild", true}, {"offline", false},
+                        // 没链接过任何工程（`GradleSettings.linkedProjectsSettings` 空 ⇒ Gradle 工具窗口不可用）。
+                        {"linkedProjects", Json::array()}}}};
 }
 
 Json exclusions() {
@@ -131,7 +81,7 @@ Json exclusions() {
             {"runConfigs", Json::array()}, {"bookmarks", Json::array()},
             {"scopes", Json::array()},
             // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认空，与 FileColorsModel 的两个空列表一致。
-            {"fileColors", Json::array()},
+            {"fileColors", Json::array()}, {"localFileColors", Json::array()},
             {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
                                {"autoscrollFromSource", false}}},
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
@@ -146,69 +96,6 @@ Json exclusions() {
 Json document() {
     return {{"recentProjects", Json::array()}, {"settings", defaults()},
             {"lastProject", nullptr}, {"perProject", Json::object()}};
-}
-
-struct TempRoot {
-    fs::path path;
-    TempRoot() {
-        const auto prefix = "taocode-projects-test-" + std::to_string(GetCurrentProcessId()) + "-" +
-                            std::to_string(GetTickCount64()) + "-";
-        for (unsigned attempt = 0; attempt != 100; ++attempt) {
-            auto candidate = fs::temp_directory_path() / (prefix + std::to_string(attempt));
-            std::error_code error;
-            if (fs::create_directory(candidate, error)) {
-                // Canonicalize using GetFinalPathNameByHandleW to match production code.
-                HANDLE handle = CreateFileW(candidate.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
-                                           nullptr, OPEN_EXISTING,
-                                           FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-                if (handle != INVALID_HANDLE_VALUE) {
-                    const DWORD size = GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-                    if (size > 0) {
-                        std::vector<wchar_t> buffer(size);
-                        const DWORD length = GetFinalPathNameByHandleW(handle, buffer.data(), size,
-                                                                      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-                        if (length > 0 && length < size) {
-                            std::wstring text(buffer.data(), length);
-                            if (text.starts_with(L"\\\\?\\")) text.erase(0, 4);
-                            for (auto& ch : text) if (ch == L'/') ch = L'\\';
-                            while (text.size() > 3 && text.back() == L'\\') text.pop_back();
-                            candidate = fs::path(text);
-                        }
-                    }
-                    CloseHandle(handle);
-                }
-                path.swap(candidate);
-                return;
-            }
-            if (error && error != std::errc::file_exists)
-                throw std::runtime_error("Cannot create isolated temporary root: " + error.message());
-        }
-        throw std::runtime_error("Cannot allocate a temporary test directory");
-    }
-    ~TempRoot() {
-        std::error_code error;
-        fs::remove_all(path, error);
-        if (error) std::cerr << "Cleanup failed for " << text(path) << ": " << error.message() << '\n';
-    }
-    TempRoot(const TempRoot&) = delete;
-    TempRoot& operator=(const TempRoot&) = delete;
-};
-
-struct NativeHandle {
-    HANDLE value;
-    ~NativeHandle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
-};
-
-bool symlink(const fs::path& link, const fs::path& target, bool directory) {
-    const DWORD flags = directory ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0;
-    if (CreateSymbolicLinkW(link.c_str(), target.c_str(), flags | 0x2)) return true;
-    auto error = GetLastError();
-    if (error == ERROR_INVALID_PARAMETER) {
-        if (CreateSymbolicLinkW(link.c_str(), target.c_str(), flags)) return true;
-        error = GetLastError();
-    }
-    std::cout << "SKIP symlink " << text(link.filename()) << " (Windows error " << error << ")\n";
-    return false;
 }
 
 } // namespace
@@ -358,6 +245,14 @@ int main() {
             const auto merged = ProjectStore(file).update_general({{"deleteToBin", false}});
             check(merged.at("reopenLastProject") == true && merged.at("deleteToBin") == false,
                   "Missing general state falls back to the data-class defaults");
+            legacy["general"] = {{"deleteToBin", false}};
+            put(file, legacy.dump());
+            const auto sparse = ProjectStore(file).update_general({{"confirmExit", false}});
+            auto expected_general = general_defaults();
+            expected_general["deleteToBin"] = false;
+            expected_general["confirmExit"] = false;
+            check(sparse == expected_general,
+                  "A sparse legacy general component receives all defaults before a partial update");
         });
 
         run("defaults reads are side-effect free and first save creates config parents", [&] {
@@ -510,7 +405,7 @@ int main() {
                                  {"bookmarks", Json::array({{{"path", "src/main.cpp"}, {"line", 7}, {"mnemonic", 2}}})},
                                  {"scopes", Json::array()},
                                  // 文件颜色（IDEA `FileColorsConfigurable`）：整表替换，顺序即优先级。
-                                 {"fileColors", Json::array()},
+                                 {"fileColors", Json::array()}, {"localFileColors", Json::array()},
                                  {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
                                                     {"autoscrollFromSource", false}}},
                                  {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
@@ -520,7 +415,9 @@ int main() {
                                  // 构建工具是项目级的（IDEA `build.tools` + Gradle 页），整对象比较要带上它。
                                  {"buildTools", {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "ALL"},
                                                  {"gradle", {{"useGradleFrom", "path"}, {"gradlePath", "C:/gradle/bin/gradle.bat"},
-                                                             {"gradleUserHome", "D:/gradle-home"}, {"gradleJvm", "#USE_PROJECT_JDK"}, {"delegatedBuild", false}, {"offline", true}}}}},
+                                                    {"gradleUserHome", "D:/gradle-home"}, {"gradleJvm", "#USE_PROJECT_JDK"}, {"delegatedBuild", false}, {"offline", true},
+                                                    // 没在这份补丁里 ⇒ 按缺键补默认（老项目文件不会因此判损坏）。
+                                                    {"linkedProjects", Json::array()}}}}},
                                  {"exportToHtml", {{"scope", 4}, {"includeSubdirectories", true},
                                                    {"printLineNumbers", true}, {"openInBrowser", true},
                                                    {"outputDirectory", "D:/export"}}}};
@@ -530,8 +427,9 @@ int main() {
             check(second.project_settings(root_b).at("excludedDirs").empty(), "Empty exclusion arrays are valid");
             check(ProjectStore(file).project_settings(root_a) == custom, "Per-project settings must persist");
             const auto disk = Json::parse(get(file));
-            check(disk.at("perProject").size() == 2 && disk.at("settings") == editor, "All settings belong in the one application state file");
-            check(fs::is_empty(a) && fs::is_empty(b), "Do not create configuration inside user projects");
+            check(disk.at("perProject").size() == 2 && disk.at("settings") == editor, "Application settings remain in the application state file");
+            check(fs::exists(a / ".idea" / "workspace.xml") && fs::exists(a / ".idea" / "fileColors.xml") && fs::is_empty(b),
+                  "Explicit color patches use IDEA XML; unrelated project settings create no XML");
             check(!first.state().contains("perProject"), "Internal perProject map is not part of public state()");
             const auto before = get(file);
             const auto before_state = first.state();
@@ -626,7 +524,7 @@ int main() {
             check(first.update_settings({{"fontSize", 10}, {"tabSize", 2}}).at("fontSize") == 10, "Lower font boundary and tab size two are valid");
             check(first.update_settings({{"tabSize", 4}}).at("tabSize") == 4, "Tab size four is valid");
             ProjectStore isolated(temporary.path / "isolated.json");
-            check(isolated.state().at("settings") == defaults() && isolated.project_settings(root_a) == exclusions(), "Different state files must remain isolated");
+            check(isolated.state().at("settings") == defaults() && isolated.project_settings(root_a) == exclusions(), "Application settings are isolated; this project's XML color lists are empty");
         });
 
         run("failed atomic replacement preserves all old state and removes owned temporaries", [&] {
@@ -1107,40 +1005,6 @@ int main() {
                   "nested partial patches preserve the other template list");
         });
 
-        run("file colors round-trip and reject anything outside the seven named colors", [&] {
-        const auto file = temporary.path / "file-colors.json";
-        ProjectStore store(file);
-        const auto root = open_result(create_project(temporary.path, "file-colors", "empty")).at("root").get<std::string>();
-        check(store.project_settings(root).at("fileColors").empty(), "no file colors by default");
-
-        // nlohmann 的老坑：内层 `{k1,v1,k2,v2}` 会被当成**数组**，对象必须写成
-        // `{{k1,v1},{k2,v2}}` 两个二元对（下面每条配置都是这个形状）。
-        // 数组顺序就是优先级（`FileColorsModel.findConfigurationWithScopeFilter` 首个命中就返回），
-        // 所以这条 round-trip 必须保序。
-        const Json colors = Json::array({
-            {{"scope", "生成物"}, {"color", "Gray"}},
-            {{"scope", "源码"}, {"color", "Blue"}},
-        });
-        check(store.update_project_settings(root, {{"fileColors", colors}}).at("fileColors") == colors,
-              "FileColorConfiguration entries round-trip in the stored order");
-        check(store.project_settings(root).at("fileColors") == colors, "the order is the priority and must survive a round-trip");
-
-        // 颜色名只认那七个（`FileColorManagerImpl.ourDefaultColors` 的键）；其余一律拒绝。
-        const std::vector<Json> rejected{
-            "not-an-array",
-            Json::array({42}),                                            // 元素不是对象
-            Json::array({{{"scope", "生成物"}, {"color", "#ff0000"}}}),  // 色值不是颜色名
-            Json::array({{{"scope", "生成物"}, {"color", "cyan"}}}),     // 不在那七个里
-            Json::array({{{"scope", "生成物"}}}),                        // 少 color
-            Json::array({{{"color", "Blue"}}}),                          // 少 scope
-            Json::array({{{"scope", 1}, {"color", "Blue"}}}),            // 形状不对
-            Json::array({{{"scope", "生成物"}, {"color", "Blue"}, {"x", 1}}}),  // 未知键
-            Json::array({{{"scope", "a"}, {"color", "Blue"}}, {{"scope", "a"}, {"color", "Rose"}}}),  // 同名两条
-        };
-        for (const auto& patch : rejected) expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root, {{"fileColors", patch}}); });
-        check(store.project_settings(root).at("fileColors") == colors, "a rejected fileColors patch changes nothing");
-    });
-
     run("Java project settings persist, migrate, and reach JDT LS shape", [&] {
             const auto file = temporary.path / "java-settings.json";
             ProjectStore store(file);
@@ -1150,13 +1014,13 @@ int main() {
                                {"sourcePaths", Json::array({"src", "test/src"})}, {"outputPath", "out"},
                                {"referencedLibraries", Json::array({"lib/**/*.jar", "vendor/specific.jar"})}};
             check(store.update_project_settings(root, {{"java", java}}).at("java") == java, "Java configuration round-trips");
-            const auto lsp = java_lsp_settings(store.project_settings(root).at("java"));
+            const auto lsp = java_lsp_settings(store.project_settings(root).at("java"), Json::object());
             check(lsp.at("java").at("configuration").at("runtimes")[0].at("name") == "JavaSE-21" &&
                       lsp.at("java").at("configuration").at("runtimes")[0].at("path") == "C:\\Program Files\\Java\\jdk-21" &&
                       lsp.at("java").at("project").at("sourcePaths") == java.at("sourcePaths") &&
                       lsp.at("java").at("project").at("referencedLibraries") == java.at("referencedLibraries"),
                   "JDT receives the documented setting keys");
-            const std::vector<Json> rejected{{nullptr}, Json::array(), {{"unknown", ""}}, {{"jdkName", "17"}},
+            const std::vector<Json> rejected{{nullptr}, Json::array(), {{"unknown", ""}}, {{"jdkName", "bogus%%"}},
                                              {{"jdkHome", "relative/jdk"}}, {{"sourcePaths", "../outside"}},
                                              {{"sourcePaths", "src"}}, {{"sourcePaths", Json::array({"../escape"})}},
                                              {{"sourcePaths", Json::array({"src/../escape"})}},
@@ -1167,6 +1031,46 @@ int main() {
             legacy["perProject"][legacy.at("perProject").begin().key()]["java"] = nullptr;
             put(file, legacy.dump());
             check(ProjectStore(file).project_settings(root).at("java") == java_defaults(), "null nested Java settings are migrated");
+            // 合成语言服务器配置时拿到的不一定是"完整"的 java 段。缺字段必须是"这一项没有"，
+            // 而不是抛 JSON 异常 —— 后者会在启动语言服务器的那一刻把 IDE 打崩（曾经如此）。
+            const auto partial = java_lsp_settings({{"jdkHome", "C:\\jdk-17"}}, Json::object());
+            check(partial.at("java").at("configuration").at("runtimes")[0].at("name") == "JavaSE-17",
+                  "缺 jdkName 时用默认的 JavaSE-17，而不是抛异常");
+            check(partial.at("java").at("project").at("sourcePaths").is_array() &&
+                      partial.at("java").at("project").at("outputPath") == "",
+                  "缺 sourcePaths/outputPath 时给空值");
+            const auto bare = java_lsp_settings(Json::object(), Json::object());
+            check(bare.at("java").at("configuration").at("runtimes").empty(),
+                  "没有 JDK 时 runtimes 为空（不编一个运行时装进去）");
+            // 「构建工具 › Gradle」必须一起进服务器：JDT LS 用 Buildship 自己跑一次 Gradle 同步，
+            // 拿不到「Gradle JVM」时它会用**自己那个 JRE**去起守护进程 —— 老 Gradle（6.8.3 只到
+            // Java 15）在 JRE 21 上直接失败，工程模型永远建不起来（表现就是没有补全、没有语义着色）。
+            // 键名按实际在跑的那份服务器核对：org.eclipse.jdt.ls.core_1.44.0.jar 的 Preferences.class。
+            const Json build_tools{{"gradle", {{"useGradleFrom", "wrapper"}, {"gradlePath", ""},
+                                               {"gradleUserHome", ""}, {"gradleJvm", "#USE_PROJECT_JDK"},
+                                               {"offline", false}, {"delegatedBuild", true}}}};
+            const auto wrapped = java_lsp_settings({{"jdkHome", "C:\\jdk-8"}}, build_tools);
+            const auto& import_gradle = wrapped.at("java").at("import").at("gradle");
+            check(import_gradle.at("wrapper").at("enabled") == true &&
+                      import_gradle.at("java").at("home") == "C:\\jdk-8" &&
+                      !import_gradle.contains("home") && !import_gradle.contains("user") &&
+                      !import_gradle.contains("offline"),
+                  "默认档：走 wrapper、Gradle JVM = 项目 JDK，没填的项一律不发");
+            const auto local = java_lsp_settings({{"jdkHome", "C:\\jdk-8"}},
+                Json{{"gradle", {{"useGradleFrom", "path"}, {"gradlePath", "D:\\gradle-8.7"},
+                                 {"gradleUserHome", "D:\\gradle-home"}, {"gradleJvm", "C:\\jdk-17"},
+                                 {"offline", true}}}});
+            const auto& local_gradle = local.at("java").at("import").at("gradle");
+            check(local_gradle.at("wrapper").at("enabled") == false &&
+                      local_gradle.at("home") == "D:\\gradle-8.7" &&
+                      local_gradle.at("user").at("home") == "D:\\gradle-home" &&
+                      local_gradle.at("java").at("home") == "C:\\jdk-17" &&
+                      local_gradle.at("offline").at("enabled") == true,
+                  "指定路径/用户主目录/显式 JVM/离线都要转成服务器认的键");
+            const auto no_build_tools = java_lsp_settings(Json::object(), Json::object());
+            check(no_build_tools.at("java").at("import").at("gradle").at("wrapper").at("enabled") == true &&
+                      !no_build_tools.at("java").at("import").at("gradle").contains("java"),
+                  "没有 buildTools 时保持服务器默认（走 wrapper），且不编一个 Gradle JVM");
         });
 
         run("inclusive 1 MiB read limit and bounded writes", [&] {

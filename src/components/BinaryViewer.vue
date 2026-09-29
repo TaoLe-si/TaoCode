@@ -96,7 +96,7 @@ function saveAs() {
 .binary-head { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); background: var(--rail); }
 .binary-title { color: var(--text); font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .binary-kind, .binary-size { flex-shrink: 0; color: var(--muted); font-size: 11px; }
-.binary-truncated { flex-shrink: 0; color: var(--warning, #b58900); font-size: 11px; }
+.binary-truncated { flex-shrink: 0; color: var(--warning); font-size: 11px; }
 .binary-actions { margin-left: auto; display: flex; gap: var(--space-1); }
 .binary-image { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: var(--space-3); background: var(--editor); }
 .binary-image img { max-width: 100%; max-height: 100%; image-rendering: pixelated; }

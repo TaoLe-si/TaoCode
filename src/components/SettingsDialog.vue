@@ -20,11 +20,13 @@ import {
 import BuildToolsSettingsPage from './BuildToolsSettingsPage.vue'
 import GradleSettingsPage from './GradleSettingsPage.vue'
 import ScopesSettingsPage from './ScopesSettingsPage.vue'
+import FileColorsSettingsPage from './FileColorsSettingsPage.vue'
+import { createSettingsDraftActions, createSettingsDraftPages, type SettingsDraft } from '../settingsDraft'
+import { createGeneralSettingsTextModels } from '../generalSettingsTextModels'
 import TodoPatternsPage from './TodoPatternsPage.vue'
 import FileTypesPage from './FileTypesPage.vue'
 import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, NamedScopeSetting, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
 import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '../bridge'
-import type { FileColorSetting } from '../fileColors'
 // 构建工具组（`build.tools` + Gradle 页）的取值/文案/控件都在 src/gradle.ts 与两个子页组件里；
 // 这里只剩两处需要类型：emit 的载荷形状与传给 Gradle 页的检测结果。
 import type { BuildToolsSettings, GradleDetection } from '../gradle'
@@ -58,7 +60,8 @@ const emit = defineEmits<{
   /** VCS 日志的 UI 开关（IDEA vcs.log）：单独一条 emit，避免与 saveProject 的重载混淆。 */
   saveVcsLog: [log: { showTagNames: boolean; showRootNames: boolean }]
   /** 命名作用域（IDEA project.scopes）：整表替换，数组顺序就是 ScopeChooserConfigurableState.myOrder。 */
-  saveScopes: [scopes: NamedScopeSetting[]], saveFileColors: [fileColors: FileColorSetting[]]
+  saveScopes: [scopes: NamedScopeSetting[]]
+  saveDraft: [draft: SettingsDraft, close?: boolean]
   /** TODO 模式表（IDEA preferences.toDoOptions）：整表替换，随项目保存。 */
   saveTodoPatterns: [patterns: TodoPattern[]]
   /** 文件类型关联（IDEA preferences.fileTypes）：整表替换，随项目保存。 */
@@ -111,8 +114,7 @@ function editInternalSetting(group: 'editor' | 'preferences.general', key: strin
 
 function applyAdvanced() {
   if (advancedErrors.value.size) return
-  applyEditor(false)
-  applyGeneral(false)
+  applyAll()
 }
 
 const copyHint = ref('')
@@ -123,26 +125,7 @@ function copyInternalSettings() {
   window.setTimeout(() => { copyHint.value = '' }, 2000)
 }
 
-// 外部工具：每行「名称|命令」，写回 general.externalTools。
-const externalToolsText = computed({
-  get: () => (general.value.externalTools ?? []).map(tool => `${tool.name}|${tool.command}`).join('\n'),
-  set: value => {
-    const entries = value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-      const [name, ...rest] = line.split('|')
-      return { name: (name ?? '').trim(), command: rest.join('|').trim() }
-    }).filter(tool => tool.name && tool.command)
-    general.value = { ...general.value, externalTools: entries }
-  },
-})
-
-const foldConsoleText = computed({
-  get: () => (general.value.foldConsoleLines ?? []).join('\n'),
-  set: value => { general.value = { ...general.value, foldConsoleLines: value.split('\n').map(line => line.trim()).filter(Boolean) } },
-})
-const foldExceptionText = computed({
-  get: () => (general.value.foldExceptions ?? []).join('\n'),
-  set: value => { general.value = { ...general.value, foldExceptions: value.split('\n').map(line => line.trim()).filter(Boolean) } },
-})
+const { externalToolsText, foldConsoleText, foldExceptionText } = createGeneralSettingsTextModels(general)
 
 // IDEA's ConfigurableListPanel reads the groups from intellij.platform.ide.impl.xml
 // groupConfigurable entries (lines 575-608); weight descends, so order is
@@ -466,7 +449,7 @@ const commitMessageDirty = computed(() => JSON.stringify(commitMessage.value) !=
 const validCommitMessage = computed(() => [commitMessage.value.subjectRightMargin, commitMessage.value.bodyRightMargin]
   .every(value => Number.isInteger(value) && value >= RIGHT_MARGIN_MIN && value <= RIGHT_MARGIN_MAX))
 const generalDirty = computed(() => JSON.stringify(general.value) !== JSON.stringify(props.general))
-const dirty = computed(() => editorDirty.value || commitMessageDirty.value || generalDirty.value)
+const { scopesPage, fileColorsPage, dirty } = createSettingsDraftPages(editorDirty, commitMessageDirty, generalDirty)
 let previousFocus: HTMLElement | null = null
 
 // Not deep, and skipped while the form is dirty: the parent refreshes `settings` when
@@ -509,21 +492,16 @@ function applyGeneral(close = false) {
 function resetGeneralPage() {
   general.value = { ...defaultGeneralSettings }
 }
-function applyAll() {
-  if (editorDirty.value) applyEditor()
-  if (commitMessageDirty.value) applyCommitMessage()
-  if (generalDirty.value) applyGeneral()
-}
-function ok() {
-  // IDEA's OK: apply, then close only when the save went through.
-  if (!dirty.value) { close(); return }
-  if (props.busy || !validEditor.value || !validCommitMessage.value) return
-  if (editorDirty.value && !editorForm.value?.reportValidity()) return
-  if (!validGeneral.value) return
-  applyEditor(true)
-  applyCommitMessage(true)
-  applyGeneral(true)
-}
+const { applyAll, ok } = createSettingsDraftActions({
+  editor, general, commitMessage, editorDirty, generalDirty, commitMessageDirty,
+  dirty, scopesPage, fileColorsPage,
+  busy: () => props.busy,
+  valid: () => validEditor.value && validCommitMessage.value && validGeneral.value,
+  reportEditorValidity: () => editorForm.value?.reportValidity(),
+  showScopes: () => { section.value = 'project.scopes' },
+  save: (draft, closeAfterSave) => emit('saveDraft', draft, closeAfterSave),
+  close,
+})
 function close() {
   if (!props.busy) emit('close')
 }
@@ -849,14 +827,18 @@ defineExpose({ handleEscape })
           <h4 class="settings-group-title">主菜单</h4>
           <fieldset class="settings-fields" :disabled="busy">
             <div class="input-row">
-              <label :for="`${id}-main-menu`">主菜单位置</label>
+              <!-- 条目顺序 = `MainMenuDisplayMode` 的**声明顺序**（AppearanceConfigurable.kt:509
+                   `CollectionComboBoxModel(MainMenuDisplayMode.entries)`），显示文本 = 各档的
+                   `description`（MainMenuDisplayMode.kt:14-16 → CoreBundle.properties:157-159）。
+                   标签文本 = IdeBundle.properties:3282 `main.menu.combobox.label=Main menu:`。 -->
+              <label :for="`${id}-main-menu`">主菜单</label>
               <select :id="`${id}-main-menu`" v-model="editor.mainMenuDisplayMode">
-                <option value="merged">合并到主工具栏</option>
-                <option value="separate">独立工具栏</option>
                 <option value="hamburger">隐藏在汉堡按钮下方</option>
+                <option value="merged">与主工具栏合并</option>
+                <option value="separate">显示在主工具栏上方</option>
               </select>
             </div>
-            <p class="field-hint restore-hint">对应 IDEA 的 MainMenuDisplayMode：合并（默认）、独立一行、或收纳进一个汉堡按钮。</p>
+            <p class="field-hint restore-hint">对应 IDEA 的 MainMenuDisplayMode：默认是「隐藏在汉堡按钮下方」（UISettingsState.kt:207），菜单收进一个按钮、与主工具栏同一行；「显示在主工具栏上方」才是菜单与工具栏各一行。</p>
           </fieldset>
           <h4 class="settings-group-title">树视图</h4>
           <fieldset class="settings-fields" :disabled="busy">
@@ -958,6 +940,17 @@ defineExpose({ handleEscape })
               <input :id="`${id}-tab-limit`" v-model.number="editor.tabLimit" type="number" min="1" max="100" step="1" required aria-describedby="editor-tab-limit-hint" />
             </div>
             <p id="editor-tab-limit-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
+            <!-- UISettings.scrollTabLayoutInEditor（UISettingsState.kt:123 默认 true）；
+                 文案 = ApplicationBundle.properties:316「Show tabs in one row」。
+                 关掉后标签条换成 WrapMultiRowLayout：换行、不裁切、也没有「…」按钮。 -->
+            <div class="input-row">
+              <label :for="`${id}-tabs-in-one-row`">标签显示在一行</label>
+              <input :id="`${id}-tabs-in-one-row`" v-model="editor.tabsInOneRow" type="checkbox" />
+            </div>
+            <div class="input-row">
+              <label :for="`${id}-pinned-separate-row`">在单独一行中显示固定标签</label>
+              <input :id="`${id}-pinned-separate-row`" v-model="editor.pinnedTabsInSeparateRow" type="checkbox" :disabled="editor.tabsInOneRow" />
+            </div>
           </fieldset>
         </form>
         <form
@@ -1212,8 +1205,13 @@ defineExpose({ handleEscape })
 
         <section v-show="section === 'project.scopes'" :id="`${id}-panel-scopes`" class="settings-panel" data-page="scopes" role="tabpanel" :aria-labelledby="`${id}-tab-scopes`" :aria-busy="busy">
           <h3>作用域</h3>
-          <p class="section-description">对应 IDEA Settings › Appearance &amp; Behavior › Scopes（scopeChooser/ScopeChooserConfigurable.java）。作用域是一段文件模式，供「在文件中查找」等对话框限定范围；也可以给作用域配一种颜色，让落在其中的文件在编辑器标签页上显示这个底色（IDEA `FileColorsConfigurable`，本仓并在这一页）。</p>
-          <ScopesSettingsPage :scopes="projectSettings?.scopes ?? []" :root="projectRoot" :module-name="moduleName" :file-colors="projectSettings?.fileColors ?? []" :busy="busy" @save="emit('saveScopes', $event)" @save-colors="emit('saveFileColors', $event)" />
+          <p class="section-description">作用域是一段文件模式，供「在文件中查找」等对话框限定范围。文件颜色在独立设置页配置。</p>
+          <ScopesSettingsPage ref="scopesPage" :scopes="projectSettings?.scopes ?? []" :root="projectRoot" :module-name="moduleName" :busy="busy" @save="emit('saveScopes', $event)" />
+        </section>
+
+        <section v-show="section === 'reference.settings.ide.settings.file-colors'" :id="`${id}-panel-reference.settings.ide.settings.file-colors`" class="settings-panel" data-page="reference.settings.ide.settings.file-colors" role="tabpanel" :aria-labelledby="`${id}-tab-reference.settings.ide.settings.file-colors`" :aria-busy="busy">
+          <h3>文件颜色</h3>
+          <FileColorsSettingsPage ref="fileColorsPage" v-model:enabled="editor.fileColorsEnabled" v-model:for-tabs="editor.fileColorsForTabs" v-model:for-project-view="editor.fileColorsForProjectView" :local-colors="projectSettings?.localFileColors ?? []" :file-colors="projectSettings?.fileColors ?? []" :scopes="projectSettings?.scopes ?? []" :root="projectRoot" :busy="busy" @manage-scopes="section = 'project.scopes'" />
         </section>
 
         <section v-show="section === 'preferences.general'" :id="`${id}-panel-general`" class="settings-panel" data-page="general" role="tabpanel" :aria-labelledby="`${id}-tab-general`" :aria-busy="busy">
@@ -1278,7 +1276,7 @@ defineExpose({ handleEscape })
       <span class="settings-hint"><CircleHelp :size="14" aria-hidden="true" /><span>项目级设置（实时模板、TODO、文件类型、作用域、VCS 日志）只应用于当前项目，随项目保存；项目结构改在「文件 › 项目结构…」对话框里（IDEA 同样如此）。</span></span>
       <span class="save-status" role="status">{{ copyNote || (busy ? '正在保存，请稍候…' : section === 'preferences.lookFeel' ? '主题即时生效' : section === 'editing.templates' ? '模板改动即时保存到本项目' : PROJECT_SCOPED_PAGES.has(section) ? '本页改动需保存后才写入项目' : dirty ? '有未应用的修改' : '已应用') }}</span>
       <div class="footer-actions">
-        <button type="button" class="subtle-button" :disabled="busy || !dirty" title="应用 (Alt+A)" @click="applyAll">应用(A)</button>
+        <button type="button" class="subtle-button" :disabled="busy || !dirty" title="应用 (Alt+A)" @click="applyAll()">应用(A)</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="close">取消</button>
         <button type="button" class="primary-button" :disabled="busy" title="应用并关闭" @click="ok">确定</button>
       </div>
@@ -1304,7 +1302,7 @@ defineExpose({ handleEscape })
 .settings-search-icon { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: inherit; }
 .settings-search-icon.has-history { cursor: pointer; }
 .settings-search-icon.has-history:hover, .settings-search-icon.has-history:focus-visible { color: var(--text); }
-.settings-history-popup { position: fixed; z-index: 30; display: flex; flex-direction: column; max-width: 320px; padding: 2px; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--menu-shadow); }
+.settings-history-popup { position: fixed; z-index: 30; display: flex; flex-direction: column; max-width: 320px; padding: 2px; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .settings-history-item { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-history-item.active { background: var(--selected); color: var(--bright); }
 .settings-group-label { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
@@ -1332,9 +1330,10 @@ defineExpose({ handleEscape })
 .settings-panel h3 { margin: 0 0 var(--space-2); font-size: 15px; color: var(--bright); font-weight: 600; }
 .section-description { margin: 0 0 var(--space-5); color: var(--secondary); line-height: 1.8; overflow-wrap: anywhere; }
 .theme-options { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-.theme-option { display: flex; flex: 1 1 135px; min-width: 0; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--editor); color: var(--secondary); }
+.theme-option { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2); row-gap: 2px; flex: 1 1 135px; min-width: 0; align-items: center; padding: var(--space-4); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--editor); color: var(--secondary); }
 .theme-option[aria-pressed='true'] { border-color: var(--accent); background: var(--selected); color: var(--bright); }
-.theme-state { flex-basis: 100%; font-size: 11px; color: var(--muted); text-align: left; }
+.theme-option > span:not(.theme-state) { text-align: left; line-height: 18px; }
+.theme-state { grid-column: 2; font-size: 11px; line-height: 16px; color: var(--muted); text-align: left; }
 .settings-group-title { margin: var(--space-5) 0 var(--space-2); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 12px; font-weight: 600; }
 .zoom-row { display: flex; align-items: center; gap: var(--space-2); }
 .zoom-row select { width: 90px; min-height: 33px; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }

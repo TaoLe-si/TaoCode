@@ -31,6 +31,8 @@ const emit = defineEmits<{
   'forget-batch': [paths: string[]]
   refresh: []
   help: []
+  /** WelcomeScreen.Options entries backed by the help actions (About / BrowseSpecialPaths / CollectZippedLogs). */
+  option: [id: 'about' | 'paths' | 'logs']
   plugins: []
   /** 第二个参数是点击事件：主题切换的水纹从点击位置扩散（见 src/themeRipple.ts）。 */
   theme: [theme: Theme, event?: MouseEvent]
@@ -42,6 +44,11 @@ const emit = defineEmits<{
 // balloon the action pops up on the welcome screen (`NotificationEventAction.kt:63-79`).
 const notificationsOpen = ref(false)
 const noticeBox = ref<HTMLElement>()
+// IDEA WelcomeScreen.Options (PlatformActions.xml): the sidebar gear is a quick-access
+// toolbar button (TabbedWelcomeScreen.createQuickAccessPanel, BorderLayout.SOUTH) whose
+// action is createShowPopupAction of that group — it does not open Settings directly.
+// TaoCode only implements the two actions that already have a surface (ShowSettings, About).
+const optionsOpen = ref(false)
 watch(notificationsOpen, async open => {
   if (!open) return
   await nextTick()
@@ -277,6 +284,7 @@ function onGroupKeydown(name: string, event: KeyboardEvent) {
 function toggleMenu(path: string) {
   menuPath.value = menuPath.value === path ? '' : path
 }
+
 // RecentProjectFilteringTree.kt:189-191 binds ENTER to "activate the selected item" and
 // ALT+DELETE to "remove it"; the tree selection is what those keys act on, so the page keeps track
 // of the focused row and falls back to the first visible project.
@@ -428,9 +436,30 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <CircleHelp :size="17" aria-hidden="true" />关于
         </button>
       </nav>
-      <button type="button" class="icon-button welcome-gear" title="设置 (Ctrl+Alt+S)" aria-label="打开设置" :disabled="busy" @click="emit('settings')">
-        <Settings :size="18" aria-hidden="true" />
-      </button>
+      <!-- IDEA TabbedWelcomeScreen.createQuickAccessPanel: BorderLayout.SOUTH of the left
+           sidebar, FlowLayout.LEFT, 26×26 buttons, New UI border empty(15, 14).
+           WelcomeScreenDefaultCustomization wires the Settings icon to a popup of
+           WelcomeScreen.Options, not to the Settings dialog itself. -->
+      <div class="welcome-quick-access">
+        <button
+          type="button" class="icon-button welcome-gear" title="选项" aria-label="选项"
+          aria-haspopup="menu" :aria-expanded="optionsOpen" :disabled="busy"
+          @click.stop="optionsOpen = !optionsOpen"
+        >
+          <Settings :size="16" aria-hidden="true" />
+        </button>
+        <div v-if="optionsOpen" class="welcome-options" role="menu" aria-label="选项">
+          <!-- PlatformActions.xml:994-1005 order: ShowSettings, CheckForUpdate, About | EditCustomProperties,
+               EditCustomVmOptions, BrowseSpecialPaths, CollectZippedLogs | CreateDesktopEntry. Actions TaoCode
+               has no host for (updates, custom properties/VM options, desktop entry) are not listed. -->
+          <button type="button" class="menu-button welcome-options-item" role="menuitem" @click="optionsOpen = false; emit('settings')">设置…</button>
+          <button type="button" class="menu-button welcome-options-item" role="menuitem" @click="optionsOpen = false; emit('option', 'about')">关于</button>
+          <div class="menu-rule" role="separator" />
+          <button type="button" class="menu-button welcome-options-item" role="menuitem" :disabled="!isDesktop" @click="optionsOpen = false; emit('option', 'paths')">特殊文件和文件夹…</button>
+          <button type="button" class="menu-button welcome-options-item" role="menuitem" :disabled="!isDesktop" @click="optionsOpen = false; emit('option', 'logs')">收集日志和诊断数据</button>
+        </div>
+      </div>
+      <div v-if="optionsOpen" class="menu-backdrop" @click="optionsOpen = false" />
     </aside>
 
     <main class="welcome-main">
@@ -628,8 +657,9 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 
 <style scoped>
 .project-welcome { display: grid; grid-template-columns: 210px minmax(0, 1fr); flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--editor); }
-.welcome-sidebar { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; padding: var(--space-6) var(--space-3) var(--space-5); background: var(--panel); border-right: 1px solid var(--line); }
-.welcome-gear { margin-top: auto; }   /* 齿轮固定在侧栏底部（IDEA 的欢迎页设置入口） */
+.welcome-sidebar { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow: auto; padding: var(--space-6) var(--space-3) 0; background: var(--panel); border-right: 1px solid var(--line); }
+/* IDEA createQuickAccessPanel: pinned to the bottom of the sidebar (BorderLayout.SOUTH),
+   left-aligned, with the New UI empty(15, 14) inset — not a lone 28px icon floating in the column. */
 .welcome-brand { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-3); }
 .welcome-brand .brand { font-size: 20px; gap: var(--space-2); }
 .welcome-version { font: 11px var(--font-mono); color: var(--muted); }
@@ -638,7 +668,10 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .navigation-item.selected { background: var(--selected); color: var(--bright); font-weight: 600; }
 .navigation-item > svg { flex-shrink: 0; }
 .nav-badge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--selected); color: var(--accent); font: 600 10px/18px var(--font-ui); text-align: center; }
-.welcome-gear { margin-top: auto; align-self: flex-start; }
+.welcome-quick-access { position: relative; display: flex; align-items: center; justify-content: center; margin: auto calc(-1 * var(--space-3)) 0; padding: 15px 14px 20px; }
+.welcome-gear { width: 26px; height: 26px; }
+.welcome-options { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% - 8px); z-index: 30; display: flex; flex-direction: column; min-width: 180px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.welcome-options-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; text-align: left; }
 .sidebar-note { margin: var(--space-2) var(--space-3) 0; color: var(--muted); font-size: 11px; }
 .welcome-main { min-width: 0; min-height: 0; overflow: auto; }
 .welcome-content { width: 100%; max-width: 1050px; margin: 0 auto; padding: clamp(24px, 5vw, 64px); }
@@ -646,8 +679,10 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .customize-group h2 { margin: 0 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; }
 .customize-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); max-width: 420px; color: var(--text); font-size: 13px; }
 .customize-row select, .customize-row input { width: 120px; min-height: 30px; padding: var(--space-1) var(--space-2); color: var(--text); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: inherit; }
-.customize-page .theme-option { flex: 0 0 auto; min-width: 110px; padding: var(--space-3); }
-.welcome-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
+.theme-options { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.customize-page .theme-option { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; min-width: 110px; padding: var(--space-3); line-height: 18px; }
+.customize-page .theme-option > svg { flex-shrink: 0; }
+.welcome-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--space-5); margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
 .welcome-heading h1 { margin: 0; font-size: 24px; line-height: 1.4; font-weight: 600; color: var(--bright); }
 .project-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .project-actions .primary-button { margin-top: 0; }
@@ -686,25 +721,27 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; border-bottom: 1px solid var(--line); }
 .recent-row.is-selected { background: var(--selected); }
 .recent-row.menu-open .recent-open { background: var(--selected); }
-.recent-open { display: grid; grid-template-columns: 32px 17rem minmax(0, 1fr) 2.2rem; gap: var(--space-2) var(--space-4); align-items: center; flex: 1; min-width: 0; min-height: 52px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
+/* RecentProjectFilteringTree renders name above path in one cell next to the icon; the old fixed
+   2.2rem date column let the date paint over the row gear. */
+.recent-open { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-2) var(--space-4); align-items: center; flex: 1; min-width: 0; min-height: 52px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-xs); background: var(--editor); text-align: left; }
 .recent-open:hover:not(:disabled) { background: var(--hover); }
 .recent-open:disabled { opacity: 1; color: var(--muted); }
-.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; align-self: center; border-radius: 50%; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: #fff; font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+.project-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; align-self: center; border-radius: 50%; font-size: 12px; background-color: var(--selected); background-image: linear-gradient(135deg, var(--selected), var(--selected)); color: var(--on-accent); font: 600 11px var(--font-brand); letter-spacing: 1px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
 /* RecentProjectIconHelper generates gradient avatars (ProjectIconPalette) for
    reachable paths and a desaturated version when the path is gone. The CSS
    gradient lives inline so the JS palette stays the single source of truth. */
-.project-details { display: contents; }
+.project-details { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .project-title { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; white-space: nowrap; }
 .project-title strong { min-width: 0; color: var(--bright); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-path { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--secondary); font: 11px/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
-.project-date { color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-date { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .project-branch { display: inline-flex; align-items: center; gap: 3px; color: var(--secondary); font: 11px var(--font-mono); white-space: nowrap; }
 .memory-tag { flex-shrink: 0; color: var(--warning); font-size: 10px; }
 .recent-row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); flex-shrink: 0; }
 /* IDEA shows the row's ⋮ only while the pointer (or keyboard focus) is on the row. */
 .row-menu-button { opacity: 0; transition: opacity .1s ease; }
 .recent-row:hover .row-menu-button, .recent-row:focus-within .row-menu-button, .recent-row.menu-open .row-menu-button { opacity: 1; }
-.row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .row-menu-item { justify-content: flex-start; gap: var(--space-2); }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .missing-tag { padding: 2px var(--space-1); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 10px; }
@@ -715,7 +752,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .empty-actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .empty-action { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 168px; justify-content: flex-start; }
 .empty-more { position: relative; display: flex; flex-direction: column; align-items: center; }
-.empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: 4px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: 4px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .empty-more-item { justify-content: flex-start; width: 100%; }
 .project-empty h3 { margin: var(--space-3) 0 var(--space-2); font-size: 15px; color: var(--text); font-weight: 500; }
 .project-empty p { max-width: 430px; margin: 0 auto var(--space-4); line-height: 1.8; overflow-wrap: anywhere; }

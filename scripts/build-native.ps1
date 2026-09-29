@@ -39,6 +39,10 @@ foreach ($line in $compilerEnvironment) {
 }
 & $cmake -S $root -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=$ninja" "-DWEBVIEW2_SDK=$sdk"
 if ($LASTEXITCODE -ne 0) { throw "Native configure failed: $LASTEXITCODE" }
+# Java 支持随发行走（IDEA 就是把 Java 支持打包进 IDE 的）：JDT LS 用**IDE 自带的 JRE** 启动，
+# 与项目的 Java 版本无关。先取件，再链接，最后让 CMake 的 taocode_ui 目标把它们放进产物旁边。
+& (Join-Path $PSScriptRoot 'fetch-jre.ps1') -Destination (Join-Path $build 'jre')
+& (Join-Path $PSScriptRoot 'fetch-jdtls.ps1') -Destination (Join-Path $build 'jdtls')
 & $cmake --build $build --parallel
 if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
 & $ctest --test-dir $build --output-on-failure --no-tests=error

@@ -18,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 namespace fs = std::filesystem;
@@ -166,6 +167,27 @@ int main() {
         Options options;  // query empty, regex off
         const auto result = taocode::search::run(root, options);
         check(result.at("matches").empty() && result.at("fileCount").get<int>() == 0, "no query -> no matches");
+    });
+
+    // 作用域编辑器（IDEA FileTreeModelBuilder + ScopeEditorPanel 的「包含 N / 共 M」）用的清单：
+    // 与大写扫描同一套目录排除策略，但不读内容、不做二进制判定，并且排序稳定。
+    run("list_files returns the whole sorted project listing", [&] {
+        const auto result = taocode::search::list_files(root);
+        check(result.at("truncated").get<bool>() == false, "a small tree is never truncated");
+        std::vector<std::string> files;
+        for (const auto& item : result.at("files")) files.push_back(item.get<std::string>());
+        const std::vector<std::string> expected{"cjk.txt", "data.bin", "deep/inner.txt", "note.txt"};
+        check(files == expected, "expected cjk.txt data.bin deep/inner.txt note.txt in order");
+        for (const auto& path : files)
+            check(path.find("node_modules") == std::string::npos && path.find(".git") == std::string::npos,
+                  "excluded directories are not listed: " + path);
+    });
+
+    run("list_files refuses an unopened workspace", [&] {
+        bool refused = false;
+        try { taocode::search::list_files(fs::path{}); }
+        catch (const taocode::WorkspaceError&) { refused = true; }
+        check(refused, "an empty workspace root must be rejected, not listed");
     });
 
     fs::remove_all(root, ec);

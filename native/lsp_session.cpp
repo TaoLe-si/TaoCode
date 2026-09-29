@@ -1,4 +1,9 @@
 #include "lsp_session.hpp"
+#include "request_trace.hpp"
+#include "lsp_support.hpp"
+
+// 工具与整形在 `lsp_support.hpp/.cpp`（原匿名 namespace，2026-09-27 拆出以降低本文件行数）。
+using namespace taocode::lsp::detail;
 
 #include <algorithm>
 #include <cctype>
@@ -9,481 +14,6 @@
 
 namespace taocode {
 namespace lsp {
-namespace {
-
-std::string lower(std::string value) {
-    for (auto& ch : value) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    return value;
-}
-
-std::string extension_of(const std::string& path) {
-    const auto slash = path.find_last_of("/\\");
-    const auto name = slash == std::string::npos ? path : path.substr(slash + 1);
-    const auto dot = name.find_last_of('.');
-    return dot == std::string::npos ? std::string() : lower(name.substr(dot + 1));
-}
-
-// Percent-encode every byte that is not unreserved or a path delimiter we keep,
-// so Windows paths with spaces, ':' or CJK become valid file:// URIs.
-std::string percent_encode(const std::string& bytes) {
-    static constexpr char hex[] = "0123456789ABCDEF";
-    std::string out;
-    for (const unsigned char ch : bytes) {
-        const bool keep = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
-                          ch == '-' || ch == '.' || ch == '_' || ch == '~' || ch == '/' || ch == ':';
-        if (keep) out.push_back(static_cast<char>(ch));
-        else { out.push_back('%'); out.push_back(hex[ch >> 4]); out.push_back(hex[ch & 0x0F]); }
-    }
-    return out;
-}
-
-std::string percent_decode(const std::string& value) {
-    auto hex = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
-    };
-    std::string out;
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        if (value[i] == '%' && i + 2 < value.size()) {
-            const int high = hex(value[i + 1]), low = hex(value[i + 2]);
-            if (high >= 0 && low >= 0) { out.push_back(static_cast<char>((high << 4) | low)); i += 2; continue; }
-        }
-        out.push_back(value[i]);
-    }
-    return out;
-}
-
-std::string u8_path(const std::filesystem::path& path) {
-    const auto generic = path.generic_u8string();
-    return {reinterpret_cast<const char*>(generic.data()), generic.size()};
-}
-
-// A real UTF-16 -> UTF-8 conversion would be needed for byte-exact offsets on
-// non-ASCII lines; LSP positions are UTF-16 code units, so this is an explicitly
-// marked approximation the contract tolerates for the current text-only bridge.
-const char* completion_kind(unsigned number) {
-    switch (number) {
-        case 1: return "text"; case 2: return "method"; case 3: return "function"; case 4: return "constructor";
-        case 5: return "field"; case 6: return "variable"; case 7: return "class"; case 8: return "interface";
-        case 9: return "module"; case 10: return "property"; case 11: return "unit"; case 12: return "value";
-        case 13: return "enum"; case 14: return "keyword"; case 15: return "snippet"; case 16: return "color";
-        case 17: return "file"; case 18: return "reference"; case 19: return "folder"; case 20: return "enum-member";
-        case 21: return "constant"; case 22: return "struct"; case 23: return "event"; case 24: return "operator";
-        case 25: return "type-parameter"; default: return "text";
-    }
-}
-
-Json hover_text(const Json& contents) {
-    if (contents.is_string()) return contents;
-    if (contents.is_object() && contents.contains("value")) return contents.at("value");
-    if (contents.is_array()) {
-        std::string joined;
-        for (const auto& part : contents) {
-            const auto text = hover_text(part);
-            if (text.is_string()) { if (!joined.empty()) joined += "\n\n"; joined += text.get<std::string>(); }
-        }
-        return joined;
-    }
-    return Json(nullptr);
-}
-
-// Shaping runs on the server reader thread, so a malformed payload must degrade to
-// zeroes instead of throwing out of the message loop. These helpers never index a
-// non-object and never assume a key exists.
-Json range_corner(const Json& range, const char* corner) {
-    if (range.is_object() && range.contains(corner) && range.at(corner).is_object()) return range.at(corner);
-    return Json::object();
-}
-
-int int_at(const Json& object, const char* key) {
-    return object.is_object() && object.contains(key) && object.at(key).is_number_integer()
-               ? object.at(key).get<int>() : 0;
-}
-
-bool bool_at(const Json& object, const char* key, bool fallback) {
-    return object.is_object() && object.contains(key) && object.at(key).is_boolean() ? object.at(key).get<bool>()
-                                                                                     : fallback;
-}
-
-int int_or(const Json& object, const char* key, int fallback) {
-    return object.is_object() && object.contains(key) && object.at(key).is_number_integer()
-               ? object.at(key).get<int>() : fallback;
-}
-
-std::string string_at(const Json& object, const char* key) {
-    return object.is_object() && object.contains(key) && object.at(key).is_string() ? object.at(key).get<std::string>()
-                                                                                     : std::string();
-}
-
-// TextEdit[] -> [{text,startLine,startChar,endLine,endChar}] with 0-based positions.
-Json text_edits(const Json& array) {
-    Json out = Json::array();
-    if (!array.is_array()) return out;
-    for (const auto& item : array) {
-        if (!item.is_object() || !item.contains("range")) continue;
-        const auto range = item.at("range");
-        const auto start = range_corner(range, "start");
-        const auto end = range_corner(range, "end");
-        out.push_back({{"text", string_at(item, "newText")},
-                       {"startLine", int_at(start, "line")}, {"startChar", int_at(start, "character")},
-                       {"endLine", int_at(end, "line")}, {"endChar", int_at(end, "character")}});
-    }
-    return out;
-}
-
-// DocumentSymbol[] (hierarchical: selectionRange + range, recursion through
-// `children`) or SymbolInformation[] (flat: location.range) -> one depth-first list.
-void collect_symbols(const Json& nodes, Json& out) {
-    if (!nodes.is_array()) return;
-    const Json blank = Json::object();
-    for (const auto& node : nodes) {
-        if (!node.is_object() || !node.contains("name") || !node.at("name").is_string()) continue;
-        const Json* span = nullptr;
-        const Json* selection = nullptr;
-        if (node.contains("range") && node.at("range").is_object()) span = &node.at("range");
-        if (node.contains("selectionRange") && node.at("selectionRange").is_object())
-            selection = &node.at("selectionRange");
-        else if (node.contains("location") && node.at("location").is_object() &&
-                 node.at("location").contains("range") && node.at("location").at("range").is_object()) {
-            span = selection = &node.at("location").at("range");
-        } else {
-            span = selection = &blank;
-        }
-        const auto start = range_corner(*selection, "start");
-        const auto end = range_corner(*span, "end");
-        out.push_back({{"name", node.at("name")}, {"kind", int_at(node, "kind")}, {"detail", string_at(node, "detail")},
-                       {"startLine", int_at(start, "line")}, {"startChar", int_at(start, "character")},
-                       {"endLine", int_at(end, "line")}, {"endChar", int_at(end, "character")}});
-        if (node.contains("children")) collect_symbols(node.at("children"), out);  // depth-first
-    }
-}
-
-Json invalid(const std::string& code, const std::string& message) {
-    return Json{{"code", code}, {"message", message}};
-}
-
-// The ServerCapabilities key a request kind needs. Every kind this session can
-// issue has one, which is what makes the "server did not advertise it" check
-// below complete instead of best-effort.
-const char* provider_for(const std::string& kind) {
-    if (kind == "hover") return "hoverProvider";
-    if (kind == "completion") return "completionProvider";
-    if (kind == "definition") return "definitionProvider";
-    if (kind == "rename") return "renameProvider";
-    if (kind == "references") return "referencesProvider";
-    if (kind == "documentSymbol") return "documentSymbolProvider";
-    if (kind == "workspaceSymbol") return "workspaceSymbolProvider";
-    if (kind == "signatureHelp") return "signatureHelpProvider";
-    if (kind == "codeAction" || kind == "codeActionResolve") return "codeActionProvider";
-    if (kind == "formatting") return "documentFormattingProvider";
-    if (kind == "rangeFormatting") return "documentRangeFormattingProvider";
-    if (kind == "implementation") return "implementationProvider";
-    if (kind == "typeDefinition") return "typeDefinitionProvider";
-    if (kind == "documentHighlight") return "documentHighlightProvider";
-    if (kind == "prepareCallHierarchy" || kind == "callHierarchyIncoming" || kind == "callHierarchyOutgoing")
-        return "callHierarchyProvider";
-    if (kind == "prepareTypeHierarchy" || kind == "typeHierarchySupertypes" || kind == "typeHierarchySubtypes")
-        return "typeHierarchyProvider";
-    if (kind == "selectionRange") return "selectionRangeProvider";
-    if (kind == "inlayHint") return "inlayHintProvider";
-    return nullptr;
-}
-
-// A workspace-relative path is only writable when it stays inside the root: no
-// absolute form, no drive letter, no `..`.
-bool escapes_root(const std::string& relative) {
-    if (relative.empty()) return true;
-    if (relative.front() == '/' || relative.front() == '\\') return true;
-    if (relative.size() >= 2 && std::isalpha(static_cast<unsigned char>(relative[0])) != 0 && relative[1] == ':')
-        return true;
-    for (std::size_t start = 0; start < relative.size();) {
-        const auto slash = relative.find_first_of("/\\", start);
-        const auto segment = relative.substr(start, slash == std::string::npos ? slash : slash - start);
-        if (segment == "..") return true;
-        if (slash == std::string::npos) break;
-        start = slash + 1;
-    }
-    return false;
-}
-
-// LSP (line, character) -> byte offset in UTF-8 text, with `character` counted in
-// UTF-16 code units like the protocol says. Clamped, so a range a server computed
-// against an older buffer can never run past the end of this one.
-std::size_t offset_of(const std::string& text, int line, int character) {
-    std::size_t position = 0;
-    for (int current = 0; current != line; ++current) {
-        const auto newline = text.find('\n', position);
-        if (newline == std::string::npos) return text.size();
-        position = newline + 1;
-    }
-    std::size_t index = position, units = 0;
-    const auto wanted = character > 0 ? static_cast<std::size_t>(character) : std::size_t(0);
-    while (index != text.size() && text[index] != '\n' && units < wanted) {
-        const auto byte = static_cast<unsigned char>(text[index]);
-        std::size_t step = 1;
-        if (byte >= 0xF0) { step = 4; units += 2; }
-        else if (byte >= 0xE0) { step = 3; units += 1; }
-        else if (byte >= 0xC0) { step = 2; units += 1; }
-        else units += 1;
-        index += step;
-    }
-    return index;
-}
-
-// ---- shared result shaping for the coding-assistance kinds -------------------
-//
-// `to_path` is the Session's uri -> workspace-relative mapper, passed in because
-// these helpers run on the server reader thread inside a shaped callback.
-
-// WorkspaceEdit -> [{path,textEdits}]. Shared by rename and by every codeAction
-// that carries an inline edit, so a multi-file refactor and a quick fix apply the
-// exact same way in the UI.
-template <class ToPath>
-Json edit_groups(const Json& result, ToPath&& to_path) {
-    Json groups = Json::array();
-    const auto add = [&groups, &to_path](const std::string& target, const Json& edits) {
-        auto text = text_edits(edits);
-        if (target.empty() || text.empty()) return;
-        groups.push_back({{"path", to_path(target)}, {"textEdits", std::move(text)}});
-    };
-    if (result.is_object()) {
-        // WorkspaceEdit.changes: uri -> TextEdit[].
-        if (result.contains("changes") && result.at("changes").is_object())
-            for (const auto& entry : result.at("changes").items())
-                add(entry.key(), entry.value());
-        // ... or the anchored documentChanges form (TextDocumentEdit only;
-        // create/rename/delete file operations carry no edits to apply).
-        for (const char* key : {"documentChanges", "documentedChanges"}) {
-            if (!result.contains(key) || !result.at(key).is_array()) continue;
-            for (const auto& change : result.at(key)) {
-                if (!change.is_object() || !change.contains("edits")) continue;
-                const auto document = change.contains("textDocument") && change.at("textDocument").is_object()
-                                          ? change.at("textDocument").value("uri", std::string()) : std::string();
-                add(document, change.at("edits"));
-            }
-        }
-    }
-    return groups;
-}
-
-// Location[] / LocationLink[] (a bare single object is accepted too) ->
-// [{path,line,character}] with 0-based positions. Shared by references,
-// implementation and typeDefinition.
-template <class ToPath>
-Json ref_entries(const Json& result, ToPath&& to_path) {
-    Json refs = Json::array();
-    const Json single = result.is_object() ? Json::array({result}) : Json::array();
-    const Json& items = result.is_array() ? result : single;  // no copy on the common path
-    for (const auto& item : items) {
-        if (!item.is_object()) continue;
-        std::string target;
-        const Json* span = nullptr;
-        const auto link = [&item](const char* uri_key, const char* range_key) {
-            return item.contains(uri_key) && item.at(uri_key).is_string() && item.contains(range_key) &&
-                   item.at(range_key).is_object();
-        };
-        if (link("uri", "range")) { target = item.at("uri").get<std::string>(); span = &item.at("range"); }
-        else if (link("targetUri", "targetSelectionRange")) {
-            target = item.at("targetUri").get<std::string>(); span = &item.at("targetSelectionRange");
-        }
-        if (target.empty() || !span || !span->is_object()) continue;
-        refs.push_back({{"path", to_path(target)}, {"line", int_at(range_corner(*span, "start"), "line")},
-                        {"character", int_at(range_corner(*span, "start"), "character")}});
-    }
-    return refs;
-}
-
-// A CallHierarchyItem / TypeHierarchyItem ->
-// {name,kind,path,detail?,line,character,raw?}. The item is the only thing the
-// incoming/outgoing and supertype/subtype requests need, so `with_raw` keeps the
-// untouched server object along for the UI to echo back verbatim.
-template <class ToPath>
-Json hier_item(const Json& item, ToPath&& to_path, bool with_raw) {
-    if (!item.is_object()) return Json(nullptr);
-    const auto name = string_at(item, "name");
-    if (name.empty()) return Json(nullptr);
-    Json shaped{{"name", name}, {"kind", int_or(item, "kind", 0)}};
-    if (item.contains("uri") && item.at("uri").is_string()) shaped["path"] = to_path(item.at("uri").get<std::string>());
-    const auto detail = string_at(item, "detail");
-    if (!detail.empty()) shaped["detail"] = detail;
-    if (item.contains("selectionRange") && item.at("selectionRange").is_object()) {
-        const auto& span = item.at("selectionRange");
-        shaped["line"] = int_at(range_corner(span, "start"), "line");
-        shaped["character"] = int_at(range_corner(span, "start"), "character");
-    }
-    if (with_raw) shaped["raw"] = item;
-    return shaped;
-}
-
-// The item arrays both hierarchies answer with (a bare object is accepted too).
-template <class ToPath>
-Json hier_items(const Json& result, ToPath&& to_path) {
-    Json items = Json::array();
-    const Json single = result.is_object() ? Json::array({result}) : Json::array();
-    for (const auto& item : (result.is_array() ? result : single)) {
-        auto shaped = hier_item(item, to_path, true);
-        if (!shaped.is_null()) items.push_back(std::move(shaped));
-    }
-    return items;
-}
-
-// CallHierarchyIncomingCall[] (`from`) / CallHierarchyOutgoingCall[] (`to`) ->
-// [{name,kind,path,line,character,callLine,callChar}]. Both carry `fromRanges`, the
-// span of the call site, so the UI can jump from a caller to where it calls.
-template <class ToPath>
-Json call_entries(const Json& result, ToPath&& to_path, const char* item_key) {
-    Json calls = Json::array();
-    if (!result.is_array()) return calls;
-    for (const auto& entry : result) {
-        if (!entry.is_object() || !entry.contains(item_key)) continue;
-        auto shaped = hier_item(entry.at(item_key), to_path, true);
-        if (shaped.is_null()) continue;
-        if (entry.contains("fromRanges") && entry.at("fromRanges").is_array() && !entry.at("fromRanges").empty() &&
-            entry.at("fromRanges").front().is_object()) {
-            const auto& span = entry.at("fromRanges").front();
-            shaped["callLine"] = int_at(range_corner(span, "start"), "line");
-            shaped["callChar"] = int_at(range_corner(span, "start"), "character");
-        }
-        calls.push_back(std::move(shaped));
-    }
-    return calls;
-}
-
-// A (Command|CodeAction)[]: only the title, the kind and an inline WorkspaceEdit
-// matter to the UI, so untitled entries are dropped and every remaining one is
-// numbered with `index`. An action whose edit only arrives through
-// codeAction/resolve is listed with edits:[] and resolvable:true; `raw_out`, when
-// given, collects the untouched server objects so `index` still addresses them
-// after a later codeActionResolve request.
-template <class ToPath>
-Json action_entries(const Json& result, ToPath&& to_path, Json* raw_out = nullptr) {
-    Json actions = Json::array();
-    if (!result.is_array()) return actions;
-    for (const auto& item : result) {
-        if (!item.is_object()) continue;
-        const auto title = string_at(item, "title");
-        if (title.empty()) continue;
-        const bool has_edit = item.contains("edit");
-        Json action{{"title", title},
-                    {"index", static_cast<int>(actions.size())},
-                    {"edits", has_edit ? edit_groups(item.at("edit"), to_path) : Json::array()}};
-        if (item.contains("kind") && item.at("kind").is_string()) action["kind"] = item.at("kind");
-        // The UI distinguishes IDEA's "quick fix" actions from intentions by what the
-        // server itself declares: isPreferred, or a diagnostics backlink.
-        if (item.contains("isPreferred") && item.at("isPreferred").is_boolean())
-            action["preferred"] = item.at("isPreferred");
-        if (item.contains("diagnostics") && item.at("diagnostics").is_array() && !item.at("diagnostics").empty())
-            action["linkedDiagnostics"] = true;
-        // Resolve can only fill an action the server left unfinished, and it needs
-        // something to act on (a command and/or server-supplied `data`).
-        action["resolvable"] = !has_edit && (item.contains("command") || item.contains("data"));
-        if (raw_out) raw_out->push_back(item);
-        actions.push_back(std::move(action));
-    }
-    return actions;
-}
-
-// SignatureInformation.parameters[].label is either a plain string or a
-// [start,end] UTF-16 pair into the signature label; the byte slice is the same
-// approximation the rest of the bridge already accepts for non-ASCII lines.
-std::string parameter_label(const Json& signature, const Json& parameter) {
-    if (!parameter.is_object() || !parameter.contains("label")) return std::string();
-    const auto& raw = parameter.at("label");
-    if (raw.is_string()) return raw.get<std::string>();
-    if (!raw.is_array() || raw.size() < 2 || !raw[0].is_number_integer() || !raw[1].is_number_integer())
-        return std::string();
-    const auto label = string_at(signature, "label");
-    const auto start = raw[0].get<std::int64_t>(), end = raw[1].get<std::int64_t>();
-    if (start < 0 || end < start || static_cast<std::size_t>(end) > label.size()) return std::string();
-    return label.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
-}
-
-// SignatureHelp -> {available, signatures:[{label,documentation?,parameters:[{label}]}],
-//                   activeSignature, activeParameter}.
-Json signature_shape(const Json& result) {
-    Json signatures = Json::array();
-    if (result.is_object() && result.contains("signatures") && result.at("signatures").is_array())
-        for (const auto& item : result.at("signatures")) {
-            if (!item.is_object()) continue;
-            const auto label = string_at(item, "label");
-            if (label.empty()) continue;
-            Json parameters = Json::array();
-            if (item.contains("parameters") && item.at("parameters").is_array())
-                for (const auto& parameter : item.at("parameters"))
-                    parameters.push_back({{"label", parameter_label(item, parameter)}});
-            Json signature{{"label", label}, {"parameters", std::move(parameters)}};
-            if (item.contains("documentation") && !item.at("documentation").is_null()) {
-                const auto text = hover_text(item.at("documentation"));
-                if (text.is_string()) signature["documentation"] = text;
-            }
-            signatures.push_back(std::move(signature));
-        }
-    if (signatures.empty()) return Json{{"available", false}};
-    return Json{{"available", true},
-                {"signatures", std::move(signatures)},
-                {"activeSignature", int_at(result, "activeSignature")},
-                {"activeParameter", int_at(result, "activeParameter")}};
-}
-
-// DocumentHighlight[] -> {available, highlights:[{kind,startLine,startChar,endLine,endChar}]}
-// with kind 1=text 2=read 3=write (0 when the server omitted it).
-Json highlight_shape(const Json& result) {
-    Json highlights = Json::array();
-    if (result.is_array())
-        for (const auto& item : result) {
-            if (!item.is_object()) continue;
-            const Json span = item.contains("range") && item.at("range").is_object() ? item.at("range") : Json::object();
-            const auto start = range_corner(span, "start");
-            const auto end = range_corner(span, "end");
-            highlights.push_back({{"kind", int_at(item, "kind")},
-                                  {"startLine", int_at(start, "line")}, {"startChar", int_at(start, "character")},
-                                  {"endLine", int_at(end, "line")}, {"endChar", int_at(end, "character")}});
-        }
-    if (highlights.empty()) return Json{{"available", false}};
-    return Json{{"available", true}, {"highlights", std::move(highlights)}};
-}
-
-// TextEdit[] for the single formatted document -> the one-file rename shape.
-Json format_shape(const Json& result, std::string path) {
-    auto text = text_edits(result);
-    if (text.empty()) return Json{{"available", false}};
-    return Json{{"available", true},
-                {"edits", Json::array({{{"path", std::move(path)}, {"textEdits", std::move(text)}}})}};
-}
-
-// A range supplied by the UI (already 0-based), or a zero-width range at the
-// caret when the caller only knows the cursor position.
-Json argument_range(const Json& args, int line, int character) {
-    if (args.is_object() && args.contains("range") && args.at("range").is_object()) {
-        const auto& candidate = args.at("range");
-        const auto corner = [&candidate](const char* name) {
-            return candidate.contains(name) && candidate.at(name).is_object();
-        };
-        if (corner("start") && corner("end")) return candidate;
-    }
-    const auto point = Json{{"line", line}, {"character", character}};
-    return Json{{"start", point}, {"end", std::move(point)}};
-}
-
-// codeAction context: the diagnostics the UI already holds for that range, or an
-// empty array. Non-object entries are dropped so a stray element cannot poison
-// the request.
-Json argument_diagnostics(const Json& args) {
-    Json out = Json::array();
-    if (args.is_object() && args.contains("diagnostics") && args.at("diagnostics").is_array())
-        for (const auto& item : args.at("diagnostics"))
-            if (item.is_object()) out.push_back(item);
-    return out;
-}
-
-// FormattingOptions: the IDE edits with 4 spaces unless the UI says otherwise.
-Json format_options(const Json& args) {
-    return Json{{"tabSize", int_or(args, "tabSize", 4)}, {"insertSpaces", bool_at(args, "insertSpaces", true)}};
-}
-
-}  // namespace
 
 Session::~Session() { shutdown_all(); }
 
@@ -521,185 +51,36 @@ std::string Session::to_uri(const std::string& path) const {
     return "file:///" + encoded;
 }
 
-std::string uri_to_relative(const std::string& uri, const std::filesystem::path& root) {
-    std::string tail = uri;
-    const std::string scheme = "file:///";
-    if (tail.rfind(scheme, 0) == 0) tail = tail.substr(scheme.size());
-    else if (tail.rfind("file://", 0) == 0) tail = tail.substr(7);
-    auto decoded = percent_decode(tail);
-    const std::string base = u8_path(root);
-    if (base.size() > 1 && decoded.size() >= base.size() && lower(decoded.substr(0, base.size())) == lower(base)) {
-        auto relative = decoded.substr(base.size());
-        while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) relative.erase(relative.begin());
-        return relative;
-    }
-    return decoded;
-}
-
 std::string Session::to_path(const std::string& uri) const {
     return uri_to_relative(uri, root_);
 }
 
-Host& Session::ensure(const std::string& language) {
-    const auto existing = hosts_.find(language);
-    if (existing != hosts_.end()) return *existing->second;
-    const auto config = config_.find(language);
-    if (config == config_.end()) throw WorkspaceError("LSP_UNAVAILABLE", "no server configured for " + language);
-
-    auto host = std::make_unique<Host>();
-    // The root is snapshotted when the host is created and never changes while it
-    // lives (reset_lsp shuts every host down before set_root), so the reader-thread
-    // callback below can map URIs without touching mutable Session state.
-    const auto root_snapshot = root_;
-    host->set_diagnostics([this, root_snapshot](Json params) {
-        if (!params.is_object()) return;
-        const auto uri = string_at(params, "uri");
-        if (uri.empty()) return;
-        // This runs on the Host reader thread with Host::io_mutex_ held. It must not
-        // take Session::mutex_ (Session->Host is the other lock order) and it must
-        // never throw: a malformed payload escaping here would terminate the process.
-        const std::string path = uri_to_relative(uri, root_snapshot);
-        Json diagnostics = Json::array();
-        if (params.contains("diagnostics") && params.at("diagnostics").is_array()) {
-            for (const auto& item : params.at("diagnostics")) {
-                if (!item.is_object() || !item.contains("range") || !item.at("range").is_object()) continue;
-                const auto& range = item.at("range");
-                const auto start = range_corner(range, "start");
-                Json entry{{"line", int_at(start, "line")}, {"character", int_at(start, "character")},
-                           {"message", string_at(item, "message")}, {"severity", int_at(item, "severity")}};
-                if (entry.at("severity").get<int>() == 0) entry["severity"] = 1;
-                if (range.contains("end") && range.at("end").is_object()) {
-                    const auto end = range_corner(range, "end");
-                    entry["endLine"] = int_at(end, "line");
-                    entry["endCharacter"] = int_at(end, "character");
-                }
-                if (item.contains("source")) entry["source"] = item.at("source");
-                diagnostics.push_back(std::move(entry));
-            }
-        }
-        if (on_diagnostics_) on_diagnostics_(path, std::move(diagnostics));
-    });
-
-    Host::Spec spec;
-    spec.executable = config->second.command;
-    spec.arguments = config->second.arguments;
-    spec.working_directory = config->second.working_directory;
-    const auto root_uri = root_.empty() ? Json(nullptr) : Json(to_uri(""));
-    auto initialization = config->second.initialization_options;
-    initialization["settings"] = config->second.settings;
-    host->set_configuration(config->second.settings);
-    host->set_timeout(timeout_);
-    const auto root_name = root_.filename().generic_u8string();
-    Json params{
-        {"initializationOptions", std::move(initialization)},
-        {"workspaceFolders", root_.empty() ? Json(nullptr) : Json::array({{{"uri", root_uri}, {"name", std::string(root_name.begin(), root_name.end())}}})},
-        {"clientInfo", {{"name", "TaoCode"}, {"version", "0.1"}}},
-        {"rootUri", root_uri},
-        {"capabilities", {
-            {"textDocument", {
-                {"hover", {{"contentFormat", Json::array({"markdown", "plaintext"})}}},
-                {"definition", Json::object()},
-                // Completion: the item kinds the UI renders and the resolve-driven
-                // detail/documentation the item list can ask for. `resolveSupport` is
-                // deliberately absent — completionItem/resolve is not implemented, so
-                // a server must send everything with the item.
-                {"completion", {{"completionItem", {{"snippetSupport", false},
-                                                    {"commitCharactersSupport", false},
-                                                    {"documentationFormat", Json::array({"markdown", "plaintext"})},
-                                                    {"deprecatedSupport", false},
-                                                    {"insertReplaceSupport", false}}},
-                                {"completionItemKind", {{"valueSet", Json::array({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-                                                                                 12, 13, 14, 15, 16, 17, 18, 19, 20,
-                                                                                 21, 22, 23, 24, 25})}}},
-                                {"contextSupport", true}}},
-                {"publishDiagnostics", {{"relatedInformation", false}, {"versionSupport", false},
-                                        {"dataSupport", true}}},
-                // Refactor + symbol capabilities: declaring hierarchical symbol
-                // support is what makes real servers answer DocumentSymbol[]
-                // instead of the legacy flat SymbolInformation[].
-                {"references", Json::object()},
-                {"rename", {{"prepareSupport", false}, {"changesAnnotationSupport", Json::object()}}},
-                {"documentSymbol", {{"hierarchicalDocumentSymbolSupport", true}}},
-                // Coding assistance. `resolveSupport` IS declared now: an action that
-                // arrives with only a command is fetched again through
-                // codeAction/resolve (see the codeActionResolve kind below).
-                {"signatureHelp", {{"contextSupport", true},
-                                   {"signatureInformation", {
-                                       {"documentationFormat", Json::array({"markdown", "plaintext"})},
-                                       {"parameterInformation", {{"labelSupport", true}}}}}}},
-                {"codeAction", {{"codeActionLiteralSupport", {{"codeActionKind", {{"valueSet", Json::array({
-                    "quickfix", "refactor", "refactor.extract", "refactor.inline", "refactor.rewrite",
-                    "source", "source.organizeImports", "source.fixAll"})}}}}},
-                    {"isPreferredSupport", true}, {"dataSupport", true},
-                    {"resolveSupport", {{"properties", Json::array({"edit", "command"})}}}}},
-                {"formatting", Json::object()},
-                {"rangeFormatting", Json::object()},
-                {"implementation", Json::object()},
-                {"typeDefinition", Json::object()},
-                {"documentHighlight", Json::object()},
-                {"callHierarchy", Json::object()},
-                {"typeHierarchy", Json::object()},
-                // Inlay hints and selection ranges are requested below, so they are
-                // declared here: a server is entitled to refuse a request whose
-                // capability the client never announced. `resolveSupport` is omitted
-                // on purpose — inlayHint/resolve is not implemented.
-                {"inlayHint", {{"dynamicRegistration", true}}},
-                {"selectionRange", {{"dynamicRegistration", true}}},
-                // The didChange the client sends is derived from what the server
-                // announces (full or incremental), so declaring both is honest.
-                {"synchronization", {{"dynamicRegistration", true}, {"willSave", false},
-                                     {"willSaveWaitUntil", false}, {"didSave", false}}},
-            }},
-            {"workspace", {{"configuration", true}, {"symbol", Json::object()},
-                           // applyEdit is implemented: the server's edits really are
-                           // written through the workspace layer.
-                           {"applyEdit", true},
-                           {"workspaceEdit", {{"documentChanges", true},
-                                              {"resourceOperations", Json::array({"create", "rename", "delete"})},
-                                              {"failureHandling", "textOnlyTransactional"}}},
-                           {"didChangeConfiguration", {{"dynamicRegistration", true}}},
-                           {"workspaceFolders", true}}},
-        }},
-    };
-    // The server-driven `workspace/applyEdit` writes real files through Workspace.
-    host->set_document_editor([this](const std::string& uri, const Json& edits, int version) {
-        return apply_document_edits(uri, edits, version);
-    });
-    // Defer didOpen until the initialize handshake completes on the reader thread.
-    host->start(spec, std::move(params), [this, language](Json result, Json error) {
-        if (!error.is_null()) return;
-        std::lock_guard lock(mutex_);
-        ready_[language] = true;
-        capabilities_[language] = result.is_object() && result.contains("capabilities") &&
-                                          result.at("capabilities").is_object()
-                                      ? result.at("capabilities") : Json::object();
-        const auto host = hosts_.find(language);
-        if (host == hosts_.end()) return;
-        // Honour the sync kind the server announced: with Incremental a didChange
-        // carries a range instead of the whole document.
-        const auto& capabilities = capabilities_[language];
-        const auto& declared = capabilities.contains("textDocumentSync") ? capabilities.at("textDocumentSync")
-                                                                         : Json(nullptr);
-        int kind = static_cast<int>(SyncKind::full);
-        if (declared.is_number_integer()) kind = declared.get<int>();
-        else if (declared.is_object() && declared.contains("change") && declared.at("change").is_number_integer())
-            kind = declared.at("change").get<int>();
-        host->second->set_sync_kind(kind == static_cast<int>(SyncKind::incremental) ? SyncKind::incremental
-                                                                                    : SyncKind::full);
-        for (auto& [path, doc] : documents_)
-            if (doc.language == language && !doc.opened) {
-                host->second->did_open(doc.uri, language, doc.version, doc.text);
-                doc.opened = true;
-            }
-    });
-    hosts_[language] = std::move(host);
-    return *hosts_[language];
-}
 
 Json Session::open(const std::string& path, const std::string& text) {
     const auto language = language_for(path);
-    std::lock_guard lock(mutex_);
-    if (!has_server(language)) return {{"running", false}, {"language", language}};
+    // A host whose initialize handshake failed can never become ready (the client is past
+    // `fresh`), so a retry has to replace it. The doomed host is stopped with mutex_ released
+    // — Host::stop() joins its reader thread, and that thread's callbacks take mutex_.
+    std::unique_ptr<Host> doomed;
+    bool retry = false;
+    {
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+        retry = has_server(language) && startup_errors_.count(language) != 0;
+        const auto failed = hosts_.find(language);
+        if (retry && failed != hosts_.end()) { doomed = std::move(failed->second); hosts_.erase(failed); }
+    }
+    if (doomed) { doomed->stop(); announce_progress_reset(language); }  // 换掉一台 = 它那批进度不会再有 `end`，界面不能留一条永远在转的行
+    if (retry) {
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+        // Only now, with the reader joined: a late callback cannot resurrect the failure we clear.
+        startup_errors_.erase(language);
+        ready_.erase(language);
+        capabilities_.erase(language);
+        for (auto& [open_path, doc] : documents_)
+            if (doc.language == language) doc.opened = false;
+    }
+    taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+    if (!has_server(language)) return language_status(language);
     Document& doc = documents_[path];
     doc.language = language;
     doc.uri = to_uri(path);
@@ -709,14 +90,14 @@ Json Session::open(const std::string& path, const std::string& text) {
     try {
         Host& host = ensure(language);
         if (ready_.count(language) && ready_[language]) { host.did_open(doc.uri, language, doc.version, text); doc.opened = true; }
-    } catch (const WorkspaceError&) {
-        return {{"running", false}, {"language", language}};
+    } catch (const WorkspaceError& error) {
+        startup_errors_[language] = invalid(error.code, error.what());
     }
-    return {{"running", true}, {"language", language}};
+    return language_status(language);
 }
 
 void Session::change(const std::string& path, const std::string& text) {
-    std::lock_guard lock(mutex_);
+    taocode::trace::Lock lock(mutex_, __FUNCSIG__);
     const auto document = documents_.find(path);
     if (document == documents_.end()) return;
     document->second.text = text;
@@ -730,7 +111,7 @@ void Session::close(const std::string& path) {
     Host* host = nullptr;
     std::string uri;
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         const auto document = documents_.find(path);
         if (document == documents_.end()) return;
         uri = document->second.uri;
@@ -743,7 +124,7 @@ void Session::close(const std::string& path) {
     // Inform the server the document is closed (LSP lifecycle); not doing so leaves
     // stale diagnostics on JDT/TS after a tab closes. Then drop local state.
     if (host) host->did_close(uri);
-    std::lock_guard lock(mutex_);
+    taocode::trace::Lock lock(mutex_, __FUNCSIG__);
     documents_.erase(path);
     pending_actions_.erase(path);
 }
@@ -753,7 +134,7 @@ void Session::request(const std::string& kind, const std::string& path, int line
     std::string uri;
     Json declined;
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         const auto document = documents_.find(path);
         if (document == documents_.end()) declined = invalid("LSP_CLOSED", "document is not open");
         else {
@@ -821,20 +202,31 @@ void Session::request(const std::string& kind, const std::string& path, int line
                         Json entry{{"label", item.at("label")}, {"kind", completion_kind(item.value("kind", 1))}};
                         if (item.contains("detail") && item.at("detail").is_string()) entry["detail"] = item.at("detail");
                         if (item.contains("insertText") && item.at("insertText").is_string()) entry["apply"] = item.at("insertText");
+                        // 有些服务器不等 resolve 就给了文档，能省一次往返。
+                        if (item.contains("documentation")) entry["documentation"] = hover_text(item.at("documentation"));
+                        // `raw` 是**服务器给的原始项**：`completionItem/resolve` 要求把它原样发回去
+                        // （服务器靠里面的 `data` 找回条目）。与层级项用的是同一套做法。
+                        entry["raw"] = item;
                         items.push_back(std::move(entry));
                     }
                 }
                 on_result({{"available", true}, {"items", std::move(items)}}, Json(nullptr));
             });
     } else {
-        on_result(Json(nullptr), Json{{"code", "LSP_BAD_KIND"}, {"message", "unknown request kind"}});
+        // 不是位置型 kind：转交 `semantic()` 的统一分派，而不是直接判死。
+        // 两个入口各有自己的 kind 表，`request` 只管 hover/completion/definition；
+        // **谁在谁的表里未知时转交给对方，是唯一不会漏的做法** —— 直接报 LSP_BAD_KIND
+        // 会让「加进了 A 表但调用方走 B 入口」变成一个只在运行时才暴露的空功能
+        // （已经发生过：completionItemResolve / diagnostic / prepareRename / foldingRange
+        // 四个 kind 曾经打到这里，前端各自的 catch 又把错误吃掉了）。
+        semantic(kind, path, line, character, Json::object(), std::move(on_result));
     }
 }
 
 void Session::set_configuration(const std::string& language, Json settings) {
     Host* host = nullptr;
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         const auto config = config_.find(language);
         if (config == config_.end()) return;
         config->second.settings = settings;
@@ -844,16 +236,59 @@ void Session::set_configuration(const std::string& language, Json settings) {
     if (host) host->set_configuration(std::move(settings));
 }
 
+// 文件操作通知。只有**声明了**对应 `workspace.fileOperations.<其一>` 的服务器才收得到 ——
+// 对没声明的服务器发这些是协议噪音，而对声明了的服务器不发会让它的索引与磁盘不一致。
+void Session::announce_file_operations(const std::string& kind, const std::vector<FileOperation>& files) {
+    if (files.empty()) return;
+    const char* capability = kind == "created" ? "didCreate" : kind == "renamed" ? "didRename"
+                                                                                 : "didDelete";
+    const char* method = kind == "created" ? "workspace/didCreateFiles"
+                                            : kind == "renamed" ? "workspace/didRenameFiles"
+                                                                : "workspace/didDeleteFiles";
+    // 目标服务器在锁内挑好，发送在锁外做：一个通知的触发点可能正是某个回调里，
+    // 而回调是 reader 线程带着 io_mutex_ 进来的。
+    std::vector<Host*> targets;
+    {
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+        for (auto& [language, host] : hosts_) {
+            const auto ready = ready_.find(language);
+            if (ready == ready_.end() || !ready->second) continue;
+            if (!file_operation_supported(language, capability)) continue;
+            targets.push_back(host.get());
+        }
+    }
+    if (targets.empty()) return;
+    Json entries = Json::array();
+    for (const auto& file : files) {
+        if (file.path.empty()) continue;
+        if (kind == "renamed") {
+            if (file.previous.empty()) continue;
+            entries.push_back({{"oldUri", to_uri(file.previous)}, {"newUri", to_uri(file.path)}});
+        } else {
+            entries.push_back({{"uri", to_uri(file.path)}});
+        }
+    }
+    if (entries.empty()) return;
+    const Json params{{"files", std::move(entries)}};
+    for (Host* host : targets) host->notify(method, params);
+}
+
 void Session::semantic(const std::string& kind, const std::string& path, int line, int character, const Json& args,
                        ResultHandler on_result) {
+    if (kind == "status") { on_result(status(path), Json(nullptr)); return; }
     Host* host = nullptr;
     std::string uri;
+    // 有些能力是**嵌套**在 provider 里的（例如 `renameProvider.prepareProvider`），
+    // 顶层的 `unsupported()` 查不到，所以这里把命中的语言带出来供分支自己再判一次。
+    std::string language_name;
     Json declined;
     {
-        std::lock_guard lock(mutex_);
-        if (kind == "workspaceSymbol") {
-            // Server-wide query: no document required. Use the language implied by
-            // `path` when the caller knows one, else any configured/running server.
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+        if (kind == "workspaceSymbol" || kind == "willRenameFiles" || kind == "workspaceDiagnostic") {
+            // Server-wide query / file operation / whole-project inspection: no OPEN document
+            // is required (a rename target is usually not open, and a whole-project
+            // inspection names no file at all). Use the language implied by `path` when the
+            // caller knows one, else any configured/running server.
             auto language = language_for(path);
             if (language.empty()) {
                 if (!hosts_.empty()) language = hosts_.begin()->first;
@@ -868,6 +303,7 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                     declined = invalid(error.code, error.what());
                 }
             }
+            language_name = language;
             if (declined.is_null() && !host) declined = invalid("LSP_UNAVAILABLE", "no language server");
             if (declined.is_null())
                 if (const auto missing = unsupported(language, kind)) declined = Json(*missing);
@@ -881,14 +317,53 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                 else {
                     host = found->second.get();
                     uri = document->second.uri;
+                    language_name = document->second.language;
                 }
             }
         }
     }
     if (!declined.is_null()) { on_result(Json(nullptr), std::move(declined)); return; }
 
+    // 位置型的三个 kind 住在 `request()` 里（见那边的注释）：从本入口进来时转交过去。
+    // 转交是**闭合环**：`request()` 对不认识的 kind 转回这里，两张表合起来覆盖全部 kind，
+    // 从哪个入口进来都能到达。上面的门控已经放行，`request()` 会重新走一遍同样的门控，
+    // 结果一致（同一份 capabilities_），所以这里不需要把 uri/host 传下去。
+    if (kind == "hover" || kind == "completion" || kind == "definition") {
+        request(kind, path, line, character, std::move(on_result));
+        return;
+    }
+
     const auto position = Json{{"line", line}, {"character", character}};
     const auto relative = [this](const std::string& target) { return to_path(target); };
+    // 改名前先问服务器：它可能回一个 WorkspaceEdit，把别处指向这个文件的 import 一起改掉
+    // （IDEA 的 `RenameFileProcessor` + "搜索引用"那一步）。这不是 provider 门控的能力，而是
+    // `workspace.fileOperations.willRename`；没声明的服务器回 `{available:false}`（不是错误），
+    // 调用方直接跳过"更新引用"，改名本身照做。
+    if (kind == "willRenameFiles") {
+        const auto new_path = string_at(args, "newPath");
+        if (new_path.empty()) {
+            on_result(Json(nullptr), invalid("INVALID_REQUEST", "the new path is missing"));
+            return;
+        }
+        bool supported = false;
+        {
+            taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+            supported = file_operation_supported(language_name, "willRename");
+        }
+        if (!supported) { on_result({{"available", false}}, Json(nullptr)); return; }
+        const Json params{{"files", Json::array({Json{{"oldUri", to_uri(path)}, {"newUri", to_uri(new_path)}}})}};
+        host->request("workspace/willRenameFiles", params,
+            [on_result = std::move(on_result), relative](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                // `workspace/willRenameFiles` returns the WorkspaceEdit ITSELF (`WorkspaceEdit | null`,
+                // 不是 `{edit: …}` —— 那是 `workspace/applyEdit` 的参数形状）。null / {} / 没有
+                // TextEdit 的空编辑都表示"没有要改的引用"。
+                const auto edits = result.is_object() ? edit_groups(result, relative) : Json::array();
+                if (edits.empty()) { on_result({{"available", false}}, Json(nullptr)); return; }
+                on_result({{"available", true}, {"edits", std::move(edits)}}, Json(nullptr));
+            });
+        return;
+    }
     if (kind == "rename") {
         host->request("textDocument/rename", {{"textDocument", text_document(uri)}, {"position", position},
             {"newName", string_at(args, "newName")}},
@@ -897,6 +372,37 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                 const auto groups = edit_groups(result, to_path);
                 if (groups.empty()) on_result({{"available", false}}, Json(nullptr));
                 else on_result({{"available", true}, {"edits", std::move(groups)}}, Json(nullptr));
+            });
+        return;
+    }
+    // LSP `textDocument/prepareRename`（规范 "Prepare Rename Request"）：结果有三种形态 ——
+    // `Range`（这个位置可以改名，范围就是标识符）、`{range, placeholder}`（可改名且给出占位名）、
+    // `null`（此处不能改名）。IDEA 的 RenameProcessor 同样先校验再打开对话框。
+    if (kind == "prepareRename") {
+        // 规范把 prepareRename 的可用性放在 `renameProvider.prepareProvider` 里；服务器没开就不发，
+        // 前端据此"跳过预校验、按老路重命名"（supported=false），而不是把它当成"此处不能改名"。
+        if (!prepare_rename_supported(language_name)) {
+            on_result({{"available", false}, {"supported", false}}, Json(nullptr));
+            return;
+        }
+        host->request("textDocument/prepareRename", {{"textDocument", text_document(uri)}, {"position", position}},
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                if (result.is_null()) { on_result({{"available", false}, {"supported", true}}, Json(nullptr)); return; }
+                Json span = result;
+                std::string placeholder;
+                if (result.is_object()) {
+                    if (result.contains("range") && result.at("range").is_object()) span = result.at("range");
+                    placeholder = string_at(result, "placeholder");
+                }
+                if (!span.is_object()) { on_result({{"available", false}, {"supported", true}}, Json(nullptr)); return; }
+                const auto start = range_corner(span, "start");
+                const auto end = range_corner(span, "end");
+                Json payload{{"available", true}, {"supported", true},
+                             {"startLine", int_at(start, "line")}, {"startChar", int_at(start, "character")},
+                             {"endLine", int_at(end, "line")}, {"endChar", int_at(end, "character")}};
+                if (!placeholder.empty()) payload["placeholder"] = placeholder;
+                on_result(std::move(payload), Json(nullptr));
             });
         return;
     }
@@ -943,15 +449,29 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
                 Json symbols = Json::array();
                 if (result.is_array())
                     for (const auto& item : result) {
-                        // SymbolInformation carries location; an unresolved workspace
-                        // symbol does not, so it has no jump target and is skipped.
+                        // URI-only WorkspaceSymbol needs workspaceSymbol/resolve, which
+                        // is not implemented here. Never invent a (0, 0) range for it.
                         if (!item.is_object() || !item.contains("location") || !item.at("location").is_object()) continue;
                         const auto& location = item.at("location");
                         if (!location.contains("uri") || !location.at("uri").is_string()) continue;
-                        const auto start = range_corner(location.value("range", Json::object()), "start");
-                        symbols.push_back({{"name", string_at(item, "name")}, {"kind", int_at(item, "kind")},
-                                           {"path", to_path(location.at("uri").get<std::string>())},
-                                           {"line", int_at(start, "line")}, {"character", int_at(start, "character")}});
+                        if (!location.contains("range") || !location.at("range").is_object()) continue;
+                        const auto& range = location.at("range");
+                        if (!range.contains("start") || !range.at("start").is_object()) continue;
+                        const auto& start = range.at("start");
+                        if (!start.contains("line") || !start.at("line").is_number_integer() ||
+                            !start.contains("character") || !start.at("character").is_number_integer()) continue;
+                        Json symbol = {{"name", string_at(item, "name")}, {"kind", int_at(item, "kind")},
+                                       {"path", to_path(location.at("uri").get<std::string>())},
+                                       {"line", int_at(start, "line")}, {"character", int_at(start, "character")}};
+                        if (range.contains("end") && range.at("end").is_object()) {
+                            const auto& end = range.at("end");
+                            if (end.contains("line") && end.at("line").is_number_integer() &&
+                                end.contains("character") && end.at("character").is_number_integer()) {
+                                symbol["endLine"] = int_at(end, "line");
+                                symbol["endCharacter"] = int_at(end, "character");
+                            }
+                        }
+                        symbols.push_back(std::move(symbol));
                     }
                 if (symbols.empty()) on_result({{"available", false}}, Json(nullptr));
                 else on_result({{"available", true}, {"symbols", std::move(symbols)}}, Json(nullptr));
@@ -969,58 +489,9 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
             });
         return;
     }
-    if (kind == "codeAction") {
-        host->request("textDocument/codeAction", {{"textDocument", text_document(uri)},
-            {"range", argument_range(args, line, character)},
-            {"context", {{"diagnostics", argument_diagnostics(args)}}}},
-            [on_result = std::move(on_result), to_path = relative, this, path](Json result, Json error) {
-                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
-                Json raw = Json::array();
-                const auto actions = action_entries(result, to_path, &raw);
-                {
-                    // Keep the untouched server objects so codeActionResolve can address
-                    // one by the `index` the UI was given (untitled entries were dropped).
-                    std::lock_guard lock(mutex_);
-                    pending_actions_[path] = std::move(raw);
-                }
-                if (actions.empty()) on_result({{"available", false}}, Json(nullptr));
-                else on_result({{"available", true}, {"actions", std::move(actions)}}, Json(nullptr));
-            });
-        return;
-    }
-    // Resolve a lazily-offered CodeAction: the server promised `edit` only on
-    // request, so echo the stored object back and reshape whatever comes with it.
-    if (kind == "codeActionResolve") {
-        const auto index = int_or(args, "index", -1);
-        Json action;
-        bool stale = true;
-        {
-            std::lock_guard lock(mutex_);
-            const auto stored = pending_actions_.find(path);
-            if (stored != pending_actions_.end() && stored->second.is_array() && index >= 0 &&
-                static_cast<std::size_t>(index) < stored->second.size()) {
-                action = stored->second[static_cast<std::size_t>(index)];
-                stale = false;
-            }
-        }
-        if (stale) {
-            on_result(Json(nullptr), invalid("STALE_ACTION", "this code action is no longer available"));
-            return;
-        }
-        if (action.contains("edit")) {  // inline already: no round trip
-            on_result({{"available", true}, {"edits", edit_groups(action.at("edit"), relative)}}, Json(nullptr));
-            return;
-        }
-        host->request("codeAction/resolve", action,
-            [on_result = std::move(on_result), to_path = relative](Json result, Json error) {
-                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
-                const auto edits = result.is_object() && result.contains("edit")
-                                       ? edit_groups(result.at("edit"), to_path) : Json::array();
-                if (edits.empty()) on_result({{"available", false}}, Json(nullptr));
-                else on_result({{"available", true}, {"edits", std::move(edits)}}, Json(nullptr));
-            });
-        return;
-    }
+    // 代码操作这一族（codeAction / codeActionResolve / executeCommand）在 native/lsp_code_actions.cpp，
+    // 本函数只做转交（门控已在上面做完）。**传左值**：kind 不属于这一族时处理器必须还是完整的。
+    if (dispatch_code_action(kind, path, *host, uri, args, line, character, on_result)) return;
     // Call hierarchy: prepare answers with the item(s) at the position, and the
     // incoming/outgoing requests must echo one of those items straight back.
     if (kind == "prepareCallHierarchy" || kind == "prepareTypeHierarchy") {
@@ -1081,6 +552,282 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
     }
     // Selection ranges: walk the innermost SelectionRange's parent chain into an
     // ordered innermost->outermost list, so the UI can grow/shrink a selection.
+    // LSP `textDocument/foldingRange`：服务器给的折叠区间（0 基行号）。声明了 `lineFoldingOnly`，
+    // 所以按行的区间是常态，但三列式（带 startCharacter/endCharacter）也要照收。
+    if (kind == "foldingRange") {
+        host->request("textDocument/foldingRange", {{"textDocument", text_document(uri)}},
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                Json ranges = Json::array();
+                if (result.is_array())
+                    for (const auto& item : result) {
+                        if (!item.is_object()) continue;
+                        const auto start_line = int_at(item, "startLine");
+                        const auto end_line = int_at(item, "endLine");
+                        if (end_line <= start_line) continue;   // 单行区间没有可折叠内容
+                        Json shaped{{"startLine", start_line}, {"endLine", end_line}};
+                        if (item.contains("startCharacter")) shaped["startChar"] = int_at(item, "startCharacter");
+                        if (item.contains("endCharacter")) shaped["endChar"] = int_at(item, "endCharacter");
+                        const auto kind = string_at(item, "kind");
+                        if (!kind.empty()) shaped["kind"] = kind;
+                        ranges.push_back(std::move(shaped));
+                    }
+                if (ranges.empty()) on_result({{"available", false}}, Json(nullptr));
+                else on_result({{"available", true}, {"ranges", std::move(ranges)}}, Json(nullptr));
+            });
+        return;
+    }
+    // LSP `textDocument/semanticTokens/*` —— IDEA 的 daemon 着色路径（见 `initialize` 里的长注释）。
+    // `previousResultId` 有值**且**服务器声明了 `requests.full.delta` 时走 `/full/delta`，
+    // 否则整份重取。
+    //
+    // `data` 是**压缩的整数数组**（每 5 个一组：deltaLine / deltaStartChar / length /
+    // tokenType / tokenModifiers），这里**原样透传**：解码规则（相对位置、多行 token、
+    // 修饰符位掩码）只在前端实现一份 —— 两端各解一次必然漂移，而且出错时很难看出是哪一端。
+
+    // LSP `textDocument/inlineCompletion` —— IDEA 的**行内补全**
+    // （`InlineCompletionProvider.getSuggestion`，见 initialize 里记的路径与行号）：
+    // 光标处给一段"幽灵文本"，按 Tab 接受。
+    //
+    // `triggerKind`：1 = 自动（打字/停顿），2 = 显式（用户主动要），3 = 上一个建议被拒后重试。
+    // 只整形 `insertText` 是**字符串或 plainText** 的项：`{kind: "snippet", value}` 里的
+    // `${1:foo}` 占位符我们不展开，直接插进去会把占位符当字面量写进代码 —— 那是错的，
+    // 所以这类项**丢弃**（宁可少给一个建议，不可插入一段错代码）。
+    // LSP `textDocument/moniker` —— 符号标识。用户可见落点是 IDEA 的 **Copy Reference**
+    // （`CopyReferenceAction`，见 initialize 里记的路径与行号）：把当前位置的符号标识复制到剪贴板。
+    //
+    // `unique` 要**如实带出去**：`true` 表示标识在整个方案里唯一（可以放心当引用），
+    // `false` 表示同名符号可能有多个 —— 客户端要么不用、要么提示，不能假装它唯一。
+    if (kind == "moniker") {
+        host->request("textDocument/moniker", {{"textDocument", text_document(uri)}},
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                Json monikers = Json::array();
+                if (result.is_array())
+                    for (const auto& entry : result) {
+                        if (!entry.is_object()) continue;
+                        const auto identifier = string_at(entry, "identifier");
+                        if (identifier.empty()) continue;   // 没有标识就没有可复制的东西
+                        Json shaped{{"identifier", identifier}};
+                        const auto scheme = string_at(entry, "scheme");
+                        if (!scheme.empty()) shaped["scheme"] = scheme;
+                        if (entry.contains("unique") && entry.at("unique").is_boolean())
+                            shaped["unique"] = entry.at("unique");
+                        monikers.push_back(std::move(shaped));
+                    }
+                if (monikers.empty()) on_result({{"available", false}}, Json(nullptr));
+                else on_result({{"available", true}, {"monikers", std::move(monikers)}}, Json(nullptr));
+            });
+        return;
+    }
+    // LSP `textDocument/codeLens` —— IDEA 的 Code Vision（"N 个用法"/"N 个实现"这类行上方提示）。
+    // 条目里的 `command` 由**点击**触发，客户端把它转成 `workspace/executeCommand` —— 复用既有链路，
+    // 不再造一套"CodeLens 自己的动作"。依据：`CodeVisionProvider`（`platform/lang-impl/src/com/intellij/codeInsight/codeVision/CodeVisionProvider.kt:25`）、
+    // 产生条目 `computeForEditor`（`:62`）、点击 `handleClick`（`:76`）。
+    //
+    // 没有 `command` 的条目**丢弃**：规范里 title 在 command 里，没有它既显示不出文字、也点不动 ——
+    // 留着就是一个空的行上方元素。（不声明 `resolveProvider`，所以服务器本该直接给 command。）
+    if (kind == "codeLens") {
+        host->request("textDocument/codeLens", {{"textDocument", text_document(uri)}},
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                Json items = Json::array();
+                if (result.is_array())
+                    for (const auto& entry : result) {
+                        if (!entry.is_object()) continue;
+                        if (!entry.contains("command") || !entry.at("command").is_object()) continue;
+                        const auto& command = entry.at("command");
+                        const auto title = string_at(command, "title");
+                        const auto name = string_at(command, "command");
+                        if (title.empty() || name.empty()) continue;
+                        Json shaped{{"title", title}, {"command", name}};
+                        if (command.contains("arguments") && command.at("arguments").is_array())
+                            shaped["arguments"] = command.at("arguments");
+                        if (entry.contains("range") && entry.at("range").is_object()) {
+                            const auto& span = entry.at("range");
+                            const auto from = range_corner(span, "start");
+                            const auto to = range_corner(span, "end");
+                            shaped["range"] = Json{{"startLine", int_at(from, "line")},
+                                                   {"startChar", int_at(from, "character")},
+                                                   {"endLine", int_at(to, "line")},
+                                                   {"endChar", int_at(to, "character")}};
+                        }
+                        items.push_back(std::move(shaped));
+                    }
+                if (items.empty()) on_result({{"available", false}}, Json(nullptr));
+                else on_result({{"available", true}, {"items", std::move(items)}}, Json(nullptr));
+            });
+        return;
+    }
+    if (kind == "inlineCompletion") {
+        Json arguments{{"textDocument", text_document(uri)}, {"position", position},
+                       {"context", {{"triggerKind", int_or(args, "triggerKind", 1)}}}};
+        host->request("textDocument/inlineCompletion", std::move(arguments),
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                // 规范允许 `null`（没有建议）与 `InlineCompletionList | InlineCompletionItem[]` 三种形状。
+                const Json* source = nullptr;
+                if (result.is_array()) source = &result;
+                else if (result.is_object() && result.contains("items") && result.at("items").is_array())
+                    source = &result.at("items");
+                Json items = Json::array();
+                if (source)
+                    for (const auto& entry : *source) {
+                        if (!entry.is_object()) continue;
+                        Json shaped = Json::object();
+                        const auto& insert = entry.contains("insertText") ? entry.at("insertText") : Json(nullptr);
+                        if (insert.is_string()) shaped["insertText"] = insert;
+                        else if (insert.is_object() && string_at(insert, "kind") == "plainText" &&
+                                 insert.contains("value") && insert.at("value").is_string())
+                            shaped["insertText"] = insert.at("value");
+                        else continue;   // snippet（或畸形）：见上面的注释
+                        const auto filter = string_at(entry, "filterText");
+                        if (!filter.empty()) shaped["filterText"] = filter;
+                        if (entry.contains("range") && entry.at("range").is_object()) {
+                            const auto& span = entry.at("range");
+                            const auto from = range_corner(span, "start");
+                            const auto to = range_corner(span, "end");
+                            shaped["range"] = Json{{"startLine", int_at(from, "line")},
+                                                   {"startChar", int_at(from, "character")},
+                                                   {"endLine", int_at(to, "line")},
+                                                   {"endChar", int_at(to, "character")}};
+                        }
+                        items.push_back(std::move(shaped));
+                    }
+                if (items.empty()) on_result({{"available", false}}, Json(nullptr));
+                else on_result({{"available", true}, {"items", std::move(items)}}, Json(nullptr));
+            });
+        return;
+    }
+    // LSP `workspace/diagnostic` —— IDEA 的**整工程批处理 Inspection**（"检查代码"）：
+    // 一次问出所有文件的诊断，而不是逐个文件拉。与 `textDocument/diagnostic` 共用同一个
+    // `diagnosticProvider`，但**额外要求它声明 `workspaceDiagnostics: true`** ——
+    // 没声明就发，服务器只能拒。
+    //
+    // `previousResultIds` 是逐文件的 `{uri, value}` 列表：服务器可以对没变的文件回
+    // `kind: "unchanged"`。所以整形必须把 `unchanged` 与 `full` 分开带出去 ——
+    // 把 unchanged 当成"这个文件没诊断"会把一整批诊断从问题面板里抹掉。
+    if (kind == "workspaceDiagnostic") {
+        // 顶层的 `unsupported()` 只查 `diagnosticProvider` 存不存在（或是否被显式声明成
+        // false/null），**查不到 `workspaceDiagnostics` 这个字段** —— 所以这里必须再判一次。
+        // 服务器的 provider 对象存在、但 `workspaceDiagnostics: false` 时，发出去只会被拒。
+        if (!workspace_diagnostic_supported(language_name)) {
+            on_result(Json(nullptr), invalid("LSP_UNSUPPORTED",
+                                             "服务器未声明 diagnosticProvider.workspaceDiagnostics，不支持整工程拉取诊断。"));
+            return;
+        }
+        Json previous = Json::array();
+        if (args.contains("previousResultIds") && args.at("previousResultIds").is_array())
+            for (const auto& entry : args.at("previousResultIds")) {
+                if (!entry.is_object()) continue;
+                const auto file_path = string_at(entry, "path");
+                const auto value = string_at(entry, "value");
+                if (file_path.empty() || value.empty()) continue;
+                previous.push_back({{"uri", to_uri(file_path)}, {"value", value}});
+            }
+        Json arguments = Json::object();
+        if (!previous.empty()) arguments["previousResultIds"] = std::move(previous);
+        host->request("workspace/diagnostic", std::move(arguments),
+            [on_result = std::move(on_result), relative](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                if (!result.is_object()) { on_result({{"available", false}}, Json(nullptr)); return; }
+                Json reports = Json::array();
+                if (result.contains("items") && result.at("items").is_array())
+                    for (const auto& item : result.at("items")) {
+                        if (!item.is_object()) continue;
+                        const auto uri = string_at(item, "uri");
+                        if (uri.empty()) continue;
+                        const auto report_kind = string_at(item, "kind");
+                        Json shaped{{"path", relative(uri)},
+                                    {"kind", report_kind.empty() ? std::string("full") : report_kind}};
+                        const auto result_id = string_at(item, "resultId");
+                        if (!result_id.empty()) shaped["resultId"] = result_id;
+                        // `unchanged` 的报告**没有** items（规范如此），所以这里不补空数组 ——
+                        // "这个文件没诊断"与"沿用上一份"是两件事。
+                        if (shaped.at("kind").get<std::string>() == "full")
+                            shaped["diagnostics"] = item.contains("items")
+                                                        ? shape_diagnostics(item.at("items")) : Json::array();
+                        reports.push_back(std::move(shaped));
+                    }
+                on_result({{"available", true}, {"items", std::move(reports)}}, Json(nullptr));
+            });
+        return;
+    }
+    if (kind == "semanticTokens") {
+        const auto previous = string_at(args, "previousResultId");
+        const bool delta = !previous.empty() && semantic_delta_supported(language_name);
+        // legend 在开锁前取（semantic_legend 读 capabilities_），并随 payload 带出去：
+        // `data` 的索引按**服务端**那张表编，前端必须用同一张表解码。
+        Json legend;
+        {
+            taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+            legend = semantic_legend(language_name);
+        }
+        Json arguments{{"textDocument", text_document(uri)}};
+        if (delta) arguments["previousResultId"] = previous;
+        host->request(delta ? "textDocument/semanticTokens/full/delta" : "textDocument/semanticTokens/full",
+            std::move(arguments),
+            [on_result = std::move(on_result), delta, legend](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                if (!result.is_object()) { on_result({{"available", false}}, Json(nullptr)); return; }
+                Json payload{{"available", true}, {"kind", delta ? "delta" : "full"}};
+                if (!legend.is_null()) payload["legend"] = legend;
+                const auto result_id = string_at(result, "resultId");
+                if (!result_id.empty()) payload["resultId"] = result_id;
+                if (delta) {
+                    // 一个 `edits: []` 的 delta 是合法的（规范化之后内容没变），前端据此什么都不做；
+                    // 所以空数组也要如实带出去，不能当成"没答上来"回 available:false。
+                    Json edits = Json::array();
+                    if (result.contains("edits") && result.at("edits").is_array())
+                        for (const auto& edit : result.at("edits")) {
+                            if (!edit.is_object() || !edit.contains("data") || !edit.at("data").is_array()) continue;
+                            edits.push_back({{"start", int_at(edit, "start")},
+                                             {"deleteCount", int_at(edit, "deleteCount")},
+                                             {"data", edit.at("data")}});
+                        }
+                    payload["edits"] = std::move(edits);
+                }
+                // `SemanticTokensDelta` 是一个**联合**：`{edits}` 或 `{data}`（后者表示"整份替换"）。
+                // 只认 edits 会漏掉一整种合法回答，所以 data 与 kind 无关地透传。
+                if (result.contains("data") && result.at("data").is_array()) payload["data"] = result.at("data");
+                else if (!delta) payload["data"] = Json::array();
+                on_result(std::move(payload), Json(nullptr));
+            });
+        return;
+    }
+    // LSP `textDocument/documentLink`：文档里的可点击区间。IDEA 侧对应的用户可见行为是
+    // Ctrl+Click 跳转（`GotoDeclarationHandler`）与"点一下导航"（`HyperlinkInfo.navigate`）。
+    //
+    // 整形保留**没有 `target` 的链接**：`resolveProvider: false` 下服务器一般会给 target，
+    // 但真给了没 target 的项时，它至少还有 tooltip 和区间 —— 直接丢掉等于把服务器说的东西
+    // 悄悄吞了。能不能点由前端按 target 是否为空决定。
+    if (kind == "documentLink") {
+        host->request("textDocument/documentLink", {{"textDocument", text_document(uri)}},
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                Json links = Json::array();
+                if (result.is_array())
+                    for (const auto& entry : result) {
+                        if (!entry.is_object()) continue;
+                        // `documentLink` 把 range 直接放在项上（不像 definition 那样包在 `location` 里），
+                        // 取不到它就说明这条没用。
+                        if (!entry.contains("range") || !entry.at("range").is_object()) continue;
+                        const auto& span = entry.at("range");
+                        const auto from = range_corner(span, "start");
+                        const auto to = range_corner(span, "end");
+                        Json link{{"startLine", int_at(from, "line")}, {"startChar", int_at(from, "character")},
+                                  {"endLine", int_at(to, "line")}, {"endChar", int_at(to, "character")}};
+                        const auto target = string_at(entry, "target");
+                        if (!target.empty()) link["target"] = target;
+                        const auto tooltip = string_at(entry, "tooltip");
+                        if (!tooltip.empty()) link["tooltip"] = tooltip;
+                        links.push_back(std::move(link));
+                    }
+                if (links.empty()) on_result({{"available", false}}, Json(nullptr));
+                else on_result({{"available", true}, {"links", std::move(links)}}, Json(nullptr));
+            });
+        return;
+    }
     if (kind == "selectionRange") {
         host->request("textDocument/selectionRange", {{"textDocument", text_document(uri)}, {"positions", Json::array({position})}},
             [on_result = std::move(on_result)](Json result, Json error) {
@@ -1129,6 +876,57 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
             });
         return;
     }
+    // LSP `completionItem/resolve`（IDEA 的 CompletionResultSet 懒解析）：把选中的补全项原样发回，
+    // 服务器补齐 `documentation` / `detail` / `additionalTextEdits`（典型用途：接受这一项时自动加 import）。
+    if (kind == "completionItemResolve") {
+        // 与 `renameProvider.prepareProvider` 同类：`completionProvider.resolveProvider` 是嵌套能力，
+        // 服务器没开就不发，前端据此照用项里已有的信息（supported=false）。
+        if (!completion_resolve_supported(language_name)) {
+            on_result({{"available", false}, {"supported", false}}, Json(nullptr));
+            return;
+        }
+        if (!args.contains("raw") || !args.at("raw").is_object()) {
+            on_result(Json(nullptr), invalid("LSP_BAD_ARGS", "completionItemResolve needs the raw item"));
+            return;
+        }
+        host->request("completionItem/resolve", args.at("raw"),
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                if (!result.is_object()) { on_result({{"available", false}, {"supported", true}}, Json(nullptr)); return; }
+                Json payload{{"available", true}, {"supported", true}, {"raw", result}};
+                if (result.contains("detail") && result.at("detail").is_string()) payload["detail"] = result.at("detail");
+                if (result.contains("documentation")) payload["documentation"] = hover_text(result.at("documentation"));
+                if (result.contains("insertText") && result.at("insertText").is_string()) payload["apply"] = result.at("insertText");
+                // `additionalTextEdits` 是"接受这一项时要一并做的编辑"，形状与格式化返回的同一套（`text_edits`）。
+                if (result.contains("additionalTextEdits")) {
+                    auto edits = text_edits(result.at("additionalTextEdits"));
+                    if (!edits.empty()) payload["additionalTextEdits"] = std::move(edits);
+                }
+                on_result(std::move(payload), Json(nullptr));
+            });
+        return;
+    }
+    // LSP `textDocument/diagnostic`（pull 模型，IDEA 的批处理 Inspection）：`previousResultId` 让
+    // 服务器可以回答 `unchanged`，省一次全量重算；`full` 的 items 走**与推送同一套整形**。
+    if (kind == "diagnostic") {
+        Json arguments{{"textDocument", text_document(uri)}};
+        const auto previous = string_at(args, "previousResultId");
+        if (!previous.empty()) arguments["previousResultId"] = previous;
+        host->request("textDocument/diagnostic", std::move(arguments),
+            [on_result = std::move(on_result)](Json result, Json error) {
+                if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
+                if (!result.is_object()) { on_result({{"available", false}, {"supported", true}}, Json(nullptr)); return; }
+                const auto result_kind = string_at(result, "kind");
+                Json payload{{"available", true}, {"supported", true},
+                             {"kind", result_kind.empty() ? std::string("full") : result_kind}};
+                const auto result_id = string_at(result, "resultId");
+                if (!result_id.empty()) payload["resultId"] = result_id;
+                if (payload.at("kind").get<std::string>() == "full")
+                    payload["items"] = result.contains("items") ? shape_diagnostics(result.at("items")) : Json::array();
+                on_result(std::move(payload), Json(nullptr));
+            });
+        return;
+    }
     on_result(Json(nullptr), invalid("LSP_BAD_KIND", "unknown semantic kind"));
 }
 
@@ -1136,41 +934,10 @@ void Session::semantic(const std::string& kind, const std::string& path, int lin
 // UI is told why nothing came back instead of getting an empty success-shaped
 // result. A server that said nothing at all (or whose handshake has not landed)
 // is still asked: plenty of real servers implement more than they advertise.
-std::optional<Json> Session::unsupported(const std::string& language, const std::string& kind) const {
-    const char* provider = provider_for(kind);
-    if (!provider) return std::nullopt;
-    const auto capabilities = capabilities_.find(language);
-    if (capabilities == capabilities_.end() || !capabilities->second.is_object()) return std::nullopt;
-    const auto declared = capabilities->second.find(provider);
-    if (declared == capabilities->second.end()) return std::nullopt;
-    const bool refused = declared->is_boolean() ? declared->get<bool>() == false
-                                                : declared->is_null();
-    if (!refused) return std::nullopt;
-    return invalid("LSP_UNSUPPORTED", std::string("the ") + language + " server does not support " + provider);
-}
-
-// Bounds every request a server fails to answer. Servers started later pick the
-// value up in ensure(); the ones already running are updated here.
-void Session::set_timeout(std::chrono::milliseconds timeout) {
-    std::vector<Host*> live;
-    {
-        std::lock_guard lock(mutex_);
-        timeout_ = timeout;
-        for (auto& entry : hosts_) live.push_back(entry.second.get());
-    }
-    for (auto* host : live) host->set_timeout(timeout);
-}
-
-void Session::set_root(std::filesystem::path root) {
-    {
-        std::lock_guard lock(mutex_);
-        root_ = std::move(root);
-    }
-    std::lock_guard edit(edit_mutex_);
-    editor_.reset();  // any cached writer belongs to the previous root
-    editor_root_.clear();
-}
-
+// `renameProvider` 可以是 `true`（只支持 rename）或 `{prepareProvider: true}`（还支持 prepareRename）。
+// 这个嵌套标志不在 `provider_for()` 的顶层表里，所以单独判一次。
+// `completionProvider` 可以是 `true`（只有补全）或 `{resolveProvider: true}`（还能 resolve）。
+// 与 `renameProvider.prepareProvider` 同类，属于嵌套能力，单独判一次。
 // The workspace handle behind server-driven edits. Opened on first use and then
 // kept, so a burst of quick fixes pays the (one-off) tree walk only once. A
 // shared handle: switching the root replaces it, but an edit already in flight on
@@ -1193,7 +960,7 @@ std::optional<std::string> Session::apply_document_edits(const std::string& uri,
     std::string text;
     bool tracked = false;
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         root = root_;
         const auto document = documents_.find(uri_to_relative(uri, root_));
         if (document != documents_.end()) {
@@ -1255,7 +1022,7 @@ std::optional<std::string> Session::apply_document_edits(const std::string& uri,
         return std::string("cannot write ") + relative + ": " + error.what();
     }
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         const auto document = documents_.find(relative);
         if (document != documents_.end()) {
             document->second.text = text;   // keep the server's view and the file in step
@@ -1278,7 +1045,7 @@ void Session::shutdown_all() noexcept {
     // so the hosts are moved out under the lock and stopped with it released.
     std::vector<std::unique_ptr<Host>> doomed;
     {
-        std::lock_guard lock(mutex_);
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
         doomed.reserve(hosts_.size());
         for (auto& [language, host] : hosts_) doomed.push_back(std::move(host));
         hosts_.clear();
@@ -1287,6 +1054,7 @@ void Session::shutdown_all() noexcept {
         ready_.clear();
         capabilities_.clear();
     }
+    announce_progress_reset();  // 停机先收进度（上游 cancelAllProgress，:331-339）
     for (auto& host : doomed) {
         if (!host) continue;
         try {
@@ -1296,6 +1064,9 @@ void Session::shutdown_all() noexcept {
         }
         host->stop();  // joins the reader thread; mutex_ is NOT held here
     }
+    // initialize failure callbacks may have run while stop joined the readers.
+    taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+    startup_errors_.clear();
 }
 
 }  // namespace lsp

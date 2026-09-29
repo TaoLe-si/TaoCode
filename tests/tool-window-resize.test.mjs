@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 import { RESIZE_CHARS, anchorIsHorizontal, resizeDirectionEnabled, stretchDelta, stretchSign } from '../src/toolWindowResize.ts'
 
 // ToolWindowAnchor.java:49-51 — only TOP and BOTTOM are horizontal anchors, so the pair of resize
@@ -68,7 +69,8 @@ test('the delta is the signed step', () => {
 // Hiding every tool window must take the resize actions with it: `update` bails out when the
 // window is invisible or the anchor axis does not match the focused dock (`:52-80`).
 test('the resize rows are wired to the focused dock and to the real panel sizes', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 「窗口」菜单在 2026-09-27 搬进了 src/menus/windowMenu.ts（一类一文件）。
+  const app = readFileSync('src/menus/windowMenu.ts', 'utf8')
   const lines = app.split('\n')
   const ids = ['window.resizeToolWindowLeft', 'window.resizeToolWindowRight', 'window.resizeToolWindowUp', 'window.resizeToolWindowDown']
   const rows = ids.map(id => lines.findIndex(line => line.includes(`id: '${id}'`)))
@@ -83,17 +85,21 @@ test('the resize rows are wired to the focused dock and to the real panel sizes'
   // The action must resolve the active tool window the way the rest of the menu does, and the
   // panel it resizes has to be the one `setPanelSize` owns. `activeToolWindowDock()` (not the raw
   // focus test) is what keeps the row usable while the Window menu itself holds the focus.
-  assert.ok(app.includes('function resizeTarget()'), 'the active tool window is not resolved for a resize')
-  assert.ok(/function resizeTarget\(\)[\s\S]{0,220}activeToolWindowDock\(\)/.test(app), 'the resize does not resolve the active tool window')
-  assert.ok(app.includes('function stretchToolWindow('), 'the resize action is missing')
-  assert.ok(/setPanelSize\(target\.panel, .*stretchDelta\(/.test(app), 'the resize does not go through setPanelSize')
-  assert.ok(app.includes('RESIZE_CHARS'), 'the registry step is not used')
+  // 尺寸逻辑在 2026-09-27 从 App.vue 拆到 src/panelResize.ts（`resizeTarget` / `stretchToolWindow` /
+  // `setPanelSize`），所以这几条「行为存在」的断言读整个外壳；菜单行的断言仍只看 App.vue。
+  const shell = shellSource()
+  assert.ok(shell.includes('function resizeTarget()'), 'the active tool window is not resolved for a resize')
+  assert.ok(/function resizeTarget\(\)[\s\S]{0,220}activeToolWindowDock\(\)/.test(shell), 'the resize does not resolve the active tool window')
+  assert.ok(shell.includes('function stretchToolWindow('), 'the resize action is missing')
+  assert.ok(/setPanelSize\(target\.panel, .*stretchDelta\(/.test(shell), 'the resize does not go through setPanelSize')
+  assert.ok(shell.includes('RESIZE_CHARS'), 'the registry step is not used')
 })
 
 // Ctrl+Alt+Shift+Arrow is a superset of Back/Forward's Ctrl+Alt+Arrow, so those two branches have
 // to exclude Shift — the same shadowing bug the F12 fix addressed.
 test('Back and Forward do not swallow the resize chords', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 快捷键分派在 2026-09-27 从 App.vue 拆到 src/keymap.ts，这里改读整个外壳。
+  const app = shellSource()
   const lines = app.split('\n')
   const resize = lines.findIndex(line => line.includes('function onKey(event: KeyboardEvent)'))
   assert.ok(resize >= 0, 'the window-level handler moved')

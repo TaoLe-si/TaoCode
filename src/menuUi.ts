@@ -11,6 +11,9 @@ import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import type { MenuRow } from './menus/types'
 import { useSubmenuState } from './menus/submenuState'
 import { rankCommands } from './commandSearch'
+import { createPopupGate } from './popupState'
+import { editorPopupRows as editorPopupLayout } from './menus/editorPopupMenu'
+import { toolWindowGearRows as toolWindowGearLayout } from './menus/toolWindowGear'
 import { PLUGIN_MENU_LABEL, pluginMenuRows } from './pluginCommands'
 import { recordActionStep } from './macroHost'
 import { bookmarkOwner } from './bookmarks'
@@ -43,11 +46,24 @@ export interface MenuUiDeps {
   /** 有未完成的写入/加载时，切换项目要拦住。 */
   working: { readonly value: boolean }
   openWorkspace: (path: string) => unknown
+  /**
+   * 编辑器右键菜单要引用、但不属于任何主菜单的 action（IDEA 里就是那些只挂在弹出组上的动作，
+   * 例如 `Gradle.ImportExternalProject` 只进 `ProjectViewPopupMenuSettingsGroup` / `EditorPopupMenu`）。
+   */
+  popupExtras?: () => MenuRow[]
+  /**
+   * 齿轮组里**不在菜单索引**的那几行（上游也只在齿轮里 `group.add(...)` 现造）：
+   * `SpeedSearch`（`ToolWindowImpl.kt:869`）与 `RemoveStripeButtonAction`（`:889`）。
+   * 宿主按各自的前置条件给行，给不出（不返回该 id）时整行不出现 ——
+   * 与"引用一个不存在的动作"同样处理，不会留一行假的。
+   */
+  gearHostRows?: () => Record<string, MenuRow>
 }
 
 export function createMenuUi(deps: MenuUiDeps) {
   const { notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows,
-          pluginList, digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace } = deps
+          pluginList, digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace,
+          popupExtras, gearHostRows = () => ({}) } = deps
 // 插件命令的执行：在动作表里按 id 找（IDEA 的 `ActionManager.getAction(id).actionPerformed`）。
 // 先记宏再执行，与其它菜单行同一条链 —— 所以走 `runAction` 而不是直接 `entry.run()`。
 function runPluginCommand(action: string) {
@@ -207,6 +223,41 @@ function runActionResult() {
   const entry = actionResults.value[actionIndex.value]
   if (entry) runAction(entry)
 }
+// 编辑器右键菜单（IDEA 的 `EditorPopupMenu`）。引用清单在 src/menus/editorPopupMenu.ts，
+// 这里只做三件事：按 id 取行（主菜单行 + `popupExtras` 贡献的只挂弹出组的动作）、浮层坐标、
+// 点击时分派给与「查找操作」**完全相同**的执行链（`runAction` ⇒ 先记宏步骤、再查可用性）。
+// 按 id 取行而不是复制一份标题/快捷键：IDEA 的组本身就是 `<reference ref="ID"/>` 的列表。
+function findMenuRow(id: string): MenuRow | undefined {
+  const search = (rows: readonly MenuRow[]): MenuRow | undefined =>
+    rows.find(row => row.id === id) ?? rows.map(row => (row.childrenOf ? row.childrenOf() : row.children) ?? [])
+      .map(list => search(list)).find(row => row)
+  for (const group of allMenuGroups.value) { const found = search(group.rows); if (found) return found }
+  return search(popupExtras?.() ?? [])
+}
+const editorPopup = ref<{ x: number; y: number } | null>(null)
+const editorPopupRows = computed(() => editorPopupLayout(findMenuRow))
+// 工具窗口齿轮菜单里"属于工具窗口自己"的那几项（引用表见 src/menus/toolWindowGear.ts）。
+// 两条分开算：内容条（Close All / 标签形态）挂在**底部 dock**上，侧栏齿轮只拿"调整大小"那条。
+const toolWindowGearRows = computed(() => toolWindowGearLayout(findMenuRow, undefined, false, gearHostRows()))
+const bottomGearRows = computed(() => toolWindowGearLayout(findMenuRow, undefined, true))
+function openEditorPopup(event: MouseEvent) {
+  // 关掉又立刻弹开的那一次点击要吞掉（上游 PopupState.isRecentlyHidden，阈值 200ms）。
+  if (editorPopupGate.recentlyHidden) return
+  if (!editorPopupRows.value.length) return
+  editorPopup.value = { x: event.clientX, y: event.clientY }
+}
+const editorPopupGate = createPopupGate()
+function closeEditorPopup() {
+  if (!editorPopup.value) return
+  editorPopup.value = null
+  editorPopupGate.hidden()
+}
+/** 菜单行的执行入口：子菜单行（带 children）只负责展开，不当动作跑。 */
+function pickEditorPopup(row: MenuRow) {
+  closeEditorPopup()
+  if (!row.run) return
+  runAction({ id: row.id, title: rowTitle(row), keywords: row.keywords, keys: row.keys, group: '编辑器', enabled: row.enabled, run: row.run })
+}
 watch(actionQuery, () => { actionIndex.value = 0 })
   return {
     allMenuGroups, rowTitle, rowEnabled, submenuRows, hasSubmenu, submenuRow, submenuPlacement, submenuStyle,
@@ -215,5 +266,6 @@ watch(actionQuery, () => { actionIndex.value = 0 })
     branchOfProject, openRecentProject,
     actionSearch, actionQuery, actionIndex, actionInput, actionList, actionResults,
     openActionSearch, moveAction, runAction, runActionResult,
+    editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, findMenuRow, toolWindowGearRows, bottomGearRows,
   }
 }

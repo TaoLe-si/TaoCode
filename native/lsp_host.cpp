@@ -9,6 +9,8 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
@@ -64,23 +66,80 @@ struct Host::Pipe {
     HANDLE job = nullptr;            // KILL_ON_JOB_CLOSE, so nothing is orphaned
 };
 
-Host::Host() : client_([this](std::string_view frame) { write_frame(frame); }) {}
+namespace {
+// Opens the trace file named by TAOCODE_LSP_TRACE, or returns null. One getenv +
+// one fopen per Host, so a normal session pays nothing for this.
+std::FILE* open_trace() {
+    char* value = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&value, &length, "TAOCODE_LSP_TRACE") != 0 || value == nullptr) return nullptr;
+    const std::string path(value, length > 0 ? length - 1 : 0);
+    free(value);
+    if (path.empty()) return nullptr;
+    std::FILE* file = nullptr;
+    if (fopen_s(&file, path.c_str(), "ab") != 0) return nullptr;
+    return file;
+}
+}  // namespace
 
-Host::~Host() { stop(); }
+Host::Host() : client_([this](std::string_view frame) { write_frame(frame); }), trace_(open_trace()) {}
+
+Host::~Host() {
+    stop();
+    if (trace_) { std::fclose(static_cast<std::FILE*>(trace_)); trace_ = nullptr; }
+}
 
 void Host::write_frame(std::string_view frame) {
-    if (!pipe_ || !pipe_->stdin_write || pipe_->stdin_write == INVALID_HANDLE_VALUE) return;
+    if (!pipe_ || !pipe_->stdin_write || pipe_->stdin_write == INVALID_HANDLE_VALUE) {
+        if (trace_) {
+            std::lock_guard lock(trace_mutex_);
+            std::fprintf(static_cast<std::FILE*>(trace_), "WRITE-DROPPED no-pipe bytes=%zu\n", frame.size());
+            std::fflush(static_cast<std::FILE*>(trace_));
+        }
+        return;
+    }
     const char* data = frame.data();
     std::size_t remaining = frame.size();
     while (remaining) {
         const auto chunk = remaining > DWORD(1) << 20 ? (DWORD(1) << 20) : static_cast<DWORD>(remaining);
         DWORD written = 0;
-        if (!WriteFile(pipe_->stdin_write, data, chunk, &written, nullptr) || !written) return;
+        // 一次写超过 200ms 就是"服务器没在读它的 stdin"（管道满，WriteFile 阻塞）。
+        // 记下来的是**线程 id**：调用方可能持有 Session::mutex_，那时整个界面会跟着 park，
+        // 而现象只表现为"窗口未响应"，不留这行就查不到是谁占着锁。
+        const auto write_started = std::chrono::steady_clock::now();
+        if (!WriteFile(pipe_->stdin_write, data, chunk, &written, nullptr) || !written) {
+            if (trace_) {
+                std::lock_guard lock(trace_mutex_);
+                std::fprintf(static_cast<std::FILE*>(trace_), "WRITE-FAILED err=%lu written=%lu remaining=%zu\n",
+                             GetLastError(), written, remaining);
+                std::fflush(static_cast<std::FILE*>(trace_));
+            }
+            return;
+        }
+        const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - write_started).count();
+        if (took >= 200 && slow_write_hook) slow_write_hook(GetCurrentThreadId(), static_cast<unsigned long>(took), chunk);
         data += written;
         remaining -= written;
     }
+    if (trace_) {
+        // The LSP header ends at the first CRLFCRLF; the body starts right after it.
+        const auto separator = frame.find("\r\n\r\n");
+        const auto header = frame.substr(0, separator == std::string_view::npos ? frame.size() : separator);
+        const auto body = separator == std::string_view::npos ? std::string_view() : frame.substr(separator + 4);
+        const auto marker = body.find("\"method\"");
+        std::string name = "?";
+        if (marker != std::string_view::npos) {
+            const auto open = body.find('\"', marker + 8);
+            const auto close = open == std::string_view::npos ? open : body.find('\"', open + 1);
+            if (open != std::string_view::npos && close != std::string_view::npos)
+                name = std::string(body.substr(open + 1, close - open - 1));
+        }
+        std::lock_guard lock(trace_mutex_);
+        std::fprintf(static_cast<std::FILE*>(trace_), "WRITE method=%s header=[%.*s] bodybytes=%zu\n",
+                     name.c_str(), static_cast<int>(header.size()), header.data(), body.size());
+        std::fflush(static_cast<std::FILE*>(trace_));
+    }
 }
-
 void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
     std::lock_guard lock(io_mutex_);
     if (alive_) return;
@@ -142,6 +201,13 @@ void Host::start(const Spec& spec, Json initialize_params, Ready on_ready) {
             const auto want = available > buffer.size() ? buffer.size() : available;
             DWORD got = 0;
             if (!ReadFile(pipe_->stdout_read, buffer.data(), static_cast<DWORD>(want), &got, nullptr) || !got) break;
+            if (trace_) {
+                // 读取侧只记字节数：帧内容由 MessageReader 解出来，原样 dump 只用于
+                // 「服务器回了什么错误帧」这类一次性排查。
+                std::lock_guard lock(trace_mutex_);
+                std::fprintf(static_cast<std::FILE*>(trace_), "READ bytes=%lu\n", got);
+                std::fflush(static_cast<std::FILE*>(trace_));
+            }
             try {
                 stream.feed({buffer.data(), got});
                 // Frames are cut out under the lock; dispatching happens WITHOUT it.
@@ -211,6 +277,11 @@ void Host::set_diagnostics(Client::Notify handler) {
     client_.on_diagnostics(std::move(handler));
 }
 
+void Host::set_progress(Client::Notify handler) {
+    std::lock_guard lock(io_mutex_);
+    client_.on_progress(std::move(handler));
+}
+
 void Host::set_document_editor(Client::DocumentEditor editor) {
     std::lock_guard lock(io_mutex_);
     client_.set_document_editor(std::move(editor));
@@ -270,6 +341,14 @@ std::int64_t Host::request(std::string_view method, Json params, Client::Handler
         in_flight_[key] = id;
     }
     return id;
+}
+
+void Host::notify(std::string_view method, Json params) {
+    // No reply is expected, so there is nothing to record and nothing to cancel:
+    // only the pipe lock matters, so the frame cannot interleave with a request.
+    std::lock_guard lock(io_mutex_);
+    if (!alive_) return;
+    client_.notify(method, std::move(params));
 }
 
 }  // namespace lsp

@@ -182,6 +182,15 @@ async function runContextConfiguration(debug: boolean) {
  * 与 IDEA 一致的取舍：类里没有 `main` 时也照样启动 —— 配置里记的就是这个类，
  * 让 JVM 去报 `no main method`，而不是在这里替用户改主意；但会先提示一句。
  */
+// file.write is a compare-and-swap save (expectedVersion must match what is on disk) and
+// file.create refuses an existing file, so the javac @argfile needs create-then-overwrite.
+async function writeArgFile(content: string) {
+  const path = javacArgFilePath()
+  try { await request('file.create', { path }) }
+  catch (error) { if (!(error instanceof Error && /已存在|EXISTS/.test(error.message + String((error as { code?: string }).code ?? '')))) throw error }
+  const current = await request<DocumentData>('file.read', { path })
+  await request('file.write', { path, content, expectedVersion: current.version, safeWrite: false })
+}
 async function runJavaContext(path: string, debug: boolean) {
   let text = ''
   try { text = (await request<DocumentData>('file.read', { path })).content }
@@ -202,7 +211,7 @@ async function runJavaContext(path: string, debug: boolean) {
   const build_plan = buildPlan(plan_request)
   if (build_plan.command && (build_plan.kind === 'javac' || build_plan.kind === 'gradle' || build_plan.kind === 'maven')) {
     if (build_plan.argFile) {
-      try { await request('file.write', { path: javacArgFilePath(), content: build_plan.argFile }) }
+      try { await writeArgFile(build_plan.argFile) }
       catch (error) { notify(`无法写入编译参数文件：${errorMessage(error)}`, true); return }
     }
     notify(build_plan.reason)
@@ -256,7 +265,7 @@ async function startBuild(rebuild: boolean) {
   if (!plan.command) { notify(plan.reason, true); return }
   // javac 的源文件清单走 `@argfile`（源文件多时命令行会超 Windows 的长度上限）。
   if (plan.argFile) {
-    try { await request('file.write', { path: javacArgFilePath(), content: plan.argFile }) }
+    try { await writeArgFile(plan.argFile) }
     catch (error) { notify(`无法写入编译参数文件：${errorMessage(error)}`, true); return }
   }
   beginRun()

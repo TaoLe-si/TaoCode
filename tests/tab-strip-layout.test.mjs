@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEADZONE_FOR_TAB_HIDDEN, MIN_TAB_WIDTH, isTabHidden, layoutSingleRow, preferredTabWidth, toFitLength,
+  DEADZONE_FOR_TAB_HIDDEN, MIN_TAB_WIDTH, isTabHidden, layoutSingleRow, preferredTabWidth, scrollUnitsToShowTab, toFitLength,
 } from '../src/tabStripLayout.ts'
 
 // SingleRowLayoutStrategy.java:22 + :152-154 — the 50px floor is for *editor* tabs only.
@@ -131,4 +131,44 @@ test('a zero-width strip hides every tab instead of producing negative sizes', (
   assert.equal(layout.moreButtonVisible, true)
   assert.deepEqual(layout.placed, [])
   assert.deepEqual(layout.dropped, [0, 1])
+})
+
+// 滚到尽头（scrollOffset = maxScrollOffset）时**尾巴必须完整可见**：这是"溢出靠滚动取回"的全部
+// 意义所在。上游同款：clampScrollOffsetToBounds 的 max 就是 required - fit + moreRectSize（:55-60）。
+test('scrolling to the end brings every tab back into the strip', () => {
+  const input = { preferredWidths: [100, 100, 100, 100], stripWidth: 250, moreButtonWidth: 0, gap: 0 }
+  const atStart = layoutSingleRow(input)
+  assert.deepEqual(atStart.dropped, [3], '不滚就得有标签在窗口外，否则这条测不出什么')
+  assert.equal(atStart.maxScrollOffset, 150)
+  const atEnd = layoutSingleRow({ ...input, scrollOffset: atStart.maxScrollOffset })
+  assert.deepEqual(atEnd.dropped, [], '滚到尽头后一条都不该留在外面')
+  // 位置是 `getStartPosition - getScrollOffset`（SingleRowLayout.java:112）：前两条被推到左边缘外。
+  assert.deepEqual(atEnd.placed.map(t => [t.position, t.width]), [[-150, 100], [-50, 100], [50, 100], [150, 100]])
+  assert.equal(atEnd.placed[3].hidden, false, '最后一条完整可见')
+  assert.equal(atEnd.placed[0].hidden, true, '第一条已经滚出左边缘')
+})
+
+// doScrollToSelectedTab（ScrollableSingleRowLayout.java:68-103）：返回值就是该交给 scroll() 的 units。
+test('the selected tab is scrolled in from either edge, and not at all when it is already visible', () => {
+  const widths = [100, 100, 100, 100]
+  // 已经落在窗口里：不动。
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: widths, index: 1, scrollOffset: 50, toFitLength: 250 }), 0)
+  // 滚过头了，选中项的左沿在窗口左边之外 → 把它的左沿贴回左边缘（offset < 0 的那一支）。
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: widths, index: 0, scrollOffset: 150, toFitLength: 250 }), -150)
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: widths, index: 1, scrollOffset: 150, toFitLength: 250 }), -50)
+  // 在右边之外 → 刚好把它右沿贴到窗口右沿（offset + length - maxLength）。
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: widths, index: 3, scrollOffset: 0, toFitLength: 250 }), 150)
+  // 选中项自己比窗口还宽：不右对齐（那样会把左沿推出去），而是把左沿贴到左边缘（:91-96 的 else）。
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: [100, 400], index: 1, scrollOffset: 0, toFitLength: 150 }), 100)
+  // 右侧界要减掉「…」那一类的预留（:80-81），预留非 0 时更早就要滚。
+  assert.equal(scrollUnitsToShowTab({ requiredLengths: widths, index: 2, scrollOffset: 0, toFitLength: 250, moreReserve: 30 }), 80)
+})
+
+// 累加用 getRequiredLength（SingleRowLayout.java:260-264：编辑器标签 = 宽度 + 间距），不是纯宽度。
+test('the gap is charged to the tabs before the selected one', () => {
+  // 每条 100 + 间距 10：第 3 条从 3*(100+10)=330 起算（源码就是按 requiredLength 累加）。
+  const units = scrollUnitsToShowTab({ requiredLengths: [110, 110, 110, 110], index: 3, scrollOffset: 0, toFitLength: 250 })
+  assert.equal(units, 330 + 110 - 250)
+  // 反证：把间距漏掉的话这里会少滚 30。
+  assert.notEqual(units, 300 + 100 - 250)
 })

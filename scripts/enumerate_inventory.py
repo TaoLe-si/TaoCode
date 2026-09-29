@@ -146,31 +146,52 @@ def main() -> int:
     uncovered_all = uncovered_roots(all_classes, owned)
     print("未覆盖包根合计：%d 个根 / %d 类" % (len(uncovered_all), sum(n for n, _ in uncovered_all)))
 
+    taken = set().union(*owned.values())
+    inventories = {domain + ".txt": owned[domain] for domain in DOMAIN_ORDER}
+    inventories["platform_rest.txt"] = platform - taken
+    summaries = {
+        "_platform.json": {"platform_total": len(platform),
+                           "covered": len(platform & taken),
+                           "rest": len(platform - taken)},
+        # 零匹配包已在上面失败，missing_roots 才能为空。
+        "_summary.json": {domain: {"count": len(owned[domain]),
+                                  "roots": domains.get(domain, []),
+                                  "missing_roots": []} for domain in DOMAIN_ORDER},
+    }
     if check_only:
-        print("\n--check：只报告，未写文件。")
-        return 0
+        different = False
+        for name, expected in {**inventories, **summaries}.items():
+            path = os.path.join(INV, name)
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    actual = ({line.strip() for line in handle if line.strip()}
+                              if name in inventories else json.load(handle))
+            except (OSError, ValueError) as error:
+                print("无法读取 %s：%s" % (path, error), file=sys.stderr)
+                different = True
+                continue
+            if actual != expected:
+                different = True
+                if name in inventories:
+                    print("%s：缺少 %d / 多出 %d" %
+                          (name, len(expected - actual), len(actual - expected)))
+                    for entry in sorted(expected - actual):
+                        print("  缺少：%s" % entry)
+                    for entry in sorted(actual - expected):
+                        print("  多出：%s" % entry)
+                else:
+                    print("%s：机器摘要内容不一致" % name)
+        print("\n--check：未写文件；%s。" % ("存在差异" if different else "全部一致"))
+        return 1 if different else 0
 
-    for domain in DOMAIN_ORDER:
-        with open(os.path.join(INV, domain + ".txt"), "w", encoding="utf-8", newline="\n") as handle:
-            for path in sorted(owned[domain]):
+    for name, paths in inventories.items():
+        with open(os.path.join(INV, name), "w", encoding="utf-8", newline="\n") as handle:
+            for path in sorted(paths):
                 handle.write(path + "\n")
-    rest_platform = sorted(platform - set().union(*owned.values()))
-    with open(os.path.join(INV, "platform_rest.txt"), "w", encoding="utf-8", newline="\n") as handle:
-        for path in rest_platform:
-            handle.write(path + "\n")
-    with open(os.path.join(INV, "_platform.json"), "w", encoding="utf-8", newline="\n") as handle:
-        json.dump({"platform_total": len(platform), "covered": covered_total, "rest": len(rest_platform)},
-                  handle, ensure_ascii=False, indent=1)
-        handle.write("\n")
-    # _summary.json 也必须由本脚本维护：parity_scan.py 从它读域列表，
-    # 而旧版枚举留下的 count / missing_roots 已经过期（那正是"文档骗人"的源头）。
-    # missing_roots 现在恒为空 —— 上面的 exit 1 已经保证每个包都匹配到了东西。
-    with open(os.path.join(INV, "_summary.json"), "w", encoding="utf-8", newline="\n") as handle:
-        json.dump({domain: {"count": len(owned[domain]),
-                            "roots": domains.get(domain, []),
-                            "missing_roots": []} for domain in DOMAIN_ORDER},
-                  handle, ensure_ascii=False, indent=1)
-        handle.write("\n")
+    for name, summary in summaries.items():
+        with open(os.path.join(INV, name), "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(summary, handle, ensure_ascii=False, indent=1)
+            handle.write("\n")
     print("\n已写：%s/{7 个域}.txt + platform_rest.txt + _platform.json + _summary.json" % INV)
     return 0
 

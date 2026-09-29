@@ -30,11 +30,14 @@
 // caller happens to hold them in", so the lists returned below are always in that order.
 
 /**
- * The contents of the strip that are closeable, **in strip order** (`BOTTOM_TABS` in App.vue
- * filtered by `isCloseable()`); `tests/tool-tabs.test.mjs` re-derives the order from the App.vue
- * literal so the two cannot drift apart.
+ * The contents of the strip that are closeable, **in strip order** (`BOTTOM_TABS` in
+ * `src/toolWindowMeta.ts` filtered by `isCloseable()`); `tests/tool-tabs.test.mjs` re-derives the
+ * order from `BOTTOM_TABS` so the two cannot drift apart.
+ *
+ * `blame` was removed in 2026-09-27: IDEA's Annotate is an editor gutter provider
+ * (`AnnotateToggleAction.java:139-153` annotates an `Editor`), not a strip content.
  */
-export const CLOSEABLE_TOOL_TABS = ['references', 'hierarchy', 'blame'] as const
+export const CLOSEABLE_TOOL_TABS = ['references', 'hierarchy'] as const
 
 export type CloseableToolTabId = (typeof CLOSEABLE_TOOL_TABS)[number]
 

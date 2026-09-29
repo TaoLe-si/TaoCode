@@ -20,6 +20,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -38,6 +39,15 @@ constexpr const char* kEmpty = "src/Empty.java";          // triggers an empty s
 void check(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+/** 一次异步往返的共享状态。必须是**堆上的**，因为回调可能在本函数返回之后才到达。 */
+struct RoundTripState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    Json result;
+    Json error;
+};
 
 fs::path self_directory() {
     std::wstring path(32768, L'\0');
@@ -69,9 +79,14 @@ int main() {
     std::mutex mutex;
     std::condition_variable cv;
     bool diagnostics_arrived = false;
+    // 与 round_trip 同一条纪律：通知必须在**解锁之后**发。持着 mutex 调 notify_all 会让
+    // 等待线程一醒来就撞进同一个临界区，`wait_for` 返回到 unique_lock 析构之间锁的归属
+    // 变得不确定。这个回调跑在 Host 的读线程上（还持着 Host::io_mutex_），所以后果更重。
     Session session([&](std::string, Json) {
-        std::lock_guard lock(mutex);
-        diagnostics_arrived = true;
+        {
+            std::lock_guard lock(mutex);
+            diagnostics_arrived = true;
+        }
         cv.notify_all();
     });
     session.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
@@ -88,17 +103,29 @@ int main() {
 
     // Waits for one async callback and hands back {result, error}.
     const auto round_trip = [&](auto&& invoke) {
-        bool done = false;
-        Json result, error;
-        invoke([&](Json payload, Json failure) {
-            std::lock_guard lock(mutex);
-            result = std::move(payload);
-            error = std::move(failure);
-            done = true;
-            cv.notify_all();
+        // 共享状态必须放在堆上：`wait_for` 一观察到 done 就返回，本函数的栈帧随即销毁，
+        // 而 Host 的读线程仍可能因为服务器又推了一条消息（publishDiagnostics 等）而
+        // **再调一次**回调 —— 写进已销毁的栈既是偶发的垃圾值，也是之前那次
+        // 0xc0000409 的来源。两点必须一起成立：
+        //  1. `shared_ptr` 持有状态，回调按值捕获 —— 栈帧没了状态还在。
+        //  2. `notify_all` 在**解锁之后**发；持锁通知会让等待线程一醒来就撞进同一个
+        //     临界区，`wait_for` 返回与 `unique_lock` 析构之间锁的归属不确定。
+        auto state = std::make_shared<RoundTripState>();
+        invoke([state](Json payload, Json failure) {
+            {
+                std::lock_guard lock(state->mutex);
+                state->result = std::move(payload);
+                state->error = std::move(failure);
+                state->done = true;
+            }
+            state->cv.notify_all();
         });
-        check(wait_for(done), "callback never fired");
-        return std::make_pair(result, error);
+        std::unique_lock lock(state->mutex);
+        const bool fired = state->cv.wait_for(lock, std::chrono::seconds(15), [&] { return state->done; });
+        check(fired, "callback never fired");
+        Json out_result = std::move(state->result);
+        Json out_error = std::move(state->error);
+        return std::make_pair(std::move(out_result), std::move(out_error));
     };
 
     run("session opens the document the semantic queries run against", [&] {

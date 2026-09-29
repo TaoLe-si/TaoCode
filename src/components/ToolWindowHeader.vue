@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Maximize2, Minimize2, MoreVertical, PanelLeft, PanelRight, X } from 'lucide-vue-next'
+import { Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
+import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import { headerAction } from '../toolWindowHeader'
 
 // IDEA's ToolWindowHeader (platform/platform-impl/src/com/intellij/toolWindow/ToolWindowHeader.kt):
@@ -8,19 +9,31 @@ import { headerAction } from '../toolWindowHeader'
 // sends a click into the content, toggles maximize on a double click and hides the window on a
 // middle click. TaoCode renders one header per dock; keeping it a single component stops the two
 // copies from drifting apart (IDEA has exactly one such class for every tool window).
+// 停靠边是**三**个：IDEA 的 `MoveToolWindow` / UIBundle `tool.window.move.to.action.group.name` 给出
+// Left / Right / Bottom（`ToolWindowManagerImpl.moveToolWindow` 同样接受 ToolWindowAnchor.BOTTOM）。
+// 少了 Bottom 一项，gradle/notifications/vcslog/todo/debug/tests 这些默认不靠左的窗口就没有办法
+// 归位 —— 只能停在出厂位置。
 const props = defineProps<{
   id: string
   title: string
-  anchor: 'left' | 'right'
+  anchor: 'left' | 'right' | 'bottom'
   maximized: boolean
   menuOpen: boolean
+  /**
+   * 齿轮菜单里"属于工具窗口自己"的那几项（引用表见 `src/menus/toolWindowGear.ts`，
+   * 由 `menuUi` 按 id 从主菜单动作索引里取，标题与快捷键都不在这里复制）。
+   * 上游同一层还有 SpeedSearch / CloseAll / ViewMode / RemoveStripeButton / Help ——
+   * 本仓没有能接住的实现，逐条登记在 docs/class-parity-todo.md，不留假控件。
+   */
+  extraRows: any[]
 }>()
 const emit = defineEmits<{
   activate: []
   hide: []
   maximize: []
-  move: [anchor: 'left' | 'right']
+  move: [anchor: 'left' | 'right' | 'bottom']
   menu: [open: boolean]
+  pickExtra: [row: any]
 }>()
 const root = ref<HTMLElement>()
 
@@ -57,6 +70,11 @@ function toggleMenu() {
 }
 function closeMenu() {
   if (props.menuOpen) emit('menu', false)
+}
+// 选完一条就把焦点还给标题栏（键盘上下一步 Esc / 方向键还在头部）。
+function pickExtra(row: any) {
+  emit('pickExtra', row)
+  focusHeader()
 }
 function focusHeader() {
   root.value?.focus()
@@ -102,6 +120,15 @@ function focusHeader() {
       <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'right'" @click="emit('move', 'right'); focusHeader()">
         <PanelRight :size="13" aria-hidden="true" />移动到右侧
       </button>
+      <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'bottom'" @click="emit('move', 'bottom'); focusHeader()">
+        <PanelBottom :size="13" aria-hidden="true" />移动到底部
+      </button>
+      <!-- 工具窗口自己的那一组（上游 GearActionGroup :857-891）：行、标题、快捷键与可用性都取自主菜单
+           动作索引；渲染器与底部 dock 的齿轮共用同一个 ToolWindowGearRows，两处不再各抄一份。 -->
+      <template v-if="extraRows.length">
+        <div class="menu-rule" role="separator" />
+        <ToolWindowGearRows :rows="extraRows" @pick="pickExtra" />
+      </template>
     </div>
   </div>
 </template>

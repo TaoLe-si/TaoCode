@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { rippleRadius } from '../src/themeRipple.ts'
+import { rippleRadius, themeRipple } from '../src/themeRipple.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -51,22 +51,60 @@ test('两处主题按钮的文案是「月之亮面 / 月之暗面」，且都�
   }
 })
 
-test('换主题那一刻才播水纹，并且用**目标主题**的底色', () => {
-  const app = read('src/App.vue')
-  // 顺序有讲究：先换 theme.value，再取底色 —— 否则圆圈铺的是旧主题的颜色。
-  const change = app.slice(app.indexOf('function changeTheme('), app.indexOf('function dismissMenu('))
-  const switchAt = change.indexOf('theme.value = value')
-  const rippleAt = change.indexOf('themeRipple(')
-  assert.ok(switchAt >= 0 && rippleAt > switchAt, '水纹必须在换完主题之后再播，否则用的是旧主题的底色')
-  assert.match(change, /themeRipple\(event \?\? null, value\)/, '水纹没有接上点击事件')
-  // 颜色不在涟漪里写死，而是从换完主题后的 `--editor` 现取。
-  const ripple = read('src/themeRipple.ts')
-  assert.match(ripple, /getPropertyValue\('--editor'\)/, '涟漪没有取目标主题的底色')
+function mockDocument(t, reduced = false) {
+  const properties = new Map()
+  const classes = new Set()
+  const root = { dataset: { theme: 'light' },
+    style: { setProperty: (key, value) => properties.set(key, value), removeProperty: key => properties.delete(key) },
+    classList: { add: key => classes.add(key), remove: key => classes.delete(key) },
+  }
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const document = { documentElement: root }
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: document })
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    innerWidth: 1000, innerHeight: 800,
+    matchMedia: query => { assert.equal(query, '(prefers-reduced-motion: reduce)'); return { matches: reduced } },
+  } })
+  t.after(() => {
+    for (const [key, descriptor] of [['document', originalDocument], ['window', originalWindow]]) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  })
+  return { document, properties, classes }
+}
+
+test('在原生快照更新回调中应用目标主题，完成后清理水纹', async t => {
+  assert.match(read('src/App.vue'), /themeRipple\(event \?\? null, value, \(\) => \{\s*theme\.value = value/)
+  const { document, properties, classes } = mockDocument(t)
+  let update, finish, applied = 0
+  document.startViewTransition = callback => {
+    update = callback
+    return { ready: Promise.resolve(), updateCallbackDone: Promise.resolve(),
+      finished: new Promise(resolve => { finish = resolve }), skipTransition() {} }
+  }
+  assert.equal(themeRipple({ clientX: 30, clientY: 40 }, 'dark', () => applied++), true)
+  assert.equal(applied, 0, '捕获旧快照前不得先切主题')
+  assert.equal(properties.get('--theme-reveal-x'), '30px')
+  assert.equal(properties.get('--theme-reveal-y'), '40px')
+  assert.equal(properties.get('--theme-reveal-radius'), `${rippleRadius({ x: 30, y: 40 }, { width: 1000, height: 800 })}px`)
+  assert.ok(classes.has('theme-transition'))
+  await update()
+  assert.equal(applied, 1)
+  finish()
+  await Promise.resolve()
+  assert.equal(classes.size, 0)
+  assert.equal(properties.size, 0)
 })
 
-test('尊重 prefers-reduced-motion：系统关了动画就一个元素都不建', () => {
-  const ripple = read('src/themeRipple.ts')
-  assert.match(ripple, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)\.matches/, '没有读 prefers-reduced-motion')
-  assert.match(ripple, /if \(prefersReducedMotion\(\)\) return false/, '关掉动画时必须直接返回，而不是缩短时长')
-  assert.match(read('src/style.css'), /@media \(prefers-reduced-motion: reduce\)/, 'CSS 侧也要有一道保险')
+test('尊重 prefers-reduced-motion：不启动过渡但立即应用主题', t => {
+  const { document, properties, classes } = mockDocument(t, true)
+  document.startViewTransition = () => assert.fail('减少动态效果时不得启动动画')
+  let applied = 0
+  assert.equal(themeRipple(null, 'dark', () => applied++), false)
+  assert.equal(applied, 1)
+  assert.equal(properties.size, 0)
+  assert.equal(classes.size, 0)
+  assert.match(read('src/style.css'), /@media \(prefers-reduced-motion: reduce\)/)
 })

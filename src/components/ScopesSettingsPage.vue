@@ -27,10 +27,6 @@ import { request, type NamedScopeSetting, type ProjectFileList } from '../bridge
 import {
   compileScopeText, excludeFrom, includeInto, scopeLookup, scopeMatches, scopeText, type ScopeContext, type ScopeSet,
 } from '../scopes'
-// 文件颜色（IDEA `FileColorsConfigurable`）：七色与判定规则都在 src/fileColors.ts。
-import {
-  FILE_COLOR_HEX, FILE_COLOR_NAMES, normalizeFileColors, type FileColorName, type FileColorSetting,
-} from '../fileColors'
 
 const props = defineProps<{
   /** null = 没有打开项目（整页只读）。 */
@@ -38,36 +34,9 @@ const props = defineProps<{
   root: string | null
   /** 单隐式模块的名字（`ProjectPatternProvider` 生成的模式里用它）。 */
   moduleName: string
-  /** 已保存的文件颜色（IDEA `FileColorConfiguration` = scopeName + colorID）。 */
-  fileColors: FileColorSetting[]
   busy: boolean
 }>()
-const emit = defineEmits<{ save: [scopes: NamedScopeSetting[]]; saveColors: [fileColors: FileColorSetting[]] }>()
-
-// ---- 文件颜色（IDEA `com.intellij.ui.tabs.FileColorsConfigurable`）----
-// 草稿按**列表顺序**存：数组下标即优先级（`FileColorsModel.findConfigurationWithScopeFilter`
-// 顺着迭代器首个命中就返回），所以颜色跟着作用域的顺序走，不需要另存一份顺序。
-const colorDraft = ref<FileColorSetting[]>([])
-function fillColors() {
-  colorDraft.value = normalizeFileColors(props.fileColors, props.scopes ?? [])
-}
-function colorOf(scope: string): FileColorName | '' {
-  return colorDraft.value.find(entry => entry.scope === scope)?.color ?? ''
-}
-function setColor(scope: string, color: FileColorName | '') {
-  colorDraft.value = colorDraft.value.filter(entry => entry.scope !== scope)
-  // 配了色的排在同位置，顺序由作用域列表决定；这里只记「谁有颜色」。
-  if (color) colorDraft.value = [...colorDraft.value, { scope, color }]
-}
-function applyColors() {
-  // 按作用域列表的当前顺序重排 —— 那个顺序就是优先级（与 setColor 里记的顺序无关）。
-  const order = new Map(draft.value.map((entry, index) => [entry.name, index]))
-  const ordered = colorDraft.value
-    .filter(entry => order.has(entry.scope))
-    .sort((a, b) => (order.get(a.scope) ?? 0) - (order.get(b.scope) ?? 0))
-    .map(entry => ({ ...entry }))
-  emit('saveColors', ordered)
-}
+const emit = defineEmits<{ save: [scopes: NamedScopeSetting[]] }>()
 
 interface ScopeTreeNode { name: string; path: string; directory: boolean; children: ScopeTreeNode[] }
 
@@ -93,9 +62,8 @@ function fillFrom(next: NamedScopeSetting[] | null) {
   chosen.value = new Set()
 }
 
-watch(() => [props.scopes, props.root, props.fileColors] as const, ([next, root]) => {
+watch(() => [props.scopes, props.root] as const, ([next, root]) => {
   fillFrom(next)
-  fillColors()
   selected.value = 0
   if (root) void loadFiles()
   else { files.value = []; filesNote.value = '' }
@@ -323,20 +291,22 @@ function localProblem(index: number): string {
     : ''
 }
 
-function apply() {
+function getDraft(): NamedScopeSetting[] | null {
   for (let index = 0; index < draft.value.length; index++) {
     const problem = validateName(draft.value[index].name, index)
-    if (problem) { note.value = problem; selected.value = index; return }
+    if (problem) { note.value = problem; selected.value = index; return null }
   }
-  emit('save', draft.value.map(entry => ({ ...entry })))
-  applyColors()
-  snapshot.value = shape()
   note.value = ''
+  return draft.value.map(entry => ({ ...entry }))
+}
+function apply() {
+  const next = getDraft()
+  if (next) emit('save', next)
 }
 function reset() {
   fillFrom(props.scopes)
-  fillColors()
 }
+defineExpose({ dirty, getDraft })
 </script>
 
 <template>
@@ -369,24 +339,6 @@ function reset() {
               @click="selected = index"
             />
             <span v-if="localProblem(index)" class="scope-warn" :title="localProblem(index)">!</span>
-            <!-- 文件颜色（IDEA `FileColorsConfigurable`，`intellij.platform.lang.impl.xml:1341-1343` 注册在
-                 appearance 组 112）：给作用域配颜色，落在该作用域里的文件在编辑器标签页上显示这个底色。
-                 IDEA 把它单独做成一页；本仓并在这里 —— 配色的对象就是作用域本身，同处配置少一次跳转。
-                 **数组顺序即优先级**（`FileColorsModel.findConfigurationWithScopeFilter` 首个命中就返回），
-                 正好复用上面那两个上移/下移按钮的顺序。判定逻辑见 src/fileColors.ts。 -->
-            <span class="scope-colors" role="group" :aria-label="`${entry.name} 的文件颜色`">
-              <button
-                v-for="name in FILE_COLOR_NAMES"
-                :key="name"
-                type="button"
-                class="scope-color-dot"
-                :class="{ picked: colorOf(entry.name) === name }"
-                :style="{ background: `var(--file-color-${name.toLowerCase()})` }"
-                :title="`${name}（${FILE_COLOR_HEX[name].light} / ${FILE_COLOR_HEX[name].dark}）`"
-                :aria-pressed="colorOf(entry.name) === name"
-                @click="setColor(entry.name, colorOf(entry.name) === name ? '' : name)"
-              />
-            </span>
           </li>
         </ul>
         <!-- scopes.no.scoped（IdeBundle:914） -->
@@ -495,13 +447,19 @@ function reset() {
 .scope-list li.active { background: var(--selection, rgba(127, 127, 127, 0.18)); }
 .scope-list input { flex: 1; min-width: 0; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; padding: 2px 4px; border-radius: 3px; }
 .scope-list input:focus { border-color: var(--line); background: var(--panel, transparent); }
-.scope-list input[aria-invalid='true'] { border-color: #c0392b; }
-.scope-warn { color: #c0392b; font-weight: 700; }
+/* 错误/校验失败态统一走 --error（IDEA 的 JBColor.RED / Validation error 同一语义色）。
+   原先三处写死 #c0392b，换深色主题不跟随，是这一页唯一不合群的颜色。 */
+.scope-list input[aria-invalid='true'] { border-color: var(--error); }
+.scope-warn { color: var(--error); font-weight: 700; }
+.field-hint.bad { color: var(--error); }
+/* 作用域语义色。IDEA 的 ScopeChooser 用矢量图标区分 local/shared
+   （ScopeChooserConfigurable.java:373/380 的 myLocalScopesManager.getIcon()），
+   没有这四个自造 hex；这里保留圆点但改成令牌，语义归入中性/强调两级。 */
 .scope-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.scope-dot.local { background: #4a7ebb; }
-.scope-dot.shared { background: #3f9142; }
-.scope-dot.all { background: #0a7700; }
-.scope-dot.some { background: #0032a0; }
+.scope-dot.local { background: var(--muted); }
+.scope-dot.shared { background: var(--secondary); }
+.scope-dot.all { background: var(--accent); }
+.scope-dot.some { background: var(--line-strong); }
 .scope-detail { display: flex; flex-direction: column; gap: 4px; }
 .scope-detail h4 { margin: 0; font-size: 13px; }
 .scope-pattern input { flex: 1; }
@@ -512,8 +470,8 @@ function reset() {
 .scope-tree > ul { padding-left: 0; }
 .scope-node { display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-radius: 3px; cursor: default; }
 .scope-node.chosen { background: var(--selection, rgba(127, 127, 127, 0.22)); }
-.scope-node.mark-all > span:last-child { color: #0a7700; }
-.scope-node.mark-some > span:last-child { color: #0032a0; }
+.scope-node.mark-all > span:last-child { color: var(--accent); }
+.scope-node.mark-some > span:last-child { color: var(--secondary); }
 .scope-caret { width: 14px; border: 0; background: transparent; color: inherit; padding: 0; display: inline-flex; align-items: center; }
 .scope-buttons { display: flex; flex-direction: column; gap: 4px; }
 .scope-legend { display: flex; align-items: center; gap: 6px; }

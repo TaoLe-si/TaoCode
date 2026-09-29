@@ -62,6 +62,11 @@ test('a partly corrupted layout keeps the fields that are still readable', () =>
   assert.equal(layout.view, 'git')
 })
 
+test('normalization preserves bottom anchors rather than replacing them with fallback sides', () => {
+  const layout = normalizeToolLayout({ anchors: { files: 'bottom', git: 'bottom', tests: 'bottom' } }, factory)
+  assert.deepEqual(layout.anchors, { files: 'bottom', git: 'bottom', tests: 'bottom' })
+})
+
 // :70-82 — setLayout writes the current state into the *named* layout and makes it active; saving
 // over the factory default renames it to INITIAL_LAYOUT_NAME ("Custom") so the default survives.
 test('saving over the factory default moves it to a named layout', () => {

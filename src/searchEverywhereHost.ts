@@ -1,4 +1,4 @@
-// Search Everywhere 的宿主装配：把三个供给者（文件 / 动作 / 运行配置）接成对话框要的 `items`。
+// Search Everywhere 的宿主装配：把四个供给者（文件 / 符号 / 动作 / 运行配置）接成对话框要的 `items`。
 //
 // 为什么要单独成模块：App.vue 是组装层，已登记的行数上限只降不升（tests/module-size.test.mjs），
 // 新逻辑一律拆到 src/xxx.ts、App 里只留一行调用。
@@ -47,6 +47,8 @@ export interface SearchEverywhereHostDeps {
   selectRunConfig: (name?: string) => unknown
   runSelectedConfig: (debug: boolean) => unknown
   baseName: (path: string) => string
+  /** 只读当前工作区已打开缓冲区；undefined 表示未打开，不能调用 openFile。 */
+  readPreviewBuffer?: (path: string) => string | undefined
 }
 
 export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
@@ -57,44 +59,83 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
   const searchEverywhereFiles = ref<string[]>([])
   const searchEverywhereSymbols = ref<SymbolEntry[]>([])
   let symbolTimer: ReturnType<typeof setTimeout> | undefined
-  /** 只认最后发出的那次查询：迟到的响应不能盖掉新结果。 */
-  let symbolQueryIssued = ''
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined
+  // 生命周期与请求序号分别隔离关闭/重开、工作区切换及同词请求的乱序返回。
+  let generation = 0
+  let fileRequestId = 0
+  let symbolRequestId = 0
+  let sessionActive = false
   /** 最近一次查询词 —— 数据源变化后要按同一个词重发符号请求（PopupUpdateProcessor 那一层）。 */
   let lastQuery = ''
 
-  async function refreshSymbols(query: string) {
+  function isCurrent(epoch: number) {
+    return sessionActive && searchEverywhereOpen.value && generation === epoch
+  }
+
+  async function refreshFiles() {
+    if (!sessionActive || !isDesktop || !workspace.value) return
+    const epoch = generation
+    const id = ++fileRequestId
+    try {
+      const { files } = await request<{ files: string[] }>('workspace.files')
+      if (isCurrent(epoch) && id === fileRequestId) searchEverywhereFiles.value = files
+    } catch { /* 当前会话刷新失败保留清单；新会话从空清单开始。 */ }
+  }
+
+  async function refreshSymbols(query: string, epoch: number, id: number) {
+    if (!isCurrent(epoch) || id !== symbolRequestId) return
     try {
       const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>(
         'lsp.request', { kind: 'workspaceSymbol', path: activePath.value, query })
-      // 对话框已经关了、或者用户又改了查询：这份结果直接丢。
-      if (!searchEverywhereOpen.value || symbolQueryIssued !== query) return
+      if (!isCurrent(epoch) || id !== symbolRequestId) return
       searchEverywhereSymbols.value = (result.symbols ?? []).slice(0, 100)
-    } catch { searchEverywhereSymbols.value = [] }
+    } catch {
+      if (isCurrent(epoch) && id === symbolRequestId) searchEverywhereSymbols.value = []
+    }
   }
 
   function onSearchEverywhereQuery(raw: string) {
     const query = raw.trim()
     lastQuery = query
+    // 在防抖开始时就作废旧请求，不能等下一次请求真正发出。
+    const id = ++symbolRequestId
+    const epoch = generation
     if (symbolTimer !== undefined) clearTimeout(symbolTimer)
-    if (query.length < SEARCH_EVERYWHERE_SYMBOL_MIN || !isDesktop || !workspace.value || !lspReady.value) {
-      symbolQueryIssued = query
-      searchEverywhereSymbols.value = []
-      return
-    }
-    symbolQueryIssued = query
-    symbolTimer = setTimeout(() => { void refreshSymbols(query) }, SYMBOL_DEBOUNCE_MS)
+    symbolTimer = undefined
+    searchEverywhereSymbols.value = []
+    if (!isCurrent(epoch) || query.length < SEARCH_EVERYWHERE_SYMBOL_MIN || !isDesktop || !workspace.value || !lspReady.value) return
+    symbolTimer = setTimeout(() => {
+      symbolTimer = undefined
+      void refreshSymbols(query, epoch, id)
+    }, SYMBOL_DEBOUNCE_MS)
   }
 
-  async function openSearchEverywhere() {
+  function openSearchEverywhere() {
     menu.value = null
+    // 打开后由生命周期 watch 异步刷新文件，动作与运行配置仍立即可用。
     searchEverywhereOpen.value = true
-    // 先用手上已有的供给者打开（文件 / 动作 / 运行配置立刻可用），再异步补文件清单。
-    if (!isDesktop || searchEverywhereFiles.value.length) return
-    try {
-      const files = (await request<{ files: string[] }>('workspace.files')).files
-      // 关闭了或已经换工作区，就别把迟到的结果塞回去。
-      if (searchEverywhereOpen.value) searchEverywhereFiles.value = files
-    } catch { /* 读不到文件清单就只剩动作与运行配置，不假装有 */ }
+  }
+
+  // Split SE: SeItemsPreviewProvider → SePopupVm.fetchPreview，不走 ItemWrapper/DetailController。
+  function previewFile(path: string, line?: number, character?: number, endLine?: number, endCharacter?: number): NonNullable<SearchEverywhereItem['preview']> {
+    const epoch = generation
+    const origin = workspace.value
+    const root = origin?.root
+    return async () => {
+      const current = () => isCurrent(epoch) && workspace.value === origin && workspace.value?.root === root
+      if (!origin || !current()) return null
+      const buffer = deps.readPreviewBuffer?.(path)
+      if (buffer !== undefined) return current() ? { path, content: buffer, origin: 'buffer', line, character, endLine, endCharacter } : null
+      if (!isDesktop) return null
+      // file.read 在原生端调用 workspace->read，保留路径、二进制和大小校验。
+      try {
+        const document = await request<{ content: string }>('file.read', { path })
+        return current() ? { path, content: document.content, origin: 'disk', line, character, endLine, endCharacter } : null
+      } catch (error) {
+        if (!current()) return null
+        throw error
+      }
+    }
   }
 
   const searchEverywhereItems = computed<SearchEverywhereItem[]>(() => [
@@ -105,6 +146,7 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       // 路径本身当关键词：搜 "demo/Main" 要能命中 "src/demo/Main.java"。
       keywords: path,
       source: 'project' as const,
+      preview: previewFile(path),
       open: () => { void openFile(path) },
     })),
     ...searchEverywhereSymbols.value.map(entry => ({
@@ -113,6 +155,7 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       subtitle: `${baseName(entry.path)}:${entry.line + 1}`,
       keywords: entry.path,
       source: 'symbols' as const,
+      preview: previewFile(entry.path, entry.line, entry.character, entry.endLine, entry.endCharacter),
       open: () => jumpSymbol(entry),
     })),
     ...actionList.value.map(entry => ({
@@ -132,33 +175,47 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
     })),
   ])
 
-  // 工作区换了要丢掉旧文件清单与符号结果，否则会列出上一个项目的路径。
-  watch(() => workspace.value?.root ?? '', () => {
+  // 同步隔离每次关闭/重开和工作区替换（包括同 root 的新工作区对象）。
+  // watch 随调用方的 Vue effectScope 停止时也会执行清理，无须另建卸载通道。
+  watch([searchEverywhereOpen, workspace, () => workspace.value?.root], ([open], _previous, onCleanup) => {
+    sessionActive = open
     searchEverywhereFiles.value = []
     searchEverywhereSymbols.value = []
-  })
+    if (!open) lastQuery = ''
+    onCleanup(() => {
+      sessionActive = false
+      generation++
+      fileRequestId++
+      symbolRequestId++
+      if (symbolTimer !== undefined) clearTimeout(symbolTimer)
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer)
+      symbolTimer = undefined
+      refreshTimer = undefined
+    })
+    if (open) {
+      void refreshFiles()
+      onSearchEverywhereQuery(lastQuery)
+    }
+  }, { immediate: true, flush: 'sync' })
+
+  // LSP 就绪状态或请求所依赖的文档变化也必须作废旧符号响应。
+  watch([activePath, lspReady], () => {
+    if (sessionActive) onSearchEverywhereQuery(lastQuery)
+  }, { flush: 'sync' })
 
   // ---- 已打开的弹层要自己跟上数据变化（IDEA `PopupUpdateProcessor`）----
-  // 源码那一族的含义：弹窗开着的时候，内容随底下的数据源变化**就地刷新**，而不是关掉重开。
-  // 本仓的弹层原来都是一次性快照 —— 弹开着改了文件/删了文件，列表还是旧的。
-  // 触发源：宿主每次文件变化都会推 `fsChanges`（version 自增）。只重取文件清单（符号按查询词重发）。
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined
   watch(() => fsChanges.version, () => {
-    if (!searchEverywhereOpen.value || !isDesktop) return
+    if (!sessionActive || !searchEverywhereOpen.value || !isDesktop || !workspace.value) return
     if (refreshTimer !== undefined) clearTimeout(refreshTimer)
-    // 一次保存可能推好几条（多个文件），抖一下再取，别每个文件都打一次宿主。
+    // 数据变化立即作废在途文件请求；符号独立刷新，不再等待文件请求完成。
+    fileRequestId++
+    onSearchEverywhereQuery(lastQuery)
+    const epoch = generation
     refreshTimer = setTimeout(() => {
-      void (async () => {
-        const query = lastQuery
-        try {
-          const files = (await request<{ files: string[] }>('workspace.files')).files
-          if (!searchEverywhereOpen.value) return
-          searchEverywhereFiles.value = files
-          if (query.trim().length >= SEARCH_EVERYWHERE_SYMBOL_MIN) void refreshSymbols(query)
-        } catch { /* 取不到就保留旧清单，不把弹层清空 */ }
-      })()
+      refreshTimer = undefined
+      if (isCurrent(epoch)) void refreshFiles()
     }, REFRESH_DEBOUNCE_MS)
-  })
+  }, { flush: 'sync' })
 
   return { searchEverywhereOpen, searchEverywhereItems, openSearchEverywhere, onSearchEverywhereQuery }
 }

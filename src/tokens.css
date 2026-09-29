@@ -1,16 +1,20 @@
 /* Design tokens.
    Three layers, top to bottom:
-     1. Scale primitives (radius / space / shadow / motion) — theme-independent.
-     2. Palette primitives + semantic aliases — re-declared per theme so components
-        only ever read the semantic names below.
-   Components must use var(--semantic); raw hex belongs here only. */
+     1. Scale primitives (radius / space / motion) + 布局度量 —— 逐条对齐 IDEA 源码，
+        每条都带 file:line，**不随配色变**。
+     2. Palette primitives —— 本仓自己的「月相」体系 `--m-*`：
+        浅色 = 月之亮面（月白瓷面 + 墨蓝字 + 月华金的高光），深色 = 月之暗面（夜面深蓝黑 + 月银字）。
+        **两档之间只换这一层的值。**
+     3. Semantic aliases —— 只声明一次（在 `:root`），一律 `var(--m-*)`。组件永远只读语义名：
+        换主题时语义名不变、它指向的月相层变 —— 这就是"动态调整"的实现方式。
+   分工一句话：**配色是我们的，几何是源码的。** */
 :root {
   color-scheme: light;
   --font-ui: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
   --font-brand: 'Bahnschrift', 'Segoe UI', sans-serif;
   --font-mono: 'Cascadia Code', Consolas, monospace;
 
-  /* 1 · Scale primitives */
+  /* 1 · Scale primitives + 布局度量（源码对齐，不随配色变） */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -25,66 +29,140 @@
   --dur-1: 120ms;
   --dur-2: 180ms;
   --dur-3: 220ms;
+  /* 子菜单展开（IDEA 的 LAF 弹出动画 160ms 量级）与主题水纹（跨屏一圈，长程）。
+     这两个是**独立于控件反馈**的动效，各给一个名字，免得在各处写死数值。 */
+  --dur-submenu: 160ms;
+  --dur-theme-reveal: 560ms;
   --ease: cubic-bezier(.16, 1, .3, 1);
-  --menu-radius: 6px;
   --menu-row-height: 28px;
   --chrome-height: 40px;
-  /* **整个顶栏**的高度。`SEPARATE_TOOLBAR`（IDEA 的默认档）是「菜单栏 + 主工具栏」两行，
-     `MERGED_WITH_MAIN_TOOLBAR` 才是一行 —— 浮层（配置选择器、汉堡菜单）必须按这个定位，
-     否则会盖住第二行。见 src/style.css 里按 `html[data-main-menu]` 的覆盖。 */
+  /* 顶栏的**内缩与组间距**。每一条都是上游的一个常量，不是估值：
+     --chrome-height        40  CustomHeader.kt:72 `HEADER_HEIGHT_NORMAL`（紧凑 32 = :71，
+                                   专注模式 30 = :70；三者由 CustomWindowHeaderUtil.kt:141-145 选）。
+     --header-inset         16  ToolbarFrameHeader.kt:504 `emptyLeft(scale(if (iconRightPosition) 16 else 4))`，
+                                   窗口按钮在右（Windows 即 `fillContent:248` 那条分支）时是 16；
+                                   它加在 `headerContent` 上 = 「汉堡按钮 / 菜单栏」这一格的左边距。
+     --header-menu-gap       4  ToolbarFrameHeader.kt:271 `createToolbarPlaceholder` 的 `empty(0, scale(4))`：
+                                   菜单格与主工具栏之间（`createHeaderContent:448-449` 两格相邻）。
+     --toolbar-row-inset     5  ProjectFrameCustomHeaderHelper.kt:364 `toolbar.border = emptyLeft(5)`：
+                                   `SEPARATE_TOOLBAR` 档主工具栏是独立的一行（不在窗口标题里），左边距 5。
+     --toolbar-group-gap    10  MainToolbar.kt:137 `private const val layoutGap = 10` + :146 `JPanel(HorizontalLayout(layoutGap))`：
+                                   同一个组内两个组件之间（HorizontalLayout.kt:186 `x += width + gap`）。
+     组与组之间是**双倍**间距（HorizontalLayout.kt:19，:145 `+ gap + gap`）= 20px，不单独给令牌：
+     它由 `.topbar-spacer` 的 min-width 与一个 --toolbar-group-gap 相加得到。
+     右侧不留内边距 —— HorizontalLayout.kt:135 `rightX = width` 把右组贴到行的右边缘。 */
+  --header-inset: 16px;
+  --header-menu-gap: 4px;
+  --toolbar-row-inset: 5px;
+  --toolbar-group-gap: 10px;
+  /* 状态栏高度 = 1px 顶边框 + max(20, 文本高)。来源：IdeStatusBarImpl.kt:266/:169/:803/:351
+     （StatusBar.topBorderWidth=1、minIconHeight=scale(18+1+1)=20、preferredTextHeight）。
+     默认缩放 11px 字体下 = 22px。 */
+  --statusbar-height: 22px;
+  /* **整个顶栏**的高度。三档（`UISettingsState.kt:206-207` 的 MainMenuDisplayMode）：
+       `UNDER_HAMBURGER_BUTTON` —— IDEA 的**默认档**（:207 `by string(MainMenuDisplayMode.UNDER_HAMBURGER_BUTTON.name)`），
+                               菜单收进一个汉堡按钮，顶栏只有工具栏一行 = --chrome-height；
+       `MERGED_WITH_MAIN_TOOLBAR`   —— 菜单并进工具栏行，同样一行；
+       `SEPARATE_TOOLBAR`          —— 菜单栏 + 工具栏两行 = 2 × --chrome-height。
+     浮层（配置选择器、汉堡菜单）按这个定位，见 src/style.css 里 `html[data-main-menu]` 的覆盖。 */
   --topbar-height: calc(var(--chrome-height) * 2);
   --ctrl-height-sm: 24px;
   --ctrl-height: 28px;
   --ctrl-height-lg: 32px;
+  /* 主工具栏 / tool-window stripe 的**按钮**尺寸。两处用的是同一个值：
+     ActionToolbar.java:84 `experimentalToolbarMinimumButtonSize()`
+       → JBUI CurrentTheme.Toolbar.experimentalToolbarButtonSize()
+       → JBUI.java:1276 `defaultExperimentalToolbarButtonSize() = size(30, 30)`
+     stripe 侧显式取同一个函数（toolWindow/StripeActionGroup.kt:160/:214），
+     所以工具栏按钮和 stripe 按钮都是 30x30（注意不是 `StripeToolbar.Button.size` 的 40）。
+     图标 20 = JBUI.java:1286 `MainToolbar.Button.iconSize` 与 :1334 `StripeToolbar.Button.iconSize`。 */
+  --toolbar-btn-size: 30px;
+  --toolbar-icon-size: 20px;
+  /* hover 圆角 = `MainToolbar.Button.arc` 默认 12（JBUI.java:1420），由
+     HeaderToolbarButtonLook.kt:58-59 getButtonArc() 消费（与上面两项同一个按钮 Look）。 */
+  --toolbar-btn-arc: 12px;
   --panel-heading-h: 32px;
   --tab-h: 34px;
 
-  /* 2 · Palette: light */
-  --editor: #ffffff;
-  --panel: #f7f8fa;
-  --rail: #eef0f3;
-  --elevated: #ffffff;
-  --hover: #e9ecf1;
-  --selected: #e0eafa;
-  --selection: #b6d5ff;
-  --selection-inactive: #d3dfef;
-  --active-line: #3268b20a;
-  --symbol-highlight: #3268b21f;
-  --debug-line: #b67c1626;
-  --gutter: #fafbfc;
-  --search-match: #f5e3ae;
-  --search-field-error: #ffcccc;
-  --spotlight: #e08855;
-  --line: #e1e4e9;
-  --line-strong: #c9ced8;
-  --text: #303644;
-  --bright: #202530;
-  --secondary: #555e6d;
-  --muted: #626d7e;
-  --accent: #3268b2;
-  --accent-hover: #285996;
-  --accent-soft: #edf3fc;
-  --on-accent: #ffffff;
-  --scrollbar: #b6becb;
-  --shadow: #20273526;
-  --backdrop: #20273566;
-
-  /* Layered elevation: soft ambient + tight contact shadow. */
-  --shadow-1: 0 1px 2px #2027350a;
-  --shadow-2: 0 2px 4px #2027350a, 0 6px 16px #20273512;
-  --shadow-3: 0 4px 10px #2027350d, 0 16px 40px #2027351f;
-  --menu-shadow: 0 1px 3px #20273510, 0 6px 18px #2027351f;
-  --ring: 0 0 0 2px var(--editor), 0 0 0 4px var(--accent);
-
-  --success: #1f6b4a;
-  --success-bg: #e4f2ea;
-  --warning: #7a560d;
-  --warning-bg: #faf0d8;
-  --error: #9a3434;
-  --error-bg: #fbeaea;
-
-  /* 文件颜色（IDEA `FileColorManagerImpl.ourDefaultColors` 的七个具名色）。
-     浅色主题这一组照抄源码里的 `new JBColor(light, dark)` 左边那一半。 */
+  /* 2 · Palette primitives —— **月之亮面**
+     月白瓷面（冷蓝相）逐级加深到墨蓝；月华金只承担"光"这一类语义（高亮/焦点/搜索命中/调试行），
+     交互色走月相蓝。深色主题换的是**同一批名字**的值。 */
+  --m-editor: #fcfdff;            /* 月面高光：编辑区 */
+  --m-panel: #f4f7fb;
+  --m-rail: #eaeef5;
+  --m-elevated: #ffffff;          /* 浮层 */
+  --m-gutter: #f7f9fc;
+  --m-hover: #e7ecf4;
+  --m-selected: #dfeaf8;
+  --m-selection: #bcd8f6;
+  --m-selection-inactive: #d8e2ee;
+  --m-active-line: #3c6ba80a;     /* 带 alpha：压在它下面的选区要透出来 */
+  --m-symbol-highlight: #3c6ba81f;
+  --m-debug-line: #b3812a26;      /* 调试当前行 = 一层月华金 */
+  --m-search-match: #f3e2b4;
+  --m-search-field-error: #f6cfcf;
+  --m-spotlight: #c08a2e;         /* 拖放/聚焦的"月光"强调 */
+  --m-line: #e2e7f0;
+  --m-line-strong: #c9d2e0;
+  --m-bright: #232d40;            /* 最强字色（墨） */
+  --m-text: #3d4a63;
+  --m-secondary: #55617a;
+  --m-muted: #606c82;
+  --m-accent: #3c6ba8;            /* 交互主色：月相蓝 */
+  --m-accent-hover: #2f5b93;
+  --m-accent-soft: #eaf1fa;
+  --m-on-accent: #ffffff;
+  --m-scrollbar: #b3bfce;
+  --m-success: #1f7a52;
+  --m-success-bg: #e3f2e9;
+  --m-warning: #8a6414;
+  --m-warning-bg: #faf1da;
+  --m-error: #a53535;
+  --m-error-bg: #fbeceb;
+  /* 顶栏是**夜面**：浅色主题下它也是深的。这是结构（角色→键的对应见 §4 的引用），不是偏好；
+     色值由我们定，"两行同色 + 失焦换色"两条行为照上游。 */
+  --m-night: #16202f;
+  --m-night-inactive: #243044;
+  --m-night-fg: #e7edf6;          /* 月银字 */
+  --m-night-hover: #24324a;
+  --m-night-line: #33415a;
+  --m-night-run: #4e9a6a;         /* 运行中那一格的绿底 */
+  --m-night-run-hover: #00000019; /* 叠黑不叠白（上游 RunWidget.hoverBackground 同方向） */
+  --m-night-run-pressed: #00000028;
+  --m-night-accent: #8fb7ea;      /* 夜面上的状态色 = 同名 key 的亮面版本 */
+  --m-night-success: #a9d5bb;
+  --m-night-error: #f0b9b4;
+  /* 补全弹窗（lookup）与菜单浮层同族：颜色在这里，度量在 §4 与 src/completionUi.ts。 */
+  --m-pop-bg: #ffffff;
+  --m-pop-fg: #232d40;
+  --m-pop-match: #3c6ba8;
+  --m-pop-selection: #dfeaf8;
+  --m-pop-inactive: #e7ebf1;      /* 编辑器失焦时的选中行底色 */
+  --m-pop-info: #606c82;
+  --m-pop-border: #c9d2e0;
+  --m-pop-mnemonic: #999999;      /* Gray.x99 = JBColor 回退值，见 --popup-mnemonic 旁 */
+  /* 禁用态字色 = expUI 的通配组 `"*".disabledForeground`（`*.foreground` 同组）：
+     浅色 Gray8 = #A8ADBD（expUI_light.theme.json:16,114），深色 Gray6 = #5A5D63
+     （expUI_dark.theme.json:14,123）。**故意低于 AA 4.5** —— 上游就是用"看不清"表达"不可用"，
+     所以这一档不参与对比度门禁（门禁只管 text/secondary/muted 三档正文色）。 */
+  --m-pop-disabled: #a8adbd;
+  --m-shadow-1: 0 1px 2px #1a24340a;
+  --m-shadow-2: 0 2px 4px #1a24340a, 0 6px 16px #1a243412;
+  --m-shadow-3: 0 4px 10px #1a24340d, 0 16px 40px #1a24341f;
+  --m-menu-shadow: 0 1px 3px #1a243410, 0 8px 22px #1a243421;
+  /* 语法着色的九个色相：与界面色共用同一套冷底调，避免亮面发紫、暗面发灰。 */
+  --m-syntax-keyword: #7d3fa4;
+  --m-syntax-string: #1c7a53;
+  --m-syntax-comment: #606c82;
+  --m-syntax-number: #9a5a12;
+  --m-syntax-type: #0a6f86;
+  --m-syntax-function: #0f66b8;
+  --m-syntax-meta: #7a5a12;
+  --m-syntax-property: #6f4fa2;
+  --m-syntax-operator: #4a5a72;
+  /* 文件颜色（IDEA `FileColorManagerImpl.ourDefaultColors` 七个具名色）。
+     这七个是**用户可见的具名标识**而不是界面配色 —— 照抄源码 `new JBColor(light, dark)` 的
+     左半边，不随月相改（改了就把"红=冲突、绿=新增"这类跨产品直觉切断）。 */
   --file-color-blue: #eaf6ff;
   --file-color-green: #effae7;
   --file-color-orange: #f6e9dc;
@@ -92,62 +170,198 @@
   --file-color-violet: #e6e0f1;
   --file-color-yellow: #ffffe4;
   --file-color-gray: #f5f5f5;
+  /* 阴影/遮罩基色带 alpha：两档基色不同（亮面用墨、暗面用纯黑），所以这两条各声明一次。 */
+  --shadow: #1a243426;
+  --backdrop: #1a243466;
 
-  --syntax-keyword: #8b269e;
-  --syntax-string: #15713c;
-  --syntax-comment: #647287;
-  --syntax-number: #a54800;
-  --syntax-type: #006d80;
-  --syntax-function: #075dba;
-  --syntax-meta: #805300;
-  --syntax-property: #7750a8;
-  --syntax-operator: #48576d;
+  /* 3 · Semantic aliases —— 只在这里声明一次，两档共用同一份映射 */
+  --editor: var(--m-editor);
+  --panel: var(--m-panel);
+  --rail: var(--m-rail);
+  --elevated: var(--m-elevated);
+  --gutter: var(--m-gutter);
+  --hover: var(--m-hover);
+  --selected: var(--m-selected);
+  --selection: var(--m-selection);
+  --selection-inactive: var(--m-selection-inactive);
+  --active-line: var(--m-active-line);
+  --symbol-highlight: var(--m-symbol-highlight);
+  --debug-line: var(--m-debug-line);
+  --search-match: var(--m-search-match);
+  --search-field-error: var(--m-search-field-error);
+  --spotlight: var(--m-spotlight);
+  --line: var(--m-line);
+  --line-strong: var(--m-line-strong);
+  --bright: var(--m-bright);
+  --text: var(--m-text);
+  --secondary: var(--m-secondary);
+  --muted: var(--m-muted);
+  --accent: var(--m-accent);
+  --accent-hover: var(--m-accent-hover);
+  --accent-soft: var(--m-accent-soft);
+  --on-accent: var(--m-on-accent);
+  --scrollbar: var(--m-scrollbar);
+  --success: var(--m-success);
+  --success-bg: var(--m-success-bg);
+  --warning: var(--m-warning);
+  --warning-bg: var(--m-warning-bg);
+  --error: var(--m-error);
+  --error-bg: var(--m-error-bg);
+  --syntax-keyword: var(--m-syntax-keyword);
+  --syntax-string: var(--m-syntax-string);
+  --syntax-comment: var(--m-syntax-comment);
+  --syntax-number: var(--m-syntax-number);
+  --syntax-type: var(--m-syntax-type);
+  --syntax-function: var(--m-syntax-function);
+  --syntax-meta: var(--m-syntax-meta);
+  --syntax-property: var(--m-syntax-property);
+  --syntax-operator: var(--m-syntax-operator);
+  --shadow-1: var(--m-shadow-1);
+  --shadow-2: var(--m-shadow-2);
+  --shadow-3: var(--m-shadow-3);
+  --ring: 0 0 0 2px var(--editor), 0 0 0 4px var(--accent);
+
+  /* 4 · Component tokens —— 顶栏。
+     **为什么浅色主题顶栏也是深的**（结构，不是配色）：
+       JBUI.java:564-572 `mainToolbarBackground(active)` 读 "MainToolbar.background"
+         （第二参数是**窗口激活态**，不是亮暗）→ `ToolbarFrameHeader.kt:424-427 getHeaderBackground()`
+         （标题行）与 `ProjectFrameCustomHeaderHelper.kt:361`（独立成行的主工具栏）**同一个键** ⇒ 两行同色；
+       `CustomHeader.kt:166-168` 记 `isActive = window.isActive` ⇒ 失焦换 `inactiveBackground`；
+       上游浅色主题那一组的字面量（**角色**出处；值我们已换成自己的夜面）：
+         background Gray2 #27282E = expUI_light.theme.json:760、inactiveBackground Gray3 :762、
+         foreground Gray12 :761、separatorColor Gray4 :763、Icon.hover/pressedBackground Gray3 :766-767、
+         RunWidget.runningBackground :1096、RunWidget.iconColor 与前景同色（图标不上色）:1095。
+     ⇒ 换的是色，**角色→键**的对应一条都没动。 */
+  --header-bg: var(--m-night);
+  --header-bg-inactive: var(--m-night-inactive);
+  --header-fg: var(--m-night-fg);
+  --header-hover: var(--m-night-hover);
+  --header-line: var(--m-night-line);
+  --header-run-bg: var(--m-night-run);
+  --header-run-hover: var(--m-night-run-hover);
+  --header-run-pressed: var(--m-night-run-pressed);
+  /* 深色顶栏上还要显示**状态色**文字（文件名 widget 的 新增/修改/删除、分支的 ↑↓）：
+     `FilenameToolbarWidgetAction.kt:67-70` —— 亮色主题 + `isDarkToolbar()`（:92 直接量顶栏亮度）时，
+     前景改取 "Dark" 配色里**同一个 `status.colorKey`**。所以这三个不是新配的色，是"同名 key 的另一面"。 */
+  --header-accent: var(--m-night-accent);
+  --header-success: var(--m-night-success);
+  --header-error: var(--m-night-error);
+  /* 补全弹窗（CodeMirror lookup）= 与菜单浮层同一套规格：颜色走 --completion-*，
+     度量走 --popup-*（每个数对应的上游行号写在 src/completionUi.ts 的规则旁）。 */
+  --completion-background: var(--m-pop-bg);
+  --completion-foreground: var(--m-pop-fg);
+  --completion-match: var(--m-pop-match);
+  --completion-selection: var(--m-pop-selection);
+  --completion-inactive: var(--m-pop-inactive);
+  --completion-info: var(--m-pop-info);
+  --completion-border: var(--m-pop-border);
+  --popup-radius: var(--radius-md);
+  --popup-border: 1px solid var(--completion-border);
+  /* 浮层族只有一档阴影：菜单、补全、各处下拉共用 --m-menu-shadow。
+     对话框才用更重的 --shadow-3（它是窗中窗，需要更大的高度差）。 */
+  --popup-shadow: var(--m-menu-shadow);
+  --popup-row-h: 24px;            /* New UI List.rowHeight */
+  /* 编辑器标签条一行的高度：JS 侧的同名常量在 src/tabStripLayout.ts（TAB_STRIP_ROW_HEIGHT），
+     两边必须相等 —— tests/tab-strip-wrap.test.mjs 机检这一条。 */
+  --tab-strip-row: 34px;
+  --popup-pad: 4px;               /* LookupCellRenderer bodyInsets = 4 */
+  --popup-selection-inset: 4px;
+  --popup-mark-width: 2px;        /* 选中行左缘那道"月光"标记条 */
+  --popup-mark-color: var(--completion-match);
+  /* 通用**列表弹窗**（IDEA 的 action/list popup，例如 Alt+F1 的 Select In）：与补全同属浮层族，
+     底色/前景/选中行共用，只多一个行首"编号列"的颜色。 */
+  --popup-background: var(--m-pop-bg);
+  --popup-foreground: var(--m-pop-fg);
+  --popup-selection: var(--m-pop-selection);
+  /* 编号列 = `Popup.mnemonicForeground` → `ActionsList.MNEMONIC_FOREGROUND`
+     = `JBColor.namedColor("Component.infoForeground", new JBColor(Gray.x99, Gray.x78))`
+     （JBUI.java:1635-1636 与 :393）。expUI 两档都**没有**定义 Component.infoForeground
+     （expUI_light.theme.json:274-283 的 Component 组里只有 arc/borderColor/焦点色），
+     所以取的是回退值 Gray.x99=#999999（Gray.java:457 `_153`）/ Gray.x78=#787878（:424 `_120`）。
+     选中行这一列换成选中前景 —— PopupListElementRenderer.java:363-369。 */
+  --popup-mnemonic: var(--m-pop-mnemonic);
+  /* 浮层自己的前景/禁用前景。**必须显式设**：浮层可以挂在任何容器里（顶栏的下拉菜单就是挂在
+     深炭色顶栏内、靠继承拿到浅色字的），继承了宿主颜色就会在白底上写出白字。
+     上游同理 —— expUI 的 `"*"` 组给所有组件统一 `foreground`/`disabledForeground`，
+     不是靠组件继承父容器（expUI_light.theme.json:108-116）。 */
+  --popup-foreground: var(--m-pop-fg);
+  --popup-disabled: var(--m-pop-disabled);
 }
 
 [data-theme='light'] { color-scheme: light; }
 
+/* **月之暗面**：只换月相层的值。语义名、组件名、几何与度量一个都不动 ——
+   `data-theme` 一切换，全站（顶栏、补全弹窗、语法着色、文件色右半边）跟着换面。 */
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --editor: #1b1d23;
-  --panel: #22252c;
-  --rail: #272a32;
-  --elevated: #292d35;
-  --hover: #343a46;
-  --selected: #303f58;
-  --selection: #365e92;
-  --selection-inactive: #35435b;
-  --active-line: #88b4f30c;
-  --symbol-highlight: #88b4f326;
-  --debug-line: #e6c68f26;
-  --gutter: #1f2229;
-  --search-match: #4d4228;
-  --search-field-error: #743a3a;
-  --spotlight: #a36b4e;
-  --line: #343943;
-  --line-strong: #4c5463;
-  --text: #d3d7df;
-  --bright: #f1f3f7;
-  --secondary: #b0b8c7;
-  --muted: #9aa5b7;
-  --accent: #88b4f3;
-  --accent-hover: #aacaf7;
-  --accent-soft: #2b3548;
-  --on-accent: #142237;
-  --scrollbar: #535c6c;
-  --shadow: #00000052;
-  --backdrop: #0b0d137a;
-
-  --shadow-1: 0 1px 2px #00000047, 0 1px 1px #0000002e;
-  --shadow-2: 0 2px 6px #00000059, 0 8px 20px #00000042;
-  --shadow-3: 0 12px 32px #00000066, 0 2px 6px #00000033;
-  --menu-shadow: 0 1px 3px #00000033, 0 8px 24px #00000052;
-
-  --success: #a9d5bb;
-  --success-bg: #1f3a2e;
-  --warning: #e6c68f;
-  --warning-bg: #403625;
-
-  /* 深色主题：源码里 `new JBColor(light, dark)` 的右边那一半。 */
+  --m-editor: #12161f;
+  --m-panel: #171d28;
+  --m-rail: #1c2331;
+  --m-elevated: #1f2735;
+  --m-gutter: #141924;
+  --m-hover: #253044;
+  --m-selected: #24344d;
+  --m-selection: #2f4c73;
+  --m-selection-inactive: #263246;
+  --m-active-line: #8fb7ea0c;
+  --m-symbol-highlight: #8fb7ea26;
+  --m-debug-line: #e0b46426;
+  --m-search-match: #4d4226;
+  --m-search-field-error: #6f3a3a;
+  --m-spotlight: #e0b464;
+  --m-line: #2a3345;
+  --m-line-strong: #3b465c;
+  --m-bright: #f1f4f9;
+  --m-text: #d6dde8;
+  --m-secondary: #adb8cb;
+  --m-muted: #8c98ad;
+  --m-accent: #7fa9e8;
+  --m-accent-hover: #a3c4f2;
+  --m-accent-soft: #1d2739;
+  --m-on-accent: #0c1220;
+  --m-scrollbar: #4d586c;
+  --m-success: #9fd3b4;
+  --m-success-bg: #1f3a2e;
+  --m-warning: #e6c68f;
+  --m-warning-bg: #403625;
+  --m-error: #f0b9b4;
+  --m-error-bg: #472c30;
+  /* 暗面的顶栏比面板再深一档；上游深色主题**没有** inactiveBackground 键
+     （JBUI.java:570 回退到激活色本身）⇒ 失焦不变色，所以这两个同值是**行为对齐**不是偷懒。 */
+  --m-night: #0b101a;
+  --m-night-inactive: #0b101a;
+  --m-night-fg: #dfe6f0;
+  --m-night-hover: #1a2333;
+  --m-night-line: #26303f;
+  --m-night-run: #52915f;
+  --m-night-run-hover: #00000019;
+  --m-night-run-pressed: #00000028;
+  --m-night-accent: #7fa9e8;
+  --m-night-success: #9fd3b4;
+  --m-night-error: #f0b9b4;
+  --m-pop-bg: #1b2331;
+  --m-pop-fg: #d6dde8;
+  --m-pop-match: #7fa9e8;
+  --m-pop-selection: #26344c;
+  --m-pop-inactive: #232c3c;
+  --m-pop-info: #8c98ad;
+  --m-pop-border: #33405a;
+  --m-pop-mnemonic: #787878;      /* Gray.x78 = JBColor 回退值，见 --popup-mnemonic 旁 */
+  --m-pop-disabled: #5a5d63;      /* 深色主题的 "*.disabledForeground" = Gray6 */
+  --m-shadow-1: 0 1px 2px #00000047, 0 1px 1px #0000002e;
+  --m-shadow-2: 0 2px 6px #00000059, 0 8px 20px #00000042;
+  --m-shadow-3: 0 12px 32px #00000066, 0 2px 6px #00000033;
+  --m-menu-shadow: 0 1px 3px #00000033, 0 8px 24px #00000052;
+  --m-syntax-keyword: #f0a870;
+  --m-syntax-string: #9fd79a;
+  --m-syntax-comment: #8b98ac;
+  --m-syntax-number: #86c8ff;
+  --m-syntax-type: #6fdcd0;
+  --m-syntax-function: #ffd479;
+  --m-syntax-meta: #c99af0;
+  --m-syntax-property: #bda9ff;
+  --m-syntax-operator: #b6c4d8;
+  /* 同一批具名文件色的右半边。 */
   --file-color-blue: #4f556b;
   --file-color-green: #49544a;
   --file-color-orange: #806052;
@@ -155,18 +369,8 @@
   --file-color-violet: #534a57;
   --file-color-yellow: #4f4b41;
   --file-color-gray: #45484a;
-  --error: #f0b9b4;
-  --error-bg: #472c30;
-
-  --syntax-keyword: #ffab70;
-  --syntax-string: #a4d580;
-  --syntax-comment: #929fb3;
-  --syntax-number: #85c5ff;
-  --syntax-type: #6edbd0;
-  --syntax-function: #ffd479;
-  --syntax-meta: #c99af0;
-  --syntax-property: #baa7ff;
-  --syntax-operator: #b9c6da;
+  --shadow: #00000052;
+  --backdrop: #05070c7a;
 }
 
 @media (prefers-reduced-motion: reduce) {

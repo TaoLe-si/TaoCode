@@ -1,4 +1,6 @@
 #include <windows.h>
+#include <functional>
+#include <unordered_map>
 #include <psapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -7,29 +9,52 @@
 #include <WebView2.h>
 #include <chrono>
 #include <cwctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <deque>
 #include <memory>
 #include <mutex>
 #include <thread>
 #include "workspace.hpp"
+#include "window_state.hpp"
 #include "projects.hpp"
 #include "git_clone.hpp"
 #include "git.hpp"
 #include "lsp_session.hpp"
+#include "lsp_worker.hpp"
+#include "request_trace.hpp"
+#include "lsp_config.hpp"
+#include "jdtls.hpp"
 #include "runner.hpp"
+#include "run_host.hpp"
 #include "search.hpp"
 #include "dap.hpp"
 #include "terminal.hpp"
 #include "history.hpp"
+#include "history_store_key.hpp"
 #include "session.hpp"
 #include "watcher.hpp"
+#include "jdk.hpp"
+#include "webview_options.hpp"
 #include "plugins.hpp"
-#include "history.hpp"
+#include "diagnostics.hpp"
+#include "base64.hpp"
+#include "text.hpp"
+#include "dialogs.hpp"
+#include "gradle.hpp"
+#include "settings_transfer.hpp"
+#include "export_file.hpp"
+#include "event_channel.hpp"
+
+namespace taocode {
+// 版本号与 package.json 的 version 一致（`app.info` 与日志启动行都用它）。
+inline constexpr char kAppVersion[] = "0.1.0";
+}  // namespace taocode
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -37,7 +62,22 @@ using taocode::Json;
 namespace fs = std::filesystem;
 
 namespace {
-constexpr wchar_t app_url[] = L"https://taocode.local/index.html";
+// 桥接方法名是 `std::string`，不能直接 `switch`。FNV-1a 在 **编译期** 把 `case "x"_h`
+// 变成整数，运行期只算一次被分派的名字。哈希碰撞不会静默走错分支：两个 `case` 得到同一个
+// 值就是重复标签，MSVC 直接报 C2196。
+constexpr std::uint64_t fnv1a(std::string_view text) {
+    std::uint64_t hash = 1469598103934665603ULL;   // FNV offset basis
+    for (const char character : text) {
+        hash ^= static_cast<std::uint8_t>(character);
+        hash *= 1099511628211ULL;                  // FNV prime
+    }
+    return hash;
+}
+
+constexpr std::uint64_t operator""_h(const char* text, std::size_t length) {
+    return fnv1a(std::string_view(text, length));
+}
+
 constexpr wchar_t app_origin[] = L"https://taocode.local/";
 constexpr UINT clone_event_message = WM_APP + 1;
 constexpr UINT lsp_event_message = WM_APP + 2;
@@ -46,79 +86,22 @@ constexpr UINT dap_event_message = WM_APP + 4;
 constexpr UINT term_event_message = WM_APP + 5;
 constexpr UINT watch_event_message = WM_APP + 6;
 constexpr UINT search_event_message = WM_APP + 7;
+// UTF-8/UTF-16 与 base64 的实现都在 taocode 命名空间（native/text.hpp、native/base64.hpp）。
+using taocode::base64_decode;
+using taocode::base64_encode;
+using taocode::utf8;
+using taocode::wide;
+
 constexpr UINT git_event_message = WM_APP + 8;
 constexpr UINT watch_restart_message = WM_APP + 9;
+constexpr UINT gradle_event_message = WM_APP + 10;
 
-std::string utf8(const std::wstring& value) {
-    if (value.empty()) return {};
-    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (!size) throw std::runtime_error("Invalid UTF-16");
-    std::string result(size, '\0');
-    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
-    return result;
-}
-std::wstring wide(const std::string& value) {
-    if (value.empty()) return {};
-    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (!size) throw std::runtime_error("Invalid UTF-8");
-    std::wstring result(size, L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size);
-    return result;
-}
-// Console bytes are arbitrary (code pages, not guaranteed UTF-8), so the terminal
-// channel carries them base64-encoded to keep the JSON bridge pure ASCII.
-std::string base64_encode(std::string_view in) {
-    static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve((in.size() + 2) / 3 * 4);
-    std::size_t i = 0;
-    for (; i + 3 <= in.size(); i += 3) {
-        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8) | static_cast<unsigned char>(in[i + 2]);
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += table[n & 63];
-    }
-    if (i + 1 == in.size()) {
-        const unsigned n = static_cast<unsigned char>(in[i]) << 16;
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += "==";
-    } else if (i + 2 == in.size()) {
-        const unsigned n = (static_cast<unsigned char>(in[i]) << 16) | (static_cast<unsigned char>(in[i + 1]) << 8);
-        out += table[(n >> 18) & 63]; out += table[(n >> 12) & 63]; out += table[(n >> 6) & 63]; out += '=';
-    }
-    return out;
-}
-std::string base64_decode(std::string_view in) {
-    const auto value = [](char c) -> int {
-        if (c >= 'A' && c <= 'Z') return c - 'A';
-        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-        if (c >= '0' && c <= '9') return c - '0' + 52;
-        if (c == '+') return 62;
-        if (c == '/') return 63;
-        return -1;  // '=' padding and stray whitespace are skipped
-    };
-    std::string out;
-    out.reserve(in.size() / 4 * 3);
-    int buffer = 0, bits = 0;
-    for (const char c : in) {
-        const int v = value(c);
-        if (v < 0) continue;
-        buffer = (buffer << 6) | v;
-        bits += 6;
-        if (bits >= 8) { bits -= 8; out.push_back(static_cast<char>((buffer >> bits) & 0xff)); }
-    }
-    return out;
-}
+// utf8 / wide 已并入 native/text.hpp（与 watcher.cpp 的重复实现合并）；
+// base64 的编/解码都在 native/base64.hpp（三处重复实现合并成一份）。
 bool trusted(const wchar_t* uri) {
     return uri && std::wstring_view(uri).starts_with(app_origin);
 }
-// Deterministic 64-bit FNV-1a of the workspace root, hex-encoded, used only as a
-// filesystem-safe history folder name. Stable across restarts (unlike std::hash).
-std::string store_hash(const std::string& value) {
-    std::uint64_t hash = 1469598103934665603ULL;
-    for (const unsigned char ch : value) { hash ^= ch; hash *= 1099511628211ULL; }
-    static constexpr char digits[] = "0123456789abcdef";
-    std::string out(16, '0');
-    for (int i = 15; i >= 0; --i) { out[static_cast<std::size_t>(i)] = digits[hash & 15]; hash >>= 4; }
-    return out;
-}
+using taocode::store_hash;
 void check(HRESULT result, const char* operation) {
     if (FAILED(result)) throw std::runtime_error(std::string(operation) + " failed (HRESULT " + std::to_string(static_cast<unsigned long>(result)) + ")");
 }
@@ -127,6 +110,7 @@ struct App {
     HWND window{};
     fs::path ui;
     fs::path profile;
+    std::string browser_version;  // WebView2 Runtime 版本（app.info 用）
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
     std::unique_ptr<taocode::Workspace> workspace = std::make_unique<taocode::Workspace>();
@@ -138,43 +122,41 @@ struct App {
     bool closing_after_clone = false;
     Json clone_request_id;
     std::chrono::steady_clock::time_point clone_started;
+    // 桥接路由表（strangler 迁移：新方法直接注册，旧链逐步清空）。
+    // 对应 IDEA 的 ActionManager：method → handler，不再是一条巨型 if-else 链。
+    using RouteHandler = std::function<Json(const Json& params)>;
+    std::unordered_map<std::string, RouteHandler> routes;
+    void register_routes() {
+        routes.emplace("dialog.pickDirectory", [this](const Json& params) {
+            return taocode::dialogs::select_directory(window, L"选择项目存放目录", params.value("initial", std::string()));
+        });
+        routes.emplace("dialog.pickImage", [this](const Json&) { return taocode::dialogs::pick_image(window); });
+        routes.emplace("app.readImage", [this](const Json& params) {
+            const auto path = params.at("path").get<std::string>();
+            if (path.empty()) return Json(nullptr);
+            return taocode::dialogs::read_image(fs::path(wide(path)));
+        });
+    }
     std::mutex clone_mutex;
     std::deque<Json> clone_events;
     std::jthread clone_thread;
 
     std::unique_ptr<taocode::lsp::Session> lsp;
-    std::mutex lsp_mutex;
-    std::deque<Json> lsp_events;
+    // 语言服务独占线程：`lsp` 只在它的线程上被创建/使用/销毁（见 native/lsp_worker.hpp）。
+    std::unique_ptr<taocode::lsp::Worker> lsp_worker;
+    taocode::EventChannel lsp_events;
 
-    std::unique_ptr<taocode::Runner> runner;
-    std::mutex run_mutex;
-    std::deque<Json> run_events;
-
-    // IDEA's Run Configuration "Before launch" list: the steps run one after another
-    // and a non-zero exit aborts the chain, so a program is never launched against a
-    // build that just failed. The pending step lives here until the UI thread has
-    // delivered the previous step's exit event.
-    struct RunStep {
-        std::string label;
-        std::string command;
-        std::string program;
-        std::string cwd;
-        std::vector<std::string> args;
-        std::vector<std::string> environment;
-        bool shell = true;
-    };
-    std::deque<RunStep> run_steps;
-    bool run_pending_continue = false;
-    int run_last_code = 0;
+    // 运行/构建的**多实例**宿主（IDEA 的 `isAllowRunningInParallel` 语义 + 每实例的 Before launch 链）
+    // 都在 native/run_host.cpp；这里只留事件通道与一个指针。
+    std::unique_ptr<taocode::run_host::Manager> runs;
+    taocode::EventChannel run_events;
 
     std::unique_ptr<taocode::dap::Client> dap;
-    std::mutex dap_mutex;
-    std::deque<Json> dap_events;
+    taocode::EventChannel dap_events;
     Json dap_config;  // optional TaoCode.dap.json: kind -> {command,args,program,cwd}
 
     std::unique_ptr<taocode::terminal::Manager> terminals = std::make_unique<taocode::terminal::Manager>();
-    std::mutex term_mutex;
-    std::deque<Json> term_events;
+    taocode::EventChannel term_events;
     // Last size the UI asked a terminal for. A reverse `runInTerminal` has no size
     // of its own, so a session the adapter opens reuses what the user is looking at
     // instead of a constant.
@@ -187,12 +169,14 @@ struct App {
 
     std::unique_ptr<taocode::history::History> history;  // per-project local history, recreated on open
     std::unique_ptr<taocode::session::SessionStore> sessions;  // crash-recovery drafts, per profile
+    // Gradle 同步：独立于"运行控制台"的通道（IDEA 的 Gradle 同步也不占运行按钮）。
+    std::unique_ptr<taocode::gradle::SyncSession> gradle_sync;
+    taocode::EventChannel gradle_events;
 
     // IDE-03 file watching: one recursive ReadDirectoryChangesW thread per open
     // workspace; batches are debounced natively and forwarded as fs.changed.
     std::unique_ptr<taocode::watcher::Watcher> watcher;
-    std::mutex watch_mutex;
-    std::deque<Json> watch_events;
+    taocode::EventChannel watch_events;
     // Set by the watcher's own thread when it dies; consumed on the UI thread, which
     // is the only place allowed to touch `watcher`.
     std::mutex watch_restart_mutex;
@@ -206,8 +190,7 @@ struct App {
     std::thread search_thread;
     std::atomic<bool> search_busy{false};
     std::atomic<bool> search_cancel{false};
-    std::mutex search_mutex;
-    std::deque<Json> search_events;
+    taocode::EventChannel search_events;
 
     // Every git.* command is a child process; they are drained by one worker so a
     // slow push cannot queue up behind — or freeze — the UI thread.
@@ -215,20 +198,19 @@ struct App {
     std::atomic<bool> git_busy{false};
     std::mutex git_mutex;
     std::deque<Json> git_requests;
-    std::deque<Json> git_replies;
+    // 回复队列原本没有上限（一条回复对应一次请求，天然有界），所以 limit 传 0。
+    taocode::EventChannel git_replies;
 
-    void queue_search(Json payload) {
-        {
-            std::lock_guard lock(search_mutex);
-            search_events.push_back(std::move(payload));
-        }
-        PostMessageW(window, search_event_message, 0, 0);
+    void queue_search(Json payload) { search_events.push(std::move(payload), window, search_event_message); }
+
+    void queue_gradle(Json payload) { gradle_events.push(std::move(payload), window, gradle_event_message); }
+
+    void drain_gradle() {
+        if (webview) for (const auto& event : gradle_events.take()) post_json(event);
     }
 
     void drain_search() {
-        std::deque<Json> events;
-        { std::lock_guard lock(search_mutex); events.swap(search_events); }
-        if (webview) for (const auto& event : events) post_json(event);
+        if (webview) for (const auto& event : search_events.take()) post_json(event);
     }
 
     void stop_search() {
@@ -241,19 +223,10 @@ struct App {
         search_busy.store(false);
     }
 
-    void queue_watch(Json payload) {
-        {
-            std::lock_guard lock(watch_mutex);
-            watch_events.push_back(std::move(payload));
-            if (watch_events.size() > 256) watch_events.pop_front();
-        }
-        PostMessageW(window, watch_event_message, 0, 0);
-    }
+    void queue_watch(Json payload) { watch_events.push(std::move(payload), window, watch_event_message, 256, 1); }
 
     void drain_watch() {
-        std::deque<Json> events;
-        { std::lock_guard lock(watch_mutex); events.swap(watch_events); }
-        if (webview) for (const auto& event : events) post_json(event);
+        if (webview) for (const auto& event : watch_events.take()) post_json(event);
     }
 
     void start_watcher() {
@@ -318,147 +291,29 @@ struct App {
         if (watcher) { watcher->stop(); watcher.reset(); }
     }
 
-    void queue_term(Json payload) {
-        {
-            std::lock_guard lock(term_mutex);
-            term_events.push_back(std::move(payload));
-            if (term_events.size() > 8192) term_events.erase(term_events.begin(), term_events.begin() + 2048);  // output flood guard
-        }
-        PostMessageW(window, term_event_message, 0, 0);
-    }
+    // output flood guard：超过 8192 条时丢掉最旧的 2048 条。
+    void queue_term(Json payload) { term_events.push(std::move(payload), window, term_event_message, 8192, 2048); }
 
     void drain_term() {
-        std::deque<Json> events;
-        { std::lock_guard lock(term_mutex); events.swap(term_events); }
-        if (webview) for (const auto& event : events) post_json(event);
+        if (webview) for (const auto& event : term_events.take()) post_json(event);
     }
 
-    void queue_run(Json payload) {
-        {
-            std::lock_guard lock(run_mutex);
-            run_events.push_back(std::move(payload));
-            if (run_events.size() > 4096) run_events.erase(run_events.begin(), run_events.begin() + 1024);
-        }
-        PostMessageW(window, run_event_message, 0, 0);
-    }
+    void queue_run(Json payload) { run_events.push(std::move(payload), window, run_event_message); }
 
     void drain_run() {
-        std::deque<Json> events;
-        { std::lock_guard lock(run_mutex); events.swap(run_events); }
-        if (webview) for (const auto& event : events) post_json(event);
-        bool more = false;
-        int code = 0;
-        { std::lock_guard lock(run_mutex); if (run_pending_continue) { more = true; code = run_last_code; run_pending_continue = false; } }
-        if (more) advance_run_chain(code);
+        if (webview) for (const auto& event : run_events.take()) post_json(event);
+        // 链的推进在 UI 线程做（下一个子进程由消息循环创建，而不是由 reader 线程创建）。
+        for (const auto& [instance, code] : runs->take_pending())
+            runs->advance(instance, code, current_root.empty() ? fs::path() : fs::path(wide(current_root)));
     }
 
-    // Runs one step of the chain. The label is echoed into the console so a chained
-    // run reads as named steps rather than one opaque wall of output.
-    void start_run_step(const RunStep& step) {
-        if (!step.label.empty()) queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> " + step.label + " <==\r\n")}});
-        start_run(step.command, step.program, step.args, step.cwd, step.environment, step.shell);
-    }
+    void stop_run() { runs->stop(0); }
 
-    void begin_run_chain(std::deque<RunStep> steps) {
-        { std::lock_guard lock(run_mutex); run_steps = std::move(steps); run_pending_continue = false; run_last_code = 0; }
-        if (run_steps.empty()) return;
-        const RunStep first = run_steps.front();
-        run_steps.pop_front();
-        start_run_step(first);
-    }
-
-    // Called from the message loop once the previous step's exit has been posted, so
-    // the next process is created on the UI thread and never from the reader thread.
-    void advance_run_chain(int code) {
-        try {
-            if (code != 0) {
-                const std::size_t skipped = run_steps.size();
-                run_steps.clear();
-                queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> 链已中止：上一步以退出码 " + std::to_string(code)
-                                                                  + " 结束，跳过 " + std::to_string(skipped) + " 个后续步骤 <==\r\n")}});
-                queue_run({{"event", "run.exit"}, {"code", code}, {"remaining", std::size_t{0}}, {"aborted", true}});
-                return;
-            }
-            if (run_steps.empty()) return;
-            const RunStep next = run_steps.front();
-            run_steps.pop_front();
-            start_run_step(next);
-        } catch (const taocode::WorkspaceError& error) {
-            run_steps.clear();
-            queue_run({{"event", "run.output"}, {"dataB64", base64_encode("\r\n==> 无法启动：" + std::string(error.what()) + " <==\r\n")}});
-            queue_run({{"event", "run.exit"}, {"code", -1}, {"remaining", std::size_t{0}}, {"error", error.code}});
-        } catch (const std::exception&) {
-            run_steps.clear();
-            queue_run({{"event", "run.output"}, {"dataB64", base64_encode(std::string("\r\n==> 无法启动后续步骤 <==\r\n"))}});
-            queue_run({{"event", "run.exit"}, {"code", -1}, {"remaining", std::size_t{0}}});
-        }
-    }
-
-    // IDEA's Run Configuration is not just a command line: it carries the program,
-    // its arguments, the working directory and environment variables. The frontend
-    // sends that whole shape, and this builds the child process from it. A bare
-    // `command` string (the older contract, still accepted) runs through cmd.exe.
-    void start_run(const std::string& command, const std::string& program, const std::vector<std::string>& args,
-                   const std::string& cwd, const std::vector<std::string>& environment, const bool shell) {
-        if (runner && runner->running()) throw taocode::WorkspaceError("BUSY", "已有构建/运行任务在进行中，请先停止。");
-        runner = std::make_unique<taocode::Runner>();
-        taocode::Runner::Spec spec;
-        if (shell || program.empty()) {
-            if (command.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "运行命令不能为空。");
-            spec.command = L"cmd.exe";
-            spec.arguments = {L"/d", L"/s", L"/c", wide(command)};
-        } else {
-            spec.command = wide(program);
-            for (const auto& argument : args) spec.arguments.push_back(wide(argument));
-        }
-        // Working directory: an absolute path from the configuration wins, then the
-        // workspace-relative path against the project root, then the root itself.
-        std::wstring directory;
-        if (!cwd.empty()) {
-            const fs::path requested(wide(cwd));
-            directory = requested.is_absolute() || !current_root.empty() ? (requested.is_absolute() ? requested.native() : (fs::path(wide(current_root)) / requested).native()) : requested.native();
-        } else if (!current_root.empty()) {
-            directory = wide(current_root);
-        }
-        if (!directory.empty()) spec.working_directory = fs::path(directory);
-        for (const auto& entry : environment) if (!entry.empty()) spec.environment.push_back(wide(entry));
-        runner->start(spec,
-            // Raw bytes, base64-encoded: a build prints in its own code page, and a
-            // chunk boundary can split a multi-byte character. The frontend decodes
-            // incrementally and flushes on the last step's exit.
-            [this](std::string_view chunk) { queue_run({{"event", "run.output"}, {"dataB64", base64_encode(chunk)}}); },
-            [this](int code) {
-                std::size_t remaining = 0;
-                {
-                    std::lock_guard lock(run_mutex);
-                    remaining = run_steps.size();
-                    run_last_code = code;
-                    run_pending_continue = true;   // even with nothing left: drain_run clears the flag
-                }
-                // `remaining` lets the console keep the run open across steps instead of
-                // declaring the whole configuration finished after step one.
-                queue_run({{"event", "run.exit"}, {"code", code}, {"remaining", remaining}});
-            });
-    }
-
-    void stop_run() {
-        { std::lock_guard lock(run_mutex); run_steps.clear(); run_pending_continue = false; }
-        if (runner) runner->stop();
-    }
-
-    void queue_dap(Json payload) {
-        {
-            std::lock_guard lock(dap_mutex);
-            dap_events.push_back(std::move(payload));
-            while (dap_events.size() > 2048) dap_events.erase(dap_events.begin());  // console flood guard
-        }
-        PostMessageW(window, dap_event_message, 0, 0);
-    }
+    // console flood guard：超过 2048 条时一条一条丢掉最旧的（保持原语义，所以 drop 传 1）。
+    void queue_dap(Json payload) { dap_events.push(std::move(payload), window, dap_event_message, 2048, 1); }
 
     void drain_dap() {
-        std::deque<Json> events;
-        { std::lock_guard lock(dap_mutex); events.swap(dap_events); }
-        if (webview) for (const auto& event : events) post_json(event);
+        if (webview) for (const auto& event : dap_events.take()) post_json(event);
     }
 
     // Replies from the DAP reader thread must not call post_json directly; funnel
@@ -646,7 +501,8 @@ struct App {
         // what a reverse request does). Destroying the client straight after start()
         // used to detach a still-running reader — a use-after-free that surfaced as
         // random crashes right after a detach.
-        if (dap) { dap->disconnect({}); dap->shutdown(); dap.reset(); }
+        // 收摊时必须结束被调试进程（默认语义）；「断开但保留进程」是 dap.disconnect 的显式选项。
+        if (dap) { dap->disconnect(true, {}); dap->shutdown(); dap.reset(); }
         reap_external_runners();
     }
 
@@ -655,26 +511,47 @@ struct App {
         return current_root;
     }
 
-    void queue_lsp(Json payload) {
-        {
-            std::lock_guard lock(lsp_mutex);
-            lsp_events.push_back(std::move(payload));
-            if (lsp_events.size() > 512) lsp_events.pop_front();
-        }
-        PostMessageW(window, WM_APP + 2, 0, 0);
-    }
+    void queue_lsp(Json payload) { lsp_events.push(std::move(payload), window, lsp_event_message, 512, 1); }
 
     void drain_lsp() {
-        std::deque<Json> events;
-        { std::lock_guard lock(lsp_mutex); events.swap(lsp_events); }
-        if (webview) for (const auto& event : events) post_json(event);
+        if (webview) for (const auto& event : lsp_events.take()) post_json(event);
     }
 
     // Reads an optional "TaoCode.lsp.json" beside the exe mapping language ->
-    // {command,args,cwd}. No server is bundled; the IDE only launches what the
-    // user has installed and configured, so the boundary stays honest.
+    // {command,args,cwd}, then falls back to **discovering** the servers the user has
+    // installed (clangd / jdtls / gopls … on PATH) and to the bundled JDT LS. No server
+    // is bundled for the other languages, so the boundary stays honest — but
+    // "installed" has to be enough: IDEA ships Java support with the IDE, and making
+    // the user hand-write a config file for a server they just installed is not the
+    // same thing. The file still wins: it is the only place where arguments, cwd and
+    // initializationOptions can be expressed. 合成逻辑在 native/lsp_config.cpp。
+    // 把一段语言服务活儿投到 LSP 线程，并按请求编号把结果回给界面。
+    // 回包走 `queue_lsp`（与 `lsp.request` 同一条通道），前端的 `pending` 按 id 认领，
+    // 所以调用契约不变，只是不再在 UI 线程上等语言服务（见 native/lsp_worker.hpp）。
+    // 投递型的处理器在 `return` 前补一行 end：否则日志里留下的是"begin 了没有 end"，
+    // 那正是死锁的形状（2026-09-28 就是靠这条形状定位的），会把下一个排查的人带偏。
+    static void trace_posted(const std::string& traced, const std::filesystem::path& profile, const char* how) {
+        if (!traced.empty()) taocode::trace::begin(profile, "end " + traced + " (" + how + ")");
+    }
+
+    void post_lsp(const Json& id, std::function<Json()> body) {
+        lsp_worker->post([this, id, body = std::move(body)] {
+            Json payload{{"id", id}, {"ok", true}};
+            try {
+                payload["result"] = body();
+            } catch (const taocode::WorkspaceError& error) {
+                payload["ok"] = false;
+                payload["error"] = {{"code", error.code}, {"message", error.what()}};
+            } catch (const std::exception& failure) {
+                payload["ok"] = false;
+                payload["error"] = {{"code", "NATIVE_ERROR"}, {"message", failure.what()}};
+            }
+            queue_lsp(std::move(payload));
+        });
+    }
+
     void configure_lsp() {
-        if (!lsp)
+        if (!lsp) {
             lsp = std::make_unique<taocode::lsp::Session>([this](std::string path, Json diagnostics) {
                 queue_lsp({{"event", "lsp.diagnostics"}, {"path", path}, {"diagnostics", diagnostics}});
             });
@@ -684,35 +561,54 @@ struct App {
             lsp->set_edit_sink([this](std::string path) {
                 queue_lsp({{"event", "lsp.edited"}, {"path", std::move(path)}});
             });
-        std::map<std::string, taocode::lsp::Session::ServerConfig> servers;
-        std::ifstream stream(ui.parent_path() / L"TaoCode.lsp.json", std::ios::binary);
-        if (stream) {
-            try {
-                for (const auto& [language, entry] : Json::parse(stream).items()) {
-                    if (!entry.is_object()) continue;
-                    taocode::lsp::Session::ServerConfig config;
-                    config.command = wide(entry.value("command", std::string()));
-                    if (entry.contains("args") && entry.at("args").is_array())
-                        for (const auto& arg : entry.at("args"))
-                            if (arg.is_string()) config.arguments.push_back(wide(arg.get<std::string>()));
-                    if (entry.contains("cwd") && entry.at("cwd").is_string())
-                        config.working_directory = fs::path(wide(entry.at("cwd").get<std::string>()));
-                    if (entry.contains("initializationOptions") && entry.at("initializationOptions").is_object())
-                        config.initialization_options = entry.at("initializationOptions");
-                    if (!config.command.empty()) servers[language] = std::move(config);
-                }
-            } catch (const Json::exception&) { /* an unreadable config simply means no servers */ }
+            lsp->set_progress_sink([this](Json payload) { queue_lsp(std::move(payload)); });  // `$/progress`：IDEA 把它做成状态栏那条带百分比的后台任务（LspServerNotificationsHandlerImpl.kt:257-328）
+            // 读线程的回调要发东西时，交回这条线程做（见 lsp_session.hpp 的 set_owner_post）。
+            lsp->set_owner_post([worker = lsp_worker.get()](std::function<void()> job) { worker->post(std::move(job)); });
         }
-        if (!current_root.empty() && servers.contains("java"))
-            servers.at("java").settings = taocode::java_lsp_settings(projects->project_settings(current_root).at("java"));
-        lsp->configure(std::move(servers));
+        // 没打开项目时没有索引目录，Java 那一份会被跳过（见 resolve_servers）。
+        const Json project_settings = current_root.empty() ? Json() : projects->project_settings(current_root);
+        lsp->configure(taocode::lsp::resolve_servers(ui.parent_path(), current_root, project_settings));
     }
 
+    // 下面三个是"投递版"：UI 线程只排队，真正的活儿在 LSP 线程上做。
     void stop_lsp() noexcept {
+        if (lsp_worker) { lsp_worker->post([this] { stop_lsp_now(); }); return; }
+        stop_lsp_now();   // 线程还没起来（启动早期就失败）时直接收
+    }
+
+    // 只在 LSP 线程（或线程已 join 的收尾期）调用。
+    void stop_lsp_now() noexcept {
         if (lsp) { lsp->shutdown_all(); lsp.reset(); }
     }
 
+    // 关窗口收尾链：顺序照旧，但每步**先写"开始"再写"用时"** —— 卡住的那一步在日志里就是一条没有配对的行（2026-09-29 三次会话都只有启动行）。
+    void close_children() {
+        const std::pair<const char*, std::function<void()>> steps[] = {
+            {"查找线程", [this] { stop_search(); }}, {"语言服务线程", [this] { if (lsp_worker) lsp_worker->stop(); }},
+            {"语言服务子进程", [this] { stop_lsp_now(); }}, {"构建/运行进程", [this] { stop_run(); }}, {"调试适配器", [this] { stop_dap(); }},
+            {"目录监听", [this] { stop_watcher(); }}, {"git 工作线程", [this] { stop_git(); }}, {"终端", [this] { terminals->kill_all(); }},
+            {"Gradle 同步", [this] { if (gradle_sync) gradle_sync->cancel(); }},  // Gradle 也是子进程：实测 1m15s 的同步是**关窗之后**才写完 daemon 日志的，之前没有一步管它
+        };
+        for (const auto& step : steps) taocode::diagnostics::run_step(profile, step.first, step.second);
+    }
+    // 文件在工作区里被创建/改名/删除之后告诉语言服务器。对应 IDEA 的 VFS 事件 +
+    // `RefactoringEventListener`：IDE 自己动了磁盘，服务器的索引必须跟上，否则改完名
+    // 它还在按旧路径解析（跳转、go-to-definition 会指向不存在的文件）。
+    // 只在操作**真的成功之后**调用 —— 失败的操作不该告诉服务器"这个文件换名字了"。
+    void announce_file_change(const char* kind, const std::string& path, const std::string& previous = std::string()) {
+        if (path.empty()) return;
+        const std::string name = kind;
+        lsp_worker->post([this, name, path, previous] {
+            if (!lsp) return;
+            lsp->announce_file_operations(name.c_str(), std::vector<taocode::lsp::Session::FileOperation>{{path, previous}});
+        });
+    }
+
     void reset_lsp(const std::string& root) {
+        lsp_worker->post([this, root] { reset_lsp_now(root); });
+    }
+
+    void reset_lsp_now(const std::string& root) {
         // Tear down any prior project's language servers before reconfiguring;
         // otherwise hosts and documents from the old root survive under the new root,
         // and URI mappings silently mix two projects.
@@ -739,103 +635,14 @@ struct App {
     }
 
     void failure(const std::string& message) {
-        if (!profile.empty()) {
-            std::ofstream log(profile / L"native.log", std::ios::app);
-            log << message << '\n';
-        }
-        const auto text = wide(message + "\n\n请确认系统已安装 Microsoft Edge WebView2 Runtime，且 exe 旁有完整 ui 目录。\n日志位于 %LOCALAPPDATA%\\TaoCode\\native.log");
+        taocode::diagnostics::event(profile, "ERROR", message);
+        const auto text = wide(message + "\n\n请确认系统已安装 Microsoft Edge WebView2 Runtime，且 exe 旁有完整 ui 目录。\n日志位于 " +
+                                taocode::diagnostics::log_file(profile).string());
         MessageBoxW(window, text.c_str(), L"TaoCode 启动失败", MB_OK | MB_ICONERROR);
         if (window) DestroyWindow(window);
     }
 
-    // IDEA's project choosers open in GeneralLocalSettings.defaultProjectDirectory when it is
-    // set (WelcomeScreenProjectProvider.kt:231, AttachProjectAction.kt:73) and in the OS
-    // default otherwise. `SetFolder` has to be handed a folder that exists — combined with
-    // FOS_PATHMUSTEXIST a stale path makes the dialog fail to appear at all — so a value that
-    // is not a directory is ignored and the dialog simply opens where it normally would.
-    static void set_initial_folder(IFileOpenDialog* dialog, const std::string& initial) {
-        if (initial.empty()) return;
-        const fs::path folder = fs::path(wide(initial));
-        std::error_code error;
-        if (!fs::is_directory(folder, error)) return;
-        ComPtr<IShellItem> item;
-        if (FAILED(SHCreateItemFromParsingName(folder.c_str(), nullptr, IID_PPV_ARGS(&item)))) return;
-        dialog->SetFolder(item.Get());  // best effort: failing here still opens the dialog
-    }
-
-    Json select_directory(const wchar_t* title, const std::string& initial = std::string()) {
-        ComPtr<IFileOpenDialog> dialog;
-        check(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)), "Create folder picker");
-        DWORD options{};
-        check(dialog->GetOptions(&options), "Get folder options");
-        check(dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT), "Set folder options");
-        dialog->SetTitle(title);
-        set_initial_folder(dialog.Get(), initial);
-        const auto result = dialog->Show(window);
-        if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return nullptr;
-        check(result, "Open folder picker");
-        ComPtr<IShellItem> item;
-        check(dialog->GetResult(&item), "Get selected folder");
-        PWSTR path{};
-        check(item->GetDisplayName(SIGDN_FILESYSPATH, &path), "Get folder path");
-        const fs::path selected(path);
-        CoTaskMemFree(path);
-        return utf8(selected.native());
-    }
-
-    // IDEA's "Background Image..." action (Images.SetBackgroundImage): pick an image
-    // file and hand its bytes to the UI as a data URL. Only real image extensions are
-    // accepted and the file is size-capped, so this cannot be used as a general
-    // "read any file" channel.
-    static bool image_mime_for(const fs::path& path, std::string& mime) {
-        auto extension = path.extension().wstring();
-        for (auto& ch : extension) ch = static_cast<wchar_t>(std::towlower(ch));
-        if (extension == L".png") mime = "image/png";
-        else if (extension == L".jpg" || extension == L".jpeg") mime = "image/jpeg";
-        else if (extension == L".gif") mime = "image/gif";
-        else if (extension == L".webp") mime = "image/webp";
-        else if (extension == L".bmp") mime = "image/bmp";
-        else if (extension == L".svg") mime = "image/svg+xml";
-        else return false;
-        return true;
-    }
-
-    Json read_image(const fs::path& path) {
-        std::string mime;
-        if (!image_mime_for(path, mime))
-            throw taocode::WorkspaceError("INVALID_IMAGE", "只支持 PNG / JPEG / GIF / WebP / BMP / SVG 图片。");
-        std::error_code ec;
-        const auto size = fs::file_size(path, ec);
-        if (ec) throw taocode::WorkspaceError("IO_ERROR", "无法读取该图片文件。");
-        if (size == 0 || size > 16ull * 1024 * 1024)
-            throw taocode::WorkspaceError("INVALID_IMAGE", "图片必须大于 0 且不超过 16 MiB。");
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream) throw taocode::WorkspaceError("IO_ERROR", "无法打开该图片文件。");
-        const std::string bytes{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-        return {{"path", utf8(path.native())}, {"mime", mime}, {"bytes", static_cast<std::int64_t>(bytes.size())},
-                {"dataUrl", "data:" + mime + ";base64," + base64_encode(bytes)}};
-    }
-
-    Json select_image() {
-        ComPtr<IFileOpenDialog> dialog;
-        check(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)), "Create image picker");
-        DWORD options{};
-        check(dialog->GetOptions(&options), "Get image options");
-        check(dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT), "Set image options");
-        const COMDLG_FILTERSPEC filters[]{{L"图片", L"*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.svg"}};
-        check(dialog->SetFileTypes(1, filters), "Set image filters");
-        dialog->SetTitle(L"选择背景图像");
-        const auto result = dialog->Show(window);
-        if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return nullptr;
-        check(result, "Open image picker");
-        ComPtr<IShellItem> item;
-        check(dialog->GetResult(&item), "Get selected image");
-        PWSTR path{};
-        check(item->GetDisplayName(SIGDN_FILESYSPATH, &path), "Get image path");
-        const fs::path selected(path);
-        CoTaskMemFree(path);
-        return read_image(selected);
-    }
+    // 文件夹选择器与图片读取在 native/dialogs.cpp（拆出去后 main.cpp 回到机检上限内）。
 
     Json open_project(const fs::path& path) {
         const auto settings = projects->project_settings(utf8(path.native()));
@@ -968,8 +775,10 @@ struct App {
     // The worker may not touch the WebView2 control either, so its reply is
     // marshalled back to the UI thread by queue_git_reply / drain_git.
     void run_request(const Json& request, bool on_worker) {
+        if (routes.empty()) register_routes();
         const auto start = std::chrono::steady_clock::now();
         Json reply = {{"id", 0}, {"ok", false}};
+        std::string traced;  // 声明在 try 外面：异常路径也要能写出 "end <method>"
         try {
             if (!request.is_object()) throw taocode::WorkspaceError("INVALID_REQUEST", "请求必须为 JSON 对象");
             if (request.value("type", std::string()) == "documentState") {
@@ -993,26 +802,31 @@ struct App {
                 queue_git_request(request);
                 return;  // answered by drain_git once the worker is done
             }
+            // 带上 kind：`lsp.request` 的三十来个 kind 共用一条分派表，只记方法名分不出卡在哪一步。
+            if (taocode::trace::on() && !on_worker) {
+                const auto kind = params.value("kind", std::string());
+                traced = method + (kind.empty() ? "" : ":" + kind);
+                taocode::trace::begin(profile, traced);
+            }
             if (clone_active && (method == "workspace.open" || method == "workspace.close" || method == "project.create" || method == "project.clone" || method == "project.settings.update" || method == "file.create" || method == "file.rename" || method == "file.delete"))
                 throw taocode::WorkspaceError("BUSY", "请先等待克隆完成或取消克隆。");
             Json result;
-            if (method == "app.state") {
+            if (auto it = routes.find(method); it != routes.end()) result = it->second(params);
+            else switch (fnv1a(method)) {
+            case "app.state"_h: {
                 result = projects->state();
                 result["gitAvailable"] = !taocode::find_git_executable().empty();
                 result["defaultParent"] = default_parent;
-            } else if (method == "dialog.pickDirectory") result = select_directory(L"选择项目存放目录", params.value("initial", std::string()));
-            else if (method == "dialog.pickImage") result = select_image();
-            // Restores a previously chosen background image after a restart: the path
-            // was persisted in settings, the bytes are re-read here.
-            else if (method == "app.readImage") {
-                const auto path = params.at("path").get<std::string>();
-                if (path.empty()) result = Json(nullptr);
-                else result = read_image(fs::path(wide(path)));
+                break;
             }
-            else if (method == "workspace.open") {
-                const auto path = params.contains("path") ? params.at("path") : select_directory(L"打开 TaoCode 工作区", params.value("initial", std::string()));
+            case "workspace.open"_h: {
+                const Json path = params.contains("path") ? params.at("path") : Json(taocode::dialogs::select_directory(window, L"打开 TaoCode 工作区", params.value("initial", std::string())));
                 result = path.is_null() ? Json(nullptr) : open_project(fs::path(wide(path.get<std::string>())));
-            } else if (method == "workspace.close") {
+                if (!result.is_null() && result.contains("root"))
+                    taocode::diagnostics::event(profile, "INFO", "打开工作区 " + result.at("root").get<std::string>());
+                break;
+            }
+            case "workspace.close"_h: {
                 projects->closed();
                 stop_run();      // a build must not outlive its project
                 stop_search();
@@ -1028,24 +842,36 @@ struct App {
                 workspace = std::make_unique<taocode::Workspace>();
                 current_root.clear();
                 SetWindowTextW(window, L"欢迎使用 TaoCode");
+                if (!current_root.empty()) taocode::diagnostics::event(profile, "INFO", "关闭工作区 " + current_root);
                 result = {{"closed", true}};
-            } else if (method == "project.create") {
+                break;
+            }
+            case "project.create"_h: {
                 projects->state();
                 const auto path = taocode::create_project(fs::path(wide(params.at("parent").get<std::string>())), params.at("name").get<std::string>(), params.at("template").get<std::string>());
                 try { result = open_project(path); }
                 catch (const std::exception& error) { throw taocode::WorkspaceError("OPEN_FAILED", "项目已创建在 " + utf8(path.native()) + "，但打开失败：" + error.what()); }
-            } else if (method == "project.clone") { begin_clone(request["id"], params); return; }
-            else if (method == "project.clone.cancel") { result = {{"requested", clone_active && clone_thread.request_stop()}}; }
-            else if (method == "projects.forget") result = projects->forget(params.at("path").get<std::string>());
-            else if (method == "projects.forgetMany") {
+                break;
+            }
+            // 早退的分支不需要 `break;`：`return` 已经离开这个函数（留着就是死代码）。
+            case "project.clone"_h: { begin_clone(request["id"], params); return; }
+            case "project.clone.cancel"_h: { result = {{"requested", clone_active && clone_thread.request_stop()}}; } break;
+            case "projects.forget"_h: {
+                result = projects->forget(params.at("path").get<std::string>());
+                break;
+            }
+            case "projects.forgetMany"_h: {
                 std::vector<std::string> paths;
                 for (const auto& entry : params.at("paths")) paths.push_back(entry.get<std::string>());
                 result = projects->forget_many(paths);
+                break;
             }
-            else if (method == "settings.general.update") {
+            case "settings.general.update"_h: {
                 // GeneralSettings (ide.general.xml): the System Settings page's backing state.
                 result = projects->update_general(params.at("general"));
-            } else if (method == "settings.update") {
+                break;
+            }
+            case "settings.update"_h: {
                 result = projects->update_settings(params.at("settings"));
                 // "Always show full path in window header" applies live, like every
                 // other appearance change in IDEA's dialog.
@@ -1059,8 +885,9 @@ struct App {
                     const std::string heading = full_path ? current_root : name;
                     if (!heading.empty()) SetWindowTextW(window, wide(heading + " — TaoCode").c_str());
                 }
+                break;
             }
-            else if (method == "project.settings.get" || method == "project.settings.update") {
+            case "project.settings.get"_h: case "project.settings.update"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 if (method == "project.settings.get") result = projects->project_settings(current_root);
                 else if (params.contains("excludedDirs")) {
@@ -1075,12 +902,27 @@ struct App {
                 } else {
                     result = {{"settings", projects->update_project_settings(current_root, params)},
                               {"entries", workspace->list("")}};
+                        }
+                if (params.contains("java") || params.contains("buildTools")) {
+                    // 两栏都要带上：`java` 给 JDK 与源根，`buildTools.gradle` 给「Gradle JVM」——
+                    // JDT LS 用它去起 Gradle 同步（缺了它，老 Gradle 在服务器的 JRE 21 上起不来）。
+                    const auto java = result.at("settings").value("java", Json::object());
+                    const auto build_tools = result.at("settings").value("buildTools", Json::object());
+                    lsp_worker->post([this, java, build_tools] {
+                        if (lsp) lsp->set_configuration("java", taocode::java_lsp_settings(java, build_tools));
+                    });
                 }
-                if (params.contains("java") && lsp)
-                    lsp->set_configuration("java", taocode::java_lsp_settings(result.at("settings").at("java")));
-            } else if (method == "workspace.list") result = workspace->list(params.at("path").get<std::string>());
-            else if (method == "file.read") result = workspace->read(params.at("path").get<std::string>(), params.value("encoding", std::string("auto")));
-            else if (method == "file.write") {
+                break;
+            }
+            case "workspace.list"_h: {
+                result = workspace->list(params.at("path").get<std::string>());
+                break;
+            }
+            case "file.read"_h: {
+                result = workspace->read(params.at("path").get<std::string>(), params.value("encoding", std::string("auto")));
+                break;
+            }
+            case "file.write"_h: {
                 const auto path = params.at("path").get<std::string>();
                 const auto content = params.at("content").get<std::string>();
                 result = workspace->write(path, content, params.at("expectedVersion").get<std::string>(),
@@ -1094,145 +936,177 @@ struct App {
                         queue_watch({{"event", "history.note"}, {"path", path}, {"message", std::string(error.what())}});
                     }
                 }
+                break;
             }
-            else if (method == "file.create") result = workspace->create(params.at("path").get<std::string>(), params.value("directory", false), params.value("template", std::string()));
-            else if (method == "file.readOnly") result = workspace->set_read_only(params.at("path").get<std::string>(), params.value("readOnly", true));
-            else if (method == "file.lineSeparators") result = workspace->convert_line_separators(params.at("path").get<std::string>(), params.at("separator").get<std::string>(), params.at("content").get<std::string>(), params.at("expectedVersion").get<std::string>());
-            else if (method == "file.readBinary") result = workspace->read_binary(params.at("path").get<std::string>(),
-                                                                                  params.value("limit", std::size_t{1024 * 1024}));
+            case "file.create"_h: {
+                const auto created = params.at("path").get<std::string>();
+                result = workspace->create(created, params.value("directory", false), params.value("template", std::string()));
+                announce_file_change("created", created);
+                break;
+            }
+            case "file.readOnly"_h: {
+                result = workspace->set_read_only(params.at("path").get<std::string>(), params.value("readOnly", true));
+                break;
+            }
+            case "file.lineSeparators"_h: {
+                result = workspace->convert_line_separators(params.at("path").get<std::string>(), params.at("separator").get<std::string>(), params.at("content").get<std::string>(), params.at("expectedVersion").get<std::string>());
+                break;
+            }
+            case "file.readBinary"_h: {
+                result = workspace->read_binary(params.at("path").get<std::string>(),
+                    params.value("limit", std::size_t{1024 * 1024}));
+                break;
+            }
             // Safe delete: "is anything still referring to this?" answered by a real
             // workspace scan (file + line + preview), so the confirm dialog can show
             // the same rows IDEA's Safe Delete dialog would.
-            else if (method == "file.usages") result = workspace->usages_of(params.at("path").get<std::string>(),
-                                                                            params.value("symbol", std::string()));
-            else if (method == "file.rename") result = workspace->rename(params.at("from").get<std::string>(), params.at("to").get<std::string>());
-            else if (method == "file.delete") result = workspace->remove(params.at("path").get<std::string>(), params.value("trash", false));
-            else if (method == "file.copy") result = workspace->copy(params.at("from").get<std::string>(), params.at("to").get<std::string>());
-            else if (method == "file.reveal") result = workspace->reveal(params.at("path").get<std::string>());
+            case "file.usages"_h: {
+                result = workspace->usages_of(params.at("path").get<std::string>(),
+                    params.value("symbol", std::string()));
+                break;
+            }
+            case "file.rename"_h: {
+                const auto from = params.at("from").get<std::string>();
+                const auto to = params.at("to").get<std::string>();
+                result = workspace->rename(from, to);
+                announce_file_change("renamed", to, from);
+                break;
+            }
+            case "file.delete"_h: {
+                const auto removed = params.at("path").get<std::string>();
+                result = workspace->remove(removed, params.value("trash", false));
+                announce_file_change("deleted", removed);
+                break;
+            }
+            case "file.copy"_h: {
+                result = workspace->copy(params.at("from").get<std::string>(), params.at("to").get<std::string>());
+                break;
+            }
+            case "file.reveal"_h: {
+                result = workspace->reveal(params.at("path").get<std::string>());
+                break;
+            }
             // RevealFileAction for absolute paths: the welcome screen has no workspace yet
             // (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33).
-            else if (method == "shell.reveal") result = taocode::reveal_absolute(params.at("path").get<std::string>());
-            else if (method == "session.save") {
+            case "shell.reveal"_h: {
+                result = taocode::reveal_absolute(params.at("path").get<std::string>());
+                break;
+            }
+            // LSP `documentLink.target` 与控制台输出里的 URL：交给系统默认处理器打开。
+            // `open_external` 会**拒绝没有协议前缀的字符串** —— 那是一个安全边界，见 workspace.cpp。
+            case "shell.openUrl"_h: {
+                result = taocode::open_external(params.at("url").get<std::string>());
+                break;
+            }
+            case "session.save"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 result = sessions->save(current_root, params.at("state"));
-            } else if (method == "session.load") {
+                break;
+            }
+            case "session.load"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 result = sessions->load(current_root);
-            } else if (method == "session.clear") {
+                break;
+            }
+            case "session.clear"_h: {
                 if (!current_root.empty()) result = sessions->clear(current_root);
                 else result = {{"cleared", true}, {"removed", false}};
+                break;
             }
-            else if (method == "lsp.open") {
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                const auto path = params.at("path").get<std::string>();
-                const auto language = taocode::lsp::Session::language_for(path);
-                if (lsp) {
-                    result = lsp->open(path, params.value("text", std::string()));
-                } else {
-                    result = {{"running", false}, {"language", language}};
-                }
-                // "No server configured for this language" is not the same state as
-                // "server is starting": the status bar must not claim indexing is
-                // pending for a plain text file (IDEA only shows the indicator when
-                // the project is actually in dumb mode).
-                result["configured"] = lsp ? lsp->has_server(language) : false;
-            }
-            else if (method == "lsp.change") {
-                if (!lsp) throw taocode::WorkspaceError("LSP_UNAVAILABLE", "语言服务未就绪。");
-                lsp->change(params.at("path").get<std::string>(), params.value("text", std::string()));
-                result = {{"ok", true}};
-            }
-            else if (method == "lsp.close") {
-                if (lsp) lsp->close(params.at("path").get<std::string>());
-                result = {{"ok", true}};
-            }
-            else if (method == "lsp.stop") { stop_lsp(); result = {{"ok", true}}; }
-            else if (method == "lsp.request") {
-                if (!lsp) throw taocode::WorkspaceError("LSP_UNAVAILABLE", "语言服务未就绪。");
+            // 五个 lsp.* 一律只投递：UI 线程不再进 Session —— 那里要起子进程、写 stdin 管道、
+            // 等 initialize 回应，任何一次阻塞都会把整个窗口拖成"未响应"（见 native/lsp_worker.hpp）。
+            // 回包走 `queue_lsp` 这条通道，前端 `pending` 按 id 认领，所以调用契约不变。
+            case "lsp.open"_h: {
                 const auto id = request["id"];
-                const auto kind = params.value("kind", std::string());
-                const auto path = params.value("path", std::string());
-                const auto lsp_reply = [this, id](Json response, Json error) {
-                    Json payload = {{"id", id}, {"ok", error.is_null()}};
-                    if (error.is_null()) payload["result"] = std::move(response);
-                    else payload["error"] = {{"code", "LSP_FAILED"},
-                        {"message", error.is_object() && error.contains("message") && error.at("message").is_string()
-                                    ? error.at("message").get<std::string>() : std::string("语言服务请求失败")}};
-                    queue_lsp(std::move(payload));
-                };
-                if (kind == "rename" || kind == "references" || kind == "documentSymbol" || kind == "workspaceSymbol") {
-                    Json semantic_args{{"newName", params.value("newName", std::string())},
-                              {"query", params.value("query", std::string())}};
-                    lsp->semantic(kind, path, params.value("line", 0), params.value("character", 0), semantic_args, lsp_reply);
-                }
-                else if (kind == "signatureHelp" || kind == "codeAction" || kind == "codeActionResolve" ||
-                         kind == "formatting" ||
-                         kind == "rangeFormatting" || kind == "implementation" || kind == "typeDefinition" ||
-                         kind == "documentHighlight" || kind == "selectionRange" || kind == "inlayHint" ||
-                         kind == "prepareCallHierarchy" || kind == "callHierarchyIncoming" ||
-                         kind == "callHierarchyOutgoing" || kind == "prepareTypeHierarchy" ||
-                         kind == "typeHierarchySupertypes" || kind == "typeHierarchySubtypes") {
-                    Json semantic_args = Json::object();
-                    for (const char* key : {"triggerKind", "tabSize", "insertSpaces", "range", "diagnostics", "index", "item"})
-                        if (params.contains(key)) semantic_args[key] = params.at(key);
-                    lsp->semantic(kind, path, params.value("line", 0), params.value("character", 0), semantic_args, lsp_reply);
-                }
-                else
-                    lsp->request(kind, path, params.value("line", 0), params.value("character", 0), lsp_reply);
+                post_lsp(id, [this, params] {
+                    if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                    const auto path = params.at("path").get<std::string>();
+                    const auto language = taocode::lsp::Session::language_for(path);
+                    if (!lsp) return Json{{"running", false}, {"language", language}, {"configured", false}};
+                    Json opened = lsp->open(path, params.value("text", std::string()));
+                    // "没配到服务器"与"服务器正在起"不是一回事：状态栏不能给纯文本文件谎报"正在索引"
+                    // （IDEA 只在真正的 dumb mode 下显示该指示器）。
+                    opened["configured"] = lsp->has_server(language);
+                    return opened;
+                });
+                trace_posted(traced, profile, "posted");
+                return;
+            }
+            case "lsp.change"_h: {
+                const auto id = request["id"];
+                post_lsp(id, [this, params] {
+                    if (!lsp) throw taocode::WorkspaceError("LSP_UNAVAILABLE", "语言服务未就绪。");
+                    lsp->change(params.at("path").get<std::string>(), params.value("text", std::string()));
+                    return Json{{"ok", true}};
+                });
+                trace_posted(traced, profile, "posted");
+                return;
+            }
+            case "lsp.close"_h: {
+                const auto id = request["id"];
+                post_lsp(id, [this, params] {
+                    if (lsp) lsp->close(params.at("path").get<std::string>());
+                    return Json{{"ok", true}};
+                });
+                trace_posted(traced, profile, "posted");
+                return;
+            }
+            // 取消一条语言服务进度：回发 LSP 的 `window/workDoneProgress/cancel`（上游
+            // LspServerNotificationsHandlerImpl.kt:286-292 —— 只有服务器声明过 cancellable 才发）。
+            case "lsp.cancelProgress"_h: {
+                const auto id = request["id"];
+                post_lsp(id, [this, params] {
+                    if (lsp) lsp->cancel_progress(params.value("language", std::string()), params.value("token", std::string()));
+                    return Json{{"ok", true}};
+                });
+                trace_posted(traced, profile, "posted");
+                return;
+            }
+            case "lsp.stop"_h: {
+                const auto id = request["id"];
+                post_lsp(id, [this] { stop_lsp_now(); return Json{{"ok", true}}; });
+                trace_posted(traced, profile, "posted");
+                return;
+            }
+            case "lsp.request"_h: {
+                const auto id = request["id"];
+                // 回包由 lsp_reply 在服务器答完时发，所以这里只投活儿，不走 post_lsp（否则会抢发第二个 id）。
+                lsp_worker->post([this, id, params] {
+                    const auto kind = params.value("kind", std::string());
+                    const auto path = params.value("path", std::string());
+                    const auto lsp_reply = [this, id](Json response, Json error) {
+                        queue_lsp(taocode::lsp::lsp_reply_payload(id, std::move(response), std::move(error)));
+                    };
+                    if (!lsp) {
+                        lsp_reply(Json(nullptr), Json{{"code", "LSP_UNAVAILABLE"}, {"message", "语言服务未就绪。"}});
+                        return;
+                    }
+                    // 路由只有这一个入口：semantic 与 request 互为兜底，两张表覆盖全部 kind，这里不许再抄一份清单。
+                    lsp->semantic(kind, path, params.value("line", 0), params.value("character", 0),
+                        taocode::lsp::forward_arguments(params), lsp_reply);
+                });
+                trace_posted(traced, profile, "posted");
                 return;  // asynchronous; delivered by drain_lsp
             }
-            else if (method == "run.start") {
+            case "run.start"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                const auto string_list = [&params](const char* key) {
-                    std::vector<std::string> values;
-                    if (params.contains(key) && params.at(key).is_array())
-                        for (const auto& item : params.at(key))
-                            if (item.is_string()) values.push_back(item.get<std::string>());
-                    return values;
-                };
-                RunStep main;
-                main.command = params.value("command", std::string());
-                main.program = params.value("program", std::string());
-                main.cwd = params.value("cwd", std::string());
-                main.shell = params.value("shell", true);
-                main.args = string_list("args");
-                main.environment = string_list("env");
-                for (const auto& entry : main.environment)
-                    if (entry.empty() || entry.front() == '=' || entry.find('=') == std::string::npos)
-                        throw taocode::WorkspaceError("INVALID_REQUEST", "环境变量要写成 KEY=VALUE。");
-                if (main.command.empty() && main.program.empty())
-                    throw taocode::WorkspaceError("INVALID_REQUEST", "运行配置需要命令或可执行程序。");
-
-                // IDEA's "Before launch" steps run first, in order, and abort the whole
-                // configuration if one fails — otherwise the program would start against
-                // whatever the previous build left behind.
-                std::deque<RunStep> steps;
-                if (params.contains("beforeLaunch") && params.at("beforeLaunch").is_array()) {
-                    for (const auto& item : params.at("beforeLaunch")) {
-                        if (!item.is_object()) continue;
-                        RunStep step;
-                        step.command = item.value("command", std::string());
-                        step.label = item.value("name", std::string());
-                        if (step.command.empty()) continue;
-                        step.cwd = main.cwd;               // before-launch inherits the configuration's directory
-                        step.environment = main.environment;
-                        step.shell = true;                 // before-launch entries are shell command lines
-                        steps.push_back(std::move(step));
-                    }
-                }
-                main.label = params.value("label", std::string());
-                steps.push_back(std::move(main));
-                const std::size_t step_count = steps.size();
-                begin_run_chain(std::move(steps));
-                result = {{"started", true}, {"steps", step_count}};
+                // 参数解析、Before launch 链、多实例与 `isAllowRunningInParallel` 语义都在
+                // native/run_host.cpp —— 这一层只把结果（实例 id）回给前端。
+                result = runs->start(params, fs::path(wide(current_root)));
+                break;
             }
-            else if (method == "run.write") {
-                if (!runner || !runner->running()) throw taocode::WorkspaceError("NOT_RUNNING", "没有正在运行的任务。");
-                runner->write_line(params.value("line", std::string()));
+            case "run.write"_h: {
+                const auto instance = params.value("instance", 0);
+                if (!runs->write_line(instance, params.value("line", std::string())))
+                    throw taocode::WorkspaceError("NOT_RUNNING", "没有正在运行的任务。");
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "run.stop") { stop_run(); result = {{"ok", true}}; }
-            else if (method == "git.status") {
+            // `instance` 为 0/缺省 = 停全部（IDEA 的 Stop All）；给 id 就只停那一个。
+            case "run.stop"_h: result = runs->stop(params.value("instance", 0)); break;
+            // IDEA 的 Run 工具窗口按"正在运行的实例"开标签，所以这条清单是它的输入。
+            case "run.instances"_h: result = runs->instances(); break;
+            case "git.status"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 const auto repository = fs::path(wide(current_root));
                 if (!taocode::git::available()) { result = {{"available", false}}; }
@@ -1243,100 +1117,160 @@ struct App {
                                            {"staged", change.staged}, {"untracked", change.untracked}, {"renameFrom", change.rename_from}});
                     result = {{"available", true}, {"head", taocode::git::head(repository)},
                               {"branches", taocode::git::branches(repository)}, {"changes", std::move(changes)}};
-                }
+                        }
+                break;
             }
-            else if (method == "git.diff") {
+            case "git.diff"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                // context = diff 的上下文行数（前端从 generalSettings.diffContextLines 传入；0 = git 默认）。
                 result = {{"diff", taocode::git::diff(fs::path(wide(current_root)), params.at("path").get<std::string>(),
-                                                      params.value("staged", false), params.value("base", std::string()))}};
+                                                      params.value("staged", false), params.value("base", std::string()),
+                                                      params.value("context", 0))}};
+                break;
             }
-            else if (method == "git.diffSides" || method == "git.compare") {
+            case "git.diffSides"_h: case "git.compare"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 const auto repository = fs::path(wide(current_root));
                 if (method == "git.compare") result = taocode::git::compare(repository, params.at("base").get<std::string>());
                 else result = taocode::git::diff_sides(repository, params.at("path").get<std::string>(),
-                                                       params.value("staged", false), params.value("base", std::string()));
+                                                       params.value("staged", false), params.value("base", std::string()), params.value("context", 0));
+                break;
             }
-            else if (method == "git.stage" || method == "git.unstage") {
+            case "git.stage"_h: case "git.unstage"_h: {
                 const auto repository = fs::path(wide(require_repo_root()));
                 const auto path = params.at("path").get<std::string>();
                 if (method == "git.stage") taocode::git::stage(repository, path); else taocode::git::unstage(repository, path);
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "git.commit") {
+            case "git.commit"_h: {
                 taocode::git::commit(fs::path(wide(require_repo_root())), params.value("message", std::string()),
                                      params.value("amend", false), params.value("signoff", false),
                                      params.value("author", std::string()), params.value("authorEmail", std::string()));
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "git.checkout") {
+            case "git.checkout"_h: {
                 taocode::git::checkout(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>());
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "git.log") result = taocode::git::log(fs::path(wide(require_repo_root())), params.value("path", std::string()), params.value("limit", 100));
-            else if (method == "git.logFull") result = taocode::git::log_full(fs::path(wide(require_repo_root())), params.value("limit", 200));
-            else if (method == "git.pull") { taocode::git::pull(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
-            else if (method == "git.fetch") { taocode::git::fetch(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
-            else if (method == "git.push") { taocode::git::push(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
-            else if (method == "git.rebase") { taocode::git::rebase(fs::path(wide(require_repo_root())), params.value("branch", std::string())); result = {{"ok", true}}; }
-            else if (method == "git.cherryPick") { taocode::git::cherry_pick(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; }
-            else if (method == "git.stash") result = taocode::git::stash_list(fs::path(wide(require_repo_root())));
-            else if (method == "git.stash.save") { taocode::git::stash_save(fs::path(wide(require_repo_root())), params.value("message", std::string())); result = {{"ok", true}}; }
-            else if (method == "git.stash.pop") { taocode::git::stash_pop(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; }
-            else if (method == "git.branch.create") { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; }
-            else if (method == "git.branch.delete") { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
-            else if (method == "git.revert") { taocode::git::revert(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; }
-            else if (method == "git.reset") result = taocode::git::reset(fs::path(wide(require_repo_root())), params.at("target").get<std::string>(), params.value("mode", std::string("mixed")));
-            else if (method == "git.merge") { taocode::git::merge(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>()); result = {{"ok", true}}; }
-            else if (method == "git.tags") result = taocode::git::tag_list(fs::path(wide(require_repo_root())));
-            else if (method == "git.tag.create") { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; }
-            else if (method == "git.tag.delete") { taocode::git::tag_delete(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; }
-            else if (method == "git.ignore") { taocode::git::ignore_path(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; }
+            case "git.log"_h: {
+                result = taocode::git::log(fs::path(wide(require_repo_root())), params.value("path", std::string()), params.value("limit", 100));
+                break;
+            }
+            case "git.commitFileDiff"_h:
+            case "git.logFull"_h: case "git.commitDetails"_h: case "git.commitChanges"_h: {
+                result = taocode::git::log_request(fs::path(wide(require_repo_root())), method, params);
+                break;
+            }
+            case "git.pull"_h: { taocode::git::pull(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
+            case "git.fetch"_h: { taocode::git::fetch(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
+            case "git.push"_h: { taocode::git::push(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
+            case "git.rebase"_h: { taocode::git::rebase(fs::path(wide(require_repo_root())), params.value("branch", std::string())); result = {{"ok", true}}; } break;
+            case "git.cherryPick"_h: { taocode::git::cherry_pick(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.stash"_h: {
+                result = taocode::git::stash_list(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.stash.save"_h: { taocode::git::stash_save(fs::path(wide(require_repo_root())), params.value("message", std::string())); result = {{"ok", true}}; } break;
+            case "git.stash.pop"_h: { taocode::git::stash_pop(fs::path(wide(require_repo_root()))); result = {{"ok", true}}; } break;
+            case "git.branch.create"_h: { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; } break;
+            case "git.branch.delete"_h: { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.revert"_h: { taocode::git::revert(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.reset"_h: {
+                result = taocode::git::reset(fs::path(wide(require_repo_root())), params.at("target").get<std::string>(), params.value("mode", std::string("mixed")));
+                break;
+            }
+            case "git.merge"_h: { taocode::git::merge(fs::path(wide(require_repo_root())), params.at("branch").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.tags"_h: {
+                result = taocode::git::tag_list(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.tag.create"_h: { taocode::git::tag_create(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("target", std::string())); result = {{"ok", true}}; } break;
+            case "git.tag.delete"_h: { taocode::git::tag_delete(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.ignore"_h: { taocode::git::ignore_path(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; } break;
             // IDEA's CommitAuthorComponent reads the repository's configured author; the
             // same values are handed back to `git.commit` when the user overrides them.
-            else if (method == "git.user") result = taocode::git::user(fs::path(wide(require_repo_root())));
+            case "git.user"_h: {
+                result = taocode::git::user(fs::path(wide(require_repo_root())));
+                break;
+            }
             // ...and the *authors* completion list comes from the log users (GitCommitOptionsUi.kt:259).
-            else if (method == "git.authors") result = taocode::git::authors(fs::path(wide(require_repo_root())));
-            else if (method == "git.diffHunks") result = taocode::git::diff_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("staged", false));
-            else if (method == "git.applyHunks") {
+            case "git.authors"_h: {
+                result = taocode::git::authors(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.diffHunks"_h: {
+                result = taocode::git::diff_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("staged", false));
+                break;
+            }
+            case "git.applyHunks"_h: {
                 taocode::git::apply_hunks(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(),
                                           params.value("staged", false), params.at("hunks").get<std::vector<int>>(), params.value("reverse", false));
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "git.aheadBehind") result = taocode::git::ahead_behind(fs::path(wide(require_repo_root())));
-            else if (method == "git.blame") result = taocode::git::blame(fs::path(wide(require_repo_root())), params.at("path").get<std::string>());
-            else if (method == "git.fileHistory") result = taocode::git::file_history(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("limit", 100));
-            else if (method == "git.showCommit") result = taocode::git::show_commit(fs::path(wide(require_repo_root())), params.at("revision").get<std::string>());
-            else if (method == "git.worktree.list") result = taocode::git::worktree_list(fs::path(wide(require_repo_root())));
-            else if (method == "git.worktree.add") {
+            case "git.aheadBehind"_h: {
+                result = taocode::git::ahead_behind(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.blame"_h: {
+                result = taocode::git::blame(fs::path(wide(require_repo_root())), params.at("path").get<std::string>());
+                break;
+            }
+            case "git.fileHistory"_h: {
+                result = taocode::git::file_history(fs::path(wide(require_repo_root())), params.at("path").get<std::string>(), params.value("limit", 100));
+                break;
+            }
+            case "git.showCommit"_h: {
+                result = taocode::git::show_commit(fs::path(wide(require_repo_root())), params.at("revision").get<std::string>());
+                break;
+            }
+            case "git.worktree.list"_h: {
+                result = taocode::git::worktree_list(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.worktree.add"_h: {
                 const auto repository = fs::path(wide(require_repo_root()));
                 taocode::git::worktree_add(repository, params.at("path").get<std::string>(),
                                            params.value("branch", std::string()), params.value("newBranch", false));
                 // Return the refreshed list so the UI cannot show a stale tree after a
                 // mutation it just performed.
                 result = taocode::git::worktree_list(repository);
-            } else if (method == "git.worktree.remove") {
+                break;
+            }
+            case "git.worktree.remove"_h: {
                 const auto repository = fs::path(wide(require_repo_root()));
                 taocode::git::worktree_remove(repository, params.at("path").get<std::string>(), params.value("force", false));
                 result = taocode::git::worktree_list(repository);
-            }             else if (method == "git.submodules") result = taocode::git::submodule_status(fs::path(wide(require_repo_root())));
-            else if (method == "git.submodule.update") {
+                break;
+            }
+            case "git.submodules"_h: {
+                result = taocode::git::submodule_status(fs::path(wide(require_repo_root())));
+                break;
+            }
+            case "git.submodule.update"_h: {
                 const auto repository = fs::path(wide(require_repo_root()));
                 taocode::git::submodule_update(repository, params.value("init", true), params.value("recursive", false));
                 result = taocode::git::submodule_status(repository);
+                break;
             }
             // Cancels the git command running on the worker right now. IDEAs
             // background-task rows carry a cancel button; git commands are the tasks
             // TaoCode runs in the background, so this is that button's backend.
-            else if (method == "git.cancel") {
+            case "git.cancel"_h: {
                 taocode::git::request_cancel();
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "search.cancel") { search_cancel.store(true); result = {{"ok", true}}; }
+            case "search.cancel"_h: { search_cancel.store(true); result = {{"ok", true}}; } break;
             // Find in Files walks up to 100k files, which is far too long to hold the
             // UI thread: it runs on its own thread and answers through the message
             // loop, and `search.cancel` abandons a walk nobody is waiting for any more.
-            else if (method == "search.run" || method == "search.replace" || method == "search.preview" || method == "search.replaceSelected") {
+            // `workspace.files` is the same walk without the text search — the scope
+            // editor needs the whole project listing, which is equally unbounded.
+            case "workspace.files"_h: case "search.run"_h: case "search.replace"_h: case "search.preview"_h: case "search.replaceSelected"_h: {
                 const auto repository = fs::path(wide(require_repo_root()));
                 taocode::search::Options options;
                 options.query = params.value("query", std::string());
@@ -1358,7 +1292,7 @@ struct App {
                             selection.column = item.value("column", std::int64_t{0});
                             if (!selection.path.empty() && selection.line > 0 && selection.column > 0)
                                 selections.push_back(std::move(selection));
-                        }
+                            }
                     if (selections.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "没有勾选任何要替换的匹配。");
                 }
                 if (search_busy.exchange(true)) throw taocode::WorkspaceError("BUSY", "已有搜索在进行中，请先取消或等待。");
@@ -1370,7 +1304,8 @@ struct App {
                 search_thread = std::thread([this, repository, options, selections, kind, id, started]() noexcept {
                     Json payload{{"id", id}, {"ok", false}};
                     try {
-                        if (kind == "search.run") payload["result"] = taocode::search::run(repository, options);
+                        if (kind == "workspace.files") payload["result"] = taocode::search::list_files(repository);
+                        else if (kind == "search.run") payload["result"] = taocode::search::run(repository, options);
                         else if (kind == "search.preview") payload["result"] = taocode::search::preview(repository, options);
                         else if (kind == "search.replaceSelected") payload["result"] = taocode::search::replace_selected(repository, options, selections);
                         else payload["result"] = taocode::search::replace(repository, options);
@@ -1386,7 +1321,7 @@ struct App {
                 });
                 return;  // asynchronous; delivered by drain_search
             }
-            else if (method == "dap.start") {
+            case "dap.start"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 load_dap_config();
                 auto& client = require_dap();
@@ -1416,21 +1351,20 @@ struct App {
                 client.start_debugging(kind, std::move(configuration), [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
                 return;  // async; delivered through drain_dap
             }
-            else if (method == "dap.setBreakpoints") {
+            case "dap.setBreakpoints"_h: {
                 auto& client = require_dap();
                 if (!params.contains("breakpoints") || !params.at("breakpoints").is_array())
                     throw taocode::WorkspaceError("INVALID_REQUEST", "breakpoints 必须是数组（{line, condition?…}）。");
                 for (const auto& point : params.at("breakpoints")) {
                     if (!point.is_object() || !point.contains("line") || !point.at("line").is_number_integer())
                         throw taocode::WorkspaceError("INVALID_REQUEST", "断点必须带有整数 line。");
-                }
+                    }
                 const auto id = request["id"];
                 client.set_breakpoints(params.at("path").get<std::string>(), params.at("breakpoints"),
                                        [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
                 return;
             }
-            else if (method == "dap.continue" || method == "dap.pause" || method == "dap.next" ||
-                     method == "dap.stepIn" || method == "dap.stepOut") {
+            case "dap.continue"_h: case "dap.pause"_h: case "dap.next"_h: case "dap.stepIn"_h: case "dap.stepOut"_h: {
                 auto& client = require_dap();
                 if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
                 const auto thread = static_cast<long>(params.value("threadId", 1));
@@ -1443,7 +1377,7 @@ struct App {
                 else client.step_out(thread, cb);
                 return;
             }
-            else if (method == "dap.stackTrace" || method == "dap.scopes" || method == "dap.variables") {
+            case "dap.stackTrace"_h: case "dap.scopes"_h: case "dap.variables"_h: {
                 auto& client = require_dap();
                 if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
                 const auto id = request["id"];
@@ -1453,7 +1387,26 @@ struct App {
                 else client.variables(static_cast<long>(params.value("reference", 0)), cb);
                 return;
             }
-            else if (method == "dap.evaluate") {
+            // IDEA 的 XValue.setValue（Variables 树里改值）与 Watches 视图的「Set Value」。
+            case "dap.setVariable"_h: case "dap.setExpression"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto id = request["id"];
+                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
+                const auto value = params.value("value", std::string());
+                if (method == "dap.setVariable") {
+                    const auto name = params.value("name", std::string());
+                    if (name.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "setVariable 需要变量名。");
+                    client.set_variable(static_cast<long>(params.value("reference", 0)), name, value, cb);
+                }
+                else {
+                    const auto expression = params.value("expression", std::string());
+                    if (expression.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "setExpression 需要表达式。");
+                    client.set_expression(expression, value, static_cast<long>(params.value("frameId", 0)), cb);
+                }
+                return;
+            }
+            case "dap.evaluate"_h: {
                 auto& client = require_dap();
                 if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
                 const auto id = request["id"];
@@ -1463,20 +1416,112 @@ struct App {
                                             {"frameId", params.value("frameId", 0)}}, cb);
                 return;
             }
-            else if (method == "dap.breakpoints") { result = {{"breakpoints", dap ? dap->breakpoint_map() : Json::object()}}; }
-            else if (method == "dap.setExceptionBreakpoints") {
+            case "dap.breakpoints"_h: { result = {{"breakpoints", dap ? dap->breakpoint_map() : Json::object()}}; } break;
+            case "dap.setExceptionBreakpoints"_h: {
                 require_dap().set_exception_breakpoints(params.at("filters"), [this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
                 return;  // async; delivered through drain_dap
             }
-            else if (method == "dap.threads") {
+            case "dap.breakpointLocations"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto path = params.value("path", std::string());
+                // 空路径会被 `to_uri("")` 解释成工作区根目录，适配器只能答"没有位置" ——
+                // 那不是"这一行不能放断点"，而是调用方忘了传。别让它伪装成前者。
+                if (path.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "断点位置预览需要一个文件路径。");
+                const auto id = request["id"];
+                client.breakpoint_locations(path, static_cast<long>(params.value("line", 0)),
+                                            static_cast<long>(params.value("endLine", 0)),
+                                            static_cast<long>(params.value("column", 0)),
+                                            static_cast<long>(params.value("endColumn", 0)),
+                                            [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+            } break;
+            case "dap.completions"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto text = params.value("text", std::string());
+                if (text.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "补全需要一段表达式文本。");
+                const auto id = request["id"];
+                // 规范里 `column` 是 **1 基**（"The position within `text` ... (1-based)"），
+                // 所以缺省值是"光标在末尾"= length + 1，不是 length。
+                client.completions(text, static_cast<long>(params.value("column", text.size() + 1)),
+                                   static_cast<long>(params.value("frameId", 0)),
+                                   static_cast<long>(params.value("line", 0)),
+                                   [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+            } break;
+            case "dap.exceptionInfo"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto id = request["id"];
+                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
+                client.exception_details(static_cast<long>(params.value("threadId", 1)), cb);
+            } break;
+            case "dap.threads"_h: {
                 require_dap().threads([this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
                 return;  // async; delivered through drain_dap
             }
-            else if (method == "dap.terminate") { stop_dap(); result = {{"ok", true}}; }
-            // Disconnect ends the session; the client is dropped so the next start
-            // gets a fresh adapter instead of one whose pipes are already closed.
-            else if (method == "dap.disconnect") { stop_dap(); result = {{"ok", true}}; }
-            else if (method == "term.create") {
+            // IDEA 的「运行到光标处」（Alt+F9）：先 gotoTargets 问目标，再 goto 跳过去。
+            case "dap.gotoTargets"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto id = request["id"];
+                client.goto_targets(params.value("path", std::string()), static_cast<long>(params.value("line", 1)),
+                                    static_cast<long>(params.value("column", 0)),
+                                    [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;
+            }
+            case "dap.goto"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto id = request["id"];
+                client.goto_target(static_cast<long>(params.value("threadId", 1)),
+                                   static_cast<long>(params.value("targetId", 0)),
+                                   [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;
+            }
+            // IDEA Frames 视图的「丢弃帧」。
+            case "dap.restartFrame"_h: {
+                auto& client = require_dap();
+                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
+                const auto id = request["id"];
+                client.restart_frame(static_cast<long>(params.value("frameId", 0)),
+                                     [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;
+            }
+            // IDEA 的「停止」：先让适配器 terminate（不支持该请求的适配器退化成
+            // disconnect{terminateDebuggee:true}），**回调里**再收摊 —— 以前两个方法都只是
+            // stop_dap()，等于从不发 DAP 的 terminate/disconnect，目标进程的去留全靠杀 job。
+            case "dap.terminate"_h: {
+                auto& client = require_dap();
+                const auto id = request["id"];
+                client.terminate([this, id](Json, Json error) {
+                    stop_dap();
+                    dap_reply(id, Json{{"ok", true}}, error);
+                });
+                return;
+            }
+            // IDEA 的「断开」：`terminate: false` 只断开、留着目标进程继续跑（远程附加的常见诉求）；
+            // 缺省 true 与「停止」一致。断开后客户端被丢弃，下一次 start 会拿到全新的适配器。
+            case "dap.disconnect"_h: {
+                auto& client = require_dap();
+                const auto id = request["id"];
+                const bool terminate_debuggee = params.value("terminate", true);
+                client.disconnect(terminate_debuggee, [this, id](Json, Json error) {
+                    stop_dap();
+                    dap_reply(id, Json{{"ok", true}}, error);
+                });
+                return;
+            }
+            // IDEA 的「重新运行」（Ctrl+F5）：适配器声明了 supportsRestartRequest 就原地重启，
+            // 否则回 DAP_UNSUPPORTED，调用方退化成"停止 + 重新启动"。
+            case "dap.restart"_h: {
+                auto& client = require_dap();
+                const auto id = request["id"];
+                Json arguments = params.contains("arguments") && params.at("arguments").is_object()
+                                     ? params.at("arguments") : Json::object();
+                client.restart(std::move(arguments), [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
+                return;
+            }
+            case "term.create"_h: {
                 // The cwd defaults to the workspace root when the caller omits it
                 // (IDEA's "Open Terminal Here" needs a per-directory cwd).
                 std::wstring cwd;
@@ -1491,24 +1536,27 @@ struct App {
                                                    [this](int id, std::string_view bytes) {
                                                        queue_term({{"event", "term.output"}, {"id", id}, {"dataB64", base64_encode(bytes)}});
                                                    })}};
+                break;
             }
-            else if (method == "term.write") { terminals->write(params.at("id").get<int>(), base64_decode(params.value("dataB64", std::string()))); result = {{"ok", true}}; }
-            else if (method == "term.resize") {
+            case "term.write"_h: { terminals->write(params.at("id").get<int>(), base64_decode(params.value("dataB64", std::string()))); result = {{"ok", true}}; } break;
+            case "term.resize"_h: {
                 terminal_cols = params.value("cols", terminal_cols);
                 terminal_rows = params.value("rows", terminal_rows);
                 terminals->resize(params.at("id").get<int>(), terminal_cols, terminal_rows);
                 result = {{"ok", true}};
+                break;
             }
-            else if (method == "term.kill") { terminals->kill(params.at("id").get<int>()); result = {{"ok", true}}; }
+            case "term.kill"_h: { terminals->kill(params.at("id").get<int>()); result = {{"ok", true}}; } break;
             // IDEA's terminal tool window keeps a session list so a shell that exited
             // still shows its state; `ids()` was already there, only unreachable.
-            else if (method == "term.list") {
+            case "term.list"_h: {
                 Json list = Json::array();
                 for (const int id : terminals->ids())
                     list.push_back({{"id", id}, {"running", terminals->running(id)}});
                 result = {{"terminals", std::move(list)}};
+                break;
             }
-            else if (method == "history.list" || method == "history.content" || method == "history.diff" || method == "history.diffSides") {
+            case "history.list"_h: case "history.content"_h: case "history.diff"_h: case "history.diffSides"_h: {
                 if (!history) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
                 const auto path = params.at("path").get<std::string>();
                 if (method == "history.list") result = history->list(path);
@@ -1520,23 +1568,31 @@ struct App {
                     const auto id = params.at("id").get<std::string>();
                     result = method == "history.diff" ? history->diff(path, id, current)
                                                       : history->side_diff(path, id, current);
-                }
-            }
+                                                }
+                                            }
             // Plugin extension points: plugins live under the profile and only publish
             // command/template metadata, so "installing" one is a directory copy.
-            else if (method == "plugin.list" || method == "plugin.setEnabled") {
+            case "plugin.list"_h: case "plugin.setEnabled"_h: case "plugin.install"_h: case "plugin.uninstall"_h: {
                 const fs::path directory = profile / L"plugins";
                 if (method == "plugin.list") {
                     fs::create_directories(directory);
+                    result = taocode::plugins::to_json(taocode::plugins::list(directory));
+                } else if (method == "plugin.install") {
+                    // IDEA PluginsConfigurable › Install Plugin from Disk：源目录 → <plugins>/<id>。
+                    taocode::plugins::install(directory, fs::path(params.at("source").get<std::string>()));
+                    result = taocode::plugins::to_json(taocode::plugins::list(directory));
+                } else if (method == "plugin.uninstall") {
+                    taocode::plugins::uninstall(directory, params.at("id").get<std::string>());
                     result = taocode::plugins::to_json(taocode::plugins::list(directory));
                 } else {
                     taocode::plugins::set_enabled(directory, params.at("id").get<std::string>(), params.value("enabled", true));
                     result = taocode::plugins::to_json(taocode::plugins::list(directory));
                 }
+                break;
             }
             // IDEA's MemoryUsagePanel reads the JVM heap; the host reports its own
             // process memory instead, which is the real equivalent here.
-            else if (method == "app.memory") {
+            case "app.memory"_h: {
                 PROCESS_MEMORY_COUNTERS counters{};
                 std::uint64_t working = 0, peak = 0, private_bytes = 0;
                 if (K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
@@ -1548,9 +1604,60 @@ struct App {
                           {"peakWorkingSetMb", peak / (1024 * 1024)},
                           {"privateMb", private_bytes / (1024 * 1024)},
                           {"available", working != 0}};
+                break;
             }
-            else if (method == "app.quit") { PostMessageW(window, WM_CLOSE, 0, 0); result = {{"closing", true}}; }
-            else throw taocode::WorkspaceError("UNKNOWN_METHOD", "该原生方法未开放");
+            // 帮助 › 关于：版本 / 平台 / WebView2 / 关键目录 / 机器上的 JDK（IDEA AboutAction 的等价信息）。
+            // 实现在 native/diagnostics.cpp（那里顺带报出 JDK 列表，探测规则见 native/jdk.hpp）。
+            case "app.info"_h: result = taocode::diagnostics::app_info(profile, browser_version, taocode::kAppVersion); break;
+            // 机器上可用的 JDK（IDEA `JavaHomeFinderBasic.findExistingJdkEntries`）——
+            // Java / Gradle 项目打开时用它当默认 SDK 与 Gradle JVM（「IDEA 打开默认就有」的来源）。
+            case "app.jdks"_h: result = taocode::jdk::to_json(taocode::jdk::find_all()); break;
+            // 帮助 › 显示日志：日志文件与目录（`ShowLogAction.showLog` 的落点）。
+            case "app.logPaths"_h: result = taocode::diagnostics::paths(profile); break;
+            // 帮助 › 浏览特殊目录：IDEA `BrowseSpecialPathsAction` 的目录清单。
+            case "app.specialPaths"_h: result = taocode::diagnostics::special_paths(profile, ui.parent_path()); break;
+            // 帮助 › 收集日志并打包（`CollectZippedLogsAction` → `LogPacker.packLogs`）。
+            case "app.collectLogs"_h: result = taocode::diagnostics::collect_logs(profile); break;
+            // 帮助 › 诊断工具 › 复制排障信息（`CollectTroubleshootingInformationAction`）。
+            case "app.troubleshooting"_h: result = taocode::diagnostics::troubleshooting(profile, ui.parent_path(), taocode::kAppVersion); break;
+            // 文件 › 导出/导入设置（`ExportImportGroup`：ExportSettingsAction / ImportSettingsAction / 恢复默认）。
+            // 归档是 native/settings_transfer.cpp 打的（一个 zip + 一份 JSON），校验在写盘**之前**做。
+            case "app.exportSettings"_h: result = projects->export_settings(fs::path(wide(params.value("path", std::string())))); break;
+            case "app.importSettings"_h: result = projects->import_settings(fs::path(wide(params.value("path", std::string())))); break;
+            // 只读摘要（不写盘）：UI 要先把这个包里的内容说清楚，用户确认之后才导入。
+            case "app.readSettingsArchive"_h: result = taocode::settings_transfer::read_archive_summary(fs::path(wide(params.value("path", std::string())))); break;
+            case "app.resetSettings"_h: result = projects->reset_settings(); break;
+            // 通用文件对话框（IDEA `FileChooser`）：导入设置要用"打开文件"，导出要用"保存文件"。
+            case "dialog.pickFile"_h: result = taocode::dialogs::pick_file(window, L"选择文件", params.value("filters", std::string()), params.value("initial", std::string())); break;
+            case "dialog.saveFile"_h: result = taocode::dialogs::save_file(window, L"保存文件", params.value("filters", std::string()), params.value("name", std::string())); break;
+            // 导出（IDEA `ExportToHTMLManager` 落盘那一步）：只写 .html/.htm 的绝对路径，边界见 export_file.hpp。
+            // 整形（JSON → Entry）在 export_file.cpp 里 —— main.cpp 贴着机检上限。
+            case "app.writeExportFiles"_h: result = taocode::export_file::write_json(params.at("files")); break;
+            // 同步：跑一条 Gradle 命令（wrapper 优先，命令行与"是不是 Gradle 项目"都由前端 src/gradle.ts
+            // 判断 —— GradleConstants 的两张表只实现一份）；输出与退出码走 `gradle.output`/`gradle.exit` 事件。
+            case "gradle.sync"_h: {  // 分派体在 native/gradle.cpp 的 start_sync（上限固定 2000 行，新能力一律抽模块）
+                if (!gradle_sync) throw taocode::WorkspaceError("NOT_READY", "Gradle 通道尚未初始化。");
+                result = taocode::gradle::start_sync(*gradle_sync, current_root, params,
+                    [this](Json payload) { queue_gradle(std::move(payload)); });
+                break;
+            }
+            case "gradle.cancel"_h: {
+                if (gradle_sync) gradle_sync->cancel();
+                result = {{"cancelled", true}};
+                break;
+            }
+            case "gradle.state"_h: {
+                result = {{"running", gradle_sync && gradle_sync->running()}};
+                break;
+            }
+            case "app.quit"_h: { PostMessageW(window, WM_CLOSE, 0, 0); result = {{"closing", true}}; } break;
+            // IDEA 的 ToggleFullScreen（View → Appearance → ToggleFullScreenGroup）：实现全在
+            // `native/window_state.cpp`（宿主能力），这里一行转发就够。
+            case "app.setFullScreen"_h: result = taocode::set_full_screen(params.value("fullScreen", true)); break;
+            case "app.fullScreen"_h: result = taocode::full_screen_state(); break;
+            default:
+                throw taocode::WorkspaceError("UNKNOWN_METHOD", "该原生方法未开放");
+            }
             reply["ok"] = true;
             reply["result"] = std::move(result);
         } catch (const taocode::WorkspaceError& error) {
@@ -1561,6 +1668,7 @@ struct App {
             reply["error"] = {{"code", "NATIVE_ERROR"}, {"message", "原生操作失败，请检查工作区是否可访问"}};
         }
         reply["durationMs"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (!traced.empty()) taocode::trace::end(profile, traced, reply["durationMs"].get<double>());
         if (on_worker) queue_git_reply(std::move(reply));
         else post_json(reply);
     }
@@ -1574,7 +1682,7 @@ struct App {
         static const std::set<std::string> methods = {
             "git.status", "git.stage", "git.unstage", "git.commit", "git.rebase", "git.cherryPick",
             "git.user", "git.authors", "git.diff", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
-            "git.log", "git.logFull", "git.showCommit", "git.blame", "git.fileHistory",
+            "git.log", "git.logFull", "git.commitDetails", "git.commitChanges", "git.commitFileDiff", "git.showCommit", "git.blame", "git.fileHistory",
             "git.checkout", "git.branch.create", "git.branch.delete", "git.merge",
             "git.revert", "git.reset",
             "git.tags", "git.tag.create", "git.tag.delete", "git.ignore",
@@ -1585,19 +1693,11 @@ struct App {
         return methods.count(method) != 0;
     }
 
-    void queue_git_reply(Json payload) {
-        {
-            std::lock_guard lock(git_mutex);
-            git_replies.push_back(std::move(payload));
-        }
-        PostMessageW(window, git_event_message, 0, 0);
-    }
+    void queue_git_reply(Json payload) { git_replies.push(std::move(payload), window, git_event_message, 0); }
 
     void drain_git() {
-        std::deque<Json> replies;
-        { std::lock_guard lock(git_mutex); replies.swap(git_replies); }
         if (!webview) return;
-        for (const auto& reply : replies) post_json(reply);
+        for (const auto& reply : git_replies.take()) post_json(reply);
         // The queue emptied out: tell the UI there is no git work in flight, so the
         // status-bar indicator settles even when the last reply was an error.
         std::size_t queued = 0;
@@ -1637,18 +1737,11 @@ struct App {
             busy = git_busy.load();
         }
         Json event{{"event", "git.progress"}, {"queued", queued}, {"running", busy}};
-        queue_git_reply_event(std::move(event));
+        queue_git_reply(std::move(event));
     }
 
-    // Progress events ride the same WM_APP+8 marshalling as the git replies; this is
-    // not a reply, so it goes out as a separate message the bridge fronts as an event.
-    void queue_git_reply_event(Json payload) {
-        {
-            std::lock_guard lock(git_mutex);
-            git_replies.push_back(std::move(payload));
-        }
-        PostMessageW(window, git_event_message, 0, 0);
-    }
+    // Progress events ride the same WM_APP+8 marshalling as the git replies（就是同一条队列，
+    // 前端按有没有 `id` 分辨回复与事件），所以这里直接复用 queue_git_reply。
 
     void git_worker() {
         for (;;) {
@@ -1677,8 +1770,7 @@ struct App {
         taocode::git::request_cancel();
         if (git_thread.joinable()) git_thread.join();
         git_busy.store(false);
-        std::deque<Json> dropped;
-        { std::lock_guard lock(git_mutex); dropped.swap(git_replies); }
+        git_replies.take();  // 丢掉还没发出去的回复（窗口/项目已经放开了）
         if (webview) post_json(Json{{"event", "git.progress"}, {"queued", 0}, {"running", false}});
     }
 
@@ -1743,13 +1835,21 @@ struct App {
         RECT bounds{};
         GetClientRect(window, &bounds);
         controller->put_Bounds(bounds);
-        check(webview->Navigate(app_url), "Load UI");
+        check(webview->Navigate(taocode::ui_url(ui).c_str()), "Load UI");   // ui_url 破缓存：见 webview_options.hpp
     }
 
     void start() {
-        const auto result = CreateCoreWebView2EnvironmentWithOptions(nullptr, profile.c_str(), nullptr,
+        // 第三个参数是环境选项：传了它才能关掉 WebView2 对 `ui` 目录的 HTTP 缓存，
+        // 否则重建前端后重启看到的还是旧页面（见 native/webview_options.hpp 的说明）。
+        const auto environment_options = taocode::webview_environment_options();
+        const auto result = CreateCoreWebView2EnvironmentWithOptions(nullptr, profile.c_str(), environment_options.Get(),
             Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([this](HRESULT status, ICoreWebView2Environment* environment) -> HRESULT {
                 if (FAILED(status) || !environment) { failure("无法初始化 WebView2 环境"); return S_OK; }
+                LPWSTR version = nullptr;
+                if (SUCCEEDED(environment->get_BrowserVersionString(&version)) && version) {
+                    browser_version = utf8(version);
+                    CoTaskMemFree(version);
+                }
                 const auto create = environment->CreateCoreWebView2Controller(window,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>([this](HRESULT created, ICoreWebView2Controller* result) -> HRESULT {
                         if (FAILED(created) || !result) { failure("无法创建 WebView2 窗口"); return S_OK; }
@@ -1808,6 +1908,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         case watch_event_message:
             app->drain_watch();
             return 0;
+        case gradle_event_message:
+            app->drain_gradle();
+            break;
+
         case search_event_message:
             app->drain_search();
             break;
@@ -1825,13 +1929,8 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
                 app->clone_thread.request_stop();
                 return 0;
             }
-            app->stop_search();  // join the Find-in-Files thread before teardown
-            app->stop_lsp();  // reap language-server children before teardown
-            app->stop_run();  // kill any running build/process tree
-            app->stop_dap();  // never orphan a debug adapter or its debuggee
-            app->stop_watcher();  // join the directory-watcher thread
-            app->stop_git();      // join the git worker; no child outlives the window
-            app->terminals->kill_all();  // no shell outlives the window
+            app->close_children();  // 每步都记"开始/用时"，卡住的那一步会在日志里露出来
+            taocode::diagnostics::event(app->profile, "INFO", "退出 TaoCode");
             if (app->controller) app->controller->Close();
             DestroyWindow(window);
             return 0;
@@ -1860,6 +1959,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             fs::create_directories(app.profile);
             app.projects = std::make_unique<taocode::ProjectStore>(app.profile / L"projects.json");
             app.sessions = std::make_unique<taocode::session::SessionStore>(app.profile / L"sessions");
+            // 日志初始化（IDEA 的 PathManager.getLogDir + idea.log）：后续关键事件都往这里写。
+            taocode::diagnostics::init(app.profile, taocode::kAppVersion, app.ui);
+            taocode::trace::configure(app.profile);   // 锁归属追踪的落点（见 native/request_trace.hpp）
+            taocode::trace::install_lsp_slow_write(app.profile);
+            app.gradle_sync = std::make_unique<taocode::gradle::SyncSession>();
+            // 运行宿主的事件出口就是 `queue_run`（线程安全：内部是 EventChannel）。
+            // 语言服务线程要在任何 lsp.* 之前起来（前端一连上就会 open 文档）。
+            app.lsp_worker = std::make_unique<taocode::lsp::Worker>();
+            app.runs = std::make_unique<taocode::run_host::Manager>([&app](Json event) { app.queue_run(std::move(event)); });
             PWSTR documents{};
             if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents))) {
                 app.default_parent = utf8(documents);
@@ -1876,6 +1984,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             const auto window = CreateWindowExW(0, window_class.lpszClassName, L"欢迎使用 TaoCode", WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT, CW_USEDEFAULT, 1440, 940, nullptr, nullptr, instance, &app);
             if (!window) throw std::runtime_error("无法创建 TaoCode 窗口");
+            // 把窗口交给窗口态模块（全屏要用）—— 见 native/window_state.hpp。
+            taocode::register_window(window);
             ShowWindow(window, show);
             app.start();
             MSG message{};

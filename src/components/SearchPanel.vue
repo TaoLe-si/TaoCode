@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from 'lucide-vue-next'
-import { isDesktop, request, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
+import { isDesktop, request, type NamedScopeSetting, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
+import { compileScopeText, scopeLookup, scopeMatches, type ScopeContext, type ScopeSet } from '../scopes'
 
-const props = defineProps<{ root: string; active: boolean }>()
+// `scopes` / `moduleName` 来自项目设置：IDEA 的 Find in Path 对话框带一个 ScopeChooserCombo
+// （`FindPopupScopeUIImpl.java:59,137`），选中哪个作用域就只在那个范围里找。
+const props = defineProps<{ root: string; active: boolean; scopes: NamedScopeSetting[]; moduleName: string }>()
 const replaceInput = ref<HTMLInputElement>()
 defineExpose({ focusReplace: () => replaceInput.value?.focus() })
 // `open` jumps the editor to an occurrence; `replaced` carries the files a replace
@@ -21,6 +24,8 @@ const regex = ref(false)
 const caseSensitive = ref(false)
 const wholeWord = ref(false)
 const filtersOpen = ref(false)
+// '' = 「项目」（IDEA 的默认范围，不限定）。
+const scopeName = ref('')
 const matches = ref<SearchPreviewMatch[]>([])
 const fileCount = ref(0)
 const truncated = ref(false)
@@ -38,6 +43,14 @@ const confirmAll = ref(false)
 const cursor = ref(-1)
 const listRef = ref<HTMLDivElement>()
 
+// NamedScopesHolder.getScope 的等价物：名字查不到时返回 null（不限定）。
+// 找到但模式解析不了的条目**不返回 null** —— 它就是一个 InvalidPackageSet，
+// 按源码语义恒不匹配（宁可显示 0 命中，也不能悄悄退回"全项目"）。
+const scopeSet = computed<ScopeSet | null>(() => {
+  const entry = props.scopes.find(item => item.name === scopeName.value)
+  return entry ? compileScopeText(entry.pattern).set : null
+})
+const scopeContext = computed<ScopeContext>(() => ({ moduleName: props.moduleName, lookup: scopeLookup(props.scopes) }))
 const busy = computed(() => running.value || replacing.value)
 const total = computed(() => matches.value.length)
 const pendingCount = computed(() => matches.value.filter(pending).length)
@@ -85,9 +98,19 @@ let replaceToken = 0
 function fetchPreview() {
   return request<SearchPreviewResult>('search.preview', { ...params(), replacement: replacement.value })
 }
+// 作用域在**结果**上求值。原生扫描只吃一个 include 列表，无法同时表达
+// 「作用域 ∩ 文件掩码」的交集，所以掩码走原生、作用域在这里精确过滤。
+function narrow(list: SearchPreviewMatch[]): SearchPreviewMatch[] {
+  const scope = scopeSet.value
+  if (!scope) return list
+  return list.filter(match => scopeMatches(scope, match.path, false, scopeContext.value))
+}
 function applyResult(result: SearchPreviewResult) {
-  matches.value = Array.isArray(result.matches) ? result.matches : []
-  fileCount.value = result.fileCount ?? 0
+  const incoming = Array.isArray(result.matches) ? result.matches : []
+  matches.value = narrow(incoming)
+  // 原生的 fileCount 是「整次扫描命中过的文件数」；作用域过滤之后必须自己重算，
+  // 否则会把范围外的文件也算进来。
+  fileCount.value = scopeSet.value ? new Set(matches.value.map(match => match.path)).size : (result.fileCount ?? 0)
   truncated.value = result.truncated === true
   // GBK 等编码现在会被尝试解码，但仍有无法识别的文件时必须明说，而不是把
   // "0 命中"当成完整答案。
@@ -194,6 +217,19 @@ function toggle(match: SearchPreviewMatch) {
 // workspace, including ones a truncated result never showed, so it needs a confirm.
 async function replaceAllOnDisk() {
   if (!canSearch.value || busy.value) return
+  // 选了范围时，原生 `search.replace` 的 include 只能写一个列表，表达不了
+  // 「作用域 ∩ 文件掩码」。与其冒着改写范围外文件的风险，不如明确只替换本次
+  // 作用域内**已列出**的那些处 —— 用户看得见它们，而且每一处都在范围内。
+  if (scopeSet.value) {
+    if (!confirmAll.value) {
+      confirmAll.value = true
+      note.value = `将替换作用域“${scopeName.value}”内已列出的 ${matches.value.length} 处；范围限定下不会改写未列出的文件。再次点击“全部替换”确认。`
+      return
+    }
+    confirmAll.value = false
+    await replaceOccurrences(matches.value)
+    return
+  }
   if (!confirmAll.value) {
     confirmAll.value = true
     note.value = `将替换工作区内全部匹配${truncated.value ? '（含未列出的部分）' : ''}。再次点击“全部替换”确认。`
@@ -278,6 +314,9 @@ function parts(match: SearchPreviewMatch): Part[] {
 }
 
 watch(() => props.active, active => { if (active && query.value.length > 0 && !searched.value && !busy.value) void runSearch() })
+// 换范围（或作用域定义被改过）之后，已列出的结果就不再成立：重新搜一遍而不是
+// 就地过滤旧结果 —— 旧结果本来就没覆盖新范围里的文件。
+watch(scopeSet, () => { if (searched.value && query.value.length > 0 && !busy.value) void refresh() })
 // A project switch invalidates every stored path, so drop the old tree and the
 // review marks with it instead of offering to replace files of the old project.
 watch(() => props.root, () => { if (searched.value || matches.value.length) clearResults() })
@@ -306,6 +345,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
       <div v-if="filtersOpen" class="fs-filters">
         <label class="fs-filter"><span>包含</span><input v-model="include" type="text" placeholder="*.cpp 或 src/**" aria-label="仅搜索这些文件" spellcheck="false" /></label>
         <label class="fs-filter"><span>排除</span><input v-model="exclude" type="text" placeholder="build/**" aria-label="排除这些文件" spellcheck="false" /></label>
+        <!-- IDEA Find in Path 的范围下拉（ScopeChooserCombo）：项目 + 命名作用域。 -->
+        <label class="fs-filter"><span>范围</span><select v-model="scopeName" aria-label="搜索范围"><option value="">项目</option><option v-for="entry in scopes" :key="entry.name" :value="entry.name">{{ entry.name }}</option></select></label>
       </div>
       <div class="fs-row">
         <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" />
@@ -318,7 +359,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     <p v-if="error" class="fs-error">{{ error }}</p>
     <p v-if="note" class="fs-note">{{ note }}</p>
     <div v-if="searched || running" class="fs-status">
-      <span>{{ replacing ? '正在替换…' : running ? '正在搜索…' : `共 ${total} 处 / ${fileCount} 个文件` }}{{ !busy && pendingCount !== total ? `，已选中 ${pendingCount} 处` : '' }}</span>
+      <span>{{ replacing ? '正在替换…' : running ? '正在搜索…' : `共 ${total} 处 / ${fileCount} 个文件` }}{{ !busy && pendingCount !== total ? `，已选中 ${pendingCount} 处` : '' }}{{ scopeName ? `，范围：${scopeName}` : '' }}</span>
       <span class="fs-status-right">
         <span v-if="truncated" class="fs-truncated" title="结果已截断，替换只覆盖列出的匹配">结果已截断</span>
         <button v-if="busy" class="fs-cancel" title="放弃本次搜索/替换" @click="cancelSearch">取消</button>

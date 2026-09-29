@@ -214,6 +214,25 @@ int main() {
         check(delivered != nullptr && delivered.at("uri") == "file:///a", "diagnostics params forwarded");
     });
 
+    run("$/progress 与 publishDiagnostics 各走各的回调，未知通知两个都不叫醒", [&] {
+        Harness h;
+        Json diagnostics = nullptr, progress = nullptr;
+        h.client.on_diagnostics([&](Json params) { diagnostics = std::move(params); });
+        h.client.on_progress([&](Json params) { progress = std::move(params); });
+        h.client.receive({{"jsonrpc", "2.0"}, {"method", "$/progress"},
+                          {"params", {{"token", "7"}, {"value", {{"kind", "begin"}, {"title", "Importing"}}}}}});
+        check(progress != nullptr && progress.at("token") == "7", "进度通知要交给 progress 回调");
+        check(diagnostics == nullptr, "进度不许顺路叫醒诊断回调（两条通道各归各）");
+        h.client.receive({{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"},
+                          {"params", {{"uri", "file:///a"}, {"diagnostics", Json::array()}}}});
+        check(diagnostics != nullptr && diagnostics.at("uri") == "file:///a", "诊断仍走原来那条");
+        // 反证：客户端能力里没有 window/workDoneProgress，服务器就不发 `$/progress`；
+        // 而发了却被丢弃的那些年，界面上永远只有一句"语言服务未就绪"。
+        const auto before = progress;
+        h.client.receive({{"jsonrpc", "2.0"}, {"method", "window/logMessage"}, {"params", {{"type", 3}, {"message", "hi"}}}});
+        check(progress == before && diagnostics != nullptr, "未知通知既不该刷新进度也不该重放诊断");
+    });
+
     run("server requests are auto-answered", [&] {
         Harness h;
         h.client.receive({{"jsonrpc", "2.0"}, {"id", 50}, {"method", "client/registerCapability"}, {"params", Json::object()}});

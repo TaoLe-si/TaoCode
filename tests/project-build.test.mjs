@@ -150,7 +150,11 @@ test('打开项目时的自动配置只填空值（用户填过的一律不动�
   const blank = { jdkHome: '', jdkName: 'JavaSE-17', sourcePaths: [], outputPath: '', referencedLibraries: ['lib/**/*.jar'] }
   const patch = javaDefaults(blank, { home: 'C:\\jdk-21', version: '21.0.11', name: '21' }, 'demo')
   assert.equal(patch.jdkHome, 'C:\\jdk-21')
+  // jdkName 必须是 JDT LS runtimes 认的 `JavaSE-<x>` 形式；探测给的显示名（`21`）
+  // 原样写回会被设置校验整个拒绝 —— javaDefaults 负责从 version 归一（JDK 8 → JavaSE-1.8）。
+  // jdkName 存 IDEA 的 SDK 显示名（suggestJdkName 产出），runtimes 的 JavaSE-x 由原生归一。
   assert.equal(patch.jdkName, '21')
+  assert.equal(javaDefaults(blank, { home: 'C:\\jdk8', version: '1.8.0_392', name: '1.8' }, 'demo').jdkName, '1.8')
   assert.equal(patch.outputPath, 'out/production/demo')
   assert.deepEqual(patch.sourcePaths, ['src'])
 

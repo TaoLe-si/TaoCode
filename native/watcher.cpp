@@ -1,4 +1,5 @@
 #include "watcher.hpp"
+#include "text.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -22,16 +23,7 @@ constexpr std::size_t buffer_bytes = 64 * 1024;
 constexpr auto debounce = std::chrono::milliseconds(300);
 constexpr auto max_batch_delay = std::chrono::milliseconds(1200);
 
-std::string utf8(std::wstring_view value) {
-    if (value.empty()) return {};
-    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (size <= 0) return {};
-    std::string out(size, '\0');
-    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-                        out.data(), size, nullptr, nullptr);
-    return out;
-}
+// utf8 已并入 native/text.hpp（与 main.cpp 的重复实现合并）。
 
 bool same_ignore_case(std::string_view a, std::string_view b) noexcept {
     if (a.size() != b.size()) return false;

@@ -384,6 +384,22 @@ Json shape_scopes(const Json& body) {
     return Json{{"scopes", std::move(scopes)}};
 }
 
+// `setVariable` / `setExpression` 的响应是同一条变量的新值（规范里没有 `variables` 数组），
+// 字段与 shape_variables 里的一条保持一致，前端才能用同一套渲染。
+Json shape_set_variable(const Json& body) {
+    const Json& item = as_object(body);
+    const auto reference = int_of(item, "variablesReference", 0);
+    Json shaped{{"name", text_of(item, "name")},
+                {"value", text_of(item, "value")},
+                {"reference", reference},
+                {"named", reference > 0 || int_of(item, "namedVariables", 0) > 0}};
+    const auto type = text_of(item, "type");
+    if (!type.empty()) shaped["type"] = type;
+    const auto evaluate_as = text_of(item, "evaluateName");
+    if (!evaluate_as.empty()) shaped["evaluateName"] = evaluate_as;
+    return shaped;
+}
+
 Json shape_variables(const Json& body) {
     Json variables = Json::array();
     const Json& envelope = as_object(body);
@@ -402,6 +418,90 @@ Json shape_variables(const Json& body) {
             variables.push_back(std::move(shaped));
         }
     return Json{{"variables", std::move(variables)}};
+}
+
+// `exceptionInfo` 的可选 details。`innerException` 是 cause 链，规范允许递归嵌套，
+// 所以这个整形函数本身是递归的 —— 深度由适配器决定，这里只保证每一层的形状一致
+// （缺字段就不写键，前端拿不到键就不会渲染空行）。
+Json shape_exception_details(const Json& details) {
+    const Json& item = as_object(details);
+    Json shaped = Json::object();
+    for (const char* key : {"message", "typeName", "fullTypeName", "evaluateName", "stackTrace"}) {
+        const auto value = text_of(item, key);
+        if (!value.empty()) shaped[key] = value;
+    }
+    if (item.contains("innerException") && item.at("innerException").is_array()) {
+        Json inner = Json::array();
+        for (const auto& nested : item.at("innerException")) inner.push_back(shape_exception_details(nested));
+        if (!inner.empty()) shaped["innerException"] = std::move(inner);
+    }
+    return shaped;
+}
+
+// `exceptionInfo` -> {available, exceptionId, description, breakMode, details?}。
+// `description` 与 `exceptionId` 是规范里的必填项：两者都空说明适配器其实没答上来
+// （或这个线程根本没有异常），这时回 available:false，而不是让 UI 显示一张空卡片。
+Json shape_exception_info(const Json& body) {
+    const Json& item = as_object(body);
+    const auto exception_id = text_of(item, "exceptionId");
+    const auto description = text_of(item, "description");
+    if (exception_id.empty() && description.empty()) return Json{{"available", false}};
+    Json shaped{{"available", true},
+                {"exceptionId", exception_id},
+                {"description", description},
+                {"breakMode", text_of(item, "breakMode")}};
+    if (item.contains("details") && item.at("details").is_object()) {
+        const auto details = shape_exception_details(item.at("details"));
+        if (!details.empty()) shaped["details"] = details;
+    }
+    return shaped;
+}
+
+// `breakpointLocations` -> {available, locations:[{line, column?, endLine?, endColumn?}]}。
+// **空数组是有意义的答案**（IDEA 的 "Cannot find appropriate breakpoint type"），所以
+// `available` 只表示"适配器答了"，"这一行能不能放"由 locations 是否为空表达 ——
+// 把空数组当成错误上报，UI 就没法区分"这行没有可执行代码"和"请求失败了"。
+// 可选字段 <= 0 时不写键：规范里它们是可选的，写个 0 会让人以为"第 0 列"。
+Json shape_breakpoint_locations(const Json& body) {
+    Json locations = Json::array();
+    const Json& envelope = as_object(body);
+    if (envelope.contains("breakpoints") && envelope.at("breakpoints").is_array())
+        for (const auto& point : envelope.at("breakpoints")) {
+            const Json& item = as_object(point);
+            Json shaped{{"line", int_of(item, "line", 0)}};
+            for (const char* key : {"column", "endLine", "endColumn"}) {
+                const auto value = int_of(item, key, 0);
+                if (value > 0) shaped[key] = value;
+            }
+            locations.push_back(std::move(shaped));
+        }
+    return Json{{"available", true}, {"locations", std::move(locations)}};
+}
+
+// `completions` -> {available, items:[{label, text?, type?, start?, length?}]}。
+// `start`/`length` 是**在请求文本里的替换区间**（规范里可选）：给了它，客户端才知道插入补全项时
+// 该替换哪一段；没给就按"整段替换"处理。所以这两个键要么一起出要么都不出 —— 只给一个是畸形，
+// 前端按"整段替换"降级比按一个误导性的 start 去切字符串安全。
+Json shape_completions(const Json& body) {
+    Json items = Json::array();
+    const Json& envelope = as_object(body);
+    if (envelope.contains("targets") && envelope.at("targets").is_array())
+        for (const auto& entry : envelope.at("targets")) {
+            const Json& item = as_object(entry);
+            const auto label = text_of(item, "label");
+            if (label.empty()) continue;   // 没有 label 的项在 UI 里无法显示，也选不中
+            Json shaped{{"label", label}};
+            const auto insert = text_of(item, "text");
+            if (!insert.empty()) shaped["text"] = insert;
+            const auto type = text_of(item, "type");
+            if (!type.empty()) shaped["type"] = type;
+            const auto start = int_of(item, "start", -1);
+            const auto length = int_of(item, "length", -1);
+            if (start >= 0 && length > 0) { shaped["start"] = start; shaped["length"] = length; }
+            items.push_back(std::move(shaped));
+        }
+    if (items.empty()) return Json{{"available", false}};
+    return Json{{"available", true}, {"items", std::move(items)}};
 }
 
 // The adapter is authoritative about *verification*, and the line it reports (a
@@ -510,6 +610,8 @@ struct Client::State {
     std::unordered_map<std::int64_t, Pending> pending_;
     std::map<std::string, Json> breakpoints_;   // path -> [{line, condition?, ...}]
     Json exception_filters_ = Json::array();    // remembered setExceptionBreakpoints filters
+    // 适配器在 initialize 响应里声明的能力（terminate/restart 要走哪条路由它决定）。
+    Json capabilities_ = Json::object();
     std::filesystem::path root_;
     std::string adapter_id_;
     EventCb on_event_;
@@ -1185,6 +1287,12 @@ void Client::initialize(const std::string& adapter_id, Reply on_reply) {
     send("initialize", std::move(arguments),
          [this, handler = std::move(on_reply)](Json capabilities, Json error) {
              if (error.is_null()) {
+                 // 能力要记住：terminate/restart 的可用性由 `supportsTerminateRequest` /
+                 // `supportsRestartRequest` 决定（见下面的 supports_* / terminate / restart）。
+                 {
+                     std::lock_guard lock(state_->mutex_);
+                     state_->capabilities_ = capabilities.is_object() ? capabilities : Json::object();
+                 }
                  // The spec mandates the `initialized` event after a successful
                  // initialize and before launch. It is fire-and-forget.
                  std::int64_t seq = 0;
@@ -1304,6 +1412,50 @@ void Client::set_breakpoints(const std::string& rel_path, const Json& requested,
             });
 }
 
+Json shape_goto_targets(const Json& body) {
+    Json targets = Json::array();
+    const Json& envelope = as_object(body);
+    if (envelope.contains("targets") && envelope.at("targets").is_array())
+        for (const Json& value : envelope.at("targets")) {
+            const Json& item = as_object(value);
+            if (!item.contains("id") || !item.at("id").is_number_integer()) continue;
+            const auto line = int_of(item, "line", 0);
+            Json shaped{{"id", item.at("id")}, {"line", line}, {"label", text_of(item, "label")}};
+            if (item.contains("column")) shaped["column"] = int_of(item, "column", 0);
+            // 适配器给的 endLine/endColumn 用不上（IDEA 也只用行），但保留它的存在便于前端提示。
+            if (item.contains("endLine")) shaped["endLine"] = int_of(item, "endLine", 0);
+            targets.push_back(std::move(shaped));
+        }
+    return Json{{"targets", std::move(targets)}};
+}
+
+void Client::goto_targets(const std::string& rel_path, long line, long column, Reply on_reply) {
+    if (!supports_goto_targets()) {
+        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
+                                     {"message", "适配器未声明 supportsGotoTargetsRequest，不支持运行到光标处。"}});
+        return;
+    }
+    // `source.path` 走与断点同一条路径规则（绝对路径 + sourceReference:0），否则适配器找不到文件。
+    Json arguments{{"source", Json{{"path", to_native(slash_form(rel_path))}, {"sourceReference", 0}}},
+                   {"line", line}};
+    if (column > 0) arguments["column"] = column;
+    send("gotoTargets", std::move(arguments),
+         shaped(std::move(on_reply), [](const Json& body) { return shape_goto_targets(body); }));
+}
+
+void Client::goto_target(long thread_id, long target_id, Reply on_reply) {
+    send("goto", Json{{"threadId", thread_id}, {"targetId", target_id}}, wrap_ok(std::move(on_reply)));
+}
+
+void Client::restart_frame(long frame_id, Reply on_reply) {
+    if (!supports_restart_frame()) {
+        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
+                                     {"message", "适配器未声明 supportsRestartFrame，无法丢弃帧。"}});
+        return;
+    }
+    send("restartFrame", Json{{"frameId", frame_id}}, wrap_ok(std::move(on_reply)));
+}
+
 void Client::continue_execution(long thread_id, bool all, Reply on_reply) {
     // Omitting threadId resumes every thread; that is how `all` is expressed.
     Json arguments = Json::object();
@@ -1341,6 +1493,58 @@ void Client::variables(long variables_reference, Reply on_reply) {
          shaped(std::move(on_reply), [](const Json& body) { return shape_variables(body); }));
 }
 
+void Client::set_variable(long variables_reference, const std::string& name, const std::string& value, Reply on_reply) {
+    send("setVariable", Json{{"variablesReference", variables_reference}, {"name", name}, {"value", value}},
+         shaped(std::move(on_reply), [](const Json& body) { return shape_set_variable(body); }));
+}
+
+void Client::set_expression(const std::string& expression, const std::string& value, long frame_id, Reply on_reply) {
+    Json arguments{{"expression", expression}, {"value", value}};
+    // frameId 在规范里是可选的：0 表示不指定栈帧（全局表达式）。
+    if (frame_id > 0) arguments["frameId"] = frame_id;
+    send("setExpression", std::move(arguments),
+         shaped(std::move(on_reply), [](const Json& body) { return shape_set_variable(body); }));
+}
+
+void Client::exception_details(long thread_id, Reply on_reply) {
+    send("exceptionInfo", Json{{"threadId", thread_id}},
+         shaped(std::move(on_reply), [](const Json& body) { return shape_exception_info(body); }));
+}
+
+void Client::completions(const std::string& text, long column, long frame_id, long line, Reply on_reply) {
+    if (!supports_completions()) {
+        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
+                                     {"message", "适配器未声明 supportsCompletionsRequest，不支持调试表达式补全。"}});
+        return;
+    }
+    Json arguments{{"text", text}, {"column", column}};
+    // `frameId` 与 `line` 都是可选：没有它们时**不发**这两个键（发 0 会被适配器当成
+    // "第 0 帧 / 第 0 行"，那是另一个上下文，补出来的符号可能完全不对）。
+    if (frame_id > 0) arguments["frameId"] = frame_id;
+    if (line > 0) arguments["line"] = line;
+    send("completions", std::move(arguments),
+         shaped(std::move(on_reply), [](const Json& body) { return shape_completions(body); }));
+}
+
+void Client::breakpoint_locations(const std::string& rel_path, long line, long end_line, long column,
+                                 long end_column, Reply on_reply) {
+    if (!supports_breakpoint_locations()) {
+        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
+                                     {"message", "适配器未声明 supportsBreakpointLocationsRequest，无法预览断点位置。"}});
+        return;
+    }
+    const auto key = slash_form(rel_path);
+    // `source.path` 取与 `setBreakpoints` 同一条规则（URI + sourceReference:0）：同一行上
+    // "能不能放断点"和"放上去"必须按同一个文件解释，两条路径规则不一致会让适配器对不上。
+    // （注：`goto_targets` 用的是 native 路径，两种形式目前并存 —— 见 docs/enum-lsp-dap.md 的待核项。）
+    Json arguments{{"source", Json{{"path", to_uri(key)}, {"sourceReference", 0}}}, {"line", line}};
+    if (end_line > 0) arguments["endLine"] = end_line;
+    if (column > 0) arguments["column"] = column;
+    if (end_column > 0) arguments["endColumn"] = end_column;
+    send("breakpointLocations", std::move(arguments),
+         shaped(std::move(on_reply), [](const Json& body) { return shape_breakpoint_locations(body); }));
+}
+
 // Waits (bounded) for the reader thread to observe that the adapter is gone. Used
 // by disconnect() so the caller can drop the Client without racing a callback.
 void Client::wait_for_exit(std::chrono::milliseconds limit) const {
@@ -1349,12 +1553,74 @@ void Client::wait_for_exit(std::chrono::milliseconds limit) const {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
-void Client::disconnect(Reply on_reply) {
-    send("disconnect", Json{{"terminateDebuggee", true}}, wrap_ok(std::move(on_reply)));
+void Client::disconnect(bool terminate_debuggee, Reply on_reply) {
+    send("disconnect", Json{{"terminateDebuggee", terminate_debuggee}}, wrap_ok(std::move(on_reply)));
     // Wait for the adapter to actually go away, then reclaim it: the caller is
     // allowed to destroy this Client the moment disconnect() returns.
     wait_for_exit(std::chrono::seconds(5));
     shutdown();
+}
+
+Json Client::capabilities() const {
+    std::lock_guard lock(state_->mutex_);
+    return state_->capabilities_;
+}
+
+bool Client::supports_terminate() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsTerminateRequest") && flags.at("supportsTerminateRequest").is_boolean()
+               && flags.at("supportsTerminateRequest").get<bool>();
+}
+
+bool Client::supports_restart() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsRestartRequest") && flags.at("supportsRestartRequest").is_boolean()
+               && flags.at("supportsRestartRequest").get<bool>();
+}
+
+bool Client::supports_goto_targets() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsGotoTargetsRequest") && flags.at("supportsGotoTargetsRequest").is_boolean()
+               && flags.at("supportsGotoTargetsRequest").get<bool>();
+}
+
+bool Client::supports_restart_frame() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsRestartFrame") && flags.at("supportsRestartFrame").is_boolean()
+               && flags.at("supportsRestartFrame").get<bool>();
+}
+
+// 规范里这个能力位**默认 false**（不是"没声明就当支持"），所以必须显式判真。
+bool Client::supports_completions() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsCompletionsRequest") && flags.at("supportsCompletionsRequest").is_boolean() &&
+           flags.at("supportsCompletionsRequest").get<bool>();
+}
+
+bool Client::supports_breakpoint_locations() const {
+    const auto flags = capabilities();
+    return flags.contains("supportsBreakpointLocationsRequest") &&
+           flags.at("supportsBreakpointLocationsRequest").is_boolean() &&
+           flags.at("supportsBreakpointLocationsRequest").get<bool>();
+}
+
+void Client::terminate(Reply on_reply) {
+    if (!supports_terminate()) {
+        // 没有 terminate 能力的适配器（cpvsdbg 之外的不少实现）只能用 disconnect 收场；
+        // `terminateDebuggee: true` 与 terminate 是同一种用户可见结果（目标进程结束）。
+        send("disconnect", Json{{"terminateDebuggee", true}}, wrap_ok(std::move(on_reply)));
+        return;
+    }
+    send("terminate", Json::object(), wrap_ok(std::move(on_reply)));
+}
+
+void Client::restart(Json arguments, Reply on_reply) {
+    if (!supports_restart()) {
+        on_reply(Json(nullptr), Json{{"code", "DAP_UNSUPPORTED"},
+                                     {"message", "适配器未声明 supportsRestartRequest，无法原地重新运行。"}});
+        return;
+    }
+    send("restart", arguments.is_object() ? std::move(arguments) : Json::object(), wrap_ok(std::move(on_reply)));
 }
 
 void Client::start_debugging(const std::string& adapter_id, Json launch_configuration, Reply on_reply) {

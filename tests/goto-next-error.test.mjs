@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { shellSource } from './shell-source.mjs'
 import { ERROR_TIER, NO_ERRORS_IN_FILE, WARNING_TIER, WEAK_WARNING_TIER, errorTier, nextErrorTarget } from '../src/gotoNextError.ts'
 
 const diag = (line, character, severity) => ({ line, character, severity })
@@ -100,7 +101,7 @@ test('the empty-file message is the one IDEA shows', () => {
 // commands). Reading the sources keeps a rename from leaving a menu row pointing nowhere.
 test('the editor binds F2 / Shift+F2 and the menu offers the same two actions', () => {
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
-  const app = readFileSync('src/App.vue', 'utf8')
+  const app = shellSource()
 
   assert.match(editor, /key: 'F2'/, 'F2 ($default.xml:658-660) is not bound')
   assert.match(editor, /key: 'Shift-F2'/, 'Shift+F2 ($default.xml:679-681) is not bound')

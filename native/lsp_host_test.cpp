@@ -18,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 namespace fs = std::filesystem;
@@ -55,13 +56,21 @@ int main() {
         Host host;
         std::mutex mutex;
         std::condition_variable ready;
-        bool initialized = false, init_failed = false, got_diagnostics = false, got_hover = false;
+        bool initialized = false, init_failed = false, got_diagnostics = false, got_hover = false, got_progress = false;
         Json diagnostics, hover_result;
+        std::vector<Json> progress;
 
         host.set_diagnostics([&](Json params) {
             std::lock_guard lock(mutex);
             diagnostics = std::move(params);
             got_diagnostics = true;
+            ready.notify_all();
+        });
+        // `$/progress` 走的是另一个回调：一条通知都不许漏给诊断那一路（也不许被丢掉）。
+        host.set_progress([&](Json params) {
+            std::lock_guard lock(mutex);
+            progress.push_back(std::move(params));
+            got_progress = progress.size() >= 3;
             ready.notify_all();
         });
 
@@ -91,6 +100,16 @@ int main() {
         check(diagnostics.at("uri") == "file:///tmp/Sample.java", "diagnostics carry the opened uri");
         check(diagnostics.at("diagnostics").size() == 1 && diagnostics.at("diagnostics")[0].at("message") == "fake diagnostic",
               "diagnostic payload survived framing");
+
+        check(wait_for(got_progress), "三拍 `$/progress`（begin/report/end）都要转出来");
+        {
+            std::lock_guard lock(mutex);
+            check(progress.size() >= 3, "progress params collected");
+            check(progress[0].at("token") == "fake-index" && progress[0].at("value").at("kind") == "begin",
+                  "begin 那一拍要原样转出去");
+            check(progress[1].at("value").at("percentage") == 40, "report 里的百分比不能在路上丢掉");
+            check(progress[2].at("value").at("kind") == "end", "end 那一拍也要转出去（前端靠它删行）");
+        }
 
         host.request("textDocument/hover", {{"textDocument", {{"uri", "file:///tmp/Sample.java"}}},
                                             {"position", {{"line", 0}, {"character", 6}}}},

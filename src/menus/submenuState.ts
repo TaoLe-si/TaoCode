@@ -8,7 +8,9 @@ import type { MenuRow } from './types'
 export interface SubmenuStyle { left: string; top?: string; bottom?: string; maxHeight: string }
 
 export function useSubmenuState() {
-  const hasSubmenu = (row: MenuRow) => Boolean(row.children?.length)
+  /** 子菜单的行：动态组优先（IDEA `ActionGroup.getChildren()`）。 */
+  const submenuRows = (row: MenuRow): MenuRow[] => row.childrenOf ? row.childrenOf() : row.children ?? []
+  const hasSubmenu = (row: MenuRow) => submenuRows(row).length > 0
   const submenuRow = ref<string | null>(null)
   const submenuPlacement = ref<'below' | 'above'>('below')
   const submenuStyle = ref<SubmenuStyle>({ left: '0px', maxHeight: '320px' })
@@ -40,5 +42,6 @@ export function useSubmenuState() {
   function cancelSubmenuClose() {
     if (closeTimer) { window.clearTimeout(closeTimer); closeTimer = undefined }
   }
-  return { hasSubmenu, submenuRow, submenuPlacement, submenuStyle, openSubmenu, closeSubmenu, scheduleSubmenuClose, cancelSubmenuClose }
+  return {
+    submenuRows, hasSubmenu, submenuRow, submenuPlacement, submenuStyle, openSubmenu, closeSubmenu, scheduleSubmenuClose, cancelSubmenuClose }
 }

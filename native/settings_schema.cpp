@@ -216,11 +216,13 @@ Json editor_defaults_impl() {
             {"bidiTextDirection", "contentBased"},
             // EditorSettingsExternalizable.java:87 默认 true。
             {"showGutterIcons", true},
-            // 文件颜色两层开关（IDEA `FileColorManagerImpl` 的 FileColorsEnabled /
-            // FileColorsForTabsEnabled，`_isEnabled()` :72-74 默认都是 true）。
-            {"fileColorsEnabled", true}, {"fileColorsForTabs", true},
+            // FileColorManagerImpl.java:75-106: all three switches default true.
+            {"fileColorsEnabled", true}, {"fileColorsForTabs", true}, {"fileColorsForProjectView", true},
             // UISettingsState.editorTabLimit defaults to 30 open tabs per group.
             {"tabLimit", 30},
+            // UISettingsState.kt:123 `scrollTabLayoutInEditor` 默认 **true** ⇒ 标签排成一行；
+            // 关掉才走 WrapMultiRowLayout（JBTabsImpl.kt:766-773 + EditorTabbedContainer.kt:582-584）。
+            {"tabsInOneRow", true},
             // Indent with tabs instead of spaces, render whitespace, reformat on save
             // (IDEA: Editor → Code Style "Use tab character", "Show whitespaces",
             // "Reformat code" in Actions on Save).
@@ -261,18 +263,23 @@ Json editor_defaults_impl() {
             {"backgroundImageFill", "scale"}, {"backgroundImageKeepRatio", true},
             {"presentationMode", false}, {"presentationModeFontSize", 24},
             // Main menu placement + screen-reader support (IDEA defaults).
-            {"mainMenuDisplayMode", "merged"},
+            // UISettingsState.kt:207：默认 UNDER_HAMBURGER_BUTTON（UISettings.kt:863 那条 separate 是**迁移**分支，不是默认）。
+            {"mainMenuDisplayMode", "hamburger"},
             // UISettingsState defaults: both AppearanceConfigurable extras ship off.
             {"differentiateProjects", false},
-            {"expandNodesWithSingleClick", false}};  // UISettingsState.kt:141
+            {"expandNodesWithSingleClick", false},  // UISettingsState.kt:141
+            // 高级设置 `editor.maximize.on.double.click`（intellij.platform.ide.impl.xml:1511 default="true"）。
+            {"maximizeEditorOnTabDoubleClick", true},
+            // UISettingsState.kt:127 showPinnedTabsInASeparateRow（默认 false）。
+            {"pinnedTabsInSeparateRow", false}};
 }
 
-// The markers IDEA ships: TODO, FIXME and the two conventional warning tags.
+// DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发 todo/fixme 两条（已核对源码），
+// 正则也逐字照抄（`\btodo\b.*` / `\bfixme\b.*`，大小写不敏感）。
 Json default_todo_markers() {
-    constexpr std::pair<const char*, const char*> markers[]{{"TODO", "待办"}, {"FIXME", "需要修"},
-                                                           {"XXX", "警告"}, {"HACK", "临时办法"}};
     Json result = Json::array();
-    for (const auto& [pattern, description] : markers)
+    for (const auto& [pattern, description] : {std::pair<const char*, const char*>{"\\btodo\\b.*", "待办"},
+                                                              {"\\bfixme\\b.*", "需要修"}})
         result.push_back({{"pattern", pattern}, {"description", description}});
     return result;
 }
@@ -283,16 +290,18 @@ Json project_defaults() {
             // 命名作用域（IDEA `ScopeChooserConfigurable`）：默认一个都没有，
             // 与 `NamedScopesHolder.myScopes = NamedScope.EMPTY_ARRAY` 一致。
             {"scopes", Json::array()},
-            // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认一条都没有，
-            // 与 `FileColorsModel` 初始两个空列表（应用级/项目级）一致。
-            {"fileColors", Json::array()},
+            // Shared/project configurations start empty (FileColorsModel.java:40).
+            // Upstream predefined local colors require scope providers; do not invent path-based defaults here.
+            {"fileColors", Json::array()}, {"localFileColors", Json::array()},
             // 书签工具窗口的视图状态（IDEA `BookmarksViewState`，workspace.xml，默认值见 :23-29）。
             {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
                                {"autoscrollFromSource", false}}},
             // VCS Log 的 UI 开关（IDEA `VcsLogApplicationSettings` 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_markers()},
-            {"java", {{"jdkHome", ""}, {"jdkName", "JavaSE-17"}, {"sourcePaths", Json::array()},
+            // jdkName 存 IDEA 的 SDK 显示名（JdkUtil.suggestJdkName:50-57 产出 `17` / `1.8` / `21-ea`），
+            // 不是 jdt.ls runtimes 的 `JavaSE-<x>` —— 那种形式只在 java_lsp_settings 的边界归一。
+            {"java", {{"jdkHome", ""}, {"jdkName", "17"}, {"sourcePaths", Json::array()},
                       {"outputPath", ""}, {"referencedLibraries", Json::array({"lib/**/*.jar"})}}},
             // Built-in templates are listed by the UI and only appear in `overrides`
             // once switched off, so the stored default is an empty pair of lists.
@@ -313,10 +322,15 @@ Json project_defaults() {
             // `scope: 0` = 还没选过（IDEA 的 MyState 里 printScope 默认 0，对话框按上下文决定初值）。
             {"exportToHtml", {{"scope", 0}, {"includeSubdirectories", false},
                               {"printLineNumbers", false}, {"openInBrowser", false}, {"outputDirectory", ""}}},
-            {"buildTools", {{"autoReloadType", "ALL"}, {"previousAutoReloadType", "ALL"},
+            // AutoImportProjectTrackerSettings.kt:16-26：autoReloadType 走 getDefaultAutoReloadType()，
+            // 全树没有注册 DefaultAutoReloadTypeProvider 扩展实现 ⇒ 默认 SELECTIVE（不是 ALL）。
+            {"buildTools", {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "SELECTIVE"},
                             {"gradle", {{"useGradleFrom", "wrapper"}, {"gradlePath", ""},
                                         {"gradleUserHome", ""}, {"gradleJvm", "#USE_PROJECT_JDK"},
-                                        {"delegatedBuild", true}, {"offline", false}}}}}};
+                                        {"delegatedBuild", true}, {"offline", false},
+                                        // 已链接的 Gradle 工程目录（`GradleSettings.linkedProjectsSettings`）。
+                                        // 缺键按"补默认"处理（老 projects.json 里没有这一项就是"没链接过"）。
+                                        {"linkedProjects", Json::array()}}}}}};
 }
 
 Json empty_document() {
@@ -498,8 +512,11 @@ void validate_java_settings(const Json& value) {
                 (!home.empty() && !from_utf8(home).is_absolute())) fail("INVALID_SETTINGS", "JDK home must be an absolute path or empty.");
         }
     if (value.contains("jdkName")) {
-        static const std::regex runtime("JavaSE-(1\\.8|9|[1-9][0-9])");
-        if (!std::regex_match(text_or(value, "jdkName"), runtime)) fail("INVALID_SETTINGS", "Use a Java execution environment such as JavaSE-17.");
+        // IDEA 的 SDK 名由 JdkUtil.suggestJdkName 产出：`1.<feature>`（8 及以下）或 `<feature>`
+        // （9 起），可带 `-ea` 后缀。历史文件里的 `JavaSE-<x>` 也放行（读盘不判损坏，
+        // java_lsp_settings 会按需归一）。
+        static const std::regex idea_name("1\\.[1-8]|[1-9][0-9](-ea)?|JavaSE-1\\.8|JavaSE-(9|[1-9][0-9])");
+        if (!std::regex_match(text_or(value, "jdkName"), idea_name)) fail("INVALID_SETTINGS", "JDK name must look like JdkUtil.suggestJdkName output (17 / 1.8 / 21-ea).");
     }
     const auto relative = [](const Json& item, bool glob) {
         if (!item.is_string()) fail("INVALID_SETTINGS", "Java project paths must be strings.");
@@ -589,13 +606,9 @@ void validate_scopes(const Json& value) {
     }
 }
 
-// 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors 一族：FileColorConfiguration =
-// scopeName + colorID）。每条只有「作用域名 + 颜色名」两个字段，颜色名限死在那七个
-// （`FileColorManagerImpl.ourDefaultColors` 的键）；数组顺序即优先级 —— 源码里
-// `FileColorsModel.findConfigurationWithScopeFilter:247-260` 顺着迭代器**首个命中就返回**。
-//
-// 上限与 scopes 同量级：文件名 80 字节、颜色名 7 个，64 条足够覆盖一个项目。
-// 作用域名允许指向尚未定义的作用域（与 IDEA 一致：它按名字查作用域，查不到就跳过这一条）。
+// FileColorManagerImpl.getColor + ColorHexUtil.java:28-35: named colors or RGB/RGBA hex.
+// Scope ownership is independent of color ownership; both lists share this validator.
+// Preserve unresolved scopes; local rules are project-owned (WORKSPACE_FILE), not global editor settings.
 void validate_file_colors(const Json& value) {
     if (!value.is_array()) fail("INVALID_SETTINGS", "fileColors 必须是数组。");
     if (value.size() > max_scopes)
@@ -615,8 +628,8 @@ void validate_file_colors(const Json& value) {
             fail("INVALID_SETTINGS", "作用域名不能为空且不超过 80 字节。");
         if (!valid_utf8(scope) || scope.find_first_of("\r\n\t") != std::string::npos)
             fail("INVALID_SETTINGS", "作用域名必须是单行 UTF-8 文本。");
-        if (!palette.count(color))
-            fail("INVALID_SETTINGS", "颜色名只能是 Blue/Green/Orange/Rose/Violet/Yellow/Gray 之一。");
+        if (!palette.count(color) && !std::regex_match(color, std::regex("(#|0x)?([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")))
+            fail("INVALID_SETTINGS", "颜色必须为七个具名色之一或 RGB/RGBA 十六进制（3/4/6/8 位，可带 # 或 0x）。");
         // 同名只留一条：重复会让「首个命中」依赖数组顺序里哪一条在前，语义不清。
         if (!scopes.insert(scope).second)
             fail("INVALID_SETTINGS", "同一个作用域名只能配一种颜色：" + scope);
@@ -639,7 +652,8 @@ void validate_build_tools(const Json& value) {
     if (!value.contains("gradle")) return;
     const auto& gradle = value.at("gradle");
     if (!gradle.is_object()) fail("INVALID_SETTINGS", "buildTools.gradle 必须是对象。");
-    known_keys(gradle, {"useGradleFrom", "gradlePath", "gradleUserHome", "gradleJvm", "delegatedBuild", "offline"}, "INVALID_SETTINGS");
+    known_keys(gradle, {"useGradleFrom", "gradlePath", "gradleUserHome", "gradleJvm", "delegatedBuild", "offline",
+                        "linkedProjects"}, "INVALID_SETTINGS");
     if (gradle.contains("useGradleFrom")) {
         const auto& field = gradle.at("useGradleFrom");
         // `DistributionType`：默认/包装器 → wrapper；本机 → local；指定路径 → path。
@@ -659,6 +673,24 @@ void validate_build_tools(const Json& value) {
     for (const auto key : {"delegatedBuild", "offline"}) {
         if (gradle.contains(key) && !gradle.at(key).is_boolean())
             fail("INVALID_SETTINGS", std::string("buildTools.gradle.") + key + " 必须是布尔值。");
+    }
+    // 已链接的 Gradle 工程目录：工作区**相对**目录（`''` = 工作区根，就是自动链接那一档）。
+    // 与 `java.sourcePaths` 同一口径：绝对路径、盘符、`..` 段一律拒 —— 一次坏写入就能把
+    // 同步的当前工作目录带到项目外面。
+    if (!gradle.contains("linkedProjects")) return;
+    const auto& linked = gradle.at("linkedProjects");
+    if (!linked.is_array() || linked.size() > 32) fail("INVALID_SETTINGS", "linkedProjects 必须是不超过 32 项的数组。");
+    for (const auto& item : linked) {
+        if (!item.is_string()) fail("INVALID_SETTINGS", "linkedProjects 的每一项都必须是字符串路径。");
+        const auto text = item.get<std::string>();
+        // 口径与书签路径一致（同文件 validate_bookmarks）：正斜杠、不出工作区、不带盘符。
+        if (text.size() > 512 || !valid_utf8(text) || text.find('\\') != std::string::npos ||
+            text.find_first_of("\r\n") != std::string::npos || text.find(':') != std::string::npos ||
+            (!text.empty() && text.front() == '/'))
+            fail("INVALID_SETTINGS", "linkedProjects 必须是工作区内的正斜杠相对目录：" + text);
+        if (text == ".." || text.starts_with("../") || text.find("/../") != std::string::npos ||
+            text.ends_with("/.."))
+            fail("INVALID_SETTINGS", "linkedProjects 不能跳出工作区：" + text);
     }
 }
 
@@ -687,12 +719,12 @@ void validate_export_to_html(const Json& value) {
 
 void validate_project_patch(const Json& patch) {
     known_keys(patch, {"excludedDirs", "runConfigs", "bookmarks", "todoPatterns", "templates", "java",
-                       "fileAssociations", "vcsLog", "scopes", "fileColors", "bookmarksView", "buildTools", "exportToHtml"},
+                       "fileAssociations", "vcsLog", "scopes", "fileColors", "localFileColors", "bookmarksView", "buildTools", "exportToHtml"},
                "INVALID_SETTINGS");
     if (patch.contains("buildTools")) validate_build_tools(patch.at("buildTools"));
     if (patch.contains("exportToHtml")) validate_export_to_html(patch.at("exportToHtml"));
     if (patch.contains("scopes")) validate_scopes(patch.at("scopes"));
-if (patch.contains("fileColors")) validate_file_colors(patch.at("fileColors"));
+    for (const auto* key : {"localFileColors", "fileColors"}) if (patch.contains(key)) validate_file_colors(patch.at(key));
     if (patch.contains("bookmarksView")) {
         // 只收录有真实落点的三个开关（IDEA 还有 askBeforeDeletingLists / showPreview /
         // rewriteBookmarkType，本仓没有对应概念，故不接受它们 —— 免得存下一个没人读的值）。

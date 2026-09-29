@@ -4,6 +4,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -85,5 +86,16 @@ private:
 // (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33). Opens the *parent* directory
 // with the entry selected, exactly like `RevealFileAction.openFile(Path)` (:170-174).
 Json reveal_absolute(const std::string& absolute);
+
+// 用系统默认处理器打开一个**带协议的绝对链接**（`https:` / `mailto:` / …）。
+// IDEA 的对应物是 `BrowserUtil.browse`；`OpenUrlHyperlinkInfo`
+// （`platform/execution-impl/src/com/intellij/ide/browsers/OpenUrlHyperlinkInfo.java`）就是把
+// 控制台/文档里的 URL 交给它。
+//
+// **只放行带协议前缀的 URL**：`ShellExecuteW(L"open", …)` 对 `"calc.exe"` 或 `"C:\x.exe"`
+// 也会照单执行，而这个 `url` 可能来自语言服务器（LSP `documentLink.target` 是服务器给的）——
+// 不校验就等于给服务器一个任意命令执行的入口。协议名按 RFC 3986 的 `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`
+// 校验，其余一律拒绝。
+Json open_external(const std::string& url);
 
 } // namespace taocode

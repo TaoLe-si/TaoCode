@@ -41,7 +41,8 @@ test('project settings patch one key without dropping the other', async () => {
 
 test('todo markers are a project list of pattern plus description', async () => {
   const initial = await preview.request('project.settings.get')
-  assert.deepEqual(initial.todoPatterns.map(entry => entry.pattern), ['TODO', 'FIXME', 'XXX', 'HACK'], 'the preview starts from the built-in markers')
+  // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发两条，正则逐字照抄。
+  assert.deepEqual(initial.todoPatterns.map(entry => entry.pattern), ['\\btodo\\b.*', '\\bfixme\\b.*'], 'the preview starts from the built-in markers')
   const custom = [{ pattern: 'REVIEW', description: '待评审' }, { pattern: 'TODO[:\\s]', description: '带冒号' }]
   const saved = await preview.request('project.settings.update', { todoPatterns: custom })
   assert.deepEqual(saved.settings.todoPatterns, custom)
@@ -360,4 +361,79 @@ test('tree mutations, sessions and reveal stay desktop-only in the preview', asy
   ]) {
     await assert.rejects(call, error => error.code === 'DESKTOP_REQUIRED')
   }
+})
+
+test('host events reach their stores, and only via handleHostEvent', () => {
+  const before = preview.fsChanges.version
+  assert.equal(preview.handleHostEvent({ event: 'fs.changed', paths: ['src/a.ts'] }), true)
+  assert.equal(preview.fsChanges.version, before + 1)
+  assert.deepEqual(preview.fsChanges.paths, ['src/a.ts'])
+
+  const watch = preview.watchStopped.version
+  assert.equal(preview.handleHostEvent({ event: 'fs.watchStopped', reason: 'overflow', restarting: true, attempt: 2 }), true)
+  assert.deepEqual({ reason: preview.watchStopped.reason, restarting: preview.watchStopped.restarting, attempt: preview.watchStopped.attempt },
+    { reason: 'overflow', restarting: true, attempt: 2 })
+  assert.equal(preview.watchStopped.version, watch + 1)
+
+  const edited = preview.lspEdited.version
+  preview.handleHostEvent({ event: 'lsp.edited', path: 'src/b.ts' })
+  assert.equal(preview.lspEdited.path, 'src/b.ts')
+  assert.equal(preview.lspEdited.version, edited + 1)
+
+  // 形状不对的事件必须原样落地：不能因为字段缺失就把 store 写坏。
+  assert.equal(preview.handleHostEvent({ event: 'lsp.edited' }), false)
+  assert.equal(preview.lspEdited.path, 'src/b.ts')
+  assert.equal(preview.handleHostEvent({ event: 'fs.changed', paths: 'not-an-array' }), false)
+  assert.equal(preview.fsChanges.version, before + 1)
+  // 既不是事件、也不是待处理请求的回包
+  assert.equal(preview.handleHostEvent(undefined), false)
+  assert.equal(preview.handleHostEvent({ id: 999999 }), false)
+})
+
+test('a pull-managed file ignores pushed diagnostics until the mark is dropped', () => {
+  const path = 'src/diagnostic.rs'
+  assert.equal(preview.isPullDiagnostics(path), false)
+
+  // 先来一条推送：正常落地。
+  assert.equal(preview.applyPushedDiagnostics(path, [{ severity: 1, message: 'push', startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 4 }]), true)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'push')
+
+  // 走一次 pull：标记生效，后续推送被丢弃。
+  preview.setPullDiagnostics(path, [{ severity: 2, message: 'pull', startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 3 }])
+  assert.equal(preview.isPullDiagnostics(path), true)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'pull')
+  assert.equal(preview.applyPushedDiagnostics(path, [{ severity: 1, message: 'push-again', startLine: 3, startCharacter: 0, endLine: 3, endCharacter: 1 }]), false)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'pull', 'a push must not overwrite a pull result')
+
+  // 同一条规则也要在真正的宿主事件入口上成立（handleHostEvent 是唯一入口）。
+  assert.equal(preview.handleHostEvent({ event: 'lsp.diagnostics', path, diagnostics: [] }), true)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'pull', 'the push event is consumed but ignored')
+
+  // 服务器只推送时（supported=false）标记必须能撤掉，否则该文件永远收不到诊断。
+  preview.clearPullDiagnostics(path)
+  assert.equal(preview.isPullDiagnostics(path), false)
+  assert.equal(preview.applyPushedDiagnostics(path, [{ severity: 1, message: 'recovered', startLine: 4, startCharacter: 0, endLine: 4, endCharacter: 2 }]), true)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'recovered')
+
+  // 清空诊断时标记一并丢弃，下一次推送还能写进这张表。
+  preview.setPullDiagnostics(path, [])
+  assert.equal(preview.isPullDiagnostics(path), true)
+  preview.clearLspDiagnostics(path)
+  assert.equal(preview.lspDiagnostics.has(path), false)
+  assert.equal(preview.isPullDiagnostics(path), false)
+  assert.equal(preview.applyPushedDiagnostics(path, [{ severity: 3, message: 'after-clear', startLine: 5, startCharacter: 0, endLine: 5, endCharacter: 1 }]), true)
+  assert.equal(preview.lspDiagnostics.get(path)[0].message, 'after-clear')
+
+  preview.clearLspDiagnostics(path)
+})
+
+test('diagnostic push with a non-array payload clears instead of corrupting the store', () => {
+  const path = 'src/legacy.ts'
+  preview.applyPushedDiagnostics(path, null)
+  assert.deepEqual(preview.lspDiagnostics.get(path), [])
+  preview.applyPushedDiagnostics(path, [{ severity: 4, message: 'ok', startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 1 }])
+  assert.equal(preview.lspDiagnostics.get(path).length, 1)
+  preview.applyPushedDiagnostics(path, 'garbage')
+  assert.deepEqual(preview.lspDiagnostics.get(path), [], 'a malformed payload resets the file rather than throwing')
+  preview.clearLspDiagnostics(path)
 })

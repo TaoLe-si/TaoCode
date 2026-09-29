@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "workspace.hpp"  // WorkspaceError
+#include "git_log.hpp"
 
 namespace taocode {
 namespace git {
@@ -23,11 +24,12 @@ std::vector<Change> status(const std::filesystem::path& repo);
 // With a non-empty `base`, the diff compares the two tips (`git diff HEAD base`), so the
 // other side's files read as additions and files only this side has read as deletions —
 // IDEA's compare view. Otherwise it is the staged/unstaged working-tree state.
+// context：统一 diff 的上下文行数（<=0 = git 默认；对应 IDEA diff 设置 settings.context.lines）。
 std::string diff(const std::filesystem::path& repo, const std::string& path, bool staged,
-                 const std::string& base = std::string());
+                 const std::string& base = std::string(), int context = 0);
 // Same diff, folded into left/right rows for a side-by-side viewer (see history.hpp).
 Json diff_sides(const std::filesystem::path& repo, const std::string& path, bool staged,
-                const std::string& base = std::string());
+                const std::string& base = std::string(), int context = 0);
 // {files:[{status,path}]} for every file where `base` and HEAD differ.
 Json compare(const std::filesystem::path& repo, const std::string& base);
 std::string head(const std::filesystem::path& repo);                 // branch name, detached hash, or empty
@@ -61,7 +63,7 @@ void checkout(const std::filesystem::path& repo, const std::string& branch);
 Json log(const std::filesystem::path& repo, const std::string& path, int limit);
 // Full log for the VCS Log tool window: includes parent hashes and ref names so the
 // frontend can draw the commit graph and label branches/tags without a second round-trip.
-// Shapes {commits:[{hash, shortHash, author, date, subject, parents:[hash], refs:[name]}]}.
+// Shapes {commits:[{hash, shortHash, author, date, subject, parents:[hash], refs:[{name,type}]}], offset, limit, hasMore}.
 Json log_full(const std::filesystem::path& repo, int limit);
 void pull(const std::filesystem::path& repo);
 void push(const std::filesystem::path& repo);
@@ -111,7 +113,8 @@ void revert(const std::filesystem::path& repo, const std::string& path);
 Json reset(const std::filesystem::path& repo, const std::string& target, const std::string& mode);
 
 // Per-line origin for `path` via `git blame --line-porcelain`:
-// {lines:[{line, hash, author, content}]} with 1-BASED line numbers.
+// {lines:[{line, hash, author, email, date, summary, content}]} with 1-BASED line
+// numbers. `hash` is the 8-char short sha; `date` is YYYY-MM-DD (local time).
 Json blame(const std::filesystem::path& repo, const std::string& path);
 
 // IDEA's "Show History for File" follows a file across renames (`--follow`), so the

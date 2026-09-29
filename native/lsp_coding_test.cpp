@@ -1,5 +1,6 @@
 // Offline self-test for the coding-assistance kinds added to Session: signatureHelp,
-// codeAction, codeActionResolve, formatting, rangeFormatting, implementation,
+// codeAction, codeActionResolve, executeCommand, willRenameFiles, the file-operation
+// notifications (workspace/did*Files), formatting, rangeFormatting, implementation,
 // typeDefinition and documentHighlight are driven against the fake language server
 // (real subprocess +
 // stdio framing), so the shaping contract is deterministic and needs no installed
@@ -23,8 +24,10 @@
 #include <filesystem>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace fs = std::filesystem;
@@ -78,9 +81,14 @@ int main() {
     std::mutex mutex;
     std::condition_variable cv;
     bool diagnostics_arrived = false;
-    Session session([&](std::string, Json) {
+    // Every diagnostic batch, kept: a file-operation NOTIFICATION has no reply, so the
+    // fake server publishes what it received as a diagnostic — see the harness helper
+    // below. Keeping them all (not just the last) is what makes that observable.
+    std::vector<std::pair<std::string, Json>> diagnostics_log;
+    Session session([&](std::string path, Json diagnostics) {
         std::lock_guard lock(mutex);
         diagnostics_arrived = true;
+        diagnostics_log.emplace_back(std::move(path), std::move(diagnostics));
         cv.notify_all();
     });
     session.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
@@ -110,6 +118,73 @@ int main() {
         check(wait_for(done), kind + ": callback never fired");
         if (!error.is_null()) throw std::runtime_error(kind + ": " + describe(error));
         return result;
+    };
+
+    // The same as `ask`, for a kind whose subject is not the one open document
+    // (workspace/file-operation kinds address a path that may not be open at all).
+    const auto ask_path = [&](const std::string& kind, const std::string& path, const Json& args) {
+        bool done = false;
+        Json result, error;
+        session.semantic(kind, path, 0, 0, args, [&](Json payload, Json failure) {
+            std::lock_guard lock(mutex);
+            result = std::move(payload);
+            error = std::move(failure);
+            done = true;
+            cv.notify_all();
+        });
+        check(wait_for(done), kind + ": callback never fired");
+        if (!error.is_null()) throw std::runtime_error(kind + ": " + describe(error));
+        return result;
+    };
+
+    // A file-operation notification carries no reply, so the fake server turns each one
+    // into a diagnostic on the named document. This waits for the message containing
+    // `fragment` and hands back both the mapped path and the whole message. The wait is
+    // a predicate, so a batch that lands between the scan and the sleep is still seen.
+    const auto find_file_operation = [&](const std::string& fragment, std::chrono::milliseconds timeout)
+        -> std::optional<std::pair<std::string, std::string>> {
+        std::unique_lock lock(mutex);
+        const auto matches = [&](const Json& item) {
+            return item.is_object() && item.value("message", std::string()).find(fragment) != std::string::npos;
+        };
+        const auto scan = [&]() {
+            for (const auto& entry : diagnostics_log)
+                for (const auto& item : entry.second)
+                    if (matches(item)) return true;
+            return false;
+        };
+        if (timeout.count() > 0) cv.wait_for(lock, timeout, scan);
+        if (!scan()) return std::nullopt;
+        for (auto entry = diagnostics_log.rbegin(); entry != diagnostics_log.rend(); ++entry)
+            for (auto item = entry->second.rbegin(); item != entry->second.rend(); ++item)
+                if (matches(*item)) return std::make_pair(entry->first, item->value("message", std::string()));
+        return std::nullopt;
+    };
+    const auto await_file_operation = [&](const std::string& fragment) {
+        const auto found = find_file_operation(fragment, std::chrono::seconds(15));
+        if (!found) throw std::runtime_error("no file-operation diagnostic containing " + fragment);
+        return *found;
+    };
+    // Same, but only reports whether it arrived — used for the NEGATIVE case, where the
+    // answer is "nothing may arrive at all".
+    const auto saw_file_operation = [&](const std::string& fragment) {
+        return find_file_operation(fragment, std::chrono::seconds(2)).has_value();
+    };
+
+    // Waits for one async semantic() callback that is EXPECTED to fail, and asserts
+    // the error code the UI keys its degradation on.
+    const auto expect_error = [&](const std::string& kind, const Json& args, const std::string& code) {
+        bool done = false;
+        Json failure;
+        session.semantic(kind, kDoc, 3, 1, args, [&](Json, Json error) {
+            std::lock_guard lock(mutex);
+            failure = std::move(error);
+            done = true;
+            cv.notify_all();
+        });
+        check(wait_for(done), kind + ": callback never fired");
+        check(!failure.is_null() && failure.value("code", std::string()) == code,
+              kind + " should fail with " + code + ", got: " + describe(failure));
     };
 
     run("session opens the document the coding-assistance queries run against", [&] {
@@ -271,6 +346,55 @@ int main() {
         });
         check(wait_for(done), "the stale index answered synchronously");
         check(failed, "index 9 of a two-action list must be reported as an error, not silently empty");
+    });
+
+    run("a code action carrying a Command is marked executable before it is offered", [&] {
+        const auto result = ask("codeAction", 3, 1, Json::object());
+        const auto& actions = result.at("actions");
+        check(action_for(actions, "Organize imports").at("command") == true,
+              "a server-side command is flagged so the UI does not read it as 'nothing to apply'");
+        check(!action_for(actions, "Fix it").contains("command"),
+              "an inline edit with no command must not be flagged executable");
+    });
+
+    run("executeCommand runs the stored action's command on the server", [&] {
+        // executeCommand addresses the action by the `index` the last codeAction reply
+        // handed out, so listing first is part of the contract (not test scaffolding).
+        const auto listed = ask("codeAction", 3, 1, Json::object());
+        check(action_for(listed.at("actions"), "Organize imports").at("index") == 1, "listed at index 1");
+        const auto result = ask("executeCommand", 3, 1, Json{{"index", 1}});
+        check(result.at("available") == true && result.at("executed") == true, "reported as executed");
+        check(result.at("value").at("executed").get<std::string>() == "java.action.organizeImports",
+              "the command id reached the server: " + describe(result.at("value")));
+        check(result.at("value").at("argc") == -1,
+              "a command with no `arguments` must not be sent an empty array (argc -1 = the key was absent)");
+    });
+
+    run("executeCommand sends a bare command id with its arguments verbatim", [&] {
+        const Json arguments = Json::array({1, "two", Json{{"deep", true}}});
+        const auto result = ask("executeCommand", 0, 0, Json{{"command", "fake.echo"}, {"arguments", arguments}});
+        check(result.at("value").at("executed") == "fake.echo", "the id round-trips: " + describe(result.at("value")));
+        check(result.at("value").at("argc") == 3, "every argument arrived, got " + describe(result.at("value")));
+    });
+
+    run("codeActionResolve stores the resolved action so its command can run afterwards", [&] {
+        // LSP allows a resolved action to carry BOTH an edit and a command; the edit is
+        // applied first and the command runs after. The fake server's resolve reply keeps
+        // the command and adds the edit, which is exactly that shape.
+        const auto resolved = ask("codeActionResolve", 3, 1, Json{{"index", 1}});
+        check(resolved.at("available") == true && resolved.at("edits").size() == 1, "the promised edit arrived");
+        check(resolved.at("command") == true, "an action that resolved to edit+command is still executable");
+        const auto executed = ask("executeCommand", 3, 1, Json{{"index", 1}});
+        check(executed.at("value").at("executed") == "java.action.organizeImports",
+              "the RESOLVED object was stored, not the unfinished original: " + describe(executed.at("value")));
+    });
+
+    run("executeCommand refuses an action with no command, an empty id and a stale index", [&] {
+        ask("codeAction", 3, 1, Json::object());                     // "Fix it" is index 0, inline only
+        expect_error("executeCommand", Json{{"index", 0}}, "NO_COMMAND");
+        expect_error("executeCommand", Json{{"command", ""}}, "NO_COMMAND");
+        expect_error("executeCommand", Json{{"index", 9}}, "STALE_ACTION");
+        expect_error("executeCommand", Json::object(), "INVALID_REQUEST");
     });
 
     run("prepareCallHierarchy shapes the item and keeps the raw echo", [&] {
@@ -460,6 +584,114 @@ int main() {
               "selectionRange start and range end still flatten");
     });
 
+    // 文件操作通知：IDE 自己动了磁盘（文件树里建/改名/删），服务器索引必须跟上。
+    // 通知没有回包，所以假服务器把收到的内容当成一条诊断发回来 —— 见上面的
+    // `await_file_operation`。
+    run("file create, rename and delete reach a server that declared fileOperations", [&] {
+        session.announce_file_operations("created", std::vector<Session::FileOperation>{{"src/New.java", ""}});
+        const auto created = await_file_operation("workspace/didCreateFiles");
+        check(created.first == "src/New.java", "the uri mapped back to the relative path: " + created.first);
+        check(created.second.find("/src/New.java") != std::string::npos, "the uri went out: " + created.second);
+
+        session.announce_file_operations("renamed", std::vector<Session::FileOperation>{{"src/Renamed.java", "src/Old.java"}});
+        const auto renamed = await_file_operation("workspace/didRenameFiles");
+        check(renamed.first == "src/Renamed.java", "the NEW path is the subject: " + renamed.first);
+        check(renamed.second.find("/src/Old.java") != std::string::npos &&
+                  renamed.second.find("/src/Renamed.java") != std::string::npos,
+              "didRenameFiles carries BOTH uris: " + renamed.second);
+
+        session.announce_file_operations("deleted", std::vector<Session::FileOperation>{{"src/Gone.java", ""}});
+        const auto deleted = await_file_operation("workspace/didDeleteFiles");
+        check(deleted.first == "src/Gone.java", "the removed file: " + deleted.first);
+    });
+
+    run("a rename without its old path, and an empty list, send nothing at all", [&] {
+        // 参数不全时**整条通知都不发**：一条 oldUri 为空的 didRenameFiles 会被服务器
+        // 理解成"从空路径改名"，比不发更糟。
+        session.announce_file_operations("renamed", std::vector<Session::FileOperation>{{"src/Only.java", ""}});
+        session.announce_file_operations("created", std::vector<Session::FileOperation>{});
+        check(!saw_file_operation("src/Only.java"), "a half-formed rename must not reach the server");
+    });
+
+    run("willRenameFiles hands back the server's WorkspaceEdit for the renamed file", [&] {
+        const auto result = ask_path("willRenameFiles", "src/Old.java", Json{{"newPath", "src/Renamed.java"}});
+        check(result.at("available") == true, "the server offered edits");
+        // 结果是 **WorkspaceEdit 本身**，不是 {edit: …}：形状搞错的话这里会拿到空编辑。
+        const auto& text = group_for(result.at("edits"), "src/Renamed.java").at("textEdits");
+        check(text.size() == 1, "one text edit, got " + std::to_string(text.size()));
+        const auto inserted = text[0].at("text").get<std::string>();
+        check(inserted.rfind("// moved from", 0) == 0, "the import rewrite: " + inserted);
+        check(inserted.find("/src/Old.java") != std::string::npos, "the OLD uri went out: " + inserted);
+    });
+
+    run("a server that did not declare fileOperations is never notified", [&] {
+        std::mutex local_mutex;
+        std::condition_variable local_cv;
+        bool local_diagnostics = false;
+        std::vector<std::pair<std::string, Json>> local_log;
+        Session quiet_session([&](std::string path, Json diagnostics) {
+            std::lock_guard lock(local_mutex);
+            local_diagnostics = true;
+            local_log.emplace_back(std::move(path), std::move(diagnostics));
+            local_cv.notify_all();
+        });
+        quiet_session.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
+        Session::ServerConfig config;
+        config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        config.arguments.push_back(L"--no-file-operations");
+        std::map<std::string, Session::ServerConfig> servers;
+        servers["java"] = config;
+        quiet_session.configure(std::move(servers));
+        check(quiet_session.open(kDoc, "class Sample {\n    int counter;\n}\n").at("running") == true,
+              "the server without file operations starts");
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return local_diagnostics; }),
+                  "no diagnostics after deferred didOpen");
+        }
+        bool renamed_done = false;
+        Json renamed_result, renamed_error;
+        quiet_session.semantic("willRenameFiles", "src/Old.java", 0, 0, Json{{"newPath", "src/Renamed.java"}},
+                               [&](Json result, Json error) {
+                                   std::lock_guard lock(local_mutex);
+                                   renamed_result = std::move(result);
+                                   renamed_error = std::move(error);
+                                   renamed_done = true;
+                                   local_cv.notify_all();
+                               });
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return renamed_done; }),
+                  "willRenameFiles never replied");
+        }
+        // 能力没声明不是错误：调用方只是跳过"更新引用"，改名本身照做。
+        check(renamed_error.is_null(), "a missing capability is not an error: " + describe(renamed_error));
+        check(renamed_result.at("available") == false, "and no edits are invented");
+
+        quiet_session.announce_file_operations("renamed",
+            std::vector<Session::FileOperation>{{"src/Renamed.java", "src/Old.java"}});
+        // 往返一次把管子冲干净：服务器按到达顺序处理消息，所以这个回包到达时，若前面真发过
+        // didRenameFiles，它引出的诊断必定已经先到了。这样"没收到"才是确定的，而不是靠等。
+        bool flushed = false;
+        quiet_session.semantic("workspaceSymbol", "src/Probe.java", 0, 0, Json{{"query", "Sample"}},
+                               [&](Json, Json) {
+                                   std::lock_guard lock(local_mutex);
+                                   flushed = true;
+                                   local_cv.notify_all();
+                               });
+        {
+            std::unique_lock lock(local_mutex);
+            check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return flushed; }),
+                  "the flushing request never replied");
+        }
+        for (const auto& entry : local_log)
+            for (const auto& item : entry.second)
+                check(!item.is_object() ||
+                          item.value("message", std::string()).find("workspace/did") == std::string::npos,
+                      "a server that did not declare fileOperations must not be notified");
+        quiet_session.shutdown_all();
+    });
+
     run("the new kinds reject a closed document and an unknown kind", [&] {
         for (const char* kind : {"signatureHelp", "codeAction", "codeActionResolve", "formatting", "rangeFormatting",
                                  "implementation", "typeDefinition", "documentHighlight", "prepareCallHierarchy",
@@ -540,6 +772,10 @@ int main() {
         Session::ServerConfig config;
         config.command = (self_directory() / L"lsp_fake_server.exe").native();
         config.arguments.push_back(L"--no-selection-range");
+        // The same handshake also declines executeCommandProvider: a client that sent
+        // workspace/executeCommand anyway would be talking to a capability the server
+        // explicitly refused.
+        config.arguments.push_back(L"--no-execute-command");
         std::map<std::string, Session::ServerConfig> servers;
         servers["java"] = config;
         declined_session.configure(std::move(servers));
@@ -550,10 +786,10 @@ int main() {
             check(local_cv.wait_for(lock, std::chrono::seconds(15), [&] { return local_diagnostics; }),
                   "no diagnostics after deferred didOpen");
         }
-        const auto ask_local = [&](const std::string& kind) {
+        const auto ask_local = [&](const std::string& kind, const Json& args = Json::object()) {
             bool done = false;
             Json payload, failure;
-            declined_session.semantic(kind, kDoc, 4, 6, Json::object(), [&](Json result, Json error) {
+            declined_session.semantic(kind, kDoc, 4, 6, args, [&](Json result, Json error) {
                 std::lock_guard lock(local_mutex);
                 payload = std::move(result);
                 failure = std::move(error);
@@ -571,6 +807,11 @@ int main() {
         const auto [hints, hints_failure] = ask_local("inlayHint");
         check(hints_failure.is_null() && hints.at("available") == true,
               "a capability the same server did advertise still works: " + describe(hints_failure));
+        const auto [executed, execute_failure] =
+            ask_local("executeCommand", Json{{"command", "fake.echo"}});
+        check(!execute_failure.is_null() && execute_failure.value("code", std::string()) == "LSP_UNSUPPORTED",
+              "a declined executeCommandProvider is refused locally: " + describe(execute_failure));
+        check(executed.is_null(), "and no command is sent to a server that refused them");
         declined_session.shutdown_all();
     });
 

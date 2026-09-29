@@ -1,6 +1,11 @@
 #include "projects.hpp"
+#include "project_file_colors.hpp"
+#include "project_settings_state.hpp"
+#include "settings_transfer.hpp"
 #include "settings_schema.hpp"
 #include "fsops.hpp"
+#include "jdk.hpp"
+#include "text.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -29,35 +34,13 @@
 namespace taocode {
 namespace {
 
-constexpr std::size_t state_limit = 1024 * 1024;
-constexpr std::size_t recent_limit = 30;
+using project_settings::load_state;
+using project_settings::save_state;
+using project_settings::recent_limit;
 // ponytail: one process-wide lock, including different stores; split by state path
 // only if configuration I/O contention matters. No cross-process CAS is promised.
 std::mutex store_mutex;
 
-[[noreturn]] void fail(const char* code, const std::string& message) {
-    throw WorkspaceError(code, message);
-}
-
-[[noreturn]] void win_error(const std::string& message, DWORD error = GetLastError()) {
-    const char* code = "IO_ERROR";
-    switch (error) {
-    case ERROR_FILE_NOT_FOUND:
-    case ERROR_PATH_NOT_FOUND: code = "NOT_FOUND"; break;
-    case ERROR_ACCESS_DENIED:
-    case ERROR_PRIVILEGE_NOT_HELD: code = "ACCESS_DENIED"; break;
-    case ERROR_SHARING_VIOLATION:
-    case ERROR_LOCK_VIOLATION: code = "FILE_BUSY"; break;
-    case ERROR_FILE_EXISTS:
-    case ERROR_ALREADY_EXISTS: code = "ALREADY_EXISTS"; break;
-    case ERROR_INVALID_NAME:
-    case ERROR_BAD_PATHNAME:
-    case ERROR_FILENAME_EXCED_RANGE: code = "INVALID_PATH"; break;
-    case ERROR_DIRECTORY: code = "NOT_DIRECTORY"; break;
-    default: break;
-    }
-    fail(code, message + " (Windows error " + std::to_string(error) + ").");
-}
 
 template <class Operation>
 auto boundary(Operation&& operation) -> decltype(operation()) {
@@ -74,32 +57,6 @@ auto boundary(Operation&& operation) -> decltype(operation()) {
     }
 }
 
-class Handle {
-public:
-    explicit Handle(HANDLE value = INVALID_HANDLE_VALUE) noexcept : value_(value) {}
-    ~Handle() { reset(); }
-    Handle(const Handle&) = delete;
-    Handle& operator=(const Handle&) = delete;
-    Handle(Handle&& other) noexcept
-        : value_(std::exchange(other.value_, INVALID_HANDLE_VALUE)) {}
-    Handle& operator=(Handle&& other) noexcept {
-        if (this != &other) {
-            reset();
-            value_ = std::exchange(other.value_, INVALID_HANDLE_VALUE);
-        }
-        return *this;
-    }
-    HANDLE get() const noexcept { return value_; }
-    explicit operator bool() const noexcept {
-        return value_ != INVALID_HANDLE_VALUE && value_ != nullptr;
-    }
-    void reset() noexcept {
-        if (*this) CloseHandle(value_);
-        value_ = INVALID_HANDLE_VALUE;
-    }
-private:
-    HANDLE value_;
-};
 
 
 constexpr std::size_t max_run_configs = 40;
@@ -107,31 +64,6 @@ constexpr std::size_t max_run_configs = 40;
 
 bool same_path(const std::string& a, const std::string& b) {
     return equal_name(from_utf8(a).native(), from_utf8(b).native());
-}
-
-std::string stored_path(const Json& value) {
-    if (!value.is_string()) fail("STATE_CORRUPT", "A stored project path is not a string.");
-    return utf8_path(absolute_path(from_utf8(value.get_ref<const std::string&>()), true));
-}
-
-bool valid_timestamp(const std::string& value) {
-    if (value.size() != 20 || value[4] != '-' || value[7] != '-' || value[10] != 'T' ||
-        value[13] != ':' || value[16] != ':' || value[19] != 'Z') return false;
-    for (std::size_t i = 0; i != value.size(); ++i) {
-        if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16 || i == 19) continue;
-        if (value[i] < '0' || value[i] > '9') return false;
-    }
-    const auto number = [&](std::size_t start, std::size_t length) {
-        unsigned result = 0;
-        for (std::size_t i = start; i < start + length; ++i) result = result * 10 + value[i] - '0';
-        return result;
-    };
-    const auto year = number(0, 4), month = number(5, 2), day = number(8, 2);
-    constexpr unsigned days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    if (year < 1601 || month < 1 || month > 12 || day < 1 || number(11, 2) > 23 ||
-        number(14, 2) > 59 || number(17, 2) > 59) return false;
-    const bool leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    return day <= days[month - 1] + (month == 2 && leap ? 1u : 0u);
 }
 
 std::string utc_now() {
@@ -143,177 +75,6 @@ std::string utc_now() {
                   static_cast<unsigned>(now.wDay), static_cast<unsigned>(now.wHour),
                   static_cast<unsigned>(now.wMinute), static_cast<unsigned>(now.wSecond));
     return buffer.data();
-}
-
-Json validate_document(Json value) {
-    try {
-        known_keys(value, {"recentProjects", "settings", "general", "lastProject", "perProject"}, "STATE_CORRUPT");
-        // 两级剪枝：文档里的 settings / general 都先丢掉当前版本不认识的键，再走严格校验。
-        if (value.contains("settings")) prune_unknown(value["settings"], EDITOR_SETTING_KEYS);
-        if (value.contains("general")) prune_unknown(value["general"], GENERAL_SETTING_KEYS);
-        if (!value.contains("recentProjects") || !value.at("recentProjects").is_array() ||
-            value.at("recentProjects").size() > recent_limit || !value.contains("settings") ||
-            !value.contains("lastProject"))
-            fail("STATE_CORRUPT", "The saved project state has an invalid schema.");
-        validate_editor_patch(value.at("settings"));
-        // A file written before a setting existed is not corrupt: the missing keys
-        // take their defaults. Unknown keys and wrong types are still refused above.
-        // The defaults are hoisted because iterating the items() view of a temporary
-        // would leave the iterators dangling.
-        const Json fallbacks = editor_defaults_impl();
-        for (const auto& entry : fallbacks.items())
-            if (!value["settings"].contains(entry.key())) value["settings"][entry.key()] = entry.value();
-        std::vector<std::string> paths;
-        for (auto& recent : value.at("recentProjects")) {
-            known_keys(recent, {"name", "path", "lastOpened", "available", "displayName",
-                                "projectName", "activationTimestamp", "branchName"}, "STATE_CORRUPT");
-            if (!recent.contains("name") || !recent.at("name").is_string() ||
-                recent.at("name").get_ref<const std::string&>().empty() ||
-                !valid_utf8(recent.at("name").get_ref<const std::string&>()) ||
-                !recent.contains("path") || !recent.contains("lastOpened") ||
-                !recent.at("lastOpened").is_string() ||
-                !valid_timestamp(recent.at("lastOpened").get_ref<const std::string&>()) ||
-                (recent.contains("available") && !recent.at("available").is_boolean()) ||
-                (recent.contains("displayName") &&
-                 (!recent.at("displayName").is_string() ||
-                  !valid_utf8(recent.at("displayName").get_ref<const std::string&>()))) ||
-                (recent.contains("projectName") &&
-                 (!recent.at("projectName").is_string() ||
-                  !valid_utf8(recent.at("projectName").get_ref<const std::string&>()))) ||
-                (recent.contains("activationTimestamp") &&
-                 (!recent.at("activationTimestamp").is_number_integer() ||
-                  recent.at("activationTimestamp").get<int64_t>() < 0)) ||
-                (recent.contains("branchName") &&
-                 (!recent.at("branchName").is_string() ||
-                  !valid_utf8(recent.at("branchName").get_ref<const std::string&>()))))
-                fail("STATE_CORRUPT", "A saved recent project is invalid.");
-            const auto path = stored_path(recent.at("path"));
-            for (const auto& existing : paths) {
-                if (same_path(existing, path)) fail("STATE_CORRUPT", "Duplicate saved project paths.");
-            }
-            paths.push_back(path);
-            recent["path"] = path;
-            recent.erase("available"); // Availability is never trusted from disk.
-        }
-        if (!value.at("lastProject").is_null()) value["lastProject"] = stored_path(value.at("lastProject"));
-        if (!value.contains("perProject")) value["perProject"] = Json::object();
-        if (!value.at("perProject").is_object()) fail("STATE_CORRUPT", "perProject must be a map.");
-        Json projects = Json::object();
-        std::set<std::wstring, decltype([](const std::wstring& a, const std::wstring& b) {
-            return CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(),
-                                        static_cast<int>(b.size()), TRUE) == CSTR_LESS_THAN;
-        })> keys;
-        for (auto it = value.at("perProject").begin(); it != value.at("perProject").end(); ++it) {
-            const auto path = stored_path(Json(it.key()));
-            if (!keys.insert(from_utf8(path).native()).second)
-                fail("STATE_CORRUPT", "Duplicate per-project settings paths.");
-            // A key an older file left as null (e.g. before the setting existed) is
-            // dropped here so project_settings() fills it from the defaults.
-            for (auto field = it.value().begin(); field != it.value().end();)
-                field = field.value().is_null() ? it.value().erase(field) : std::next(field);
-            validate_project_patch(it.value());
-            if (!it.value().contains("excludedDirs")) fail("STATE_CORRUPT", "Incomplete per-project settings.");
-            projects[path] = it.value();
-        }
-        value["perProject"] = std::move(projects);
-        return value;
-    } catch (const WorkspaceError& error) {
-        if (error.code == "STATE_CORRUPT") throw;
-        fail("STATE_CORRUPT", "The saved configuration is invalid; the original file was kept.");
-    } catch (const Json::exception&) {
-        fail("STATE_CORRUPT", "The saved configuration is invalid; the original file was kept.");
-    }
-}
-
-std::string read_state_bytes(HANDLE handle) {
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(handle, &size)) win_error("Cannot inspect configuration size");
-    if (size.QuadPart < 0 || size.QuadPart > static_cast<LONGLONG>(state_limit))
-        fail("STATE_CORRUPT", "The configuration exceeds the 1 MiB limit; the original file was kept.");
-    std::string result;
-    result.reserve(static_cast<std::size_t>(size.QuadPart));
-    std::array<char, 65536> buffer{};
-    for (;;) {
-        DWORD count = 0;
-        if (!ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr))
-            win_error("Cannot read application configuration");
-        if (!count) break;
-        if (count > state_limit - result.size()) fail("STATE_CORRUPT", "The configuration exceeds 1 MiB.");
-        result.append(buffer.data(), count);
-    }
-    return result;
-}
-
-struct LoadedState {
-    PinnedDirectory parent;
-    Handle original;
-    Json document = empty_document();
-};
-
-LoadedState load_state(const fs::path& file) {
-    LoadedState loaded;
-    loaded.parent = pin_directory(file.parent_path(), Missing::allow);
-    if (!loaded.parent.exists) return loaded;
-    loaded.original = Handle(CreateFileW(api_path(loaded.parent.path / file.filename()).c_str(),
-                                        GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-                                        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT |
-                                        FILE_FLAG_BACKUP_SEMANTICS, nullptr));
-    if (!loaded.original) {
-        const auto error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return loaded;
-        win_error("Cannot open application configuration", error);
-    }
-    const auto info = file_info(loaded.original.get());
-    reject_reparse(info);
-    if ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || GetFileType(loaded.original.get()) != FILE_TYPE_DISK)
-        fail("STATE_CORRUPT", "The configuration is not a regular file; it was not changed.");
-    const auto bytes = read_state_bytes(loaded.original.get());
-    try {
-        // Reject ambiguous duplicate JSON keys and bound parser nesting as well as bytes.
-        std::vector<std::set<std::string>> objects;
-        const auto callback = [&](int depth, Json::parse_event_t event, Json& parsed) {
-            if (depth > 32) fail("STATE_CORRUPT", "Configuration JSON is nested too deeply.");
-            if (event == Json::parse_event_t::object_start) objects.emplace_back();
-            else if (event == Json::parse_event_t::key) {
-                if (objects.empty() || !objects.back().insert(parsed.get<std::string>()).second)
-                    fail("STATE_CORRUPT", "Configuration JSON contains a duplicate key.");
-            } else if (event == Json::parse_event_t::object_end) objects.pop_back();
-            return true;
-        };
-        loaded.document = validate_document(Json::parse(bytes, callback));
-    } catch (const Json::exception&) {
-        fail("STATE_CORRUPT", "Cannot parse saved configuration; the original file was kept.");
-    }
-    return loaded;
-}
-
-void save_state(const fs::path& file, LoadedState& loaded, const Json& next) {
-    const auto bytes = next.dump(2) + '\n';
-    if (bytes.size() > state_limit) fail("STATE_TOO_LARGE", "The configuration would exceed 1 MiB.");
-    if (!loaded.parent.exists) loaded.parent = pin_directory(file.parent_path(), Missing::create);
-    auto temporary = temporary_object(loaded.parent.path, false);
-    write_and_flush(temporary.handle.get(), bytes);
-    const bool had_original = static_cast<bool>(loaded.original);
-    loaded.original.reset();  // Release our read handle; Windows blocks replace-over-own-handle.
-    const auto target = loaded.parent.path / file.filename();
-    if (had_original) {
-        // A handle-based replace reports both "target held without delete-sharing"
-        // and ACL faults as error 5. Take a brief DELETE reservation first so a busy
-        // file surfaces as FILE_BUSY instead of collapsing into ACCESS_DENIED.
-        Handle reservation(CreateFileW(api_path(target).c_str(), DELETE,
-                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-        if (!reservation) {
-            const auto error = GetLastError();
-            if (error == ERROR_SHARING_VIOLATION)
-                fail("FILE_BUSY", "The configuration is in use by another program; it was not changed.");
-            win_error("Cannot replace application configuration", error);
-        }
-    }
-    // A first save must not replace an object which appeared after the initial read.
-    rename_handle(temporary.handle.get(), target, had_original);
-    temporary.cleanup = false;
-    // Nothing that can fail or allocate is done after the atomic replacement.
 }
 
 Json public_state(const Json& document) {
@@ -360,13 +121,61 @@ Json editor_defaults() { return editor_defaults_impl(); }
 
 Json general_defaults() { return general_defaults_impl(); }
 
-Json java_lsp_settings(const Json& java) {
+namespace {
+// JDT LS `java.configuration.runtimes[].name` 只认 `JavaSE-1.8` / `JavaSE-11` / `JavaSE-17`…
+// 这类形式；探测层给过显示名（`17` / `1.8` / `21-ea`）。这里统一归一 —— 归不出 feature
+// 就保持原值（校验层已经拦过非法形式，这里只是把历史数据救回来）。
+std::string normalize_runtime_name(const std::string& name, const std::string& jdk_home) {
+    if (name.rfind("JavaSE-", 0) == 0) return name;
+    const std::string version = jdk_home.empty() ? name : jdk::read_version(std::filesystem::path(wide(jdk_home)));
+    const int feature = jdk::feature_version(version.empty() ? name : version);
+    if (feature <= 0) return name;
+    return feature == 8 ? "JavaSE-1.8" : "JavaSE-" + std::to_string(feature);
+}
+}  // namespace
+
+namespace {
+/**
+ * 「Gradle JVM」→ 真正的主目录。与 src/gradle.ts 的 `gradleEnvironment` 是同一条规则：
+ * `#USE_PROJECT_JDK`（`ExternalSystemJdkUtil.java:52`，也是 `GradleProjectSettings.java:60`
+ * 构造时赋的值）或没填 ⇒ 用项目 JDK；填了就用填的那个。
+ */
+std::string gradle_java_home(const Json& gradle, const std::string& project_jdk_home) {
+    const auto chosen = gradle.value("gradleJvm", std::string());
+    if (chosen.empty() || chosen == "#USE_PROJECT_JDK") return project_jdk_home;
+    return chosen;
+}
+}  // namespace
+
+Json java_lsp_settings(const Json& java, const Json& build_tools) {
+    // 一律用 `value` 而不是 `at`：这段的调用方是 LSP 配置合成，拿到的是**任意**经过校验的
+    // `java` 段，而不是"刚写出来的那一份"。缺字段时 `at` 会抛 JSON 异常 —— 那会在启动语言
+    // 服务器的那一刻把 IDE 打崩；缺字段的合理语义是"这一项没有"，不是"整件事失败"。
     Json runtimes = Json::array();
-    if (!java.at("jdkHome").get_ref<const std::string&>().empty())
-        runtimes.push_back({{"name", java.at("jdkName")}, {"path", java.at("jdkHome")}, {"default", true}});
+    const auto jdk_home = java.value("jdkHome", std::string());
+    if (!jdk_home.empty())
+        runtimes.push_back({{"name", normalize_runtime_name(java.value("jdkName", std::string("17")), jdk_home)},
+                            {"path", jdk_home}, {"default", true}});
+    // 「构建工具 › Gradle」那一栏必须**同时**送到语言服务手里：JDT LS 用 Buildship 自己跑一次
+    // Gradle 同步来建工程模型，而它默认拿**自己那个 JRE** 去起 Gradle 守护进程（实测 1.44.0 跑在
+    // JRE 21 上）。老 Gradle（6.8.3 只支持到 Java 15）在那个 JVM 上直接起不来 ⇒ 同步从未完成 ⇒
+    // 文件不在任何源根里 ⇒ 没有语义补全、没有语义着色。键名按**实际在跑的那份服务器**核对过
+    // （org.eclipse.jdt.ls.core_1.44.0.jar 的 Preferences.class 常量池）。
+    const auto gradle = build_tools.value("gradle", Json::object());
+    Json gradle_import{{"wrapper", {{"enabled", gradle.value("useGradleFrom", std::string("wrapper")) == "wrapper"}}}};
+    const auto gradle_path = gradle.value("gradlePath", std::string());
+    if (gradle.value("useGradleFrom", std::string("wrapper")) == "path" && !gradle_path.empty())
+        gradle_import["home"] = gradle_path;
+    const auto gradle_user_home = gradle.value("gradleUserHome", std::string());
+    if (!gradle_user_home.empty()) gradle_import["user"] = {{"home", gradle_user_home}};
+    if (gradle.value("offline", false)) gradle_import["offline"] = {{"enabled", true}};
+    const auto java_home = gradle_java_home(gradle, jdk_home);
+    if (!java_home.empty()) gradle_import["java"] = {{"home", java_home}};
     return {{"java", {{"configuration", {{"runtimes", std::move(runtimes)}}},
-                      {"project", {{"sourcePaths", java.at("sourcePaths")}, {"outputPath", java.at("outputPath")},
-                                   {"referencedLibraries", java.at("referencedLibraries")}}}}}};
+                      {"import", {{"gradle", std::move(gradle_import)}}},
+                      {"project", {{"sourcePaths", java.value("sourcePaths", Json::array())},
+                                   {"outputPath", java.value("outputPath", std::string())},
+                                   {"referencedLibraries", java.value("referencedLibraries", Json::array())}}}}}};
 }
 
 fs::path project_destination(const fs::path& parent, const std::string& name) {
@@ -937,7 +746,42 @@ Json ProjectStore::project_settings(const std::string& root) {
         // with the defaults for the missing keys, recursively.
         Json result = project_defaults();
         if (found != projects.end()) fill_defaults(result, *found);
+        read_project_file_colors(from_utf8(key), result);
         return result;
+    });
+}
+
+Json ProjectStore::export_settings(const fs::path& file) {
+    return boundary([&] {
+        std::lock_guard lock(store_mutex);
+        return settings_transfer::export_archive(load_state(state_file_).document, file);
+    });
+}
+
+Json ProjectStore::import_settings(const fs::path& file) {
+    return boundary([&] {
+        std::lock_guard lock(store_mutex);
+        const auto imported = settings_transfer::read_archive(file);
+        auto loaded = load_state(state_file_);
+        auto next = loaded.document;
+        // 只换这三段：**最近项目列表与 lastProject 保持不动**（IDEA 的导入同样不碰最近的工程）。
+        for (const char* section : {"settings", "general", "perProject"})
+            if (imported.contains(section)) next[section] = imported.at(section);
+        save_state(state_file_, loaded, next);
+        return public_state(next);
+    });
+}
+
+Json ProjectStore::reset_settings() {
+    return boundary([&] {
+        std::lock_guard lock(store_mutex);
+        auto loaded = load_state(state_file_);
+        auto next = empty_document();
+        // 恢复默认同样保留最近项目（`RestoreDefaultSettingsAction` 复位的是设置，不是最近列表）。
+        next["recentProjects"] = loaded.document.value("recentProjects", Json::array());
+        next["lastProject"] = loaded.document.value("lastProject", Json(nullptr));
+        save_state(state_file_, loaded, next);
+        return public_state(next);
     });
 }
 
@@ -951,11 +795,18 @@ Json ProjectStore::update_project_settings(const std::string& root, const Json& 
         auto& projects = next["perProject"];
         const auto existing = existing_project_key(projects, key);
         auto result = project_defaults();
-        if (projects.contains(existing)) fill_defaults(result, projects.at(existing));
+        const Json legacy = projects.contains(existing) ? projects.at(existing) : Json::object();
+        fill_defaults(result, legacy);
+        read_project_file_colors(from_utf8(key), result);
         result.merge_patch(patch);
         projects.erase(existing);
         projects[key] = result;
-        save_state(state_file_, loaded, next);
+        // File colors now belong to IDEA XML, not an application JSON shadow copy.
+        projects[key].erase("localFileColors");
+        projects[key].erase("fileColors");
+        auto prepared = project_settings::prepare_state(state_file_, loaded, next);
+        save_project_settings_layers(from_utf8(key), legacy, patch,
+                                     [&] { project_settings::commit_state(prepared); });
         return result;
     });
 }
