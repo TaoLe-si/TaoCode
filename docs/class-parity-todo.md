@@ -491,10 +491,15 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 - 底部 dock 的内容 → 宿主行（`src/usageViewGear.ts` 那种），经 `src/menus/toolWindowGear.ts` 的
   `{ fromHost: true, contentsScoped: true }` 进齿轮，位置在最前（`ToolWindowImpl.kt:859-868`）。
 
+`vcslog`（Git 日志）**第三十八批已接**：它的那一组不在 `additionalGearActions` 而在**工具条右角**的
+`Vcs.Log.PresentationSettings` 齿轮 —— 接住 `标签名称` 与 `列`，其余六条逐条登记（见
+`docs/ui-placement-audit.md` §AP、`docs/source-todo.md` §11）。
+
 **还没接的窗口**（上游各自的 `setAdditionalGearActions`，按"有没有真宿主"逐个判）：
 `git`（提交窗口：`vcsToolWindowFactories.kt:34` → `LocalChangesView.GearActions`
-= 「双击时显示」差异/源两条，`ShowOnDoubleClickToggleAction.kt:16-58` —— 本仓是"单击即开差异"、
-没有双击这一档，要做先得把单击/双击的边界定下来）、`vcslog`（Git 日志自己的工具条）、
+= 「双击时显示」差异/源两条，`ShowOnDoubleClickToggleAction.kt:16-58` —— 「差异」要"diff 开进编辑器标签"这个形态，
+本仓 `DiffView` 只活在面板里（提交面板/历史/日志/剪贴板对比），编辑器标签是 `DocumentData` 绑死的 ⇒
+**要么先做 diff 标签，要么只接「源」那一条**，别做成两个都点了没反应的单选）、
 `terminal`（`TerminalToolWindowTabsManagerImpl.kt:300` 的标签动作）、`debug`/`services`
 （`ServiceViewSourceScrollHelper.java:41-47`）、`problems`（`InspectionResultsView.java:274-277`）、
 `maven`（`MavenProjectsNavigator.kt:306`，本仓无 Maven）。

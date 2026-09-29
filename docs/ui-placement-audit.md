@@ -1898,3 +1898,42 @@ ContentManager（`:23`），没有可关的选中内容才落到 `toolWindow.hid
 合成的 Alt+F7 每次落点都停在注释行（`.cm-activeLine` 是 `// AE2 VM — …`），而本机这台的状态栏被关掉了，
 拿不到"语言服务已就绪"的信号来重试落点。**没有把它写成已验证** —— 组件与设置的行为判据在单测里，
 真机那一步由下一位接手时补（或者在把本机状态栏打开之后再跑一次）。
+
+## AP. 2026-09-29 第三十八批：Git 日志窗口自己的「视图选项」齿轮（`Vcs.Log.PresentationSettings`）
+
+§17 列的"还没接的窗口"里点到了 `vcslog`。它的那一组不是 `additionalGearActions` 而是**工具条右角**的齿轮：
+`platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml` 的 `Vcs.Log.Toolbar.RightCorner` 里放了
+`Vcs.Log.PresentationSettings`（组文案 `VcsLogBundle` 的 `group.Vcs.Log.PresentationSettings.text` = 视图选项，
+description = 配置日志的表示）。逐条判过能否接住：
+
+| 上游成员 | 文案（随 IDE 发货的中文包） | 本仓 |
+|---|---|---|
+| `Vcs.Log.ShowTagNames` | 标签名称 | ✅ 接住：状态早就有（项目设置 `vcsLog.showTagNames`，日志行按它过滤 tag 引用），这一批只是把入口放到 IDEA 那一处 |
+| `group.Vcs.Log.ToggleColumns` | 列 | ✅ 接住：勾掉的列不画（表头 + 行单元格同一份判据，宽度也不参与分配），按仓库根持久化 |
+| `Vcs.Log.ShowRootsColumnAction` | 根名称 | ❌ `ShowRootsColumnAction.update`：`!hasMultiplePaths()` 就整行不可见 —— 本仓日志按仓库根分别打开，恒为单根 |
+| `Vcs.Log.CompactReferencesView` | 紧凑型引用视图 | ❌ 本地引用是一排 pill，没有第二种渲染 |
+| `Vcs.Log.ShowLongEdges` | 长边 | ❌ 本地图只画相邻行的边，跨行长边没有中间表示 |
+| `Vcs.Log.PreferCommitDate` | 提交时间戳 | ❌ 日志行只有作者日期（`GitFullCommit.date`）；提交日期只有详情里有（`GitCommitDetails.committerDate`）⇒ 要做先让 native 的 `git.log` 一起回（**待办**，不是不做） |
+| `Vcs.Log.AlignLabels` | 左侧的引用 | ❌ 本地引用固定在提交消息左侧，没有第二种排布 |
+| `Vcs.Log.HighlightersActionGroup` | 着色器 | ❌ 本地只按仓库根着色（`rootColor`），没有按作者/日期的着色器族 |
+
+落点：`src/vcsLogPresentation.ts`（模型 + 那四条不做的判据成表）、`src/vcsLogColumns.ts` 的
+`hiddenColumns`/`toggleColumn`/`visibleColumns`（`fitColumns` 只把**看得见**的列算进余量）、
+`VcsLog.vue` 的工具条齿轮（`<details>` 弹层，与过滤器同一套定位）、`VcsLogColumns.vue`/`VcsLogTable.vue`
+各按同一判据跳过隐藏列。`标签名称` 的写回走**既有**的 `project.settings.update` 通路
+（`toolViewContext` 的 `onSetVcsLogTagNames` → `settingsPersistence.saveVcsLog`），没有另开一条。
+
+判据：`tests/vcs-log-presentation.test.mjs`（6 条：隐藏集的解析与切换、`fitColumns` 的余量只减看得见的列、
+模型的形状与真状态、四条不做项留在登记里、SSR 渲真组件确认勾掉的列不画、宿主接线）。自证有牙：
+把 `fitColumns` 的隐藏分支与表格的 `v-if` 各拔掉一次，两条当场变红。
+
+**真 exe 取证（完整走通）**：把 `lastProject` 临时指向本仓的 scratch 工程（`.tools/ui-parity-proj`，
+有 1 个提交），启动后读 DOM：
+日志加载出 1 行；工具条上的齿轮 `title = 视图选项（配置日志的表示）`；
+点开后行是「标签名称（勾）/ 列 / 提交（勾）/ 作者（勾）/ 日期（勾）/ 哈希（勾）」；
+点「日期」→ `.date` 单元格 0 个（作者列仍在 1 个）、`localStorage['taocode.vcs.log.<root>.columns.hidden'] = ["date"]`；
+再点回来 → 1 个、存档回到 `[]`；全程 **0 异常 / 0 报错**。
+
+**顺带查实（与本批无关但值得记）**：本机当前打开的项目 `E:/Applied Energistics 2 Acceleration`
+**没有 `.git`**（`git rev-parse --git-dir` 也这么说），所以日志窗口显示"读取 Git 日志失败：fatal: not a git
+repository" —— 那是**如实报错**，不是缺陷；同时也解释了为什么这台机器上 Git 相关面板大多是空的。

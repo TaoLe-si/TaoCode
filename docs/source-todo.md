@@ -158,3 +158,31 @@
   不接**：它要的是"单击选中 / 双击导航"这套**选择模型**，而本仓的引用行是**单击即导航**、没有选中态。
   做一个点了没反应的勾选项就是假控件（项目硬规则 2），所以本轮**不建**，等结果列表有了选择态
   （↑↓ 移动选中项、Enter 打开）再一起补。它不是被忘掉的：`src/usageViewGear.ts` 的注释里写明缺什么。
+
+## 11. 第三十八批（Git 日志窗口的「视图选项」齿轮）的不做项
+
+上游那一组是 `Vcs.Log.PresentationSettings`（`platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml`
+的 `Vcs.Log.Toolbar.RightCorner` 里那个齿轮，组文案 = 视图选项）。本仓接住两条：
+
+- [x] 「标签名称」（`action.Vcs.Log.ShowTagNames.text`，描述"在表中显示标签名称"）—— 状态早就有
+  （项目设置 `vcsLog.showTagNames`，日志行按它过滤 tag 引用）；这一批只是把入口放到 IDEA 放的那一处
+  （日志窗口自己的齿轮），设置页那份仍在。**不是** `VcsLogApplicationSettings`：上游真正的持有者是
+  `CommonUiProperties.SHOW_TAG_NAMES`（`VcsLogUiProperties`）。
+- [x] 「列」（`group.Vcs.Log.ToggleColumns.text`，描述"选择要在表中查看的列"）—— 勾掉的列不画：
+  表头（`VcsLogColumns.vue`）与行单元格（`VcsLogTable.vue`）同一份判据，宽度也不参与分配
+  （`fitColumns` 的余量算法只减看得见的列）。按仓库根持久化（与列宽/顺序同一家族）。
+
+不接的四条（判据都在 `src/vcsLogPresentation.ts` 的文件头）：
+
+- [~] 「根名称」（`Vcs.Log.ShowRootsColumnAction`）：`ShowRootsColumnAction.update` 里
+  `!table.getColorManager().hasMultiplePaths()` 就整行 `isEnabledAndVisible = false` ——
+  本仓的日志是**按仓库根分别打开**的（`<VcsLog :root=…>`），恒为单根 ⇒ 上游那条行本身也不会出现。
+  本地 `showRootNames` 那个项目设置保留（它在单根下仍会画根名，是既有行为，改动它属于另一件事）。
+- [~] 「紧凑型引用视图」（`Vcs.Log.CompactReferencesView`）：本地引用是一排 pill，没有"只显示第一个引用"的第二套渲染。
+- [~] 「长边」（`Vcs.Log.ShowLongEdges`）：本地图只画相邻行的边（`buildLogGraph` 的 down/up/pass），跨行长边没有中间表示。
+- [~] 「提交时间戳」（`Vcs.Log.PreferCommitDate`）：日志行只有作者日期（`GitFullCommit.date`），
+  提交日期只有"提交详情"里才有（`GitCommitDetails.committerDate`）—— 要做得先让 native 的 `git.log`
+  一起回提交日期（跨层），所以这一条是"待办"，不是"不做"。
+- [~] 「左侧的引用」（`Vcs.Log.AlignLabels`）：本地引用固定在提交消息左侧，没有第二种排布。
+- [~] 着色器组（`Vcs.Log.HighlightersActionGroup`）：本地只按仓库根着色（`rootColor`），
+  没有按作者/按日期的着色器族。

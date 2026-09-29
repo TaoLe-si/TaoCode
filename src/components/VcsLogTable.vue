@@ -4,7 +4,8 @@ import { useLogViewport } from '../vcsLogViewport'
 import VcsLogColumns from './VcsLogColumns.vue'
 import type { GitFullCommit } from '../bridge'
 import { buildLogGraph, lanePath, laneX, logDate, rootColor, ROW_H } from '../vcsLogGraph'
-const props = defineProps<{ commits: GitFullCommit[]; selected: string; root: string; loading?: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
+import { visibleColumns, type LogColumn } from '../vcsLogColumns'
+const props = defineProps<{ commits: GitFullCommit[]; selected: string; root: string; loading?: boolean; showTagNames?: boolean; showRootNames?: boolean; hidden?: LogColumn[] }>()
 const emit = defineEmits<{ select: [hash: string]; copy: []; more: [] }>()
 const list = ref<HTMLElement>()
 const viewportWidth = ref(0)
@@ -19,6 +20,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
 const { start, end, update, reveal } = useLogViewport(list, computed(() => props.commits.length), () => emit('more'))
+// 勾掉的列（`Vcs.Log.ToggleColumns`）在行里也不画 —— 表头与单元格是同一份判据。
+const columns = computed(() => visibleColumns(['commit', 'author', 'date', 'hash'], props.hidden ?? []))
 const graph = computed(() => buildLogGraph(props.commits))
 // A page can contain only already-known hashes after an external history update;
 // completion, not just row-count changes, must recheck the bottom threshold.
@@ -52,7 +55,7 @@ defineExpose({ focusHash })
 
 <template>
   <div ref="list" class="log-table" role="listbox" aria-label="提交列表" tabindex="0" @scroll="update" @keydown.self="keys(Math.max(0, commits.findIndex(c => c.hash === selected)), $event)">
-    <VcsLogColumns :storage-key="`taocode.vcs.log.${encodeURIComponent(root)}.columns`" :rows="columnRows" :viewport="viewportWidth" :root-width="showRootNames ? 101 : 6">
+    <VcsLogColumns :storage-key="`taocode.vcs.log.${encodeURIComponent(root)}.columns`" :rows="columnRows" :viewport="viewportWidth" :root-width="showRootNames ? 101 : 6" :hidden="hidden">
     <div :style="{ height: `${start * ROW_H}px` }" aria-hidden="true" />
     <div v-for="(row, index) in graph.rows.slice(start, end)" :key="row.commit.hash" class="log-row" role="option" :data-index="index + start" :aria-posinset="index + start + 1" :aria-setsize="commits.length"
       :class="{ selected: selected === row.commit.hash }" :aria-selected="selected === row.commit.hash"
@@ -69,9 +72,9 @@ defineExpose({ focusHash })
         <span v-for="r in row.commit.refs.filter(r => showTagNames !== false || r.type !== 'tag')" :key="`${r.type}:${r.name}`" class="ref" :class="r.type">{{ r.name }}</span>
         <span class="subject" :title="row.commit.subject">{{ row.commit.subject }}</span>
       </span>
-      <span class="author" :title="row.commit.author">{{ row.commit.author }}</span>
-      <span class="date">{{ logDate(row.commit.date) }}</span>
-      <span class="hash" :title="row.commit.hash">{{ row.commit.shortHash }}</span>
+      <span v-if="columns.includes('author')" class="author" :title="row.commit.author">{{ row.commit.author }}</span>
+      <span v-if="columns.includes('date')" class="date">{{ logDate(row.commit.date) }}</span>
+      <span v-if="columns.includes('hash')" class="hash" :title="row.commit.hash">{{ row.commit.shortHash }}</span>
     </div>
     <div :style="{ height: `${(commits.length - end) * ROW_H}px` }" aria-hidden="true" />
     </VcsLogColumns>

@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { columnOrder, fitColumns, moveColumn, type LogColumn, type LogWidths } from '../vcsLogColumns'
-const props = defineProps<{ storageKey: string; rows: Array<{ author: string; date: string; shortHash: string }>; viewport: number; rootWidth: number }>()
+import { columnOrder, fitColumns, moveColumn, visibleColumns, type LogColumn, type LogWidths } from '../vcsLogColumns'
+import { LOG_COLUMN_TITLES } from '../vcsLogPresentation'
+const props = defineProps<{ storageKey: string; rows: Array<{ author: string; date: string; shortHash: string }>; viewport: number; rootWidth: number; hidden?: LogColumn[] }>()
 const saved = ref<Partial<LogWidths>>({})
 const order = ref(columnOrder(null))
 const host = ref<HTMLElement>()
 const font = ref('11px sans-serif')
-const labels = { commit: '提交', author: '作者', date: '日期', hash: '哈希' }
+const labels = LOG_COLUMN_TITLES
 let context: CanvasRenderingContext2D | null = null
 onMounted(() => { context = document.createElement('canvas').getContext('2d'); if (host.value) font.value = getComputedStyle(host.value).font || font.value })
 const widths = computed(() => fitColumns(props.rows, (text, column) => {
   if (!context) return 50
   context.font = column === 'hash' ? '10px monospace' : font.value
   return context.measureText(text).width
-}, props.viewport, props.rootWidth, saved.value))
+}, props.viewport, props.rootWidth, saved.value, props.hidden ?? []))
+// 勾掉的列不画表头也不占宽（`Vcs.Log.ToggleColumns`）。
+const shown = computed(() => visibleColumns(order.value, props.hidden ?? []))
 watch(() => props.storageKey, key => {
   saved.value = {}; order.value = columnOrder(null)
   try {
@@ -56,7 +59,7 @@ const style = computed(() => Object.fromEntries(order.value.flatMap((key, index)
   <div ref="host" class="columns" :style="style">
     <div class="invisible-header" aria-label="调整列宽与顺序">
       <span :style="{ width: `${rootWidth}px` }" />
-      <span v-for="column in order" :key="column" :style="{ width: `${widths[column]}px` }" @dragover.prevent @drop.prevent="drop(column)">
+      <span v-for="column in shown" :key="column" :style="{ width: `${widths[column]}px` }" @dragover.prevent @drop.prevent="drop(column)">
         <span class="reorder" draggable="true" :title="`拖动重排${labels[column]}列`" @dragstart="startReorder(column, $event)" @dragend="moving = null" />
         <span class="resize" role="separator" tabindex="0" aria-orientation="vertical" :aria-label="`${labels[column]}列宽，Alt 加方向键重排，双击自动宽度`" :aria-valuenow="widths[column]" :aria-valuemin="50" :aria-valuemax="2000" @pointerdown="start(column, $event)" @pointermove="move" @pointerup="stop" @pointercancel="stop" @lostpointercapture="stop" @keydown="key(column, $event)" @dblclick="automatic(column)" />
       </span>

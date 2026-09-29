@@ -98,6 +98,8 @@ export interface ToolWindowViewContext {
   diffContextLines?: number
   /** VCS 日志的 UI 开关（IDEA vcs.log）。 */
   vcsLogShowTagNames?: boolean
+  /** 「标签名称」（上游 `Vcs.Log.ShowTagNames`）写回项目设置 `vcsLog.showTagNames`。 */
+  onSetVcsLogTagNames?: (value: boolean) => void
   vcsLogShowRootNames?: boolean
   /** 命名作用域（IDEA project.scopes）：Find in Files 的范围下拉用它。 */
   scopes?: any
@@ -145,7 +147,7 @@ const props = defineProps<{
   <BookmarksPanel v-else-if="view === 'bookmarks'" :entries="ctx.sortedBookmarks as any" :active-path="ctx.activePath" :settings="(ctx.bookmarksView ?? {}) as any" @jump="(entry: { path: string; line: number }) => ctx.onReveal({ path: entry.path, line: entry.line - 1 })" @remove="ctx.onBookmarkRemove" @assign="ctx.onBookmarkAssign" @update-settings="(patch: any) => ctx.onUpdateBookmarksView?.(patch)" />
   <DebugPanel v-else-if="view === 'debug'" :active-path="ctx.activePath" :ready="ctx.isDesktop && Boolean(ctx.workspace)" :evaluate-request="ctx.evaluateRequest" :program="ctx.runConfigProgram" :cwd="ctx.runConfigCwd" />
   <SourceControl v-else-if="view === 'git'" :root="ctx.root" :active="active" :todo-patterns="ctx.todoPatterns as any" :commit-settings="ctx.commitSettings" :diff-context-lines="ctx.diffContextLines" :compare-with="ctx.gitCompareWith ?? ''" />
-  <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" />
+  <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" @set-tag-names="ctx.onSetVcsLogTagNames?.($event)" />
   <GradlePanel v-else-if="view === 'gradle'"
     :detection="ctx.gradleDetection" :detection-error="ctx.gradleDetectionError" :result="ctx.gradleResult"
     :message="ctx.gradleMessage" :task-groups="ctx.gradleTaskGroups"

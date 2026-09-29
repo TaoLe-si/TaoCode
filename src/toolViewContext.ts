@@ -45,6 +45,8 @@ export interface ToolViewContext {
   revertHistory: any
   runConfigCwd: any
   runConfigProgram: any
+  /** VCS 日志的显示开关写回（`project.settings.update` 那条通路）。 */
+  saveVcsLog: (log: { showTagNames: boolean; showRootNames: boolean }) => unknown
   saveBookmarksView: any
   saveSettingsPatch: any
   searchPanelRef: any
@@ -61,7 +63,7 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -107,6 +109,8 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   diffContextLines: editorSettings.value.diffContextLines,
   vcsLogShowTagNames: projectSettings.value.vcsLog?.showTagNames ?? true,
   vcsLogShowRootNames: projectSettings.value.vcsLog?.showRootNames ?? true,
+  // 日志窗口齿轮里的「标签名称」写回项目设置（与设置页那两个勾选项同一条通路）。
+  onSetVcsLogTagNames: (value: boolean) => { void saveVcsLog({ showTagNames: value, showRootNames: projectSettings.value.vcsLog?.showRootNames ?? true }) },
   // Gradle 工具窗口（IDEA 的 `Gradle` tool window，默认停靠右侧）的 ctx：由状态域一次给出，
   // 免得这里抄十几行（`computed` 惰性求值，所以可以在 gradleHost 之前写这行）。
   ...gradleViewContext(gradleHost, { projectSettings, openSettings }),
