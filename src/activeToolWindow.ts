@@ -61,3 +61,29 @@ export function nextContentIndex(count: number, current: number | undefined, ste
   const next = step === 1 ? index + 1 : index - 1 + count
   return next % count
 }
+
+/**
+ * `TabNavigationActionBase`（`platform-impl/.../actions/TabNavigationActionBase.java`）的**目标路由**：
+ * 焦点在哪，NextTab / PreviousTab 就在哪里生效，**永不跨 dock**。
+ *
+ * 上游 `actionPerformed`（`:57-65`）只有两支：
+ *   · `toolWindowManager.isEditorComponentActive()` → 走编辑器（`:130-147` 的 `composites`）；
+ *   · 否则 `PlatformDataKeys.NONEMPTY_CONTENT_MANAGER.getData(...)`（`:64`）→ 走**当前聚焦那个**
+ *     工具窗口自己的 ContentManager（`InternalDecoratorImpl.kt:648` 把它塞进 data context）。
+ *
+ * 可用性判据（`:106` 与 `:81-87`）是 `contentCount > 1 && isSingleSelection()`：
+ * **侧栏窗口只有一条内容**，所以那一支的 count 恒为 1 ⇒ 动作灰着。本仓原来是
+ * "不是编辑器就当底部" ⇒ 焦点在项目树里按 Alt+→ 会去切底部 dock 的标签（用户没在看的面板）。
+ */
+export type TabNavigationTarget = 'editor' | 'side' | 'bottom'
+
+/**
+ * 该目标上有几个可切的标签（上游 `getContentCount()`）。
+ * 侧栏恒 1（单内容窗口 ⇒ 动作灰着，与 `:106` 的 `contentCount > 1` 一致），
+ * 编辑器是当前分组的标签数，底部是那排内容标签数。
+ */
+export function tabNavigationCount(focused: TabNavigationTarget, editorTabs: number, bottomTabs: number): number {
+  if (focused === 'editor') return editorTabs
+  if (focused === 'side') return 1
+  return bottomTabs
+}

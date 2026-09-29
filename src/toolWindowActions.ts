@@ -4,7 +4,7 @@
 // 模式：`lastDockFocus` / `bottomContentUiType`（含 localStorage 持久化）由模块**自持**；
 // 其余依赖注入且**全部惰性解析**（箭头包装/取值函数），与 App 的声明顺序无关。
 import { computed, ref, watch } from 'vue'
-import { nextContentIndex } from './activeToolWindow'
+import { nextContentIndex, tabNavigationCount, type TabNavigationTarget } from './activeToolWindow'
 import { canCloseAllContents, canCloseOtherContents, isCloseableToolTab, tabsCloseAllWouldRemove, tabsCloseOtherWouldRemove } from './toolTabs'
 import type { CloseableToolTabId, ToolTabPresence } from './toolTabs'
 import { closeAllReferences, closeReferences, closeOtherReferences, hasReferences, referenceTabs,
@@ -132,11 +132,12 @@ export function createToolWindowActions(ctx: ToolWindowActionsContext) {
   /**
    * `TabNavigationActionBase.java:187-201`: the action is enabled only when the context it would act
    * on has more than one tab, which is why the two rows below are greyed out on a single tab.
+   * 判据本身在 `src/activeToolWindow.ts` 的 `tabNavigationCount`（含"侧栏恒 1"那一支）。
    */
   function tabTargetCount(): number {
     if (!ctx.workspace().value) return 0
-    if (focusedDock() === 'editor') return ctx.groups[ctx.focusedPane.value].tabs.length
-    return bottomContentCount()
+    return tabNavigationCount(focusedDock() as TabNavigationTarget,
+      ctx.groups[ctx.focusedPane.value].tabs.length, bottomContentCount())
   }
 
   /**
@@ -179,6 +180,11 @@ export function createToolWindowActions(ctx: ToolWindowActionsContext) {
 
   function cycleTab(step: 1 | -1) {
     if (!ctx.workspace().value) return
+    // 侧栏窗口只有一条内容（`getContentCount() > 1` 必假），所以这一支什么都不做 ——
+    // 上游 `TabNavigationActionBase.actionPerformed:57-65` 只会走编辑器或"当前那个
+    // ContentManager"，绝不会跳到另一个 dock 去。原先没有这一支：焦点在项目树里按 Alt+→
+    // 会去切底部 dock 的标签。
+    if (focusedDock() === 'side') return
     if (focusedDock() === 'editor') {
       // Editor branch (:130-147): the tabs of the *current* editor window, wrapping around.
       const pane = ctx.focusedPane.value

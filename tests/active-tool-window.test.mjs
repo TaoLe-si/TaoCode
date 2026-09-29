@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { shellSource } from './shell-source.mjs'
-import { lastActiveId, nextContentIndex, pushActive, removeActive } from '../src/activeToolWindow.ts'
+import { lastActiveId, nextContentIndex, pushActive, removeActive, tabNavigationCount } from '../src/activeToolWindow.ts'
 
 const always = () => true
 
@@ -201,4 +201,25 @@ test('the remaining ActiveToolwindowGroup actions are wired', () => {
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
   for (const key of ['Alt-ArrowLeft', 'Alt-ArrowRight'])
     assert.ok(editor.includes(`{ key: '${key}', preventDefault: true, run: () => true }`), `${key} is not shadowed in the editor`)
+})
+
+// `TabNavigationActionBase`（`:57-65` 路由、`:106` 可用性）—— NextTab/PreviousTab 只在**焦点所在的
+// 那个** ContentManager 上生效，永不跨 dock。侧栏窗口只有一条内容 ⇒ `getContentCount() > 1` 必假
+// ⇒ 那一支没有可切的东西。
+test('侧栏只有一条内容：Next/PreviousTab 在那里无事可做（不跨 dock 去切底部）', () => {
+  assert.equal(tabNavigationCount('side', 5, 7), 1, '侧栏恒 1 —— 不管别的 dock 有几条')
+})
+
+test('编辑器与底部各报各的标签数', () => {
+  assert.equal(tabNavigationCount('editor', 3, 7), 3)
+  assert.equal(tabNavigationCount('bottom', 3, 7), 7)
+  assert.equal(tabNavigationCount('editor', 0, 0), 0, '空编辑器分组为 0（动作灰着）')
+})
+
+test('接线：宿主那一层用这个判据，且 `cycleTab` 对侧栏提前返回', () => {
+  const actions = readFileSync(new URL('../src/toolWindowActions.ts', import.meta.url), 'utf8')
+  assert.match(actions, /return tabNavigationCount\(focusedDock\(\) as TabNavigationTarget,/,
+    'tabTargetCount 没走共享判据')
+  assert.match(actions, /if \(focusedDock\(\) === 'side'\) return/,
+    'cycleTab 没有对侧栏提前返回 —— 焦点在项目树里按 Alt+→ 会去切底部标签')
 })

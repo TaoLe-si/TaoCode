@@ -1711,3 +1711,45 @@ else                               presentation.isEnabled = available
 工作区没开时整组仍不可用；`toolWindow` 助手带 `toolDisabled` 门禁）。已自证有牙：去掉助手那半句，
 "也带 toolDisabled 门禁"当场变红。另把 `makeContext` 补上 `toolDisabled`，并把原先那条只断
 `activateToolWindow }` 的接线断言改成同时断两个注入。
+
+## AM. 2026-09-29 第三十四批：`ToolWindowManager` 查询面 —— 查到一处**跨 dock 切标签**的真缺陷
+
+先说结论：这一族（`getToolWindow` / `getToolWindows` / `getToolWindowIds` / `getActiveToolWindowId` /
+`getLastActiveToolWindowId` / `invokeLater` / `canShowNotification` / `isStripeButtonShow` /
+`getLocationIcon` …）**不该另起一个门面模块**。本仓的查询散在三个模块里
+（`toolWindowMeta` 的 id/标题/顺序、`toolWindowStripes` 的锚点与可见性、`toolWindowActions` 的激活态），
+抽一个 `ToolWindowManager` 门面只是把三处转发一遍，没有新语义 —— 与「EP→Factory 不建」同一个理由。
+逐个成员核过消费者后，**只有一处是真缺陷**：
+
+### 缺陷：焦点在**侧栏**时按 Alt+←/→ 会去切**底部** dock 的标签
+
+上游 `TabNavigationActionBase`（`platform-impl/.../ide/actions/TabNavigationActionBase.java`）：
+
+| 位置 | 规则 |
+|---|---|
+| `actionPerformed:57-65` | 只有两支 —— `isEditorComponentActive()` → 走编辑器（`:130-147` 的 `composites`）；否则 `PlatformDataKeys.NONEMPTY_CONTENT_MANAGER.getData(...)` → 走**当前聚焦那个**工具窗口自己的 ContentManager（`InternalDecoratorImpl.kt:648` 把它塞进 data context） |
+| `update:106`、`:81-87` | 可用性 = `contentManager != null && contentManager.getContentCount() > 1 && contentManager.isSingleSelection()` |
+
+关键在最后一行：**侧栏工具窗口只有一条内容**，它那个 ContentManager 的 `getContentCount()` 恒为 1
+⇒ 动作灰着、切不动。本仓原先写的是"不是编辑器就当底部"：
+
+```ts
+if (focusedDock() === 'editor') { …编辑器… }
+// 否则一律走底部那一支 ⇒ 焦点在项目树里按 Alt+→ 去切底部 dock
+```
+
+结果是**跨 dock 操作**：用户在项目树里按 Next Tab，动的是他没在看的面板。`tabTargetCount()`
+（那两条菜单行的 `enabled`）有同样的错，所以行也是亮的。
+
+**修复**：判据抽到 `src/activeToolWindow.ts` 的 `tabNavigationCount(focused, editorTabs, bottomTabs)`
+（侧栏恒 1，与 `getContentCount() > 1` 同义），`tabTargetCount` 与 `cycleTab` 都改走它；
+`cycleTab` 对侧栏**提前返回**（那一支没有可切的东西）。
+
+**这同时是查询面该在哪里的答案**：`isEditorComponentActive` 的等价物就是本仓那个
+`focusedDock()`（`'editor' | 'side' | 'bottom'`），它已经在 `toolWindowActions.ts` 里服务了七处调用
+（隐藏当前窗口、关闭当前标签、折叠/展开目标、标签导航…）。要加的不是门面，而是把**判据本身**
+放回纯模块以便单测。
+
+判据：`tests/active-tool-window.test.mjs` 新增 3 条（侧栏恒 1；编辑器与底部各报各的数；
+接线：`tabTargetCount` 走共享判据 + `cycleTab` 对侧栏提前返回），已自证有牙（把提前返回改成
+`if (false) return`，接线那条当场变红）。
