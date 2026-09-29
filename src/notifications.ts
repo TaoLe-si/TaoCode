@@ -9,6 +9,7 @@
 // 两者同处是因为「通知中心」本身就是状态栏里的一个组件，它们的开关状态（`noticeOpen` / `statusMenu`）互相牵制。
 import { computed, ref } from 'vue'
 import { pushNotice, upsertNotice, type NoticeAction, type NoticeEntry } from './notices.ts'
+import { clearNoticeStatus, setNoticeStatus } from './statusBarText.ts'
 import { focusableWidgets, navigateWidget, resolveRestoreTarget, shouldFocusFirstWidget, type NavDirection } from './statusBarNav.ts'
 import { wireLspProgressNotices } from './progressNotices.ts'
 
@@ -38,6 +39,9 @@ function notify(message: string, error = false, onClick?: () => void, detail?: s
   // .kt:97): the notification with the same display id is expired first, so repeated commits replace
   // one entry instead of filling the notification centre with history.
   noticeLog.value = pushNotice(noticeLog.value, entry)
+  // 通知进状态栏那一段文字（IDEA `ApplicationNotificationsModel` 推 statusMessage，由
+  // `StatusPanel.updateText` 显示并**带相对时间**）。`stamp` 用真实 epoch：上游拿它算"刚刚/N 分钟前"。
+  setNoticeStatus({ message, stamp: Date.now() })
 }
 // The commit panel reports its result through `notify` with a display id, so its handler ignores
 // the channel's transient-click action.
@@ -76,7 +80,7 @@ function runBalloonAction(action: NoticeAction) {
 function expireNotice(id: number) {
   noticeLog.value = noticeLog.value.filter(entry => entry.id !== id)
   if (noticeEntryId.value === id) noticeEntryId.value = null
-  if (!noticeLog.value.length) noticeOpen.value = false
+  if (!noticeLog.value.length) { noticeOpen.value = false; clearNoticeStatus() }
 }
 const noticeOpen = ref(false)
 // --- Status bar keyboard navigation (IdeStatusBarImpl.kt:313-323,863-872,952-962) -------------
@@ -135,13 +139,13 @@ function openStatusMenu(event: MouseEvent) {
   event.preventDefault()
   statusMenu.value = { x: event.clientX, y: event.clientY }
 }
-function clearNotices() { noticeLog.value = []; noticeOpen.value = false }
+function clearNotices() { noticeLog.value = []; noticeOpen.value = false; clearNoticeStatus() }
 // WindowMenu › Notifications（`PlatformActions.xml:726-728`）：CloseFirstNotification 关掉
 // **最新**一条 —— `pushNotice` 是前插（`[entry, ...kept]`），所以最新就是下标 0；
 // CloseAllNotifications 清空整条日志（复用通知中心的 clearNotices）。
 function closeFirstNotification() {
   noticeLog.value = noticeLog.value.slice(1)
-  if (!noticeLog.value.length) noticeOpen.value = false
+  if (!noticeLog.value.length) { noticeOpen.value = false; clearNoticeStatus() }
 }
   return {
     noticeLog, noticeOpen, notify, notifyFromPanel, notifyProgress, noticeActions, runNoticeAction, runBalloonAction, expireNotice, statusBarRef, statusWidgets, focusStatusBar,

@@ -1595,3 +1595,44 @@ B1 待做清单的最后一项（多行布局）核到一条真缺口：本仓 `
 判据：`tests/status-bar-widgets.test.mjs`（8 条：默认值三态、切回默认就删条、三道闸各自否决、
 勾选清单只列可配置非内部、editor-based 没编辑器不可开启、旧存档迁移与坏输入、
 App.vue 装配 + 4 个非工厂条目 + 11 个真工厂都带 upstreamId、上游默认值与 `smartMode` 的纠正）。
+
+## AJ. 2026-09-29 第三十一批：状态栏**中间那段文字**（`StatusBar.Info` 通道）+ 进程结束播报
+
+**这是补一个"此前完全不存在"的通道**：状态栏中段一直写着硬编码的 `working ? '正在处理…' : '就绪'`，
+没有任何地方能往里说话 —— 运行/调试结束之后，界面上一句结果都不说。
+
+上游链路三跳，逐跳核过：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `StatusBar.Info.set(text, project, requestor)` → `StatusBarInfo.TOPIC` | `ide-core/.../StatusBar.kt:34-49`、`StatusBarInfo.java:12-20` | `src/statusBarText.ts` 的 `setStatusText(text, requestor)` |
+| `InfoAndProgressPanel.setText(text, requestor)` | `InfoAndProgressPanel.kt:439-451` | `acceptStatusText`：空文字只有来自**当前说话人或通知通道**才被接受；返回值 = 是否通知托管 |
+| `StatusPanel.updateText(nonLogText)` | `StatusPanel.java:168-213` | `statusBarDisplay`：通知托管时显示通知文字，`myDirty \|\| >= 60_000` 追加相对时间，每 30_000ms 重算 |
+
+**没有通知可用时回到通道自己说的话**（上游 `:203-209`）—— 所以通知穷尽/清空时要把文字交回通道，
+这条接在 `notifications.ts` 的 `expireNotice`/`clearNotices`/`closeFirstNotification` 三处。
+
+**进程结束那一句**（`src/processTerminated.ts`，IDEA `ProcessTerminatedListener`）：
+文案 `IdeCoreBundle.properties:131` = `Process finished with exit code {0}`；上游 `attach(handler, project)`
+给的是**前后各一个换行**（`:45-49`），落在控制台里；同一句话再发一条 `StatusBar.Info.set`（`:59-66`）。
+`stringifyExitCode`（`:75-93`）**逐条照抄**：Windows 上 `[0xC0000000, 0xD0000000)` 追加
+`(0x…大写十六进制)`，其中 `0xC000013A` 再补 `: interrupted by Ctrl+C`；Unix 上按信号表反查，
+追加 `(interrupted by signal N:SIGNAME)`。信号表（含 `EXIT_CODE_OFFSET = 128` 与 BSD/Linux
+两套号）抄自 `platform/eel/.../UnixSignal.kt:18-45/55`。
+
+**两处如实不报**：
+1. **只在整条链结束时报**（`remaining === 0`）。上游 `attach` 挂在一个 ProcessHandler 上，而本仓
+   一条配置会以 `remaining > 0` 连发每步的退出（`native/run_host.cpp` 的链式步骤），每步都报就是刷屏。
+2. **用户主动停止不报**（`aborted`）。本仓用 `code = -1` 作停止哨兵（`run_host.cpp` 的 `stop_instance`），
+   那不是进程真实退出码 —— 报「退出码 -1」是编造数字；中止那一路宿主自己已写「链已中止…」一行。
+
+判据：`tests/status-bar-text.test.mjs`（9 条：空文字过滤三态、时间后缀首次必带与 60 秒门槛、
+后缀粒度、通道/托管/静默三种显示、Windows 失败码与 Ctrl+C、Unix 信号反查（含 BSD/Linux 号差）、
+文案模板与前后换行、接线五处、`IDLE_TEXT` 是唯一哨兵）。已自证有牙：注释掉空文字过滤那条规则，
+"空文字只有来自当前说话人或通知通道才被接受"当场变红。
+
+**连带更新**：4 个测试文件里"运行输出"的精确断言加上末尾那条结束行（新增的第二条控制台文字，
+与上游一致是独立的一条，不并进解码残留），并把 `menu-submenu.test.mjs` 里那条断言改为同时校验
+"收起面板 + 交回状态栏文字"。`src/App.vue` 与 `src/bridge.ts` 都在登记上限上（2737 / 1208 行，
+机检口径 `split('\n').length`）—— 逻辑一律落在 `src/statusBarText.ts` 与 `src/processTerminated.ts`，
+宿主只留一行调用。

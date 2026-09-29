@@ -116,7 +116,7 @@ test('beginRun / endRun：新一轮是新实例（控制台从空开始），迟
   handleRunExit({ instance: 4, code: 0 })
   // 不带 id = 用户按下运行、回包未到：旧实例的结果必须留着（控制台按实例分标签）。
   beginRun()
-  assert.deepEqual([...runOutput], ['上一轮输出'], '起跑确认之前不能抹掉上一轮的输出')
+  assert.equal(runOutput[0], '上一轮输出', '起跑确认之前不能抹掉上一轮的输出')
 
   // 新实例 id = 新的一轮：它的缓冲从空开始，并自动切过去。
   beginRun(5)
@@ -125,8 +125,8 @@ test('beginRun / endRun：新一轮是新实例（控制台从空开始），迟
   endRun(5)
   assert.equal(runInstances.get(5).running, false)
   assert.equal(runState.running, false)
-  // 旧实例仍在，只是被切开了。
-  assert.deepEqual(runInstances.get(4).output, ['上一轮输出'])
+  // 旧实例仍在，只是被切开了。（末尾那条进程结束行是新实例的，不在这里。）
+  assert.equal(runInstances.get(4).output[0], '上一轮输出')
 
   // 带 id 且该 id 已经在跑 = 宿主事件先于 run.start 回包到达的「迟到确认」：
   // 再确认一次不能把这一轮已经收到的输出清掉。

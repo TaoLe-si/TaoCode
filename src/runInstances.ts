@@ -15,6 +15,7 @@
 // 实例自己的缓冲是唯一事实来源，`runOutput` 是它的镜像（切换实例时整体换掉）。
 import { reactive, ref } from 'vue'
 import { fromBase64 } from './base64.ts'
+import { runExitAnnouncement } from './processTerminated.ts'
 
 /** 输出保留的行数上限（与单实例时代一致，防止刷屏吃内存）。 */
 export const RUN_OUTPUT_LIMIT = 4000
@@ -104,14 +105,30 @@ export function handleRunExit(data: { instance?: number; code?: number; remainin
   const id = typeof data.instance === 'number' ? data.instance : activeRunInstance.value
   const remaining = typeof data.remaining === 'number' ? data.remaining : 0
   const tail = decoder.decode()
+  // IDEA `ProcessTerminatedListener.processTerminated`（:59-66）：进程结束时**同一句话写两处** ——
+  // 控制台一行（`notifyTextAvailable(..., SYSTEM)`）+ 状态栏一条（`StatusBar.Info.set`）。规则
+  // （只在整条链结束时报、用户主动停止不报）在 src/processTerminated.ts。放在这里而不是桥接层：
+  // 它是本函数收尾语义的一部分。与上游一致，这是**独立的一条**控制台文字（不并进解码残留里）。
+  const finished = runExitAnnouncement({ code: data.code, remaining, aborted: data.aborted })
+  const push = (text: string) => {
+    if (id) {
+      const target = record(id)
+      target.output.push(text)
+      if (target.output.length > RUN_OUTPUT_LIMIT) target.output.splice(0, target.output.length - RUN_OUTPUT_LIMIT)
+      if (id === activeRunInstance.value) {
+        runOutput.push(text)
+        if (runOutput.length > RUN_OUTPUT_LIMIT) runOutput.splice(0, runOutput.length - RUN_OUTPUT_LIMIT)
+      }
+    } else {
+      runOutput.push(text)
+    }
+  }
+  if (tail) push(tail)
+  if (finished !== null) push(finished)
   if (id) {
     const target = record(id)
-    if (tail) target.output.push(tail)
-    if (id === activeRunInstance.value && tail) runOutput.push(tail)
     target.exit = data.code
     if (remaining === 0) target.running = false
-  } else if (tail) {
-    runOutput.push(tail)
   }
   refreshAggregate()
   return true

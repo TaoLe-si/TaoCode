@@ -81,7 +81,10 @@ test('the notifications submenu closes the newest notification and clears the lo
   assert.match(app, /id: 'window\.notifications', title: '[^']*', keywords: '[^']*', children: \[/)
   const body = app.slice(app.indexOf('function closeFirstNotification()'), app.indexOf('function closeFirstNotification()') + 400)
   assert.match(body, /noticeLog\.value = noticeLog\.value\.slice\(1\)/, '最新一条 = 下标 0，去掉它')
-  assert.match(body, /if \(!noticeLog\.value\.length\) noticeOpen\.value = false/, '清空后收起通知面板')
+  // 清空后既要收起面板，也要把状态栏那段文字交回通道（IDEA `StatusPanel.updateText` 在
+  // 没有通知可用时回去显示通道自己的文字 —— 见 tests/status-bar-text.test.mjs）。
+  assert.match(body, /if \(!noticeLog\.value\.length\) \{ noticeOpen\.value = false; clearNoticeStatus\(\) \}/,
+    '清空后收起通知面板并交回状态栏文字')
   const menu = app.slice(app.indexOf("id: 'window.notifications'"), app.indexOf("id: 'window.notifications'") + 700)
   assert.match(menu, /run: clearNotices/, '关闭全部复用通知中心的清空逻辑')
   // 两条都在空日志时禁用（用子串断言，避免正则转义把断言本身写坏）

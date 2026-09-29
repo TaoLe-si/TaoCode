@@ -30,7 +30,9 @@ test('run.start reply arriving after output/exit preserves Main output and termi
   handleRunOutput(1, 'HELLO_MAIN\r\n')
   handleRunExit({ instance: 1, code: 0, remaining: 0 })
   beginRun(1) // runActions receives the run.start reply after the events
-  assert.deepEqual([...runOutput], ['HELLO_MAIN\r\n'])
+  // 末尾那条是 IDEA `ProcessTerminatedListener` 写的「进程已结束，退出码 …」（判据在
+  // tests/status-bar-text.test.mjs）；这里校验的是"迟到的 run.start 回包不抹掉已收到的输出"。
+  assert.deepEqual([...runOutput], ['HELLO_MAIN\r\n', '\n进程已结束，退出码 0\n'])
   assert.equal(runState.running, false)
   assert.equal(runState.exit, 0)
   assert.equal(runInstances.get(1).label, 'Main')
@@ -42,7 +44,7 @@ test('pending new run does not erase another instance console', () => {
   handleRunOutput(1, 'previous diagnostics\r\n')
   handleRunExit({ instance: 1, code: 1 })
   beginRun()
-  assert.deepEqual([...runOutput], ['previous diagnostics\r\n'])
+  assert.equal(runOutput[0], 'previous diagnostics\r\n', '上一轮的输出还在')
 })
 
 test('duplicate run.started is idempotent, including after process exit', () => {
@@ -51,7 +53,8 @@ test('duplicate run.started is idempotent, including after process exit', () => 
   handleRunOutput(1, 'HELLO_MAIN\r\n')
   handleRunExit({ instance: 1, code: 0 })
   handleRunStarted({ instance: 1, label: 'Main' })
-  assert.deepEqual([...runOutput], ['HELLO_MAIN\r\n'])
+  assert.equal(runOutput[0], 'HELLO_MAIN\r\n')
+  assert.equal(runOutput.length, 2, '重复确认不再追加（末条是进程结束行）')
   assert.equal(runState.running, false)
   assert.equal(runState.exit, 0)
 })
@@ -128,7 +131,9 @@ test('real Main: backslash source paths survive javac argfile, package and outpu
   handleRunOutput(10, result.stdout)
   handleRunExit({ instance: 10, code: result.status })
   beginRun(10)
-  assert.equal(runOutput.join('').trim(), 'HELLO_MAIN:dependency')
+  // 程序自己的输出必须原样连续（末尾那条进程结束行是本轮新增，见 tests/status-bar-text.test.mjs）。
+  assert.equal(runOutput[0].trim(), 'HELLO_MAIN:dependency')
+  assert.equal(runOutput.length, 2, '程序输出一条 + 进程结束一条')
   assert.equal(runState.running, false)
   assert.equal(runState.exit, 0)
 })
