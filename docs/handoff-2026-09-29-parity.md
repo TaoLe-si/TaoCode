@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：待提交（本机领先 `origin/main` 八个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+- HEAD：`37bbe05`（本机领先 `origin/main` 八个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
   Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**、
   **主工具栏键盘焦点 + §C 无宿主条目的判决清理**，外加两份交接文档跟进）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
@@ -166,7 +166,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 ## 7. 最近的提交（知道上一批在干嘛）
 
 ```
-<待提交> feat(tool-windows): 主工具栏键盘焦点 + §C 里没有宿主的 12 条判 [-]
+37bbe05 feat(toolbar,vcs-verdict): 主工具栏键盘焦点 + §C 里没有宿主的 12 条判 [-]
 0fa43ef feat(tool-windows): 布局档案 + 布局改成项目级（B2 §C 第 10 条）
 929b947 refactor(tool-windows): 工具窗口注册表 —— 一个窗口 = 一条记录
 607cf14 feat(vcs-log): 日志窗口自己的「视图选项」齿轮（标签名称 + 列的显示/隐藏）
