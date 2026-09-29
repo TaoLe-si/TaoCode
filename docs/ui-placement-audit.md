@@ -1753,3 +1753,12 @@ if (focusedDock() === 'editor') { …编辑器… }
 判据：`tests/active-tool-window.test.mjs` 新增 3 条（侧栏恒 1；编辑器与底部各报各的数；
 接线：`tabTargetCount` 走共享判据 + `cycleTab` 对侧栏提前返回），已自证有牙（把提前返回改成
 `if (false) return`，接线那条当场变红）。
+
+**同批（第三十五批）**：上一条的**同一个错**在 `closeActiveTab` 里也有一份。
+`CloseActiveTabAction`（`platform-impl/.../ide/actions/CloseActiveTabAction.java`）先取**上下文里那个**
+ContentManager（`:23`），没有可关的选中内容才落到 `toolWindow.hide(null)`（`:31-37`）—— 而那个
+`toolWindow` 是**从该 ContentManager 自己的上下文**里取的（`:32`），所以收的一定是同一个窗口。
+侧栏只有一条不可关的内容 ⇒ 那一支收的是**侧栏**。本仓原来是 `if (focusedDock() !== 'editor')`
+一把抓，于是焦点在项目树里按 Ctrl+Shift+F4 会去收**底部**面板。已改成显式分开：
+侧栏 ⇒ `explorer = false`；底部 ⇒ 关内容或收面板；编辑器 ⇒ 关标签。
+判据 `tests/active-tool-window.test.mjs` 新增 1 条（并锁住旧写法必须消失），已自证有牙。

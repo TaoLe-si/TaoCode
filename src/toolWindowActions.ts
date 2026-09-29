@@ -225,7 +225,11 @@ export function createToolWindowActions(ctx: ToolWindowActionsContext) {
    */
   function closeActiveTab() {
     if (!ctx.workspace().value) return
-    if (focusedDock() !== 'editor') {
+    // 侧栏只有一条不可关的内容 ⇒ 上游那一支会走到 `toolWindow.hide(null)`（`:31-37`），
+    // 而那个 `toolWindow` 是从**该 ContentManager 的**上下文里取的（`:32`）⇒ 收的是**侧栏**。
+    // 原先没有这一支：焦点在项目树里按 Ctrl+Shift+F4 会去收**底部**面板（跨 dock 的同一个错）。
+    if (focusedDock() === 'side') { ctx.explorer.value = false; return }
+    if (focusedDock() === 'bottom') {
       const current = ctx.bottomTab.value
       if (isCloseableToolTab(current) && toolTabPresence()[current]) { clearToolTab(current); return }
       ctx.bottom.value = false

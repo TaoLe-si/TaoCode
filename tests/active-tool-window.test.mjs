@@ -223,3 +223,17 @@ test('接线：宿主那一层用这个判据，且 `cycleTab` 对侧栏提前�
   assert.match(actions, /if \(focusedDock\(\) === 'side'\) return/,
     'cycleTab 没有对侧栏提前返回 —— 焦点在项目树里按 Alt+→ 会去切底部标签')
 })
+
+// `CloseActiveTabAction`（`platform-impl/.../ide/actions/CloseActiveTabAction.java`）：先取**上下文里那个**
+// ContentManager（`:23`）。若它没有可关的选中内容，才落到 `toolWindow.hide(null)`（`:31-37`）——
+// 而那个 toolWindow 是**从该 ContentManager 自己的上下文**里取的（`:32`）⇒ 收的一定是同一个窗口。
+// 侧栏只有一条不可关的内容，所以那一支收的是**侧栏**，不是底部。
+test('关闭当前标签页：焦点在侧栏时收侧栏，在底部时收底部（不跨 dock）', () => {
+  const actions = readFileSync(new URL('../src/toolWindowActions.ts', import.meta.url), 'utf8')
+  const body = actions.slice(actions.indexOf('function closeActiveTab()'), actions.indexOf('function closeActiveTab()') + 700)
+  assert.match(body, /if \(focusedDock\(\) === 'side'\) \{ ctx\.explorer\.value = false; return \}/,
+    '侧栏焦点要收侧栏 —— 原先会去收底部面板')
+  assert.match(body, /if \(focusedDock\(\) === 'bottom'\) \{/, '底部那一支要显式判 dock')
+  assert.ok(!/if \(focusedDock\(\) !== 'editor'\)/.test(body),
+    '把"不是编辑器"当底部的旧写法必须消失（它会跨 dock）')
+})
