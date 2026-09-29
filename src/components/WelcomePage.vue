@@ -4,6 +4,7 @@ import { BellDot, ChevronDown, CircleHelp, Copy, FolderOpen, FolderPlus, FolderS
 import { lastOpenedPath, matchesSearch, systemDependentPath } from '../welcomeProjects'
 import { noticeButtonText, noticeButtonVisible, noticeTitle, type NoticeEntry } from '../notices'
 import { copyToClipboard } from '../clipboard'
+import { clampEditorFontSize, MAX_EDITOR_FONT_SIZE, MIN_EDITOR_FONT_SIZE } from '../editorFontSize'
 import { request, type EditorSettings, type RecentProject } from '../bridge'
 import type { Theme } from '../appearance'
 import NoticeList from './NoticeList.vue'
@@ -488,8 +489,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <label class="customize-row">
             <span>字体大小（像素）</span>
             <input
-              type="number" min="10" max="32" step="1" :value="settings.fontSize"
-              @change="emit('settings-change', { fontSize: Math.min(32, Math.max(10, Number(($event.target as HTMLInputElement).value) || settings.fontSize)) })"
+              type="number" :min="MIN_EDITOR_FONT_SIZE" :max="MAX_EDITOR_FONT_SIZE" step="1" :value="settings.fontSize"
+              @change="emit('settings-change', { fontSize: clampEditorFontSize(Number(($event.target as HTMLInputElement).value) || settings.fontSize) })"
             />
           </label>
         </section>

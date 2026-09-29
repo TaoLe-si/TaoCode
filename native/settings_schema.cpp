@@ -53,8 +53,10 @@ void validate_editor_patch(const Json& patch) {
     for (auto it = patch.begin(); it != patch.end(); ++it) {
         const auto& value = it.value();
         if (it.key() == "fontSize") {
-            if (!value.is_number_integer() || value < 10 || value > 32)
-                fail("INVALID_SETTINGS", "fontSize must be an integer from 10 through 32.");
+            // 上下限抄 IDEA `EditorFontsConstants`（`getMinEditorFontSize()` = scale(4)、
+            // `getMaxEditorFontSize()` = scale(registry `ide.editor.max.font.size`，默认 40)）。
+            if (!value.is_number_integer() || value < 4 || value > 40)
+                fail("INVALID_SETTINGS", "fontSize must be an integer from 4 through 40.");
         } else if (it.key() == "tabSize") {
             if (!value.is_number_integer() || (value != 2 && value != 4 && value != 8))
                 fail("INVALID_SETTINGS", "tabSize must be 2, 4 or 8.");

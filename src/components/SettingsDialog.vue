@@ -5,6 +5,7 @@ import { copyToClipboard } from '../clipboard'
 import { defaultEditorSettings } from '../bridge'
 import { isNameHit, matchesOption, optionMatches, resolveSettingsPath, settingsPath } from '../settingsSearch'
 import { RIGHT_MARGIN_MAX, RIGHT_MARGIN_MIN, type CommitMessageInspectionSettings } from '../commitMessageInspection'
+import { MAX_EDITOR_FONT_SIZE, MIN_EDITOR_FONT_SIZE } from '../editorFontSize.ts'
 import { addHistoryEntry, formatHistory, parseHistory, popupHistory, SEARCH_HISTORY_LABEL, SETTINGS_SEARCH_HISTORY_KEY, stepHistory, type HistoryDirection } from '../searchHistory'
 import { MAX_SHOWS, NEW_BADGE_TEXT, NEW_OPTION_PAGES, badgeStorageKey, markOpened, parseBadgeCount, showNewBadgeDot, showNewOptions, showNewOptionsInGroup, type BadgeCounts } from '../settingsBadge'
 import { PASTE_REFORMAT_MODES, pasteReformatLabel } from '../pasteOptions'
@@ -432,7 +433,7 @@ function copyCrumbPath() {
 }
 
 const validEditor = computed(() => Number.isInteger(editor.value.fontSize)
-  && editor.value.fontSize >= 10 && editor.value.fontSize <= 32 && [2, 4, 8].includes(editor.value.tabSize)
+  && editor.value.fontSize >= MIN_EDITOR_FONT_SIZE && editor.value.fontSize <= MAX_EDITOR_FONT_SIZE && [2, 4, 8].includes(editor.value.tabSize)
   && Number.isInteger(editor.value.tabLimit) && editor.value.tabLimit >= 1 && editor.value.tabLimit <= 100)
 // The select doubles as the indentation size for spaces and the display width of a
 // tab character, so its labels follow whichever mode is turned on.
@@ -897,9 +898,9 @@ defineExpose({ handleEscape })
           <fieldset class="settings-fields" :disabled="busy">
             <div class="input-row">
               <label :for="`${id}-font`">字体大小 <span class="field-hint">（像素）</span></label>
-              <input :id="`${id}-font`" v-model.number="editor.fontSize" type="number" min="10" max="32" step="1" required aria-describedby="editor-font-hint" />
+              <input :id="`${id}-font`" v-model.number="editor.fontSize" type="number" :min="MIN_EDITOR_FONT_SIZE" :max="MAX_EDITOR_FONT_SIZE" step="1" required aria-describedby="editor-font-hint" />
             </div>
-            <p id="editor-font-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">字体大小需为 10–32 之间的整数。待核：IDEA 的编辑器字号很可能在 Editor › Color Scheme › Color Scheme Font，尚未核实。</p>
+            <p id="editor-font-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">字体大小需为 {{ MIN_EDITOR_FONT_SIZE }}–{{ MAX_EDITOR_FONT_SIZE }} 之间的整数（IDEA `EditorFontsConstants`：下限 4，上限 registry `ide.editor.max.font.size` 默认 40）。</p>
             <label class="checkbox-row"><input v-model="editor.wordWrap" type="checkbox" aria-describedby="editor-wrap-hint" /><span>自动换行（软换行）</span></label>
             <p id="editor-wrap-hint" class="field-hint restore-hint">对应 IDEA 的 “Soft-wrap these files”，在 Editor › General —— EditorOptionsPanel.kt 引用 ApplicationBundle.properties:341 的 checkbox.use.soft.wraps.at.editor。</p>
           </fieldset>

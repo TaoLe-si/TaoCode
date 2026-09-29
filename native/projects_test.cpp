@@ -434,7 +434,7 @@ int main() {
             const auto before = get(file);
             const auto before_state = first.state();
             const std::vector<Json> bad_editor{
-                nullptr, Json::array(), {{"theme", "dark"}}, {{"fontSize", 9}}, {{"fontSize", 33}},
+                nullptr, Json::array(), {{"theme", "dark"}}, {{"fontSize", 3}}, {{"fontSize", 41}},
                 {{"fontSize", 14.0}}, {{"fontSize", "14"}}, {{"fontSize", true}},
                 {{"fontSize", (std::numeric_limits<std::uint64_t>::max)()}},
                 {{"tabSize", 3}}, {{"tabSize", 2.0}}, {{"wordWrap", 1}}, {{"lineNumbers", nullptr}},
@@ -521,7 +521,7 @@ int main() {
             check(second.update_project_settings(root_a, {{"buildTools", {{"autoReloadType", "SELECTIVE"}, {"previousAutoReloadType", "ALL"}}}})
                     .at("buildTools") == custom.at("buildTools"),
                   "Restoring the reload type must return the whole buildTools block");
-            check(first.update_settings({{"fontSize", 10}, {"tabSize", 2}}).at("fontSize") == 10, "Lower font boundary and tab size two are valid");
+            check(first.update_settings({{"fontSize", 4}, {"tabSize", 2}}).at("fontSize") == 4, "Lower font boundary and tab size two are valid");
             check(first.update_settings({{"tabSize", 4}}).at("tabSize") == 4, "Tab size four is valid");
             ProjectStore isolated(temporary.path / "isolated.json");
             check(isolated.state().at("settings") == defaults() && isolated.project_settings(root_a) == exclusions(), "Application settings are isolated; this project's XML color lists are empty");

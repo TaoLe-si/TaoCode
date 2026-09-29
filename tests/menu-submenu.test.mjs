@@ -67,9 +67,12 @@ test('the editor toggle actions submenu flips real editor settings', () => {
   for (const setting of ['wordWrap', 'showWhitespaces', 'lineNumbers', 'showGutterIcons', 'showIndentGuides'])
     assert.match(body, new RegExp(`ctx\\.saveSettingsPatch\\(\\{ ${setting}: !ctx\\.editorSettings\\.value\\.${setting} \\}\\)`),
       `${setting} 的开关要有真实落点`)
-  // 字号动作受与设置页相同的上下限约束（10–32）
-  assert.match(body, /Math\.min\(32, ctx\.editorSettings\.value\.fontSize \+ 1\)/)
-  assert.match(body, /Math\.max\(10, ctx\.editorSettings\.value\.fontSize - 1\)/)
+  // 字号动作走 src/editorFontSize.ts 的共享边界（上游 `ChangeEditorFontSizeAction.java:48` 的目标值
+  // 门槛 [8, 40]；设置页的写入门槛是 `EditorFontsConstants` 的 [4, 40]）—— 原先这里写死 10–32。
+  assert.match(body, /stepEditorFontSize\(ctx\.editorSettings\.value\.fontSize, 1\)/,
+    '增大字号走共享边界')
+  assert.match(body, /stepEditorFontSize\(ctx\.editorSettings\.value\.fontSize, -1\)/,
+    '减小字号走共享边界')
   // 原先这里断言「不许出现 gutter icons 一项」（当时 TaoCode 没有行内图标层）。2026-09-27 已把
   // 宿主能力补齐（src/gutterIcons.ts + src/editorGutterIcons.ts，IDEA `GutterIconRenderer`），
   // 所以守卫改成上面 `showGutterIcons` 的**正向**断言：这一行必须写回真实设置。

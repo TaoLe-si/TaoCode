@@ -17,6 +17,7 @@ function toolWindowGroupOrder(): ToolWindowId[] {
   return [...withMnemonic, ...rest]
 }
 import { defaultEditorSettings } from '../settingsModel.ts'
+import { stepEditorFontSize } from '../editorFontSize.ts'
 
 export interface ViewMenuContext {
   changeSplitOrientation: any
@@ -126,9 +127,10 @@ export interface ViewMenuContext {
     // ShowWhitespaces · ShowLineNumbers · ShowGutterIcons · ShowIndentLines · (分隔) ·
     // IncreaseFontSize · DecreaseFontSize。这些都是 ToggleAction，落点是同一份编辑器设置
     // （与 编辑器 › 常规 › 外观 页共用状态，改一处两边都变）。
-    // `EditorToggleShowGutterIcons` = **待办**（已登记 docs/class-parity-todo.md §9 #2）：缺的能力是
-    // 「可点击的行内 gutter 图标层」（IDEA 的 `GutterIconRenderer`，由各 `LineMarkerProvider` 生产），
-    // 本仓 gutter 目前只有行号/折叠/断点/书签，没有图标渲染器这一层 —— 先补宿主层再做这个开关。
+    // `EditorToggleShowGutterIcons` = **已落地**（不再是待办）：`showGutterIcons` 的消费方是
+    // `src/gutterIconHost.ts`（IDEA `areGutterIconsShown()` 的对应物），图标层的三个生产者是
+    // LSP 诊断 / DAP 断点 / 书签（见 tests/gutter-icons.test.mjs）。仍待办的是 gutter 图标上的
+    // 右键弹层与部分对齐档，登记在 docs/class-parity-todo.md §9 #2。
     { id: 'view.editorToggleActions', title: '编辑器开关', keywords: 'editor toggle soft wrap whitespaces line numbers indent guides font size 编辑器开关 软换行 空白 行号 缩进 字号', children: [
       { id: 'view.toggleSoftWraps', title: '软换行', keywords: 'soft wrap word wrap 软换行 自动换行', checked: () => ctx.editorSettings.value.wordWrap, run: () => void ctx.saveSettingsPatch({ wordWrap: !ctx.editorSettings.value.wordWrap }) },
       { id: 'view.ruleEditorToggles1', rule: true },
@@ -140,9 +142,11 @@ export interface ViewMenuContext {
       { id: 'view.toggleGutterIcons', title: '显示装订线图标', keywords: 'show gutter icons line markers 装订线 图标 行标记', checked: () => ctx.editorSettings.value.showGutterIcons, run: () => void ctx.saveSettingsPatch({ showGutterIcons: !ctx.editorSettings.value.showGutterIcons }) },
       { id: 'view.toggleIndentGuides', title: '显示缩进参考线', keywords: 'show indent guides 缩进参考线', checked: () => ctx.editorSettings.value.showIndentGuides, run: () => void ctx.saveSettingsPatch({ showIndentGuides: !ctx.editorSettings.value.showIndentGuides }) },
       { id: 'view.ruleEditorToggles2', rule: true },
-      // IDEA 的字号动作以 1 为步长、受同一份字号上下限约束（这里是 10–32，与设置页一致）。
-      { id: 'view.increaseEditorFont', title: '增大编辑器字号', keywords: 'increase editor font size bigger 增大 字号', enabled: () => ctx.editorSettings.value.fontSize < 32, run: () => void ctx.saveSettingsPatch({ fontSize: Math.min(32, ctx.editorSettings.value.fontSize + 1) }) },
-      { id: 'view.decreaseEditorFont', title: '减小编辑器字号', keywords: 'decrease editor font size smaller 减小 字号', enabled: () => ctx.editorSettings.value.fontSize > 10, run: () => void ctx.saveSettingsPatch({ fontSize: Math.max(10, ctx.editorSettings.value.fontSize - 1) }) },
+      // 字号动作：步长 1，上下限与设置页同源。上游 `ChangeEditorFontSizeAction.java:48` 只在
+      // **目标值**落在 `[8, getMaxEditorFontSize()]` 时才应用；上限 = `ide.editor.max.font.size`
+      // （`EditorFontsConstants.java:16`，默认 **40**）。规则在 `src/editorFontSize.ts`。
+      { id: 'view.increaseEditorFont', title: '增大编辑器字号', keywords: 'increase editor font size bigger 增大 字号', enabled: () => stepEditorFontSize(ctx.editorSettings.value.fontSize, 1) !== null, run: () => { const next = stepEditorFontSize(ctx.editorSettings.value.fontSize, 1); if (next !== null) void ctx.saveSettingsPatch({ fontSize: next }) } },
+      { id: 'view.decreaseEditorFont', title: '减小编辑器字号', keywords: 'decrease editor font size smaller 减小 字号', enabled: () => stepEditorFontSize(ctx.editorSettings.value.fontSize, -1) !== null, run: () => { const next = stepEditorFontSize(ctx.editorSettings.value.fontSize, -1); if (next !== null) void ctx.saveSettingsPatch({ fontSize: next }) } },
     ] },
     // ViewMenu **直接层**的 `EditorResetFontSizeGlobal`（PlatformActions.xml:586，在 EditorToggleActions
     // 组之后、ToggleFocusMode 之前）。同一层还有 `EditorIncreaseFontSizeGlobal` / `DecreaseGlobal`

@@ -1636,3 +1636,37 @@ App.vue 装配 + 4 个非工厂条目 + 11 个真工厂都带 upstreamId、上�
 "收起面板 + 交回状态栏文字"。`src/App.vue` 与 `src/bridge.ts` 都在登记上限上（2737 / 1208 行，
 机检口径 `split('\n').length`）—— 逻辑一律落在 `src/statusBarText.ts` 与 `src/processTerminated.ts`，
 宿主只留一行调用。
+
+## AK. 2026-09-29 第三十二批：字号上下限的**实质偏差**（10–32 → 上游的 4–40 / 8–40）
+
+**这是一个真缺陷，不是位置问题**：本仓把编辑器字号卡在 **10–32**，而上游不是这个区间。原先设置页
+那句提示自己就写着「**待核**：IDEA 的编辑器字号很可能在 Editor › Color Scheme › Color Scheme Font，
+尚未核实」—— 本轮把出处查实了。
+
+上游**两处来源、两个区间**（这才是容易踩错的地方）：
+
+| 用途 | 上游 | 区间 |
+|---|---|---|
+| 设置页 / 配色方案**写入**门槛 | `EditorFontsConstants.getMinEditorFontSize()` = `scale(4)`、`getMaxEditorFontSize()` = `scale(registry ide.editor.max.font.size，默认 40)`（`EditorFontsConstants.java:11-17`）；`AbstractColorsScheme.setEditorFontSize`（`:324-326`）每次写入都 `checkAndFixEditorFontSize`；设置页输入框同界 clamp（`AbstractFontOptionsPanel.java:109`） | **[4, 40]** |
+| 菜单「增大/减小字号」 | `ChangeEditorFontSizeAction.actionPerformed`（`ChangeEditorFontSizeAction.java:48`）只在 `unscaledSize >= 8 && <= getMaxEditorFontSize()` 时应用 —— 判的是**目标值** | **[8, 40]** |
+
+所以两处修正，规则落在 `src/editorFontSize.ts`（单一来源）：
+
+1. **设置页 / 欢迎页 / 原生校验**改成 [4, 40]。原生 `settings_schema.cpp` 是权威校验器，它原先
+   会把 4–9 和 33–40 判成非法 —— 也就是说**用户改不到上游允许的值**。三处（设置页 input + 校验、
+   欢迎页自定义框、原生 schema + 错误文案）一起改，避免各写一个数。
+2. **菜单动作**走 `stepEditorFontSize(current, ±1)`：按**目标值**判 [8, 40]，越界时 `enabled` 为假。
+   这一条连"从设置页写进来的 4 按增大得 5 也不动"都照抄了（目标值 5 不满足 `>= 8`）—— 判目标值
+   而不是当前值，正是上游那句代码的形状。
+
+**为什么这算实质偏差**：10–32 让 [4,9] 与 [33,40] 两段上游可用区间在本仓不可达，且菜单动作与设置页
+用了**同一个**区间（上游其实不同）。
+
+判据：`tests/editor-font-size.test.mjs`（7 条：门槛常量出处、clamp 到 [4,40]、动作判目标值、
+步进越界返回 null、低值 5 也不应用、三处 UI + 原生 schema 都走共享边界且旧字面量已消失、
+原生边界用例已移到 4/3/41）。并同步更新 `tests/menu-submenu.test.mjs` 里那两条写死 32/10 的断言
+（改成断"走共享步进函数"，仍精确）。
+
+**顺带订正**：`src/menus/viewMenu.ts` 里 `EditorToggleShowGutterIcons` 那段注释还写着「待办」，
+但该组**早已落地**（`src/gutterIconHost.ts` 消费 `showGutterIcons`，三个生产者是 LSP 诊断/DAP 断点/
+书签，判据 `tests/gutter-icons.test.mjs`）—— 注释改为"已落地 + 仍待办的是 gutter 右键弹层"。
