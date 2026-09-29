@@ -12,6 +12,7 @@ import type { MenuRow } from './menus/types'
 import { useSubmenuState } from './menus/submenuState'
 import { rankCommands } from './commandSearch'
 import { createPopupGate } from './popupState'
+import { focusMainToolbar, mainToolbarFocusHost } from './mainToolbarFocus.ts'
 import { editorPopupRows as editorPopupLayout } from './menus/editorPopupMenu'
 import { toolWindowGearRows as toolWindowGearLayout } from './menus/toolWindowGear'
 import { PLUGIN_MENU_LABEL, pluginMenuRows } from './pluginCommands'
@@ -198,6 +199,15 @@ const actionList = computed<ActionEntry[]>(() => {
   // "Move focus to the first widget in the status bar") is not a menu item either: it lives in the
   // `ToolbarPopupActions` group (PlatformActions.xml:1366) that CustomizationUtil.java:567-568
   // injects into the *toolbar customization* popup, so it is a searchable action without a menu row.
+  // `FocusMainToolbar`（`intellij.platform.ide.impl.actions.xml:721`，文案 ActionsBundle:79-80 =
+  // 聚焦主工具栏）与 `FocusStatusBar` 一样是**顶层 `<reference>`**（PlatformActions.xml:1364/1366），
+  // 不占菜单行；本仓挂进动作索引（查找操作里可搜可点）。`update`：新 UI 且有项目才可用（`:25-27`），
+  // 本仓的新 UI 是常态 ⇒ 等价于"打开了项目"。
+  list.push({
+    id: 'window.focusMainToolbar', title: '聚焦主工具栏', keys: '',
+    keywords: 'focus main toolbar first item keyboard 主工具栏 焦点 focus main toolbar', group: '窗口',
+    enabled: () => Boolean(workspace.value), run: () => focusMainToolbar(mainToolbarFocusHost),
+  })
   list.push({
     id: 'window.focusStatusBar', title: '聚焦状态栏', keys: '',
     keywords: 'focus status bar first widget keyboard 状态栏 键盘 焦点 focus status bar', group: '窗口',

@@ -4,7 +4,7 @@
 
 四档（同 B1）：`[x]` 已移植 · `[~]` 部分 · `[ ]` 未移植（TODO）· `[-]` 不适用（附理由）
 
-> **本文档对 350 类逐条给判决**：§A/§B 讲有实现点的 87 条，§C 讲未移植 79 条，§D 讲不适用 182 条，§G 是**逐条总表**（350 行，机检对齐）。四档合计 11 + 76 + 79 + 184 = 350。
+> **本文档对 350 类逐条给判决**：§A/§B 讲有实现点的 89 条，§C 讲未移植 65 条，§D 讲不适用 182 条，§G 是**逐条总表**（350 行，机检对齐）。四档合计 12 + 77 + 65 + 196 = 350。
 >
 > 2026-09-29 第三十六批把 `ResizeStripeManager` 与 `MoreSquareStripeButton` 落了地（侧条拖宽 + 「更多」按钮，
 > 见 `docs/ui-placement-audit.md` §AN），顺带纠正三行写错的依据：`ToolWindowToolbar` / `ToolWindowLeftToolbar` /
@@ -130,9 +130,9 @@
 | `requestFocusInToolWindow` | `src/toolWindowActions.ts` 的 `focusToolWindowContent`（同名能力，形态不同） | 上游对具体组件类型的焦点偏好（表格/树/编辑器） |
 | `toolWindowNamesChange` / `toolwindow` | `src/toolWindowMeta.ts` 的 `toolTitles` 常量表 | 上游是运行时改名通道（本仓标题是常量，没有改名入口） |
 
-## C. 未移植（`[ ]`，79 类）—— 有真行为、本仓还没有
+## C. 未移植（`[ ]`，65 类）—— 有真行为、本仓还没有
 
-（第三十六批从这里移走 5 条：`ResizeStripeManager`、`MoreSquareStripeButton` 已落地；状态栏注册表那 5 行是第三十批的欠账，同批一起补判 —— 
+（第四十一批把没有宿主的 12 条判成 `[-]`；第三十六批从这里移走 5 条：`ResizeStripeManager`、`MoreSquareStripeButton` 已落地；状态栏注册表那 5 行是第三十批的欠账，同批一起补判 —— 
 `ToolWindowToolbar` / `ToolWindowLeftToolbar` / `ToolWindowRightToolbar` 是侧条本体，原先按"窗口内工具栏"误判。）
 
 按"用户能不能看见"排序，前几条是下一步该做的。
@@ -145,20 +145,20 @@
 | 4 | `EditorBasedWidget` / `EditorBasedStatusBarPopup` / `StatusBarEditorBasedWidgetFactory` | `impl/status/EditorBasedWidget.kt`、`EditorBasedStatusBarPopup.kt`、`status/widget/StatusBarEditorBasedWidgetFactory.kt` | "跟着当前编辑器走的 widget"基类（上游 `PositionPanel`/`EncodingPanel`/`LineSeparatorPanel` 都继承它）。本仓这些组件直接在 App.vue 里读 `active`/`editorSettings` |
 | 5 | `ReadOnlyAttributeWidgetFactory` / `EncodingPanelWidgetFactory` / `LineSeparatorWidgetFactory` / `PositionPanelWidgetFactory` / `MemoryIndicatorWidgetFactory` / `SmartModeIndicatorWidgetFactory` / `VfsRefreshIndicatorWidgetFactory` / `PowerSaveStatusWidgetFactory` / `ColumnSelectionModeWidgetFactory` / `FatalErrorWidgetFactory` | `impl/status/*WidgetFactory.*` | 这十个工厂的**行为**本仓大都以"App.vue 里一个 `<button>`"存在（编码/行尾/光标/只读/内存/语言服务/省电/列选择），但**没有工厂这一层** ⇒ 与第 1 条同根，是注册表落地后的机械工作 |
 | 6 | `IndexesAndVfsFlushIndicatorWidgetFactory` / `WriteThreadIndicatorWidgetFactory` | `impl/status/*` | 索引与刷盘指示（本仓无索引阶段，但"写线程"这条有对应语义） |
-| 7 | `ToolWindowManager`（接口） | `ide-core/.../ToolWindowManager.java` | 上游查询面：`getToolWindow(id)`/`getToolWindows()`/`getToolWindowIds()`/`getActiveToolWindowId()`/`invokeLater(...)` |
+| ~~7~~ | `ToolWindowManager`（接口） | `ide-core/.../ToolWindowManager.java` | **判 `[-]`（第四十一批）**：本仓的查询面散在三个模块里且每个都有真实消费者，抽一个门面只是把三处转发一遍、没有新语义（§AM 已逐成员核过）。见 §G |
 | ~~8~~ | `RegisterToolWindowTask` / `ToolWindowFactory` | `platform-api/.../wm/*` | **已落地（第三十九批）**：`src/toolWindowMeta.ts` 的 `TOOL_WINDOW_REGISTRY` 一条记录 = 一个工具窗口（id / 条纹标题 / 图标 / 锚点 / 助记符 / `shouldBeAvailable`），标题/图标/锚点/次序/助记符四张表全部由它派生。两处配套仍缺（`createToolWindowContent` 那一栏＝内容挂载点仍是模板链；EP 侧本就无宿主），见 `docs/ui-placement-audit.md` §AQ |
 | 9 | `ToolWindowManagerListener` / `ToolWindowManagerState` / `WindowInfoImpl` / `ToolWindowPaneState` / `ToolWindowEntry` / `ToolWindowSetInitializer` | `toolWindow/*`、`impl/*` | 上游的**每窗口状态对象**、状态持久化聚合、集合初始化 |
 | ~~10~~ | `ProjectFrameToolWindowLayout` / `ToolWindowLayoutProfileProvider` / `ToolWindowLayoutProfileMigrationHelper` | `toolWindow/*`、`impl/*` | **已落地（第四十批）**：`src/toolLayoutProfiles.ts`（档案 + `SEED_ONLY`/`FORCE_ONCE` + 上游那条应用级迁移标记）+ 布局改成**项目级**（`taocode.toolLayout:<root>`，旧的三键一次性迁进来）。`ProjectFrameToolWindowLayoutBean` 里还差几个本仓模型没有的每窗口字段（`weight`/`split`/`sideWeight`/按窗口的 `contentUiType`）—— 那属于下面第 9 条（每窗口状态对象），见 `docs/ui-placement-audit.md` §AR |
 | 9 | `ToolWindowManagerListener` / `ToolWindowManagerState` / `WindowInfoImpl` / `ToolWindowPaneState` / `ToolWindowEntry` / `ToolWindowSetInitializer` | `toolWindow/*`、`impl/*` | 上游的**每窗口状态对象**（`WindowInfoImpl`：anchor/order/`isVisible`/`isShowStripeButton`/`weight`/`split`/`contentUiType`/`sideWeight`）与状态持久化聚合。本仓现在把 anchor/顺序/隐藏集收在项目的**一份布局记录**里（第四十批），但没有 per-window 对象 —— **这是 §C 里最有价值的一条**：它是布局档案剩下那几个字段（weight/split/按窗口的 contentUiType）与"每窗口可见性/收藏"的前置，有真宿主（刚落地的那份项目布局记录） |
-| 11 | `ToolWindowHorizontalToolbar` / `ToolWindowStripeExtension` | `extendedToolWindowsUi/*` | TOP/底部的**横向**条纹与那套扩展点：本仓（与 2026.2 发货版）都没有这条形态 —— 2026.2 整包 jar 里已无 `ToolWindowStripeExtension`。`ToolWindowLeftToolbar` / `ToolWindowRightToolbar` / `ToolWindowToolbar` **不是**这一族（它们是侧条本体），第三十六批已实现 |
+| ~~11~~ | `ToolWindowHorizontalToolbar` / `ToolWindowStripeExtension` | `extendedToolWindowsUi/*` | **判 `[-]`（第四十一批）**：`ToolWindowStripeExtension` 在 2026.2 的整包 jar 里已不存在（那把闸随它一起没了，见 §AN），`ToolWindowHorizontalToolbar` 是「扩展存在时才有」的 TOP/BOTTOM 横向条纹 —— 本仓与 2026.2 都没有这条形态，没有宿主 |
 | 12 | `ToolWindowButtonManager` / `ToolWindowPaneNewButtonManager` / `ToolWindowPaneOldButtonManager` / `StripeActionGroup` | `toolWindow/*` | 条纹按钮**管理器**（新/旧 UI 两套）与 `TopStripeActionGroup`（顶部条纹的动作组，本仓无顶部条纹）。拖条宽（`ResizeStripeManager`）与侧条「更多」（`MoreSquareStripeButton`）第三十六批已落地 |
 | 13 | `ToolWindowInnerDragHelper` / `ToolWindowToEditorTransfer` / `ToolWindowInEditorSupport` | `toolWindow/innerDrag/*`、`impl/content/*` | 跨区拖放（工具窗口 → 编辑区/另一窗口）。**前置机制**：编辑器标签现在绑定文件（`Tab extends DocumentData`），承载任意内容这件事还没有（登记在 `docs/source-todo.md` §12） |
 | 14 | `tabInEditor` 整组（20 类，`ToolWindowEditorTab*`） | `impl/tabInEditor/*` | "把工具窗口作为一个编辑器标签打开"（包装成 `FileEditor` 于是能像文件一样拖到分栏）。本仓**完全没有**这一族；与 13 共用同一个前置机制 |
 | 15 | `IdeFocusManager` / `FocusManagerImpl` / `IdeFocusManagerImpl` / `ideFocusUtil` / `IdeFocusTraversalPolicy` / `BaseFocusWatcher` / `FocusWatcher` | `ide-core`/`impl`/`util/ui` | 上游通用焦点管理器（请求排队、回调、focus stack）。本仓只有状态栏那条 focus cycle root（`src/statusBarNav.ts`） |
-| 16 | `WindowManager` / `WindowManagerListener` | `ide-core`/`project-frame` | 窗口查询面与窗口事件。本仓由宿主 C++ 管窗口 |
-| 17 | `InspectionProfileWidgetFactory` / `TogglePopupHintsPanel` | `lang-impl/.../status/*` | 检查配置档 widget（本仓无检查档）与"隐去弹层提示"开关 |
-| 18 | `FocusMainToolbarAction` / `MainToolbarFocusSupport` / `MainToolbarQuickActions` / `OpenProjectSelectionPredicateSupplier` / `StatusBarListener` | `headertoolbar/*`、`status/*` | 顶栏焦点与快捷动作、项目部件选择谓词、状态栏事件监听 |
-| 19 | `LibraryDependentToolWindow` / `LibrarySearchHelper` | `platform-api/.../wm/ext/*` | 库依赖工具窗口（本仓无"依赖库"概念） |
+| ~~16~~ | `WindowManager` / `WindowManagerListener` | `ide-core`/`project-frame` | **判 `[-]`（第四十一批）**：窗口是宿主 C++ 建的那一个 WebView2 窗口，前端没有「创建/查询/监听窗口」这件事可做（`getFrame`/`getStatusBar` 那套查询在本仓没有消费者） |
+| ~~17~~ | `InspectionProfileWidgetFactory` / `TogglePopupHintsPanel` | `lang-impl/.../status/*` | **判 `[-]`（第四十一批）**：`TogglePopupHintsPanel` 就是那个检查配置档 widget 本身（`TogglePopupHintsPanel.java:29-32`：`StatusBarWidget.IconPresentation`，`ID = InspectionProfile`），原判据写的「隐去弹层提示」是误读 —— 本仓的诊断来自语言服务、没有 profile 概念，两个都没有宿主 |
+| 18 | `FocusMainToolbarAction` / `MainToolbarFocusSupport` / `MainToolbarQuickActions` / `OpenProjectSelectionPredicateSupplier` / `StatusBarListener` | `headertoolbar/*`、`status/*` | **第四十一批走了三条**：`FocusMainToolbarAction` 判 `[x]`、`MainToolbarFocusSupport` 判 `[~]`（Esc/←→/取条目都在，缺焦点恢复与「点击不进焦点」）；`OpenProjectSelectionPredicateSupplier` 与 `StatusBarListener` 判 `[-]`（都是给插件的那层 SPI/监听，本仓没有插件运行时）。**只剩** `MainToolbarQuickActions`（它属于「定制主工具栏」那套 QuickAction，本仓没有工具栏定制） |
+| ~~19~~ | `LibraryDependentToolWindow` / `LibrarySearchHelper` | `platform-api/.../wm/ext/*` | **判 `[-]`（第四十一批）**：依附「依赖库」（`OrderEntry` 一级的库）与针对库的搜索，本仓没有这个概念也没有对应 UI |
 | 20 | `ProductTitleInfoProvider` / `ProductVersionTitleInfoProvider` / `ConfigFolderTitleInfoProvider` / `SimpleTitleInfoProvider` / `SuperUserSuffixTitleInfoProvider` / `TitleInfoOption` | `impl/simpleTitleParts/*` | 标题分段 provider（见 B-4） |
 
 ## D. 不适用（`[-]`，182 类）—— 附理由
@@ -272,22 +272,22 @@
 | `EditorBasedWidget` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/EditorBasedWidget.kt` | `[ ]` | 跟着当前编辑器走的 widget 基类 |
 | `EncodingPanelWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/EncodingPanelWidgetFactory.java` | `[ ]` | §C：同上 |
 | `FatalErrorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/FatalErrorWidgetFactory.java` | `[ ]` | §C：同上 |
-| `FocusMainToolbarAction` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/FocusMainToolbarAction.kt` | `[ ]` | 聚焦主工具栏的动作 |
+| `FocusMainToolbarAction` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/FocusMainToolbarAction.kt` | `[x]` | `src/mainToolbarFocus.ts` 的 `focusMainToolbar`（守卫：焦点已在工具栏/标题栏里就不动）+ 动作索引里的 `window.focusMainToolbar` 行（`PlatformActions.xml:1364` 是顶层 reference，与 `FocusStatusBar` 相邻） |
 | `FocusManagerImpl` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/FocusManagerImpl.java` | `[ ]` | 同上（实现） |
 | `FocusWatcher` | `platform/util/ui/src/com/intellij/openapi/wm/FocusWatcher.java` | `[ ]` | 焦点监视 |
 | `IdeFocusManager` | `platform/ide-core/src/com/intellij/openapi/wm/IdeFocusManager.java` | `[ ]` | 通用焦点管理器（焦点请求排队/回调）：本仓只有状态栏那条 focus cycle root |
 | `IdeFocusManagerImpl` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/IdeFocusManagerImpl.java` | `[ ]` | 同上（实现） |
 | `IdeFocusTraversalPolicy` | `platform/platform-impl/src/com/intellij/openapi/wm/ex/IdeFocusTraversalPolicy.java` | `[ ]` | 焦点遍历策略 |
 | `IndexesAndVfsFlushIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/IndexesAndVfsFlushIndicatorWidgetFactory.kt` | `[ ]` | §C：索引/刷盘指示（本仓无索引） |
-| `InspectionProfileWidgetFactory` | `platform/lang-impl/src/com/intellij/openapi/wm/impl/status/InspectionProfileWidgetFactory.java` | `[ ]` | 检查配置档 widget（本仓无检查档） |
-| `LibraryDependentToolWindow` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibraryDependentToolWindow.java` | `[ ]` | 库依赖工具窗口 |
-| `LibrarySearchHelper` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibrarySearchHelper.java` | `[ ]` | 库依赖工具窗口的搜索帮助 |
+| `InspectionProfileWidgetFactory` | `platform/lang-impl/src/com/intellij/openapi/wm/impl/status/InspectionProfileWidgetFactory.java` | `[-]` | 本仓没有「检查配置档」（诊断来自语言服务），它管的那条状态栏组件没有对象 |
+| `LibraryDependentToolWindow` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibraryDependentToolWindow.java` | `[-]` | 依附「依赖库」（`OrderEntry` 一级的库）的工具窗口；本仓没有这个概念 |
+| `LibrarySearchHelper` | `platform/platform-api/src/com/intellij/openapi/wm/ext/LibrarySearchHelper.java` | `[-]` | 同上：它服务的是「在库里搜索」，本仓没有库 |
 | `LineSeparatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/LineSeparatorWidgetFactory.java` | `[ ]` | §C：同上 |
-| `MainToolbarFocusSupport` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbarFocusSupport.kt` | `[ ]` | 工具栏焦点支撑 |
+| `MainToolbarFocusSupport` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbarFocusSupport.kt` | `[~]` | `src/mainToolbarFocus.ts`：`getFocusableAndEnabledItems`（`:66-70`）、`focusFirstItem`（`:51-61`）、Esc 回焦点（`:87-101`）、←/→ 遍历（`:216-224`）都已落；缺「聚焦项被禁用/移除时的焦点恢复」（`:135-186`）与「点击不把焦点带进工具栏」（`:56-58`），登记在 `docs/source-todo.md` §14 |
 | `MainToolbarQuickActions` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbarQuickActions.kt` | `[ ]` | 工具栏快捷动作 |
 | `MemoryIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/MemoryIndicatorWidgetFactory.java` | `[ ]` | §C：同上 |
 | `MoreSquareStripeButton` | `platform/platform-impl/src/com/intellij/toolWindow/MoreSquareStripeButton.kt` | `[x]` | `src/components/ToolStripe.vue`（按钮 + 弹层 + 「移至对侧」）+ `src/toolWindowStripes.ts` 的 `moreButtonRows`/`moreButtonSide`（`ToolWindowManagerState.moreButton` 的存档形状） |
-| `OpenProjectSelectionPredicateSupplier` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/OpenProjectSelectionPredicateSupplier.kt` | `[ ]` | 项目部件选择谓词（依附项目部件动作过滤） |
+| `OpenProjectSelectionPredicateSupplier` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/OpenProjectSelectionPredicateSupplier.kt` | `[-]` | 给插件决定「项目部件里哪些动作要过滤掉」的 SPI（`@ApiStatus.Experimental`）；本仓没有插件运行时，动作集是固定的 |
 | `PositionPanelWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/PositionPanelWidgetFactory.kt` | `[ ]` | §C：同上 |
 | `PowerSaveStatusWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/PowerSaveStatusWidgetFactory.java` | `[ ]` | §C：同上 |
 | `ProductTitleInfoProvider` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/simpleTitleParts/ProductTitleInfoProvider.kt` | `[ ]` | 标题分段 provider（产品名/版本/配置目录）：本仓窗口标题由宿主拼，没有分段模型 |
@@ -300,7 +300,7 @@
 | `SmartModeIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/SmartModeIndicatorWidgetFactory.kt` | `[ ]` | §C：同上 |
 | `StatusBarEditorBasedWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/widget/StatusBarEditorBasedWidgetFactory.kt` | `[ ]` | EditorBasedWidget 的工厂 |
 | `StatusBarEx` | `platform/platform-impl/src/com/intellij/openapi/wm/ex/StatusBarEx.java` | `[ ]` | 状态栏扩展接口（`addWidget`/`getWidget` 那套管理面）：本仓的查询侧在 `src/statusWidgets.ts`，接口层未建 |
-| `StatusBarListener` | `platform/ide-core/src/com/intellij/openapi/wm/StatusBarListener.java` | `[ ]` | 状态栏事件监听 |
+| `StatusBarListener` | `platform/ide-core/src/com/intellij/openapi/wm/StatusBarListener.java` | `[-]` | 给插件观察「组件增删/更新」的监听接口（`widgetAdded`/`widgetUpdated`/`widgetRemoved`）；本仓组件是渲染模型的固定表 + 响应式状态，没有「谁来订阅」的角色 |
 | `StatusBarWidgetFactory` | `platform/platform-api/src/com/intellij/openapi/wm/StatusBarWidgetFactory.java` | `[x]` | `src/statusBarWidgets.ts`（字段面 + 三道闸 + `findWidgetFactory`）+ `src/statusWidgets.ts`（工厂表，逐条带 upstreamId）。第三十批已落地，见 `docs/ui-placement-audit.md` §AI |
 | `StatusBarWidgetProvider` | `platform/platform-api/src/com/intellij/openapi/wm/StatusBarWidgetProvider.java` | `[ ]` | 注册表的 EP 侧 |
 | `StatusBarWidgetProviderToFactoryAdapter` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/widget/StatusBarWidgetProviderToFactoryAdapter.kt` | `[ ]` | 状态栏组件注册表（§C 最优先）：本仓是固定清单 |
@@ -311,7 +311,7 @@
 | `StripeActionGroup` | `platform/platform-impl/src/com/intellij/toolWindow/StripeActionGroup.kt` | `[ ]` | 条纹右键动作组 |
 | `SuperUserSuffixTitleInfoProvider` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/simpleTitleParts/SuperUserSuffixTitleInfoProvider.kt` | `[ ]` | 标题分段 provider（产品名/版本/配置目录）：本仓窗口标题由宿主拼，没有分段模型 |
 | `TitleInfoOption` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/simpleTitleParts/TitleInfoOption.kt` | `[ ]` | 标题分段 provider（产品名/版本/配置目录）：本仓窗口标题由宿主拼，没有分段模型 |
-| `TogglePopupHintsPanel` | `platform/lang-impl/src/com/intellij/openapi/wm/impl/status/TogglePopupHintsPanel.java` | `[ ]` | 隐去弹层提示的开关 |
+| `TogglePopupHintsPanel` | `platform/lang-impl/src/com/intellij/openapi/wm/impl/status/TogglePopupHintsPanel.java` | `[-]` | 它就是那个检查配置档组件本身（`TogglePopupHintsPanel.java:29-32`：`ID = InspectionProfile`，`StatusBarWidget.IconPresentation`）—— 原判据写的「隐去弹层提示开关」是误读；同上，没有宿主 |
 | `ToolWindowAllowlistEP` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowAllowlistEP.java` | `[-]` | 同上：allowlist 是"哪些插件声明的窗口允许出现在这个产品里"，没有插件清单就没有它 |
 | `ToolWindowButtonManager` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowButtonManager.kt` | `[ ]` | 条纹按钮管理（新/旧 UI 两套） |
 | `ToolWindowEP` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowEP.java` | `[-]` | 插件扩展点（`<toolWindow>` 由插件声明）——本仓没有插件运行时（硬规则 2 的例子），不建空壳；理由登记在 `docs/source-todo.md` §12 |
@@ -337,28 +337,28 @@
 | `ToolWindowEditorTabTransferController` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/tabInEditor/ToolWindowEditorTabTransferController.kt` | `[ ]` | 把工具窗口当编辑器标签（§E-3）：依赖另一条标签类型与生命周期，单独一批 |
 | `ToolWindowEntry` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowEntry.kt` | `[ ]` | 占位/平铺条目模型 |
 | `ToolWindowFactory` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowFactory.kt` | `[~]` | `src/toolWindowMeta.ts` 的 `shouldBeAvailable(project)` 那一栏（逐条带出处：Gradle 走 `AbstractExternalSystemToolWindowFactory.java:32-34`、VCS 日志走 `vcsToolWindowFactories.kt:60-63`）已落；`createToolWindowContent` 那一半仍是 `ToolWindowView.vue` 的模板链（各视图 props 不同，没有假装数据化） |
-| `ToolWindowHorizontalToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/extendedToolWindowsUi/ToolWindowHorizontalToolbar.kt` | `[ ]` | 窗口内横向工具栏 |
+| `ToolWindowHorizontalToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/extendedToolWindowsUi/ToolWindowHorizontalToolbar.kt` | `[-]` | 它只在 `ToolWindowStripeExtension` 存在时才建（TOP/BOTTOM 横向条纹）；本仓与 2026.2 都没有这条形态 |
 | `ToolWindowInEditorSupport` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/content/ToolWindowInEditorSupport.kt` | `[ ]` | 工具窗口进编辑器的支撑（同 tabInEditor 一族） |
 | `ToolWindowInnerDragHelper` | `platform/platform-impl/src/com/intellij/toolWindow/innerDrag/ToolWindowInnerDragHelper.kt` | `[ ]` | 跨区拖放内部实现 |
 | `ToolWindowLayoutProfileMigrationHelper` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/ToolWindowLayoutProfileMigrationHelper.kt` | `[x]` | `src/toolLayoutProfiles.ts` 的 `layoutMigrationKey`（上游 `toolwindow.layout.profile.migration.<profileId>` 的等价键）+ `resolveProjectLayout` 的 `appliedVersion`/`writeAppliedVersion`（已应用版本 ≥ 档案版本就什么都不做） |
 | `ToolWindowLayoutProfileProvider` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowLayoutProfileProvider.kt` | `[x]` | `src/toolLayoutProfiles.ts` 的 `PROJECT_FRAME_PROFILES` / `projectFrameProfile(id)` / `resolveProjectLayout`（`SEED_ONLY` 与 `FORCE_ONCE` 两条语义 + `migrationVersion`） |
 | `ToolWindowLeftToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowLeftToolbar.kt` | `[~]` | `src/components/ToolStripe.vue`：左条与右条在本仓是**同一个组件**的 `side` 两个取值（上游也只是两个薄子类）；无 `bottomStripe` 那一半 |
-| `ToolWindowManager` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowManager.kt` | `[ ]` | 上游查询面：本仓散在 `src/toolWindowMeta.ts`/`src/toolWindowStripes.ts`/`src/toolWindowActions.ts` |
-| `ToolWindowManagerListener` | `platform/platform-api/src/com/intellij/openapi/wm/ex/ToolWindowManagerListener.java` | `[ ]` | 工具窗口事件监听（插件扩展点） |
+| `ToolWindowManager` | `platform/platform-api/src/com/intellij/openapi/wm/ToolWindowManager.kt` | `[-]` | 上游的查询面在本仓散在 `src/toolWindowMeta.ts`（注册表）/`src/toolWindowStripes.ts`（锚点与可见性）/`src/toolWindowActions.ts`（激活态）三处，每处都有真实消费者；抽一个门面只是转发，没有新语义（§AM 逐成员核过） |
+| `ToolWindowManagerListener` | `platform/platform-api/src/com/intellij/openapi/wm/ex/ToolWindowManagerListener.java` | `[-]` | 插件订阅工具窗口事件（注册/注销/状态变化）的监听接口；本仓的观察通道是响应式状态本身（`toolAnchors`/`toolOrder`/`hiddenStripeButtons`），没有订阅者角色 |
 | `ToolWindowManagerState` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/ToolWindowManagerState.kt` | `[ ]` | 布局持久化的完整模型 |
 | `ToolWindowPaneNewButtonManager` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowPaneNewButtonManager.kt` | `[ ]` | 新 UI 按钮管理 |
 | `ToolWindowPaneOldButtonManager` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowPaneOldButtonManager.kt` | `[ ]` | 旧 UI 按钮管理 |
 | `ToolWindowPaneState` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowPaneState.kt` | `[ ]` | 每 pane 状态对象 |
 | `ToolWindowRightToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowRightToolbar.kt` | `[~]` | `src/components/ToolStripe.vue`（`side="right"`）：镜像定位、宽度按边持久化、更多按钮的归属判定 |
 | `ToolWindowSetInitializer` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowSetInitializer.kt` | `[ ]` | 工具窗口集合初始化 |
-| `ToolWindowStripeExtension` | `platform/platform-impl/src/com/intellij/toolWindow/extendedToolWindowsUi/ToolWindowStripeExtension.kt` | `[ ]` | 条纹扩展点 |
+| `ToolWindowStripeExtension` | `platform/platform-impl/src/com/intellij/toolWindow/extendedToolWindowsUi/ToolWindowStripeExtension.kt` | `[-]` | 2026.2 的整包 jar 里已无这个类（§AN 的取证），它提供的 `isStripeResizable`/`getButtonMinSize` 那一层在本仓没有对应物；判 `[-]` 而不是待办 |
 | `ToolWindowToEditorTransfer` | `platform/platform-impl/src/com/intellij/toolWindow/innerDrag/ToolWindowToEditorTransfer.kt` | `[ ]` | 拖到编辑器转成标签 |
 | `ToolWindowToolbar` | `platform/platform-impl/src/com/intellij/toolWindow/ToolWindowToolbar.kt` | `[~]` | `src/components/ToolStripe.vue`：条纹本体（按钮 / 更多按钮 / 宽度分隔线 / 空白处右键 / `hasVisibleButtons` 的等价物）已落；`topStripe`+`bottomStripe` 的**双条纹**（split 组）与拖放落点几何没有（本仓是单列 + 底部 dock，既有登记偏差） |
 | `VfsRefreshIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/VfsRefreshIndicatorWidgetFactory.java` | `[ ]` | §C：同上 |
 | `WidgetRegistry` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/WidgetRegistry.kt` | `[~]` | `src/statusWidgets.ts` 的 `STATUS_WIDGETS` 表就是这份注册表（含"哪些是可配置工厂"的分档）；没有另立一个容器对象 |
 | `WindowInfoImpl` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/WindowInfoImpl.kt` | `[ ]` | 每窗口状态对象 |
-| `WindowManager` | `platform/ide-core/src/com/intellij/openapi/wm/WindowManager.java` | `[ ]` | 窗口查询面：本仓由宿主 C++ 管窗口 |
-| `WindowManagerListener` | `platform/project-frame/src/com/intellij/openapi/wm/ex/WindowManagerListener.kt` | `[ ]` | 窗口事件监听 |
+| `WindowManager` | `platform/ide-core/src/com/intellij/openapi/wm/WindowManager.java` | `[-]` | 窗口查询面（`getFrame`/`getStatusBar`/`getIdeFrame`…）：本仓就一个由宿主 C++ 建的 WebView2 窗口，前端没有对应的查询对象 |
+| `WindowManagerListener` | `platform/project-frame/src/com/intellij/openapi/wm/ex/WindowManagerListener.kt` | `[-]` | 同上：窗口是宿主的事，前端没有窗口事件可听 |
 | `WriteThreadIndicatorWidgetFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/WriteThreadIndicatorWidgetFactory.kt` | `[ ]` | §C：写线程指示 |
 | `ideFocusUtil` | `platform/ide-core/src/com/intellij/openapi/wm/ideFocusUtil.kt` | `[ ]` | 焦点工具（requestFocusInEditor 等） |
 | `AbstractBannerImageProvider` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/AbstractBannerImageProvider.kt` | `[-]` | 横幅图 provider |

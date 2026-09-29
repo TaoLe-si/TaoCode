@@ -217,3 +217,22 @@
   按窗口的 `contentUiType`/`visible`。它们要有落点，先得有**每窗口状态对象**（上游 `WindowInfoImpl`，
   判决表 §C 第 9 条）—— 本仓现在把三张表平铺在一份项目布局里，没有 per-window 对象。
   这不是"不做"，是排在那个对象之后（第 9 条现标"最有价值的下一条"）。
+
+## 14. 第六块（主工具栏键盘焦点）留下的
+
+上游 `MainToolbarFocusSupport` 里有五件事，本仓接了四件（明细与坐标见 `docs/ui-placement-audit.md` §AS）：
+
+- [x] `focusFirstItem()`（`:51-61`）：聚焦第一个"可聚焦且可用"的条目；焦点在工具栏**外面**时记下当前焦点。
+- [x] `Esc → restoreFocusToPreviousComponent()`（`:87-101`）：记下的还在显示且可用就回它，否则回编辑器。
+- [x] `←/→` 在条目间移动（`:216-224` 把这两键加进遍历键，`:206-213` 的遍历策略在走到头时回环）。
+- [x] `getFocusableAndEnabledItems()`（`:66-70`）：没显示或不可用的条目不参与。
+- [~] **走到头时先落到标题栏的 menu button**（`:206-213` 的 `getToolbarFrameHeader()?.getMenuButtonFocusTarget()`）：
+  本仓的标题栏里确实有 ☰ 菜单按钮，但它不是"工具栏条目"（`.topbar-toolbar` 之外），
+  要接得先给"标题栏这一级的遍历顺序"建模 —— 本仓暂时**直接回环**，并在此登记（不是漏的）。
+- [~] **焦点恢复**（`:135-186 moveFocusToFallbackIfNeeded()`）：正在聚焦的条目被禁用/移除时，
+  把焦点挪到同下标或最近的可聚焦条目（上游靠 `ActionToolbarListener.actionsUpdated`）。
+  本仓的工具栏条目会随状态变化消失（运行 widget 那一段），要做需要给工具栏挂
+  `MutationObserver` 或让各控件上报"我没了"—— 留作待办，不猜语义。
+- [~] **鼠标点击不把焦点带进工具栏**（`:56-58`：`isRequestFocusEnabled = false`）：
+  浏览器里点按钮本来就会聚焦它，与上游相反。改它等于禁掉一个浏览器原生行为，
+  先登记；真要改就在工具栏根上拦 `pointerdown` 的默认聚焦（会影响所有子控件）。

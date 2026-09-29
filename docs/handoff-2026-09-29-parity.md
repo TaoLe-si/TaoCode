@@ -4,8 +4,9 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`0fa43ef`（本机领先 `origin/main` 七个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
-  Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**，外加两份交接文档跟进）
+- HEAD：待提交（本机领先 `origin/main` 八个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+  Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**、
+  **主工具栏键盘焦点 + §C 无宿主条目的判决清理**，外加两份交接文档跟进）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -20,7 +21,7 @@
 
 | 项 | 值 |
 |---|---|
-| 前端测试 | `npm test` → **1196 passed / 0 failed** |
+| 前端测试 | `npm test` → **1209 passed / 0 failed** |
 | 类型检查 | `npx vue-tsc --noEmit -p tsconfig.json` → 0 错 |
 | 前端构建 | `npx vite build --emptyOutDir false` → 成功 |
 | 原生构建 | `cmd //c scripts\build-native-locked.bat` → RC 0、0 error / 0 warning |
@@ -125,6 +126,8 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
    §C 现标"最有价值的下一条"的是**每窗口状态对象**（上游 `WindowInfoImpl`：anchor/order/visible/
    isShowStripeButton/weight/split/contentUiType/sideWeight）—— 本仓现在把三张表平铺在一份项目布局里，
    没有 per-window 对象；档案里剩下那几个字段、以及"每窗口可见性/收藏"都等它。
+   （第四十一批已把 §C 里**没有宿主**的 12 条判成 `[-]`，剩下 65 条 `[ ]` 每条都真有行为、都还没有；
+   其中 13/14 那两族等的是"编辑器标签承载任意内容"这个机制，见 `docs/source-todo.md` §12。）
    §C 第 13/14 条（跨区拖放、`tabInEditor` 20 类）**共用同一个前置机制**：
    编辑器标签现在绑定文件（`Tab extends DocumentData`），"标签承载任意内容"这件事还没有，
    两条都排在它之后（登记在 `docs/source-todo.md` §12）
@@ -163,6 +166,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 ## 7. 最近的提交（知道上一批在干嘛）
 
 ```
+<待提交> feat(tool-windows): 主工具栏键盘焦点 + §C 里没有宿主的 12 条判 [-]
 0fa43ef feat(tool-windows): 布局档案 + 布局改成项目级（B2 §C 第 10 条）
 929b947 refactor(tool-windows): 工具窗口注册表 —— 一个窗口 = 一条记录
 607cf14 feat(vcs-log): 日志窗口自己的「视图选项」齿轮（标签名称 + 列的显示/隐藏）

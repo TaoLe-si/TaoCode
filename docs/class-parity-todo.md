@@ -533,3 +533,16 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 还差：档案里 `weight`/`split`/`sideWeight`/按窗口 `contentUiType` 这些字段要有落点，先得有每窗口状态
 对象（§C 第 9 条，现标"最有价值的下一条"）；理由是这些字段在 IDEA 里属于 `WindowInfoImpl`，
 而本仓把三张表平铺在一份项目布局记录里。
+
+## 20. 主工具栏键盘焦点（2026-09-29 第四十一批）
+
+`FocusMainToolbarAction` 判 `[x]`、`MainToolbarFocusSupport` 判 `[~]`（明细见 §AS）：
+`src/mainToolbarFocus.ts`（聚焦第一个条目 / 守卫"已在工具栏里就不动" / Esc 回焦点 / ←→ 遍历）
++ `MainToolbar.vue` 根上的键盘处理 + 动作索引里的 `window.focusMainToolbar`（无键位，与 `FocusStatusBar` 同一处）。
+同批抽出 `src/editorFocus.ts`（"回可见的那个编辑器"）并修掉状态栏那条同款写法里的无声失败。
+
+**同批把 §C 里没有宿主的 12 条判成 `[-]`**（附理由），四档计数 → `12 + 77 + 65 + 196 = 350`：
+`ToolWindowManager`、`ToolWindowManagerListener`、`StatusBarListener`、`WindowManager`、`WindowManagerListener`、
+`ToolWindowHorizontalToolbar`、`ToolWindowStripeExtension`、`InspectionProfileWidgetFactory`、
+`TogglePopupHintsPanel`、`LibraryDependentToolWindow`、`LibrarySearchHelper`、`OpenProjectSelectionPredicateSupplier`。
+剩下的 `[ ]` 每一条都真有行为、都还没有。

@@ -23,6 +23,7 @@
 import BranchPopup from './BranchPopup.vue'
 import { ChevronDown, FileCode2, FolderOpen, GitBranch, Hammer, Play, Search, SlidersHorizontal, Square, Bug } from 'lucide-vue-next'
 import { ACCESSIBLE_NAME_PREFIX } from '../filenameWidget'
+import { mainToolbarFocusHost, moveToolbarFocus, restoreFocusFromMainToolbar } from '../mainToolbarFocus.ts'
 
 /** 工具栏要用到的状态与动作。字段名与 App.vue 里的变量同名，所以模板是**原样搬运**的。 */
 export interface MainToolbarContext {
@@ -77,6 +78,12 @@ export interface MainToolbarContext {
 }
 
 const props = defineProps<{ ctx: MainToolbarContext }>()
+// 工具栏自己的键盘行为（Esc 把焦点还回去；←/→ 在条目间走）。判据在 src/mainToolbarFocus.ts。
+function onToolbarKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && !event.defaultPrevented) { restoreFocusFromMainToolbar(mainToolbarFocusHost); return }
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+  moveToolbarFocus(mainToolbarFocusHost, event.key === 'ArrowRight' ? 1 : -1)
+}
 // **不要解构 ctx**：它的字段是 getter（`unref(...)`），解构会把值**快照**下来 ——
 // `gitHead`/`filenameShown` 这些是异步加载的，快照意味着它们永远停在初始值，整行看着就是空的。
 // 保留 `ctx` 本身、在模板里写 `ctx.xxx`，每次渲染都会重新走 getter。
@@ -84,7 +91,9 @@ const c = props.ctx
 </script>
 
 <template>
-  <div class="topbar-toolbar">
+  <!-- 键盘：上游 `MainToolbarFocusSupport.install()`（`:44-48`）把 Esc 注册成工具栏上的自定义快捷键，
+       并在 `installHeaderToolbarFocusTraversalPolicy`（`:216-224`）里把 ←/→ 加进遍历键。这里同一个位置。 -->
+  <div class="topbar-toolbar" @keydown="onToolbarKeydown">
     <div class="project-widget"><button class="header-widget" :aria-expanded="c.projectWidgetOpen" aria-haspopup="menu" :aria-label="`项目 ${c.workspace.name}`" :title="c.workspace.root" @click.stop="c.toggleProjectWidget"><FolderOpen :size="14" /><span class="project-widget-name">{{ c.workspace.name }}</span><ChevronDown :size="12" :class="{ 'project-widget-caret': true, open: c.projectWidgetOpen }" /></button><div v-if="c.projectWidgetOpen" class="project-widget-popup" role="menu" :aria-label="`项目 ${c.workspace.name}`"><input :value="c.projectWidgetQuery" class="project-widget-search" placeholder="搜索项目（名称或路径）" aria-label="搜索项目" @input="c.setProjectWidgetQuery(($event.target as HTMLInputElement).value)" @keydown.esc.stop="c.projectWidgetQuery ? c.setProjectWidgetQuery('') : c.closeProjectWidget()" /><template v-for="group in c.projectWidgetGroups" :key="group.label"><div class="project-widget-group" role="presentation">{{ group.label }}</div><button v-for="project in group.items" :key="`${group.label}:${project.path}`" class="menu-button project-widget-row" role="menuitem" :disabled="c.working || !project.available" :title="project.path" @click="c.pickProjectFromWidget(project)"><span class="menu-item-icon"><FolderOpen :size="13" /></span><span class="project-widget-details"><span class="project-widget-title">{{ project.name }}</span><span class="project-widget-path">{{ project.path }}</span><span v-if="c.branchOfProject(project.path)" class="project-widget-branch"><GitBranch :size="11" />{{ c.branchOfProject(project.path) }}</span></span></button></template><p v-if="!c.projectWidgetGroups.length" class="menu-empty">没有匹配的项目</p></div></div>
 
     <!-- IDEA 新 UI 的 `main.toolbar.git.Branches` widget（Git4Idea 挂在 `MainToolbarVCSGroup` 的

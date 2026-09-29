@@ -16,6 +16,8 @@ const exports = {}
 new Function('require', 'exports', js)(name => {
   if (name.endsWith('.vue')) return { default: defineComponent({ render: () => null }) }
   if (name === '../filenameWidget') return require('../src/filenameWidget.ts')
+  // 工具栏的键盘判据（第三十九批加的 import）——与上面那条同一个路子。
+  if (name === '../mainToolbarFocus.ts') return require('../src/mainToolbarFocus.ts')
   return require(name)
 }, exports)
 const MainToolbar = exports.default

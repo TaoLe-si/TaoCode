@@ -8,6 +8,7 @@
 // Escape 回到进入前的组件；规则在 src/statusBarNav.ts，本模块只做 DOM 与注册。
 // 两者同处是因为「通知中心」本身就是状态栏里的一个组件，它们的开关状态（`noticeOpen` / `statusMenu`）互相牵制。
 import { computed, ref } from 'vue'
+import { focusActiveEditor } from './editorFocus.ts'
 import { pushNotice, upsertNotice, type NoticeAction, type NoticeEntry } from './notices.ts'
 import { clearNoticeStatus, setNoticeStatus } from './statusBarText.ts'
 import { focusableWidgets, navigateWidget, resolveRestoreTarget, shouldFocusFirstWidget, type NavDirection } from './statusBarNav.ts'
@@ -119,7 +120,8 @@ function restoreFocusFromStatusBar() {
   const usable = Boolean(saved?.isConnected && !(saved as HTMLButtonElement).disabled)
   if (resolveRestoreTarget(Boolean(saved), usable) === 'previous' && saved) { saved.focus(); return }
   // `:583-590` — the saved owner is gone, so the focus goes back to the editor component.
-  document.querySelector<HTMLElement>('.editor-stage .cm-content, .editor-stage textarea')?.focus()
+  // 走共用助手：隐藏面板里的那个 `.cm-content` focus() 会无声失败（见 src/editorFocus.ts）。
+  focusActiveEditor()
 }
 function onStatusBarKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && !event.defaultPrevented) { restoreFocusFromStatusBar(); return }

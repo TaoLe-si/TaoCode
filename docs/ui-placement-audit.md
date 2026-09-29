@@ -2019,3 +2019,58 @@ FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案
 `ProjectFrameToolWindowLayout` 判 `[~]`（差的是本仓模型没有的每窗口字段），四档计数
 `9 + 75 + 82 + 184` → `11 + 76 + 79 + 184`；"最有价值的下一条"随之移到第 9 条
 （每窗口状态对象 `WindowInfoImpl` —— 它正是剩下那几个字段的前置，有真宿主）。
+
+## AS. 2026-09-29 第四十一批：主工具栏键盘焦点（`FocusMainToolbar` + `MainToolbarFocusSupport`）+ 把 §C 里没有宿主的 12 条判掉
+
+两件事一起做：一件是**真行为**（主工具栏的键盘可达性），一件是**判决表的诚实性**（§C 里那些
+"没有宿主"的条目一直挂着 `[ ]`，读起来像待办）。
+
+### A. 主工具栏键盘焦点
+
+上游 `FocusMainToolbarAction.kt`（动作 id `FocusMainToolbar`，`intellij.platform.ide.impl.actions.xml:721`；
+文案 `ActionsBundle.properties:79-80`；`update` 要求新 UI + 有项目）+ `MainToolbarFocusSupport.kt`：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `focusFirstItem()`：聚焦第一个「可聚焦且可用」的条目；**焦点在外时**才记下当前焦点 | `:51-61` | `src/mainToolbarFocus.ts` 的 `focusMainToolbar`（`body`/`html` 视为"没有焦点主"—— 浏览器里没有 `null` 那一档） |
+| 守卫：焦点已在工具栏（或它所在的标题栏）里 ⇒ **什么都不做** | `FocusMainToolbarAction.kt:15-21`、`MainToolbarFocusSupport.kt:207-212` | `shouldFocusFirstToolbarItem` + `focusInsideToolbar`（标题栏 = `.topbar`，菜单与工具栏同一行） |
+| `getFocusableAndEnabledItems()`：`isFocusable && isToolbarFocusableType()` 再滤掉"没显示/被禁用"；**不含菜单** | `:66-70`、`:243-248` | `toolbarItemElements`（`button/select/input/textarea/[tabindex]`，排掉 `[role=menu]` 里的行）+ `focusableToolbarItems` |
+| `restoreFocusToPreviousComponent()`：记下的还在显示且可用 ⇒ 回它；否则 `activateEditorComponent()` | `:87-101` | `restoreFocusFromMainToolbar` + `resolveToolbarRestoreTarget` |
+| Esc 注册成**工具栏上的**自定义快捷键 | `:44-48` | `MainToolbar.vue` 根上的 `@keydown`（被内层吞掉的 Esc 不再处理） |
+| ←/→ 加进遍历键 | `:216-224` | `moveToolbarFocus` + `nextToolbarItemIndex`（回环；上游那条"先落到标题栏菜单按钮"登记在 §14） |
+
+动作本身**不占菜单行**（`PlatformActions.xml:1364` 是顶层 `<reference>`，紧邻 `FocusStatusBar`），
+所以本仓与 `window.focusStatusBar` 同一处挂进动作索引：查找操作里可搜可点、无键位。
+
+**真 exe 抓到一个真缺陷（已修）**：`回编辑器`原先写成
+`document.querySelector('.editor-stage .cm-content, …')?.focus()` —— 而**分屏/会话恢复时会有多个
+`.cm-content`，隐藏面板里的那个 `focus()` 是无声失败的**（`activeElement` 不动、连 focus 事件都没有）。
+取证时看到的现象是"按 Esc 后焦点留在工具栏按钮上、日志里 0 个 focus/blur"。修法是抽出
+`src/editorFocus.ts`（`pickEditorToFocus`：取"真的在显示"的那个候选），并**把状态栏那条同款写法一起换掉**
+（它踩的是同一个坑）。这条不是猜的：同一支脚本里裸选择器 `focus()` 返回 `ok: false`，
+换成助手之后 Esc 的 focusLog 是 `out: header-widget → in: cm-content`。
+
+判据：`tests/main-toolbar-focus.test.mjs`（13 条：纯判据逐条对上游、假 DOM 里真跑四个入口
+——进入/守卫/回焦点/回环/跳过禁用与折叠、以及"回编辑器要挑看得见的那个"）。自证有牙：
+把守卫与"回记下的那个"各拔一次，进入那条当场变红。
+
+**真 exe 驱动（走真实入口）**：查找操作（Ctrl+Shift+A）→ 搜「聚焦主工具栏」→ 回车 ⇒
+焦点落在工具栏的**第一个条目**（`BUTTON.header-widget`）；按 Esc ⇒ 焦点**回到编辑器**
+（`focusLog` 里 `out header-widget` → `in cm-content`）；按 → ⇒ 走到下一个条目
+（`run-caret`「选择运行配置」）；全程 0 异常。
+
+### B. §C 里没有宿主的 12 条判 `[-]`（附理由，见判决表 §G 各行）
+
+`ToolWindowManager`（查询面散在三个模块且每处都有消费者，门面只是转发 —— §AM 逐成员核过）、
+`ToolWindowManagerListener` / `StatusBarListener`（给插件的监听接口；本仓的观察通道是响应式状态）、
+`WindowManager` / `WindowManagerListener`（窗口是宿主 C++ 的那一个）、
+`ToolWindowHorizontalToolbar` / `ToolWindowStripeExtension`（2026.2 整包 jar 里已无此扩展点，
+"横向条纹"没有形态 —— §AN 的取证）、`InspectionProfileWidgetFactory` / `TogglePopupHintsPanel`
+（本仓没有检查配置档；顺带纠正 `TogglePopupHintsPanel` 那条**误读**：它就是检查配置档组件本身，
+`TogglePopupHintsPanel.java:29-32` 的 `ID = InspectionProfile`，原判据写成"隐去弹层提示开关"）、
+`LibraryDependentToolWindow` / `LibrarySearchHelper`（没有"依赖库"概念）、
+`OpenProjectSelectionPredicateSupplier`（给插件的动作过滤 SPI）。
+
+判决表四档计数随之 `11 + 76 + 79 + 184` → `12 + 77 + 65 + 196 = 350`。
+**剩下 65 条 `[ ]` 现在每一条都是"真有行为、本仓还没有"**（含 §C 里那 20 条 tabInEditor 与 13/14 的跨区拖放，
+它们等的是"编辑器标签承载任意内容"这个机制，登记在 `docs/source-todo.md` §12）。
