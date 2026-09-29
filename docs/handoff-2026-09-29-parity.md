@@ -4,7 +4,8 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`cd3622d`（本机领先 `origin/main` 两个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组）
+- HEAD：`607cf14`（本机领先 `origin/main` 四个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+  Git 日志窗口的「视图选项」齿轮，外加一份交接文档跟进）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -19,7 +20,7 @@
 
 | 项 | 值 |
 |---|---|
-| 前端测试 | `npm test` → **1176 passed / 0 failed** |
+| 前端测试 | `npm test` → **1182 passed / 0 failed** |
 | 类型检查 | `npx vue-tsc --noEmit -p tsconfig.json` → 0 错 |
 | 前端构建 | `npx vite build --emptyOutDir false` → 成功 |
 | 原生构建 | `cmd //c scripts\build-native-locked.bat` → RC 0、0 error / 0 warning |
@@ -112,8 +113,10 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
    判决表里这两条已改 `[x]`，`ToolWindowToolbar`/`LeftToolbar`/`RightToolbar` 三行从误判的"窗口内工具栏"改成 `[~]`
 2. 标题栏 ⋮ 菜单 —— §14 已逐行核过，只剩两条没接：`TW.ViewModeGroup`（浮动/独立窗口没有宿主）与
    `HelpAction`（没有 helpId 映射），都如实登记、不建空壳
-3. 其余窗口自己的 `additionalGearActions`：项目视图（§AA）+ **用法视图/Fɪɴᴅ 窗口（第三十七批，§AO）** 已接；
-   下一批候选在 `docs/class-parity-todo.md` §17 里逐窗口列了（`git` 提交窗口的「双击时显示」最像有活干）
+3. 其余窗口自己的 `additionalGearActions`：项目视图（§AA）+ **用法视图/Fɪɴᴅ 窗口（第三十七批，§AO）** +
+   **Git 日志窗口的工具条齿轮（第三十八批，§AP：`标签名称` + `列` 的显示/隐藏）** 已接；
+   下一批候选在 `docs/class-parity-todo.md` §17 里逐窗口列了 —— `git` 提交窗口的「双击时显示」
+   要先把"diff 开进编辑器标签"这个形态定下来（本仓 `DiffView` 只活在面板里），否则只能接「源」那一条
 4. `tabInEditor` 整组（20 类）——**先判断有没有宿主**，没有就如实记 `[-]`
 5. 判决表 §C 里现标"最有价值的下一条"的是**工具窗口的注册机制**
    （`ToolWindowFactory`/`RegisterToolWindowTask` 那一半有真宿主；`ToolWindowEP`/allowlist 是插件扩展点，
@@ -153,6 +156,8 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 ## 7. 最近的提交（知道上一批在干嘛）
 
 ```
+607cf14 feat(vcs-log): 日志窗口自己的「视图选项」齿轮（标签名称 + 列的显示/隐藏）
+6044084 docs(handoff): 交接文档跟进（HEAD cd3622d）
 cd3622d feat(tool-windows): 接住 Find 窗口自己的齿轮组（additionalGearActions 的第二个落点）
 f21ad40 feat(tool-windows): 侧条可拖宽 + 「更多」按钮（B2 §C 的 ResizeStripeManager / MoreSquareStripeButton）
 bc4560d docs(handoff): 交接文档（2026-09-29）—— 硬规则、Git 纪律、验证口径、判决表状态与下一步
@@ -169,7 +174,9 @@ f7cf508 fix(editor-font-size): 字号上下限从 10–32 订正为上游的 [4,
 每批都做了真 exe 取证（用 `TAOCODE_DEBUG_PORT` + CDP），第三十六批靠它抓到两个**测试看不见**的真缺陷
 （非 immediate `watch` 在创建时求值 ⇒ 读到声明更晚的设置域 ⇒ TDZ；按钮 `contextmenu` 冒泡 ⇒ 两个菜单同时开）。
 **接手提示**：`src/` 里任何 `{ get value() { return 更晚声明的 ref } }` 的惰性注入，都不能在**建模块时或
-非 immediate 的 watch 源里**读 —— 那是本仓这两批踩过的同一个坑。
+非 immediate 的 watch 源里**读 —— 那是本仓这两批踩过的同一个坑。另一条同样有用：**ctx 对象要在
+`computed(() => createXxxContext({...}))` 里建**（惰性），否则把声明在后面的函数写进对象字面量会当场撞 TDZ；
+本仓既有代码就是这么写的，照抄。
 
 **最近三批的共性**：都在修「**跨 dock 的假行为**」—— 焦点在侧栏时，Next/PreviousTab 与
 CloseActiveTab 会去动**底部**面板。根因是同一个：上游按"当前聚焦那个 ContentManager"分派，
