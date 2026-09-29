@@ -1863,3 +1863,38 @@ ContentManager（`:23`），没有可关的选中内容才落到 `toolWindow.hid
 `ToolWindowFactory`）：它是与状态栏注册表**同一种**结构性缺口 —— 加一个工具窗口现在要改
 `src/toolWindowMeta.ts` 的 id 联合、两张表与可用性函数。B2 四档计数同时由 `6 + 71 + 91 + 182`
 订正为 `8 + 74 + 86 + 182`（`tests/b2-verdict.test.mjs` 的和数断言与文档头部一起改，仍 = 350）。
+
+## AO. 2026-09-29 第三十七批：Find 窗口自己的齿轮组（`additionalGearActions` 的第二个落点）
+
+§14 里 `additionalGearActions` 那一行记的是"项目视图的那一组已接（第二十二批），其余窗口自己的组仍未逐窗口接"。
+这一批接第二个窗口：**用法视图（引用 / IDEA 的 Find 窗口）**。
+
+上游 `UsageViewContentManagerImpl.java:114-116`：那个工具窗口的 `setAdditionalGearActions(...)` 里是
+`DefaultActionGroup.createPopupGroup(IdeBundle "group.view.options")`（组标题 = 视图选项）+ 三条：
+
+| 上游成员 | 坐标 | 本仓 |
+| --- | --- | --- |
+| `toggleAutoscrollAction`「一键导航」 | `UIBundle.properties:23` "Navigate with Single Click"；`UsageViewSettings.isAutoScrollToSource` | **不接**：本仓的引用行本来就是单击即导航，这个开关要的是"单击选中 / 双击导航"的**选择模型**，结果列表没有选中态 —— 做一个点了没反应的勾选项是假控件。逐条登记在 `docs/source-todo.md` §10 |
+| `toggleSortAction`「按字母顺序排列成员」 | `UsageViewBundle` 的 `sort.alphabetically.action.text`；`UsageViewSettings.isSortAlphabetically`（默认 false） | `src/referenceContents.ts` 的 `sortUsages`（路径大小写不敏感 → 行 → 列）+ 持久化 `taocode.usagesSortAlphabetically`；面板读的就是排序后的那一份（`references` computed） |
+| `toggleNewTabAction`「在新标签页中打开结果」 | `find.open.in.new.tab.action`；`FindUsagesSettings.showResultsInSeparateView` | 状态早就有（`referencesInNewTab`，Window 菜单那一行也在用它）；这一批把它**也**接到 Find 窗口自己的齿轮上 —— 上游它本来就在这一组里，两处同一份状态 |
+
+**它挂在哪**：本仓的"工具窗口自己的齿轮项"有两个落点 —— 项目视图在自己的树头部渲染
+（`ToolWindowView.vue` 的 `view-gear-menu`），底部 dock 的齿轮收**宿主行**。所以这一组走宿主行：
+新增 `src/usageViewGear.ts`（按当前底部内容给行，不是用法视图就整组不给）、
+`src/menus/toolWindowGear.ts` 里加一条 `{ action: 'usage.viewOptions', fromHost: true, contentsScoped: true }`、
+`src/menuUi.ts` 的 `bottomGearHostRows` 接上、App.vue 一行注入（`bottomTab.value`）。
+顺序照上游：`additionalGearActions` 在 `GearActionGroup.getChildren` 里是**第一条**（`ToolWindowImpl.kt:859-868`），
+所以它排在 SpeedSearch（`:869`）之前 —— `tests/tool-window-gear.test.mjs` 与 `tests/speed-search-wiring.test.mjs`
+里那两条"SpeedSearch 最前"的断言随源码改成了"additionalGearActions 最前、SpeedSearch 次之"。
+
+文案一律取随 IDE 发货的中文语言包：视图选项 / 按字母顺序排列成员 / 在新标签页中打开结果。
+
+判据：`tests/usage-view-gear.test.mjs`（6 条：字母序的键与不可变性、开关真的改面板顺序、组的可见性与两条成员的真状态、
+「一键导航」留在登记表里而不是留一个死勾选项、引用表里的位置与"只给挂内容的窗口"、宿主接线 + 组行摊平渲染）。
+自证有牙：把 `sortUsages` 换成 `sort(() => 0)`、把组的可见性门去掉，三条当场变红，改回即绿。
+
+**真 exe 取证的如实记录**：这一批在真 exe 里只验到"新 bundle 加载后 **0 异常 / 0 报错**"。
+端到端那一条（Java 文件 → Alt+F7 出引用内容 → 打开底部齿轮 → 点「按字母顺序排列成员」）**没跑通**：
+合成的 Alt+F7 每次落点都停在注释行（`.cm-activeLine` 是 `// AE2 VM — …`），而本机这台的状态栏被关掉了，
+拿不到"语言服务已就绪"的信号来重试落点。**没有把它写成已验证** —— 组件与设置的行为判据在单测里，
+真机那一步由下一位接手时补（或者在把本机状态栏打开之后再跑一次）。

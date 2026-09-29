@@ -477,3 +477,24 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 **仍差**：`ToolWindowButtonManager` / `ToolWindowPaneNewButtonManager` / `ToolWindowPaneOldButtonManager`
 （按钮管理器与工厂层）、`StripeActionGroup`（`TopStripeActionGroup`，顶部条纹的动作组 —— 本仓无顶部条纹）。
 刻意偏差六条登记在 `docs/source-todo.md` §9。
+
+## 17. 各窗口自己的 `additionalGearActions`：第二个落点（2026-09-29 第三十七批）
+
+§14 的头一行记的是"项目视图的那一组已接（§AA），其余窗口自己的组（Git 日志、TODO、书签、调试…）仍未逐窗口接"。
+这一批接**用法视图（引用 / IDEA 的 Find 窗口）**：`UsageViewContentManagerImpl.java:114-116` 的
+「视图选项」组 —— 两条已接（按字母顺序排列成员 / 在新标签页中打开结果，见
+`docs/ui-placement-audit.md` §AO），第三条「一键导航」（`UIBundle.properties:23`
+"Navigate with Single Click"）**不接**（要结果列表的选择模型，登记在 `docs/source-todo.md` §10）。
+
+本仓"窗口自己的齿轮项"的两条落点已经清楚，后续窗口照这个走：
+- 项目视图 → 在它自己的树头部渲染（`ToolWindowView.vue` 的 `view-gear-menu`）；
+- 底部 dock 的内容 → 宿主行（`src/usageViewGear.ts` 那种），经 `src/menus/toolWindowGear.ts` 的
+  `{ fromHost: true, contentsScoped: true }` 进齿轮，位置在最前（`ToolWindowImpl.kt:859-868`）。
+
+**还没接的窗口**（上游各自的 `setAdditionalGearActions`，按"有没有真宿主"逐个判）：
+`git`（提交窗口：`vcsToolWindowFactories.kt:34` → `LocalChangesView.GearActions`
+= 「双击时显示」差异/源两条，`ShowOnDoubleClickToggleAction.kt:16-58` —— 本仓是"单击即开差异"、
+没有双击这一档，要做先得把单击/双击的边界定下来）、`vcslog`（Git 日志自己的工具条）、
+`terminal`（`TerminalToolWindowTabsManagerImpl.kt:300` 的标签动作）、`debug`/`services`
+（`ServiceViewSourceScrollHelper.java:41-47`）、`problems`（`InspectionResultsView.java:274-277`）、
+`maven`（`MavenProjectsNavigator.kt:306`，本仓无 Maven）。

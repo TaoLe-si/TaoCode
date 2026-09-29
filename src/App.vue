@@ -144,7 +144,7 @@ import { filterProjects, groupProjects } from './projectWidget'
 import { NOTICES_LABEL, noticeButtonText, noticeButtonVisible, noticeLevel, noticeTitle, pushNotice, type NoticeEntry } from './notices'
 import { ACCESSIBLE_NAME_PREFIX, absolutePath, fileStatusKind, filenameWidgetLabel, filenameWidgetTooltip, filenameWidgetVisible, insideContentRoot, isFilenameWidgetCloseGesture, isSameFile, recentFilesPopupRows, uniqueFileName } from './filenameWidget'
 import { references, referenceTabs } from './referenceContents'
-import { gearHostRows as gearHostRowMap } from './gearHostRows'
+import { gearHostRows as gearHostRowMap } from './gearHostRows'; import { usageViewGearRows } from './usageViewGear'
 import { canCloseAllContents, canCloseOtherContents, canHideAllToolWindows, hasVisibleToolWindow, hideAllToolWindowsTitle, isCloseableToolTab, tabsCloseAllWouldRemove, tabsCloseOtherWouldRemove, type CloseableToolTabId, type ToolTabPresence, type ToolWindowChrome } from './toolTabs'
 import { RESIZE_CHARS, resizeDirectionEnabled, stretchDelta, type ResizeDirection } from './toolWindowResize'
 import { canToggleContentUiType, isTabbedContentUi, resolveContentUiType, toggledContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi'
@@ -1675,7 +1675,7 @@ const {
   openActionSearch, moveAction, runAction, runActionResult, flattenMenuRows, editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, toolWindowGearRows, bottomGearRows,
 } = createMenuUi({
   notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows, pluginList,
-  digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working,
+  digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, bottomGearHostRows: () => usageViewGearRows(bottomTab.value),
   openWorkspace: (...a) => openWorkspace(...a), // 惰性：工作区生命周期模块装配在本块之后。
   // 只挂在弹出组上的动作：`Gradle.ImportExternalProject` 进项目树右键与 EditorPopupMenu，不进主菜单
   // （可见性判据与上游 `isVisible` 同一条：文件名 ∈ KNOWN_GRADLE_FILES 且该目录还没有链接设置）。

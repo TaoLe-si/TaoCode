@@ -25,8 +25,9 @@ function knownActionIds() {
 
 test('齿轮引用表就是本仓真能接住的那几条（顺序即上游 GearActionGroup）', () => {
   assert.deepEqual(TOOL_WINDOW_GEAR_SPEC.map(entry => entry.action),
-    ['window.speedSearch', 'window.closeAllTabs', 'window.toggleContentUiType', 'window.resizeToolWindow', 'window.removeStripeButton'],
-    'SpeedSearch 在最前（`ToolWindowImpl.kt:869`）、RemoveStripeButton 在最后（:889），中间三条照 :872-887')
+    ['usage.viewOptions', 'window.speedSearch', 'window.closeAllTabs', 'window.toggleContentUiType', 'window.resizeToolWindow', 'window.removeStripeButton'],
+    'additionalGearActions 在最前（`ToolWindowImpl.kt:859-868`）、SpeedSearch 次之（:869）、'
+    + 'RemoveStripeButton 在最后（:889），中间三条照 :872-887')
   const known = knownActionIds()
   // `window.speedSearch` 不在菜单索引里（上游 `PlatformActions.xml:146` 只是顶层 `<reference>`），
   // 它由宿主按"焦点处有没有可搜的列表"提供 —— 所以只核**引用型**那几条。
@@ -102,8 +103,8 @@ test('接线：齿轮行由 menuUi 解析、标题栏只负责渲染与回抛', 
   // 底部 dock 的标题条以前没有齿轮：内容动作只能从主菜单进，而同样的动作侧栏一点就开。
   assert.match(app, /<ToolWindowGear :rows="bottomGearRows" label="输出窗口选项" @pick="pickEditorPopup\(\$event\)" \/>/,
     '底部 dock 的标题条要有同一个齿轮，并且走同一条执行链')
-  assert.match(read('src/menuUi.ts'), /bottomGearRows = computed\(\(\) => toolWindowGearLayout\(findMenuRow, undefined, true\)\)/,
-    '底部那一份要显式声明"这是挂着内容的窗口"')
+  assert.match(read('src/menuUi.ts'), /bottomGearRows = computed\(\(\) => toolWindowGearLayout\(findMenuRow, undefined, true, bottomGearHostRows\(\)\)\)/,
+    '底部那一份要显式声明"这是挂着内容的窗口"，并把宿主行（用法视图的「视图选项」组）一起算进来')
   assert.match(read('src/components/ToolWindowGear.vue'), /Teleport v-if="open" to="body"/,
     '弹层要 Teleport 到 body：`.output-panel` 是 overflow:hidden，长在里面的菜单会被裁掉')
   assert.match(read('src/style.css'), /\.tool-gear-menu \{ position: fixed/, '同上：fixed 定位才躲得开裁剪')

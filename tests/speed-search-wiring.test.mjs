@@ -21,9 +21,16 @@ const read = relative => readFileSync(join(root, relative), 'utf8')
 let opened = 0
 const fakeTree = () => ({ openSpeedSearch: () => { opened++ } })
 
-test('齿轮的第一条是 SpeedSearch（ToolWindowImpl.kt:869）', () => {
-  assert.equal(TOOL_WINDOW_GEAR_SPEC[0].action, 'window.speedSearch', '顺序照源码：SpeedSearch 在 CloseAll 之前')
-  assert.equal(TOOL_WINDOW_GEAR_SPEC[0].fromHost, true, '它不在菜单索引里，行由宿主给')
+// 齿轮组的第一条是 `additionalGearActions`（该窗口自己那一组，`ToolWindowImpl.kt:859-868`），
+// SpeedSearch 紧接在其后（`:869`）。第三十七批把用法视图的「视图选项」组接进来，所以
+// SpeedSearch 不再是第 0 条 —— 判据改成"它就在 additionalGearActions 之后、CloseAll 之前"。
+test('SpeedSearch 紧跟 additionalGearActions，且在 CloseAll 之前（ToolWindowImpl.kt:859-872）', () => {
+  const order = TOOL_WINDOW_GEAR_SPEC.map(entry => entry.action)
+  assert.equal(order[0], 'usage.viewOptions', 'additionalGearActions 那一组在最前')
+  assert.equal(order[1], 'window.speedSearch', '顺序照源码：SpeedSearch 在 CloseAll 之前')
+  assert.equal(order.indexOf('window.closeAllTabs'), 2)
+  const search = TOOL_WINDOW_GEAR_SPEC[1]
+  assert.equal(search.fromHost, true, '它不在菜单索引里，行由宿主给')
 })
 
 test('有可搜的列表才给这一行（isVisible = 有 handler）', () => {

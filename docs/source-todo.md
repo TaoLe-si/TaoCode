@@ -143,3 +143,18 @@
 - [~] **没有键盘路径**：上游那个分隔线是 `Splittable`/`OnePixelDivider`，只有指针拖拽；本仓照抄
   （`role="separator"` + `aria-valuenow` 给读屏，不加自创的方向键绑定 —— 面板分隔条那套方向键是本仓
   自己的既有能力，侧条这边不假装上游有）。
+
+## 10. 第三十七批（用法视图齿轮的「视图选项」组）的缺口
+
+上游那一组是三条（`UsageViewContentManagerImpl.java:114-116` 的 `addAll`），本仓接了两条：
+
+- [x] 「按字母顺序排列成员」（`sort.alphabetically.action.text`，`UsageViewSettings.isSortAlphabetically`
+  默认 false）——`src/referenceContents.ts` 的 `sortUsages`（路径大小写不敏感 → 行 → 列）+ 持久化 +
+  面板读的就是排序后的那一份。
+- [x] 「在新标签页中打开结果」（`find.open.in.new.tab.action`，`FindUsagesSettings.showResultsInSeparateView`）
+  ——状态早就有（`referencesInNewTab`），这一批把它也接到 Find 窗口自己的齿轮上（上游它就在这一组里；
+  Window 菜单那一行仍在，两处**同一份状态**）。
+- [~] **「一键导航」（`autoscroll.to.source.action.name`，`UIBundle.properties:23` = "Navigate with Single Click"）
+  不接**：它要的是"单击选中 / 双击导航"这套**选择模型**，而本仓的引用行是**单击即导航**、没有选中态。
+  做一个点了没反应的勾选项就是假控件（项目硬规则 2），所以本轮**不建**，等结果列表有了选择态
+  （↑↓ 移动选中项、Enter 打开）再一起补。它不是被忘掉的：`src/usageViewGear.ts` 的注释里写明缺什么。

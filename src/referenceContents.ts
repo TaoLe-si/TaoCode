@@ -29,18 +29,54 @@ const PROJECT_SCOPE = '项目文件'
 // （`UsageViewContentManagerImpl.java:59-74`）—— 它是**持久化**设置，不是一次会话里的开关。
 // 读法照本仓那条"缺键就取默认"的纪律：只认 'true'，其余（缺键/旧值/写坏）一律按默认 false 走，
 // 于是旧磁盘上的 localStorage 不会被判成损坏。
-const NEW_TAB_KEY = 'taocode.referencesInNewTab'
-function readStoredInNewTab(): boolean {
-  try { return localStorage.getItem(NEW_TAB_KEY) === 'true' } catch { return false }
+// 这一组的**两条**（Find 窗口齿轮的「视图选项」，`UsageViewContentManagerImpl.java:114-116`）：
+// 「在新标签页中打开结果」（`find.open.in.new.tab.action`）与「按字母顺序排列成员」
+// （`UsageViewBundle.properties` 的 `sort.alphabetically.action.text`）。第三条
+// 「一键导航」（`UIBundle.properties:23` "Navigate with Single Click" = 单击即导航）**没接**：
+// 本仓的结果行本来就是单击即导航，那个开关要的是"单击选中 / 双击导航"的选择模型，
+// 结果列表还没有选择态 —— 做一个点了没反应的勾选项就是假控件，逐条登记在 docs/source-todo.md §10。
+// 组标题 `group.view.options` = 视图选项（IdeBundle）。
+export const USAGE_VIEW_OPTIONS_TITLE = '视图选项'
+export const USAGE_OPEN_IN_NEW_TAB_TITLE = '在新标签页中打开结果'
+export const USAGE_SORT_TITLE = '按字母顺序排列成员'
+
+function readStoredFlag(key: string): boolean {
+  try { return localStorage.getItem(key) === 'true' } catch { return false }
 }
-export const referencesInNewTab = ref(readStoredInNewTab())
-watch(referencesInNewTab, value => {
-  try { localStorage.setItem(NEW_TAB_KEY, String(value)) } catch { /* storage unavailable: session-only */ }
-})
+function persistFlag(key: string, value: boolean) {
+  try { localStorage.setItem(key, String(value)) } catch { /* storage unavailable: session-only */ }
+}
+
+const NEW_TAB_KEY = 'taocode.referencesInNewTab'
+export const referencesInNewTab = ref(readStoredFlag(NEW_TAB_KEY))
+watch(referencesInNewTab, value => persistFlag(NEW_TAB_KEY, value))
+
+// `UsageViewSettings.isSortAlphabetically`（键 `SORT_ALPHABETICALLY`，默认 false）。
+const SORT_KEY = 'taocode.usagesSortAlphabetically'
+export const referencesSortAlphabetically = ref(readStoredFlag(SORT_KEY))
+watch(referencesSortAlphabetically, value => persistFlag(SORT_KEY, value))
+
+/**
+ * 字母序：路径（大小写不敏感）→ 行 → 列。
+ * 上游排的是**用法树**（`UsageViewTreeModelBuilder` 按节点呈现文本比较），本仓的结果是一条平表，
+ * 所以最接近的映射就是"先文件后位置"。大小写不敏感由 `CASE_INSENSITIVE_ORDER` 那一档决定
+ * （`UsageViewSettings.isSortAlphabetically` 走的就是它），同级再比位置保证稳定。
+ */
+export function sortUsages(locations: readonly LspLocation[]): LspLocation[] {
+  return [...locations].sort((left, right) => {
+    const a = left.path.toLowerCase()
+    const b = right.path.toLowerCase()
+    if (a !== b) return a < b ? -1 : 1
+    if (left.line !== right.line) return left.line - right.line
+    return left.character - right.character
+  })
+}
 
 /** 选中的那条的地点；没选中就是空数组（面板据此显示"没有找到引用"，不猜别条的内容）。 */
-export const references = computed<LspLocation[]>(() =>
-  contents.value.find(content => content.id === selectedId.value)?.payload ?? [])
+export const references = computed<LspLocation[]>(() => {
+  const payload = contents.value.find(content => content.id === selectedId.value)?.payload ?? []
+  return referencesSortAlphabetically.value ? sortUsages(payload) : payload
+})
 export const selectedReferences = computed<ToolContent<LspLocation[]> | null>(() =>
   contents.value.find(content => content.id === selectedId.value) ?? null)
 /** 标签条上的一行（`Content.getTabName()` = tabName，`ContentImpl.java:135-137`）。 */
