@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`c030f62`，与 `origin/main` 一致
+- HEAD：`cd3622d`（本机领先 `origin/main` 两个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -19,7 +19,7 @@
 
 | 项 | 值 |
 |---|---|
-| 前端测试 | `npm test` → **1150 passed / 0 failed** |
+| 前端测试 | `npm test` → **1176 passed / 0 failed** |
 | 类型检查 | `npx vue-tsc --noEmit -p tsconfig.json` → 0 错 |
 | 前端构建 | `npx vite build --emptyOutDir false` → 成功 |
 | 原生构建 | `cmd //c scripts\build-native-locked.bat` → RC 0、0 error / 0 warning |
@@ -106,11 +106,18 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 
 **下一步优先级（B2 §C 剩下的，按用户可见度）**：
 
-1. `Stripe` 的拖条宽（`ResizeStripeManager`）与侧条溢出「更多」（`MoreSquareStripeButton`）
-2. 标题栏 ⋮ 菜单（当前是「Move to Left/Right/Bottom + Hide」，上游是
-   `DockToolWindowAction` + `ShowOptionsAction` + `HideAction` 三个不同语义的动作）
-3. 其余窗口自己的 `additionalGearActions`（已接项目视图那一组，见 `docs/ui-placement-audit.md` §AA）
+1. ~~`Stripe` 的拖条宽（`ResizeStripeManager`）与侧条溢出「更多」（`MoreSquareStripeButton`）~~
+   —— **已落地**（第三十六批，`docs/ui-placement-audit.md` §AN：宽度 [40,100]/紧凑 33、名称开着才挂分隔线、
+   按边持久化；「更多」= 没有侧条按钮的可用窗口，助记符序，停在 `getMoreButtonSide()` 那一侧）。
+   判决表里这两条已改 `[x]`，`ToolWindowToolbar`/`LeftToolbar`/`RightToolbar` 三行从误判的"窗口内工具栏"改成 `[~]`
+2. 标题栏 ⋮ 菜单 —— §14 已逐行核过，只剩两条没接：`TW.ViewModeGroup`（浮动/独立窗口没有宿主）与
+   `HelpAction`（没有 helpId 映射），都如实登记、不建空壳
+3. 其余窗口自己的 `additionalGearActions`：项目视图（§AA）+ **用法视图/Fɪɴᴅ 窗口（第三十七批，§AO）** 已接；
+   下一批候选在 `docs/class-parity-todo.md` §17 里逐窗口列了（`git` 提交窗口的「双击时显示」最像有活干）
 4. `tabInEditor` 整组（20 类）——**先判断有没有宿主**，没有就如实记 `[-]`
+5. 判决表 §C 里现标"最有价值的下一条"的是**工具窗口的注册机制**
+   （`ToolWindowFactory`/`RegisterToolWindowTask` 那一半有真宿主；`ToolWindowEP`/allowlist 是插件扩展点，
+   本仓没有插件运行时 ⇒ 归 `[-]`）
 
 **B3..B12 尚未开始**（判决 0/4944）：`vcs/commit`、`editor/actions`、`codeInsight/template`、
 `settings-run`、`find`+`diff`、`execution`+`xdebugger`、`projectviews`、`actions`、
@@ -146,6 +153,9 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 ## 7. 最近的提交（知道上一批在干嘛）
 
 ```
+cd3622d feat(tool-windows): 接住 Find 窗口自己的齿轮组（additionalGearActions 的第二个落点）
+f21ad40 feat(tool-windows): 侧条可拖宽 + 「更多」按钮（B2 §C 的 ResizeStripeManager / MoreSquareStripeButton）
+bc4560d docs(handoff): 交接文档（2026-09-29）—— 硬规则、Git 纪律、验证口径、判决表状态与下一步
 c030f62 chore(repo): 加 .gitattributes 固定 LF —— CRLF 工作树会让切片式机检假失败
 b49b11b fix(tool-windows): 关闭当前标签页也不再跨 dock（CloseActiveTab 的窗口取自同一上下文）
 88cd8de fix(tool-windows): Alt+←/→ 不再跨 dock 切标签（侧栏单内容 ⇒ 无事可做）
@@ -154,6 +164,12 @@ f7cf508 fix(editor-font-size): 字号上下限从 10–32 订正为上游的 [4,
 7211254 feat(status-bar): 补上状态栏文字通道（StatusBar.Info）与进程结束播报
 861ba98 chore: 入库全部在途源码 + B2 判决与状态栏组件注册表
 ```
+
+**第三十六 / 三十七两批的共性**：都是"用户看得见的侧条与齿轮"，落点都在**新组件/宿主行**而不是改旧逻辑；
+每批都做了真 exe 取证（用 `TAOCODE_DEBUG_PORT` + CDP），第三十六批靠它抓到两个**测试看不见**的真缺陷
+（非 immediate `watch` 在创建时求值 ⇒ 读到声明更晚的设置域 ⇒ TDZ；按钮 `contextmenu` 冒泡 ⇒ 两个菜单同时开）。
+**接手提示**：`src/` 里任何 `{ get value() { return 更晚声明的 ref } }` 的惰性注入，都不能在**建模块时或
+非 immediate 的 watch 源里**读 —— 那是本仓这两批踩过的同一个坑。
 
 **最近三批的共性**：都在修「**跨 dock 的假行为**」—— 焦点在侧栏时，Next/PreviousTab 与
 CloseActiveTab 会去动**底部**面板。根因是同一个：上游按"当前聚焦那个 ContentManager"分派，
