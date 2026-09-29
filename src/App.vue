@@ -227,6 +227,8 @@ const explorer = ref(window.innerWidth >= 700)
 const leftView = ref<ToolWindowId>('files')
 const activity = ref(false)
 const bottom = ref(false)
+// 底部 dock 显示哪一格。要早于 `createToolWindowStripes`：那里按 `WindowInfo.isVisible` 恢复它（watch 建时会求值）。
+const bottomTab = ref<BottomTabId | ToolWindowId>('output')
 // IDEA 的 ToolWindowAnchor：每个工具窗口记住自己停在哪一侧（`Anchor` 由状态域定义，见下）。
 // 工具窗口的停靠边 / 顺序 / 可用性是一个独立状态域，见 src/toolWindowStripes.ts
 // （2026-09-27 加 Gradle 工具窗口时从中拆出）。`toolDisabled` / `bottomAnchoredIds` 由它导出。
@@ -236,7 +238,7 @@ const { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, sa
     workspace: { get value() { return workspace.value } },
     lspReady: { get value() { return lspReady.value } },
     gradleAvailable: { get value() { return gradleAvailable.value } },
-    activeView: { get value() { return leftView.value } },
+    activeView: { get value() { return leftView.value }, set value(id) { leftView.value = id } }, bottom, bottomTab,
     compactMode: { get value() { return editorSettings.value.compactMode } }, showNames: { get value() { return editorSettings.value.showToolWindowNames } },
   })
 // 侧条（宽度的分隔线 / 「更多」按钮 / 空白处右键）都由 ToolStripe.vue 承担，这里只做转发。
@@ -350,8 +352,7 @@ function isLeftToolWindowId(id: string): id is ToolWindowId { return id in toolA
  */
 // 工具窗口的停靠判定/隐藏/循环/关闭：见 src/toolWindowActions.ts（一组一文件）。
 // lastDockFocus 由模块自持；内容条形态（contentUiType）住在项目的布局记录里（src/toolWindowStripes.ts）。
-const { focusedDock, noteDockFocus, activeToolWindowDock, hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows,
-  bottomTabAvailable, bottomContentCount, tabTargetCount, activeContentCount, bottomTabOptions, bottomTabLabel, selectReferenceTab, closeReferenceTab, pinReferenceTab, bottomSelectValue, pickBottomOption,
+const { focusedDock, noteDockFocus, activeToolWindowDock, hideActiveToolWindow, hideSideToolWindows, hideBottomToolWindows, bottomTabAvailable, bottomContentCount, tabTargetCount, activeContentCount, bottomTabOptions, bottomTabLabel, selectReferenceTab, closeReferenceTab, pinReferenceTab, bottomSelectValue, pickBottomOption,
   selectNextTab, selectPreviousTab, cycleTab, toolTabPresence, clearToolTab, closeActiveTab, closeOtherToolTabs, closeOtherTabsTarget, closeAllToolTabs, closeAllTabsTarget, openToolMenu,
   anchorMenu, anchorMenuAnchor, bottomTabIsToolWindow, openAnchorMenu, closeAnchorMenu, moveAnchorTo, canPinToolwindowTab, pinTabTitle, togglePinToolwindowTab, contentUiType, toggleContentUiType } = createToolWindowActions({
   workspace: () => workspace,
@@ -385,7 +386,6 @@ const { draggingTool, dropTarget, onToolDragStart, onToolDragOver, onToolDrop, o
   saveToolOrder: () => saveToolOrder(),
 })
 // 底部 dock 既能显示固定底部 tab，也能显示「停靠在底部的工具窗口」（IDEA 的任意停靠）。
-const bottomTab = ref<BottomTabId | ToolWindowId>('output')
 const runCommand = ref('cmake --build build')
 const runInput = ref<HTMLInputElement>()
 const runLog = ref<HTMLElement>()

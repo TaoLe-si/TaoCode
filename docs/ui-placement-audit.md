@@ -2111,3 +2111,35 @@ FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案
 **写路径**（点「合并标签页」那一行）这次没在 exe 里驱动（它在 Window 菜单的「激活工具窗口」**子菜单**里，
 子菜单要悬停才展开；手动驱动脚本的成本高于收益），由上面那 3 条单测 + `tool-window-content-ui` 的接线判据覆盖 ——
 **没有写成"已验证"**。
+
+## AU. 2026-09-29 第四十三批：每窗口**可见性**（`WindowInfo.isVisible`）—— 打开项目时回到上次那些窗口
+
+第四十二批把布局记录改成"每窗口一条"之后，这一批往里加 `visible`（上游 `WindowInfoImpl.isVisible`，
+**默认 false**）并接上两头：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `isVisible` 默认 false、序列化成 `visible` 属性 | `openapi/wm/impl/WindowInfoImpl.kt:78-80` | `src/toolLayoutProfiles.ts` 的 `WindowInfo.visible` + `windowVisible`（只有显式 true 才算可见）+ `WINDOW_INFO_DEFAULTS.visible = false` |
+| `ToolWindowImpl.show()/hide()` 改的就是它 ⇒ 展开/收起跟着项目存 | `ToolWindowImpl.kt` 的 `show/hide` | `src/toolWindowStripes.ts` 的 `saveVisibility`：宿主那四个 dock 状态（`explorer`/`bottom`/`bottomTab`/`leftView`）一变就把"此刻开着的那几个"写进记录并落盘 |
+| `ToolWindowSetInitializer` 装配时按存档把 `isVisible = true` 的窗口放回去 | `toolWindow/ToolWindowSetInitializer.kt` | `applyProjectLayout` 里的 `restoreVisibility`：选中的那个就是可见的那个（本仓每侧只有一个），那一侧一个都没有 ⇒ 收起那一侧 |
+| 存档里没有这一栏时**不许**覆盖（新项目按注册/默认来） | — | `hasExplicitVisibility`：只有记录里**出现过** `visible` 字段才恢复，否则宿主自己的默认（宽窗口默认开项目视图）不动 |
+
+**固定底部内容也算**：`output`/`run`/`problems`/`references`/`hierarchy`/`terminal` 在本仓不是工具窗口，
+但上游它们各自就是窗口、一样有 `WindowInfo`，所以落盘时把它们的 `visible`/`contentUiType` 一起并进记录
+（`extraContentIds`）—— 判据里专门有一条盯它。
+
+判据：`tests/tool-window-visibility.test.mjs`（7 条：没写过就不动宿主；展开/收起都写回记录；
+底部按内容记（固定内容与停靠底部的工具窗口都算）；打开项目按存档放回（含"两个都收着"那一档）；
+侧栏开着时选中的那个就是可见的那个；可见性按项目分开；纯判据的默认值与"只有显式 true 算可见"）。
+自证有牙：把"按当前状态写 visible"改成常量 true、把恢复那一句关掉，五条当场变红。
+另外 `tests/stripe-resize-more.test.mjs` 里那条 TDZ 判据跟着更新：允许的 watch 源现在有两处
+（换项目 + 可见性写入点），且**仍然禁止**读声明更晚的设置域。
+
+**真 exe 取证（完整走通）**：打开项目后关掉侧栏 ⇒ 记录里一个 `visible` 都没有（`{}`）；
+再打开底部 dock ⇒ 记录变成 `{"output": true}`；`Page.reload`（等于重新装配/重开项目）⇒
+**侧栏保持收着、底部保持开着** —— 也就是"上次那些窗口"真的被放回来了；全程 0 异常。
+
+**同批顺带的接线约束**：可见性的 watch 源里读的是宿主的 `explorer`/`bottom`/`bottomTab`/`leftView`，
+而**非 immediate 的 `watch` 建时会求值一次** ⇒ 这几个 ref 必须声明在 `createToolWindowStripes` 之前。
+`bottomTab` 原先在 388 行（模块之后），已挪到 `bottom` 旁边（229 行）；`activeView` 那一项同时改成可写
+（恢复时要设它）。

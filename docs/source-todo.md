@@ -244,9 +244,9 @@
 
 - [x] `anchor` / `order` / `showStripeButton` / `contentUiType`：住进项目的**每窗口记录**
   （`src/toolLayoutProfiles.ts` 的 `WindowInfo`），形态按内容一份（`contentUiType`）。
-- [~] **`isVisible`**（上游默认 false，"打开项目时恢复上次那些工具窗口"）：本仓的可见性是
-  `explorer` / `bottom` / `leftView` / `bottomTab` 几个**全局 ref**，没有"每个窗口各自可见"这一层。
-  要做：记录里写 `isVisible`，项目打开时按它恢复侧栏与底部（宿主在 App.vue 的工作区生命周期里接线）。
+- [x] **`isVisible`**（上游默认 false，"打开项目时恢复上次那些工具窗口"）：第四十三批已落 ——
+  记录里写 `visible`（宿主那四个 dock 状态一变就写回），装配时按存档放回；**没写过这一栏就不动宿主默认**。
+  见 `docs/ui-placement-audit.md` §AU，判据 `tests/tool-window-visibility.test.mjs`。
 - [~] **`weight` / `sideWeight`**（上游 0.33 / 0.5，"这个窗口占内部桌面多大"）：本仓的等价物是
   `panelResize.ts` 的"记住每个工具窗口各自的尺寸"（`rememberSizeForEachToolWindow`），
   与布局记录是**两条路**；合并与否要看"尺寸该不该跟着项目走"（现在跟着项目走的是 `panelSizes`？不是）。

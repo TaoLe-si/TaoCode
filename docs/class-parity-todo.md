@@ -557,3 +557,14 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 
 **对后续批次的意义**：布局记录从此是"每窗口一条"的，往里面加字段（下一个最可能是 `isVisible`）
 不用再动记录的形状 —— 那是这一批的主要收益。
+
+## 22. 每窗口可见性（2026-09-29 第四十三批）
+
+`WindowInfo.isVisible`（上游默认 false）落地：展开/收起跟着**项目**存，打开项目时按存档把上次那些
+窗口放回（侧栏与底部各自）。明细见 `docs/ui-placement-audit.md` §AU；
+`WindowInfoImpl` 那一族现在只剩 `weight`/`sideWeight`/`isSplit`（本仓的每窗口尺寸在
+`panelResize.ts` 那条路上）与 `ToolWindowPaneState`/`ToolWindowEntry` 两个运行期对象（登记在
+`docs/source-todo.md` §15）。
+
+**接线约束（写给下一位）**：可见性的写入点 watch 会读宿主的 dock 状态，而 watch 建时求值一次 ⇒
+被读的 ref 必须声明在 `createToolWindowStripes` 之前（`bottomTab` 已为此上移）。

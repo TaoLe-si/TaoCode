@@ -128,9 +128,13 @@ test('建模块时不许去读"宿主声明得更晚"的设置域（TDZ 回归�
   const stripes = read('src/toolWindowStripes.ts')
   // 允许 watch（换项目要换布局那一处），但它的源只能是**声明在模块之前**的 `workspace`；
   // `showNames` / `compactMode` 声明在模块之后，任何在创建时求值的东西读它们都会撞 TDZ。
-  const sources = [...stripes.matchAll(/watch\(([^,]+),/g)].map(match => match[1])
-  assert.deepEqual(sources, ['() => deps.workspace.value?.root ?? null'], `watch 的源只有 workspace，实际：${sources.join(' | ')}`)
-  assert.ok(!/deps\.(showNames|compactMode)[^)]*\)\s*,/.test(stripes), '设置域只在函数体里读，不许进 watch 的源')
+  // 允许的 watch 源只有两类：换项目（workspace）与宿主**声明在本模块之前**的那几个 dock 状态
+  // （`explorer`/`bottom`/`bottomTab`/`activeView` —— 第四十二批的 isVisible 写入点）。
+  const watchLines = stripes.split(String.fromCharCode(10)).filter(line => line.includes('watch('))
+  assert.equal(watchLines.length, 2, `watch 条数变了：${watchLines.join(' | ')}`)
+  assert.match(watchLines[0], /deps\.workspace\.value\?\.root/, '换项目那一条还在')
+  assert.match(watchLines[1], /\[deps\.explorer, bottomRef, \(\) => bottomTabRef\.value, \(\) => deps\.activeView\.value\]/, '可见性写入点的源：只准读声明在本模块之前的那些 dock 状态')
+  assert.ok(!/deps\.(showNames|compactMode)/.test(watchLines.join(' ')), '设置域只在函数体里读，不许进 watch 的源')
   assert.match(read('src/appearanceActions.ts'), /deps\.applyShowNamesWidths\?\.\(show\)/,
     'applyShowNames 要有宿主侧的触发点')
   assert.match(read('src/App.vue'), /applyShowNamesWidths/, '宿主要把这条接线接上')

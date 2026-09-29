@@ -47,10 +47,15 @@ export interface WindowInfo {
   showStripeButton?: boolean
   /** `contentUiType`（默认 TABBED）。 */
   contentUiType?: ToolWindowContentUiType
+  /**
+   * `WindowInfoImpl.isVisible`（默认 **false**）：这个窗口此刻是不是展开的。
+   * 打开项目时按它恢复"上次开着的那几个窗口"（上游 `ToolWindowSetInitializer` 装配时读的就是这个字段）。
+   */
+  visible?: boolean
 }
 
-/** 上游默认值里本仓会用到的那两个（`anchor`/`order` 的默认在注册表与顺序表里）。 */
-export const WINDOW_INFO_DEFAULTS = { showStripeButton: true, contentUiType: 'tabbed' } as const
+/** 上游默认值里本仓会用到的那几个（`anchor`/`order` 的默认在注册表与顺序表里）。 */
+export const WINDOW_INFO_DEFAULTS = { showStripeButton: true, contentUiType: 'tabbed', visible: false } as const
 
 /** 空记录（"这个窗口在布局里还没有任何显式状态"）。 */
 export function windowInfoOf(layout: StoredProjectLayout | null, id: string): WindowInfo {
@@ -67,12 +72,30 @@ export function contentUiTypeOf(info: WindowInfo): ToolWindowContentUiType {
   return resolveContentUiType(info.contentUiType)
 }
 
+/** `WindowInfoImpl.isVisible`：没写就是 false（**只有显式 true 才算"这个窗口开着"**）。 */
+export function windowVisible(info: WindowInfo): boolean {
+  return info.visible === true
+}
+
+/**
+ * 存档里**显式**写过可见性的那些窗口（`visible` 字段出现过）。
+ * "有没有显式写过"决定打开项目时要不要恢复：没写过（新项目/刚播种）就不动宿主的默认。
+ */
+export function hasExplicitVisibility(layout: StoredProjectLayout | null): boolean {
+  return Object.values(layout?.windows ?? {}).some(info => typeof info.visible === 'boolean')
+}
+
+/** 存档里显式标为可见的那些窗口 id（按存档顺序）。 */
+export function visibleWindowIds(layout: StoredProjectLayout | null): string[] {
+  return Object.entries(layout?.windows ?? {}).filter(([, info]) => windowVisible(info)).map(([id]) => id)
+}
+
 /** 写一个窗口的一段状态（不改原对象）。 */
 export function withWindowInfo(layout: StoredProjectLayout, id: string, patch: WindowInfo): StoredProjectLayout {
   return { ...layout, windows: { ...layout.windows, [id]: { ...windowInfoOf(layout, id), ...patch } } }
 }
 
-/** 一个窗口在档案里的覆盖项 —— 与 `WindowInfo` 同一形状，没写的就沿用出厂默认。 */
+/** 一个窗口在档案里的覆盖项 —— 与 `WindowInfo` 同一形状（含 `visible`），没写的就沿用出厂默认。 */
 export interface ProfileWindowOverride extends WindowInfo {
   /** `showStripeButton = false`：这个档案里不注册这个窗口（`createLayout` 里 `infos.remove(id)`）。 */
   hidden?: boolean

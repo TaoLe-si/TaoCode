@@ -9,7 +9,8 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, shouldBeAvailable, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
 import {
-  DEFAULT_PROJECT_FRAME_PROFILE, contentUiTypeOf, layoutMigrationKey, resolveProjectLayout, stripeButtonShown, windowInfoOf,
+  DEFAULT_PROJECT_FRAME_PROFILE, contentUiTypeOf, hasExplicitVisibility, layoutMigrationKey, resolveProjectLayout,
+  stripeButtonShown, visibleWindowIds, windowInfoOf,
   type LegacyMachineLayout, type StoredProjectLayout, type WindowInfo,
 } from './toolLayoutProfiles.ts'
 import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
@@ -48,10 +49,17 @@ export interface ToolWindowStripesDeps {
   /** 「项目视图是否显示」—— 把一个窗口挪到某一侧时要顺手打开它，否则窗口会看不见。 */
   explorer: Ref<boolean>
   /**
-   * 当前激活的窗口（宿主的 `leftView`）。
-   * 只读它的**锚点**（用于最大化/布局），所以注入只读视图就够。
+   * 当前显示的窗口（宿主的 `leftView`）。除了读它的**锚点**，还要按项目的
+   * `WindowInfo.isVisible` 把它**写回**去（打开项目时恢复上次开着的那一个），所以是可写的。
    */
-  activeView: { readonly value: ToolWindowId }
+  activeView: { value: ToolWindowId }
+  /**
+   * 底部 dock 是否展开（宿主的 `bottom`）—— 它承担底部那几个内容的 `isVisible`。
+   * 可选：不传就当作"底部一直没开"（单测夹具大多不关心这一侧）。
+   */
+  bottom?: Ref<boolean>
+  /** 底部 dock 当前显示哪一格（宿主的 `bottomTab`）；恢复时也要写它。同上，可选。 */
+  bottomTab?: Ref<string>
   /**
    * 紧凑模式（`UISettings.compactMode`）：侧条宽度的下限 33/40 由它决定（`ResizeStripeManager.kt:139`）。
    * 可选 —— 不传就是非紧凑。
@@ -75,6 +83,9 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   const toolAnchors = reactive<Record<ToolWindowId, Anchor>>({ ...DEFAULT_TOOL_ANCHORS })
   /** 当前布局属于哪个项目（null = 还没打开项目；档案馆与落盘都按它走）。 */
   const layoutRoot = ref<string | null>(null)
+  // 底部那一侧的两个状态（可选依赖 → 给个本地兜底，测试夹具不传也能跑）。
+  const bottomRef: Ref<boolean> = deps.bottom ?? ref(false)
+  const bottomTabRef: Ref<string> = deps.bottomTab ?? ref('')
 
   function readJson<T>(key: string, fallback: T): T {
     try {
@@ -150,10 +161,23 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
    * 项目布局里写过的那个；没写过的先按旧全局键（迁移）或默认走，不写进表里。
    */
   const contentUiTypes = reactive<Record<string, ToolWindowContentUiType>>({})
+  /**
+   * 记录里那些**不是工具窗口**的内容 id（底部那几格固定内容：output/run/problems/references/
+   * hierarchy/terminal）。它们在上游各自就是工具窗口、一样有 `WindowInfo`，所以落盘时也要跟着写
+   * `visible`/`contentUiType` —— 只是它们不在注册表里，得单独记一份。
+   */
+  const extraContentIds = new Set<string>()
+  /**
+   * 此刻开着的窗口/内容（上游每窗口一个 `isVisible`；本仓每侧只有一个）。
+   * 它是**写入端的缓存**：宿主那两个状态一变就重算并落盘。
+   */
+  const visibleIds = ref<string[]>([])
   function refreshContentUiTypes(layout: StoredProjectLayout) {
     for (const key of Object.keys(contentUiTypes)) delete contentUiTypes[key]
+    extraContentIds.clear()
     for (const [id, info] of Object.entries(layout.windows ?? {})) {
       if (info.contentUiType === 'tabbed' || info.contentUiType === 'combo') contentUiTypes[id] = info.contentUiType
+      if (!Object.hasOwn(toolAnchors, id)) extraContentIds.add(id)
     }
   }
   /** 某个内容此刻的内容条形态（上游 `ToolWindowImpl.kt:521` 读的就是 `windowInfo.contentUiType`）。 */
@@ -204,7 +228,8 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
 
   /**
    * 切到某个项目：读它的布局；没有就按**档案**播种（`resolveProjectLayout` 的两条应用模式 +
-   * 旧版机器级布局的一次性迁移）。上游等价物是 `ToolWindowLayoutProfileProviderService.getProfile()`
+   * 旧版机器级布局的一次性迁移），**再按存档里的 `isVisible` 把上次开着的窗口放回去**。
+   * 上游等价物是 `ToolWindowLayoutProfileProviderService.getProfile()`
    * + 项目打开时给窗口上种（`ToolWindowSetInitializer`）。
    */
   function applyProjectLayout(root: string | null) {
@@ -220,9 +245,52 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
       legacy: { layout: readLegacyLayout(), alreadyMigrated: layoutMigrated() },
     })
     applyLayout(resolved.layout)
+    // 恢复"上次开着的那几个窗口"：**只有存档显式写过 `visible`** 才动宿主的默认
+    // （新项目/刚播种的没有这一栏，别去覆盖"宽窗口默认开项目视图"那种现状）。
+    if (hasExplicitVisibility(resolved.layout)) restoreVisibility(resolved.layout)
     if (resolved.persist) saveLayout()
     if (resolved.migrated) markLayoutMigrated()
     if (resolved.writeAppliedVersion !== null) markAppliedLayoutVersion(DEFAULT_PROJECT_FRAME_PROFILE.id, resolved.writeAppliedVersion)
+  }
+
+  /**
+   * 上游 `ToolWindowSetInitializer` 装配时做的事：把存档里 `isVisible = true` 的窗口展开。
+   * 本仓每个 dock 同时只显示一个窗口（`leftView` / `bottomTab`），所以"可见的那个"就是选中的那个；
+   * 那一侧一个都没有 ⇒ 那一侧收起（上游同样按 `isVisible` 决定 dock 显不显示）。
+   */
+  function restoreVisibility(layout: StoredProjectLayout) {
+    const visible = visibleWindowIds(layout)
+    const side = visible.find(id => Object.hasOwn(toolAnchors, id) && toolAnchors[id as ToolWindowId] !== 'bottom')
+    if (side) {
+      deps.activeView.value = side as ToolWindowId
+      deps.explorer.value = true
+    } else {
+      deps.explorer.value = false
+    }
+    // 底部那一侧：可见的内容可能是固定的底部标签（output/run/problems/…）也可能是停靠在底部的工具窗口。
+    const bottom = visible.find(id => !Object.hasOwn(toolAnchors, id) || toolAnchors[id as ToolWindowId] === 'bottom')
+    if (bottom) {
+      bottomTabRef.value = bottom
+      bottomRef.value = true
+    } else {
+      bottomRef.value = false
+    }
+  }
+
+  /**
+   * 把"现在哪些窗口开着"写回记录（上游 `ToolWindowImpl.show()/hide()` 改的就是 `windowInfo.isVisible`）。
+   * 每侧只可能有一个可见窗口：侧栏是 `leftView`，底部是 `bottomTab`。
+   */
+  function currentVisibleIds(): string[] {
+    const ids: string[] = []
+    if (deps.explorer.value) ids.push(String(deps.activeView.value))
+    if (bottomRef.value && bottomTabRef.value) ids.push(String(bottomTabRef.value))
+    return ids
+  }
+  function saveVisibility() {
+    if (!layoutRoot.value) return
+    visibleIds.value = currentVisibleIds()
+    saveLayout()
   }
 
   /**
@@ -242,11 +310,19 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
         order: rank >= 0 ? rank : undefined,
         showStripeButton: !hiddenStripeButtons.has(id),
         contentUiType: contentUiTypes[id],
+        visible: visibleIds.value.includes(id),
       }
     }
-    // 内容条形态的键不止工具窗口：底部那几格固定内容（output/run/problems/…）也各有形态
-    // （上游它们各自就是工具窗口，WindowInfo 里一样有 `contentUiType`），所以显式值单独并进来。
-    for (const [id, type] of Object.entries(contentUiTypes)) windows[id] = { ...(windows[id] ?? {}), contentUiType: type }
+    // 内容条形态与可见性的键不止工具窗口：底部那几格固定内容（output/run/problems/…）也各有这两种
+    // 状态（上游它们各自就是工具窗口，WindowInfo 里一样有 `contentUiType`/`isVisible`），单独并进来。
+    for (const id of new Set([...extraContentIds, ...Object.keys(contentUiTypes), ...visibleIds.value])) {
+      if (Object.hasOwn(toolAnchors, id)) continue
+      windows[id] = {
+        ...(windows[id] ?? {}),
+        ...(contentUiTypes[id] ? { contentUiType: contentUiTypes[id] } : {}),
+        visible: visibleIds.value.includes(id),
+      }
+    }
     writeJson(projectLayoutKey(root), { windows } satisfies StoredProjectLayout)
   }
   function saveToolAnchors() { saveLayout() }
@@ -424,9 +500,14 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   applyProjectLayout(deps.workspace.value?.root ?? null)
   // 换项目 = 换一套布局（上游：项目的 workspace 里存着它自己的 WindowInfo）。
   watch(() => deps.workspace.value?.root ?? null, root => applyProjectLayout(root))
+  // 展开/收起与"显示哪一格"都是 `WindowInfo.isVisible` 的写入点（上游 `show()/hide()` 做同一件事）。
+  // 这一条 watch 的源读的是宿主里声明在本模块**之前**的那几个 ref（`explorer`/`bottom`/`bottomTab`/
+  // `leftView`）—— 非 immediate 的 watch 建时会求值一次，晚了会撞 TDZ，所以宿主那边把它们挪到了前面。
+  watch([deps.explorer, bottomRef, () => bottomTabRef.value, () => deps.activeView.value], () => saveVisibility())
 
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
            removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,
            stripeWidths, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows,
-           moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType }
+           moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType,
+           visibleIds, saveVisibility }
 }
