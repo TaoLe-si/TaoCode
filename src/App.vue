@@ -22,6 +22,7 @@ import ToolWindowView, { type ToolWindowViewContext } from './components/ToolWin
 import SearchEverywhereDialog from './components/SearchEverywhereDialog.vue'
 import SelectInPopup from './components/SelectInPopup.vue'
 import ToolWindowAnchorMenu from './components/ToolWindowAnchorMenu.vue'; import EditorPopupMenu from './components/EditorPopupMenu.vue'; import ToolWindowGear from './components/ToolWindowGear.vue'
+import ToolStripe from './components/ToolStripe.vue'
 import { createSearchEverywhereHost } from './searchEverywhereHost'
 import { createFileColorHost } from './fileColorsHost'
 import ProjectDialog from './components/ProjectDialog.vue'
@@ -229,14 +230,17 @@ const bottom = ref(false)
 // IDEA 的 ToolWindowAnchor：每个工具窗口记住自己停在哪一侧（`Anchor` 由状态域定义，见下）。
 // 工具窗口的停靠边 / 顺序 / 可用性是一个独立状态域，见 src/toolWindowStripes.ts
 // （2026-09-27 加 Gradle 工具窗口时从中拆出）。`toolDisabled` / `bottomAnchoredIds` 由它导出。
-const { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons, removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf } = createToolWindowStripes({
+const { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons, removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows, moreButtonVisible } = createToolWindowStripes({
     isDesktop, explorer,
     // `lspReady` / `gradleAvailable` 在宿主里声明得比这里晚（TDZ），只能惰性传。
     workspace: { get value() { return workspace.value } },
     lspReady: { get value() { return lspReady.value } },
     gradleAvailable: { get value() { return gradleAvailable.value } },
     activeView: { get value() { return leftView.value } },
+    compactMode: { get value() { return editorSettings.value.compactMode } }, showNames: { get value() { return editorSettings.value.showToolWindowNames } },
   })
+// 侧条（宽度的分隔线 / 「更多」按钮 / 空白处右键）都由 ToolStripe.vue 承担，这里只做转发。
+function toggleToolWindowNames() { void saveSettingsPatch({ showToolWindowNames: !editorSettings.value.showToolWindowNames }) }
 // IDEA's MaximizeToolWindow (MaximizeToolWindowAction.java:36 -> ToolWindowManagerImpl.setMaximized
 // -> ToolWindowPane.kt:544-560 `stretch(toolWindow, MAX)`): the dock is stretched over the whole
 // width and the previous size is remembered for the restore. Only one dock is stretched at a time;
@@ -1874,7 +1878,7 @@ const {
   backgroundImage, applyBackground, chooseBackgroundImage, clearBackgroundImage,
   leftSideBySide, rightSideBySide,
 } = createAppearanceActions({ notify, isDesktop, generalSettings, zenMode, panelSizes, setPanelSize, saveSettingsPatch,
-  editorSettings, settingsBusy, settingsError,
+  editorSettings, settingsBusy, settingsError, applyShowNamesWidths,
   lastRunParams: { get value() { return lastRunParams }, set value(v) { lastRunParams = v } } as any,
   toolDisabled, showView, gitHead, dirty, help, helpClose, leavePrompt, leaveCancel,
   menu, menus, palette, paletteIndex, query, queryInput, runLog, save, testRunnerRef,
@@ -2046,25 +2050,21 @@ onBeforeUnmount(() => {
       <!-- Zen 模式的退出入口：IDEA 的 Zen/免打扰模式保留 Esc 与顶部浮出工具栏，这里给常驻悬浮按钮，
            否则唯一入口（视图 › 外观）随 header 一起 v-if 掉，用户会被困在空界面里。 -->
       <button v-if="chromeHidden" class="zen-exit" :title="`${hideChromeLabel}（Esc）`" :aria-label="hideChromeLabel" @click="exitHideChrome()"><X :size="13" />{{ hideChromeLabel }}</button>
-      <!-- IDEA 的 Stripe（ToolWindowManagerImpl）跟工具窗口的**显示/隐藏**是分开的：隐藏窗口
-           只是收起它的面板，条纹上的按钮仍在（再次点击即重新显示）。原先这里写的是
-           `explorer && !chromeHidden`，于是「⋮ 隐藏」之后整条左侧条纹一起消失，用户再也点不回来。 -->
-      <aside v-if="!chromeHidden" class="activity-bar" aria-label="工具栏">
-        <template v-for="id in stripeOrder('left')" :key="id">
-          <span v-if="isDropBefore('left', id)" class="stripe-drop-marker" aria-hidden="true" />
-          <button
-            class="activity-button" :class="{ active: explorer && leftView === id, dragging: draggingTool === id }"
-            draggable="true" :title="`${toolTitles[id]}（可拖到另一侧或拖动重排）`" :aria-label="`切换${toolTitles[id]}`" :disabled="toolDisabled(id)"
-            @click="activateToolWindow(id)" @contextmenu.prevent="openToolMenu(id)"
-            @dragstart="onToolDragStart(id, $event)" @dragover="onToolDragOver('left', id, $event)" @drop="onToolDrop('left', id, $event)" @dragend="onToolDragEnd"
-          ><component :is="toolIcons[id]" :size="21" /><span class="activity-name">{{ toolTitles[id] }}</span><span class="activity-number">{{ toolWindowMnemonic(id) }}</span></button>
-        </template>
-        <span v-if="dropTarget?.side === 'left' && !dropTarget.before" class="stripe-drop-marker" aria-hidden="true" />
+      <!-- IDEA 的 Stripe（ToolWindowManagerImpl）跟工具窗口的**显示/隐藏**是分开的：隐藏窗口只是收起它的
+           面板，条纹上的按钮仍在（再次点击即重新显示）—— 原先写成 `explorer && !chromeHidden`，于是
+           「⋮ 隐藏」之后整条左条纹一起消失，用户再也点不回来。按钮/拖拽/拖宽的分隔线/「更多」都在
+           src/components/ToolStripe.vue（上下两侧条是同一份结构，IDEA 也只是 Left/RightToolbar 两个薄子类）。 -->
+      <ToolStripe
+        v-if="!chromeHidden" side="left" :ids="stripeOrder('left')" :labels="toolTitles" :icons="toolIcons" :mnemonic-of="toolWindowMnemonic" :is-disabled="toolDisabled" :is-active="id => explorer && leftView === id" :dragging="draggingTool"
+        :is-drop-before="isDropBefore" :drop-at-end="dropTarget?.side === 'left' && !dropTarget.before" :width="stripeWidth('left')" :more-ids="moreButtonRows" :show-names="editorSettings.showToolWindowNames" :compact="editorSettings.compactMode" :more-on-this-side="moreButtonVisible('left')"
+        @activate="activateToolWindow" @menu="openToolMenu" @drag-start="onToolDragStart" @drag-over="(id, event) => onToolDragOver('left', id, event)" @drop="(id, event) => onToolDrop('left', id, event)" @drag-end="onToolDragEnd"
+        @resize="width => setStripeWidth('left', width)" @toggle-names="toggleToolWindowNames" @more-pick="activateToolWindow" @move-more-to="moveMoreButtonTo"
+      >
         <button class="activity-button" :class="{ active: activity }" title="处理记录" aria-label="切换处理记录" @click="activity = !activity"><Workflow :size="21" /></button>
         <div class="rail-divider" />
         <button class="activity-button" :class="{ active: bottom }" title="输出面板" aria-label="切换输出面板" @click="bottom = !bottom"><span class="activity-name">输出</span><TerminalSquare :size="20" /></button>
         <div class="rail-bottom"><button class="activity-button" title="设置 (Ctrl+Alt+S)" aria-label="设置" :disabled="working" @click="openSettings()"><SlidersHorizontal :size="20" /></button><span class="local-avatar" title="仅本地工作区">L</span></div>
-      </aside>
+      </ToolStripe>
 
       <aside v-if="explorer && !chromeHidden && activeAnchor === 'left'" class="explorer-panel" tabindex="-1">
         <ToolWindowHeader
@@ -2107,13 +2107,13 @@ onBeforeUnmount(() => {
 
       <!-- IDEA's right stripe (Stripe.java): a narrow rail listing the tool windows
            anchored right, clickable exactly like the left activity bar. -->
-      <aside v-if="!chromeHidden && stripeOrder('right').length" class="activity-bar right-stripe" aria-label="右侧工具窗口条" @dragover="onToolDragOver('right', null, $event)" @drop="onToolDrop('right', null, $event)">
-        <template v-for="id in stripeOrder('right')" :key="id">
-          <span v-if="isDropBefore('right', id)" class="stripe-drop-marker" aria-hidden="true" />
-          <button class="activity-button" :class="{ active: explorer && leftView === id, dragging: draggingTool === id }" draggable="true" :title="`${toolTitles[id]}（可拖到另一侧或拖动重排）`" :aria-label="`切换${toolTitles[id]}`" :disabled="toolDisabled(id)" @click="activateToolWindow(id)" @contextmenu.prevent="openToolMenu(id)" @dragstart="onToolDragStart(id, $event)" @dragover="onToolDragOver('right', id, $event)" @drop="onToolDrop('right', id, $event)" @dragend="onToolDragEnd"><component :is="toolIcons[id]" :size="21" /><span class="activity-name">{{ toolTitles[id] }}</span><span class="activity-number">{{ toolWindowMnemonic(id) }}</span></button>
-        </template>
-        <span class="stripe-drop-hint" aria-hidden="true" />
-      </aside>
+      <ToolStripe
+        v-if="!chromeHidden && stripeOrder('right').length"
+        side="right" :ids="stripeOrder('right')" :labels="toolTitles" :icons="toolIcons" :mnemonic-of="toolWindowMnemonic" :is-disabled="toolDisabled" :is-active="id => explorer && leftView === id" :dragging="draggingTool"
+        :is-drop-before="isDropBefore" :drop-at-end="false" :width="stripeWidth('right')" :more-ids="moreButtonRows" :show-names="editorSettings.showToolWindowNames" :compact="editorSettings.compactMode" :more-on-this-side="moreButtonVisible('right')"
+        @activate="activateToolWindow" @menu="openToolMenu" @drag-start="onToolDragStart" @drag-over="(id, event) => onToolDragOver('right', id, event)" @drop="(id, event) => onToolDrop('right', id, event)" @drag-end="onToolDragEnd"
+        @resize="width => setStripeWidth('right', width)" @toggle-names="toggleToolWindowNames" @more-pick="activateToolWindow" @move-more-to="moveMoreButtonTo"
+      />
 
       <div v-if="explorer && !chromeHidden" class="resize-handle resize-explorer" role="separator" aria-label="调整项目面板宽度" aria-orientation="vertical" :aria-valuenow="panelSizes.explorer" :aria-valuemin="180" :aria-valuemax="Math.max(180, panelMax('explorer'))" tabindex="0" @pointerdown="startResize($event, 'explorer')" @keydown="resizeKey($event, 'explorer')" />
       <main class="editor-column">

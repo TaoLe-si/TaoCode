@@ -16,8 +16,9 @@ html[data-menu-icons='off'] .row-menu-item > svg:first-child,
 html[data-menu-icons='off'] .tool-menu-item > svg:first-child,
 html[data-menu-icons='off'] .context-menu-item > svg:first-child { display: none; }
 /* IDEA "Show tool window names": the stripe buttons carry the window name under the
-   icon, so the rail widens; "Show tool window bars" off hides the rails entirely and
-   the docked panels keep their own width. */
+   icon. The rail **width** is not a constant any more — it is the per-side custom width the
+   drag handle writes (`ResizeStripeManager`: 名称开着就有宽度、拖动改宽度)，宿主按状态给内联宽度；
+   这里的 66px 只是"还没读到状态时"的兜底。 */
 .activity-name { display: none; }
 html[data-tool-names='on'] .activity-bar { width: 66px; min-width: 66px; }
 html[data-tool-names='on'] .activity-button { flex-direction: column; gap: 2px; height: auto; width: 60px; padding: var(--space-1) 2px; }
@@ -242,7 +243,24 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    → JBUI.java:1276 `defaultExperimentalToolbarButtonSize() = size(30, 30)`。
    也就是 stripe 按钮和主工具栏按钮**同尺寸 30x30**（原先 40x40 每格高了 10px）。
    图标 20px = JBUI.java:1334 `defaultStripeToolbarButtonIconSize() = 20`。 */
-.activity-bar { width: 31px; min-width: 31px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; background: var(--rail); border-right: 1px solid var(--line); padding: var(--space-1) 0; }
+.activity-bar { position: relative; width: 31px; min-width: 31px; min-height: 0; flex-shrink: 0; display: flex; align-items: center; flex-direction: column; gap: 3px; background: var(--rail); border-right: 1px solid var(--line); padding: var(--space-1) 0; }
+/* 按钮列表自己滚：轨道不能滚 —— 宽度分隔线要整条贴着轨道内沿（IDEA 的 `mySplitter` 就在
+   `ToolWindowToolbar` 上，位置由 `layoutContainer` 钉在 `width - 1` / `0`）。 */
+.stripe-list { flex: 0 1 auto; min-height: 0; width: 100%; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+/* 侧条宽度的分隔线（IDEA `ResizeStripeManager.mySplitter`，1px、平时不画）。命中区靠 ::before
+   撑到 7px —— 1px 的线在 DOM 里抓不住（Swing 那边是拖拽事件直接命中）。 */
+.stripe-resize-handle { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 5; cursor: col-resize; background: transparent; touch-action: none; user-select: none; transition: background-color var(--dur-1) var(--ease); }
+.activity-bar > .stripe-resize-handle { right: 0; }
+.activity-bar.right-stripe > .stripe-resize-handle { right: auto; left: 0; }
+.stripe-resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: -3px; right: -3px; }
+.stripe-resize-handle:hover, .stripe-resize-handle.dragging { background: var(--accent); }
+/* 「更多」弹层（`ShowMoreToolWindowsAction`）：`minPopupWidth = JBUI.scale(300)`，位置由宿主按
+   按钮矩形给（左条贴轨道外沿，右条 -300）。外观不另立配方，复用浮层族的 --popup-*。 */
+.stripe-popup { position: fixed; z-index: 60; display: flex; flex-direction: column; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.stripe-popup-more { min-width: 300px; }
+.stripe-popup-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; justify-content: flex-start; text-align: left; }
+.stripe-popup-key { margin-left: auto; color: var(--muted); font: 11px var(--font-mono); }
+.stripe-popup-backdrop { position: fixed; inset: 0; z-index: 59; }
 .activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
 .activity-button > svg { width: 20px; height: 20px; stroke-width: 1.7; }
 .activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }

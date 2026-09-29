@@ -49,3 +49,25 @@ export function naturalCompare(a: string, b: string): number {
 export function sortedByTitle<T>(items: readonly T[], title: (item: T) => string): T[] {
   return [...items].sort((left, right) => naturalCompare(title(left), title(right)))
 }
+
+/**
+ * `ToolWindowsGroup.getActionComparator` (`ToolWindowsGroup.java:79-88`): first the windows that answer to
+ * an Alt+digit, by that digit (`comparingMnemonic` maps a missing mnemonic to `Integer.MAX_VALUE`, so the
+ * unnumbered ones sort last), then by the tool window id **case-insensitively** (`CASE_INSENSITIVE_ORDER`).
+ *
+ * This is the order the stripe's "more" popup lists windows in — deliberately *not* the title order the
+ * status-bar widget uses (`:168`): upstream really does use two different comparators for the two lists.
+ */
+export function sortedByMnemonicThenId<T extends string>(ids: readonly T[], mnemonic: (id: T) => string | undefined): T[] {
+  const rank = (id: T): number => {
+    const digit = Number(mnemonic(id))
+    return Number.isFinite(digit) ? digit : Number.MAX_SAFE_INTEGER
+  }
+  return [...ids].sort((left, right) => {
+    const byMnemonic = rank(left) - rank(right)
+    if (byMnemonic !== 0) return byMnemonic
+    const a = left.toLowerCase()
+    const b = right.toLowerCase()
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+}

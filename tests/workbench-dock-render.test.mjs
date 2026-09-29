@@ -4,9 +4,12 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { parse as parseSfc, compileTemplate } from '@vue/compiler-sfc'
 import { parse } from '@vue/compiler-dom'
-import { createSSRApp } from 'vue'
+import { createSSRApp, h } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import ts from 'typescript'
+import { loadSfc } from './vue-sfc-loader.mjs'
+
+const { component: toolStripe } = loadSfc('src/components/ToolStripe.vue')
 
 const require = createRequire(import.meta.url)
 const { descriptor } = parseSfc(readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8'))
@@ -66,14 +69,20 @@ for (const orientation of ['horizontal', 'vertical']) {
   })
 }
 
+// 侧条本体（`activity-bar`）现在住在 `src/components/ToolStripe.vue`：App.vue 那一层只留
+// `<ToolStripe>` 调用（App.vue 顶在机检上限，见 tests/module-size.test.mjs）。所以这一条改成
+// 直接渲真组件 —— 判定点没变：**隐藏面板不等于移除按钮**，dock 收起时侧条按钮仍然在。
+// 组件自己的完整判据在 tests/stripe-resize-more.test.mjs。
 test('hiding the project dock keeps its stripe button available to reopen it', async () => {
-  const tree = await renderPart('activity-bar', {
-    explorer: false, chromeHidden: false, stripeOrder: () => ['files'],
-    isDropBefore: () => false, leftView: 'files', draggingTool: null,
-    toolTitles: { files: '项目' }, toolDisabled: () => false, toolIcons: { files: 'span' },
-    toolWindowMnemonic: () => '1', dropTarget: null, activity: false, bottom: false, working: false,
-  })
-  assert.ok(find(tree, node => node.type === 1 && node.tag === 'button' && node.props.some(p => p.name === 'aria-label' && p.value?.content === '切换项目')))
+  const html = await renderToString(createSSRApp({
+    render: () => h(toolStripe, {
+      side: 'left', ids: ['files'], labels: { files: '项目' }, icons: { files: 'span' },
+      mnemonicOf: () => '1', isDisabled: () => false, isActive: () => false, dragging: null,
+      isDropBefore: () => false, dropAtEnd: false, width: 0, showNames: false, compact: false,
+      moreIds: [], moreOnThisSide: true,
+    }),
+  }))
+  assert.match(html, /aria-label="切换项目"/)
 })
 
 // DEFAULT_TOOL_ANCHORS（src/toolWindowMeta.ts:56-60）里 vcslog / todo / debug / tests 全部默认

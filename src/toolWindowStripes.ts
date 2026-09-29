@@ -7,7 +7,9 @@
 // 状态自持（锚点表 + 顺序表 + 两份 localStorage 镜像），宿主只 import 同名变量，模板零改动 ——
 // 与 src/statusWidgets.ts、src/progressPanel.ts 同一个"状态模块"模式。
 import { computed, reactive, ref, type Ref } from 'vue'
-import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, type ToolWindowId } from './toolWindowMeta.ts'
+import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
+import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
+import { sortedByMnemonicThenId } from './toolWindows.ts'
 import type { Workspace } from './bridge'
 
 /** IDEA 的 `ToolWindowAnchor`（TaoCode 只用 left/right/bottom）。 */
@@ -36,6 +38,16 @@ export interface ToolWindowStripesDeps {
    * 只读它的**锚点**（用于最大化/布局），所以注入只读视图就够。
    */
   activeView: { readonly value: ToolWindowId }
+  /**
+   * 紧凑模式（`UISettings.compactMode`）：侧条宽度的下限 33/40 由它决定（`ResizeStripeManager.kt:139`）。
+   * 可选 —— 不传就是非紧凑。
+   */
+  compactMode?: { readonly value: boolean }
+  /**
+   * 「显示工具窗口名称」（`UISettings.showToolWindowsNames`）：它就是侧条能不能拖的那道闸
+   * （2026.2 的 `ResizeStripeManager.Companion.isShowNames()`）。可选 —— 不传就是名称关。
+   */
+  showNames?: { readonly value: boolean }
 }
 
 export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
@@ -126,6 +138,90 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     saveHiddenStripeButtons()
   }
   const stripeOrder = computed(() => (side: Anchor) => toolOrder.value[side].filter(id => (toolAnchors[id] ?? 'left') === side && !hiddenStripeButtons.has(id)))
+
+  // --- 侧条宽度（IDEA `ResizeStripeManager`）-----------------------------------------------------
+  // 上游把两侧的宽度存在 `UISettings.toolWindowLeftSideCustomWidth` / `…RightSideCustomWidth` 里
+  // （`ResizeStripeManager.kt:230-249` 的 `getSideCustomWidth` / `setSideCustomWidth`），
+  // 与锚点/顺序一样是机器偏好，所以在同一处持久化。
+  const WIDTH_STORAGE_KEY = 'taocode.stripeWidths'
+  function readStoredWidth(side: StripeSide): number | undefined {
+    try {
+      const raw = JSON.parse(localStorage.getItem(WIDTH_STORAGE_KEY) ?? 'null') as unknown
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+      const value = (raw as Record<string, unknown>)[side]
+      return typeof value === 'number' ? value : undefined
+    } catch { /* 坏存档 → 按默认宽度 */ return undefined }
+  }
+  // 建模块时**只读存档**（不碰 `deps.compactMode` / `deps.showNames` —— 那两个要等设置域组装完，
+  // 在宿主里声明得比本模块晚，这里读它们会撞 TDZ；实测过：非 immediate 的 `watch` 在创建时就会
+  // 求值一次取 oldValue，所以连 watch 也不能挂在这一层）。折算与夹取都放到读的那一刻。
+  const stripeWidths = reactive<Record<StripeSide, number>>({ left: readStoredWidth('left') ?? 0, right: readStoredWidth('right') ?? 0 })
+  function saveStripeWidths() {
+    try { localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(stripeWidths)) } catch { /* session-only */ }
+  }
+  /**
+   * 这一侧此刻的宽度。**名称关着就是 0**，存档里的值不参与 —— 上游 `updateState`（`:89-102`）在
+   * `isShowNames()` 为假时把 `myCustomWidth` 直接归零、连分隔线一起摘掉（存档值只在名称开着时读）。
+   * 名称开着但还没存过宽度时按 `applyShowNames` 的默认值折算，否则轨道会被 CSS 兜底撑宽、
+   * 而拖拽起点还是 0（两者不一致时，第一次拖动会跳一下）。
+   */
+  function stripeWidth(side: StripeSide): number {
+    if (deps.showNames?.value !== true) return 0
+    const stored = stripeWidths[side]
+    if (!(stored > 0)) return STRIPE_NAMES_DEFAULT_WIDTH
+    return clampStripeWidth(stored, deps.compactMode?.value === true)
+  }
+  /** 拖动一帧（`setSideCustomWidth`，`:240-253`）。 */
+  function setStripeWidth(side: StripeSide, width: number) {
+    stripeWidths[side] = clampStripeWidth(width, deps.compactMode?.value === true)
+    saveStripeWidths()
+  }
+  /**
+   * `applyShowNames()`（`:215-228`）：开关名称 = 把两侧宽度重置成默认（开）或 0（关）。
+   * 由**宿主**在设置变化时调用（上游同样是设置页 `onApply` 与 `ToolWindowShowNamesAction` 触发，
+   * 不是常驻监听）—— 本模块不挂 watch：那条 watch 会在建模块时就求值一次，而设置域还没组装完。
+   * 启动时**不**调用它，否则用户拖出来的宽度每次重启都会被抹掉。
+   */
+  function applyShowNamesWidths(showNames: boolean) {
+    const next = stripeWidthsAfterShowNames(showNames)
+    stripeWidths.left = next.left
+    stripeWidths.right = next.right
+    saveStripeWidths()
+  }
+
+  // --- 「更多」按钮（IDEA `MoreSquareStripeButton` + `ShowMoreToolWindowsAction`）----------------
+  // 上游把它放在「上条纹」之后（`ToolWindowToolbar.initMoreButton` 在非扩展形态下
+  // `topStripe.parent.add(moreButton, BorderLayout.CENTER)`），点开的是**没有侧条按钮**的窗口列表
+  // （`ToolWindowsGroup.getToolWindowActions(project, true)`，`ToolWindowsGroup.java:47-77`），
+  // 右键是「移至<对侧>」那一条（`MoreSquareStripeButton.createPopupGroup:49-61`）。
+  const MORE_BUTTON_STORAGE_KEY = 'taocode.moreButtonSide'
+  /** `ToolWindowManagerState.kt:31/60`：默认 LEFT；`:86-87` 只在**不是 LEFT** 时才写进存档。 */
+  const moreButtonSide = ref<StripeSide>(readMoreButtonSide())
+  function readMoreButtonSide(): StripeSide {
+    try { return localStorage.getItem(MORE_BUTTON_STORAGE_KEY) === 'right' ? 'right' : 'left' } catch { return 'left' }
+  }
+  function moveMoreButtonTo(side: StripeSide) {
+    moreButtonSide.value = side
+    try {
+      // 上游序列化只记"与默认不同"的那一档（`ToolWindowManagerState.kt:86-87`）。
+      if (side === 'left') localStorage.removeItem(MORE_BUTTON_STORAGE_KEY)
+      else localStorage.setItem(MORE_BUTTON_STORAGE_KEY, side)
+    } catch { /* session-only */ }
+  }
+  /**
+   * 弹层的行 = 现在**没有侧条按钮**的可用窗口。
+   * 上游的跳过规则是 `isShowStripeButton() && isAvailable() && isStripeButtonShow(window)`
+   * （`ToolWindowsGroup.java:50-53`）—— "按钮在条纹上而且在"才跳过。本仓每个可用窗口都必有一条按钮，
+   * 所以"没有按钮"只剩一种情况：被「从侧栏移除」（`RemoveStripeButtonAction`）摘掉了。
+   * 不可用的窗口不进表（本仓不列假行，与状态栏那个弹层同一条规矩）。
+   */
+  const moreButtonRows = computed(() => sortedByMnemonicThenId(
+    (Object.keys(toolAnchors) as ToolWindowId[]).filter(id => hiddenStripeButtons.has(id) && !toolDisabled(id)),
+    toolWindowMnemonic))
+  /** `AbstractMoreSquareStripeButton.isAvailable`（`MoreSquareStripeButton.kt:142`）：有行才有这个按钮。 */
+  function moreButtonAvailable(): boolean { return moreButtonRows.value.length > 0 }
+  /** `MoreSquareStripeButton.isAvailable`（`:78-80`）：还要这一侧的 `side` 等于 `getMoreButtonSide()`。 */
+  function moreButtonVisible(side: StripeSide): boolean { return moreButtonSide.value === side && moreButtonAvailable() }
   // Which tool windows can be opened right now (IDEA disables an unavailable window
   // instead of hiding it, so the stripe keeps a stable layout).
   function toolDisabled(id: ToolWindowId): boolean {
@@ -162,5 +258,7 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   function anchorOf(id: ToolWindowId): Anchor { return toolAnchors[id] ?? 'left' }
 
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
-           removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf }
+           removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,
+           stripeWidths, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows,
+           moreButtonAvailable, moreButtonVisible }
 }

@@ -453,3 +453,27 @@ AE2 这种 Forge 工程首次同步需要能访问 Maven 仓库；同步没完�
 **剩下的上限（如实）**：单台服务器**自己崩掉**（读线程退出、但会话没走 `shutdown_all`）时不会有人报 reset，
 那条行会一直留在面板里 —— 上游是靠 `LspServerState` 的变更监听调 `cancelAllProgress()`，
 本仓还没有"某台 Host 从活变死"的事件出口。要补就先补那条出口，别在界面上加超时猜测。
+
+## 16. 工具窗口侧条：拖宽 + 「更多」按钮（2026-09-29 第三十六批）
+
+B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `ResizeStripeManager` / `MoreSquareStripeButton`
+改成 `[x]`，明细见 `docs/ui-placement-audit.md` §AN）：
+
+| 上游 | 坐标 | 本仓 |
+| :-- | :-- | :-- |
+| 侧条宽度可拖（1px 分隔线，内沿） | `ResizeStripeManager.kt:79-86`（`createLayout`：左条 `width-1`、右条 `0`）、`:113-136`（`setProportion`，右侧取反）、`:138-150`（`checkMinMax` [40,100]，紧凑 33） | `src/stripeResize.ts`（夹取/方向/拖拽收尾）+ `src/components/ToolStripe.vue` 的 `.stripe-resize-handle` |
+| 宽度 = 名称的开关 | `updateView:173-182`（`setOrUpdateShowName(myCustomWidth > 0)`）；2026.2 的 `Companion.enabled()` 是常量 true ⇒ `isShowNames() = UISettings.showToolWindowsNames` | 只有「显示工具窗口名称」开着才挂分隔线；宽度写回 `taocode.stripeWidths`（按边各一份，对应 UISettings 的两侧字段） |
+| 开关名称 = 重置宽度 | `applyShowNames:215-228`（开 59 / 关 0，两侧） | `stripeWidthsAfterShowNames` + `toolWindowStripes.ts` 里那条 `watch`（只在**变化**时重置，启动不动用户拖过的宽度） |
+| 「更多」= 没有侧条按钮的窗口 | `AbstractMoreSquareStripeButton.isAvailable:142` + `ToolWindowsGroup.java:47-77` 的跳过规则 | `moreButtonRows`（被「从侧栏移除」的可用窗口，助记符序 —— `ToolWindowsGroup.java:79-88` 的比较器在 `src/toolWindows.ts` 的 `sortedByMnemonicThenId`） |
+| 「更多」停在 `getMoreButtonSide()` 那一侧 | `MoreSquareStripeButton.isAvailable:78-80`；状态在 `ToolWindowManagerState.moreButton`（默认 LEFT，只在非 LEFT 时写存档 `:86-87`） | `moreButtonSide` + `moreButtonVisible(side)`，存档键 `taocode.moreButtonSide` |
+| 左键弹层 / 右键「移至对侧」/ 侧条空白处右键「显示工具窗口名称」 | `ShowMoreToolWindowsAction:100-123`（`minPopupWidth = 300`）、`createPopupGroup:49-61`、`ResizeStripeManager.kt:49-61` | `ToolStripe.vue` 的两个弹层 + 名称开关（文案取自随 IDE 发货的中文语言包） |
+
+**同批的结构动作**：App.vue 顶在机检上限（2737 行），侧条这一域整体搬进
+`src/components/ToolStripe.vue`（左右两条侧条本来就是同一份结构 —— IDEA 也只是
+`ToolWindowLeftToolbar`/`RightToolbar` 两个薄子类）。判决表里 `ToolWindowToolbar` /
+`ToolWindowLeftToolbar` / `ToolWindowRightToolbar` 三行原先按"窗口内工具栏"误判成 `[ ]`，
+随本轮改成 `[~]`（缺的是 `topStripe`+`bottomStripe` 的双条纹/split 组那一半）。
+
+**仍差**：`ToolWindowButtonManager` / `ToolWindowPaneNewButtonManager` / `ToolWindowPaneOldButtonManager`
+（按钮管理器与工厂层）、`StripeActionGroup`（`TopStripeActionGroup`，顶部条纹的动作组 —— 本仓无顶部条纹）。
+刻意偏差六条登记在 `docs/source-todo.md` §9。

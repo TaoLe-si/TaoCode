@@ -1762,3 +1762,104 @@ ContentManager（`:23`），没有可关的选中内容才落到 `toolWindow.hid
 一把抓，于是焦点在项目树里按 Ctrl+Shift+F4 会去收**底部**面板。已改成显式分开：
 侧栏 ⇒ `explorer = false`；底部 ⇒ 关内容或收面板；编辑器 ⇒ 关标签。
 判据 `tests/active-tool-window.test.mjs` 新增 1 条（并锁住旧写法必须消失），已自证有牙。
+
+## AN. 2026-09-29 第三十六批：侧条**拖宽**与**「更多」按钮**（B2 §C 的 `ResizeStripeManager` + `MoreSquareStripeButton`）
+
+交接文档把这两条排成"下一步优先级 1"。动手前先把 2026.2 的**实际**行为钉死 —— 参考树（OSS master）
+与本机安装版（IU-262.8665.258）在这块**结构不一样**：参考树里"侧条能不能拖"来自
+`ToolWindowStripeExtension.isStripeResizable()`，而 2026.2 的整包 jar 里**已经没有** `ToolWindowStripeExtension`
+这个类（`lib/intellij.platform.ide.impl.jar` 全扫，0 命中），`ResizeStripeManager$Companion.enabled()`
+反编译出来是常量 `true`：
+
+| 事实 | 证据 | 本仓落点 |
+|---|---|---|
+| 能拖 ⟺ 「显示工具窗口名称」开着 | `enabled()` = `iconst_1; ireturn`；`isShowNames() = enabled() && UISettings.showToolWindowsNames` | `src/stripeResize.ts` 的门控语义 + `ToolStripe.vue` 的 `v-if="showNames"` |
+| 宽度上下限 40..100（紧凑 33） | `checkMinMax` 反编译（`ResizeStripeManager.kt:138-150` 同款） | `stripeWidthLimits` / `clampStripeWidth` |
+| 开关名称 = 把宽度重置 | `applyShowNames`：开 `JBUI.scale(59)`、关 0，**两侧**都重置 | `stripeWidthsAfterShowNames` + `toolWindowStripes.ts` 的 watch（只在变化时重置） |
+| 名称关着时存档宽度**不生效** | `updateState`（`:89-102`）在 `isShowNames()` 为假时把 `myCustomWidth` 直接归零并摘掉分隔线（`getSideCustomWidth` 只在名称开着时读） | `stripeWidth()` 先看名称开关再读存档 —— 否则会出现"轨道很宽但没有名字"的中间态 |
+| 拖出来的宽度按边持久化 | `getSideCustomWidth`/`setSideCustomWidth`（UISettings 两侧各一份，`:230-253`） | `taocode.stripeWidths`（`{left, right}`） |
+| 右侧条方向取反 | `setProportion` 里 `anchor == RIGHT ⇒ width = fullWidth - width`（`:120-123`） | `stripeWidthAfterDrag` 的镜像 |
+| 分隔线在**内沿** | `layoutContainer`：左条 `target.width - 1`、右条 `0`（`:79-86`） | `.stripe-resize-handle` 的 `right:0` / `left:0` |
+| 「更多」= 有窗口**没有侧条按钮** | `AbstractMoreSquareStripeButton.isAvailable`（`:142`）= `getToolWindowActions(project, true).isNotEmpty()`，跳过规则在 `ToolWindowsGroup.java:50-53` | `moreButtonRows`（= 被「从侧栏移除」的**可用**窗口） |
+| 「更多」只停在它那一侧 | `MoreSquareStripeButton.isAvailable`（`:78-80`）：`getMoreButtonSide() == side`；`ToolWindowManagerState.moreButton` 默认 LEFT、只在非 LEFT 时写存档（`:86-87`） | `moreButtonSide` / `moreButtonVisible(side)` |
+| 左键 = 窗口列表；右键 = 「移至对侧」 | `ShowMoreToolWindowsAction`（`:100-123`，`minPopupWidth = JBUI.scale(300)`）；`createPopupGroup(moveTo)`（`:49-61`） | 弹层与「移至右侧 / 移至左侧」 |
+| 侧条空白处右键 = 名称开关 | `ResizeStripeManager.kt:49-61` 挂的 `PopupHandler` → `ToolWindowShowNamesAction` | `openNamesMenu` |
+
+文案一律取本机随 IDE 发货的中文语言包（`plugins/localization-zh/lib/localization-zh.jar`，不是自己译的）：
+「更多」（`more.button.accessible.name`）、「更多工具窗口」（`tool.window.new.stripe.more.title`）、
+「移至{左,右}侧」（`tool.window.more.button.move` × `action.text.anchor.*.capitalized`）、
+「显示工具窗口名称」（`action.ToolWindowShowNamesAction.text`）。**行序**照 `ToolWindowsGroup` 的比较器
+（助记符 → 窗口 id 大小写不敏感，`ToolWindowsGroup.java:79-88`），**不是**状态栏那个按标题排的比较器 ——
+所以 `src/toolWindows.ts` 新增 `sortedByMnemonicThenId`（同一弹层的两种排序上游真的都有）。
+
+**结构变化**：App.vue 原先把两条侧条的按钮循环内联着写，而它顶在机检上限（2737 行，`tests/module-size.test.mjs`），
+新增的四处标记（分隔线、更多按钮、两个弹层）没有位置。按本仓 §4 的规矩，把这一域整体搬进
+`src/components/ToolStripe.vue` —— 左右两条侧条本来就是**同一份结构**（IDEA 也只是
+`ToolWindowLeftToolbar`/`RightToolbar` 两个薄子类），App.vue 每条只剩一行调用，左侧条尾部那几个固定按钮
+（处理记录 / 输出 / 设置 / 头像）走 `<slot>`。按钮列表另起一层 `.stripe-list` 自己滚：轨道本体不能再滚
+（`overflow-y: auto` 的容器里，绝对定位的分隔线会跟着内容滚走）。
+
+**刻意偏差（逐条登记在 `docs/source-todo.md` §9）**：
+
+1. 默认宽度取 **66** 而不是上游的 59 —— 59 是 IDEA 在自己的字体度量下量出的按钮宽度，本仓名称态按钮盒
+   是 60px + 两侧 3px 内边距，照搬 59 会把按钮挤出去。拖动范围仍是上游的 `[40,100]`（紧凑 33）。
+2. 不做 IDE scale 乘法（上游 `updateNamedState:152-171` 会按 `currentIdeScale` 换算）—— 本仓整条侧条都是
+   未缩放的 px，只缩宽度会与图标/文字错位。
+3. 分隔线命中区 7px（线宽仍 1px、平时不画 —— 与上游 `paint(){}` 一致）：1px 的线在 DOM 里抓不住，
+   Swing 那边是拖拽事件直接命中。
+4. 「更多」的触发比上游窄一档：上游把"按钮不在条纹上"的窗口**都**算进去（含不可用的窗口，弹层里那几行是灰的）；
+   本仓每个可用窗口都必有一条按钮，所以只剩「从侧栏移除」这一档，且不可用的窗口不进表（与状态栏那个弹层
+   同一条规矩：不列假行）。
+5. 弹层行不带「钉住」内联动作：上游 `XNextToolWindowsMoreGroup` / `StripeActionGroup.MyMoreAction` 给每行
+   挂 `TogglePinAction`（钉住侧条按钮），本仓没有"钉住的侧条按钮"这个概念，不放假按钮。
+
+判据：`tests/stripe-resize-more.test.mjs`（17 条 —— 夹取/拖拽方向/名称闸/持久化与重置/坏存档/拖拽收尾、
+更多按钮的可用性与两侧归属/行序/存档只记非默认档/不可用窗口不进表、组件真模板渲染的按钮与分隔线与
+更多按钮、App.vue 与 CSS 的接线）。**自证有牙**：把"不可用窗口的过滤"与"分隔线的 `v-if="showNames"`"
+各拔一次，对应两条当场变红，改回即绿。
+
+顺带纠正判决表里**判断依据写错**的三行：`ToolWindowToolbar` / `ToolWindowLeftToolbar` /
+`ToolWindowRightToolbar` 被记成"窗口内工具栏（本仓窗口内没有工具栏层）"——它们就是**侧条本体**的类，
+判决随本轮实现一起改成 `[~]`（`ToolWindowHorizontalToolbar` 仍是 `[ ]`：TOP 横向条纹，本仓与 2026.2
+都没有这条形态）。B2 四档计数随之由 `4 + 68 + 96 + 182` 变成 `6 + 71 + 91 + 182`（仍是 350）。
+
+**真 exe 取证（这一步抓到两个测试看不见的缺陷）**：`build/TaoCode.exe` 用
+`TAOCODE_DEBUG_PORT=9335` 起 WebView2 的 CDP，直接对真实 DOM 取证（跑完 `taskkill` 收进程、
+`projects.json` 原样还原）：
+
+| 步骤 | 结果 |
+|---|---|
+| 名称关（默认） | 两条轨道都在、`.stripe-list` 在、分隔线 0 个、名字 `display: none`、宽度 31 |
+| 名称开 | 分隔线 2 个、宽度 66、名字 `display: block` |
+| 拖左条分隔线（合成 `Input.dispatchMouseEvent`，pointerId=1） | `.dragging` 生效，宽度 66 → 96，落盘 `{"left":96,"right":66}`（只动左边） |
+| 右键侧条按钮 → 齿轮「从侧栏移除」 | 按钮消失、`taocode.hiddenStripeButtons = ["git"]`、「更多」出现（`aria-label=更多`、`title=更多工具窗口`） |
+| 点「更多」 | 弹层开、`min-width: 300px`、左沿 = 轨道右沿（`ShowMoreToolWindowsAction.showPopup` 的几何）、行 = `源代码管理 Alt+2` |
+| 点那一行 | 按钮回来、「更多」消失、`hiddenStripeButtons` 清空（上游同一个循环） |
+| 右键侧条空白处 | 弹层只有一行「显示工具窗口名称」，`aria-checked=true` |
+| 控制台 | 0 异常 / 0 报错 |
+
+抓到的两个**真缺陷**（都已修 + 各自留了回归判据）：
+
+1. **TDZ**：原先宽度那一域挂在 `toolWindowStripes.ts` 里的 `watch(() => deps.showNames.value, …)`，
+   而非 immediate 的 `watch` 在**创建时**就会求值一次取 oldValue ⇒ 读到了宿主里声明更晚的
+   `editorSettings` ⇒ 真 exe 里 `ReferenceError: Cannot access 'dt' before initialization`
+   （SSR 测试看不见：那边传的是普通对象）。改法照上游语义 —— `applyShowNames` 本来就该由设置页
+   `onApply` 触发，所以现在由 `src/appearanceActions.ts` 在设置变化时调 `deps.applyShowNamesWidths`，
+   状态域只读存档（新增判据锁住"这一层不许挂 watch"）。
+2. **右键冒泡**：按钮的 `contextmenu` 冒泡到轨道 ⇒ 齿轮菜单与「显示工具窗口名称」同时弹出，
+   后者的遮罩接着吞掉下一次点击（拖拽也就跟着失效）。改成 `.prevent.stop`（上游是按钮自己的
+   `PopupHandler` 吃掉事件）。
+
+**同批补判（判决表的欠账）**：收拾判决表时发现第三十批的**状态栏注册表**（本文件 §AI）代码已落地、
+依据已写清，但 §G 里那一族仍是 `[ ]`（`StatusBarWidgetFactory` / `StatusBarWidgetSettings` /
+`StatusBarWidgetsActionGroup` / `StatusBarWidgetsManager` / `WidgetRegistry`）。
+按 **本文件已有的记录**（§AI 逐条引了 `src/statusBarWidgets.ts` 与 `src/statusWidgets.ts`）把它们补判成
+`[x]`（前两条）与 `[~]`（后三条 —— 三道闸与按 id 反查都在，缺的是 `LinkedHashMap<Factory, Widget>` 那种
+"已建组件容器 + 增量增删"，渲染模型里不需要），并在 §C 的优先表里把第 1、2 条划掉。
+`StatusBarWidgetProvider` / `StatusBarWidgetProviderToFactoryAdapter`（EP 侧）与
+`StatusBarWidgetsOptionProvider`（设置页）仍是 `[ ]`：本仓没有插件运行时、也没有状态栏组件的设置页。
+
+由此 §C 的"最有价值的下一条"标记移到**工具窗口的注册机制**（`RegisterToolWindowTask` / `ToolWindowEP` /
+`ToolWindowFactory`）：它是与状态栏注册表**同一种**结构性缺口 —— 加一个工具窗口现在要改
+`src/toolWindowMeta.ts` 的 id 联合、两张表与可用性函数。B2 四档计数同时由 `6 + 71 + 91 + 182`
+订正为 `8 + 74 + 86 + 182`（`tests/b2-verdict.test.mjs` 的和数断言与文档头部一起改，仍 = 350）。

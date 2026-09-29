@@ -112,3 +112,34 @@
 
 - [x] **`Alt+←` / `Alt+→` 的旧提示文案 → 结案：原样就是写错了**：`$default.xml:296-299`（`Back` = `control alt LEFT` + `button4`）与 `:901-904`（`Forward` = `control alt RIGHT` + `button5`）——**没有裸 `Alt+←/→`**，`macOS System Shortcuts.xml` 里也没有。第四十五/四十六批把编辑器工具栏两处 `title` 改成 `Ctrl Alt` 是正确修复，无需回退。
 - [x] **`HideAllWindowsAction` 的 ToggleAction 语义 → 结案：那一行本身就该会翻文案（不是"合并成一行"）**：`HideAllToolWindowsAction.kt:34-49` 的 `update` 里，`getIdsToHide(...).any()` 为真 → 文案 `action.hide.all.windows`（`IdeBundle.properties:384` "Hide All _Windows"）；否则若 `layoutToRestoreLater != null` → 文案 `action.restore.windows`（`:385` "Restore _Windows"）且 `CURRENT_STATE_IS_MAXIMIZED_KEY = true`；两者都不满足 → `isEnabled = false`（`:36, :48`）。`actionPerformed:14-32` 是真正的 toggle：先 `getLayout().copy()` 存进 `layoutToRestoreLater` 再逐个 `hideToolWindow`，恢复分支先置空该字段再 `setLayout`（`:17-22`）。View 菜单（`PlatformActions.xml:521-597`）整段**没有** maximize/hide-all 项，唯一入口是 WindowMenu `:656`。→ 已按源码实现：`window.hideAllWindows` 改为双文案 + 源码启用条件，`view.maximizeEditor` 那行删除。
+
+## 9. 第三十六批（侧条拖宽 + 「更多」按钮）的刻意偏差
+
+**同批真 exe 取证抓到的两个真缺陷（已修 + 留了回归判据，详见 `docs/ui-placement-audit.md` §AN）**：
+
+- [x] **TDZ**：宽度那一域原先挂在 `toolWindowStripes.ts` 里的 `watch(() => deps.showNames.value, …)`，
+  而非 immediate 的 `watch` 在创建时就会求值一次取 oldValue ⇒ 读到宿主里声明更晚的 `editorSettings`
+  ⇒ 真 exe 里 `ReferenceError: Cannot access 'dt' before initialization`（SSR 测试看不见这一档）。
+  已改成由 `src/appearanceActions.ts` 在设置变化时调 `applyShowNamesWidths`（上游 `applyShowNames`
+  本来就是设置页 `onApply` 触发），状态域只读存档。
+- [x] **右键冒泡**：按钮的 `contextmenu` 冒泡到轨道 ⇒ 齿轮菜单与「显示工具窗口名称」同时弹出，
+  后者的遮罩接着吞掉下一次点击（拖拽跟着失效）。已改成 `.prevent.stop`。
+
+对照上游 `ResizeStripeManager.kt` / `MoreSquareStripeButton.kt`（2026.2 的行为用 `javap -c -p` 核过，
+见 `docs/ui-placement-audit.md` §AN）：
+
+- [~] **侧条默认宽度取 66，不是上游的 59**（`applyShowNames` 里的 `JBUI.scale(59)`）：59 是 IDEA 在自己的
+  字体度量下量出的按钮宽度；本仓名称态按钮盒是 60px + 轨道两侧 3px 内边距，照搬 59 会把按钮挤出去。
+  拖动范围仍是上游的 `[40,100]`（紧凑 33，`checkMinMax:138-150`）。
+- [~] **不做 IDE scale 乘法**（上游 `updateNamedState:152-171` 会按 `currentIdeScale` 换算已存宽度）：
+  本仓整条侧条都是未缩放的 px（连 `--space-*` 都是 px），只缩宽度会让图标/文字与轨道错位。
+- [~] **分隔线的命中区 7px**（线宽仍是 1px、平时不画 —— 与上游 `paint(){}` 一致）：1px 的线在 DOM 里
+  抓不住（Swing 那边是拖拽事件直接命中，不需要像素级的命中区）。
+- [~] **「更多」的触发比上游窄一档**：上游把"按钮不在条纹上"的窗口**都**算进去（含不可用的窗口，
+  弹层里那几行是灰的，`ToolWindowsGroup.java:50-53`）；本仓每个可用窗口都必有一条按钮，所以只剩
+  「从侧栏移除」这一档，且不可用的窗口不进表 —— 与状态栏那个弹层同一条规矩：不列假行。
+- [~] **弹层行不带「钉住」内联动作**：上游 `XNextToolWindowsMoreGroup` / `StripeActionGroup.MyMoreAction`
+  给每行挂 `TogglePinAction`（钉住侧条按钮），本仓没有"钉住的侧条按钮"这个概念，不放假按钮。
+- [~] **没有键盘路径**：上游那个分隔线是 `Splittable`/`OnePixelDivider`，只有指针拖拽；本仓照抄
+  （`role="separator"` + `aria-valuenow` 给读屏，不加自创的方向键绑定 —— 面板分隔条那套方向键是本仓
+  自己的既有能力，侧条这边不假装上游有）。

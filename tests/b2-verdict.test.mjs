@@ -49,13 +49,21 @@ test('扫描件是 350 类，且 §G 逐条覆盖（名字与路径都对得上�
   assert.deepEqual(missing, [], `§G 漏了这些类：${missing.join(', ')}`)
 })
 
-test('四档计数自己加得起来（4 + 68 + 96 + 182 = 350）', () => {
+// 计数随批次变化（第三十六批把 `ResizeStripeManager` / `MoreSquareStripeButton` 判成 `[x]`、
+// 三行侧条本体类从误判的 `[ ]` 改成 `[~]`：4 + 68 + 96 + 182 → 6 + 71 + 91 + 182）。
+// 这里盯的是**自洽**：每档的数字与总数对得上，且判决表自己写的和数一致。
+// 计数随批次变化（第三十六批：`ResizeStripeManager` / `MoreSquareStripeButton` 判成 `[x]`、
+// 三行侧条本体类从误判的 `[ ]` 改成 `[~]`；同批把第三十批欠账的状态栏注册表 5 行补判：
+// 4 + 68 + 96 + 182 → 8 + 74 + 86 + 182）。这里盯的是**自洽**：每档数字与总数对得上，
+// 且判决表自己写的和数一致。
+test('四档计数自己加得起来（8 + 74 + 86 + 182 = 350）', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 4)
-  assert.equal(count('[~]'), 68)
-  assert.equal(count('[ ]'), 96)
+  assert.equal(count('[x]'), 8)
+  assert.equal(count('[~]'), 74)
+  assert.equal(count('[ ]'), 86)
   assert.equal(count('[-]'), 182)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 350)
+  assert.match(verdict, /四档合计 8 \+ 74 \+ 86 \+ 182 = 350/, '文档头部的和数也要跟着改')
 })
 
 test('每个 [x]/[~] 行的依据必须指到真实存在的 src/ 或 native/ 文件（防"注释里提过就算移植"）', () => {
@@ -97,8 +105,10 @@ test('判决文件把「三条如实不做」和「最有价值的下一条」�
   assert.match(section, /customFrameDecorations/, '缺 customFrameDecorations 那条')
   assert.match(section, /FLOATING/, '缺浮动/独立窗口那条')
   assert.match(section, /tabInEditor/, '缺 tabInEditor 那条')
-  // §C 的第一条必须是状态栏组件注册表 —— 它是 B2 里唯一"加组件要改 App.vue"的结构性缺口。
+  // §C 里必须标出"最有价值的下一条"，且它得是同一个口径的结构性缺口（"加一个要改宿主"）。
+  // 状态栏注册表（`StatusBarWidgetFactory`）第三十批落地、第三十六批补判；现标在工具窗口注册机制上。
   const c = verdict.split('## C. 未移植')[1].split('## D.')[0]
   assert.match(c, /StatusBarWidgetFactory/, '§C 缺 StatusBarWidgetFactory')
   assert.match(c, /最有价值的一条/, '最有价值的下一条没有标出来')
+  assert.ok(/最有价值的一条[^|]{10,}/.test(c), '那一行要就地说明理由（不是只挂一个标签）')
 })

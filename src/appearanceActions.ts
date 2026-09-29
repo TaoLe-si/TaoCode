@@ -43,6 +43,8 @@ export interface AppearanceActionsDeps {
   settingsError: Ref<any>
   /** 上次运行的参数（宿主在启动后要写它，所以留在宿主）。 */
   lastRunParams: Ref<any>
+  /** 侧条宽度的重置（`src/toolWindowStripes.ts` 的 `applyShowNamesWidths`；可选 —— 纯外观测试不需要它）。 */
+  applyShowNamesWidths?: (showNames: boolean) => void
   theme: Ref<any>
   workspace: Ref<any>
   explorer: Ref<any>
@@ -237,6 +239,10 @@ export function createAppearanceActions(deps: AppearanceActionsDeps) {
   watch(() => editorSettings.value.showToolWindowNames, show => {
     document.documentElement.dataset.toolNames = show ? 'on' : 'off'
   }, { immediate: true })
+  // 名称开关一变就把侧条宽度重置（`ResizeStripeManager.applyShowNames`，`ResizeStripeManager.kt:215-228`）。
+  // 这一条**故意不是 immediate**：上游 applyShowNames 由设置页 onApply / 动作触发，启动时读的是存下来的
+  // 宽度 —— immediate 会把用户拖出来的宽度每次重启都抹掉。
+  watch(() => editorSettings.value.showToolWindowNames, show => deps.applyShowNamesWidths?.(show))
   // IDEA "Show tool window numbers": the stripe buttons wear Alt+1..9 mnemonics and
   // those shortcuts really do focus the window (same order as the stripe).
   watch(() => editorSettings.value.showToolWindowNumbers, show => {
