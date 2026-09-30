@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, isFileBookmark, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from '../src/bookmarks.ts'
+import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, isFileBookmark, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from '../src/bookmarks.ts'
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -201,4 +201,15 @@ test('重写助记键时：行书签被删掉，文件书签降级成无键（�
                    '文件书签只被摘掉助记键，条目留着')
   const lineSquatter = placeBookmark(taken, 'new.cpp', 9, 'C')
   assert.deepEqual(lineSquatter.map(entry => entry.path), ['a.cpp', 'new.cpp'], '行书签那条（b.cpp:4）被整条删掉')
+})
+
+test('装订线的悬停文本按上游拼：书签 + 助记键 + 描述 + 键位（字母没有键位）', () => {
+  assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3, text: '  int x = 1;  ' }), '书签: int x = 1;')
+  assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3, text: 'int x;', mnemonic: 'A' }), '书签 A: int x;',
+               '字母没有全局键位 ⇒ 不拼括号那一段')
+  assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3, text: 'int x;', mnemonic: '4' }),
+               '书签 4: int x; (Ctrl+Shift+4 以切换，Ctrl+4 以跳转到)')
+  assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3, text: 'int x;', description: '选中的那段', mnemonic: '9' }),
+               '书签 9: 选中的那段 (Ctrl+Shift+9 以切换，Ctrl+9 以跳转到)', '自定义描述优先于行原文')
+  assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3 }), '书签', '没有原文/描述/助记键时只有"书签"')
 })

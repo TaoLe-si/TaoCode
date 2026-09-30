@@ -111,8 +111,17 @@
    **仍未做**：命名/分组书签列表（`BookmarkGroup`、`GroupCreateDialog`、把某个列表标为默认）、
    `EditBookmark`（F2 改描述）、`AddAnotherBookmark`（往另一个列表再加一条）、`BookmarkOpenTabs`
    （把打开的标签页一键加成文件书签）。
-③ **列表项的富渲染**：`BookmarkItem.setupRenderer`（`:46-86` 图标 + 描述 + 行的文本）、
-   `speedSearchText`（`:104`）、`footerText`（`:109`）—— 本仓面板只有编号/文件/行号。
+③ **列表项的富渲染 —— 大部分已做**（面板在第七十一/七十三批：图标 + 描述 + `行号: 那一行原文`
+   + 助记键气泡 + 两种形状照 `ui/tree/LineNode.kt:20-31` 与 `BookmarkNode.kt:64-83`）；
+   **装订线那一侧在第七十五批补齐**：悬停文本逐条照 `GutterLineBookmarkRenderer.getTooltipText:56-72`
+   （`书签` + 助记键 + `: 描述` + ` (键)`，键位文案取中文包的三条 `bookmark.shortcut.to.*`；0-9 有
+   Ctrl+Shift+N/Ctrl+N，字母没有键位所以不拼括号），点击 = `ToggleBookmark`（`:48`）、
+   **中键 = `EditBookmark`**（`:50`，本仓落成 `src/components/BookmarkDescriptionDialog.vue`
+   + `editBookmarkAt`/`saveBookmarkDescription`，文案取 `action.bookmark.edit.description.dialog.*`）、
+   对齐按 `Alignment.RIGHT`（`:46`）。
+   **仍未做**：`speedSearchText`（`:104` —— 本仓面板没有快速搜索，登记为无落点）、
+   `updateAccessoryView`（`:92-99` 助记键在**右侧附件位**，本仓仍画在行首 —— 观感差异，待改）、
+   `footerText`（`:109` 的 presentable URL，本仓用行的 `title` 给了 `路径:行` ✓ 近似）。
 
 ## G. 逐条总表（5 类，与 `docs/inventory/bookmarks.txt` 一一对齐）
 

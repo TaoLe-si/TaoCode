@@ -14,6 +14,7 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import TestRunnerPanel from './components/TestRunnerPanel.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import BookmarkMnemonicChooser from './components/BookmarkMnemonicChooser.vue'
+import BookmarkDescriptionDialog from './components/BookmarkDescriptionDialog.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
@@ -1315,9 +1316,8 @@ const {
 const {
   bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic, confirmRewrite, dontAskRewrite, removeMnemonic,
   useProjectSettings, bookmarkSave,
-  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel,
-} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(), openPath: path => void openFile(path),
-  updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, gutterBookmarks, toggleBookmarkAt, editBookmarkAt, descriptionPrompt, saveBookmarkDescription,
+} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(), openPath: path => void openFile(path), updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
 // language-neutral templates in surround.ts.
@@ -1502,7 +1502,7 @@ const {
   pickPasteHistoryEntry, removePasteHistoryEntry, onEditorPaste,
 } = createPasteActions({ notify, active, editorFor, lspOn, editorSettings, runFormatting })
 // 行内 gutter 图标层（IDEA `GutterIconRenderer`：诊断 / 断点 / 书签，可点击）。
-const { gutterIcons, onGutterIcon } = createGutterIconHost({ active, editorSettings, diagnostics: lspDiagnostics, revealLocation, toggleBreakpointAt, notify, bookmarks: path => bookmarkLines.value[path] ?? [], breakpointLines: path => (dapBreakpoints.get(path) ?? []).map(point => point.line) })
+const { gutterIcons, onGutterIcon, onGutterIconMiddleClick } = createGutterIconHost({ active, editorSettings, diagnostics: lspDiagnostics, revealLocation, toggleBreakpointAt, notify, bookmarks: path => gutterBookmarks(path), toggleBookmarkAt, editBookmarkAt, breakpointLines: path => (dapBreakpoints.get(path) ?? []).map(point => point.line) })
 // 帮助菜单的动作（IDEA HelpMenu 里能落地的那些；其余在 src/menus/helpMenu.ts 里逐条登记为待办）。
 const {
   aboutOpen, aboutInfo, specialPathsOpen, specialPaths, collectBusy, showLog, showAbout, browseSpecialPaths,
@@ -2157,7 +2157,7 @@ onBeforeUnmount(() => {
                 <div v-for="symbol in stickyLines" :key="symbol.startLine" class="sticky-line">{{ symbol.name }}</div>
               </div>
               <BinaryViewer v-if="binaryView && pane === focusedPane" :path="binaryView.path" :data="binaryView.data" @close="closeBinary" @reveal="revealBinary" />
-              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :plugin-templates="pluginList" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @link="openDocumentLink" @code-lens="runCodeLensCommand" @template-chooser="openTemplateChooser" @paste="onEditorPaste" @typing="recordTypingStep" :gutter-icons="gutterIcons" :blame="blameOf(tab.path)" @gutter-icon="onGutterIcon" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" @contextmenu.prevent="openEditorPopup($event)" />
+              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :plugin-templates="pluginList" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @link="openDocumentLink" @code-lens="runCodeLensCommand" @template-chooser="openTemplateChooser" @paste="onEditorPaste" @typing="recordTypingStep" :gutter-icons="gutterIcons" :blame="blameOf(tab.path)" @gutter-icon="onGutterIcon" @gutter-icon-middle="onGutterIconMiddleClick" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" @contextmenu.prevent="openEditorPopup($event)" />
               <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" @open="path => void openFile(path, false, { preview: true })" @error="message => notify(message, true)" />
               <!-- IDEA's empty editor: a right-aligned shortcut list plus the
                    drag-and-drop hint (verified on screen: 随处搜索 Shift Shift /
@@ -2462,6 +2462,7 @@ onBeforeUnmount(() => {
         <button :disabled="!fileClipboard" @click="pasteFromClipboard()">粘贴</button>
         <div class="menu-rule" />
         <button @click="bookmarkFile(treeMenu.entry.path); treeMenu = null">{{ fileBookmarkLabel(treeMenu.entry.path) }}</button>
+        <button v-if="fileBookmarkLabel(treeMenu.entry.path) === '删除书签'" @click="editBookmarkAt(treeMenu.entry.path); treeMenu = null">编辑描述</button>
         <button v-if="treeMenu.entry.kind === 'file'" @click="openFile(treeMenu.entry.path); treeMenu = null; treeSubmenu = null">打开</button>
         <div class="menu-rule" />
         <button v-if="treeMenu.entry.kind === 'file'" :disabled="!lspReady" @click="findUsagesOf(treeMenu.entry.path)">查找用法…</button>
@@ -2682,6 +2683,7 @@ onBeforeUnmount(() => {
     <div v-if="palette" class="modal-backdrop" @click.self="palette = false">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="转到文件" @keydown="trapFocus"><div class="palette-input"><Search :size="18" /><input ref="queryInput" v-model="query" placeholder="转到文件…" aria-label="搜索已打开或根目录文件" @keydown.down.prevent="paletteIndex = (paletteIndex + 1) % Math.max(1, candidates.length)" @keydown.up.prevent="paletteIndex = (paletteIndex + candidates.length - 1) % Math.max(1, candidates.length)" @keydown.enter="candidates[paletteIndex] && openFile(candidates[paletteIndex]!)" /><button class="icon-button" aria-label="关闭文件选择器" @click="palette = false"><X :size="16" /></button></div><div class="palette-scope">已打开文件与工作区根目录文件 · 子目录请在左侧展开</div><div class="palette-results"><button v-for="(path, index) in candidates" :key="path" :class="{ highlighted: index === paletteIndex }" @click="openFile(path)"><FileCode2 :size="15" /><span>{{ path }}</span><span v-if="path === activePath" class="small-muted">当前文件</span><ArrowRight :size="14" /></button><p v-if="!candidates.length" class="palette-empty">没有匹配的文件。先打开文件夹或在资源管理器中展开目录。</p></div></section>
     </div>
+    <BookmarkDescriptionDialog v-if="descriptionPrompt" :target="descriptionPrompt" :trap-focus="trapFocus" @save="saveBookmarkDescription" @close="descriptionPrompt = null" />
     <BookmarkMnemonicChooser v-if="mnemonicPrompt" :prompt="mnemonicPrompt" :rewrite="rewriteAsk" :owner-of="mnemonicOwner" :trap-focus="trapFocus"
                             @pick="pickMnemonic" @remove="removeMnemonic" @confirm="confirmRewrite" @dont-ask="dontAskRewrite"
                             @close="mnemonicPrompt = null; rewriteAsk = null" />

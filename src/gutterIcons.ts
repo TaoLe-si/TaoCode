@@ -27,6 +27,18 @@ export type GutterIconKind = 'error' | 'warning' | 'hint' | 'breakpoint' | 'book
 /** 渲染器对齐方式（`GutterIconRenderer.Alignment`，`:158-168`）。 */
 export type GutterAlignment = 'left' | 'center' | 'right'
 
+/**
+ * 装订线上的书签（行书签才有图标；文件书签没有行号，不进装订线）。
+ * `tooltip` 由调用方按上游 `GutterLineBookmarkRenderer.getTooltipText:56-72` 拼好
+ * （`src/bookmarks.ts` 的 `bookmarkGutterTooltip`）—— 本模块保持零 import，方便单测直接 import。
+ */
+export interface GutterBookmark {
+  /** 1 基行号。 */
+  line: number
+  /** 悬停文本（「书签[ 助记键][: 描述][ (键)]」）。 */
+  tooltip: string
+}
+
 export interface GutterIcon {
   /** 1 基行号（IDEA 的 `LineMarkerInfo` 同样是 1 基）。 */
   line: number
@@ -37,6 +49,8 @@ export interface GutterIcon {
   accessibleName: string
   /** `getClickAction() != null`。 */
   clickable: boolean
+  /** 中键动作（`GutterIconRenderer.getMiddleButtonClickAction()`，书签是 `EditBookmark`）。 */
+  middleClickable?: boolean
   alignment: GutterAlignment
   /** 去重键（对应源码要求的 `equals`/`hashCode`）。 */
   key: string
@@ -84,13 +98,13 @@ export interface GutterIconSources {
   diagnostics?: readonly GutterDiagnostic[] | undefined
   /** DAP 断点（`dapBreakpoints`，1 基行号）。 */
   breakpoints?: readonly number[] | undefined
-  /** 书签（`bookmarkLines`，1 基行号）。 */
-  bookmarks?: readonly number[] | undefined
+  /** 书签（行书签；1 基行号 + 助记键 + 描述）。 */
+  bookmarks?: readonly GutterBookmark[] | undefined
 }
 
 function icon(line: number, kind: GutterIconKind, tooltip: string, clickable: boolean,
-              alignment: GutterAlignment = 'center'): GutterIcon {
-  return { line, kind, tooltip, accessibleName: tooltip, clickable, alignment, key: `${line}:${kind}:${tooltip}` }
+              alignment: GutterAlignment = 'center', middleClickable = false): GutterIcon {
+  return { line, kind, tooltip, accessibleName: tooltip, clickable, middleClickable, alignment, key: `${line}:${kind}:${tooltip}` }
 }
 
 /**
@@ -122,8 +136,11 @@ export function collectGutterIcons(sources: GutterIconSources, enabled: boolean)
   for (const line of sources.breakpoints ?? []) push(byLine, icon(line, 'breakpoint', '断点：点击切换', true))
   // 书签图标在 IDEA 里点开的是一个弹层（删除 / 助记符 / 上一个 / 下一个），TaoCode 还没有 gutter 右键弹层
   // 这套基建，所以按 `getClickAction() == null` 的形态渲染（接口允许不可点击），tooltip 里写明移除入口。
-  for (const line of sources.bookmarks ?? []) {
-    push(byLine, icon(line, 'bookmark', '书签（移除请用「切换书签」或书签面板）', false))
+  for (const entry of sources.bookmarks ?? []) {
+    // 上游 `GutterLineBookmarkRenderer`：tooltip = 「书签[ <助记键>][: 描述][ (<键>)]」
+    // （`:56-72`），`getClickAction()` = ToggleBookmark，`getMiddleButtonClickAction()` = EditBookmark
+    // （`:48-50`），对齐方式 `Alignment.RIGHT`（`:46`）。
+    push(byLine, icon(entry.line, 'bookmark', entry.tooltip, true, 'right', true))
   }
 
   return [...byLine.entries()]

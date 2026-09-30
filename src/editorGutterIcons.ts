@@ -68,6 +68,8 @@ const gutterIconsField = StateField.define<readonly GutterIcon[]>({
 export interface GutterIconsOptions {
   /** 点击一个**可点击**图标时的回调（IDEA 的 `getClickAction().actionPerformed`）。 */
   onClick: (icon: GutterIcon) => void
+  /** 中键动作（`getMiddleButtonClickAction()`）：书签是 EditBookmark。 */
+  onMiddleClick?: (icon: GutterIcon) => void
 }
 
 /** gutter 扩展：按 `line` 分组渲染，点击用 dataset 里的行号/种类找回图标。 */
@@ -98,8 +100,13 @@ export function gutterIconsExtension(options: GutterIconsOptions): Extension {
         const icon = view.state.field(gutterIconsField)
           .find((item: GutterIcon) => item.line === number && item.kind === target.dataset.kind)
         if (!icon || !icon.clickable) return false
+        // 中键 = `getMiddleButtonClickAction()`（书签是 EditBookmark）；左键走 onClick。
+        const middle = (event as MouseEvent).button === 1
+        if (middle && !icon.middleClickable) return false
+        if (middle && !options.onMiddleClick) return false
         event.preventDefault()
-        options.onClick(icon)
+        if (middle) options.onMiddleClick?.(icon)
+        else options.onClick(icon)
         return true
       },
     },

@@ -7,7 +7,7 @@
 // 为什么单独成模块：App.vue 已到机检上限，而这一域（图标合成 + 点击分派）自洽，
 // 宿主只留一行装配。
 import { computed } from 'vue'
-import { collectGutterIcons, type GutterIcon } from './gutterIcons'
+import { collectGutterIcons, type GutterBookmark, type GutterIcon } from './gutterIcons'
 import type { LspDiagnostic } from './bridge'
 import type { Tab } from './editorTab'
 
@@ -24,8 +24,12 @@ export interface GutterIconHostDeps {
   toggleBreakpointAt: (path: string, line: number) => unknown
   /** 提示诊断消息（点击后立即看到内容，不必悬停）。 */
   notify: (message: string, error?: boolean) => void
-  /** 当前文件的书签行（1 基）。 */
-  bookmarks: (path: string) => readonly number[]
+  /** 当前文件的行书签（1 基行号 + 悬停文本，悬停文本由 bookmarkActions 按上游拼好）。 */
+  bookmarks: (path: string) => readonly GutterBookmark[]
+  /** 切换 `path` 上某一行的书签（`GutterIconRenderer.getClickAction()` = ToggleBookmark）。 */
+  toggleBookmarkAt: (path: string, line: number) => unknown
+  /** 中键：编辑描述（`getMiddleButtonClickAction()` = EditBookmark）。 */
+  editBookmarkAt: (path: string, line: number) => unknown
   /** 当前文件的断点行（1 基）。 */
   breakpointLines: (path: string) => readonly number[]
 }
@@ -47,10 +51,19 @@ export function createGutterIconHost(deps: GutterIconHostDeps) {
     const path = deps.active.value?.path
     if (!path || !icon.clickable) return
     if (icon.kind === 'breakpoint') { deps.toggleBreakpointAt(path, icon.line); return }
+    // 书签：点一下就是 ToggleBookmark（上游 GutterLineBookmarkRenderer:48）
+    if (icon.kind === 'bookmark') { deps.toggleBookmarkAt(path, icon.line); return }
     // 诊断：跳到该行并把这行的消息直接说出来（悬停才看得到的话等于没看到）
     deps.revealLocation({ path, line: icon.line - 1 })
-    if (icon.kind !== 'bookmark') deps.notify(icon.tooltip)
+    deps.notify(icon.tooltip)
   }
 
-  return { gutterIcons, onGutterIcon }
+  /** 中键（`getMiddleButtonClickAction()`）：目前只有书签有 —— `EditBookmark`。 */
+  function onGutterIconMiddleClick(icon: GutterIcon) {
+    const path = deps.active.value?.path
+    if (!path || !icon.middleClickable || icon.kind !== 'bookmark') return
+    deps.editBookmarkAt(path, icon.line)
+  }
+
+  return { gutterIcons, onGutterIcon, onGutterIconMiddleClick }
 }

@@ -62,6 +62,26 @@ export function bookmarkDescription(entry: Bookmark): string | undefined {
 }
 
 /**
+ * 装订线书签图标的悬停文本 —— 逐条照上游 `GutterLineBookmarkRenderer.getTooltipText:56-72`：
+ * `书签` + 「 助记键」（非 DEFAULT 才有）+ 「: 描述」（非空才有）+ 「 (键)」（该助记键真有键位才有）。
+ * 键位文案取自同文件 `:78-92` 用的三条 bundle 串（中文包）：
+ *   `bookmark.shortcut.to.toggle.and.jump` = 「{0} 以切换，{1} 以跳转到」
+ *   `bookmark.shortcut.to.toggle` = 「{0} 以切换」 / `bookmark.shortcut.to.jump` = 「{0} 以跳转到」
+ * 0-9 的键位来自 `keymaps/$default.xml:201-228`（Ctrl+Shift+N 切换 / Ctrl+N 跳转）；
+ * **字母没有全局键**（GotoBookmarkA..Z 在键位表里没有条目），所以字母只报书签与描述。
+ */
+export function bookmarkGutterTooltip(entry: Bookmark): string {
+  let text = '书签'
+  const mnemonic = entry.mnemonic
+  if (mnemonic !== undefined) text += ' ' + mnemonic
+  const description = bookmarkDescription(entry)
+  if (description) text += ': ' + description
+  if (mnemonic !== undefined && mnemonic >= '0' && mnemonic <= '9')
+    text += ` (Ctrl+Shift+${mnemonic} 以切换，Ctrl+${mnemonic} 以跳转到)`
+  return text
+}
+
+/**
  * 行原文锚的长度上限（**字符**）。原生侧按 4 KiB 字节校验
  * （`native/settings_schema.cpp` 的 `max_bookmark_text`），1024 个字符在 UTF-8 下最多 4 KiB ——
  * 存（`bookmarkActions.placeAt`）与比（`reconcileBookmarks` 的 `textAt`）必须走同一个函数，

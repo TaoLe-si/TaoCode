@@ -6,7 +6,7 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkAnchor, bookmarkDescription, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
+import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
@@ -163,6 +163,41 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     deps.updateBookmarkViewSettings({ rewriteBookmarkType: true })
     confirmRewrite()
   }
+  /**
+   * 装订线要的行书签（1 基行号 + 上游那条悬停文本）。文件书签不进装订线（没有行号可挂）。
+   */
+  function gutterBookmarks(path: string) {
+    return bookmarks.value
+      .filter(entry => entry.path === path && entry.line !== undefined)
+      .map(entry => ({ line: entry.line as number, tooltip: bookmarkGutterTooltip(entry) }))
+  }
+  /** 装订线图标点一下 = `ToggleBookmark`（在那一行上加/删书签，不动助记键）。 */
+  function toggleBookmarkAt(path: string, line: number) {
+    placeAt(path, line, undefined, deps.editorContent?.(path))
+  }
+  /**
+   * `EditBookmark`：改这条书签的描述。上游 `EditBookmarkAction` 的入口是书签图标的**中键**
+   * （`GutterLineBookmarkRenderer.getMiddleButtonClickAction:50`）与右键菜单里的「编辑描述」，
+   * 弹一个预填当前描述的输入框（`Messages.showInputDialog`，标题/提示取中文包）。
+   */
+  const descriptionPrompt = ref<{ path: string; line?: number; current: string } | null>(null)
+  function editBookmarkAt(path: string, line?: number) {
+    const entry = bookmarks.value.find(item => item.path === path && item.line === line)
+    if (entry === undefined) return
+    descriptionPrompt.value = { path, line, current: bookmarkDescription(entry) ?? '' }
+  }
+  /** 保存描述（空串 = 清掉自定义描述，回到"用行原文"。上游 `setDescription` 写的是自定义描述）。 */
+  function saveBookmarkDescription(value: string) {
+    const at = descriptionPrompt.value
+    descriptionPrompt.value = null
+    if (!at) return
+    const trimmed = value.trim()
+    bookmarks.value = bookmarks.value.map(entry =>
+      entry.path === at.path && entry.line === at.line
+        ? (trimmed ? { ...entry, description: value } : (() => { const next = { ...entry }; delete next.description; return next })())
+        : entry)
+    persistBookmarks()
+  }
   /** 跳到一条书签：行书签去行号，文件书签只把文件打开。 */
   function goTo(entry: Bookmark) {
     if (entry.line === undefined) deps.openPath?.(entry.path)
@@ -225,6 +260,7 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   return {
     bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
     confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, goTo,
+    gutterBookmarks, toggleBookmarkAt, descriptionPrompt, editBookmarkAt, saveBookmarkDescription,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,
     jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,

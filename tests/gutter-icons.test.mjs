@@ -57,19 +57,22 @@ test('诊断行号从 0 基折成 1 基（LSP 与 LineMarkerInfo 的基准差）
   assert.deepEqual(icons.map(icon => icon.line), [1, 42])
 })
 
-test('断点可点、书签不可点（书签弹层基建待补，按 clickAction==null 的形态渲染）', () => {
-  const icons = collectGutterIcons({ breakpoints: [7], bookmarks: [9] }, true)
+test('断点与书签都可点：书签点击 = ToggleBookmark，中键 = EditBookmark（上游 :48-50）', () => {
+  const icons = collectGutterIcons({ breakpoints: [7], bookmarks: [{ line: 9, tooltip: '书签' }] }, true)
   const breakpoint = icons.find(icon => icon.kind === 'breakpoint')
   const bookmark = icons.find(icon => icon.kind === 'bookmark')
   assert.equal(breakpoint.line, 7)
   assert.equal(breakpoint.clickable, true)
   assert.equal(bookmark.line, 9)
-  assert.equal(bookmark.clickable, false)
+  assert.equal(bookmark.clickable, true, '书签图标的 getClickAction() 就是 ToggleBookmark')
+  assert.equal(bookmark.middleClickable, true, '中键是 EditBookmark')
+  assert.equal(bookmark.alignment, 'right', 'GutterLineBookmarkRenderer 对齐到 RIGHT')
+  assert.equal(bookmark.tooltip, '书签', '悬停文本由调用方按上游拼好')
 })
 
 test('同一行混多种图标：按 GUTTER_ICON_ORDER 并排，行号升序', () => {
   // 注意两套基准：诊断是 0 基（LSP），断点/书签是 1 基 —— 第 5 行 = 诊断 line 4 = 断点/书签 5。
-  const icons = collectGutterIcons({ diagnostics: [diagnostic(4, 2, 'w')], breakpoints: [5], bookmarks: [5] }, true)
+  const icons = collectGutterIcons({ diagnostics: [diagnostic(4, 2, 'w')], breakpoints: [5], bookmarks: [{ line: 5, tooltip: '书签' }] }, true)
   assert.deepEqual(icons.map(icon => [icon.line, icon.kind]),
     [[5, 'warning'], [5, 'breakpoint'], [5, 'bookmark']])
 })
@@ -93,7 +96,8 @@ test('默认设置里开关是开的，且前后端键白名单都登记了它',
 test('接线：编辑器装了图标层、宿主传了图标、菜单与设置页都有这一项', () => {
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
   // 图标层扩展 + 同步入口 + prop/emit
-  assert.ok(editor.includes('gutterIconsExtension({ onClick: icon => emit(\'gutterIcon\', icon) })'), '编辑器没有装图标层')
+  assert.ok(editor.includes('gutterIconsExtension('), '编辑器没有装图标层')
+  assert.ok(editor.includes("onMiddleClick: icon => emit('gutterIconMiddle', icon)"), '图标层没接中键（EditBookmark）')
   assert.ok(editor.includes('syncGutterIcons(view, props.gutterIcons ?? [])'), '编辑器没有同步图标')
   assert.ok(editor.includes('gutterIcons?: GutterIcon[]'), '编辑器没有 gutterIcons prop')
   // 断点/书签不再用整行 boxShadow 表达（迁到图标层，避免两套表达并存）
@@ -103,6 +107,7 @@ test('接线：编辑器装了图标层、宿主传了图标、菜单与设置�
   const app = readFileSync('src/App.vue', 'utf8')
   assert.ok(app.includes(':gutter-icons="gutterIcons"'), 'App 没有把图标传给编辑器')
   assert.ok(app.includes('@gutter-icon="onGutterIcon"'), 'App 没有接图标点击')
+  assert.ok(app.includes('@gutter-icon-middle="onGutterIconMiddleClick"'), 'App 没有接图标中键（EditBookmark）')
   // 视图菜单（IDEA 位置：紧跟显示行号）
   const view = readFileSync('src/menus/viewMenu.ts', 'utf8')
   assert.ok(view.includes("id: 'view.toggleGutterIcons'"), '视图菜单没有「显示装订线图标」')
