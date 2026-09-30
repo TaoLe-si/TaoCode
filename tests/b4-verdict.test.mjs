@@ -87,16 +87,16 @@ test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
   assert.equal(count('[x]'), 0)
-  assert.equal(count('[~]'), 10)
-  assert.equal(count('[ ]'), 33)
+  assert.equal(count('[~]'), 31)
+  assert.equal(count('[ ]'), 12)
   assert.equal(count('[-]'), 26)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 69)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 0 \+ `\[~\]` 10 \+ `\[ \]` 33 \+ `\[-\]` 26 = 69/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 0 \+ `\[~\]` 31 \+ `\[ \]` 12 \+ `\[-\]` 26 = 69/,
     '表尾的和数要与逐条表一致')
 })
 
-test('§C 记下了下一批该做的四条（按用户可见度）', () => {
-  const section = verdict.split('## C. 下一批该做的四条')[1].split('## D.')[0]
+test('§C 记下了下一批该做的条目（按用户可见度）', () => {
+  const section = verdict.split('## C. 下一批该做的条目')[1].split('## D.')[0]
   for (const item of ['动作族', 'CodeFoldingSettings', '持久化', '全部收起']) {
     assert.ok(section.includes(item), `§C 缺下一批该做的条目：${item}`)
   }

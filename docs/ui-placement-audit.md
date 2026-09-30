@@ -2420,3 +2420,59 @@ B3（`vcs/commit`）收口之后按 `docs/inventory/_domains.json` 的域定义�
 **判据（6 条）**：覆盖面从 `editor_scan.md` 重推（排测试源码集）并与 `folding.txt` 对齐；`[x]`/`[~]` 行的引用必须
 落在磁盘上真实存在的 `src/`/`native/` 文件；§D 四类理由必须在；四档计数自洽且与表尾一致；§C 四条在。
 自证有牙：把 §G 里某条依据的文件名改错 ⇒ 红（覆盖率那条靠"行数 ≠ 域内类数"也会先红）。
+
+## BF. 2026-09-30 第六十批：B4 §C①④ —— 折叠**动作族**（15 条命令 + 键位 + Code 菜单落点）
+
+§C 那四条里最实在的一条：折叠的"逐个动作"（区域/递归/到级别/选区/块/切换/文档注释）本仓一条都没有，
+上游却有完整的动作族与键位表。本批把它整族接上，并把「全部收起」的文案与 `FoldingGroup` 的落点一起收掉。
+落点：新模块 `src/editorFolding.ts`（折叠的**区域层** + 命令族 + 纯逻辑），命令表接进 `src/editorCommands.ts`，
+键位进 `src/components/CodeEditor.vue` 的常驻 keymap，菜单进 `src/menus/codeMenu.ts`（Code 菜单），
+编辑菜单里那四条（上游不在这里）删掉。
+
+**挑目标的规则逐条照上游，不是"能折就行"**（这一批最主要的返工都出在这里）：
+
+| 动作 | 上游 | 本仓（`src/editorFolding.ts`） |
+|---|---|---|
+| 收起 | `CollapseRegionAction.java:26-38`：先看"起始行落在光标行"的区域（多于一條就认不出，`FoldingUtil.java:33-45`），否则光标处最内层**未折叠**的那条 | `collapseTarget`（`areaStartingAtLine` + `areasContaining`） |
+| 展开 | `ExpandRegionAction.java:43-55`：先看起始行那条（折着才算），否则光标处**最外层**折着的那条 | `expandTarget`（注意是外层优先，不是内层） |
+| 递归 | `BaseFoldingHandler.java:61-86`：根先按起始行挑，挑不到（或收起时它已经折着）就换"展开态与目标一致"的最内层那条；结果 = 根 + 套在里面的全部 | `recursiveScope` |
+| 到级别 | `BaseExpandToLevelAction.java:43-70`：相对根算层，比 N 浅的展开、**正好第 N 层的折起**、更深的原样不动 | `levelPlan`（`expandCaretToLevel` / `expandAllToLevel`） |
+| 切换 | `ExpandCollapseToggleAction.kt:17-25` | `toggleFoldTarget` → `toggleTarget` |
+| 折叠选区 | `CollapseSelectionHandler.java:24-90`：精确匹配 → 移除（自动生成的不许移除）；搭界 → 确认框（默认「取消」）；否则折起选区那几行；**无选区时切换光标处最内层**（`:75-87`） | `toggleFoldSelection` |
+| 多光标 | 每个动作都在 `getAllCarets()` 上循环 | `perCaret`（`state.selection.ranges`） |
+
+**区域从哪来**（上游是"文件里全部 `FoldRegion`"）：本仓拼三个来源 —— LSP `foldingRange`（服务端给的整块）、
+CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` 沿祖先链给"光标套在里面的块"）、
+手工折的区间（`foldedRanges` 里没被前两者覆盖的）。同一块两种边界（LSP 整块 vs `foldInside` 的花括号内部）
+**按起始行去重、只留服务端那条** —— 不然"这块折着没有"说不清，`unfoldEffect` 只认精确边界。
+
+**真机上踩到的三件事（都是先按下去才发现不对，再改代码）**：
+
+1. **键位挂错了 keymap**：这一族起初挂在 `lspExtensions()`（语言服务在才生效）里，未接语言服务的文件
+   （探针 `fold-probe.ts`）整族按不出来，而"全部收起"（常驻 keymap 里的 CodeMirror 命令）却好使 ——
+   挂到 `onMounted` 的常驻 keymap 后，`Ctrl+-`/`Ctrl+=`/`Ctrl+Shift+-`/`Ctrl+*`/`Ctrl+.` 逐个在真 exe 里验过。
+2. **光标在块中间时收起没反应**：`foldable` 只看光标那一行，光标在 `return a` 上（块中间）时它给 null，
+   收起一动不动。补 `enclosingAreas`（`syntaxTree(...).resolveInner` 沿 `node.parent` 收 `foldNodeProp`），
+   这才是上游"文件里全部区间含住光标的那些"的最小等价物。
+3. **展开把嵌套的里层也一起展开了**：`isCollapsedIn` 原本是"里面有东西折着"（containment），
+   于是一个外层区域只要内部折着就被当成"折着"，`unfoldEffect` 又只认精确边界 —— 一次 Ctrl+= 把两条都开了。
+   改成"边界一模一样才算折着"+ 按起始行去重后，真机上"两条嵌着折 → Ctrl+= 先开**外层**那条"与上游一致。
+
+4. **键名不是想当然**：一开始按 `$default.xml` 的写法给数字键盘也各写了一条（`Ctrl-NumPad-` 这种）——
+   在 CodeMirror 里这**永远是死键位**：`normalizeKeyName` 按 `/(?!$)/` 切分后 `NumPad-` 被当成键名后缀
+   （不是修饰键，所以不报错，只是永不命中）；而浏览器里数字键盘的减号与主键区减号**本来就同名**
+   （`w3c-keyname` 按 keyCode 查表：109/189 → `-`、107/187 → `=`、106 → `*`），主键区那一条已经覆盖。
+   改成只写主键区的写法，并用 `runScopeHandlers` 按**真实键名**（Shift+= 报 `+`、Shift+- 报 `_`）
+   逐条验了一遍（`tests/editor-folding.test.mjs`）；顺带把三条"分不开"的（数字键盘 ± 不随 Shift 改名、
+   `Ctrl+Shift+数字键盘乘号` 会先命中不带 Shift 的那条）在判据里**钉成已知**，不再装作有。
+   教训：CDP 合成键事件时 `key` 得填浏览器真实报的字符（`_`/`+`/`>`），否则等于在测另一条键位。
+
+**判决表随之更新**：21 行由 `[ ]` 进 `[~]`（动作族 12 条 + 到级别 10 条 + `BaseExpandToLevelAction` 等），
+四档变成 `[x]` 0 + `[~]` 31 + `[ ]` 12 + `[-]` 26 = 69；`CollapseRegionAction` / `ExpandRegionAction` /
+`CollapseAllRegionsAction` 三条 `[~]` 的依据换成新实现的真文件与真缺口（两段式「全部收起」、PSI 元素身份、
+  编辑器内提示/模态框）。
+
+**判据**：`tests/editor-folding.test.mjs`（19 条）—— 纯逻辑（层级/最内层/挑根/区域挑法/到级别/递归）、
+命令表与键位的静态核对（含"折叠族必须在常驻 keymap、不在 `lspExtensions()`"与"不许再出现
+`foldCode`/`unfoldCode`/`window.__foldDebug`"）、Code 菜单顺序与文案、以及**无 DOM 的 EditorState 用例**
+（LSP 区间经 `lspFoldService` 真的进了 `foldable`；`enclosingAreas` 对真 TS 语法树给出 while/if/function 三层）。
