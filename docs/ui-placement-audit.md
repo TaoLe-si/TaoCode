@@ -2684,3 +2684,24 @@ B5 这一域没有 `[-]`/`[ ]`，所以门控没有 §D 那一组检查（对比
 
 **判据**：`tests/bookmarks.test.mjs`：越界丢弃 + 原文回来放回 + 单行上移特例（`line - 2`）+ 空原文照样认
 （上游没有"非空才算"的条件）+ 老数据（无原文）只按行号保留 + 同一行只留一条 + 别的文件不参与。
+
+## BN. 2026-09-30 第六十七批（续）：项目树偶发空白的**真因与修复** + 一条遗留待查
+
+复验 B5 §C① 时撞上「项目视图一片空白、`.tree-entry` 零行」，追了一轮，结论两条：
+
+**一、真因（已修）**：`src/editorSideViews.ts` 的 `refreshTree()` 用的是**全应用的** `busy` 做重入保护 ——
+`if (!workspace.value || busy.value) return`。打开项目那一串里 `busy` 正好为真 ⇒ 这次刷新被**静默丢掉**
+（连通知都没有，所以界面上只看到"已打开…"和一片空白），`workspace.entries` 停在 `[]`；
+切一次左视图时 `busy` 已落下、`showView` 又刷了一次，于是"切一下就好"。
+改成它**自己的忙标 + 排队**（`treeBusy`/`treeAgain`：重入时置 `treeAgain`，跑完再补一次）。
+验证：新起 3 个实例，打开项目视图后树都是 8 行、名字齐全（`ui-parity-proj / .idea / out / src / tests / CMakeLists.txt / README.md / 外部库`）。
+
+**二、一半的"零行"不是缺陷**：项目视图**关着**时当然没有行（`.explorer-panel` 的 `clientHeight` = 0）。
+这一轮在这两种状态之间来回误判了很久，教训记两条（已写进 memory）：活动条**合成 `MouseEvent` 点不动、
+要 `el.click()`**；连点两次会把它关掉 —— 判断"要不要点"必须先读面板的 `clientHeight`。
+
+**三、遗留待查**：撤销（Ctrl+Z）是否触发 `onEditorChange` 未定论 —— 带探针那轮里撤销没有产生 `reconcile`
+记录（停在删除那一轮），要等下一次内容变更才看到 `dropped 1 → 0` 的放回。姿势写在 checklist 里。
+
+**四、B5 §C① 的面板级证据**（同批拿到）：`F11` 后面板出现「跳转到 src/bookmark-probe.ts 第 4 行」✓；
+一次删掉整行后（文档 3 行）面板变成「(无行)」✓。

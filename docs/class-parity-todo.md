@@ -674,7 +674,6 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 真机取证（临时探针记录 reconcile 的输入输出，取证后已撤）：删整行 ⇒ `before 1 → after 0`、丢掉表 `0 → 1`；
 撤销后的下一次变更 ⇒ `before 1 → after 2`、丢掉表 `1 → 0`（顺带暴露的"同一行两条"已按上游 `isDuplicate` 修掉）。
 **剩**：书签描述（`Bookmark` 行）、书签类型与文件书签、列表项富渲染；
-**待查（两条，都带复现姿势）**：① 项目视图偶发渲染零行（真缺陷，切视图重挂可恢复；已排除原生数据与
-watch 绑定，可疑点是 `projectTreeModel.ts:247-` 的 refresh 交叉与应用侧 entries 停在 `[]` 不重试）；
-② 撤销（Ctrl+Z）之后 `onEditorChange` 有没有被调用未定论（带探针那次记录停在删除那一轮）。
-两条都写在 `docs/ui-parity-checklist.md`，下一批先解决。
+**第六十七批后**：项目树偶发空白**已修**（`refreshTree` 的 `busy` 静默丢弃 → 自己的忙标 + 排队；
+3 个实例验证树都是 8 行）；**剩一条待查**：撤销是否触发 `onEditorChange`（未定论，带探针姿势）。
+两条都写在 `docs/ui-parity-checklist.md`。
