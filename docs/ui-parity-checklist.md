@@ -1053,6 +1053,20 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 - [x] **已补（第七十六批）** 书签**列表**这条线：运行时 `src/bookmarkListActions.ts`（建/改名/删/把书签加进某张列表）、对话框 `src/components/BookmarkListDialog.vue`（上游三个对话框合一的形状）、面板段头的重命名/删除按钮、标题栏的「创建书签列表」「书签打开的标签页…」，以及齿轮的「删除多个书签前询问」（默认开）。真机取证：建「待办」→ 改名「待办2」→「书签打开的标签页…」把打开的标签页加成**文件书签**并落盘 → 删除时弹出上游那句「确定要删除 ''待办2'' 书签列表吗? 此操作无法撤消。」。
 - [ ] **待补（第七十六批遗留）** `AddAnotherBookmark`（把一条**已有**书签加到另一张列表）：运行时与对话框都就绪（`runWithChosenList` + `addBookmarkToNamedList` + select 模式），缺的是上游那个入口（书签节点右键菜单里的「添加另一书签…」）。
 
+- [ ] **LSP「解析外部」这条线（进行中）** —— 目标是让 JDT 拿到外部类路径与源根，等价于 IDEA「已导入的模型」。
+  已落地（`0a76a4d` / `a2a329d`）：`default_referenced_libraries`（`build/rfg/**/*.jar`、`build/libs/**`、`lib/**`
+  等磁盘上真实存在的产物）+ `default_source_paths`（链接子工程的 `src/main/java` 等）+ `window/showMessage`
+  转发（导入失败在界面上看得见）。都有 `projects_test` / `lsp_host_test` 判据。
+  **还差最后一步（下一个开关）**：JDT 的 Buildship 导入**不理会** `java.import.exclusions`（真机日志实证：
+  仍逐个同步 `AE2-refs/*` 与 `AE2VMAddon-1.10.2/-1.12.2-nova/-1.15.2…`，每个 ~75s、逐个失败）⇒ 收敛导入范围
+  只能靠 `java.import.gradle.enabled=false`（"不导入，用磁盘产物"）。做法：`buildTools.gradle` 加一个
+  布尔（默认 true，保持现在的行为），映射到该 JDT 偏好；设置页/Gradle 栏给一行；判据加在
+  `projects_test` 的 JDT 形状那一档。
+  **验证配方**：把大工程的 `lastProject` 指到 `E:/Applied Energistics 2 Acceleration`（只改这一个字段，
+  别动 `perProject` 里的设置 —— 我手写过一次 `buildTools` 让整份配置被判非法，应用会停在欢迎页），
+  启动后 `lsp.open` 那个 `AE2VMConfig.java`，再 `lsp.request {kind:'hover'|'definition', line:24, character:45}`
+  指向 `net.minecraftforge.common.config.Configuration`：**回包里带 jar 路径 = 外部解析通了**；
+  `available:false` = 文件仍不在源根里；无回包 = 服务端仍在导入（JDT 导入期间不答语义请求）。
 ## 已知抖动（不是缺陷，见到重跑一次）
 
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
