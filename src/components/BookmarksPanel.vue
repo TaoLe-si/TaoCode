@@ -12,10 +12,12 @@
 // TaoCode 只渲染**有真实落点**的三个开关（其余三个在源码里依赖命名书签列表 / 预览标签页 /
 // 书签类型，本仓没有这些概念，登记在 docs/class-parity-todo.md，不造假开关）。
 import { computed, nextTick, ref, watch } from 'vue'
-import { Bookmark, Check, ListTree, Settings2, X } from 'lucide-vue-next'
+import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } from 'lucide-vue-next'
 import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
+import { confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
+import BookmarkListDialog from './BookmarkListDialog.vue'
 
 export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings; lists?: PanelList[] }>()
@@ -24,6 +26,8 @@ const emit = defineEmits<{
   remove: [entry: BookmarkEntry]
   assign: []
   updateSettings: [patch: Partial<BookmarksViewSettings>]
+  /** 「书签打开的标签页…」（上游 `BookmarkOpenTabs`）：宿主把所有打开的标签页加成文件书签。 */
+  bookmarkTabs: []
 }>()
 
 const gearOpen = ref(false)
@@ -37,7 +41,11 @@ const groups = computed(() => groupBookmarks(props.entries, props.settings.group
  * 分组设置切文件；没给就还是老样子（一段 = 全部）。默认列表带「默认」标记
  * （`default.group.marker` = 「默认」）。
  */
-const sections = computed(() => props.lists?.length ? props.lists : [{ name: '', isDefault: false, entries: props.entries }])
+const sections = computed(() => {
+  const live = panelLists.value
+  if (live.length > 1) return live
+  return props.lists?.length ? props.lists : [{ name: '', isDefault: false, entries: props.entries }]
+})
 /**
  * 文件书签（没有行号）与行书签分开：前者渲染成"文件那一行"（上游的 `FileNode`，
  * `providers/FileBookmarkImpl.kt:26-29` 按 isDirectory 建 FolderNode/FileNode），
@@ -60,6 +68,14 @@ watch(() => props.activePath, async path => {
 })
 
 function toggle(patch: Partial<BookmarksViewSettings>) { emit('updateSettings', patch) }
+/**
+ * 删除列表：`askBeforeDeletingLists`（上游 `BookmarksViewState:24`，默认 **true**）开着就先弹确认
+ * （文案「确定要删除 ''{0}'' 书签列表吗? 此操作无法撤消。」），关着直接删。
+ */
+function askDeleteList(name: string) {
+  if (!props.settings.askBeforeDeletingLists) { listDialog.value = { mode: 'delete', name }; confirmDeleteList(); return }
+  listDialog.value = { mode: 'delete', name }
+}
 async function scrollIntoViewFor(entry: BookmarkEntry) {
   await nextTick()
   scrollBox.value?.querySelector<HTMLElement>(`[data-key="${CSS.escape(bookmarkKey(entry))}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -86,6 +102,8 @@ function onKeydown(event: KeyboardEvent) {
       <span class="heading-count">{{ entries.length }}</span>
       <!-- 齿轮：IDEA 把它放在工具窗口标题栏（ToolWindowHeader 的 ShowOptionsAction → 该窗口自己的
            gearProducer）。TaoCode 的面板标题行就是该窗口的标题区，所以齿轮放这里。 -->
+      <button class="icon-button" title="创建书签列表…" aria-label="创建书签列表" @click.stop="openCreateListDialog()"><Plus :size="14" /></button>
+      <button class="icon-button" title="书签打开的标签页…" aria-label="书签打开的标签页" @click.stop="emit('bookmarkTabs')"><BookMarked :size="14" /></button>
       <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="书签视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="14" /></button>
       <div v-if="gearOpen" class="bookmark-gear" role="menu" aria-label="书签视图选项">
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.groupLineBookmarks" @click="toggle({ groupLineBookmarks: !settings.groupLineBookmarks })">
@@ -93,6 +111,9 @@ function onKeydown(event: KeyboardEvent) {
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="!settings.rewriteBookmarkType" @click="toggle({ rewriteBookmarkType: !settings.rewriteBookmarkType })">
           <span class="gear-check"><ListTree :size="13" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><Check :size="12" /></span>
+        </button>
+        <button type="button" role="menuitemcheckbox" :aria-checked="settings.askBeforeDeletingLists" @click="toggle({ askBeforeDeletingLists: !settings.askBeforeDeletingLists })">
+          <span class="gear-check"><ListTree :size="13" /></span><span>删除多个书签前询问</span><span v-if="settings.askBeforeDeletingLists" class="gear-on"><Check :size="12" /></span>
         </button>
         <div class="gear-rule" role="separator" />
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollToSource" @click="toggle({ autoscrollToSource: !settings.autoscrollToSource })">
@@ -114,7 +135,9 @@ function onKeydown(event: KeyboardEvent) {
       <div v-if="section.name" class="bookmark-list-head" role="presentation">
         <span class="bookmark-list-name">{{ section.name }}</span>
         <span v-if="section.isDefault" class="bookmark-list-default" title="新书签会自动添加到这个列表">默认</span>
-        <span class="bookmark-list-count">{{ section.entries.length }}</span>
+        <button v-if="section.name && !section.isDefault" class="icon-button" title="重命名书签列表…" :aria-label="`重命名书签列表 ${section.name}`" @click="listDialog = { mode: 'rename', name: section.name }"><Pencil :size="12" /></button>
+        <button v-if="section.name && !section.isDefault" class="icon-button" title="删除书签列表" :aria-label="`删除书签列表 ${section.name}`" @click="askDeleteList(section.name)"><X :size="13" /></button>
+        <span v-else class="bookmark-list-count">{{ section.entries.length }}</span>
       </div>
       <template v-for="group in groupBookmarks(section.entries, props.settings.groupLineBookmarks)" :key="(section.name || 'all') + ':' + (group.path || 'flat')">
         <!-- 分组模式下的文件标题行（IDEA 的 GroupLineBookmarks = 按文件分组） -->
@@ -154,6 +177,7 @@ function onKeydown(event: KeyboardEvent) {
       </template>
       </template>
     </div>
+    <BookmarkListDialog v-if="listDialog" :ask-before-deleting="settings.askBeforeDeletingLists" />
   </div>
 </template>
 

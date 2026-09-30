@@ -9,6 +9,7 @@
 // 返回类型就写成 `ToolWindowViewContext`：每个箭头函数的参数类型靠它做**上下文推导**，
 // 与搬过来之前一模一样（所以这里不需要手写任何 `any`）。
 import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView.ts'
+import { addBookmarkToNamedList, runWithChosenList } from './bookmarkListActions.ts'
 import { isDesktop, type BookmarksViewState } from './bridge.ts'
 import { getProjectTreeState } from './projectTreeState'
 import type { ToolWindowViewContext } from './components/ToolWindowView.vue'
@@ -53,6 +54,8 @@ export interface ToolViewContext {
   saveVcsLog: (log: { showTagNames: boolean; showRootNames: boolean }) => unknown
   /** 还没保存的编辑器路径（宿主 `allTabs` 里 dirty 的那些）。 */
   dirtyPaths: () => string[]
+  /** 当前打开的标签页路径（「书签打开的标签页…」要把它们都加成文件书签）。 */
+  openTabPaths: () => string[]
   /** 保存某个路径（宿主 `save(findTab(path))`）。 */
   savePath: (path: string) => Promise<unknown>
   saveBookmarksView: any
@@ -71,7 +74,7 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -133,6 +136,12 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   gitCompareWith: gitCompareWith.value,
   bookmarksView: projectSettings.value.bookmarksView ?? DEFAULT_BOOKMARKS_VIEW,
   onUpdateBookmarksView: (patch: unknown) => { void saveBookmarksView(patch as Partial<BookmarksViewState>) },
+  // 「书签打开的标签页…」（上游 `BookmarkOpenTabsAction`）：先按上游的捷径挑一张列表
+  // （没有就现建、只有一张直接用、多张弹选择），再把每个打开的标签页加成文件书签。
+  onBookmarkTabs: () => runWithChosenList(name => {
+    for (const path of openTabPaths()) addBookmarkToNamedList(name, { path })
+    notify(`已把 ${openTabPaths().length} 个打开的标签页加到列表「${name}」`)
+  }),
   // 书签列表（上游 `ManagerState.groups`）：命名列表来自 `projectSettings.bookmarkLists`，
   // **默认列表**用历史字段 `bookmarks` 的内容（迁移规则：旧平铺列表 = 一张用项目名命名的默认列表，
   // 见 src/bookmarkLists.ts 的 `listsFromLegacy`）。

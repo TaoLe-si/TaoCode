@@ -61,7 +61,7 @@ export type { FileColorSetting } from './fileColors.ts'
 import type { FileColorSetting } from './fileColors.ts'
 // 书签工具窗口的视图状态（IDEA `BookmarksViewState`）：只收录有真实落点的四个开关
 // （`rewriteBookmarkType` 的落点是"改贴已占用的助记键时是否还问"，见 bookmarkActions）。
-export interface BookmarksViewState { groupLineBookmarks: boolean; rewriteBookmarkType: boolean; autoscrollToSource: boolean; autoscrollFromSource: boolean }
+export interface BookmarksViewState { groupLineBookmarks: boolean; rewriteBookmarkType: boolean; askBeforeDeletingLists: boolean; autoscrollToSource: boolean; autoscrollFromSource: boolean }
 /**
  * 导出到 HTML 的设置（IDEA `ExportToHTMLSettings`，`:14-15`
  * `@State(name = "ExportToHTMLSettings", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))` ⇒ **项目级**）。
@@ -158,7 +158,7 @@ export const defaultProjectSettings: ProjectSettings = {
   // NamedScope.EMPTY_ARRAY: a fresh project has no scopes.
   scopes: [], fileColors: [], localFileColors: [],
   // BookmarksViewState 的默认值（platform/bookmarks/.../BookmarksViewState.kt:23-29）。
-  bookmarksView: { groupLineBookmarks: true, rewriteBookmarkType: false, autoscrollToSource: false, autoscrollFromSource: false },
+  bookmarksView: { groupLineBookmarks: true, rewriteBookmarkType: false, askBeforeDeletingLists: true, autoscrollToSource: false, autoscrollFromSource: false },
   bookmarkLists: [],
   // 构建工具（IDEA 设置「构建、执行、部署 › 构建工具」）。**项目级**：IDEA 的
   // `ExternalSystemGroupConfigurable` 是 projectConfigurable，`GradleSettings` 存 `.idea/gradle.xml`。

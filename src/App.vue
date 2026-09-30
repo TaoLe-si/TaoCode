@@ -934,7 +934,7 @@ const toolViewCtx = computed<ToolWindowViewContext>(() => createToolViewContext(
   syntheticNodes, editorSettings, projectViewFileColor, fileTreeRef, searchPanelRef, testRunnerRef, noticeLog, clearNotices, runNoticeAction, expireNotice, runConfigProgram, runConfigCwd,
   evaluateRequest, commitMessageSettings, editorFor, onSearchOpen, onSearchReplaced, revealLocation,
   dropBookmark, openMnemonicPrompt, revertHistory, onTreeContext, openFile, notify, notifyFromPanel, showToolWindow: (id: string) => showView(id as typeof leftView.value), refreshTree,
-  historyEpoch, leftView, saveSettingsPatch, saveVcsLog, gitCompareWith, saveBookmarksView, gradleHost, gradleViewContext, openSettings, dirtyPaths: () => allTabs.value.filter(tab => tab.dirty).map(tab => tab.path), savePath: path => save(findTab(path)),
+  historyEpoch, leftView, saveSettingsPatch, saveVcsLog, gitCompareWith, saveBookmarksView, gradleHost, gradleViewContext, openSettings, dirtyPaths: () => allTabs.value.filter(tab => tab.dirty).map(tab => tab.path), openTabPaths: () => allTabs.value.map(tab => tab.path), savePath: path => save(findTab(path)),
 }))
 // IDEA's "Recent Places" collects every place the caret has been: files, symbols and
 // bookmarks alike, most recent first.

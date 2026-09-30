@@ -10,14 +10,16 @@
 //   showPreview          false  在预览标签页打开（BookmarksView.OpenInPreviewTab）
 // 其中 `autoscrollToSource` 在 `noStateLoaded()` 时取 `UISettings.defaultAutoScrollToSource`（:38-40）。
 //
-// **TaoCode 实现有真实落点的四项**（其余登记在 docs/class-parity-todo.md，不渲染假开关）：
+// **TaoCode 实现有真实落点的五项**（其余登记在 docs/class-parity-todo.md，不渲染假开关）：
 //   groupLineBookmarks   → 面板按文件分组 / 平铺
+//   askBeforeDeletingLists → 删除书签列表前是否先确认（第七十六批起有列表，这个开关就有落点了）
 //   rewriteBookmarkType  → 把一个已被占用的助记键改贴到新书签时**不再询问**（见 bookmarkActions 的重写确认）
 //   autoscrollToSource   → 面板里用键盘选中某条时是否跳到编辑器
 //   autoscrollFromSource → 编辑器切换文件时面板是否滚到该文件的第一条书签
-// 无落点：`askBeforeDeletingLists`（本仓没有命名书签列表）、`showPreview`（没有预览标签页）。
+// 无落点：`showPreview`（本仓没有预览标签页）。
 export interface BookmarksViewSettings {
   groupLineBookmarks: boolean
+  askBeforeDeletingLists: boolean
   rewriteBookmarkType: boolean
   autoscrollToSource: boolean
   autoscrollFromSource: boolean
@@ -26,6 +28,7 @@ export interface BookmarksViewSettings {
 /** 与 IDEA `BookmarksViewState` 的默认值一致（`:23-29`）。 */
 export const DEFAULT_BOOKMARKS_VIEW: BookmarksViewSettings = {
   groupLineBookmarks: true,
+  askBeforeDeletingLists: true,
   rewriteBookmarkType: false,
   autoscrollToSource: false,
   autoscrollFromSource: false,

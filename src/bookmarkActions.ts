@@ -8,6 +8,7 @@ import { request } from './bridge'
 import { errorMessage } from './errors'
 import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
+import { configureBookmarkLists, syncBookmarkLists } from './bookmarkListActions.ts'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
@@ -87,6 +88,14 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     if (bookmarkSave) { window.clearTimeout(bookmarkSave); bookmarkSave = undefined }
     projectSettings.value = settings
     bookmarks.value = settings.bookmarks
+    // 命名书签列表（`bookmarkLists`）与默认列表（历史字段 `bookmarks`）是两份状态，
+    // 但读写口都在这一处 —— 列表运行时直接从这里拿默认列表的内容与"摘掉一条"的口。
+    configureBookmarkLists({
+      isDesktop, settings: projectSettings, workspace, notify: deps.notify,
+      defaultEntries: () => sortedAll.value,
+      removeFromDefault: entry => { bookmarks.value = removeBookmark(bookmarks.value, entry) },
+    })
+    syncBookmarkLists(settings)
   }
   function persistBookmarks() {
     if (!isDesktop || !workspace.value) return

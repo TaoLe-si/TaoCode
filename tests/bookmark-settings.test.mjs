@@ -35,7 +35,8 @@ test('书签视图设置：只认有落点的四个布尔开关', () => {
   assert.deepEqual(normalizeBookmarksView({ rewriteBookmarkType: true }), { rewriteBookmarkType: true })
   assert.deepEqual(normalizeBookmarksView({ groupLineBookmarks: false, autoscrollToSource: true, autoscrollFromSource: false }),
                    { groupLineBookmarks: false, autoscrollToSource: true, autoscrollFromSource: false })
-  for (const value of [null, [], 'x', { rewriteBookmarkType: 'yes' }, { showPreview: true }, { askBeforeDeletingLists: true }])
+  assert.deepEqual(normalizeBookmarksView({ askBeforeDeletingLists: false }), { askBeforeDeletingLists: false })
+  for (const value of [null, [], 'x', { rewriteBookmarkType: 'yes' }, { showPreview: true }, { openInPreviewTab: true }])
     assert.throws(() => normalizeBookmarksView(value), /书签视图设置/, JSON.stringify(value))
 })
 

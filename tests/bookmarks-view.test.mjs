@@ -9,6 +9,7 @@ test('the view defaults match BookmarksViewState', () => {
   assert.deepEqual(DEFAULT_BOOKMARKS_VIEW, {
     groupLineBookmarks: true,
     rewriteBookmarkType: false,
+    askBeforeDeletingLists: true,
     autoscrollToSource: false,
     autoscrollFromSource: false,
   })

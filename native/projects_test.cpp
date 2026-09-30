@@ -83,6 +83,7 @@ Json exclusions() {
             // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认空，与 FileColorsModel 的两个空列表一致。
             {"fileColors", Json::array()}, {"localFileColors", Json::array()},
             {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                               {"askBeforeDeletingLists", true},
                                {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_patterns()},
@@ -407,6 +408,7 @@ int main() {
                                  // 文件颜色（IDEA `FileColorsConfigurable`）：整表替换，顺序即优先级。
                                  {"fileColors", Json::array()}, {"localFileColors", Json::array()},
                                  {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                                                    {"askBeforeDeletingLists", true},
                                                     {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
                                  {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
                                  {"todoPatterns", Json::array({{{"pattern", "REVIEW"}, {"description", utf8(u8"待评审")}}})},
@@ -820,7 +822,7 @@ int main() {
                 {{"bookmarksView", {{"groupLineBookmarks", "true"}}}},
                 {{"bookmarksView", {{"groupLineBookmarks", 1}}}},
                 {{"bookmarksView", {{"showPreview", true}}}},
-                {{"bookmarksView", {{"askBeforeDeletingLists", true}}}},
+                {{"bookmarksView", {{"openInPreviewTab", true}}}},
                 {{"bookmarksView", {{"rewriteBookmarkType", "yes"}}}},
             };
             for (const auto& patch : rejected)

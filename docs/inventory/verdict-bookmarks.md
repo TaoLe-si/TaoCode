@@ -118,7 +118,19 @@
    默认值 + 补丁白名单，判据见 `projects_test` 的「命名书签列表」一档与
    `tests/bookmark-settings.test.mjs`）；「默认列表」暂用历史字段 `bookmarks`（一个平铺列表），
    `bookmarkLists` 装**其余**的列表 —— 迁移规划见 `src/bookmarkLists.ts` 的 `listsFromLegacy`。
-   **第七十六批（c）已接面板分区**：书签面板能按列表分段（上游的列表节点 —— 段头是列表名 +
+   **第七十六批（c/d）已接**：面板分区（见下）、**列表的运行时与增删改**（`src/bookmarkListActions.ts`：
+   建/改名/删/把书签加进某张列表；对话框 `src/components/BookmarkListDialog.vue` 把上游三个对话框
+   （创建/重命名/选择）合成一个组件，文案逐条取中文包）、**「书签打开的标签页…」**
+   （上游 `BookmarkOpenTabsAction` 的两条捷径：一张列表直接用、没有先建、多张弹选择 —— 本仓挂在书签
+   面板标题栏，因为上游挂的 `EditorTabsEntryPoint` 本仓没有），以及齿轮里的
+   **「删除多个书签前询问」**（`askBeforeDeletingLists` 默认 true，删列表时弹
+   「确定要删除 ''{0}'' 书签列表吗? 此操作无法撤消。」）。
+   **真机取证**：标题栏三个按钮（创建书签列表 / 书签打开的标签页 / 视图选项）；创建 → 预填「新建列表」
+   → 段头出现「待办」；改名 → 「待办2」；「书签打开的标签页…」→ 气球「已把 1 个打开的标签页加到
+   列表「待办2」」，持久化里该列表多出一条 `{"path":"README.md"}`（**文件书签**）；点删除 → 弹出
+   上游那句确认。**还没接**：`AddAnotherBookmark`（把一条**已有**书签加到另一张列表 —— 运行时的
+   `runWithChosenList`/`addBookmarkToNamedList` 已就绪，缺的是入口：上游在书签节点右键菜单里）、
+   `EditBookmark` 的树/标签右键那一半、命令式列表排序（`UISettings.sortBookmarks` 的另一支）。书签面板能按列表分段（上游的列表节点 —— 段头是列表名 +
    「默认」标记 + 条数，`default.group.marker` 的文案），默认列表用历史字段 `bookmarks` 的内容、
    名字取项目名（迁移规则），命名列表来自 `projectSettings.bookmarkLists`；分段与"按文件分组"
    是两层（列表 → 文件 → 行，与上游树同形）。真机取证：面板显示

@@ -306,6 +306,7 @@ Json project_defaults() {
             {"fileColors", Json::array()}, {"localFileColors", Json::array()},
             // 书签工具窗口的视图状态（IDEA `BookmarksViewState`，workspace.xml，默认值见 :23-29）。
             {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                               {"askBeforeDeletingLists", true},
                                {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
             // VCS Log 的 UI 开关（IDEA `VcsLogApplicationSettings` 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
@@ -812,13 +813,13 @@ void validate_project_patch(const Json& patch) {
     if (patch.contains("scopes")) validate_scopes(patch.at("scopes"));
     for (const auto* key : {"localFileColors", "fileColors"}) if (patch.contains(key)) validate_file_colors(patch.at(key));
     if (patch.contains("bookmarksView")) {
-        // 只收录有真实落点的四个开关（IDEA 还有 askBeforeDeletingLists / showPreview，
-        // 本仓没有对应概念，故不接受它们 —— 免得存下一个没人读的值）。
+        // 只收录有真实落点的五个开关（IDEA 还有 showPreview，本仓没有预览标签页，故不接受它 ——
+        // 免得存下一个没人读的值）。`askBeforeDeletingLists` 第七十六批起有落点：删列表前是否先确认。
         // `rewriteBookmarkType` 第七十三批接上了落点：改贴已占用的助记键时是否还问
         // （`BookmarksManagerImpl.canRewriteType:262-283`），齿轮里那一行也是它。
         const auto& view = patch.at("bookmarksView");
         if (!view.is_object()) fail("INVALID_SETTINGS", "bookmarksView 必须是对象。");
-        known_keys(view, {"groupLineBookmarks", "rewriteBookmarkType", "autoscrollToSource", "autoscrollFromSource"}, "INVALID_SETTINGS");
+        known_keys(view, {"groupLineBookmarks", "rewriteBookmarkType", "askBeforeDeletingLists", "autoscrollToSource", "autoscrollFromSource"}, "INVALID_SETTINGS");
         for (auto it = view.begin(); it != view.end(); ++it)
             if (!it.value().is_boolean()) fail("INVALID_SETTINGS", "bookmarksView 的值必须是布尔值。");
     }

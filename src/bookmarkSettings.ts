@@ -45,10 +45,10 @@ export function normalizeBookmarkLists(value: unknown): { name: string; isDefaul
 /** 书签工具窗口视图状态：只认有落点的四个布尔开关（见 src/bookmarksView.ts 的清单）。 */
 export function normalizeBookmarksView(value: unknown): Partial<BookmarksViewState> {
   const view = value as Record<string, unknown>
-  const keys = ['groupLineBookmarks', 'rewriteBookmarkType', 'autoscrollToSource', 'autoscrollFromSource']
+  const keys = ['groupLineBookmarks', 'rewriteBookmarkType', 'askBeforeDeletingLists', 'autoscrollToSource', 'autoscrollFromSource']
   const malformed = !view || typeof view !== 'object' || Array.isArray(view)
     || Object.keys(view).some(key => !keys.includes(key))
     || Object.entries(view).some(([, flag]) => typeof flag !== 'boolean')
-  if (malformed) throw new Error('书签视图设置要写成 {groupLineBookmarks, rewriteBookmarkType, autoscrollToSource, autoscrollFromSource} 四个布尔值。')
+  if (malformed) throw new Error('书签视图设置要写成 {groupLineBookmarks, rewriteBookmarkType, askBeforeDeletingLists, autoscrollToSource, autoscrollFromSource} 五个布尔值。')
   return view as Partial<BookmarksViewState>
 }
