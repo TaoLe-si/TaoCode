@@ -66,7 +66,8 @@ test('todo markers are a project list of pattern plus description', async () => 
 
 test('bookmarks ride on the same project settings record', async () => {
   // 助记键是单个字符（0-9/A-Z，上游 BookmarkType 的 mnemonic）；数字 0 要写 '0'。
-  const marks = [{ path: 'src/main.cpp', line: 12 }, { path: 'src/app.vue', line: 3, mnemonic: '0' }]
+  // 没有 line 的那条是**文件书签**（上游 FileBookmark，持久化不写 line 属性）。
+  const marks = [{ path: 'src/main.cpp', line: 12 }, { path: 'src/app.vue', line: 3, mnemonic: '0' }, { path: 'src/logo.svg' }]
   const saved = await preview.request('project.settings.update', { bookmarks: marks })
   assert.deepEqual(saved.settings.bookmarks, marks)
   assert.equal(saved.settings.runConfigs.length, 0, 'the bookmark write must not invent run configs')
@@ -78,11 +79,11 @@ test('bookmarks ride on the same project settings record', async () => {
     { bookmarks: [{ path: '../x.cpp', line: 3 }] },
     { bookmarks: [{ path: 'src\\x.cpp', line: 3 }] },
     { bookmarks: [{ path: 'src/x.cpp', line: 0 }] },
-    { bookmarks: [{ path: 'src/x.cpp' }] },
     { bookmarks: [{ path: 'src/x.cpp', line: 3, mnemonic: 10 }] },
     { bookmarks: [{ path: 'src/x.cpp', line: 3, mnemonic: 'a' }] },
     { bookmarks: [{ path: 'src/x.cpp', line: 3, mnemonic: 'AB' }] },
     { bookmarks: { path: 'src/x.cpp', line: 3 } },
+    { bookmarks: [{ path: 'src/x.cpp', line: -1 }] },
   ]
   for (const patch of rejected)
     await assert.rejects(preview.request('project.settings.update', patch), error => error.code === 'INVALID_SETTINGS')
