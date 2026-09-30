@@ -5,6 +5,7 @@
 // 语言服务是否在跑）。它们是一个交互闭环，所以放在同一个模块里；`onSemantic`（语义动作）
 // 另行处理，因为它依赖编辑器与重构链路。
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
+import { notifyEditorContentChanged } from './bookmarkActions'
 import { clearLspDiagnostics, lspDiagnostics, request, setLspDiagnostics, type DocumentData, type EditorSettings, type LspDocumentSymbol,
          type LspSymbolsResult, type Workspace } from './bridge'
 import type { Tab } from './editorTab'
@@ -138,6 +139,8 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   function onEditorChange(tab: Tab) {
     tab.dirty = true
     tab.preview = false
+    // 书签按"同一行号 + 同一行原文"对账（上游 BookmarkManager.documentChanged；丢/放回都在那一步）。
+    notifyEditorContentChanged(tab.path, editorFor(tab.path)?.text() ?? tab.content)
     // 行号 → 可放置位置的映射依赖代码内容：改过就整体作废（见 breakpointLocations.ts 的类注释）。
     breakpointLocationCache.clear()
     // IdeDocumentHistory.placeChanged(EditorEvent.DocumentChange): every user edit

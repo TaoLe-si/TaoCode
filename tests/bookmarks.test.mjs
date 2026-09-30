@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { bookmarkOwner, nextBookmark, placeBookmark, removeBookmark, sortedBookmarks } from '../src/bookmarks.ts'
+import { bookmarkOwner, nextBookmark, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from '../src/bookmarks.ts'
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -48,4 +48,59 @@ test('the panel can drop one entry without touching the rest', () => {
   const list = [{ path: 'a', line: 1 }, { path: 'b', line: 2, mnemonic: 4 }]
   assert.deepEqual(removeBookmark(list, list[1]), [{ path: 'a', line: 1 }])
   assert.deepEqual(removeBookmark(list, { path: 'c', line: 9 }), list)
+})
+
+// 编辑后对账（上游 BookmarkManager.beforeDocumentChange + documentChanged，:430-536）
+test('越界的书签被删掉并记下原文；原文回到同一行号就放回去', () => {
+  const before = ['a', 'b', 'c', 'd'].join(String.fromCharCode(10))
+  const placed = placeBookmark([], 'x.java', 4, undefined, 'd')
+  // 第一次对账：行还在 ⇒ 留着，并把原文刷成当前那一行
+  const first = reconcileBookmarks(placed, 'x.java', before)
+  assert.deepEqual(first.list.map(b => [b.line, b.text]), [[4, 'd']])
+  assert.deepEqual(first.dropped, [])
+  // 删掉最后一行 ⇒ 越界被丢（记着行号与原文）
+  const shorter = ['a', 'b', 'c'].join(String.fromCharCode(10))
+  const second = reconcileBookmarks(first.list, 'x.java', shorter, first.dropped)
+  assert.deepEqual(second.list, [])
+  assert.deepEqual(second.dropped.map(b => [b.line, b.text]), [[4, 'd']])
+  // 撤销（行又回来了）⇒ 放回原位
+  const back = reconcileBookmarks(second.list, 'x.java', before, second.dropped)
+  assert.deepEqual(back.list.map(b => [b.line, b.text, b.mnemonic]), [[4, 'd', undefined]])
+  assert.deepEqual(back.dropped, [])
+})
+
+test('别的文件的书签不参与本文件的对账', () => {
+  const list = [{ path: 'y.java', line: 9, text: 'zz' }]
+  const out = reconcileBookmarks(list, 'x.java', 'a' + String.fromCharCode(10) + 'b')
+  assert.deepEqual(out.list, list)
+  assert.deepEqual(out.dropped, [])
+})
+
+test('单行上移的特例：原文出现在两行之前（上游 :499-506 的 line -= 2）', () => {
+  const dropped = [{ path: 'x.java', line: 5, text: 'moved' }]
+  const content = ['one', 'two', 'moved', 'four', 'five'].join(String.fromCharCode(10))
+  const out = reconcileBookmarks([], 'x.java', content, dropped)
+  assert.deepEqual(out.list.map(b => [b.line, b.text]), [[3, 'moved']])
+})
+
+test('没有原文的老书签（旧数据）只在行还在时保留；空原文按上游那一句照样能放回', () => {
+  const NL = String.fromCharCode(10)
+  const legacy = [{ path: 'x.java', line: 2 }]
+  // 行还在（第 2 行是空行）⇒ 保留并把原文补成 ''
+  const kept = reconcileBookmarks(legacy, 'x.java', 'a' + NL, [{ path: 'x.java', line: 3, text: '' }])
+  assert.deepEqual(kept.list.map(b => [b.line, b.text]), [[2, '']])
+  assert.deepEqual(kept.dropped, [{ path: 'x.java', line: 3, text: '' }], '行越界 ⇒ 仍丢着')
+  // 空原文的丢弃项：那一行还是空的就放回去（上游 `''.equals('')`，:536）
+  const restored = reconcileBookmarks([], 'x.java', 'a' + NL, [{ path: 'x.java', line: 2, text: '' }])
+  assert.deepEqual(restored.list.map(b => [b.line, b.text]), [[2, '']])
+  // 完全没有原文（老数据）的丢弃项不认（entry.text === undefined）
+  assert.deepEqual(reconcileBookmarks([], 'x.java', 'a', [{ path: 'x.java', line: 1 }]).dropped, [{ path: 'x.java', line: 1 }])
+})
+
+test('同一行只留一条：丢掉的那条回来时这一行已有新书签，就把回来的那条再丢回去（isDuplicate:517-530）', () => {
+  const NL = String.fromCharCode(10)
+  const content = 'a' + NL + 'b'
+  const out = reconcileBookmarks([{ path: 'x.java', line: 2, text: 'b' }], 'x.java', content, [{ path: 'x.java', line: 2, text: 'b' }])
+  assert.equal(out.list.length, 1, '保留原有那条')
+  assert.equal(out.dropped.length, 1, '回来的那条进回丢弃表')
 })

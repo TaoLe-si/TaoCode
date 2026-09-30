@@ -6,7 +6,7 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
+import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from './bookmarks'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
@@ -23,7 +23,19 @@ export interface BookmarkActionsDeps {
   baseName: (path: string) => string
   /** 记入"最近位置"环（IDEA 的 InFileRecentPlaces）。 */
   rememberPlace: (entry: any) => void
+  /** 某个文件**当前**的编辑器内容（编辑器里改了还没保存时 `tab.content` 是旧的）。 */
+  editorContent?: (path: string) => string | undefined
   revealLocation: (target: { path: string; line: number }) => unknown
+}
+
+/**
+ * 编辑后对账的入口：编辑器内容一变就调它（`src/lspNavigation.ts` 的 `onEditorChange`）。
+ * 为什么是模块级的：对账要的是"当前内容"，而宿主那边的变更回调在自己的一域里 ——
+ * 为这一行去改 App.vue（贴着机检上限）不划算。`createBookmarkActions` 建实例时把实现挂上。
+ */
+let contentChanged: ((path: string, content: string) => void) | undefined
+export function notifyEditorContentChanged(path: string, content: string): void {
+  contentChanged?.(path, content)
 }
 
 export function createBookmarkActions(deps: BookmarkActionsDeps) {
@@ -37,6 +49,20 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     return map
   })
   const mnemonicPrompt = ref<{ path: string; line: number } | null>(null)
+  // 行号越界被删掉的书签（会话内）。上游的 `myDeletedDocumentBookmarks` 也不进持久化状态
+  // （`getState()` 只给书签表），撤销时按"同一行号 + 同一行原文"放回去。
+  let dropped: Bookmark[] = []
+  function reconcile(path: string, content: string) {
+    const next = reconcileBookmarks(bookmarks.value, path, content, dropped)
+    dropped = next.dropped
+    const changed = next.list.length !== bookmarks.value.length
+      || next.list.some((entry, index) => entry.path !== bookmarks.value[index]?.path || entry.line !== bookmarks.value[index]?.line
+        || entry.mnemonic !== bookmarks.value[index]?.mnemonic || entry.text !== bookmarks.value[index]?.text)
+    if (!changed) return
+    bookmarks.value = next.list
+    persistBookmarks()
+  }
+  contentChanged = reconcile
   const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   let bookmarkSave: number | undefined
   function useProjectSettings(settings: ProjectSettings) {
@@ -55,8 +81,9 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
         .catch(error => deps.notify(`书签未能保存：${errorMessage(error)}`, true))
     }, 600)
   }
-  function placeAt(path: string, line: number, mnemonic?: number) {
-    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic)
+  function placeAt(path: string, line: number, mnemonic?: number, content?: string) {
+    const lineText = content === undefined ? undefined : (content.split(String.fromCharCode(10))[line - 1] ?? '').trim()
+    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText)
     const keptEntry = bookmarks.value.find(entry => entry.path === path && entry.line === line)
     if (keptEntry) rememberPlace({ kind: '书签', path, line: line - 1, label: keptEntry.mnemonic === undefined ? baseName(path) + ':' + line : `${keptEntry.mnemonic} · ${baseName(path)}:${line}` })
     const kept = bookmarks.value.find(entry => entry.path === path && entry.line === line)
@@ -66,7 +93,8 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   function toggleBookmark(mnemonic?: number) {
     const tab = active.value
     if (!tab) return
-    placeAt(tab.path, tab.line, mnemonic)
+    // 放书签时把那一行原文一起记下（上游的 `myBeforeChangeData` 记的是同一个东西，只是记在变更前）。
+    placeAt(tab.path, tab.line, mnemonic, deps.editorContent?.(tab.path))
   }
   function openMnemonicPrompt() {
     const tab = active.value
