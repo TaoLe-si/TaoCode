@@ -18,7 +18,7 @@
 import { watch } from 'vue'
 import { gradleOutputTail } from './gradle.ts'
 import { elapsedLabel } from './progressPanel.ts'
-import { lspProgressInterrupted, lspProgressTasks, runningLspTasks } from './lspProgress.ts'
+import { lspProgressInterrupted, lspProgressTasks, lspServerMessages, runningLspTasks } from './lspProgress.ts'
 import type { NoticeEntry } from './notices'
 
 /** 通知列表的写入端口（`notifications.ts` 的 `notifyProgress`）。 */
@@ -80,6 +80,17 @@ export function gradleFinishedNoticeOf(error: string, seconds: number, label = '
  * 补一条"已完成"的结论（`end` 那拍任务会被删掉，所以要自己留着上一次的形状）。
  */
 export function wireLspProgressNotices(notifyProgress: NotifyProgress) {
+  // 服务器自己发的消息（`window/showMessage`）：一条一行，错误/警告标成错误样式。
+  watch(() => lspServerMessages.length, () => {
+    for (const message of lspServerMessages.splice(0, lspServerMessages.length)) {
+      notifyProgress({
+        message: message.message,
+        error: message.severity <= 2,
+        detail: [`来自 ${message.language || '语言服务'}`],
+        displayId: `lsp:message:${message.language}`,
+      })
+    }
+  })
   let previous = new Map(Object.entries(lspProgressTasks).map(entry => [entry[0], entry[1]]))
   watch(() => `${Object.keys(lspProgressTasks).join('|')}#${lspProgressInterrupted.length}`, () => {
     const current = new Map(runningLspTasks(lspProgressTasks).map(task => [task.key, task]))

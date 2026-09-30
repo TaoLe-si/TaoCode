@@ -129,6 +129,10 @@ int main(int argc, char** argv) {
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "$/progress"},
                                      {"params", {{"token", "fake-index"}, {"value", {{"kind", "end"},
                                                                                       {"message", "done"}}}}}});
+                    // 工程级的一条消息（`window/showMessage`，type=2 警告）：真实 jdt.ls 用它报
+                    // "Gradle 导入失败"那类问题，客户端必须转出去而不是丢掉。
+                    write_frame(Json{{"jsonrpc", "2.0"}, {"method", "window/showMessage"},
+                                     {"params", {{"type", 2}, {"message", "fake import failure"}}}});
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"}, {"params",
                         {{"uri", opened_uri}, {"diagnostics", Json::array({
                             {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 5}}}}},

@@ -482,6 +482,11 @@ void Client::receive(const Json& message) {
             std::lock_guard lock(mutex_);
             handler = progress_;
         }
+        // 服务器自己要说的整条消息（不是进度）：原样交给宿主去显示。
+        else if (name == "window/showMessage") {
+            std::lock_guard lock(mutex_);
+            handler = server_message_;
+        }
         if (!handler) return;
         handler(message.contains("params") ? message.at("params") : Json(nullptr));
         return;

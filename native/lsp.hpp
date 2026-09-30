@@ -114,6 +114,10 @@ public:
     // 见 `LspServerNotificationsHandlerImpl.notifyProgress`（platform/lsp-impl/src/impl/
     // LspServerNotificationsHandlerImpl.kt:257-328）。
     void on_progress(Notify handler) { progress_ = std::move(handler); }
+    // LSP `window/showMessage`（`:1` 错误 / `:2` 警告 / `:3` 信息 / `:4` 日志）—— jdt.ls 用它报
+    // "Gradle 导入失败"这类整条工程级的问题。以前直接丢掉，界面上就表现为"外部的类解析不了、
+    // 又不知道为什么"。
+    void on_server_message(Notify handler) { server_message_ = std::move(handler); }
     void set_configuration(Json settings);
 
     // Feed one parsed message received from the server.
@@ -155,6 +159,7 @@ private:
     Writer writer_;
     Notify diagnostics_;
     Notify progress_;
+    Notify server_message_;
     Json configuration_ = Json::object();
     std::unordered_map<std::int64_t, Pending> pending_;
     std::unordered_map<std::string, std::string> synced_;  // uri -> last text sent

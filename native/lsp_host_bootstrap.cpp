@@ -80,6 +80,18 @@ Host& Session::ensure(const std::string& language) {
                       {"cancellable", value.value("cancellable", false)}});
     });
 
+    // 服务器自己发的 `window/showMessage`（jdt.ls 用它报 Gradle 导入失败之类）：交给界面如实显示，
+    // 走的是同一条 progress 出口（前端按 `event` 分派）。
+    host->set_server_message([this, language](Json params) {
+        if (!on_progress_ || !params.is_object()) return;
+        const auto text = string_at(params, "message");
+        if (text.empty()) return;
+        on_progress_({{"event", "lsp.message"},
+                      {"language", language},
+                      {"severity", params.contains("type") && params.at("type").is_number() ? params.at("type").get<int>() : 3},
+                      {"message", text}});
+    });
+
     Host::Spec spec;
     spec.executable = config->second.command;
     spec.arguments = config->second.arguments;

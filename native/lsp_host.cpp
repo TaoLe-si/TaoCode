@@ -350,6 +350,11 @@ void Host::set_progress(Client::Notify handler) {
     client_.on_progress(std::move(handler));
 }
 
+void Host::set_server_message(Client::Notify handler) {
+    std::lock_guard lock(io_mutex_);
+    client_.on_server_message(std::move(handler));
+}
+
 void Host::set_document_editor(Client::DocumentEditor editor) {
     std::lock_guard lock(io_mutex_);
     client_.set_document_editor(std::move(editor));

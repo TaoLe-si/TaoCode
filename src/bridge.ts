@@ -367,8 +367,7 @@ export function handleHostEvent(data: Reply | undefined): boolean {
       return deliverTermOutput(data.id, data.dataB64)
     // `$/progress` 的三支语义与"停机就整条收掉"都在 src/lspProgress.ts
     // （上游 LspServerNotificationsHandlerImpl.kt:257-339）。
-    case 'lsp.progress':
-    case 'lsp.progressReset':
+    case 'lsp.progress': case 'lsp.progressReset': case 'lsp.message':
       return handleLspProgressEvent(data.event, data)
     case 'lsp.edited':
       if (typeof data.path !== 'string') return false

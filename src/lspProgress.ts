@@ -115,13 +115,32 @@ export function applyLspProgressEvent(
 export interface LspProgressEventData {
   event?: string; language?: unknown; token?: unknown; kind?: unknown
   title?: unknown; message?: unknown; percentage?: unknown; cancellable?: unknown
+  /** `lsp.message` 用：LSP `MessageType`（1 错误 / 2 警告 / 3 信息 / 4 日志）。 */
+  severity?: unknown
 }
 
 /**
  * 一条 `lsp.progress` / `lsp.progressReset` 事件进状态表。`false` = 这条不属于本通道
  * （调用方继续往下的分支）—— 与 `handleGradleEvent` 同一个约定，桥接层因此只留一行转发。
  */
+/** 服务器自己发的整条消息（`window/showMessage`，整形见 native/lsp_host_bootstrap.cpp）。 */
+export interface LspServerMessage { language: string; severity: number; message: string }
+/** 待显示的消息队列（`progressNotices.ts` 的 watcher 读走；`notify` 在通知层，不在这儿）。 */
+export const lspServerMessages: LspServerMessage[] = []
+
 export function handleLspProgressEvent(event: string | undefined, data: LspProgressEventData): boolean {
+  // 服务器自己说的话（jdt.ls 用它报 Gradle 导入失败之类）：界面上必须看得见 —— 以前这条被丢掉，
+  // 表现就是"外部的类解析不了、又不知道为什么"。
+  if (event === 'lsp.message') {
+    const text = typeof data.message === 'string' ? data.message : ''
+    if (!text) return true
+    lspServerMessages.push({
+      language: typeof data.language === 'string' ? data.language : '',
+      severity: typeof data.severity === 'number' ? data.severity : 3,
+      message: text,
+    })
+    return true
+  }
   if (event === 'lsp.progressReset') {
     // 服务器停了就再不会有 `end`：整条语言收掉，并交给消息窗口一句实话（不是"已完成"）。
     lspProgressInterrupted.push(...takeLspProgressForLanguage(lspProgressTasks, typeof data.language === 'string' ? data.language : ''))

@@ -1068,6 +1068,29 @@ int main() {
             std::ofstream(root / "build" / "rfg" / "recompiled_minecraft-1.7.10.jar").put('x');
             std::ofstream(root / "lib" / "helper.jar").put('x');
         }
+        // 导入范围：只导入链接的子工程（IDEA 的行为），未链接的顶层目录进 exclusions。
+        std::filesystem::create_directories(root / "AE2-refs" / "sub");
+        std::filesystem::create_directories(root / "other-addon");
+        const Json gradle = {{"linkedProjects", Json::array({"AE2VMAddon-1.7.10-gtnh"})}};
+        const auto exclusions = taocode::import_exclusions(root, gradle);
+        // 源根：链接的子工程里真实存在的 src/main/java 等
+        std::filesystem::create_directories(root / "AE2VMAddon-1.7.10-gtnh" / "src" / "main" / "java");
+        std::filesystem::create_directories(root / "AE2VMAddon-1.7.10-gtnh" / "src" / "test" / "java");
+        const auto sources = taocode::default_source_paths(root, gradle);
+        const auto has_source = [&sources](const char* value) {
+            return std::find(sources.begin(), sources.end(), std::string(value)) != sources.end();
+        };
+        check(has_source("AE2VMAddon-1.7.10-gtnh/src/main/java") && has_source("AE2VMAddon-1.7.10-gtnh/src/test/java"),
+              "链接的子工程的 main/test 源根都要在");
+        check(taocode::default_source_paths(root, Json::object()).empty(), "没填 linkedProjects 时不猜源根");
+        const auto excluded = [&exclusions](const char* pattern) {
+            return std::find(exclusions.begin(), exclusions.end(), std::string(pattern)) != exclusions.end();
+        };
+        check(excluded("**/AE2-refs/**") && excluded("**/other-addon/**"), "未链接的顶层目录都要排除，形如 **/name/**");
+        check(excluded("**/lib/**"), "普通目录也排除（它们本来也不是 Gradle 工程，排除只是让模式表完整）");
+        check(!excluded("**/AE2VMAddon-1.7.10-gtnh/**"), "链接的那个不排");
+        check(std::is_sorted(exclusions.begin(), exclusions.end()), "模式按名字升序（可复现）");
+        check(taocode::import_exclusions(root, Json::object()).empty(), "没填 linkedProjects 就不擅自缩小导入范围");
         const auto globs = taocode::default_referenced_libraries(root);
         const auto has = [&globs](const char* needle) {
             return std::find(globs.begin(), globs.end(), std::string(needle)) != globs.end();

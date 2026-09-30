@@ -59,6 +59,8 @@ public:
     void set_diagnostics(Client::Notify handler);
     // LSP `$/progress` 通知的出口（与诊断同一条读线程回调，见 Client::on_progress）。
     void set_progress(Client::Notify handler);
+    // `window/showMessage` 的出口（与进度同一条读线程回调）。
+    void set_server_message(Client::Notify handler);
     void set_configuration(Json settings);
     // Wiring used by the session layer: the workspace writer behind
     // `workspace/applyEdit` and the sync kind the server announced.

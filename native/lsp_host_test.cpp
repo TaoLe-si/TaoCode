@@ -73,6 +73,13 @@ int main() {
             got_progress = progress.size() >= 3;
             ready.notify_all();
         });
+        // `window/showMessage` 与进度同一条出口（宿主按 `event` 分派），所以这里只挑它那几条。
+        std::vector<Json> messages;
+        host.set_server_message([&](Json params) {
+            std::lock_guard lock(mutex);
+            messages.push_back(std::move(params));
+            ready.notify_all();
+        });
 
         Host::Spec spec;
         spec.executable = self_directory() / L"lsp_fake_server.exe";
@@ -121,6 +128,13 @@ int main() {
                      });
         check(wait_for(got_hover), "hover response never arrived");
         check(hover_result.at("contents").at("value") == "hover from fake", "hover content round-tripped");
+
+        {
+            std::lock_guard lock(mutex);
+            check(messages.size() == 1 && messages[0].at("message") == "fake import failure",
+                  "工程级的 window/showMessage 要原样转出来（不然'外部类解析不了'在界面上无声无息）");
+            check(messages[0].at("type") == 2, "severity 原样带上");
+        }
 
         host.stop();
         check(!host.alive(), "host is not alive after stop");
