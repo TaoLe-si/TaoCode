@@ -31,6 +31,28 @@ export interface LogMenuCommit {
   shortHash: string
   /** 是不是当前分支的最后一个提交（`GitUncommitAction.update` 的 `isHeadCommit()`）。 */
   isHead: boolean
+  subject?: string
+  author?: string
+  /** 已经格式化好的日期（`logDate` 那一套，与日志行同一种呈现）。 */
+  dateText?: string
+  parents?: readonly string[]
+}
+
+/**
+ * 「转到父/子提交」的候选 = **可见图里相邻的行**（上游 `getRowsToJump`：
+ * `ui.dataPack.visibleGraph.getRowInfo(row).getAdjacentRows(parent).sorted()`，且只在**选中一行**时才有）。
+ * 本仓的日志是一页页加载的平表，所以：
+ *   · 父 = 该提交的 `parents` 里**已加载**的那些（没加载的跳不过去，上游的"可见图"同理）；
+ *   · 子 = 已加载的提交里，`parents` 含这个 hash 的那些（列表顺序 = 图上的顺序，上游也是按行号排）。
+ */
+export function adjacentCommits(commits: readonly LogMenuCommit[], hash: string, parent: boolean): LogMenuCommit[] {
+  if (!hash) return []
+  if (parent) {
+    const self = commits.find(commit => commit.hash === hash)
+    const parents = self?.parents ?? []
+    return parents.map(sha => commits.find(commit => commit.hash === sha)).filter((commit): commit is LogMenuCommit => Boolean(commit))
+  }
+  return commits.filter(commit => commit.hash !== hash && (commit.parents ?? []).includes(hash))
 }
 
 export interface LogMenuRow {
@@ -54,6 +76,16 @@ export const RESET_TO_HERE_TITLE = '将当前分支重置到此处…'
 export const UNCOMMIT_TITLE = '撤消提交…'
 export const UNCOMMIT_DESCRIPTION = '撤消最后一次提交并将其更改放入所选更改列表'
 export const UNCOMMIT_DISABLED_DESCRIPTION = '所选提交不是当前分支中的最后一次提交'
+/** `VcsLogBundle` `action.Vcs.Log.GoToChild.text` / `.description`（`GoToParentOrChildAction.kt` 那一对）。 */
+export const GO_TO_CHILD_TITLE = '转到子提交'
+export const GO_TO_CHILD_DESCRIPTION = '导航到提交图中的子行'
+/** `action.Vcs.Log.GoToParent.text` / `.description`。 */
+export const GO_TO_PARENT_TITLE = '转到父提交'
+export const GO_TO_PARENT_DESCRIPTION = '导航到提交图中的父行'
+/** `action.go.to.select.hash.subject.author.date.time` = `{0} {1}，作者 {2}，{3} {4}`（多候选时每行一个）。 */
+export function goToCandidateText(shortHash: string, subject: string, author: string, dateText: string): string {
+  return `${shortHash} "${subject}"，作者 ${author}，${dateText}`
+}
 /** `action.Git.CreateNewTag.text` / `.description`（包里就是「标记」，不是「标签」）。 */
 export const CREATE_TAG_TITLE = '新建标记…'
 export const CREATE_TAG_DESCRIPTION = '创建指向此提交的新标签'
@@ -63,11 +95,17 @@ export interface LogMenuActions {
   reset: () => void
   uncommit: () => void
   createTag: () => void
+  /** 跳到某个提交（上游 `VcsLogNavigationUtil.jumpToGraphRow`）。 */
+  goTo: (hash: string) => void
 }
 
-/** 按上游顺序给出这一行的菜单（只给有落点的四条，其余在上面的注释里逐条记了原因）。 */
-export function logCommitMenu(commit: LogMenuCommit, actions: LogMenuActions): LogMenuRow[] {
-  return [
+/**
+ * 按上游顺序给出这一行的菜单（有落点的那几条，其余在上面的注释里逐条记了原因）。
+ * `commits` = 当前已加载的提交（算「转到父/子提交」的候选要用）。
+ */
+export function logCommitMenu(commit: LogMenuCommit, actions: LogMenuActions,
+                              commits: readonly LogMenuCommit[] = []): LogMenuRow[] {
+  const rows: LogMenuRow[] = [
     { id: 'copyRevision', action: 'Vcs.CopyRevisionNumberAction', title: COPY_REVISION_TITLE, description: COPY_REVISION_DESCRIPTION, run: actions.copy },
     { id: 'reset', action: 'Git.Reset.In.Log', title: RESET_TO_HERE_TITLE, separatorBefore: true, run: actions.reset },
     {
@@ -77,6 +115,37 @@ export function logCommitMenu(commit: LogMenuCommit, actions: LogMenuActions): L
     },
     { id: 'createTag', action: 'Git.CreateNewTag', title: CREATE_TAG_TITLE, description: CREATE_TAG_DESCRIPTION, separatorBefore: true, run: actions.createTag },
   ]
+  // 平台组末尾那一对（`intellij.platform.vcs.log.impl.xml:281-282`）：转到子提交 / 转到父提交。
+  const childCandidates = adjacentCommits(commits, commit.hash, false)
+  const parentCandidates = adjacentCommits(commits, commit.hash, true)
+  rows.push(
+    { id: 'goToChild', action: 'Vcs.Log.GoToChild', title: GO_TO_CHILD_TITLE, description: GO_TO_CHILD_DESCRIPTION,
+      separatorBefore: true, disabled: childCandidates.length === 0, run: () => goTo(actions, childCandidates[0]) },
+    { id: 'goToParent', action: 'Vcs.Log.GoToParent', title: GO_TO_PARENT_TITLE, description: GO_TO_PARENT_DESCRIPTION,
+      disabled: parentCandidates.length === 0, run: () => goTo(actions, parentCandidates[0]) },
+  )
+  // 多个候选：上游是弹一个带编号的列表（`action.go.to.select.child/parent.to.navigate` + 每行 `…hash，subject…`），
+  // 本仓的菜单本身就是列表 ⇒ 每个候选补一行（父那一组的行跟在父提交那行后面）。
+  appendCandidates(rows, 'Vcs.Log.GoToChild', childCandidates, actions)
+  appendCandidates(rows, 'Vcs.Log.GoToParent', parentCandidates, actions)
+  return rows
+}
+
+function goTo(actions: LogMenuActions, target: LogMenuCommit | undefined) {
+  if (target) actions.goTo(target.hash)
+}
+
+function appendCandidates(rows: LogMenuRow[], action: string, candidates: readonly LogMenuCommit[], actions: LogMenuActions) {
+  if (candidates.length < 2) return
+  const at = rows.findIndex(row => row.action === action)
+  const extra = candidates.map(candidate => ({
+    id: `${action}:${candidate.hash}`,
+    action,
+    title: goToCandidateText(candidate.shortHash, candidate.subject ?? '', candidate.author ?? '', candidate.dateText ?? ''),
+    description: undefined,
+    run: () => actions.goTo(candidate.hash),
+  }))
+  rows.splice(at + 1, 0, ...extra)
 }
 
 /** `GitBundle` `branches.action.delete` = 删除(&D)（`GitDeleteRefAction` 的文案，用于分支/远端分支/标签）。 */

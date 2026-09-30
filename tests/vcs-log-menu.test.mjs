@@ -8,15 +8,17 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { logCommitMenu, logRefMenu, COPY_REVISION_TITLE, COPY_REVISION_DESCRIPTION, RESET_TO_HERE_TITLE,
-  UNCOMMIT_TITLE, UNCOMMIT_DESCRIPTION, UNCOMMIT_DISABLED_DESCRIPTION, CREATE_TAG_TITLE, CREATE_TAG_DESCRIPTION,
-  DELETE_REF_TITLE } from '../src/vcsLogMenu.ts'
+import { logCommitMenu, logRefMenu, adjacentCommits, goToCandidateText, COPY_REVISION_TITLE, COPY_REVISION_DESCRIPTION,
+  RESET_TO_HERE_TITLE, UNCOMMIT_TITLE, UNCOMMIT_DESCRIPTION, UNCOMMIT_DISABLED_DESCRIPTION, CREATE_TAG_TITLE,
+  CREATE_TAG_DESCRIPTION, DELETE_REF_TITLE, GO_TO_CHILD_TITLE, GO_TO_CHILD_DESCRIPTION, GO_TO_PARENT_TITLE,
+  GO_TO_PARENT_DESCRIPTION } from '../src/vcsLogMenu.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 const head = { hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', isHead: true }
 const older = { hash: 'b'.repeat(40), shortHash: 'bbbbbbbb', isHead: false }
 const noop = () => {}
+const actions = (over = {}) => ({ copy: noop, reset: noop, uncommit: noop, createTag: noop, goTo: noop, ...over })
 
 test('文案逐条等于随 IDE 发货的中文包', () => {
   assert.equal(COPY_REVISION_TITLE, '复制修订号', 'ActionsBundle action.Vcs.CopyRevisionNumberAction.text')
@@ -29,19 +31,20 @@ test('文案逐条等于随 IDE 发货的中文包', () => {
   assert.equal(CREATE_TAG_DESCRIPTION, '创建指向此提交的新标签', '同动作 .description')
 })
 
-test('行序照上游：复制修订号 ─ 重置到此处 ─ 撤消提交 ─ 新建标记', () => {
-  const rows = logCommitMenu(head, { copy: noop, reset: noop, uncommit: noop, createTag: noop })
+test('行序照上游：复制修订号 ─ 重置到此处 ─ 撤消提交 ─ 新建标记 ─ 转到子/父提交', () => {
+  const rows = logCommitMenu(head, actions(), [head])
   assert.deepEqual(rows.map(row => row.action), [
     'Vcs.CopyRevisionNumberAction', 'Git.Reset.In.Log', 'Git.Uncommit', 'Git.CreateNewTag',
+    'Vcs.Log.GoToChild', 'Vcs.Log.GoToParent',
   ])
-  assert.deepEqual(rows.map(row => Boolean(row.separatorBefore)), [false, true, false, true], '分隔线照上游那两处')
+  assert.deepEqual(rows.map(row => Boolean(row.separatorBefore)), [false, true, false, true, true, false], '分隔线照上游那几处')
 })
 
 test('「撤消提交」只对当前分支的最后一个提交可用（GitUncommitAction.update 的 isHeadCommit）', () => {
-  const actions = { copy: noop, reset: noop, uncommit: noop, createTag: noop }
-  const onHead = logCommitMenu(head, actions).find(row => row.id === 'uncommit')
+  const actionsObj = actions()
+  const onHead = logCommitMenu(head, actionsObj, [head]).find(row => row.id === 'uncommit')
   assert.equal(onHead.disabled, false, 'HEAD 上可用')
-  const onOlder = logCommitMenu(older, actions).find(row => row.id === 'uncommit')
+  const onOlder = logCommitMenu(older, actionsObj, [head, older]).find(row => row.id === 'uncommit')
   assert.equal(onOlder.disabled, true, '别的提交上灰着')
   assert.equal(onOlder.description, UNCOMMIT_DISABLED_DESCRIPTION, '灰着时给上游那句理由')
   assert.equal(onHead.description, UNCOMMIT_DESCRIPTION)
@@ -90,4 +93,58 @@ test('面板里那条自造的标签行已删（新建在日志菜单、删除�
     assert.ok(!panel.includes(gone), `面板里不该再有「${gone}」`)
   }
   assert.ok(!read('src/style.css').includes('.sc-tag {'), '那套 chip 样式也删了')
+})
+
+// ── 第五十八批：转到子/父提交（上游 GoToParentOrChildAction.kt + Vcs.Log.ContextMenu 的尾组） ──
+
+const graph = [
+  { hash: 'c3', shortHash: 'c3', isHead: true, subject: 'third', author: 'Tao', dateText: '2026-09-30 10:00', parents: ['c2'] },
+  { hash: 'c2', shortHash: 'c2', isHead: false, subject: 'second', author: 'Tao', dateText: '2026-09-30 09:00', parents: ['c1'] },
+  { hash: 'c1', shortHash: 'c1', isHead: false, subject: 'first', author: 'Tao', dateText: '2026-09-30 08:00', parents: [] },
+  { hash: 'm', shortHash: 'm', isHead: false, subject: 'side', author: 'Tao', dateText: '2026-09-30 07:00', parents: ['c1'] },
+]
+
+test('文案逐条等于 VcsLogBundle', () => {
+  assert.equal(GO_TO_CHILD_TITLE, '转到子提交', 'action.Vcs.Log.GoToChild.text')
+  assert.equal(GO_TO_CHILD_DESCRIPTION, '导航到提交图中的子行', '同动作 .description')
+  assert.equal(GO_TO_PARENT_TITLE, '转到父提交', 'action.Vcs.Log.GoToParent.text')
+  assert.equal(GO_TO_PARENT_DESCRIPTION, '导航到提交图中的父行', '同动作 .description')
+  assert.equal(goToCandidateText('c2', 'second', 'Tao', '2026-09-30 09:00'), 'c2 "second"，作者 Tao，2026-09-30 09:00',
+    'action.go.to.select.hash.subject.author.date.time = {0} {1}，作者 {2}，{3} {4}')
+})
+
+test('相邻提交：父 = 它的 parents 里已加载的，子 = 已加载里以它为父的', () => {
+  assert.deepEqual(adjacentCommits(graph, 'c2', true).map(c => c.hash), ['c1'], 'c2 的父是 c1')
+  assert.deepEqual(adjacentCommits(graph, 'c1', false).map(c => c.hash), ['c2', 'm'], 'c1 的子有 c2 与 m（按列表/图上的顺序）')
+  assert.deepEqual(adjacentCommits(graph, 'c2', false).map(c => c.hash), ['c3'], 'c2 的子是 c3')
+  assert.deepEqual(adjacentCommits(graph, 'c3', true).map(c => c.hash), ['c2'])
+  assert.deepEqual(adjacentCommits(graph, 'c1', true), [], '根提交没有父')
+  assert.deepEqual(adjacentCommits(graph, 'c3', false), [], '还没有子（m 指向 c1）')
+  assert.deepEqual(adjacentCommits(graph, 'unknown', true), [], '未知 hash 不猜')
+  assert.deepEqual(adjacentCommits(graph, '', false), [])
+})
+
+test('菜单尾组：有候选才可用；多候选时每个候选补一行（上游那个带编号的弹层）', () => {
+  const actions = { copy: noop, reset: noop, uncommit: noop, createTag: noop, goTo: noop }
+  const onC3 = logCommitMenu({ ...graph[0] }, actions, graph)
+  const childRow = onC3.find(row => row.id === 'goToChild')
+  const parentRow = onC3.find(row => row.id === 'goToParent')
+  assert.equal(childRow.disabled, true, 'c3 还没有子提交 ⇒ 灰着（上游 isEnabled = getRowsToJump 非空）')
+  assert.equal(parentRow.disabled, false, 'c3 的父是 c2')
+  const picked = []
+  const onC1 = logCommitMenu({ ...graph[2] }, { ...actions, goTo: hash => picked.push(hash) }, graph)
+  assert.equal(onC1.find(row => row.id === 'goToChild').disabled, false)
+  assert.equal(onC1.find(row => row.id === 'goToParent').disabled, true)
+  const extras = onC1.filter(row => /^Vcs\.Log\.GoToChild:/.test(row.id))
+  assert.deepEqual(extras.map(row => row.id), ['Vcs.Log.GoToChild:c2', 'Vcs.Log.GoToChild:m'], '两个子候选各一行')
+  assert.match(extras[0].title, /^c2 "second"，作者 Tao，/, '候选行用上游那条格式')
+  extras[1].run?.()
+  assert.deepEqual(picked, ['m'], '点候选行真的跳过去')
+})
+
+test('接线：日志视图把已加载的提交与 jump 交给模型（跳转走既有的 navigate 那条路）', () => {
+  const view = read('src/components/VcsLog.vue')
+  assert.match(view, /logCommitMenu\(/, '菜单来自模型')
+  assert.match(view, /commits\.value\.map\(c => \(\{ hash: c\.hash, shortHash: c\.shortHash, isHead: false/, '把已加载的提交整份给模型')
+  assert.match(view, /goTo: hash => \{ closeMenu\(\); void jump\(hash\) \}/, '跳到某提交 = 既有的 jump')
 })

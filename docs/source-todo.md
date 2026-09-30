@@ -305,8 +305,9 @@
       （`showCommitCheckFailuresPanel`，`:317-321`），提交路径那条再加「仍然提交」。
       **顺带修掉一个真缺陷**：面板的 `@notify` 从来没绑过（通知被静默丢掉）——
       现在 `ToolWindowView` 绑到 `ctx.notifyFromPanel`（ctx 新增 `notifyFromPanel`/`showToolWindow`）。见审计 §BC。
-- [ ] `Vcs.Log.GoToChild` / `Vcs.Log.GoToParent`（跳到子/父提交）：本仓日志的导航是"后退/前进"**历史**
-      （`canBack`/`travel`），不是提交图的父子；要做得先把"父/子"在单根日志里的语义定下来
-      （父 = 第一父提交；子 = 当前已加载提交里第一个以它为父的）。
+- [x] `Vcs.Log.GoToChild` / `Vcs.Log.GoToParent`（第五十八批已落）：父 = 该提交的 `parents` 里已加载的，
+      子 = 已加载里 `parents` 含这个 hash 的（顺序 = 图上的顺序）；可用性 = 候选非空；多候选按上游那条
+      `{0} {1}，作者 {2}，{3} {4}` 逐候选补一行；跳转走既有的 `jump`。上游没有默认键位 ⇒ 不编。
+      见审计 §BD —— **§17 至此全部收口**。
 - [ ] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
       「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）。

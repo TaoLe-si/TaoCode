@@ -2364,3 +2364,25 @@ ctx 两条通道、`notifyFromPanel` 的形参顺序）、「显示详细信息�
 
 **还没做的**：`Vcs.Log.GoToChild`/`GoToParent`（本仓导航是"后退/前进"历史，不是图的父子）——
 §17 只剩这一条；其余都已收口。
+
+## BD. 2026-09-30 第五十八批：日志的「转到子提交 / 转到父提交」—— §17 收尾
+
+§17 的最后一条。上游那两条是 `Vcs.Log.GoToChild` / `Vcs.Log.GoToParent`（`GoToParentOrChildAction`）：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| 文案 `action.Vcs.Log.GoToChild.text` = **转到子提交** / `action.Vcs.Log.GoToParent.text` = **转到父提交**（描述分别是「导航到提交图中的子行/父行」） | `VcsLogBundle.properties:14-17` | `src/vcsLogMenu.ts` 的 `GO_TO_CHILD_TITLE` / `GO_TO_PARENT_TITLE`（值 + key 一并写） |
+| 候选 = **可见图里相邻的行**：`visibleGraph.getRowInfo(row).getAdjacentRows(parent).sorted()`；且只在**选中一行**时才有 | `GoToParentOrChildAction.kt:110-115` | `adjacentCommits(commits, hash, parent)`：本仓的日志是一页页加载的平表 ⇒ 父 = 该提交的 `parents` 里**已加载**的；子 = 已加载里 `parents` 含这个 hash 的（列表顺序 = 图上的顺序，上游也是按行号排） |
+| 可用性 = 候选非空（`isEnabled = getRowsToJump(ui).isNotEmpty()`） | `:47-54` | 两条行的 `disabled = 候选为空`（父/子各自算） |
+| 多个候选（合并/多子）⇒ 弹一个**带编号的列表**，标题 `action.go.to.select.parent/child.to.navigate`（选择要导航的父项/子项），每行文案 `action.go.to.select.hash.subject.author.date.time` = `{0} {1}，作者 {2}，{3} {4}` | `:69-95` | 本仓的右键菜单本身就是列表 ⇒ 在同一行下面按那个格式**逐候选补一行**（`goToCandidateText`） |
+| 跳转 = `VcsLogNavigationUtil.jumpToGraphRow(row, false, true)` | `:63` | 用本仓既有的 `jump(hash)`（选中 + 按需加载它的历史，与点行同一条路） |
+| 键位：`$default.xml` 里这两条**没有**绑定 | — | 不编键位，提示里也不写快捷键 |
+
+**真机取证（MCP 驱动）**：右键 HEAD（`14edb40`）⇒ 尾组 `[转到子提交]`（灰着：它是最新的，还没有子）与 `[转到父提交]`（可用）；
+点「转到父提交」⇒ 选中行跳到它的父提交 `a01d346`；再右键那一行 ⇒ **两个方向都可用了**（它既有父 `6bc3b08` 也有子 `14edb40`）。
+
+**判据**：`tests/vcs-log-menu.test.mjs` 新增 4 条 —— 文案对 `VcsLogBundle`、`adjacentCommits` 的父子语义（含根提交/未知 hash/空 hash）、
+菜单尾组的两行与多候选补行（含"点候选行真的跳过去"）、接线（日志视图把已加载的提交与 `jump` 交给模型）。
+自证有牙：把「子」的判据放宽成"所有提交" ⇒ 2 条变红。
+
+**§17 至此全部收口**。提交面板那一带的排布、文案、动作与通知都按上游核过一遍了（第五十二～五十八批）。

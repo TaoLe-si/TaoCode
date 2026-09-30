@@ -14,6 +14,7 @@ import VcsLogFilters from './VcsLogFilters.vue'
 import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
 import { logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
+import { logDate } from '../vcsLogGraph'
 
 const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
 // 「标签名称」是**项目设置**（`vcsLog.showTagNames`），写回走宿主；其余行是本窗口自己的排布。
@@ -28,8 +29,12 @@ const panel = ref<HTMLElement>()
 const menu = ref<{ hash: string; shortHash: string; isHead: boolean; x: number; y: number } | null>(null)
 // 引用 chip 的菜单（同一次只开一个）。
 const refMenu = ref<{ name: string; type: 'local' | 'remote' | 'tag' | 'head'; x: number; y: number } | null>(null)
-const menuRows = computed<LogMenuRow[]>(() => menu.value ? logCommitMenu(
-  { hash: menu.value.hash, shortHash: menu.value.shortHash, isHead: menu.value.isHead },
+const menuRows = computed<LogMenuRow[]>(() => {
+  const row = menu.value
+  if (!row) return []
+  const commit = commits.value.find(c => c.hash === row.hash)
+  return logCommitMenu(
+  { hash: row.hash, shortHash: row.shortHash, isHead: row.isHead, subject: commit?.subject, author: commit?.author, dateText: logDate(commit?.date ?? ''), parents: commit?.parents ?? [] },
   {
     copy: () => { copyHash(); closeMenu() },
     reset: () => {
@@ -50,7 +55,10 @@ const menuRows = computed<LogMenuRow[]>(() => menu.value ? logCommitMenu(
       if (!name?.trim()) return
       void createTagOn(hash, name.trim())
     },
-  }) : [])
+    // 上游 `VcsLogNavigationUtil.jumpToGraphRow`：选中那一行（本仓的 navigate 也会按需加载它的历史）。
+    goTo: hash => { closeMenu(); void jump(hash) },
+  }, commits.value.map(c => ({ hash: c.hash, shortHash: c.shortHash, isHead: false, subject: c.subject, author: c.author, dateText: logDate(c.date), parents: c.parents })))
+})
 function openMenu(payload: { hash: string; x: number; y: number }) {
   const commit = commits.value.find(c => c.hash === payload.hash)
   // 用面板自己的盒子换算（工具窗口内容可能带 transform/滚动，`position: fixed` 不可靠）。
