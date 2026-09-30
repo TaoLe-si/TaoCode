@@ -255,7 +255,7 @@
   本仓的 dock 是全局 ref、窗口集合是常量表，没有对应对象；`ToolWindowSetInitializer` 那一半
   （建模块时装配 + 换项目再装配）已由 `applyProjectLayout` 承担。
 
-## 16. 提交检查的文案与入口（2026-09-30 第四十四/四十五批）
+## 16. 提交检查的文案与入口（2026-09-30 第五十/五十一批）
 
 已落：`src/commitChecks.ts`（一处检查链 + 文案常量）、**失败行**（警告图标 + 失败文本 +
 「重新运行提交检查」那把刷新按钮）、「仍然提交」（`action.commit.anyway.text`）、
@@ -272,16 +272,16 @@
 - `RecentCommitChecks` 的其余几档（`MODIFICATIONS_FAILED` / `POST_FAILED` / `SMART_MODE_REQUIRED`）：
   本仓的检查是一次性的（全在提交前），没有"提交后再补检查"那两档。
 
-## 17. 提交面板"待判"的排布（2026-09-30 第四十六批留下的）
+## 17. 提交面板"待判"的排布（2026-09-30 第五十二批留下的）
 
 这一批把 amend 与消息区按上游核了一遍（审计 §AX），同时**明确记下还没核的**——
 它们现在**没有引文**，下一批要先找到"上游哪个组件、哪一行"再动，不许先编引文：
 
-- [ ] `.sc-toolbar` 那一行的 `拉取/获取/推送/变基/储藏/弹出`：操作本身上游都有，
-      **但不在这一行**。上游提交工具窗口那一行（`CommitStatusPanel` 左侧）只有
-      修正(M) + 消息历史；`VcsToolbarActions`（`VcsActions.xml` 里那一族）是
-      `VcsToolbarLabelAction` / `Vcs.UpdateProject` / `CheckinProject` / `ChangesView.ToggleCommitUi` /
-      `Diff.ShowDiff` / `ChangesView.CreatePatchFromChanges` / 搁置那几条 —— 逐条核位置与文案。
+- [x] `.sc-toolbar` 那一行（第五十三批已按上游裁剪）：上游 = `VcsToolbarActions`
+      （`VcsActions.xml:416-425` + dvcs-impl 的 `Vcs.Push`）—— 现在只剩「更新项目」（`Vcs.UpdateProject`，
+      先 fetch 再整合）与「推送」（`Vcs.Push`，键位进提示）；「获取/变基/储藏/弹出」的上游位置是 Git 菜单
+      （本仓已有），「历史」的上游位置是日志工具窗口（本仓已有）⇒ 面板里那四个按钮与那份自造的
+      「提交历史列表」一起删掉。见审计 §AY。
 - [ ] `.sc-changes-head` 的「折叠/展开」按钮：上游哪条动作管变更树的折叠？（候选：
       `ChangesViewToggleChangesTreeGroup` 一类；先找再说。）
 - [ ] `.sc-branch-ops` 的三行（新建/合并/删除分支、新建标签、与分支比较）：上游这些操作在

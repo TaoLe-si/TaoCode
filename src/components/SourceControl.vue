@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GitBranch, GitCommitIcon, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Archive, History, Tag, Ban, GitPullRequestArrow, CloudDownload, RotateCcw, Trash2, ChevronDown, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
+import { GitBranch, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, History, Tag, Ban, GitPullRequestArrow, Trash2, ChevronDown, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
@@ -24,7 +24,7 @@ import {
   type CommitMessageInspectionSettings,
   type CommitMessageProblem,
 } from '../commitMessageInspection'
-import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommit, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStash, type GitStatus, type GitTags, type TodoPattern } from '../bridge'
+import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStatus, type GitTags, type TodoPattern } from '../bridge'
 
 const props = defineProps<{
   root: string
@@ -89,9 +89,6 @@ function measureLegend() {
   legendCompact.value = probe.getBoundingClientRect().width > available
 }
 const ahead = ref<GitAheadBehind>({ available: false, ahead: 0, behind: 0 })
-const stashCount = ref(0)
-const historyOpen = ref(false)
-const commits = ref<GitCommit[]>([])
 // Secondary reads (remote status, stash count, tags, hunk list) must not fail the
 // whole panel, but they must not fail silently either.
 const extrasError = ref('')
@@ -122,8 +119,6 @@ async function refreshExtras() {
   const problems: string[] = []
   try { ahead.value = await request<GitAheadBehind>('git.aheadBehind') }
   catch (caught) { ahead.value = { available: false, ahead: 0, behind: 0 }; problems.push(`读取远程领先/落后失败：${errorText(caught)}`) }
-  try { stashCount.value = (await request<GitStash>('git.stash')).entries.length }
-  catch (caught) { stashCount.value = 0; problems.push(`读取储藏列表失败：${errorText(caught)}`) }
   if (token === statusToken) extrasError.value = problems.join('；')
 }
 // ShowNotificationCommitResultHandler.kt:24-98 — the outcome of a commit is reported through a
@@ -160,9 +155,8 @@ async function act(operation: () => Promise<unknown>, onFailure?: (message: stri
   catch (caught) { error.value = errorText(caught); onFailure?.(error.value) }
   finally {
     busy.value = false
-    // Any git operation can change the commit history and the branch comparison:
-    // invalidate both so the next render reflects the new repo state.
-    commits.value = []
+    // Any git operation can change the branch comparison: invalidate it so the next
+    // render reflects the new repo state.
     compared.value = []
     void loadTags()
   }
@@ -517,12 +511,13 @@ const toggleMessageHistory = () => {
   })()
 }
 const checkout = (branch: string) => act(() => request('git.checkout', { branch }))
-const pull = () => act(() => request('git.pull'))
+// `Vcs.UpdateProject`（与 `Vcs.Push` 同在 `VcsToolbarActions`，VcsActions.xml:416-425）：
+// 先刷新远端（fetch）再做整合（pull）—— 与 Git 菜单那条宿主实现（`src/vcsActions.ts`）同义。
+const updateProject = () => act(async () => { await request('git.fetch'); await request('git.pull') })
 const push = () => act(() => request('git.push'))
 // IDEA Git menu rows: Fetch (refresh remotes), Rebase onto upstream, branch delete,
 // the Tag dialog, "Add to .gitignore" for untracked rows.
 const fetch = () => act(() => request('git.fetch'))
-const rebaseUpstream = () => act(() => request('git.rebase', {}))
 const deleteBranch = () => { const name = mergeBranch.value.trim(); if (!name || name === status.value.head) return; void act(() => request('git.branch.delete', { name })) }
 const ignore = (path: string) => act(() => request('git.ignore', { path }))
 const tagName = ref('')
@@ -552,22 +547,8 @@ function toggleHunk(index: number) {
   // Set mutation needs a fresh Set to stay reactive for the checkbox binding.
   diff.value.hunkPicked = new Set(diff.value.hunkPicked)
 }
-const stash = () => {
-  // IDEA's Stash Changes dialog owns its message field; borrowing the commit box
-  // would silently rename stashes after whatever the user was about to commit.
-  const text = window.prompt('储藏信息（Stash Changes）：', `TaoCode 储藏 ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`)
-  if (text === null) return
-  void act(() => request('git.stash.save', { message: text.trim() || 'TaoCode 储藏' }))
-}
-const stashPop = () => act(() => request('git.stash.pop'))
 const createBranch = () => { const name = newBranch.value.trim(); if (!name) return; void act(async () => { await request('git.branch.create', { name, checkout: true }); newBranch.value = '' }) }
 const mergeBranchInto = () => { const name = mergeBranch.value.trim(); if (!name) return; void act(() => request('git.merge', { branch: name })) }
-async function toggleHistory() {
-  historyOpen.value = !historyOpen.value
-  if (historyOpen.value && !commits.value.length) {
-    try { commits.value = (await request<GitLog>('git.log')).commits } catch (caught) { error.value = errorText(caught) }
-  }
-}
 async function showDiff(target: { path: string; staged: boolean; base?: string }) {
   const base = target.base ?? ''
   hunkError.value = ''
@@ -660,7 +641,6 @@ watch(() => [props.root, props.active] as const, () => {
   compareBase.value = ''
   compareTo.value = ''
   compared.value = []
-  commits.value = []
   // The author comes from the repository configuration, so a new project needs a re-read
   // and any override made for the previous repository must not leak into it.
   authorOverride.value = null
@@ -706,6 +686,8 @@ watch(() => [props.root, props.active] as const, () => {
         </div>
       </div>
       <div class="sc-changes-head">
+        <!-- TODO(第四十七批)：上游哪条动作管变更树的折叠还没找到（候选 ChangesViewToggleChangesTreeGroup 一类），
+             先留在这里并登记在 docs/source-todo.md §17 —— 不加引文。 -->
         <button class="sc-tool" :disabled="busy || !changes.length" :title="changesCollapsed ? '展开变更列表' : '折叠变更列表'" :aria-expanded="!changesCollapsed" @click="changesCollapsed = !changesCollapsed"><ChevronDown :size="13" :class="{ 'sc-flip': !changesCollapsed }" />{{ changesCollapsed ? '展开' : '折叠' }}</button>
       </div>
       <div class="sc-toolbar">
@@ -714,13 +696,12 @@ watch(() => [props.root, props.active] as const, () => {
              非模态面板的消息区自己不带工具条（CommitMessage.kt 的 showToolbar=false）。 -->
         <label class="sc-amend" :title="AMEND_TOOLTIP"><input v-model="amend" type="checkbox" :disabled="busy" /><span>{{ AMEND_CHECKBOX_TEXT }}</span></label>
         <button class="icon-button" :class="{ on: messageHistoryOpen }" :title="MESSAGE_HISTORY_DESCRIPTION" :aria-expanded="messageHistoryOpen" :aria-label="MESSAGE_HISTORY_TEXT" :disabled="busy || loading" @click="toggleMessageHistory"><Clock :size="13" /></button>
-        <button class="sc-tool" :disabled="busy" title="拉取（--ff-only）" @click="pull"><Download :size="13" />拉取<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
-        <button class="sc-tool" :disabled="busy" title="获取（fetch，不合并）" aria-label="获取" @click="fetch"><CloudDownload :size="13" />获取</button>
-        <button class="sc-tool" :disabled="busy" title="推送当前分支" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>
-        <button class="sc-tool" :disabled="busy" title="变基到上游（rebase）" aria-label="变基" @click="rebaseUpstream"><RotateCcw :size="13" />变基</button>
-        <button class="sc-tool" :disabled="busy || !changes.length" title="储藏当前更改" @click="stash"><Archive :size="13" />储藏</button>
-        <button class="sc-tool" :disabled="busy || !stashCount" title="弹出最近的储藏" @click="stashPop">弹出<span v-if="stashCount" class="sc-badge">{{ stashCount }}</span></button>
-        <button class="sc-tool" :class="{ on: historyOpen }" title="提交历史" @click="toggleHistory"><History :size="13" />历史</button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
+        <!-- 上游本地变更工具窗口那一行是 `VcsToolbarActions`（VcsActions.xml:416-425 + dvcs-impl 的
+             `Vcs.Push` :80-85）：更新项目 / 提交 / 切换提交界面 / 推送 / 比较同版本 / 文件历史 / 回滚。
+             本仓这一行只放我们真有的那两个（更新项目、推送）；获取/变基/储藏/取出储藏在上游都不在这一行
+             （它们在 Git 菜单与日志窗口那一族），所以留在 Git 菜单里、不在这里重复一份。 -->
+        <button class="sc-tool" :disabled="busy" title="更新项目（Ctrl+T）" @click="updateProject"><Download :size="13" />更新项目<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
+        <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
       </div>
       <div class="sc-branch-ops">
         <input v-model="newBranch" class="sc-input" placeholder="新分支名" aria-label="新分支名" :disabled="busy" @keydown.enter.prevent="createBranch" />
@@ -776,13 +757,6 @@ watch(() => [props.root, props.active] as const, () => {
             <button class="sc-file" :title="`${file.status} · ${file.path}`" @click="showDiff({ path: file.path, staged: false, base: compareTo })"><span class="sc-status">{{ file.status }}</span><span class="sc-path">{{ file.path }}</span></button>
           </div>
           <p v-if="!compared.length" class="sc-empty-line">该分支相对此处没有多出的文件。</p>
-        </section>
-        <section v-if="historyOpen" class="sc-section">
-          <h3><GitCommitIcon :size="12" /> 提交历史 <span class="sc-count">{{ commits.length }}</span></h3>
-          <div v-for="entry in commits" :key="entry.hash" class="sc-commit-row" :title="`${entry.subject} · ${entry.author} · ${entry.date}`">
-            <span class="sc-hash">{{ entry.shortHash }}</span><span class="sc-subject">{{ entry.subject }}</span><span class="sc-meta">{{ entry.author }}</span>
-          </div>
-          <p v-if="!commits.length" class="sc-empty-line">尚无提交。</p>
         </section>
       </div>
       <p v-if="commitCheckError" class="sc-commit-check" role="alert">{{ commitCheckError }}</p>

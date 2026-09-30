@@ -2144,7 +2144,11 @@ FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案
 `bottomTab` 原先在 388 行（模块之后），已挪到 `bottom` 旁边（229 行）；`activeView` 那一项同时改成可写
 （恢复时要设它）。
 
-## AV. 2026-09-30 第四十四批：提交检查收成**一处来源** + 提交期间保存 + 「只运行检查」（B3 §E 的 ①③）
+<!-- 批次号说明：本文件接在前一位 agent 的第四十九批之后，从第五十批继续。
+     早先几个提交（8979353 / ff36e8a）的 message 里写的是第四十四~四十六批 —— 那是我当时按本文件
+     最后一个标题（AU = 第四十三批）顺推的，与前一位 agent 在清单 §第四十四~四十九批里的用法撞了号，
+     现以本文件为准。 -->
+## AV. 2026-09-30 第五十批：提交检查收成**一处来源** + 提交期间保存 + 「只运行检查」（B3 §E 的 ①③）
 
 B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用户能看得见的缺口」，这一批做掉两条：
 
@@ -2160,7 +2164,7 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 **判据**：`tests/commit-checks.test.mjs` + `tests/commit-check.test.mjs`。
 自证有牙：把检查链拆回两处、或让 `commitCheckReport` 不再区分「错误行 / 失败行」，判据当场变红。
 
-## AW. 2026-09-30 第四十五批：按**真 exe 取证**修正上一批 —— 去掉编造的常显按钮，改判 `FailuresPanel` 失败行 + 「仍然提交」
+## AW. 2026-09-30 第五十一批：按**真 exe 取证**修正上一批 —— 去掉编造的常显按钮，改判 `FailuresPanel` 失败行 + 「仍然提交」
 
 这一批是**先用真机跑、再回头改代码**：上一批把「运行提交检查」做成了一个**常显的文字按钮**，
 真机截图 + 上游复核发现那不是上游形态，而且它把提交按钮那一排挤成了竖排文字。逐条修正：
@@ -2189,7 +2193,7 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 「显示详细信息 / 查看详情」链接动作；`CommitChecksProgressIndicator`（面板内的检查进度）
 与 `label.commit.checks.not.available.during.indexing`（索引期间检查不可用）那两条警告也没有。
 
-## AX. 2026-09-30 第四十六批：提交面板的**动作排布与文案**按上游核一遍 —— 2 处编造、1 处造错的形状、1 处造错的文案
+## AX. 2026-09-30 第五十二批：提交面板的**动作排布与文案**按上游核一遍 —— 2 处编造、1 处造错的形状、1 处造错的文案
 
 上一批靠真机截图抓到过一个"上游没有的常显按钮"，这一批把同一类风险**系统化**：先写脚本把面板里
 所有"用户看得见"的中文文案（模板文本节点、`title`/`aria-label`/`placeholder`、脚本里的字符串字面量）
@@ -2224,3 +2228,37 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 `ChangesView.ToggleCommitUi`/`Diff.ShowDiff`/搁置那一族，位置与措辞都要逐条核）、变更树头部那个
 「折叠/展开」（`sc-changes-head`）、以及 `.sc-branch-ops` 那三行（分支/标签/比较）——都登记在
 `docs/source-todo.md` §16，判之前不许再给它们编引文。
+
+## AY. 2026-09-30 第五十三批：提交面板那一行改成上游 `VcsToolbarActions` 的内容（§17 的第一条）
+
+上一批把 amend 与消息区按上游核完，留下 `.sc-toolbar` 那一行"有操作、没位置依据"。这一批先把**上游那一行**
+找出来，再按它裁剪：
+
+上游本地变更工具窗口的那一行 = **`VcsToolbarActions`**（`VcsActions.xml:416-425`）：
+
+| 上游项 | 来源 | 本仓 |
+|---|---|---|
+| `VcsToolbarLabelAction` | `VcsActions.xml:417` | 无对应（它是 IDEA 的工具栏标签位） |
+| `Vcs.UpdateProject`（Ctrl+T，`VcsActions.xml:49-52` 自带键位） | `:418` | **落**：原来那个「拉取（--ff-only）」改成「更新项目」，行为也改成上游的两步（先 fetch 再整合，与 Git 菜单那条宿主实现 `src/vcsActions.ts` 同义） |
+| `CheckinProject`（提交） | `:419` | 本仓的提交按钮在面板底部（`CommitActionsPanel` 那一处），这一行不重复放 |
+| `ChangesView.ToggleCommitUi` | `:420` | 本仓只有一个提交界面，无意义（登记即可） |
+| `Vcs.Push`（Ctrl+Shift+K，`intellij.platform.vcs.dvcs.impl.xml:80-86` 自带键位、`anchor=after ChangesView.ToggleCommitUi`） | dvcs-impl `:80-85` | **落**：一直在这行，键位补进工具提示 |
+| `Compare.SameVersion` / `Vcs.ShowTabbedFileHistory` / `ChangesView.Revert` | `:421-423` | 本仓这三个动作分别在「与分支比较」那一行、Git 菜单与变更树上，不在这行 |
+| `Git.Commit.Stage`（暂存区模式的提交） | git4idea `:455-459` | 本仓没有「暂存区模式」这个开关，无宿主 ⇒ 不加 |
+
+**移走的**（上游这一行没有、且它们的上游位置本仓已经有了）：`获取`（`Git.Fetch`）、`变基`（`Git.Rebase`）、
+`储藏`/`弹出`（搁置那一族）、`历史`（= 日志工具窗口）。前四个本来就在 **Git 菜单**里（`src/menus/gitMenu.ts`
+的 `git.fetch` / `git.rebase` / `git.stash` / `git.unstash`，早先批次落的），第五个的上游位置是**日志工具窗口**
+（Git 菜单 →「显示日志」→ `vcslog`）——所以面板里那份「提交历史列表」（`sc-commit-row` 那一节）连同按钮一起删掉，
+不再重复一份。
+
+**留下的两处「待判」**（这行之外，登记在 `docs/source-todo.md` §17）：变更树头部的「折叠/展开」按钮
+（还没找到上游是哪个动作，代码里加了 TODO 注释、**不加引文**）、以及分支/标签/比较那三行。
+
+**真机取证**：那一行现在是 `[☑ 修正(M)] [🕘 提交消息历史记录] [⬇ 更新项目] [⬆ 推送]` 加右端的提交图例；
+获取/变基/储藏/弹出/历史都不在了；`更新项目` 的工具提示是「更新项目（Ctrl+T）」。
+
+**判据**：`tests/scm-panel-strings.test.mjs` 新增两条 —— ①那一行的**按钮**里只剩更新项目与推送，且
+`updateProject` 是「先 fetch 再 pull」；②被移走的几个操作仍在 `src/menus/gitMenu.ts`（`git.fetch`/`git.rebase`/
+`git.stash`/`git.unstash`/`git.update`/`git.push`），日志工具窗口是提交历史的上游位置。
+自证有牙：把「获取」按钮放回那一行 ⇒ 当场变红。

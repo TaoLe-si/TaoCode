@@ -966,11 +966,6 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .sc-input { flex: 1; min-width: 0; min-height: var(--ctrl-height-sm); padding: 2px var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-mono); }
 .sc-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sc-select { flex: 0 1 110px; }
-.sc-commit-row { display: flex; align-items: baseline; gap: var(--space-2); padding: 3px var(--space-3); font-size: 11px; }
-.sc-commit-row:hover { background: var(--hover); }
-.sc-hash { flex-shrink: 0; color: var(--accent); font: 11px var(--font-mono); }
-.sc-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.sc-meta { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 10px; }
 .sc-empty-line { margin: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; }
 
 /* Run configurations */

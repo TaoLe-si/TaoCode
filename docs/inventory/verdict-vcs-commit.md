@@ -84,11 +84,11 @@
 
 本域**没有留白的 TODO**：要么已在链路里（`[x]`/`[~]`），要么在本仓没有宿主（`[-]`）。
 下一批真正要做的不是"补类"，而是 §C 里那几条**用户能看见的缺口**（按价值）：
-① ~~「只运行检查」入口~~（`RunCommitChecksExecutor`）**已落**（第四十四/四十五批）：入口照上游放在失败行上那把刷新按钮里，
+① ~~「只运行检查」入口~~（`RunCommitChecksExecutor`）**已落**（第五十/五十一批）：入口照上游放在失败行上那把刷新按钮里，
    并补上配套的「仍然提交」（`action.commit.anyway.text`）——**没有**常显按钮（上游没有）；
    `CommitChecksProgressIndicator` 仍是 `[~]`（进度在状态栏后台任务行，不在面板内）；
 ② 「改某一次具体提交」（`CommitToAmend.Resolved` 那条下拉）——**仍是缺口**；
-③ ~~提交前保存文档的否决~~（`SaveCommittingDocumentsVetoer`）**已落**（第四十四批）：`saveDuringCommitQuestion` + `confirmSaveDuringCommit`；
+③ ~~提交前保存文档的否决~~（`SaveCommittingDocumentsVetoer`）**已落**（第五十批）：`saveDuringCommitQuestion` + `confirmSaveDuringCommit`；
 ④ 三层的插槽（`CommitExecutor`：让"提交"能被别的执行器接管）——这条价值最低，且要有真消费者才建。
 
 ## F. 判据（本判决文件自身的门控）
@@ -126,7 +126,7 @@
 | `AmendCommitModeDropDownLink` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitModeDropDownLink.kt` | `[~]` | 本仓的 amend 是勾选框（`src/components/SourceControl.vue` 的 `.sc-amend`）；**缺**上游那个「改哪一次提交」的下拉链接 |
 | `ChangeListClassifierProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangeListClassifierProvider.kt` | `[-]` | 变更列表扩展点（哪个列表的信息由描述提供）：本仓是 git index 模型（见 `src/components/SourceControl.vue` 的 staged/unstaged 两份），没有 `LocalChangeList` |
 | `ChangesViewCommitMessagePolicy` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitMessagePolicy.kt` | `[-]` | 按变更列表存提交信息：同上，没有变更列表 |
-| `ChangesViewCommitPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitPanel.kt` | `[~]` | `src/components/SourceControl.vue`（面板本体：信息框 + 变更 + 动作 + 图例） |
+| `ChangesViewCommitPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitPanel.kt` | `[~]` | `src/components/SourceControl.vue`（面板本体：信息框 + 变更 + 动作 + 图例；第五十三批把那一行按 `VcsToolbarActions` 裁成「更新项目 + 推送 + 图例」）；**缺** `ChangesView.ToggleCommitUi`（本仓只有一个提交界面） |
 | `ChangesViewCommitTabTitleUpdater` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitTabTitleUpdater.kt` | `[-]` | 按变更列表名改工具窗口标签标题：没有变更列表 |
 | `ChangesViewCommitWorkflow` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitWorkflow.kt` | `[~]` | 流程在面板 + 宿主（`src/components/SourceControl.vue` 的 `runCommit`/`commitAndPush`） |
 | `ChangesViewCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitWorkflowHandler.kt` | `[~]` | 同上：流程与面板同住 `src/components/SourceControl.vue` |
@@ -170,7 +170,7 @@
 | `SingleChangeListCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowHandler.kt` | `[-]` | 同上 |
 | `SingleChangeListCommitWorkflowUi` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowUi.kt` | `[-]` | 同上 |
 | `SingleChangeListCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitter.kt` | `[-]` | 同上（单变更列表的执行体） |
-| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | `[~]` | 第四十六批按它核过：文案与浮层在 `src/commitPanelStrings.ts`（`checkbox.amend` = 修正(M)、标题+Alt+M、**无描述**）、控件在 `src/components/SourceControl.vue` 且位置 = `ChangesView.CommitToolbar` 那一行（与图例同行）；**缺** `isAmendSpecificCommitSupported` 为真时的 `ToggleAmendPanel`（勾选框 + 「上次提交」下拉），见 `AmendCommitHandler` 行。判据 `tests/scm-panel-strings.test.mjs` |
+| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | `[~]` | 第五十二批按它核过：文案与浮层在 `src/commitPanelStrings.ts`（`checkbox.amend` = 修正(M)、标题+Alt+M、**无描述**）、控件在 `src/components/SourceControl.vue` 且位置 = `ChangesView.CommitToolbar` 那一行（与图例同行）；**缺** `isAmendSpecificCommitSupported` 为真时的 `ToggleAmendPanel`（勾选框 + 「上次提交」下拉），见 `AmendCommitHandler` 行。判据 `tests/scm-panel-strings.test.mjs` |
 | `ToggleAmendCommitOption` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitOption.kt` | `[x]` | `src/components/SourceControl.vue` 的 amend 勾选框（tooltip 与 VK_M 助记符引 `ToggleAmendCommitOption.kt:19/23`） |
 | `VcsCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsCommitter.kt` | `[~]` | 提交执行在 `native/git.cpp` + `src/commitNotification.ts` 的结果处理；缺 VCS 无关的执行体 |
 | `VcsPathsToRefreshProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsPathsToRefreshProvider.kt` | `[-]` | EP：插件声明"提交后要刷新哪些路径"；本仓没有插件运行时 |
@@ -181,7 +181,7 @@
 | `CommitMessageInspectionEP` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionEP.kt` | `[-]` | EP：插件贡献提交信息检查；本仓没有插件运行时 |
 | `CommitMessageInspectionProfile` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionProfile.java` | `[~]` | 本仓是一套设置（`src/commitMessageInspection.ts` 的 `CommitMessageInspectionSettings`）；没有 `InspectionProfileImpl` 那套检查配置档 |
 | `CommitMessageInspectionsPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionsPanel.kt` | `[~]` | 同上：设置面在 `src/commitMessageInspection.ts` 与 `src/settingsPersistence.ts` |
-| `ReformatCommitMessageAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/ReformatCommitMessageAction.java` | `[x]` | `src/components/SourceControl.vue` 的 `reformatCommitMessage`，入口 = 每条检查问题的快捷修复（上游也是这条；第四十六批撤掉消息区那个上游没有的常显按钮；键位 `Alt+L`（`use-shortcut-of=ReformatCode`）登记在 `docs/source-todo.md` §16）。判据 `tests/commit-message-inspection.test.mjs` |
+| `ReformatCommitMessageAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/ReformatCommitMessageAction.java` | `[x]` | `src/components/SourceControl.vue` 的 `reformatCommitMessage`，入口 = 每条检查问题的快捷修复（上游也是这条；第五十二批撤掉消息区那个上游没有的常显按钮；键位 `Alt+L`（`use-shortcut-of=ReformatCode`）登记在 `docs/source-todo.md` §16）。判据 `tests/commit-message-inspection.test.mjs` |
 | `SubjectBodySeparationInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectBodySeparationInspection.java` | `[x]` | `src/commitMessageInspection.ts` 的 `MISSING_BLANK_LINE_MESSAGE` + `addBlankLineAfterSubject` |
 | `SubjectLimitInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectLimitInspection.kt` | `[x]` | `src/commitMessageInspection.ts` 的主题行检查（`SUBJECT_LIMIT_MESSAGE`） |
 

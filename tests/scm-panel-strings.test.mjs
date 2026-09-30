@@ -68,3 +68,31 @@ test('占位文本就是包里那一条 —— 没有再编一句本仓提示', 
   assert.ok(!read('src/commitPanelStrings.ts').includes('留空则沿用上次的提交信息'),
     '那句本仓提示随"amend 预填上次信息"一起删了（见 tests/amend-message.test.mjs）')
 })
+
+test('那一行只剩上游 VcsToolbarActions 里我们有的两个操作（第四十七批）', () => {
+  const panel = read('src/components/SourceControl.vue')
+  const row = panel.slice(panel.indexOf('<div class="sc-toolbar">'), panel.indexOf('class="sc-legend"'))
+  assert.ok(row.includes('更新项目'), 'Vcs.UpdateProject 在 VcsToolbarActions 里（VcsActions.xml:416-425）')
+  assert.match(row, /title="更新项目（Ctrl\+T）"/, 'Ctrl+T 是 Vcs.UpdateProject 自己的键位（VcsActions.xml:49-52）')
+  assert.ok(row.includes('>推送<') || /推送<span/.test(row), 'Vcs.Push 也在这个组里')
+  assert.match(row, /title="推送（Ctrl\+Shift\+K）"/, 'Vcs.Push 的键位（dvcs-impl 的注册里声明 control shift K）')
+  // 只看按钮（注释里会写到被移走的那些名字，不能拿整段文本当判据）
+  const buttons = [...row.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map(m => m[1])
+  assert.ok(buttons.length >= 2, '这一行至少有更新项目与推送两个按钮')
+  const labels = buttons.join(' | ')
+  for (const gone of ['获取', '变基', '储藏', '弹出', '提交历史']) {
+    assert.ok(!labels.includes(gone), `上游这一行没有「${gone}」，不该在这里重复一份`)
+  }
+  assert.match(panel, /const updateProject = \(\) => act\(async \(\) => \{ await request\('git\.fetch'\); await request\('git\.pull'\) \}\)/,
+    '更新项目 = 先刷新远端再整合（Vcs.UpdateProject）')
+})
+
+test('移走的那几个操作仍在 Git 菜单里（上游给它们的位置）', () => {
+  const menu = read('src/menus/gitMenu.ts')
+  for (const entry of ['git.fetch', 'git.rebase', 'git.stash', 'git.unstash', 'git.update', 'git.push']) {
+    assert.ok(menu.includes(`id: '${entry}'`), `Git 菜单缺 ${entry}`)
+  }
+  const panel = read('src/components/SourceControl.vue')
+  assert.ok(!panel.includes('sc-commit-row'), '面板内那份提交历史列表已删（上游是日志工具窗口）')
+  assert.ok(menu.includes("run: () => ctx.showView('vcslog')"), '日志工具窗口是它的上游位置（Git 菜单 → 显示日志）')
+})
