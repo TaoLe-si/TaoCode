@@ -1100,8 +1100,10 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      · 于是发 `{kind:'diagnostic'}` → JDT 回 **`{"code":"LSP_FAILED","message":"Internal error."}`**
        （拉取诊断在这个文件上内部报错，同样指向"它不在一个类路径完整的工程里"）；
      · 状态栏的问题计数 chip（`.status-problems`）默认不渲染，读不到条数。
-     ⇒ 拿诊断原文的可行路径只剩：**问题面板**（点击状态栏/底部「问题」把它打开，或
-     `showOutput('problems')`）或编辑器里的错误提示。下一次从这里继续。
+     ⇒ 拿诊断原文的可行路径（第四次尝试后收窄为一条）：**不要**去找"切换输出面板"这类按钮
+     （`title` 不是那个词，找不到）；最稳的是**临时探针**——在编辑器页里把拿到的那份诊断表暴露成
+     `window.__diag`（我们前端把它存在模块级的 Map 里，页面读不到），读完即撤，和书签那几轮的做法一致。
+     这一步做完就能直接看到「`Configuration` cannot be resolved」这类原文。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 
