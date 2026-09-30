@@ -31,7 +31,7 @@ add_library(taocode_workspace native/workspace.cpp native/window_state.cpp nativ
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/git_clone.cpp native/git.cpp
+add_library(taocode_projects native/projects.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/git_clone.cpp native/git.cpp
                              native/settings_transfer.cpp native/git_log.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history xmllite shlwapi ole32)
 
@@ -108,6 +108,9 @@ add_test(NAME projects_lifecycle COMMAND projects_test)
 add_executable(project_file_colors_test native/project_file_colors_test.cpp)
 target_link_libraries(project_file_colors_test PRIVATE taocode_projects)
 add_test(NAME project_file_colors COMMAND project_file_colors_test)
+add_executable(folding_state_test native/folding_state_test.cpp)
+target_link_libraries(folding_state_test PRIVATE taocode_projects)
+add_test(NAME folding_state COMMAND folding_state_test)
 add_executable(git_clone_test native/git_clone_test.cpp)
 target_link_libraries(git_clone_test PRIVATE taocode_projects)
 add_test(NAME git_clone_lifecycle COMMAND git_clone_test)

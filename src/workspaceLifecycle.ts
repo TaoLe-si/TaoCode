@@ -9,6 +9,7 @@
 // 它们共享 `confirmLeave`（离开前的未保存确认）与同一批 `appError` / `busy` 状态，是一个闭环。
 // 注意：`openFile`（编辑器骨架）、会话恢复（src/sessionSnapshot.ts）各自属于别的域。
 import { ref } from 'vue'
+import { importFoldState } from './editorFoldingState'
 import { cloneProgress, defaultGeneralSettings, defaultProjectSettings, isDesktop, normalizeEditorSettings, request,
          type AppState, type Entry, type PluginList, type ProjectForm, type ProjectSettings, type Workspace } from './bridge'
 import type { SyntheticNode } from './components/FileTree.vue'
@@ -131,7 +132,11 @@ async function activateWorkspace(result: Workspace) {
   places.value = []
   useProjectSettings(structuredClone(defaultProjectSettings))
   try {
-    useProjectSettings(await request<ProjectSettings>('project.settings.get'))
+    const loaded = await request<ProjectSettings>('project.settings.get')
+    useProjectSettings(loaded)
+    // 折叠状态跟着项目走（上游存在项目的 workspace 文件里）：读回来的那份灌进会话内存档，
+    // 没有就清空（换项目时不能把上一个项目的折叠状态带过来）。
+    importFoldState(loaded?.foldingState)
     await refreshAppState()
     selectRunConfig()
   } catch (error) { notify(`项目已打开，但读取设置失败：${errorMessage(error)}`, true) }
@@ -187,6 +192,7 @@ async function closeWorkspace() {
     workspaceEpoch.value++
     workspace.value = null
     closeAllPanes()
+    importFoldState(undefined)   // 关项目：折叠状态跟着项目走，别带进下一个
     projectSettings.value = structuredClone(defaultProjectSettings)
     bookmarks.value = []
     places.value = []

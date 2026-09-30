@@ -102,6 +102,7 @@ test('编辑器把「代码折叠」设置交给折叠控制器（顺序与串�
     last = at
   }
   assert.match(controller, /if \(busy\) \{ again = true; return \}/, '管道必须串行（两轮并存会把覆盖状态记错）')
+  assert.match(controller, /flushFoldState\(\)/, '存完顺带安排落盘（上游是 dispose 时交给 saveFoldingState）')
   assert.match(controller, /for \(const entry of deps\.foldingKinds\(\)\) foldKinds\(view, \[entry\.kind\], entry\.collapse\)/,
     '按 kind 折/展开（关掉开关要展开回去）')
   const folding = read('src/editorFolding.ts')

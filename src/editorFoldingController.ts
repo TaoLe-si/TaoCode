@@ -18,7 +18,7 @@
 //     把"用户展开过"记成"折着"（真机上就是这么丢的）。
 import type { EditorView } from '@codemirror/view'
 import { applyFoldPlan, candidatesOf, foldKinds, foldedAreasOf, setFoldingRanges } from './editorFolding'
-import { captureFoldState, dropStaleFolds, rememberCandidates, restorePlan, savedFoldState, signatureAt } from './editorFoldingState'
+import { captureFoldState, dropStaleFolds, flushFoldState, rememberCandidates, restorePlan, savedFoldState, signatureAt } from './editorFoldingState'
 import type { LspFold } from './editorFolding'
 
 export interface FoldingControllerDeps {
@@ -45,6 +45,9 @@ export function createFoldingController(deps: FoldingControllerDeps) {
     const view = deps.view()
     if (!view) return
     captureFoldState(deps.path(), view.state.doc, foldedAreasOf(view.state), enabledKinds())
+    // 存完顺带安排一次**落盘**（去抖）：上游是文件编辑器 dispose 时把状态交给
+    // `CodeFoldingManager.saveFoldingState`（写进 workspace 文件），本仓攒一小会儿写进项目设置。
+    flushFoldState()
   }
 
   /** ④ 按设置把"默认该折着"的那几族折起来，关掉的那几族展开（设置一改就重算）。 */

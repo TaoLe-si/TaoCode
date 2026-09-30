@@ -1,6 +1,7 @@
 // 设置模式层：键表、校验、未知键剪枝、默认值 —— 对应 IDEA 各 Configurable 的
 // 校验与默认值（SettingsSchema）。从 projects.cpp 拆出（桃 2026-09-26：模块化）。
 #include "settings_schema.hpp"
+#include "folding_state_schema.hpp"
 #include "fsops.hpp"
 
 #include <algorithm>
@@ -725,8 +726,11 @@ void validate_export_to_html(const Json& value) {
 
 void validate_project_patch(const Json& patch) {
     known_keys(patch, {"excludedDirs", "runConfigs", "bookmarks", "todoPatterns", "templates", "java",
-                       "fileAssociations", "vcsLog", "scopes", "fileColors", "localFileColors", "bookmarksView", "buildTools", "exportToHtml"},
+                       "fileAssociations", "vcsLog", "scopes", "fileColors", "localFileColors", "bookmarksView", "buildTools", "exportToHtml",
+                       "foldingState"},
                "INVALID_SETTINGS");
+    // 折叠状态（IDEA 的 workspace 文件那一段）：形状与上限在 native/folding_state_schema.cpp。
+    if (patch.contains("foldingState")) validate_folding_state(patch.at("foldingState"));
     if (patch.contains("buildTools")) validate_build_tools(patch.at("buildTools"));
     if (patch.contains("exportToHtml")) validate_export_to_html(patch.at("exportToHtml"));
     if (patch.contains("scopes")) validate_scopes(patch.at("scopes"));

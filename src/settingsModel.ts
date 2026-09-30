@@ -5,6 +5,7 @@
 // 早就贴着机检上限。类型与默认值放这里，调用方仍然从 `src/bridge.ts` 取（那边有 `export ... from`），
 // 所以既有 import 一行都不用改。
 import type { Bookmark } from './bookmarks'
+import type { FoldSnapshot } from './editorFoldingState'
 import type { TemplateSettings } from './templates'
 import { DEFAULT_BUILD_TOOLS, type BuildToolsSettings } from './gradle.ts'
 
@@ -79,7 +80,7 @@ export interface ExportToHtmlSettings {
 export const defaultExportToHtmlSettings: ExportToHtmlSettings = {
   scope: 0, includeSubdirectories: false, printLineNumbers: false, openInBrowser: false, outputDirectory: '',
 }
-export interface ProjectSettings { excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; localFileColors: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
+export interface ProjectSettings { /** 折叠状态（IDEA 的 workspace 文件那一段；键是项目内相对路径）。 */ foldingState?: Record<string, FoldSnapshot[]>; excludedDirs: string[]; runConfigs: RunConfig[]; bookmarks: Bookmark[]; bookmarksView?: BookmarksViewState; todoPatterns: TodoPattern[]; templates: TemplateSettings; java: JavaProjectSettings; fileAssociations: Record<string, string>; /** VCS Log 的 UI 开关（IDEA VcsLogApplicationSettings 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。 */ vcsLog?: { showTagNames: boolean; showRootNames: boolean }; /** 命名作用域（IDEA project.scopes）。 */ scopes?: NamedScopeSetting[]; /** 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：作用域名 + 颜色名，数组顺序即优先级。 */ fileColors?: FileColorSetting[]; localFileColors: FileColorSetting[]; /** 构建工具（IDEA `build.tools` 组：外部系统自动重载 + Gradle 项目设置），**项目级**。 */ buildTools?: BuildToolsSettings; exportToHtml?: ExportToHtmlSettings }
 export interface ProjectForm { parent: string; name: string; template: 'empty' | 'cpp' | 'java' | 'spring-boot' | 'maven' | 'gradle' | 'kotlin' | 'python' | 'node' | 'vue' | 'react'; source: string }
 export interface AppState { recentProjects: RecentProject[]; settings: EditorSettings; general?: GeneralSettingsState; lastProject: string | null; gitAvailable: boolean; defaultParent: string }
 // Source: platform/ide-core/src/com/intellij/ide/GeneralSettings.kt:227-266

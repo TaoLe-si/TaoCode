@@ -6,8 +6,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EditorState } from '@codemirror/state'
 import {
-  captureFoldState, caretInsideRange, clearSavedFoldState, dedupeSnapshots, dropStaleFolds, foldedSnapshots,
-  rememberCandidates, restorePlan, savedFoldState, setSavedFoldState, signatureAt, staleFolds, unfoldedOverrides,
+  captureFoldState, caretInsideRange, clearSavedFoldState, dedupeSnapshots, dropStaleFolds, exportFoldState,
+  FOLD_STATE_LIMITS, foldedSnapshots, importFoldState, rememberCandidates, restorePlan, savedFoldState,
+  setSavedFoldState, signatureAt, staleFolds, unfoldedOverrides,
 } from '../src/editorFoldingState.ts'
 
 const DOC = [
@@ -133,4 +134,27 @@ test('展开计划按签名认块：边界被编辑推走的那条也认（apply
   assert.equal(signatureAt(doc, staleFold), signatureAt(doc, target), '同一块的签名相同（整行原文）')
   const other = bounds(9, 11)
   assert.notEqual(signatureAt(doc, other), signatureAt(doc, target), '不是同一块 ⇒ 签名不同，不会被误展开')
+})
+
+test('落盘：导出按"最近动过的"裁剪到上限，导入能吃回来', () => {
+  clearSavedFoldState()
+  rememberCandidates('a.java', [])
+  // 造 25 个文件（前端上限 20）：从末尾往前取 ⇒ 最近动过的那些留下
+  for (let i = 0; i < 25; i++) setSavedFoldState(`f${i}.java`, [{ from: 0, to: 2, expanded: false, signature: `s${i}` }])
+  const exported = exportFoldState()
+  assert.equal(Object.keys(exported).length, FOLD_STATE_LIMITS.files, '按前端上限裁到 20 个文件')
+  assert.ok(Object.keys(exported).includes('f24.java'), '最近动过的在')
+  assert.ok(!Object.keys(exported).includes('f0.java'), '最久没动的被裁掉')
+  // 每个文件的条数上限 + 签名截断
+  setSavedFoldState('big.java', Array.from({ length: 40 }, (_, i) => ({ from: i * 2, to: i * 2 + 1, expanded: false, signature: 'x'.repeat(200) })))
+  const one = exportFoldState()['big.java']
+  assert.equal(one.length, FOLD_STATE_LIMITS.entries)
+  assert.equal(one[0].signature.length, FOLD_STATE_LIMITS.signature, '签名超长按上限截断')
+  // 导入：形状不对的条目丢掉，好的留下
+  clearSavedFoldState()
+  importFoldState({ 'ok.java': [{ from: 1, to: 5, expanded: true, signature: 'x' }], 'bad.java': [{ from: 5, to: 5, expanded: false, signature: 'y' }, { from: 1, to: 2, expanded: 'no', signature: 'z' }] })
+  assert.deepEqual(savedFoldState('ok.java').map(s => [s.from, s.to, s.expanded]), [[1, 5, true]])
+  assert.deepEqual(savedFoldState('bad.java'), [], '不合规的条目被丢掉（越界/类型错）')
+  importFoldState(undefined)
+  assert.deepEqual(savedFoldState('ok.java'), [], '换项目 ⇒ 清空')
 })

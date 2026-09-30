@@ -1075,7 +1075,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
         if (malformed) throw new BridgeError('INVALID_SETTINGS', '导出到 HTML 的设置要写成 {scope: 0|1|2|4, includeSubdirectories, printLineNumbers, openInBrowser, outputDirectory}。')
         next.exportToHtml = { ...(next.exportToHtml ?? defaultExportToHtmlSettings), ...raw }
       }
-      previewProjectSettings = next
+      previewProjectSettings = params.foldingState === undefined ? next : { ...next, foldingState: params.foldingState as ProjectSettings['foldingState'] }  // 折叠状态只透传（形状/上限在原生）
       return { settings: structuredClone(previewProjectSettings), entries: previewEntries('') }
     }
     // Source: GeneralSettings.kt:227-266 — the same fields the native side

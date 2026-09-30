@@ -17,6 +17,7 @@
 //   · `shouldExpandNewRegion` 的规矩：**第一次**给某块建区间时，光标落在里面就不折
 //     （`caretInsideRange`，`:236-238`）；已经有状态的按老状态办。
 import type { Text } from '@codemirror/state'
+import { request } from './bridge.ts'   // 带扩展名：这个模块能被 node --test 直接加载（见 tests/editor-folding-state.test.mjs）
 
 /** 一段偏移区间。 */
 export interface FoldBounds { from: number; to: number }
@@ -73,8 +74,66 @@ export function savedFoldState(path: string): readonly FoldSnapshot[] {
 
 /** 存这份文档的折叠状态（空表就删条目 —— 上游 `writeExternal` 空表也不写）。 */
 export function setSavedFoldState(path: string, snapshots: readonly FoldSnapshot[]): void {
+  // 删了再插：Map 的插入顺序就是"最近动过的"顺序（`exportFoldState` 从末尾往前取）。
+  saved.delete(path)
   if (snapshots.length) saved.set(path, snapshots.map(snapshot => ({ ...snapshot })))
-  else saved.delete(path)
+}
+
+// ── 落盘（项目级设置里的 `foldingState`） ─────────────────────────────────────────────
+//
+// 上游把这份状态写进 **workspace 文件**（`DocumentFoldingInfo.writeExternal:260-295`），读回来时
+// 用**文件时间戳**挡"磁盘上改过"（`readExternal:333`）。本仓落在项目级设置那一段
+// （`projects.json` → `perProject[项目]`，前端走 `project.settings.update`），时间戳的替身是轻签名。
+// 上限比原生那道闸更紧一档：整份应用状态有 1 MiB 硬上限，而折叠状态是唯一随项目规模线性长的字段 ——
+// 前端按"最近动过的"裁剪，别等到原生报错才发现存不下。
+export const FOLD_STATE_LIMITS = {
+  files: 20,      // 原生那道闸是 50；前端主动裁到 20（折叠状态是锦上添花，不该挤掉运行配置那些）
+  entries: 30,    // 原生 40
+  signature: 96,  // 原生 96：超了就截断（同一块两行的前 96 个字符足够认出是不是同一行）
+} as const
+
+/** 把会话内的存档导出成落盘的形状（按"最近动过的"截断到上限）。 */
+export function exportFoldState(): Record<string, FoldSnapshot[]> {
+  const out: Record<string, FoldSnapshot[]> = {}
+  // Map 保持插入顺序；抓取时会把动过的路径重新插到末尾，所以从**末尾往前**取就是"最近动过的"。
+  const recent = [...saved.keys()].reverse()
+  for (const path of recent) {
+    if (Object.keys(out).length >= FOLD_STATE_LIMITS.files) break
+    const snapshots = savedFoldState(path)
+    if (!snapshots.length) continue
+    out[path] = snapshots.slice(0, FOLD_STATE_LIMITS.entries).map(snapshot => ({
+      from: snapshot.from,
+      to: snapshot.to,
+      expanded: snapshot.expanded,
+      signature: snapshot.signature.slice(0, FOLD_STATE_LIMITS.signature),
+    }))
+  }
+  return out
+}
+
+/** 把落盘的那份读回会话内（工作区打开时调；`undefined` 表示换项目 ⇒ 清空）。 */
+export function importFoldState(record: Record<string, readonly FoldSnapshot[]> | undefined): void {
+  saved.clear()
+  if (!record) return
+  for (const [path, snapshots] of Object.entries(record)) {
+    if (typeof path !== 'string' || !Array.isArray(snapshots)) continue
+    const valid = snapshots.filter(snapshot => snapshot
+      && Number.isInteger(snapshot.from) && Number.isInteger(snapshot.to)
+      && snapshot.from >= 0 && snapshot.from < snapshot.to
+      && typeof snapshot.expanded === 'boolean'
+      && typeof snapshot.signature === 'string')
+    if (valid.length) saved.set(path, valid.map(snapshot => ({ ...snapshot })))
+  }
+}
+
+let flushTimer: number | undefined
+/** 落盘（去抖）：折叠状态变得很频繁，攒一下再写；写失败不影响编辑（这份状态是锦上添花）。 */
+export function flushFoldState(delayMs = 1500): void {
+  if (flushTimer !== undefined) clearTimeout(flushTimer)
+  flushTimer = window.setTimeout(() => {
+    flushTimer = undefined
+    void request('project.settings.update', { foldingState: exportFoldState() }).catch(() => undefined)
+  }, delayMs)
 }
 
 /** 只在测试与"文件被外部改过"的场合用。 */
