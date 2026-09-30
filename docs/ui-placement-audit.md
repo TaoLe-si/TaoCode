@@ -2646,3 +2646,37 @@ B4 收口后按 `docs/inventory/_domains.json` 挑下一个域。`projectviews` 
 **判据（5 条）**：覆盖面从 `projectviews_scan.md` 重推（排测试源码集）并与 `bookmarks.txt` 对齐；
 `[x]`/`[~]` 行的引用必须落在磁盘上真实存在的 `src/`/`native/` 文件；四档计数自洽且与表尾一致；§C 三条在。
 B5 这一域没有 `[-]`/`[ ]`，所以门控没有 §D 那一组检查（对比 B4 的门控有）。
+
+## BM. 2026-09-30 第六十七批：B5 §C① —— 书签的**行文本锚**与编辑后对账（删掉/撤销）
+
+上游 `BookmarkManager`（`platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java`）在
+`beforeDocumentChange` 里给每条书签记下「行号 + 那一行的原文」（`:430-444`），`documentChanged` 里
+（`:449-536`）做三件事：**行号越界的删掉**（`moveToDeleted` 记进 `myDeletedDocumentBookmarks`，`:522-534`）、
+**同一行只留一条**（`isDuplicate:517-530`）、**原文回到同一行号就放回去**（`:536` 的
+`bookmarkedText.equals(lineContent)`，单行移动的特例是 `line -= 2`，`:499-506`）。
+
+**落点**（`src/bookmarks.ts` 的 `reconcileBookmarks` + `Bookmark.text`，接线在 `src/bookmarkActions.ts`）：纯函数
+对外给「书签表 + 路径 + 当前内容 + 上一次丢掉的那些」，回「留下的 + 丢掉的」；丢掉表是**会话内**的
+（上游的 `myDeletedDocumentBookmarks` 也不进持久化状态 —— `getState()` 只给书签表）。放书签时记下原文
+（`placeBookmark(..., text)`），每次对账把还留着的那些刷成当前原文 —— 与上游"每次变更前都重记一遍"等价。
+
+**接线**：`src/lspNavigation.ts` 的 `onEditorChange`（编辑器每次内容变更都走它）调
+`notifyEditorContentChanged(path, 内容)`；内容取自编辑器句柄（`editorFor(path).text()`，因为 `tab.content`
+只在保存时更新）。为什么走模块级钩子而不是加依赖：宿主 `App.vue` 贴着机检上限，为一行回调去改它不划算；
+`createBookmarkActions` 建实例时把实现挂上（`src/bookmarkActions.ts:30-40`）。
+
+**真机取证**（在真 exe 里插临时探针记录 `reconcile` 的输入输出，取证后已撤）：
+
+| 动作 | 探针记录 | 结论 |
+|---|---|---|
+| 一次删掉第 4 行（行尾到行尾的选区 → `Delete`） | `{lines: 3, before: 1, after: 0, dropped: 0 → 1}` | 越界的书签被丢进会话内的表 ✓ |
+| 撤销后再一次变更（敲一个字符） | `{lines: 4, before: 1, after: 2, dropped: 1 → 0}` | 原文回到同一行号 ⇒ 放回去 ✓，**同时暴露**"同一行两条"的重复 |
+| 上面那条重复 | —— | 按上游 `isDuplicate:517-530` 补了查重规则（同一行只留一条，多出来的也丢进那张表），单元判据钉住 |
+
+**没复验到的一条**：修掉查重之后，「面板上只剩一条」的最终观感没在真机上确认 —— 最后几个实例的
+**项目视图与源代码管理列表在 DOM 里渲染为空**（`workspace.files` 的 IPC 回包正常：5 个文件），
+文件打不开就做不了这一步。这条另行登记（见 `docs/ui-parity-checklist.md` 的待查项：项目树/SCM 列表
+偶发零行，原生数据正常）。行为本身有单元判据（`tests/bookmarks.test.mjs` 10 条，含查重与撤销放回）。
+
+**判据**：`tests/bookmarks.test.mjs`：越界丢弃 + 原文回来放回 + 单行上移特例（`line - 2`）+ 空原文照样认
+（上游没有"非空才算"的条件）+ 老数据（无原文）只按行号保留 + 同一行只留一条 + 别的文件不参与。

@@ -63,6 +63,8 @@
 
 ### A4 提交工具窗口 `ChangesViewCommitPanel.kt`
 
+- [x] **已加（第六十七批）** 书签的**行文本锚与编辑后对账**：一次删掉整行 ⇒ 越界的书签被丢（记在会话内的"丢掉表"里），撤销让原文回到同一行号 ⇒ 放回去；同一行只留一条（上游 `isDuplicate:517-530`）。落点 `src/bookmarks.ts` 的 `reconcileBookmarks` + `src/bookmarkActions.ts` / `src/lspNavigation.ts` 的变更接线（审计 §BM）。
+- [ ] **待查（第六十七批发现）** 项目视图与源代码管理列表**偶发渲染零行**：原生 `workspace.files` 的 IPC 回包正常（5 个文件），但 `.tree-entry` 一条都不渲染 ⇒ 文件打不开，B5 §C① 的面板级复验因此没做成。复现：新起一个实例、打开 `ui-parity-proj`，点活动条「项目」后树仍为空（有几轮正常、有几轮全空）。下一批先查这条。
 - [x] **已起域（第六十六批）** B5 = `ide/bookmarks` 5 类：判决 `docs/inventory/verdict-bookmarks.md` + 门控 `tests/b5-verdict.test.mjs`（覆盖率从扫描件重推、引用要落在真文件上）。五条全 `[~]`，缺口按 §G 行内逐条写明（编辑后重锚 / 描述与书签类型 / 列表项富渲染），§C 三条是下一批。
 - [x] **已收口（第六十五批）** B4（`codeInsight/folding` 69 类）`[ ]` 归零：`FoldingPolicy`/`FoldingUtil` 判 `[~]`（逐函数有落点），`CollapseBlockHandler`/`CodeFoldingZombie`/`FoldingHintMouseMotionListener` 判 `[-]`（语言侧 EP、注册表后的模型缓存、装订线折叠轮廓区本仓没有对应形态）—— 依据逐条写在判决 §G 与审计 §BK。
 - [x] **已加（第六十四批）** 折叠状态**落盘**：写进项目级设置（`ProjectSettings.foldingState`），杀进程重启后打开同一文件折叠原样回来；原生新增 `native/folding_state_schema.cpp` 校验形状与上限（50×40、签名 ≤96），前端按"最近动过的"裁到 20×30（判决 §C③，审计 §BJ）。

@@ -665,3 +665,13 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 `openapi/wm/impl/welcomeScreen` 93、`ide/projectView` 158、`history` 94。
 其余域的大组：`editor` 域 `openapi/editor` 928 与 `codeInsight/daemon` 629（最大两块）、
 `vcs/openapi/vcs` 1122、`settings-run/execution` 1561、`ui` 域 `com/intellij/ui` 1136、`actions` 域 302。
+
+### 26.2 §C① 已做（2026-09-30 第六十七批）
+
+书签的行文本锚与编辑后对账：`src/bookmarks.ts` 的 `reconcileBookmarks`（越界丢弃 + 原文回来放回 +
+单行上移 `line - 2` + 同一行只留一条）与 `Bookmark.text`；接线在 `src/bookmarkActions.ts`
+（会话内的"丢掉表" + 模块级内容变更钩子）与 `src/lspNavigation.ts` 的 `onEditorChange`。
+真机取证（临时探针记录 reconcile 的输入输出，取证后已撤）：删整行 ⇒ `before 1 → after 0`、丢掉表 `0 → 1`；
+撤销后的下一次变更 ⇒ `before 1 → after 2`、丢掉表 `1 → 0`（顺带暴露的"同一行两条"已按上游 `isDuplicate` 修掉）。
+**剩**：书签描述（`Bookmark` 行）、书签类型与文件书签、列表项富渲染；
+**待查**：项目树/SCM 列表偶发零行（挡了面板级复验，见审计 §BM 与 checklist）。

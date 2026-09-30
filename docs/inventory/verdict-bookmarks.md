@@ -22,14 +22,15 @@
 | `src/editorGutterIcons.ts` | 装订线上的书签图标（`GutterIconRenderer` 的等价物） | `Bookmark.updateHighlighter`（`Bookmark.java:118-125`）挂的高亮器 |
 | `ProjectSettings.bookmarks`（项目级） | 持久化 | `BookmarkManager implements PersistentStateComponent<Element>`（`BookmarkManager.java:62`） |
 
-## C. 下一批该做的三条（按用户可见度）
+## C. 下一批该做的条目（按用户可见度）
 
-① **编辑后重锚 + 行文本**：上游给每条书签记下"变化前那一行的原文"（`BookmarkManager.java:439-444` 的
-    `BookmarkInfo(bookmark, line, text)`），文档一变就按文本找回、去掉失效与重复的（`:449-495`
-    的 `documentChanged` + `moveToDeleted` + `myDeletedDocumentBookmarks` 的恢复循环）；本仓的
-    `Bookmark{path,line}` 只有行号，**上面插一行书签就指到别人身上**。自动描述也一并做：
-    `addTextBookmark` 的描述取自"选中的文本，否则整行 trim，超过 200 字符截断"
-    （`getAutoDescription:127-139`，`MAX_AUTO_DESCRIPTION_SIZE`）。
+① **编辑后对账 + 行文本锚** —— ✅ **已做（第六十七批）**：本仓落在 `src/bookmarks.ts` 的
+    `reconcileBookmarks` + `Bookmark.text`，接线在 `src/bookmarkActions.ts` 与 `src/lspNavigation.ts` 的
+    `onEditorChange`。做的是上游 `documentChanged`（`:449-536`）那三条：行号越界的删掉并记进会话内的
+    "丢掉表"（`:522-534`）、同一行只留一条（`isDuplicate:517-530`）、原文回到同一行号就放回去
+    （`:536`，含单行移动的 `line -= 2` 特例 `:499-506`）。真机取证与"面板观感未复验"的原因写在审计 §BM。
+    **还没做**：自动描述 —— `addTextBookmark` 的描述取自"选中的文本，否则整行 trim，超过 200 字符截断"
+    （`getAutoDescription:127-139`），本仓的 `Bookmark` 没有 description 字段（`Bookmark` 那一行记着）。
 ② **书签类型与文件书签**：`BookmarkType`（`Bookmark.java:181`）与 `addFileBookmark`
    （`BookmarkManager.java:120-125`，行 `-1`）—— 本仓只有行书签；书签类型还是那三个"没渲染"的
    视图开关（`rewriteBookmarkType` 等）的前置。

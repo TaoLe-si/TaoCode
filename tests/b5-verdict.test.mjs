@@ -84,9 +84,9 @@ test('四档计数自洽，且与表尾那句一致', () => {
     '表尾的和数要与逐条表一致')
 })
 
-test('§C 记下了下一批该做的三条（按用户可见度）', () => {
-  const section = verdict.split('## C. 下一批该做的三条')[1].split('## G.')[0]
-  for (const item of ['重锚', '书签类型', '列表项的富渲染']) {
+test('§C 记下了下一批该做的条目（按用户可见度）', () => {
+  const section = verdict.split('## C. 下一批该做的条目')[1].split('## G.')[0]
+  for (const item of ['对账', '自动描述', '书签类型', '列表项的富渲染']) {
     assert.ok(section.includes(item), `§C 缺下一批该做的条目：${item}`)
   }
 })
