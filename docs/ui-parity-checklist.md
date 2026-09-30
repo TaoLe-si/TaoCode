@@ -1070,6 +1070,11 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 - [ ] **LSP 复验的精确落点（2026-10-01 实测）**：写入 `buildTools.gradle.enabled=false` 后在大工程上跑：
   `definition` 从「20–28s 无回包」变成**立刻回包** ✓（导入 churn 让语义请求全悬死的那一半解决了），
   但内容是 `{"available": false}` ✗ —— 外部类型仍未解析。两个候选原因（**各一次探针就能定死**）：
+  **2026-10-01 第二次探针（等 75s 再问）**：`definition` 仍 `available:false`，但 `hover` 回
+  `{"available": true, "contents": ""}` —— 文件已被认作 Java（hover 能力在），**只是符号解析不出来**
+  （解析出来时 hover 会回签名）⇒ 更像候选 ②（类路径/源根没真正生效），而不是时序。下一个诊断：
+  把合成出来的 `java.project.{sourcePaths,referencedLibraries}` 打印一次（或问 JDT 的
+  `java.project.getClasspath`），确认服务器收到的到底是什么。
   ① **时序**：启动后 5s 就 `lsp.open` 并立刻发问，而 `java.project.sourcePaths`/`referencedLibraries`
   是随 `initialize` 的 settings 下去的 —— 文档可能先被当成"不在任何源根里"建了不可见工程。
   验证：等 60s 再问一次，或等设置到达后重发 `lsp.open`（我倾向这条：磁盘上的 jar 与
