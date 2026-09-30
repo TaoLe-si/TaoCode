@@ -3,7 +3,14 @@
 // so the toggle and walk rules are checkable without a DOM.
 export interface Bookmark {
   path: string
-  line: number
+  /**
+   * 行号（1 基）。**没有这个字段 = 文件书签**（上游 `FileBookmark`：
+   * `platform/lang-api/src/com/intellij/ide/bookmark/FileBookmark.kt`，
+   * 由 `BookmarksManagerImpl.createBookmark(file)` 从项目树/编辑器标签右键产生，
+   * 见 `actions/extensions.kt:58-72`；持久化时**不写 line 属性**——
+   * `BookmarkManager.writeExternal:335-337` 只在线号 ≥ 0 时才写）。
+   */
+  line?: number
   /**
    * 助记键：单个字符 `0-9` 或 `A-Z`。上游 2026.2 把它建成 `BookmarkType` 枚举
    * （`platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:24-45`：
@@ -22,7 +29,11 @@ export interface Bookmark {
   description?: string
 }
 
-const compare = (a: Bookmark, b: Bookmark) => a.path.localeCompare(b.path) || a.line - b.line
+// 文件书签没有行号：按上游那条 `line = -1` 排在同文件的行书签**前面**。
+const compare = (a: Bookmark, b: Bookmark) => a.path.localeCompare(b.path) || (a.line ?? -1) - (b.line ?? -1)
+
+/** 文件书签（没有行号的那一种）。 */
+export const isFileBookmark = (entry: Bookmark): boolean => entry.line === undefined
 
 /**
  * 行书签的**自动描述**：书签树/列表那一行显示的文本。
@@ -66,7 +77,8 @@ export function sortedBookmarks(list: readonly Bookmark[]): Bookmark[] {
 }
 
 const withMnemonic = (entry: Bookmark, mnemonic?: string): Bookmark => {
-  const next: Bookmark = { path: entry.path, line: entry.line }
+  // 文件书签**不写 line 键**（上游持久化也只在行号 ≥ 0 时才写）—— 别把 `line: undefined` 物化出来。
+  const next: Bookmark = entry.line === undefined ? { path: entry.path } : { path: entry.path, line: entry.line }
   if (mnemonic !== undefined) next.mnemonic = mnemonic
   if (entry.text !== undefined) next.text = entry.text
   if (entry.description !== undefined) next.description = entry.description
@@ -79,7 +91,7 @@ const withMnemonic = (entry: Bookmark, mnemonic?: string): Bookmark => {
  * Ctrl+Shift+digit, i.e. it moves the digit to this line (freeing its old owner) and
  * removes the bookmark when the digit already sits here.
  */
-export function placeBookmark(list: readonly Bookmark[], path: string, line: number, mnemonic?: string, text?: string,
+export function placeBookmark(list: readonly Bookmark[], path: string, line: number | undefined, mnemonic?: string, text?: string,
                              description?: string, rewrite = true): Bookmark[] {
   const here = (entry: Bookmark) => entry.path === path && entry.line === line
   const existing = list.find(here)
@@ -90,13 +102,18 @@ export function placeBookmark(list: readonly Bookmark[], path: string, line: num
   // `rewrite === false` = 用户在确认里选了取消：整件事作废（书签也不添加，与上游那条早退一致）。
   const squatted = mnemonic === undefined ? undefined : list.find(entry => entry.mnemonic === mnemonic)
   if (squatted !== undefined && !here(squatted) && !rewrite) return [...list]
+  // 重写时老主人的下场分两种（上游 `rewriteType:285-295`）：行书签**整条删掉**，
+  // 文件书签只降级成 DEFAULT（`info.changeType(BookmarkType.DEFAULT)`）—— 文件书签是
+  // "给文件本身做的记号"，删掉它等于用户右键那一下白点了。`here(entry)` 那一条是"它自己"，
+  // 换编号时不能把自己删掉。
   const freed = mnemonic === undefined
     ? [...list]
-    : list.filter(entry => entry.mnemonic !== mnemonic || here(entry))
-  // 选中文字时 F11 记下的是**自定义**描述：它只在这条书签被放上时写一次（上游同样只在 toggle 之后 setDescription），
-  // 之后不再跟着行内容走；行原文锚 `text` 仍由对账刷新。
+    : list.flatMap(entry => {
+        if (entry.mnemonic !== mnemonic || here(entry)) return [entry]
+        return entry.line === undefined ? [withoutMnemonic(entry)] : []
+      })
   const extra = { ...(text === undefined ? {} : { text }), ...(description === undefined ? {} : { description }) }
-  const anchored = { path, line, ...extra }
+  const anchored = line === undefined ? { path, ...extra } : { path, line, ...extra }
   return existing
     ? freed.map(entry => (here(entry) ? withMnemonic({ ...entry, ...extra }, mnemonic) : entry))
     : [...freed, withMnemonic(anchored, mnemonic)]
@@ -138,6 +155,13 @@ export function removeBookmark(list: readonly Bookmark[], entry: Bookmark): Book
   return list.filter(item => !(item.path === entry.path && item.line === entry.line))
 }
 
+/** 文件书签的开关（右键项目树/编辑器标签那一下）。 */
+export function toggleFileBookmark(list: readonly Bookmark[], path: string, description?: string): Bookmark[] {
+  const existing = list.find(entry => entry.path === path && entry.line === undefined)
+  if (existing !== undefined) return list.filter(entry => entry !== existing)
+  return placeBookmark(list, path, undefined, undefined, undefined, description)
+}
+
 /**
  * 编辑后对账（上游 `BookmarkManager.beforeDocumentChange` + `documentChanged`，
  * `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java:430-536`）：
@@ -159,13 +183,15 @@ export function reconcileBookmarks(
   const kept: Bookmark[] = []
   const nextDropped: Bookmark[] = []
   for (const entry of list) {
-    if (entry.path !== path) { kept.push(entry); continue }
+    // 文件书签没有行号，内容变更与它无关（上游 documentChanged 只动行书签）。
+    if (entry.path !== path || entry.line === undefined) { kept.push(entry); continue }
     const text = textAt(entry.line)
     if (text === undefined) nextDropped.push({ ...entry, text: entry.text ?? '' })
     else kept.push({ ...entry, text })
   }
   for (const entry of dropped) {
-    if (entry.path !== path) { nextDropped.push(entry); continue }
+    // 文件书签（没有行号）不进"放回"这一支：它们从来不会因为行号越界被丢掉。
+    if (entry.path !== path || entry.line === undefined) { nextDropped.push(entry); continue }
     // 空原文也认：上游那一句就是 `bookmarkedText.equals(lineContent)`（`:536`），没有"非空才算"的条件 ——
     // 空行上的书签删掉再撤销时，正是靠 '' == '' 放回去的。
     const matches = (line: number) => entry.text !== undefined && textAt(line) === entry.text

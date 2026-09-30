@@ -6,7 +6,7 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkAnchor, bookmarkDescription, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, withoutMnemonic } from './bookmarks'
+import { bookmarkAnchor, bookmarkDescription, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
@@ -22,6 +22,8 @@ export interface BookmarkActionsDeps {
   /** 语言名（模板里显示用）。 */
   language: Ref<string>
   baseName: (path: string) => string
+  /** 打开一个文件（文件书签的跳转就是"打开它"，没有行号可去）。 */
+  openPath?: (path: string) => void
   /** 记入"最近位置"环（IDEA 的 InFileRecentPlaces）。 */
   rememberPlace: (entry: any) => void
   /** 某个文件**当前**的编辑器内容（编辑器里改了还没保存时 `tab.content` 是旧的）。 */
@@ -51,7 +53,8 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   const sortedAll = computed(() => sortedBookmarks(bookmarks.value))
   const bookmarkLines = computed(() => {
     const map: Record<string, number[]> = {}
-    for (const entry of bookmarks.value) (map[entry.path] ??= []).push(entry.line)
+    // 文件书签没有行号 ⇒ 没有装订线图标（上游也只有行书签走 gutter 高亮器）。
+    for (const entry of bookmarks.value) if (entry.line !== undefined) (map[entry.path] ??= []).push(entry.line)
     return map
   })
   /**
@@ -160,6 +163,25 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     deps.updateBookmarkViewSettings({ rewriteBookmarkType: true })
     confirmRewrite()
   }
+  /** 跳到一条书签：行书签去行号，文件书签只把文件打开。 */
+  function goTo(entry: Bookmark) {
+    if (entry.line === undefined) deps.openPath?.(entry.path)
+    else void revealLocation({ path: entry.path, line: entry.line - 1 })
+  }
+  /**
+   * 文件书签的开关（右键项目树/编辑器标签那一下）。上游 `BookmarksManagerImpl.createBookmark(file)`
+   * 从 `VirtualFile` 建一条没有行号的书签，`toggle(bookmark, DEFAULT)` 就是加/删。
+   */
+  function bookmarkFile(path: string) {
+    const existing = bookmarks.value.find(entry => entry.path === path && entry.line === undefined)
+    bookmarks.value = toggleFileBookmark(bookmarks.value, path)
+    deps.notify(existing !== undefined ? `已取消书签 ${path}` : `书签 ${path}`)
+    persistBookmarks()
+  }
+  /** 右键那一行的标题（上游 `bookmark.add.action.text` / `bookmark.delete.action.text`）。 */
+  function fileBookmarkLabel(path: string): string {
+    return bookmarks.value.some(entry => entry.path === path && entry.line === undefined) ? '删除书签' : '添加书签'
+  }
   /** 菜单里那一行的标题随状态变（上游 `ChooseBookmarkTypeAction.update:33-41` 的三段文案）。 */
   function bookmarkMnemonicLabel(): string {
     const tab = active.value
@@ -182,14 +204,14 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   function jumpMnemonic(mnemonic: string) {
     const found = bookmarkOwner(bookmarks.value, normalizeMnemonic(mnemonic) ?? mnemonic)
     if (!found) { deps.notify(`没有助记键 ${mnemonic} 的书签（Ctrl+F11 可以贴一个）。`, true); return }
-    void revealLocation({ path: found.path, line: found.line - 1 })
+    goTo(found)
   }
   // IDEA walks the whole project, not just the open file, and wraps around.
   function cycleBookmark(reverse: boolean) {
     const tab = active.value
     const target = nextInList(bookmarks.value, tab?.path ?? '', tab?.line ?? 0, reverse)
     if (!target) { deps.notify(bookmarks.value.length ? '只有这一个书签。' : '还没有书签：F11 标记当前行，Ctrl+F11 编号。', true); return }
-    void revealLocation({ path: target.path, line: target.line - 1 })
+    goTo(target)
   }
   function dropBookmark(entry: Bookmark) {
     bookmarks.value = removeBookmark(bookmarks.value, entry)
@@ -202,7 +224,7 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
 
   return {
     bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
-    confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel,
+    confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, goTo,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,
     jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,

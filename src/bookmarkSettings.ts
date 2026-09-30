@@ -15,11 +15,12 @@ export function normalizeBookmarks(value: unknown): Bookmark[] {
   const list = value as Bookmark[]
   const malformed = !Array.isArray(list) || list.length > 200 || list.some(entry =>
     !entry || typeof entry.path !== 'string' || !entry.path || entry.path.startsWith('/') || entry.path.includes('\\') || entry.path.includes('..')
-    || !Number.isInteger(entry.line) || entry.line < 1 || entry.line > 1000000
+    // `line` 缺省 = 文件书签（上游持久化不写 line 属性）；写了就必须是 1..1000000。
+    || (entry.line !== undefined && (!Number.isInteger(entry.line) || entry.line < 1 || entry.line > 1000000))
     || (entry.mnemonic !== undefined && (typeof entry.mnemonic !== 'string' || !BOOKMARK_MNEMONICS.includes(entry.mnemonic)))
     || (entry.description !== undefined && (typeof entry.description !== 'string' || entry.description.length > MAX_FIELD))
     || (entry.text !== undefined && (typeof entry.text !== 'string' || entry.text.length > MAX_FIELD)))
-  if (malformed) throw new Error('书签要写成 {path, line, mnemonic?, text?, description?}：行号从 1 开始，助记键是单个 0-9/A-Z 字符。')
+  if (malformed) throw new Error('书签要写成 {path, line?, mnemonic?, text?, description?}：行号（有就是 1 起）或省掉表示文件书签，助记键是单个 0-9/A-Z 字符。')
   return list.map(entry => ({ ...entry }))
 }
 

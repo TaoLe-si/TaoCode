@@ -490,7 +490,7 @@ void validate_bookmarks(const Json& values) {
     std::set<std::string> places;
     std::set<std::string> mnemonics;
     for (const auto& value : values) {
-        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?, text?, description?}。");
+        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line?, mnemonic?, text?, description?}（省掉 line 就是文件书签）。");
         known_keys(value, {"path", "line", "mnemonic", "text", "description"}, "INVALID_SETTINGS");
         const auto path = text_or(value, "path");
         if (path.empty() || path.size() > 512) fail("INVALID_SETTINGS", "书签路径不能为空且不超过 512 字节。");
@@ -499,11 +499,18 @@ void validate_bookmarks(const Json& values) {
         if (path == ".." || path.starts_with("../") || path.find("/../") != std::string::npos ||
             path.ends_with("/.."))
             fail("INVALID_SETTINGS", "书签路径不能跳出工作区。");
-        if (!value.contains("line") || !value.at("line").is_number_integer() ||
-            value.at("line") < 1 || value.at("line") > max_bookmark_line)
-            fail("INVALID_SETTINGS", "书签行号必须是 1 到 1000000 的整数。");
-        if (!places.insert(path + ':' + std::to_string(value.at("line").get<std::int64_t>())).second)
-            fail("INVALID_SETTINGS", "同一行只能有一个书签：" + path);
+        // **没有行号 = 文件书签**（上游 `FileBookmark`：从项目树/编辑器标签右键产生，行 -1；
+        // 持久化时 `BookmarkManager.writeExternal:335-337` 只在线号 ≥ 0 时才写 line 属性）。
+        // 写了就必须是 1..1000000 —— 0/-1 这类"内部哨兵值"不接受，缺省才是文件书签。
+        if (value.contains("line")) {
+            if (!value.at("line").is_number_integer() ||
+                value.at("line") < 1 || value.at("line") > max_bookmark_line)
+                fail("INVALID_SETTINGS", "书签行号必须是 1 到 1000000 的整数（省掉 line 表示文件书签）。");
+            if (!places.insert(path + ':' + std::to_string(value.at("line").get<std::int64_t>())).second)
+                fail("INVALID_SETTINGS", "同一行只能有一个书签：" + path);
+        } else if (!places.insert(path + ":file").second) {
+            fail("INVALID_SETTINGS", "同一个文件只能有一个文件书签：" + path);
+        }
         // `text` = 那一行的原文，是编辑后对账的**锚**（前端 `reconcileBookmarks` 靠它判断
         // "原文回到同一行就放回"，见 src/bookmarks.ts）。上游把它持久化成
         // `<bookmark description="…">`（`BookmarkManager.writeExternal:329-333`，只写非空值）——

@@ -31,8 +31,16 @@ const scrollBox = ref<HTMLDivElement>()
 
 const folderOf = (path: string) => path.slice(0, path.length - path.split('/').pop()!.length).replace(/\/$/, '')
 const groups = computed(() => groupBookmarks(props.entries, props.settings.groupLineBookmarks))
+/**
+ * 文件书签（没有行号）与行书签分开：前者渲染成"文件那一行"（上游的 `FileNode`，
+ * `providers/FileBookmarkImpl.kt:26-29` 按 isDirectory 建 FolderNode/FileNode），
+ * 后者渲染成 `LineNode`。分组开着时文件书签就落在它那个组的文件行上 —— 这与 IDEA
+ * "FileNode 底下挂 LineNode"是同一个形状，也避免同名两行。
+ */
+const fileBookmarks = computed(() => new Map(props.entries.filter(entry => entry.line === undefined).map(entry => [entry.path, entry])))
+const lineEntriesOf = (group: { path: string; entries: BookmarkEntry[] }) => group.entries.filter(entry => entry.line !== undefined || !group.path)
 /** 可见顺序（键盘上下移动按它走，与屏幕上看到的一致）。 */
-const visible = computed(() => groups.value.flatMap(group => group.entries))
+const visible = computed(() => groups.value.flatMap(group => lineEntriesOf(group as never)))
 
 // autoscrollFromSource：编辑器切到某个文件时，滚到该文件的第一条书签。
 watch(() => props.activePath, async path => {
@@ -97,12 +105,15 @@ function onKeydown(event: KeyboardEvent) {
     <div v-else ref="scrollBox" class="bookmark-scroll" role="list" aria-label="项目书签" tabindex="0" @keydown="onKeydown" @focus="cursor = cursor || (visible.length ? bookmarkKey(visible[0]) : '')">
       <template v-for="group in groups" :key="group.path || 'flat'">
         <!-- 分组模式下的文件标题行（IDEA 的 GroupLineBookmarks = 按文件分组） -->
-        <div v-if="group.path" class="bookmark-group-head" role="presentation" :title="group.path">
-          <span class="bookmark-group-name">{{ group.path.split('/').pop() }}</span>
+        <div v-if="group.path" class="bookmark-group-head" :role="fileBookmarks.get(group.path) ? 'listitem' : 'presentation'" :title="group.path">
+          <span class="bookmark-digit" :title="fileBookmarks.get(group.path)?.mnemonic === undefined ? '无编号' : `Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic ?? '' }}</span>
+          <button v-if="fileBookmarks.get(group.path)" class="bookmark-group-name bookmark-file-open" :title="`打开 ${group.path}${bookmarkDescription(fileBookmarks.get(group.path)!) ? '：' + bookmarkDescription(fileBookmarks.get(group.path)!) : ''}`" @click="activate(fileBookmarks.get(group.path)!)">{{ group.path.split('/').pop() }}</button>
+          <span v-else class="bookmark-group-name">{{ group.path.split('/').pop() }}</span>
           <span class="bookmark-group-folder">{{ folderOf(group.path) }}</span>
-          <span class="bookmark-group-count">{{ group.entries.length }}</span>
+          <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="13" /></button>
+          <span v-else class="bookmark-group-count">{{ group.entries.length }}</span>
         </div>
-        <div v-for="entry in group.entries" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }">
+        <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }">
           <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
                   :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行${bookmarkDescription(entry) ? `：${bookmarkDescription(entry)}` : ''}`" @click="activate(entry)">
             <span class="bookmark-digit" :title="entry.mnemonic === undefined ? '无编号' : `Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic ?? '' }}</span>
@@ -119,7 +130,7 @@ function onKeydown(event: KeyboardEvent) {
               <span v-if="bookmarkDescription(entry)" class="bookmark-detail">{{ bookmarkDescription(entry) }}</span>
               <span class="bookmark-name" :class="{ 'bookmark-name-muted': bookmarkDescription(entry) !== undefined }">{{ entry.path.split('/').pop() }}</span>
               <span class="bookmark-folder">{{ folderOf(entry.path) }}</span>
-              <span class="bookmark-line">:{{ entry.line }}</span>
+              <span v-if="entry.line !== undefined" class="bookmark-line">:{{ entry.line }}</span>
             </template>
           </button>
           <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>

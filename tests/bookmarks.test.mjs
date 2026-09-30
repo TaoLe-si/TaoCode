@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, withoutMnemonic } from '../src/bookmarks.ts'
+import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, isFileBookmark, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from '../src/bookmarks.ts'
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -165,4 +165,40 @@ test('助记键被占用：重写 = 老的那条被删掉（上游 rewriteType:2
   // 重写：老的那条行书签被删掉，新的拿到 B
   const rewritten = placeBookmark(taken, 'new.cpp', 9, 'B', 'new line', undefined, true)
   assert.deepEqual(rewritten.map(entry => [entry.path, entry.line, entry.mnemonic]), [['new.cpp', 9, 'B']])
+})
+
+test('文件书签：没有行号，按文件的开关切换，且不与行书签互相干扰', () => {
+  const withFile = toggleFileBookmark([], 'src/a.cpp')
+  assert.deepEqual(withFile, [{ path: 'src/a.cpp' }], '文件书签没有 line 键')
+  assert.equal(isFileBookmark(withFile[0]), true)
+  assert.equal(isFileBookmark({ path: 'src/a.cpp', line: 3 }), false)
+  // 同一个文件的行书签照旧能加（两种并存）
+  const both = placeBookmark(withFile, 'src/a.cpp', 3, undefined, 'int x;')
+  assert.deepEqual(both.map(entry => entry.line), [undefined, 3])
+  // 再点一次是取消，而且不动行书签
+  assert.deepEqual(toggleFileBookmark(both, 'src/a.cpp').map(entry => entry.line), [3])
+  // 排序：文件书签排在同一个文件的行书签前面（上游 line = -1）
+  assert.deepEqual(sortedBookmarks(both).map(entry => entry.line), [undefined, 3])
+})
+
+test('内容变更不碰文件书签（上游 documentChanged 只动行书签）', () => {
+  const twoLines = 'one' + String.fromCharCode(10) + 'keep'
+  const list = [{ path: 'a.cpp' }, { path: 'a.cpp', line: 2, text: 'keep' }]
+  const out = reconcileBookmarks(list, 'a.cpp', twoLines, [])
+  assert.deepEqual(out.list.map(entry => entry.line), [undefined, 2], '文件书签原样留着，行书签也还在')
+  assert.deepEqual(out.dropped, [], '两行都在 ⇒ 不该丢任何一条')
+  // 行号越界时只有行书签被丢掉，文件书签不受影响
+  const shrunk = reconcileBookmarks(list, 'a.cpp', 'one', [])
+  assert.deepEqual(shrunk.list.map(entry => entry.line), [undefined])
+})
+
+test('重写助记键时：行书签被删掉，文件书签降级成无键（上游 rewriteType:285-295）', () => {
+  const taken = [{ path: 'a.cpp' }, { path: 'b.cpp', line: 4, mnemonic: 'C', text: 'x' }]
+  const fileSquatter = placeBookmark([{ path: 'a.cpp', mnemonic: 'C' }], 'new.cpp', 9, 'C')
+  // 列表顺序是"插入顺序"（排序在 sortedBookmarks 里做），所以这里按路径排一下再比。
+  const byPath = fileSquatter.slice().sort((a, b) => a.path.localeCompare(b.path)).map(entry => [entry.path, entry.line, entry.mnemonic])
+  assert.deepEqual(byPath, [['a.cpp', undefined, undefined], ['new.cpp', 9, 'C']],
+                   '文件书签只被摘掉助记键，条目留着')
+  const lineSquatter = placeBookmark(taken, 'new.cpp', 9, 'C')
+  assert.deepEqual(lineSquatter.map(entry => entry.path), ['a.cpp', 'new.cpp'], '行书签那条（b.cpp:4）被整条删掉')
 })

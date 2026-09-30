@@ -1315,8 +1315,8 @@ const {
 const {
   bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic, confirmRewrite, dontAskRewrite, removeMnemonic,
   useProjectSettings, bookmarkSave,
-  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel,
-} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(),
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel,
+} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(), openPath: path => void openFile(path),
   updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
@@ -2461,6 +2461,7 @@ onBeforeUnmount(() => {
         <button @click="copyPath()">复制路径</button>
         <button :disabled="!fileClipboard" @click="pasteFromClipboard()">粘贴</button>
         <div class="menu-rule" />
+        <button @click="bookmarkFile(treeMenu.entry.path); treeMenu = null">{{ fileBookmarkLabel(treeMenu.entry.path) }}</button>
         <button v-if="treeMenu.entry.kind === 'file'" @click="openFile(treeMenu.entry.path); treeMenu = null; treeSubmenu = null">打开</button>
         <div class="menu-rule" />
         <button v-if="treeMenu.entry.kind === 'file'" :disabled="!lspReady" @click="findUsagesOf(treeMenu.entry.path)">查找用法…</button>

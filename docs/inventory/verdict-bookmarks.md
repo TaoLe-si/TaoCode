@@ -90,10 +90,27 @@
    都在；敲 `A` 直接落盘 `{"line":8,"mnemonic":"A"}`；改贴已占用的 A 时弹
    「A 助记键已被占用（README.md:8）。是否要重写?」（重写 / 重写且不再询问 / 取消），点「重写」后
    老的从持久化里消失、新的拿到 A；气球按"有没有全局键"分别说「Ctrl+3 跳转」与「导航菜单：转到书签 A」。
-   **仍未做**：`FileBookmark`（文件书签，行 `-1`；上游由 `manager.createBookmark(file)` 从项目树/编辑器
-   标签右键产生，见 `actions/extensions.kt:58-72`）、命名/分组书签列表（`BookmarkGroup`、
-   `GroupCreateDialog`、把某个列表标为默认）、`EditBookmark`（F2 改描述）、`AddAnotherBookmark`、
-   `BookmarkOpenTabs`。
+   **文件书签 —— ✅ 已做（第七十四批）**：上游 `FileBookmark`（`platform/lang-api/src/com/intellij/ide/
+   bookmark/FileBookmark.kt`）是"给文件本身（也可以是目录）做的记号"，由
+   `BookmarksManagerImpl.createBookmark(file)` 从**项目树右键 / 编辑器标签右键**产生
+   （`actions/extensions.kt:58-72`：`place == EDITOR_TAB_POPUP || window.id == PROJECT_VIEW` →
+   `manager.createBookmark(file)`）；渲染成 `FileNode`/`FolderNode`（`providers/FileBookmarkImpl.kt:26-29`
+   按 `isDirectory` 分），`navigate` = `OpenFileDescriptor`；**持久化不写 line 属性**
+   （`BookmarkManager.writeExternal:335-337` 只在线号 ≥ 0 时才写）。
+   本仓落地：`Bookmark.line` 变成可选（缺省 = 文件书签）、`toggleFileBookmark`、面板里它渲染成
+   **文件那一行**（分组头带助记键时变成可点/可删的那一行，行书签在它下面 —— 与"FileNode 底下挂
+   LineNode"同形）、跳转 = 打开文件、装订线不给图标、内容变更不动它（上游 `documentChanged` 只动行书签）；
+   项目树右键第一格是 `添加书签`/`删除书签`（标题随状态；插入点照
+   `intellij.platform.bookmarks.xml:227` 的 anchor=after `ProjectViewPopupMenuRefactoringGroup`，
+   放在重构组之后）；原生校验 `line` 可省、写了必须是 1..1000000（0/-1 这类内部哨兵值不收），
+   同一文件的文件书签唯一条数、且可与行书签并存；重写助记键时**文件书签只摘键、行书签才删除**
+   （上游 `rewriteType:285-295` 的两个分支，这一条是测试抓出来的：先前实现把文件书签也删了）。
+   **真机取证**：项目树右键 CMakeLists.txt → 菜单首格「添加书签」→ 气球「书签 CMakeLists.txt」→
+   持久化里出现 `{"path":"CMakeLists.txt"}`（**没有 line 键**）→ 书签面板里它是一条可点的文件行、
+   旁边有移除按钮，而只有行书签的 README.md 仍是普通分组头（带条数）。
+   **仍未做**：命名/分组书签列表（`BookmarkGroup`、`GroupCreateDialog`、把某个列表标为默认）、
+   `EditBookmark`（F2 改描述）、`AddAnotherBookmark`（往另一个列表再加一条）、`BookmarkOpenTabs`
+   （把打开的标签页一键加成文件书签）。
 ③ **列表项的富渲染**：`BookmarkItem.setupRenderer`（`:46-86` 图标 + 描述 + 行的文本）、
    `speedSearchText`（`:104`）、`footerText`（`:109`）—— 本仓面板只有编号/文件/行号。
 

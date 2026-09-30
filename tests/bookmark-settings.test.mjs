@@ -5,12 +5,13 @@ import assert from 'node:assert/strict'
 
 import { normalizeBookmarks, normalizeBookmarksView } from '../src/bookmarkSettings.ts'
 
-test('书签表：助记键收单个 0-9/A-Z，可选的行原文与描述都放行', () => {
+test('书签表：助记键收单个 0-9/A-Z，可选的行原文与描述都放行；没有 line = 文件书签', () => {
   const list = normalizeBookmarks([
     { path: 'src/a.cpp', line: 3, mnemonic: 'A', text: 'int x;', description: '选中的那段' },
     { path: 'src/b.cpp', line: 9 },
+    { path: 'src/c.cpp' },  // 文件书签（上游 FileBookmark：持久化不写 line 属性）
   ])
-  assert.equal(list.length, 2)
+  assert.equal(list.length, 3)
   assert.equal(list[0].mnemonic, 'A')
   // 返回的是新对象（桥接层不该把调用方的对象直接挂进项目设置）
   assert.notEqual(list[0], undefined)
@@ -18,7 +19,7 @@ test('书签表：助记键收单个 0-9/A-Z，可选的行原文与描述都放
 
 test('书签表：坏形状一律抛（行号从 1、助记键单字符、路径不出工作区、文本有上限）', () => {
   const bad = [
-    null, {}, 'x', [{ path: 'a.cpp' }], [{ path: '', line: 1 }], [{ path: '/abs.cpp', line: 1 }],
+    null, {}, 'x', [{ path: '' }], [{ path: '' , line: 1 }], [{ path: '/abs.cpp', line: 1 }],
     [{ path: 'a\\\\b.cpp', line: 1 }], [{ path: '../x.cpp', line: 1 }],
     [{ path: 'a.cpp', line: 0 }], [{ path: 'a.cpp', line: 1.5 }], [{ path: 'a.cpp', line: 1000001 }],
     [{ path: 'a.cpp', line: 1, mnemonic: 'a' }], [{ path: 'a.cpp', line: 1, mnemonic: 'AB' }],

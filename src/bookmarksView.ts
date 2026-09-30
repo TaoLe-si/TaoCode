@@ -31,12 +31,13 @@ export const DEFAULT_BOOKMARKS_VIEW: BookmarksViewSettings = {
   autoscrollFromSource: false,
 }
 
-export interface BookmarkLike { path: string; line: number; mnemonic?: string }
+export interface BookmarkLike { path: string; line?: number; mnemonic?: string }
 
 export interface BookmarkGroup<T extends BookmarkLike> { path: string; entries: T[] }
 
 /**
- * `groupLineBookmarks` 开 = 按文件分组（顺序取该文件第一次出现的位置，组内按行号升序）；
+ * `groupLineBookmarks` 开 = 按文件分组（顺序取该文件第一次出现的位置，组内按行号升序，
+ * **文件书签排在该组最前** —— 上游给文件书签的行号就是 -1）；
  * 关 = 平铺成一组（IDEA 关掉分组时就是一条平铺列表，顺序仍是书签自己的顺序）。
  */
 export function groupBookmarks<T extends BookmarkLike>(entries: readonly T[], group: boolean): BookmarkGroup<T>[] {
@@ -48,7 +49,7 @@ export function groupBookmarks<T extends BookmarkLike>(entries: readonly T[], gr
     if (!bucket) { bucket = { path: entry.path, entries: [] }; index.set(entry.path, bucket); groups.push(bucket) }
     bucket.entries.push(entry)
   }
-  for (const bucket of groups) bucket.entries.sort((a, b) => a.line - b.line)
+  for (const bucket of groups) bucket.entries.sort((a, b) => (a.line ?? -1) - (b.line ?? -1))
   return groups
 }
 
@@ -61,7 +62,8 @@ export function scrollTargetFor<T extends BookmarkLike>(entries: readonly T[], p
   let best: T | null = null
   for (const entry of entries) {
     if (entry.path !== path) continue
-    if (!best || entry.line < best.line) best = entry
+    // 文件书签（没有行号）算在最前：切到该文件时它就是要滚到的那一条。
+    if (!best || (entry.line ?? -1) < (best.line ?? -1)) best = entry
   }
   return best
 }

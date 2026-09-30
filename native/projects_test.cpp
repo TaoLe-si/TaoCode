@@ -734,10 +734,16 @@ int main() {
                 {{"path", "src/main.cpp"}, {"line", 12}, {"text", "int main() {"}},
                 {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}, {"text", ""}, {"description", "选中的那段"}},
                 {{"path", "src/app.vue"}, {"line", 88}, {"mnemonic", "9"}},
-                {{"path", "src/logo.svg"}, {"line", 2}, {"mnemonic", "A"}}});
+                {{"path", "src/logo.svg"}, {"line", 2}, {"mnemonic", "A"}},
+                // 文件书签：没有 line 属性（上游 writeExternal 只在线号 >= 0 时才写）
+                {{"path", "src/README.md"}, {"mnemonic", "B"}}});
             // 旧版本写过的**整数形式**仍然收下（不判损坏 —— 老状态文件不该因为这次扩到 A-Z 就变成坏的）；
             // 新的写入一律是单个字符（上游 `writeExternal:337-340` 存的就是 `String.valueOf(char)`）。
             const Json legacy_marks = Json::array({{{"path", "src/main.cpp"}, {"line", 12}, {"mnemonic", 3}}});
+            // 同一个文件：文件书签与行书签并存（上游两种都能建，各自一条）。
+            const Json both = Json::array({{{"path", "src/dual.cpp"}}, {{"path", "src/dual.cpp"}, {"line", 3}}});
+            check(store.update_project_settings(root_a, {{"bookmarks", both}}).at("bookmarks") == both,
+                  "文件书签与行书签必须在同一个文件上并存");
             check(store.update_project_settings(root_a, {{"bookmarks", legacy_marks}}).at("bookmarks") == legacy_marks,
                   "旧版整数助记键必须还能写进状态文件（同一份读数不许因此判损坏）");
             check(store.update_project_settings(root_a, {{"bookmarks", marks}}).at("bookmarks") == marks,
@@ -759,8 +765,11 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src\\x.cpp"}, {"line", 3}}})}},
                 {{"bookmarks", Json::array({{{"path", "../out.cpp"}, {"line", 3}}})}},
                 {{"bookmarks", Json::array({{{"path", "a/../b.cpp"}, {"line", 3}}})}},
-                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 0}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", -1}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}},
+                                            {{"path", "src/x.cpp"}}})}},  // 同一文件两个文件书签
+
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 1000001}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", "3"}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 10}}})}},
