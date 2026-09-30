@@ -160,10 +160,6 @@ Json merged_string_list(const Json& declared, const std::vector<std::string>& ex
     return list;
 }
 
-Json source_path_list(const Json& java, const std::vector<std::string>& extra) {
-    return merged_string_list(java.value("sourcePaths", Json::array()), extra);
-}
-
 /** 用户的 `referencedLibraries` 在前、磁盘派生兜底在后（去重，保持顺序）。 */
 Json library_list(const Json& java, const std::vector<std::string>& extra) {
     Json list = Json::array();
@@ -309,7 +305,7 @@ Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vec
                            }
                            return section;
                        }()},
-                      {"project", {{"sourcePaths", source_path_list(java, extra_source_paths)},
+                      {"project", {{"sourcePaths", merged_string_list(java.value("sourcePaths", Json::array()), extra_source_paths)},
                                    {"outputPath", java.value("outputPath", std::string())},
                                    // 用户的显式列表在前，磁盘派生兜底在后（同一份数组，JDT 全收）。
                                    {"referencedLibraries", library_list(java, extra_libraries)}}}}}};
