@@ -78,7 +78,7 @@ Json exclusions() {
     // 与 ProjectStore 的 per-project 默认值逐键对齐（含默认列表本身）：
     // 少一个键，整对象比较就会失败，所以这里是 `project_defaults()` 的镜像。
     return {{"excludedDirs", Json::array({".git", "node_modules", "build", "dist"})},
-            {"runConfigs", Json::array()}, {"bookmarks", Json::array()},
+            {"runConfigs", Json::array()}, {"bookmarks", Json::array()}, {"bookmarkLists", Json::array()},
             {"scopes", Json::array()},
             // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认空，与 FileColorsModel 的两个空列表一致。
             {"fileColors", Json::array()}, {"localFileColors", Json::array()},
@@ -402,7 +402,7 @@ int main() {
             const Json custom = {{"excludedDirs", Json::array({".git", utf8(u8"临时 目录"), "out"})},
                                  {"runConfigs", Json::array({{{"name", utf8(u8"构建")}, {"command", "cmake --build build"},
                                                               {"allowRunningInParallel", true}}})},
-                                 {"bookmarks", Json::array({{{"path", "src/main.cpp"}, {"line", 7}, {"mnemonic", 2}}})},
+                                 {"bookmarkLists", Json::array()}, {"bookmarks", Json::array({{{"path", "src/main.cpp"}, {"line", 7}, {"mnemonic", 2}}})},
                                  {"scopes", Json::array()},
                                  // 文件颜色（IDEA `FileColorsConfigurable`）：整表替换，顺序即优先级。
                                  {"fileColors", Json::array()}, {"localFileColors", Json::array()},
@@ -744,6 +744,30 @@ int main() {
             const Json both = Json::array({{{"path", "src/dual.cpp"}}, {{"path", "src/dual.cpp"}, {"line", 3}}});
             check(store.update_project_settings(root_a, {{"bookmarks", both}}).at("bookmarks") == both,
                   "文件书签与行书签必须在同一个文件上并存");
+            // 命名书签列表（上游 ManagerState.groups）：往返 + 形状
+            const Json lists = Json::array({
+                {{"name", utf8(u8"待办")}, {"isDefault", false}, {"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", "int x;"}}})}},
+                {{"name", "ui-parity-proj"}, {"isDefault", true}, {"bookmarks", Json::array()}}});
+            check(store.update_project_settings(root_a, {{"bookmarkLists", lists}}).at("bookmarkLists") == lists,
+                  "书签列表必须原样往返（名字 + 是否默认 + 里面的书签）");
+            const std::vector<Json> bad_lists{
+                {{"bookmarkLists", nullptr}}, {{"bookmarkLists", Json::object()}},
+                {{"bookmarkLists", Json::array({{{"isDefault", true}, {"bookmarks", Json::array()}}})}},   // 没有名字
+                {{"bookmarkLists", Json::array({{{"name", "  "}, {"isDefault", true}, {"bookmarks", Json::array()}}})}},
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", true}, {"bookmarks", Json::array()}},
+                                                {{"name", "A"}, {"isDefault", false}, {"bookmarks", Json::array()}}})}},  // 重名
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", true}, {"bookmarks", Json::array()}},
+                                                {{"name", "B"}, {"isDefault", true}, {"bookmarks", Json::array()}}})}},  // 两个默认
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", 1}, {"bookmarks", Json::array()}}})}},
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", false}}})}},                 // 没有 bookmarks
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", false}, {"bookmarks", Json::array({{{"path", "x.cpp"}, {"line", 0}}})}}})}},
+                {{"bookmarkLists", Json::array({{{"name", "A"}, {"isDefault", false}, {"bookmarks", Json::array()}, {"extra", 1}}})}},
+            };
+            for (const auto& patch : bad_lists)
+                expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, patch); });
+            check(store.project_settings(root_a).at("bookmarkLists") == lists, "坏补丁不许改动已存的列表");
+            check(store.update_project_settings(root_a, {{"bookmarks", legacy_marks}}).at("bookmarkLists") == lists,
+                  "改书签表不该动列表");
             check(store.update_project_settings(root_a, {{"bookmarks", legacy_marks}}).at("bookmarks") == legacy_marks,
                   "旧版整数助记键必须还能写进状态文件（同一份读数不许因此判损坏）");
             check(store.update_project_settings(root_a, {{"bookmarks", marks}}).at("bookmarks") == marks,

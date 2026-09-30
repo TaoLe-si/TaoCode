@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 import { normalizeFileColor, normalizeFileColors } from './fileColors.ts'
-import { normalizeBookmarks, normalizeBookmarksView } from './bookmarkSettings.ts'
+import { normalizeBookmarkLists, normalizeBookmarks, normalizeBookmarksView } from './bookmarkSettings.ts'
 import { errorMessage } from './errors.ts'
 // base64（桥上的二进制载荷）与 Gradle 同步通道都拆成了独立模块；这里转出给既有调用方。
 import { fromBase64, toBase64 } from './base64.ts'
@@ -905,6 +905,11 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
       if (params.bookmarks !== undefined) {
         try {
           next.bookmarks = normalizeBookmarks(params.bookmarks)
+        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
+      }
+      if (params.bookmarkLists !== undefined) {
+        try {
+          next.bookmarkLists = normalizeBookmarkLists(params.bookmarkLists)
         } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
       }
       if (params.bookmarksView !== undefined) {

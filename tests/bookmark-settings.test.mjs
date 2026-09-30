@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeBookmarks, normalizeBookmarksView } from '../src/bookmarkSettings.ts'
+import { normalizeBookmarkLists, normalizeBookmarks, normalizeBookmarksView } from '../src/bookmarkSettings.ts'
 
 test('书签表：助记键收单个 0-9/A-Z，可选的行原文与描述都放行；没有 line = 文件书签', () => {
   const list = normalizeBookmarks([
@@ -37,4 +37,25 @@ test('书签视图设置：只认有落点的四个布尔开关', () => {
                    { groupLineBookmarks: false, autoscrollToSource: true, autoscrollFromSource: false })
   for (const value of [null, [], 'x', { rewriteBookmarkType: 'yes' }, { showPreview: true }, { askBeforeDeletingLists: true }])
     assert.throws(() => normalizeBookmarksView(value), /书签视图设置/, JSON.stringify(value))
+})
+
+test('命名书签列表：名字非空/不重复/最多一个默认，里面的书签走同一条校验', () => {
+  const lists = normalizeBookmarkLists([
+    { name: 'ui-parity-proj', isDefault: true, bookmarks: [{ path: 'a.cpp', line: 3 }] },
+    { name: '待办', isDefault: false, bookmarks: [{ path: 'b.cpp' }] },
+  ])
+  assert.equal(lists.length, 2)
+  assert.equal(lists[0].isDefault, true)
+  assert.equal(lists[1].bookmarks[0].line, undefined, '文件书签（没有 line）也在列表里合法')
+  for (const value of [
+    null, {}, 'x',
+    [{ name: '', isDefault: true, bookmarks: [] }],
+    [{ name: ' 有空 ′', isDefault: true, bookmarks: [] }],
+    [{ name: 'A', isDefault: true, bookmarks: [] }, { name: 'A', isDefault: false, bookmarks: [] }],
+    [{ name: 'A', isDefault: true, bookmarks: [] }, { name: 'B', isDefault: true, bookmarks: [] }],
+    [{ name: 'A', isDefault: 'yes', bookmarks: [] }],
+    [{ name: 'A', isDefault: false }],
+    [{ name: 'A', isDefault: false, bookmarks: [{ path: 'x.cpp', line: 0 }] }],
+    Array.from({ length: 21 }, (_, index) => ({ name: `L${index}`, isDefault: false, bookmarks: [] })),
+  ]) assert.throws(() => normalizeBookmarkLists(value), /书签/, JSON.stringify(value)?.slice(0, 40))
 })

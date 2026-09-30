@@ -19,6 +19,8 @@ constexpr std::size_t max_todo_patterns = 20;
 constexpr std::size_t max_run_configs = 40;
 // 书签行原文（锚）的上限：前端按 1024 个字符截断，UTF-8 下最多 4 KiB —— 两边口径一致。
 constexpr std::size_t max_bookmark_text = 4096;
+// 命名书签列表（上游 `ManagerState.groups`）的条数上限：列表本身很轻，给个"挡住无限追加"的界就行。
+constexpr std::size_t max_bookmark_lists = 20;
 // 作用域条数上限：状态文件本身有 1 MiB 上限，模式最长 1024 字节，64 条远不会触顶，
 // 同时挡住「无限追加」的写法。IDEA 自己没有条数上限。
 constexpr std::size_t max_scopes = 64;
@@ -295,7 +297,7 @@ Json default_todo_markers() {
 
 Json project_defaults() {
     return {{"excludedDirs", Json::array({".git", "node_modules", "build", "dist"})},
-            {"runConfigs", Json::array()}, {"bookmarks", Json::array()},
+            {"runConfigs", Json::array()}, {"bookmarks", Json::array()}, {"bookmarkLists", Json::array()},
             // 命名作用域（IDEA `ScopeChooserConfigurable`）：默认一个都没有，
             // 与 `NamedScopesHolder.myScopes = NamedScope.EMPTY_ARRAY` 一致。
             {"scopes", Json::array()},
@@ -553,6 +555,37 @@ void validate_bookmarks(const Json& values) {
     }
 }
 
+// 命名书签列表（上游 `ManagerState.groups` = `GroupState { name, isDefault, bookmarks }`，
+// `state.kt:8-20`）。规则：名字去空白后非空、≤64 字符、合法 UTF-8、**互不重名**；
+// `isDefault` 是布尔且**最多一个 true**（上游 `Group.isDefault` 的 setter 就是这样维护的，
+// `BookmarksManagerImpl.kt:529-533`）；每个列表里的书签走同一条 `validate_bookmarks`。
+// 本仓的持久化把默认列表放在历史字段 `bookmarks` 上，这张表只装**其余的**列表 ——
+// 所以这里不要求"必须有一个 isDefault"。
+void validate_bookmark_lists(const Json& values) {
+    if (!values.is_array()) fail("INVALID_SETTINGS", "bookmarkLists must be an array.");
+    if (values.size() > max_bookmark_lists)
+        fail("INVALID_SETTINGS", "每个项目的书签列表不能超过 " + std::to_string(max_bookmark_lists) + " 张。");
+    std::set<std::string> names;
+    int defaults = 0;
+    for (const auto& value : values) {
+        if (!value.is_object()) fail("INVALID_SETTINGS", "书签列表要写成 {name, isDefault, bookmarks}。");
+        known_keys(value, {"name", "isDefault", "bookmarks"}, "INVALID_SETTINGS");
+        const auto name = text_or(value, "name");
+        if (name.empty() || name.size() > 128 || !valid_utf8(name))
+            fail("INVALID_SETTINGS", "书签列表名不能为空、不超过 128 字节且必须是 UTF-8。");
+        const auto has_control = std::any_of(name.begin(), name.end(), [](unsigned char ch) { return ch < 0x20; });
+        if (name.front() == ' ' || name.back() == ' ' || has_control)
+            fail("INVALID_SETTINGS", "书签列表名首尾不能有空白，也不能含制表符/换行。");
+        if (!names.insert(name).second) fail("INVALID_SETTINGS", "书签列表名不能重复：" + name);
+        if (!value.contains("isDefault") || !value.at("isDefault").is_boolean())
+            fail("INVALID_SETTINGS", "书签列表的 isDefault 必须是布尔值。");
+        if (value.at("isDefault").get<bool>() && ++defaults > 1)
+            fail("INVALID_SETTINGS", "只能有一个默认书签列表。");
+        if (!value.contains("bookmarks")) fail("INVALID_SETTINGS", "书签列表要有 bookmarks 数组（可以是空的）。");
+        validate_bookmarks(value.at("bookmarks"));
+    }
+}
+
 void validate_java_settings(const Json& value) {
     known_keys(value, {"jdkHome", "jdkName", "sourcePaths", "outputPath", "referencedLibraries"}, "INVALID_SETTINGS");
         if (value.contains("jdkHome")) {
@@ -768,7 +801,7 @@ void validate_export_to_html(const Json& value) {
 }
 
 void validate_project_patch(const Json& patch) {
-    known_keys(patch, {"excludedDirs", "runConfigs", "bookmarks", "todoPatterns", "templates", "java",
+    known_keys(patch, {"excludedDirs", "runConfigs", "bookmarks", "bookmarkLists", "todoPatterns", "templates", "java",
                        "fileAssociations", "vcsLog", "scopes", "fileColors", "localFileColors", "bookmarksView", "buildTools", "exportToHtml",
                        "foldingState"},
                "INVALID_SETTINGS");
@@ -883,6 +916,7 @@ void validate_project_patch(const Json& patch) {
         }
     }
     if (patch.contains("bookmarks")) validate_bookmarks(patch.at("bookmarks"));
+    if (patch.contains("bookmarkLists")) validate_bookmark_lists(patch.at("bookmarkLists"));
     if (patch.contains("todoPatterns")) validate_todo_patterns(patch.at("todoPatterns"));
     if (patch.contains("templates")) validate_template_settings(patch.at("templates"));
 }

@@ -114,7 +114,11 @@
    默认列表唯一（`Group.isDefault` setter `:529-533`）、删掉默认列表后没有默认（`Group.remove:638-647`）、
    新书签进默认列表而**行书签只有一个家**（`findGroupsToAdd:200-207`）、名字校验与 `名字 (1)…(99)`
    （`GroupInputValidator:19-35`）、无历史状态时用项目名建第一张列表（`noStateLoaded:93-95`）。
-   **还没接**：持久化（`bookmarkLists` 字段 + 旧平铺 `bookmarks` 的迁移）、面板的分区渲染、
+   **第七十六批（b）已接持久化**：`bookmarkLists` 成为项目设置里的字段（原生校验 + 桥接归一化 +
+   默认值 + 补丁白名单，判据见 `projects_test` 的「命名书签列表」一档与
+   `tests/bookmark-settings.test.mjs`）；「默认列表」暂用历史字段 `bookmarks`（一个平铺列表），
+   `bookmarkLists` 装**其余**的列表 —— 迁移规划见 `src/bookmarkLists.ts` 的 `listsFromLegacy`。
+   **还没接**：面板的分区渲染、
    `GroupCreateDialog`/`GroupRenameDialog`/`GroupSelectDialog` 三个对话框、齿轮的
    `askBeforeDeletingLists`（有了列表它才有落点），以及依赖列表的两个动作：
    `AddAnotherBookmark`（`AddAnotherBookmarkAction`）与 `BookmarkOpenTabs`
