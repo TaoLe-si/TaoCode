@@ -63,6 +63,7 @@
 
 ### A4 提交工具窗口 `ChangesViewCommitPanel.kt`
 
+- [x] **已起域（第六十六批）** B5 = `ide/bookmarks` 5 类：判决 `docs/inventory/verdict-bookmarks.md` + 门控 `tests/b5-verdict.test.mjs`（覆盖率从扫描件重推、引用要落在真文件上）。五条全 `[~]`，缺口按 §G 行内逐条写明（编辑后重锚 / 描述与书签类型 / 列表项富渲染），§C 三条是下一批。
 - [x] **已收口（第六十五批）** B4（`codeInsight/folding` 69 类）`[ ]` 归零：`FoldingPolicy`/`FoldingUtil` 判 `[~]`（逐函数有落点），`CollapseBlockHandler`/`CodeFoldingZombie`/`FoldingHintMouseMotionListener` 判 `[-]`（语言侧 EP、注册表后的模型缓存、装订线折叠轮廓区本仓没有对应形态）—— 依据逐条写在判决 §G 与审计 §BK。
 - [x] **已加（第六十四批）** 折叠状态**落盘**：写进项目级设置（`ProjectSettings.foldingState`），杀进程重启后打开同一文件折叠原样回来；原生新增 `native/folding_state_schema.cpp` 校验形状与上限（50×40、签名 ≤96），前端按"最近动过的"裁到 20×30（判决 §C③，审计 §BJ）。
 - [x] **已加（第六十三批）** `caretInsideRange` 接进默认折叠（光标严格落在区间里就不折，上游 `shouldExpandNewRegion:236-238`）；「全部收起/展开」的两段式经分析在本仓退化成一段（`keepExpandedOnFirstCollapseAll` 是语言侧钩子），依据写进判决 §G（审计 §BI）。

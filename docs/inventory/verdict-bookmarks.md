@@ -1,0 +1,49 @@
+# B5 判决：`ide/bookmarks` = 5 类（书签那一族）
+
+判定依据：机械枚举（`docs/inventory/projectviews_scan.md` 里路径含 `com/intellij/ide/bookmarks/` 的
+非测试类 —— 清单落在 `docs/inventory/bookmarks.txt`，5 行）+ 逐类读上游源码
+（`platform/bookmarks/src/com/intellij/ide/bookmarks/*`）+ 本仓书签功能的真实落点核对
+（`src/bookmarks.ts`、`src/bookmarkActions.ts`、`src/bookmarksView.ts`、
+`src/components/BookmarksPanel.vue`、`src/editorGutterIcons.ts`、`src/keymap.ts`）。
+
+> 为什么挑它起 B5：它是 `projectviews` 域里**最小的一组**（5 类），而本仓的书签功能已经是一整条真实链路
+> （列表代数 + 编号助记 + F11/Ctrl+F11 + 工具窗口 + 装订线图标 + 视图齿轮 + 项目级持久化）——
+> 每个类都能落到真文件上，不会写出"看起来合理"的空话。
+> §G 是逐条总表（5 行，机检对齐），四档计数写在表尾。本域**没有 `[-]`、也没有 `[ ]`**，所以没有 §D。
+
+## A. 本仓书签功能的地基（读判决前先看这一节）
+
+| 本地落点 | 干什么 | 上游对应 |
+|---|---|---|
+| `src/bookmarks.ts`（列表代数：`Bookmark{path,line,mnemonic?}`、`placeBookmark` 的 F11/Ctrl+F11 语义、编号唯一性、`sortedBookmarks`、`bookmarkOwner`、前后跳转） | 一个项目一份书签表；编号 0–9 只能被一条占着，所以 `Ctrl+数字` 永远指得准 | `Bookmark`（`Bookmark.java`）+ `BookmarkManager` 的增删与编号（`BookmarkManager.java:104-125` 的 `index++` 与 `myBookmarks.putValue`） |
+| `src/bookmarkActions.ts` + `src/keymap.ts` | F11 / Ctrl+F11 / Ctrl+数字 的键位与动作（`$default.xml` 逐条核过） | `BookmarkManager` 上的动作包（`ToggleBookmarkAction` 等，在 `platform/bookmarks` 的 actions 包里 —— 不在本域路径上） |
+| `src/components/BookmarksPanel.vue` | 书签工具窗口：编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查 | `BookmarkItem`（列表项与渲染）+ `BookmarksView`（面板本体，不在本域路径上） |
+| `src/bookmarksView.ts` | 视图齿轮的三个真开关（按文件分组 / 选中时跳源 / 源变化时选中）与另外三个"没有落点就不渲染"的登记 | `BookmarksViewState`（不在本域路径上）；开关名与默认值逐条核过 |
+| `src/editorGutterIcons.ts` | 装订线上的书签图标（`GutterIconRenderer` 的等价物） | `Bookmark.updateHighlighter`（`Bookmark.java:118-125`）挂的高亮器 |
+| `ProjectSettings.bookmarks`（项目级） | 持久化 | `BookmarkManager implements PersistentStateComponent<Element>`（`BookmarkManager.java:62`） |
+
+## C. 下一批该做的三条（按用户可见度）
+
+① **编辑后重锚 + 行文本**：上游给每条书签记下"变化前那一行的原文"（`BookmarkManager.java:439-444` 的
+    `BookmarkInfo(bookmark, line, text)`），文档一变就按文本找回、去掉失效与重复的（`:449-495`
+    的 `documentChanged` + `moveToDeleted` + `myDeletedDocumentBookmarks` 的恢复循环）；本仓的
+    `Bookmark{path,line}` 只有行号，**上面插一行书签就指到别人身上**。自动描述也一并做：
+    `addTextBookmark` 的描述取自"选中的文本，否则整行 trim，超过 200 字符截断"
+    （`getAutoDescription:127-139`，`MAX_AUTO_DESCRIPTION_SIZE`）。
+② **书签类型与文件书签**：`BookmarkType`（`Bookmark.java:181`）与 `addFileBookmark`
+   （`BookmarkManager.java:120-125`，行 `-1`）—— 本仓只有行书签；书签类型还是那三个"没渲染"的
+   视图开关（`rewriteBookmarkType` 等）的前置。
+③ **列表项的富渲染**：`BookmarkItem.setupRenderer`（`:46-86` 图标 + 描述 + 行的文本）、
+   `speedSearchText`（`:104`）、`footerText`（`:109`）—— 本仓面板只有编号/文件/行号。
+
+## G. 逐条总表（5 类，与 `docs/inventory/bookmarks.txt` 一一对齐）
+
+| 类 | 源码 | 判决 | 依据（有实现点的指到真实 `src/` 文件） |
+|---|---|---|---|
+| `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | `[~]` | 本仓的 `src/bookmarks.ts` 有 `Bookmark{path,line,mnemonic?}`（`Navigatable` 那一面 = 面板/动作跳到 `path:line`；`Comparable` 那一面 = `sortedBookmarks` 按路径+行）；**缺** `description`（`:57` 与 `:173-179`，`@Nls` 文本）、`BookmarkType`（`:181`，行/文件书签）、`getBookmarkFont`（`:95`，编号书签的粗体）、`release`/`updateHighlighter`（`:118-126`，高亮器生命周期 —— 本仓的图标由 `src/editorGutterIcons.ts` 统一重算，没有"每条书签自己持一个高亮器"的形态） |
+| `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | `[~]` | 资源包只是取文案的机制（`:21-28` 的 `message`/`messagePointer`）；本仓的对应物是面板与动作里的字面量（文案逐条核过本机 IDEA 2026.2 中文包），见 `src/components/BookmarksPanel.vue`；**缺** `messagePointer` 那半（延迟取文案的 `Supplier` 形态 —— 本仓直接取字符串，没有它要解决的问题） |
+| `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | `[~]` | 列表项在 `src/components/BookmarksPanel.vue`（编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查）；**缺** `setupRenderer`（`:46-86`：图标 + 描述 + 行文本）、`speedSearchText`（`:104`，快速搜索命中串）、`footerText`（`:109`）、`updateAccessoryView`（`:92`，编号在右侧附件位）、`allowedToRemove`/`removed`（`:119-127`，类型化书签才有的"许可删除"） |
+| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[~]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）+ `getValidBookmarks` 的"按位置排序"那一支（`src/bookmarks.ts` 的 `sortedBookmarks`）；**缺** 编辑后按行文本重锚与失效/查重（`:439-495`）、自动描述（`:127-139`）、`UISettings.sortBookmarks` 的"按加入顺序"排序（`:141-150` 的另一支）、`addFileBookmark`（`:120-125`） |
+| `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | `[~]` | 事件面（`:10-16` 的 added/removed/changed/orderChanged）在本仓是 Vue 响应式：书签表一变，面板、装订线图标（`src/editorGutterIcons.ts`）与跳转动作自己跟着重算；**缺** 给他人用的监听接口（本仓没有插件，也没有第二个消费者需要订阅） |
+
+**四档合计**：`[x]` 0 + `[~]` 5 + `[ ]` 0 + `[-]` 0 = 5。

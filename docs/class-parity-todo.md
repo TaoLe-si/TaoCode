@@ -647,3 +647,21 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 原生键表/默认值同步（`native/settings_schema.hpp`/`.cpp`），打开文件按 `kind` 预折叠、改了一键重算。
 另三条（文件头/方法体/文档注释）上游只有语言侧 builder 读、上游自己的 LSP 路径也传 null ⇒ 不渲染，
 判决 §G 里写着。四档：`[x]` 0 / `[~]` 33 / `[ ]` 10 / `[-]` 26 = 69。
+
+## 26. B5 起域：`ide/bookmarks`（2026-09-30 第六十六批）
+
+`projectviews` 域里最小的一组：5 类，判决 `docs/inventory/verdict-bookmarks.md`，清单
+`docs/inventory/bookmarks.txt`，门控 `tests/b5-verdict.test.mjs`。四档：`[x]` 0 / `[~]` 5 / `[ ]` 0 / `[-]` 0 = 5
+—— 五条都 `[~]`，缺口逐条写在 §G（编辑后重锚、描述与书签类型、列表项富渲染……）。
+**下一批做 §C 三条**，第一条（编辑后按行文本重锚 + 自动描述）是最实的：
+上游 `BookmarkManager` 记下"变化前那一行的原文"（`:439-444`）并在文档变化后按文本找回（`:449-495`），
+本仓的 `Bookmark{path,line}` 只有行号。
+
+### 26.1 B5 的域还剩哪些组（供后续排期）
+
+`projectviews` 域共 11 组（按扫描件重算的规模）：`ide/bookmarks` 5（✅ 本轮）、
+`platform/welcomeScreen` 1、`platform/lvcs/impl` 35、`platform/ide/nonModalWelcomeScreen` 38、
+`notification` 67、`openapi/command/impl` 76、`ide/todo` 80、`ide/structureView` 93、
+`openapi/wm/impl/welcomeScreen` 93、`ide/projectView` 158、`history` 94。
+其余域的大组：`editor` 域 `openapi/editor` 928 与 `codeInsight/daemon` 629（最大两块）、
+`vcs/openapi/vcs` 1122、`settings-run/execution` 1561、`ui` 域 `com/intellij/ui` 1136、`actions` 域 302。

@@ -2622,3 +2622,27 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 每行都写明了替身与缺口；`[-]` 三类（语言侧 builder 与 EP、语义签名族、注入片段、Swing/启动期宿主）。
 
 **下一批**：B5 起域（`editor/actions`）—— 按 B4 的同一套流程走（机械枚举 → 判决表 + 门控 → §C 优先级 → 逐条实现）。
+
+## BL. 2026-09-30 第六十六批：**起 B5 域** —— `ide/bookmarks` 5 类逐条判决（判决文件 + 门控）
+
+B4 收口后按 `docs/inventory/_domains.json` 挑下一个域。`projectviews` 域里 `com/intellij/ide/bookmarks`
+是**最小的一组**（5 类），而本仓的书签功能已经是一整条真实链路（列表代数 `src/bookmarks.ts`、
+动作与键位 `src/bookmarkActions.ts` + `src/keymap.ts`、工具窗口 `src/components/BookmarksPanel.vue`、
+视图齿轮 `src/bookmarksView.ts`、装订线图标 `src/editorGutterIcons.ts`、项目级持久化
+`ProjectSettings.bookmarks`）—— 每个类都能落到真文件上，挑它起域最不容易写出空话。
+
+**判决**：`[x]` 0 + `[~]` 5 + `[ ]` 0 + `[-]` 0 = 5 —— 五条全是 `[~]`，缺口逐条写在判决 §G 行内：
+
+- `Bookmark` 缺 `description` 文本（`:57`/`:173-179`）、`BookmarkType`（`:181`）、编号书签的粗体（`:95`）、
+  每条书签自带高亮器的生命周期（`:118-126`，本仓图标统一重算）；
+- `BookmarkItem` 缺行文本预览/快速搜索串/底部文本（`:46-109`）；
+- `BookmarkManager` 缺**编辑后按行文本重锚**（`:439-495`）、自动描述（`:127-139`）、
+  "按加入顺序"排序（`:141-150` 的另一支）、文件书签（`:120-125`）；
+- `BookmarksListener` 的事件面在本仓是 Vue 响应式（没有插件消费者）；`BookmarkBundle` 的文案散在面板/动作里。
+
+**§C 三条**（按用户可见度）：① 编辑后重锚 + 行文本（上面插一行书签就指到别人身上，这是最实的一条）；
+② 书签类型与文件书签（还是那三个"没渲染"的视图开关的前置）；③ 列表项的富渲染。
+
+**判据（5 条）**：覆盖面从 `projectviews_scan.md` 重推（排测试源码集）并与 `bookmarks.txt` 对齐；
+`[x]`/`[~]` 行的引用必须落在磁盘上真实存在的 `src/`/`native/` 文件；四档计数自洽且与表尾一致；§C 三条在。
+B5 这一域没有 `[-]`/`[ ]`，所以门控没有 §D 那一组检查（对比 B4 的门控有）。

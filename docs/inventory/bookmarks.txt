@@ -1,0 +1,5 @@
+platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java
+platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java
+platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java
+platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java
+platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java
