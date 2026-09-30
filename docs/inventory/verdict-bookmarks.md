@@ -108,9 +108,18 @@
    **真机取证**：项目树右键 CMakeLists.txt → 菜单首格「添加书签」→ 气球「书签 CMakeLists.txt」→
    持久化里出现 `{"path":"CMakeLists.txt"}`（**没有 line 键**）→ 书签面板里它是一条可点的文件行、
    旁边有移除按钮，而只有行书签的 README.md 仍是普通分组头（带条数）。
-   **仍未做**：命名/分组书签列表（`BookmarkGroup`、`GroupCreateDialog`、把某个列表标为默认）、
-   `EditBookmark`（F2 改描述）、`AddAnotherBookmark`（往另一个列表再加一条）、`BookmarkOpenTabs`
-   （把打开的标签页一键加成文件书签）。
+   **第七十五/七十六批**：`EditBookmark` 已做（中键 + 树右键的「编辑描述」，见 §C③ 那一行）；
+   **命名书签列表已起地基**：`src/bookmarkLists.ts`（纯逻辑 + 7 条判据）把上游 `BookmarkGroup` /
+   `GroupState` 的规则整套搬过来 —— `ManagerState.groups`（`state.kt:8-20`）的模型、
+   默认列表唯一（`Group.isDefault` setter `:529-533`）、删掉默认列表后没有默认（`Group.remove:638-647`）、
+   新书签进默认列表而**行书签只有一个家**（`findGroupsToAdd:200-207`）、名字校验与 `名字 (1)…(99)`
+   （`GroupInputValidator:19-35`）、无历史状态时用项目名建第一张列表（`noStateLoaded:93-95`）。
+   **还没接**：持久化（`bookmarkLists` 字段 + 旧平铺 `bookmarks` 的迁移）、面板的分区渲染、
+   `GroupCreateDialog`/`GroupRenameDialog`/`GroupSelectDialog` 三个对话框、齿轮的
+   `askBeforeDeletingLists`（有了列表它才有落点），以及依赖列表的两个动作：
+   `AddAnotherBookmark`（`AddAnotherBookmarkAction`）与 `BookmarkOpenTabs`
+   （`BookmarkOpenTabsAction`，文案「书签打开标签页…」，它先弹「选择/创建书签列表」）。
+   这些是**下一批**（76b/76c）。
 ③ **列表项的富渲染 —— 大部分已做**（面板在第七十一/七十三批：图标 + 描述 + `行号: 那一行原文`
    + 助记键气泡 + 两种形状照 `ui/tree/LineNode.kt:20-31` 与 `BookmarkNode.kt:64-83`）；
    **装订线那一侧在第七十五批补齐**：悬停文本逐条照 `GutterLineBookmarkRenderer.getTooltipText:56-72`
@@ -119,9 +128,10 @@
    **中键 = `EditBookmark`**（`:50`，本仓落成 `src/components/BookmarkDescriptionDialog.vue`
    + `editBookmarkAt`/`saveBookmarkDescription`，文案取 `action.bookmark.edit.description.dialog.*`）、
    对齐按 `Alignment.RIGHT`（`:46`）。
-   **仍未做**：`speedSearchText`（`:104` —— 本仓面板没有快速搜索，登记为无落点）、
-   `updateAccessoryView`（`:92-99` 助记键在**右侧附件位**，本仓仍画在行首 —— 观感差异，待改）、
-   `footerText`（`:109` 的 presentable URL，本仓用行的 `title` 给了 `路径:行` ✓ 近似）。
+   **第七十六批收尾**：`updateAccessoryView`（`:92-99`）落地——助记键从行首挪到**行尾的附件位**
+   （`margin-left: auto` 顶到右侧，与 IDEA 把编号写进树的 accessory 同形）；
+   `footerText`（`:109` 的 presentable URL）本仓用行的 `title` 给 `路径:行` ✓ 近似；
+   `speedSearchText`（`:104`）登记为**无落点**（本仓面板没有快速搜索/`SpeedSearch` 那套基建）。
 
 ## G. 逐条总表（5 类，与 `docs/inventory/bookmarks.txt` 一一对齐）
 

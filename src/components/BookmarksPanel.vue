@@ -106,17 +106,17 @@ function onKeydown(event: KeyboardEvent) {
       <template v-for="group in groups" :key="group.path || 'flat'">
         <!-- 分组模式下的文件标题行（IDEA 的 GroupLineBookmarks = 按文件分组） -->
         <div v-if="group.path" class="bookmark-group-head" :role="fileBookmarks.get(group.path) ? 'listitem' : 'presentation'" :title="group.path">
-          <span class="bookmark-digit" :title="fileBookmarks.get(group.path)?.mnemonic === undefined ? '无编号' : `Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic ?? '' }}</span>
           <button v-if="fileBookmarks.get(group.path)" class="bookmark-group-name bookmark-file-open" :title="`打开 ${group.path}${bookmarkDescription(fileBookmarks.get(group.path)!) ? '：' + bookmarkDescription(fileBookmarks.get(group.path)!) : ''}`" @click="activate(fileBookmarks.get(group.path)!)">{{ group.path.split('/').pop() }}</button>
           <span v-else class="bookmark-group-name">{{ group.path.split('/').pop() }}</span>
           <span class="bookmark-group-folder">{{ folderOf(group.path) }}</span>
+          <span v-if="fileBookmarks.get(group.path)?.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic }}</span>
           <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="13" /></button>
           <span v-else class="bookmark-group-count">{{ group.entries.length }}</span>
         </div>
         <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }">
           <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
                   :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行${bookmarkDescription(entry) ? `：${bookmarkDescription(entry)}` : ''}`" @click="activate(entry)">
-            <span class="bookmark-digit" :title="entry.mnemonic === undefined ? '无编号' : `Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic ?? '' }}</span>
+
             <!-- 分组在文件下：`"行号: "` 灰 + 描述（那一行原文）常规体 —— 逐条照 `ui/tree/LineNode.kt:20-31`。
                  行号直接用 `entry.line`：上游那份要多一次 `+1`（`LineNode.kt:21`）是因为 IDEA 存 0 基，
                  本仓存的就是 1 基（见 `src/bookmarks.ts` 的注释）。 -->
@@ -132,6 +132,9 @@ function onKeydown(event: KeyboardEvent) {
               <span class="bookmark-folder">{{ folderOf(entry.path) }}</span>
               <span v-if="entry.line !== undefined" class="bookmark-line">:{{ entry.line }}</span>
             </template>
+            <!-- 助记键在**右侧附件位**（上游 `BookmarkItem.updateAccessoryView:92-99` 把编号写进
+                 那个 JLabel = 树的 accessory），所以它在行尾而不是行首。 -->
+            <span v-if="entry.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic }}</span>
           </button>
           <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>
         </div>
@@ -160,7 +163,8 @@ function onKeydown(event: KeyboardEvent) {
 .bookmark-row:hover { background: var(--hover); }
 .bookmark-selected { background: var(--selected); }
 .bookmark-jump { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 3px 0 3px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
-.bookmark-digit { flex-shrink: 0; width: 11px; color: var(--accent); font: 10px var(--font-mono); }
+/* 右侧附件位（`updateAccessoryView` 把编号放在那）：`margin-left: auto` 顶到行尾，宽度按内容。 */
+.bookmark-digit { flex-shrink: 0; min-width: 11px; margin-left: auto; color: var(--accent); font: 10px var(--font-mono); text-align: right; }
 .bookmark-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 描述（那一行原文）：常规体、可省略号截断；`BookmarkNode.kt:80` 里它是唯一用 REGULAR_ATTRIBUTES 的段。 */
 .bookmark-detail { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
