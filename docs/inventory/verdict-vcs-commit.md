@@ -106,7 +106,7 @@
 
 | 类 | 源码 | 判决 | 依据（有实现点的指到真实 `src/` 文件） |
 |---|---|---|---|
-| `AmendCommitHandler` | `platform/vcs-api/src/com/intellij/vcs/commit/AmendCommitHandler.kt` | `[~]` | `src/commitCheck.ts`（`commitToAmend`/`amendRoot` 的闸）+ `src/components/SourceControl.vue` 的 amend 勾选框；**缺** `CommitToAmend.Resolved`（改某一次具体提交）与 `getAmendSpecificCommitTargets` |
+| `AmendCommitHandler` | `platform/vcs-api/src/com/intellij/vcs/commit/AmendCommitHandler.kt` | `[~]` | `src/commitCheck.ts`（`commitToAmend`/`amendRoot` 的闸）+ 面板的 amend 勾选框 + **`src/amendMessage.ts`**（进 amend 模式预填上次提交的信息、退出还原草稿 = `setAmendMessage`/`restoreBeforeAmendMessage`，判据 `tests/amend-message.test.mjs`）；**缺** `CommitToAmend.Resolved`（改某一次具体提交 —— `git.amend.specific.commit` 默认 true，上游真会列出最近提交）与 `getAmendSpecificCommitTargets` |
 | `CommitAuthorTracker` | `platform/vcs-api/src/com/intellij/vcs/commit/CommitAuthorTracker.kt` | `[x]` | `src/commitAuthor.ts`（作者与作者日期、`--author` 覆盖、清除；判据 `tests/commit-author.test.mjs`） |
 | `CommitMode` | `platform/vcs-api/src/com/intellij/vcs/commit/CommitMode.kt` | `[~]` | `src/components/SourceControl.vue`：本仓只有**非模态**一档（常驻面板）；`PendingCommitMode`/`ModalCommitMode` 没有宿主 ⇒ §D |
 | `CommitWorkflowHandler` | `platform/vcs-api/src/com/intellij/vcs/commit/CommitWorkflowHandler.kt` | `[~]` | 流程行为在 `src/commitCheck.ts` + `src/components/SourceControl.vue`（`CommitChecksResult` 那几档对应"拒绝原因"）；没有这个接口对象 |
@@ -121,7 +121,7 @@
 | `AbstractCommitWorkflow` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitWorkflow.kt` | `[~]` | 流程状态在 `src/components/SourceControl.vue` + 宿主；缺选项保存/恢复的统一层（本仓的选项直接进设置） |
 | `AbstractCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitWorkflowHandler.kt` | `[~]` | 同上：handler 的职责分散在 `src/components/SourceControl.vue` 与宿主 |
 | `AbstractCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitter.kt` | `[~]` | 提交执行在 `native/git.cpp`（`git.commit`）+ `src/components/SourceControl.vue`；缺"执行器"抽象 |
-| `AmendCommitAware` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitAware.kt` | `[~]` | `getLastCommitMessage` 由 `git.amendMessage`/历史提供（见 `src/commitCheck.ts` 的引用）；缺 `getAmendCommitDetails` 的分支 |
+| `AmendCommitAware` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitAware.kt` | `[~]` | `getLastCommitMessage` 走原生 `git.commitDetails`（`%B`）+ `src/amendMessage.ts` 的 `amendMessagePlan`；缺 `getAmendCommitDetails` 的其余分支（作者/日期也跟着改写那个提交） |
 | `AmendCommitHandlerImpl` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitHandlerImpl.kt` | `[~]` | 同上（本仓没有那个对象，行为在面板与 `src/commitCheck.ts`） |
 | `AmendCommitModeDropDownLink` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitModeDropDownLink.kt` | `[~]` | 本仓的 amend 是勾选框（`src/components/SourceControl.vue` 的 `.sc-amend`）；**缺**上游那个「改哪一次提交」的下拉链接 |
 | `ChangeListClassifierProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangeListClassifierProvider.kt` | `[-]` | 变更列表扩展点（哪个列表的信息由描述提供）：本仓是 git index 模型（见 `src/components/SourceControl.vue` 的 staged/unstaged 两份），没有 `LocalChangeList` |
@@ -170,7 +170,7 @@
 | `SingleChangeListCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowHandler.kt` | `[-]` | 同上 |
 | `SingleChangeListCommitWorkflowUi` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowUi.kt` | `[-]` | 同上 |
 | `SingleChangeListCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitter.kt` | `[-]` | 同上（单变更列表的执行体） |
-| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | `[~]` | amend 的**勾选框**已落（`src/components/SourceControl.vue`）；缺同名的菜单/动作形态（本仓没有它的菜单行） |
+| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | `[~]` | 第四十六批按它核过：文案与浮层在 `src/commitPanelStrings.ts`（`checkbox.amend` = 修正(M)、标题+Alt+M、**无描述**）、控件在 `src/components/SourceControl.vue` 且位置 = `ChangesView.CommitToolbar` 那一行（与图例同行）；**缺** `isAmendSpecificCommitSupported` 为真时的 `ToggleAmendPanel`（勾选框 + 「上次提交」下拉），见 `AmendCommitHandler` 行。判据 `tests/scm-panel-strings.test.mjs` |
 | `ToggleAmendCommitOption` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitOption.kt` | `[x]` | `src/components/SourceControl.vue` 的 amend 勾选框（tooltip 与 VK_M 助记符引 `ToggleAmendCommitOption.kt:19/23`） |
 | `VcsCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsCommitter.kt` | `[~]` | 提交执行在 `native/git.cpp` + `src/commitNotification.ts` 的结果处理；缺 VCS 无关的执行体 |
 | `VcsPathsToRefreshProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsPathsToRefreshProvider.kt` | `[-]` | EP：插件声明"提交后要刷新哪些路径"；本仓没有插件运行时 |
@@ -181,7 +181,7 @@
 | `CommitMessageInspectionEP` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionEP.kt` | `[-]` | EP：插件贡献提交信息检查；本仓没有插件运行时 |
 | `CommitMessageInspectionProfile` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionProfile.java` | `[~]` | 本仓是一套设置（`src/commitMessageInspection.ts` 的 `CommitMessageInspectionSettings`）；没有 `InspectionProfileImpl` 那套检查配置档 |
 | `CommitMessageInspectionsPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/CommitMessageInspectionsPanel.kt` | `[~]` | 同上：设置面在 `src/commitMessageInspection.ts` 与 `src/settingsPersistence.ts` |
-| `ReformatCommitMessageAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/ReformatCommitMessageAction.java` | `[x]` | `src/components/SourceControl.vue` 的「重新格式化提交信息」（`reformatCommitMessage`） |
+| `ReformatCommitMessageAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/ReformatCommitMessageAction.java` | `[x]` | `src/components/SourceControl.vue` 的 `reformatCommitMessage`，入口 = 每条检查问题的快捷修复（上游也是这条；第四十六批撤掉消息区那个上游没有的常显按钮；键位 `Alt+L`（`use-shortcut-of=ReformatCode`）登记在 `docs/source-todo.md` §16）。判据 `tests/commit-message-inspection.test.mjs` |
 | `SubjectBodySeparationInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectBodySeparationInspection.java` | `[x]` | `src/commitMessageInspection.ts` 的 `MISSING_BLANK_LINE_MESSAGE` + `addBlankLineAfterSubject` |
 | `SubjectLimitInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectLimitInspection.kt` | `[x]` | `src/commitMessageInspection.ts` 的主题行检查（`SUBJECT_LIMIT_MESSAGE`） |
 

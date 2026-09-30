@@ -581,3 +581,20 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`，78 类）里 §E 的 ①③
 真机截图才发现上游没有这种东西（非模态面板里执行器挂在提交按钮的下拉上，而那个组是空的），
 而且它把提交按钮那一排挤成了竖排文字。判决表里 `[~]` 的行**不要凭直觉补形状**：
 先按上游源码找到「入口在哪个组件、什么条件下可见」，再动手。
+
+## 24. 提交面板的文案与动作排布（2026-09-30 第四十六批）
+
+从"真机抓到一处编造"变成"系统化核一遍"：面板里所有用户看得见的中文文案 × 随 IDE 发货的中文包
+（1419 个 bundle / 95030 条含中文取值）逐个比对，命中的都改了 —— amend 的文案与浮层（`checkbox.amend`
+= 修正(M)）、amend 与消息历史的位置（`ChangesView.CommitToolbar`，与图例同一行）、消息区不带工具条
+（`CommitMessage(showToolbar=false)`）、占位文本（`commit.message.placeholder` = 提交消息）；
+**删掉两件上游没有的东西**：「回滚提交信息」按钮 + 自造占位「默认信息」。顺带补上"一开 amend
+就预填上次提交的信息"（`src/amendMessage.ts`）。明细见 `docs/ui-placement-audit.md` §AX，
+判据 `tests/scm-panel-strings.test.mjs` + `tests/amend-message.test.mjs`。
+
+**还没判的**（`.sc-toolbar` 那一行、折叠按钮、分支/标签/比较三行、reformat 的 Alt+L 键位、
+失败行的详情链接）逐条登记在 `docs/source-todo.md` §17 —— **先找到上游的组件与行号再动**。
+
+**方法（写给下一位）**：只要面板里出现一句中文，问三个问题 —— ①上游有没有这句话（在哪个 bundle、
+key 是什么）？②如果没有，它是不是本仓措辞（那就在清单里写明"本仓"两字）？③控件本身呢
+（哪个组件、哪一行、什么条件下可见）？这三问答不上来的，就是下一个 §AX。

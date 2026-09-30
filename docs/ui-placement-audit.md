@@ -2188,3 +2188,39 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 **还没落的（判决表里仍记 `[~]`）**：失败行没有上游 `CommitCheckFailure.WithDetails` 那条
 「显示详细信息 / 查看详情」链接动作；`CommitChecksProgressIndicator`（面板内的检查进度）
 与 `label.commit.checks.not.available.during.indexing`（索引期间检查不可用）那两条警告也没有。
+
+## AX. 2026-09-30 第四十六批：提交面板的**动作排布与文案**按上游核一遍 —— 2 处编造、1 处造错的形状、1 处造错的文案
+
+上一批靠真机截图抓到过一个"上游没有的常显按钮"，这一批把同一类风险**系统化**：先写脚本把面板里
+所有"用户看得见"的中文文案（模板文本节点、`title`/`aria-label`/`placeholder`、脚本里的字符串字面量）
+逐个对随 IDE 发货的中文包核一遍（`localization-zh.jar` 解出来 1419 个 bundle、95030 条含中文的取值），
+把对不上的挑出来逐条判。命中的四类：
+
+| 发现 | 上游证据 | 改法 |
+|---|---|---|
+| **「修改(M) 上次提交（改写 HEAD，不选具体提交）」是编的** —— 上游面板里那枚复选框叫 `checkbox.amend` = **修正(_M)**；我们抄的是**经典对话框**那个选项的措辞，而且括号里那句话哪儿都没有 | `VcsBundle` `checkbox.amend` = `修正(_M)`（中文包 `:327`）；非模态那条动作是 `ToggleAmendCommitModeAction`（`text = message("checkbox.amend")`，`:29`），经典对话框那条才是 `ToggleAmendCommitOption`（`commit.amend.commit` + `commit.tooltip.merge…`） | 文案改 `修正(M)`（`src/commitPanelStrings.ts`，常量 + key 注释） |
+| **浮层也是另一条动作的** —— 我们用的是经典对话框那条的 tooltip（`commit.tooltip.merge.this.commit.with.the.previous.one`）；非模态那条是 `HelpTooltip(标题).setShortcut(...)`，**描述被 `description = null` 清掉了**（`:30`），动作注册里也没有 description | `ToggleAmendCommitModeAction.kt:29-33,55-60`；键位 `$default.xml:1057-1059` = `alt M` | 浮层 = 「修正(M)（Alt+M）」，由两个常量拼出来（判据盯着不许手写） |
+| **位置错了一行** —— 上游 `ChangesView.CommitToolbar` = `{Vcs.ToggleAmendCommitMode, Vcs.MessageActionGroup}`，挂在 `CommitStatusPanel` 左侧 ⇒ 与**提交图例同一行**；非模态面板的消息区自己不带工具条（`CommitMessage(project, withSeparator=false, showToolbar=false, …)`） | `VcsActions.xml:396-408`、`NonModalCommitPanel.kt:104-107`、`CommitMessage.java:118-155` | amend 勾选框与「消息历史」按钮一起搬进图例那一行；消息区上面那一行（标题 + 三个图标按钮）整行删掉 |
+| **「回滚提交信息」上游没有这个动作** —— 面板里那个"恢复到上次提交时使用过的信息"按钮、以及它背后的 localStorage 持久化，都是自造件 | 全仓没有 `Vcs.RollbackCommitMessage` 之类的动作，`VcsBundle` 也没有对应 key；上游的消息历史是 `Vcs.ShowMessageHistory`（`ActionsBundle` = 「提交消息历史记录」/「显示提交消息历史记录」），就在上面那一行 | 删按钮 + 删 `persistMessage`/`lastPersistedMessage` 那套；历史按钮改到图例行，名称/说明取动作文案 |
+| **占位文本是编的** —— 我们写的是「默认信息」 | `VcsBundle` `commit.message.placeholder` = **提交消息**（非模态面板传的就是它，`NonModalCommitPanel.kt:100`） | 占位文本改「提交消息」，只有这一种 |
+
+**顺带补齐的一条真行为**（不是文案）：上游一开 amend 就把**上次提交的信息**填进输入框
+（`AmendCommitHandlerImpl.setAmendMessage`，`:76-105`：先记草稿，再 `LoadCommitMessagesTask` 取上次的信息，
+空串不填、只差空白不填），退出 amend 模式再还原草稿（`:52` 的 `restoreBeforeAmendMessage`）。
+本仓的原生层本来就有 `git.commitDetails`（`%B`），所以这条是**纯前端**补上的：新模块
+`src/amendMessage.ts`（`amendMessagePlan` / `restoreBeforeAmendMessage` / `equalsIgnoreWhitespaces`），
+面板在 `amend` 的 watch 里取 `HEAD` 的信息填进去并把焦点送进输入框。
+
+**真机取证（MCP 驱动 build 里的 exe + 截图）**：面板那一行现在是 `[☑ 修正(M)] [🕘] [拉取][获取]…`，
+消息框占位是「提交消息」，勾上「修正(M)」⇒ 输入框出现上一次提交的主题（探针仓那条超长主题）**且获得焦点**，
+取消勾选 ⇒ 输入框回到空草稿；全程 0 异常。
+
+**判据**：`tests/scm-panel-strings.test.mjs`（6 条：值逐条对中文包、浮层 = 标题+快捷键、控件在图例行、
+编造件已删、历史按钮的名称/说明取动作文案、占位文本只有一种）+ `tests/amend-message.test.mjs`（7 条）。
+自证有牙：把「回滚提交信息」加回去 ⇒ 1 红；把 `修正(M)` 改成 `修改(M)` ⇒ 2 红。
+
+**还没判的（下一批的活，不再"默认合理"）**：`.sc-toolbar` 那一行的 `拉取/获取/推送/变基/储藏/弹出`
+（操作本身在上游都有，但**不在这一行**：`VcsToolbarActions` 里是 `Vcs.UpdateProject`/`CheckinProject`/
+`ChangesView.ToggleCommitUi`/`Diff.ShowDiff`/搁置那一族，位置与措辞都要逐条核）、变更树头部那个
+「折叠/展开」（`sc-changes-head`）、以及 `.sc-branch-ops` 那三行（分支/标签/比较）——都登记在
+`docs/source-todo.md` §16，判之前不许再给它们编引文。

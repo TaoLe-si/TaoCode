@@ -271,3 +271,27 @@
   本仓没有"索引中"这个状态。
 - `RecentCommitChecks` 的其余几档（`MODIFICATIONS_FAILED` / `POST_FAILED` / `SMART_MODE_REQUIRED`）：
   本仓的检查是一次性的（全在提交前），没有"提交后再补检查"那两档。
+
+## 17. 提交面板"待判"的排布（2026-09-30 第四十六批留下的）
+
+这一批把 amend 与消息区按上游核了一遍（审计 §AX），同时**明确记下还没核的**——
+它们现在**没有引文**，下一批要先找到"上游哪个组件、哪一行"再动，不许先编引文：
+
+- [ ] `.sc-toolbar` 那一行的 `拉取/获取/推送/变基/储藏/弹出`：操作本身上游都有，
+      **但不在这一行**。上游提交工具窗口那一行（`CommitStatusPanel` 左侧）只有
+      修正(M) + 消息历史；`VcsToolbarActions`（`VcsActions.xml` 里那一族）是
+      `VcsToolbarLabelAction` / `Vcs.UpdateProject` / `CheckinProject` / `ChangesView.ToggleCommitUi` /
+      `Diff.ShowDiff` / `ChangesView.CreatePatchFromChanges` / 搁置那几条 —— 逐条核位置与文案。
+- [ ] `.sc-changes-head` 的「折叠/展开」按钮：上游哪条动作管变更树的折叠？（候选：
+      `ChangesViewToggleChangesTreeGroup` 一类；先找再说。）
+- [ ] `.sc-branch-ops` 的三行（新建/合并/删除分支、新建标签、与分支比较）：上游这些操作在
+      日志窗口与分支弹窗里，提交面板里没有这一族；要么搬去该去的地方，要么如实登记为
+      "本仓把常用 git 操作放在这里"的**有意偏差**（登记也要写进清单）。
+- [ ] `重新格式化提交信息` 的**键位**：上游是 `Vcs.ReformatCommitMessage`
+      （注册时 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L），本仓目前只有
+      "提交信息检查"那条问题的快捷修复这一个入口。要接键位就得动 `src/keymap.ts`
+      （它需要宿主把提交面板的状态传进去）。
+- [ ] 失败行上的「显示详细信息 / 查看详情」链接动作（上游 `CommitCheckFailure.WithDetails`，
+      `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板）。
+- [ ] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
+      「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）。

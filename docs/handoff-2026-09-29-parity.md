@@ -4,10 +4,10 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`8979353`（本机领先 `origin/main`：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+- HEAD：`4db2567`（本机领先 `origin/main`：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
   Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**、
   **主工具栏键盘焦点 + §C 无宿主条目的判决清理**、**每窗口可见性**、**B3 域判决**、
-  **提交检查的入口/失败行/「仍然提交」**，外加交接文档跟进）
+  **提交检查的入口/失败行/「仍然提交」**、**提交面板文案与 amend 形状（第四十六批）**，外加交接文档跟进）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -173,7 +173,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 
 **文档**
 - `docs/class-parity-todo.md` —— 总控与执行顺序（**每批完成后回来更新状态**）。
-- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§AW，按批次追加）。
+- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§AX，按批次追加）。
 - `docs/source-todo.md` —— "假 UI / 假位置 / 假控件 / 假逻辑"清单，判定不做的逐条在此登记理由。
 - `docs/enum-lsp-dap.md` —— LSP/DAP 承接层对照（协议侧，不按类对照）。
 

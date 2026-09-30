@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GitBranch, GitCommitIcon, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Archive, History, Tag, Ban, GitPullRequestArrow, CloudDownload, RotateCcw, Trash2, ChevronDown, Clock, Settings, Undo2, AlignLeft, TriangleAlert } from 'lucide-vue-next'
+import { GitBranch, GitCommitIcon, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Archive, History, Tag, Ban, GitPullRequestArrow, CloudDownload, RotateCcw, Trash2, ChevronDown, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
+import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION } from '../commitPanelStrings'
+import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
 import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, checksFailedTitle, commitAnywayLabel,
   commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
 import { setStatusText } from '../statusBarText'
@@ -22,7 +24,7 @@ import {
   type CommitMessageInspectionSettings,
   type CommitMessageProblem,
 } from '../commitMessageInspection'
-import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommit, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStash, type GitStatus, type GitTags, type TodoPattern } from '../bridge'
+import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommit, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStash, type GitStatus, type GitTags, type TodoPattern } from '../bridge'
 
 const props = defineProps<{
   root: string
@@ -50,7 +52,6 @@ const message = ref('')
 const amend = ref(false)
 // `ToggleAmendCommitOption.kt:23` tooltip = VcsBundle.properties:1163
 // `commit.tooltip.merge.this.commit.with.the.previous.one`, plus the `VK_M` mnemonic of `:19`.
-const AMEND_TOOLTIP = '将本次提交与上一次合并（Alt+M）'
 interface DiffState { path: string; staged: boolean; base: string; text: string; rows: DiffRow[]; truncated: boolean; hunks?: GitHunks; hunkPicked?: Set<number> }
 const diff = ref<DiffState | null>(null)
 const hunkError = ref('')
@@ -363,7 +364,6 @@ const commit = () => {
       author: authorOverride.value?.name ?? '', authorEmail: authorOverride.value?.email ?? '',
     })
     reportCommitResult(text, stagedPaths, [])
-    persistMessage(text)
     message.value = ''
     amend.value = false
     // 提交会话结束 ⇒ `CommitStateCleaner.resetState()`（:634-641）里的 `resetCommitChecksResult()`。
@@ -394,26 +394,13 @@ const commitAndPush = () => {
     committed = true
     checksFailures.value = []
     reportCommitResult(text, stagedPaths, [])
-    persistMessage(text)
     message.value = ''
     amend.value = false
     await request('git.push')
   }, failure => { if (!committed) reportCommitResult(text, stagedPaths, [failure]) })
 }
-// The changes list collapses like IDEA's commit tab: the tree header carries
-// "修改(M) 上次提交" on the left and 展开 on the right.
+// The changes list collapses like IDEA's commit tab: the tree header carries 展开 on the right.
 const changesCollapsed = ref(false)
-// IDEA CommitMessagePanel has a rollback button: it restores the message that was
-// last persisted (here: the message of the last successful commit for this root).
-const lastPersistedMessage = ref('')
-function messageStorageKey() { return `taocode.commitMsg:${props.root}` }
-function readPersistedMessage() {
-  try { lastPersistedMessage.value = localStorage.getItem(messageStorageKey()) ?? '' } catch { lastPersistedMessage.value = '' }
-}
-function persistMessage(value: string) {
-  lastPersistedMessage.value = value
-  try { localStorage.setItem(messageStorageKey(), value) } catch { /* storage unavailable: session-only */ }
-}
 // IDEA's commit-message inspections (vcs/commit/message/): the subject line and every body line
 // are checked against their right margins, and line 1 has to be empty before the body starts.
 // The rules live in src/commitMessageInspection.ts so they can be tested without a DOM.
@@ -444,6 +431,33 @@ function applyFix(problem: CommitMessageProblem, fix: CommitMessageFix) {
 // wraps the body lines to its margin. It does not touch the subject (SubjectLimitInspection has no
 // reformat) and it does not tidy whitespace — `CommitMessage.getComment()` only trims the trailing
 // whitespace of the whole message (:300-302), which the commit itself already does.
+// 进 amend 模式就把「上次提交的信息」填进输入框、退出时还原草稿（上游 `AmendCommitHandlerImpl`
+// 的 `setAmendMessage` / `restoreBeforeAmendMessage`，判据 `tests/amend-message.test.mjs`）。
+let amendDraft: string | null = null
+let beforeAmendMessage: string | null = null
+watch(amend, value => {
+  if (!value) {
+    const restored = restoreBeforeAmendMessage(message.value, amendDraft, beforeAmendMessage)
+    amendDraft = null
+    beforeAmendMessage = null
+    if (restored !== null) message.value = restored
+    return
+  }
+  void (async () => {
+    try {
+      const details = await request<GitCommitDetails>('git.commitDetails', { revision: 'HEAD' })
+      const plan = amendMessagePlan(message.value, details.message)
+      if (plan.fill === null) return
+      amendDraft = plan.fill
+      beforeAmendMessage = plan.before
+      message.value = plan.fill
+      void nextTick(() => messageBox.value?.focus())
+    } catch (caught) {
+      // 还没有 HEAD（新仓库）就没有可改写的提交信息 —— 上游那边也是空手回来。
+      error.value = errorText(caught)
+    }
+  })()
+})
 function reformatMessage() {
   message.value = reformatCommitMessage(message.value, props.commitSettings)
 }
@@ -459,10 +473,6 @@ watch(message, value => {
   message.value = wrapped.text
   void nextTick(() => { box.selectionStart = box.selectionEnd = wrapped.caret })
 })
-function rollbackMessage() {
-  message.value = lastPersistedMessage.value
-}
-watch(() => props.root, () => readPersistedMessage(), { immediate: true })
 // IDEA's commit options popup (ChangesView.ShowCommitOptions). Only options with a
 // real backend are offered: Git's Signed-off-by trailer (GitCommitOptions.kt:92) and
 // a pre-commit TODO scan that reuses the project's own TODO patterns.
@@ -675,8 +685,7 @@ watch(() => [props.root, props.active] as const, () => {
     <div v-if="!status.available" class="sc-empty"><CircleSlash :size="22" /><p>未找到 Git</p><span>安装 Git 并加入 PATH 后可使用版本控制。</span></div>
     <template v-else>
       <div class="sc-commit">
-        <div class="sc-msg-head"><span class="sc-msg-title">提交信息</span><button class="icon-button" :class="{ on: messageHistoryOpen }" :title="messageHistoryOpen ? '隐藏历史提交信息' : '历史提交信息'" :aria-expanded="messageHistoryOpen" aria-label="历史提交信息" :disabled="busy || loading" @click="toggleMessageHistory"><Clock :size="13" /></button><button class="icon-button" :disabled="busy || !lastPersistedMessage || message === lastPersistedMessage" title="恢复到上次提交时使用过的信息" aria-label="回滚提交信息" @click="rollbackMessage"><Undo2 :size="13" /></button><button class="icon-button" :disabled="busy || !message.trim()" title="重新格式化提交信息（在主题后补空行、按右边距折行正文）" aria-label="重新格式化提交信息" @click="reformatMessage"><AlignLeft :size="13" /></button></div>
-        <textarea ref="messageBox" v-model="message" rows="3" :placeholder="amend ? '留空则沿用上次的提交信息' : '默认信息'" aria-label="提交信息" :disabled="busy" @keydown.ctrl.enter.prevent="commit" @keydown.ctrl.shift.enter.prevent="commitAndPush" />
+        <textarea ref="messageBox" v-model="message" rows="3" :placeholder="COMMIT_MESSAGE_PLACEHOLDER" aria-label="提交消息" :disabled="busy" @keydown.ctrl.enter.prevent="commit" @keydown.ctrl.shift.enter.prevent="commitAndPush" />
         <!-- IDEA's commit-message inspections: the reported range is underlined in the commit
              message editor; here each problem names its line, shows the exact substring IDEA
              would highlight, and offers the same quick fixes. -->
@@ -697,10 +706,14 @@ watch(() => [props.root, props.active] as const, () => {
         </div>
       </div>
       <div class="sc-changes-head">
-        <label class="sc-amend" :title="AMEND_TOOLTIP"><input v-model="amend" type="checkbox" :disabled="busy" /><span>修改(M) 上次提交（改写 HEAD，不选具体提交）</span></label>
         <button class="sc-tool" :disabled="busy || !changes.length" :title="changesCollapsed ? '展开变更列表' : '折叠变更列表'" :aria-expanded="!changesCollapsed" @click="changesCollapsed = !changesCollapsed"><ChevronDown :size="13" :class="{ 'sc-flip': !changesCollapsed }" />{{ changesCollapsed ? '展开' : '折叠' }}</button>
       </div>
       <div class="sc-toolbar">
+        <!-- `ChangesView.CommitToolbar`（VcsActions.xml:405-408）= `Vcs.ToggleAmendCommitMode` + `Vcs.MessageActionGroup`，
+             挂在 `CommitStatusPanel` 的左侧 ⇒ 与提交图例**同一行**（NonModalCommitPanel.kt:104-107）。
+             非模态面板的消息区自己不带工具条（CommitMessage.kt 的 showToolbar=false）。 -->
+        <label class="sc-amend" :title="AMEND_TOOLTIP"><input v-model="amend" type="checkbox" :disabled="busy" /><span>{{ AMEND_CHECKBOX_TEXT }}</span></label>
+        <button class="icon-button" :class="{ on: messageHistoryOpen }" :title="MESSAGE_HISTORY_DESCRIPTION" :aria-expanded="messageHistoryOpen" :aria-label="MESSAGE_HISTORY_TEXT" :disabled="busy || loading" @click="toggleMessageHistory"><Clock :size="13" /></button>
         <button class="sc-tool" :disabled="busy" title="拉取（--ff-only）" @click="pull"><Download :size="13" />拉取<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
         <button class="sc-tool" :disabled="busy" title="获取（fetch，不合并）" aria-label="获取" @click="fetch"><CloudDownload :size="13" />获取</button>
         <button class="sc-tool" :disabled="busy" title="推送当前分支" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>

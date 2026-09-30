@@ -477,8 +477,6 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-amend input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
 /* IDEA ChangesViewCommitPanel: message box header, the changes-tree header with
    修改(M) + 展开, and the 提交(N) / 提交并推送(P) action row under the tree. */
-.sc-msg-head { display: flex; align-items: center; justify-content: space-between; color: var(--secondary); font-size: 11px; }
-.sc-msg-head .icon-button.on { color: var(--accent); }
 .sc-msg-history { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-xs); max-height: 160px; overflow: auto; }
 .sc-msg-row { padding: 3px var(--space-2); border: 0; background: transparent; color: var(--text); font-size: 11px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-msg-row:hover { background: var(--hover); color: var(--bright); }
