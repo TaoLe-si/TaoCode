@@ -2604,3 +2604,21 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 **判据**：原生 `native/folding_state_test.cpp`（7 组：形状、条目字段、签名上限与 UTF-8、路径不许 `..`、
 50×40 上限、`validate_project_patch` 收下 `foldingState` 并照旧拒未知键）+ 前端
 `tests/editor-folding-state.test.mjs` 的导出/裁剪/导入一条。
+
+## BK. 2026-09-30 第六十五批：B4 最后 5 条 `[ ]` 全部判掉 —— B4 收口
+
+`[ ]` 归零靠的是**逐条读完上游再判**，不是补形状：
+
+| 类 | 判决 | 依据 |
+|---|---|---|
+| `FoldingPolicy` | `[~]` | 三个职责各有落点：`isCollapsedByDefault`/`keepExpandedOnFirstCollapseAll`（`:25-42`）转发语言侧 builder ⇒ 本仓是 LSP `kind` → 设置那套映射（`LspFoldingBuilder.kt:41-46`）；`getSignature`/`restoreBySignature`（`:44-70`）⇒ `signatureAt` + `restorePlan` 的按签名认回 |
+| `FoldingUtil` | `[~]` | 五个函数逐个对上（`findFoldRegion`/`findFoldRegionStartingAtLine`/`getFoldRegionsAtOffset`/`isTextRangeFolded`/`createFoldTreeIterator` 的层数），缺的是 `isHighlighterFolded`（markdown highlighter 那一层）与 PSI 重载 |
+| `CollapseBlockHandler` | `[-]` | 语言插件实现的 EP 接口（`CollapseBlockAction.java:29-46` 按语言取 handler）——本仓没有语言插件；**行为**在 `CollapseBlockAction` 行（`blockAt` + 语法树退路） |
+| `CodeFoldingZombie` | `[-]` | 折叠**模型**的磁盘缓存，上游挂在注册表开关 `cache.folding.model.on.disk` 后（`CodeFoldingNecromancer.kt:52-56`）；本仓模型是一次 `foldingRange` 请求的产物、**状态**已落盘 ⇒ 再造缓存没有可见收益 |
+| `FoldingHintMouseMotionListener` | `[-]` | 触发点是**装订线折叠轮廓区**（`FOLDING_OUTLINE_AREA`，`:47-53`）且折叠区头部已滚出视口（`:71-88`）；CodeMirror 的装订线只在折叠区**起始行**画标记，起始行滚出后那一带没有可悬停元素 ⇒ 形态对不上（§D.4 的 Swing 宿主） |
+
+**四档**：`[x]` 0 / `[~]` 40 / `[ ]` 0 / `[-]` 29 = 69 —— **B4 没有未决项**。剩下的 `[~]` 全是
+"上游靠 PSI 元素身份 / 文件时间戳 / Swing 宿主，本仓用偏移 + 轻签名 / CodeMirror 语义当替身"这类**引擎差异**，
+每行都写明了替身与缺口；`[-]` 三类（语言侧 builder 与 EP、语义签名族、注入片段、Swing/启动期宿主）。
+
+**下一批**：B5 起域（`editor/actions`）—— 按 B4 的同一套流程走（机械枚举 → 判决表 + 门控 → §C 优先级 → 逐条实现）。

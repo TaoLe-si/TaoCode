@@ -63,6 +63,7 @@
 
 ### A4 提交工具窗口 `ChangesViewCommitPanel.kt`
 
+- [x] **已收口（第六十五批）** B4（`codeInsight/folding` 69 类）`[ ]` 归零：`FoldingPolicy`/`FoldingUtil` 判 `[~]`（逐函数有落点），`CollapseBlockHandler`/`CodeFoldingZombie`/`FoldingHintMouseMotionListener` 判 `[-]`（语言侧 EP、注册表后的模型缓存、装订线折叠轮廓区本仓没有对应形态）—— 依据逐条写在判决 §G 与审计 §BK。
 - [x] **已加（第六十四批）** 折叠状态**落盘**：写进项目级设置（`ProjectSettings.foldingState`），杀进程重启后打开同一文件折叠原样回来；原生新增 `native/folding_state_schema.cpp` 校验形状与上限（50×40、签名 ≤96），前端按"最近动过的"裁到 20×30（判决 §C③，审计 §BJ）。
 - [x] **已加（第六十三批）** `caretInsideRange` 接进默认折叠（光标严格落在区间里就不折，上游 `shouldExpandNewRegion:236-238`）；「全部收起/展开」的两段式经分析在本仓退化成一段（`keepExpandedOnFirstCollapseAll` 是语言侧钩子），依据写进判决 §G（审计 §BI）。
 - [x] **已加（第六十二批）** 折叠状态的存/取与重算：关标签/换文件前存档、区间到手后按偏移+签名恢复（区间被编辑推走的按签名认回）；文档一变重算时先存后删失效项、"用户展开过"的块活在重算里。落点在 `src/editorFoldingState.ts` + `src/editorFoldingController.ts`（判决 §C③⑤，审计 §BH）；**缺**落盘那半。
