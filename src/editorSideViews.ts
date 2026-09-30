@@ -79,14 +79,23 @@ watch(activePath, path => {
   const target = typeof path === 'string' ? path : activePath.value
   if (shouldSelectInTree(projectViewBehavior(), target)) fileTreeRef.value?.reveal(target)
 })
+// 重列项目树。**开自己的忙标、放弃时排队**：早先用的是全应用的 `busy`（很多操作都会置它），
+// 打开项目那一串里正好 busy ⇒ 这次刷新被**静默丢掉**且不再重试，`entries` 就停在 `[]` ——
+// 表现是项目视图一片空白，切到别的左视图再切回来（那时 busy 已落下、`showView` 会再刷一次）才恢复。
+let treeBusy = false
+let treeAgain = false
 async function refreshTree() {
-  if (!workspace.value || busy.value) return
-  busy.value = true
+  if (!workspace.value) return
+  if (treeBusy) { treeAgain = true; return }   // 排队而不是丢
+  treeBusy = true
   try {
     workspace.value.entries = await request<Entry[]>('workspace.list', { path: '' })
     treeVersion.value++
   } catch (error) { notify(errorMessage(error), true) }
-  finally { busy.value = false }
+  finally {
+    treeBusy = false
+    if (treeAgain) { treeAgain = false; void refreshTree() }
+  }
   await refreshSyntheticNodes()
 }
 function selectInTree() {
