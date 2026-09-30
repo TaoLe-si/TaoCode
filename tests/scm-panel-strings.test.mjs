@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
-  AMEND_SHORTCUT_TEXT, AMEND_TOOLTIP } from '../src/commitPanelStrings.ts'
+  AMEND_SHORTCUT_TEXT, AMEND_TOOLTIP, EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../src/commitPanelStrings.ts'
 import { CHECKS_FAILED_UNKNOWN, RERUN_CHECKS_TOOLTIP, commitAnywayLabel, checksFailedTitle } from '../src/commitChecks.ts'
 import { commitBlockMessage } from '../src/commitCheck.ts'
 
@@ -95,4 +95,36 @@ test('移走的那几个操作仍在 Git 菜单里（上游给它们的位置）
   const panel = read('src/components/SourceControl.vue')
   assert.ok(!panel.includes('sc-commit-row'), '面板内那份提交历史列表已删（上游是日志工具窗口）')
   assert.ok(menu.includes("run: () => ctx.showView('vcslog')"), '日志工具窗口是它的上游位置（Git 菜单 → 显示日志）')
+})
+
+test('变更树头部那对按钮 = 上游的 header 动作（全部展开 / 全部收起）', () => {
+  assert.equal(EXPAND_ALL_TEXT, '全部展开', 'ActionsBundle action.ExpandAll.text')
+  assert.equal(COLLAPSE_ALL_TEXT, '全部收起', 'ActionsBundle action.CollapseAll.text（包里是「收起」不是「折叠」）')
+  const panel = read('src/components/SourceControl.vue')
+  const head = panel.slice(panel.indexOf('<div class="sc-changes-head">'), panel.indexOf('<div class="sc-toolbar">'))
+  assert.ok(head.includes('{{ EXPAND_ALL_TEXT }}') && head.includes('{{ COLLAPSE_ALL_TEXT }}'), '两个按钮的文案走常量')
+  assert.match(head, /aria-label="全部收起" @click="changesCollapsed = true"/, '收起 = 把分组里的行收起来')
+  assert.match(head, /aria-label="全部展开" @click="changesCollapsed = false"/)
+  assert.ok(head.includes(':disabled="busy || !hasGroups"'), '可见性/可用性照 isExpandAllVisible()（有分组才成立）')
+  assert.match(panel, /const hasGroups = computed\(\(\) => changes\.value\.length > 0\)/, '本仓的分组就是已暂存/更改两组')
+  // 折叠的是行，不是整块（组节点留着）——上游收起的是树的子节点
+  assert.ok(!panel.includes('v-show="!changesCollapsed" class="sc-scroll"'), '整块滚动区不该被隐藏')
+  assert.match(panel, /v-for="change in staged" v-show="!changesCollapsed"/, '分组的行随折叠显隐')
+  assert.match(panel, /v-for="change in unstaged" v-show="!changesCollapsed"/)
+})
+
+test('分支/检出/合并/删除/比较 不在面板里（上游位置 = 分支弹窗，本仓已有）', () => {
+  const panel = read('src/components/SourceControl.vue')
+  assert.ok(!panel.includes('新建并切换到分支') && !panel.includes('合并所选分支到当前分支'), '合并/删除分支的按钮已删')
+  assert.ok(!panel.includes('与分支比较…'), '比较的下拉已删（触发点在上游是分支弹窗）')
+  assert.match(panel, /watch\(\(\) => props\.compareWith/, '弹窗选一行 ⇒ 宿主设 compareWith ⇒ 面板跑一次')
+  const popup = read('src/branchPopup.ts')
+  for (const id of ['checkout', 'compare', 'merge', 'delete']) {
+    assert.ok(popup.includes(`id: '${id}'`), `分支弹窗缺 ${id}`)
+  }
+})
+
+test('重新格式化提交信息接上上游键位（Vcs.ReformatCommitMessage 借 ReformatCode = Alt+L）', () => {
+  const panel = read('src/components/SourceControl.vue')
+  assert.match(panel, /@keydown\.alt\.l\.prevent="reformatMessage"/, '提交信息框上绑定 Alt+L')
 })

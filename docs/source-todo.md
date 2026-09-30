@@ -282,15 +282,21 @@
       先 fetch 再整合）与「推送」（`Vcs.Push`，键位进提示）；「获取/变基/储藏/弹出」的上游位置是 Git 菜单
       （本仓已有），「历史」的上游位置是日志工具窗口（本仓已有）⇒ 面板里那四个按钮与那份自造的
       「提交历史列表」一起删掉。见审计 §AY。
-- [ ] `.sc-changes-head` 的「折叠/展开」按钮：上游哪条动作管变更树的折叠？（候选：
-      `ChangesViewToggleChangesTreeGroup` 一类；先找再说。）
-- [ ] `.sc-branch-ops` 的三行（新建/合并/删除分支、新建标签、与分支比较）：上游这些操作在
-      日志窗口与分支弹窗里，提交面板里没有这一族；要么搬去该去的地方，要么如实登记为
-      "本仓把常用 git 操作放在这里"的**有意偏差**（登记也要写进清单）。
-- [ ] `重新格式化提交信息` 的**键位**：上游是 `Vcs.ReformatCommitMessage`
-      （注册时 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L），本仓目前只有
-      "提交信息检查"那条问题的快捷修复这一个入口。要接键位就得动 `src/keymap.ts`
-      （它需要宿主把提交面板的状态传进去）。
+- [x] `.sc-changes-head` 的「折叠/展开」（第五十四批已换成上游那一对）：上游是变更树自己的**头部动作**
+      `ChangesTree.createExpandAllAction(true)` / `createCollapseAllAction(true)`（`ChangesTree.java:725-744`，
+      头部工具栏 `TreeActionsToolbarPanel:53-54`），可见性 `MyTreeExpander.isExpandAllVisible()`（`:752-762`）；
+      文案 = 全部展开 / **全部收起**；语义 = 收起分组里的行、组节点留着。见审计 §AZ。
+- [x] 分支那两行（新建/合并/删除分支、与分支比较）（第五十四批已删）：上游位置 = **分支弹窗**
+      （`GitBranchesPopup`，`intellij.vcs.git.backend.xml:303-333`），本仓 `src/branchPopup.ts` 的
+      `BRANCH_ROW_ACTIONS` 里 `checkout/compare/rebase/merge/push/delete` 都有；比较的**结果列表**仍在面板，
+      触发点回到弹窗（`props.compareWith`）。见审计 §AZ。
+- [ ] **标签那一行**（新标签名 + 新建标签 + 标签 chips）—— 上游是**日志窗口右键菜单**里的
+      `Git.CreateNewTag`（`intellij.vcs.git.backend.xml:108`，加进 `Vcs.Log.ContextMenu` 的 `:418-428`），
+      本仓日志窗口还没有右键菜单 ⇒ 下一批：要么在日志窗口补那条菜单、要么如实登记为有意偏差。
+- [x] `重新格式化提交信息` 的**键位**（第五十四批已接）：上游 `Vcs.ReformatCommitMessage`
+      （`VcsActions.xml:394-395` 的 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L）——
+      提交信息框上挂 `@keydown.alt.l.prevent="reformatMessage"`（与 Ctrl+Enter 同一种做法），
+      不用动 `src/keymap.ts`。
 - [ ] 失败行上的「显示详细信息 / 查看详情」链接动作（上游 `CommitCheckFailure.WithDetails`，
       `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板）。
 - [ ] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与

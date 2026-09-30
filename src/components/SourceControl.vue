@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GitBranch, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, History, Tag, Ban, GitPullRequestArrow, Trash2, ChevronDown, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
+import { GitBranch, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Tag, Ban, GitPullRequestArrow, ChevronsUpDown, ChevronsDownUp, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
-import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION } from '../commitPanelStrings'
+import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
+  EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../commitPanelStrings'
 import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
 import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, checksFailedTitle, commitAnywayLabel,
   commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
@@ -55,7 +56,6 @@ const amend = ref(false)
 interface DiffState { path: string; staged: boolean; base: string; text: string; rows: DiffRow[]; truncated: boolean; hunks?: GitHunks; hunkPicked?: Set<number> }
 const diff = ref<DiffState | null>(null)
 const hunkError = ref('')
-const compareBase = ref('')
 const compareTo = ref('')
 const compared = ref<GitCompareFile[]>([])
 
@@ -93,8 +93,6 @@ const ahead = ref<GitAheadBehind>({ available: false, ahead: 0, behind: 0 })
 // whole panel, but they must not fail silently either.
 const extrasError = ref('')
 const tagsError = ref('')
-const newBranch = ref('')
-const mergeBranch = ref('')
 
 function errorText(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 // Every status read carries a token: another project taking over mid-request makes
@@ -394,7 +392,10 @@ const commitAndPush = () => {
   }, failure => { if (!committed) reportCommitResult(text, stagedPaths, [failure]) })
 }
 // The changes list collapses like IDEA's commit tab: the tree header carries 展开 on the right.
+// 折叠的是分组里的行（组节点「已暂存 N / 更改 N」留着），对应上游把树的子节点收起来。
 const changesCollapsed = ref(false)
+// `isExpandAllVisible()`：分组不是 NONE 或模型不是平铺 —— 本仓的分组就是已暂存/更改这两组 ⇒ 有改动就成立。
+const hasGroups = computed(() => changes.value.length > 0)
 // IDEA's commit-message inspections (vcs/commit/message/): the subject line and every body line
 // are checked against their right margins, and line 1 has to be empty before the body starts.
 // The rules live in src/commitMessageInspection.ts so they can be tested without a DOM.
@@ -518,7 +519,6 @@ const push = () => act(() => request('git.push'))
 // IDEA Git menu rows: Fetch (refresh remotes), Rebase onto upstream, branch delete,
 // the Tag dialog, "Add to .gitignore" for untracked rows.
 const fetch = () => act(() => request('git.fetch'))
-const deleteBranch = () => { const name = mergeBranch.value.trim(); if (!name || name === status.value.head) return; void act(() => request('git.branch.delete', { name })) }
 const ignore = (path: string) => act(() => request('git.ignore', { path }))
 const tagName = ref('')
 const createTag = () => { const name = tagName.value.trim(); if (!name) return; void act(async () => { await request('git.tag.create', { name }); tagName.value = '' }) }
@@ -547,8 +547,6 @@ function toggleHunk(index: number) {
   // Set mutation needs a fresh Set to stay reactive for the checkbox binding.
   diff.value.hunkPicked = new Set(diff.value.hunkPicked)
 }
-const createBranch = () => { const name = newBranch.value.trim(); if (!name) return; void act(async () => { await request('git.branch.create', { name, checkout: true }); newBranch.value = '' }) }
-const mergeBranchInto = () => { const name = mergeBranch.value.trim(); if (!name) return; void act(() => request('git.merge', { branch: name })) }
 async function showDiff(target: { path: string; staged: boolean; base?: string }) {
   const base = target.base ?? ''
   hunkError.value = ''
@@ -578,24 +576,18 @@ async function showDiff(target: { path: string; staged: boolean; base?: string }
     }
   } catch (caught) { error.value = errorText(caught) }
 }
-// 外部请求的「与某分支比较」（分支弹窗 → 比较）：设好 base 后直接跑一次，
-// 结果就出现在本面板已有的比较列表里（不另造一套展示）。
+// 「与分支比较」的**触发点**在上游是分支弹窗（`Git.Ref.Compare.With`，见 `src/branchPopup.ts`
+// 的 `BRANCH_ROW_ACTIONS`）：弹窗选一行 ⇒ 宿主设好 props.compareWith ⇒ 这里跑一次，
+// 结果就出现在本面板已有的比较列表里（不另造一套展示，也不在面板里再放一个下拉）。
 watch(() => props.compareWith, base => {
   if (!base) return
-  compareBase.value = base
-  runCompare()
-})
-function runCompare() {
-  const base = compareBase.value
-  if (!base) { compared.value = []; compareTo.value = ''; return }
   void act(async () => {
     const result = await request<GitCompare>('git.compare', { base })
     compared.value = result.files
     compareTo.value = base
   })
-}
+})
 function clearCompare() {
-  compareBase.value = ''
   compared.value = []
   compareTo.value = ''
 }
@@ -638,7 +630,6 @@ watch(() => [props.root, props.active] as const, () => {
   statusToken++
   extrasError.value = ''
   tagsError.value = ''
-  compareBase.value = ''
   compareTo.value = ''
   compared.value = []
   // The author comes from the repository configuration, so a new project needs a re-read
@@ -665,7 +656,7 @@ watch(() => [props.root, props.active] as const, () => {
     <div v-if="!status.available" class="sc-empty"><CircleSlash :size="22" /><p>未找到 Git</p><span>安装 Git 并加入 PATH 后可使用版本控制。</span></div>
     <template v-else>
       <div class="sc-commit">
-        <textarea ref="messageBox" v-model="message" rows="3" :placeholder="COMMIT_MESSAGE_PLACEHOLDER" aria-label="提交消息" :disabled="busy" @keydown.ctrl.enter.prevent="commit" @keydown.ctrl.shift.enter.prevent="commitAndPush" />
+        <textarea ref="messageBox" v-model="message" rows="3" :placeholder="COMMIT_MESSAGE_PLACEHOLDER" aria-label="提交消息" :disabled="busy" @keydown.ctrl.enter.prevent="commit" @keydown.ctrl.shift.enter.prevent="commitAndPush" @keydown.alt.l.prevent="reformatMessage" />
         <!-- IDEA's commit-message inspections: the reported range is underlined in the commit
              message editor; here each problem names its line, shows the exact substring IDEA
              would highlight, and offers the same quick fixes. -->
@@ -686,9 +677,12 @@ watch(() => [props.root, props.active] as const, () => {
         </div>
       </div>
       <div class="sc-changes-head">
-        <!-- TODO(第四十七批)：上游哪条动作管变更树的折叠还没找到（候选 ChangesViewToggleChangesTreeGroup 一类），
-             先留在这里并登记在 docs/source-todo.md §17 —— 不加引文。 -->
-        <button class="sc-tool" :disabled="busy || !changes.length" :title="changesCollapsed ? '展开变更列表' : '折叠变更列表'" :aria-expanded="!changesCollapsed" @click="changesCollapsed = !changesCollapsed"><ChevronDown :size="13" :class="{ 'sc-flip': !changesCollapsed }" />{{ changesCollapsed ? '展开' : '折叠' }}</button>
+        <!-- 变更树的**头部**动作（上游 `ChangesTree.createExpandAllAction(true)` /
+             `createCollapseAllAction(true)`，ChangesTree.java:725-744；头部工具栏 = TreeActionsToolbarPanel:53-54）。
+             可见性 = `MyTreeExpander.isExpandAllVisible()`（:752-762）：分组不是 NONE、或模型不是平铺时才有这一对。
+             文案取 `ActionsBundle`：`action.ExpandAll.text` = 全部展开、`action.CollapseAll.text` = **全部收起**。 -->
+        <button class="sc-tool" :disabled="busy || !hasGroups" :title="EXPAND_ALL_TEXT" aria-label="全部展开" @click="changesCollapsed = false"><ChevronsUpDown :size="13" />{{ EXPAND_ALL_TEXT }}</button>
+        <button class="sc-tool" :disabled="busy || !hasGroups" :title="COLLAPSE_ALL_TEXT" aria-label="全部收起" @click="changesCollapsed = true"><ChevronsDownUp :size="13" />{{ COLLAPSE_ALL_TEXT }}</button>
       </div>
       <div class="sc-toolbar">
         <!-- `ChangesView.CommitToolbar`（VcsActions.xml:405-408）= `Vcs.ToggleAmendCommitMode` + `Vcs.MessageActionGroup`，
@@ -704,16 +698,6 @@ watch(() => [props.root, props.active] as const, () => {
         <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
       </div>
       <div class="sc-branch-ops">
-        <input v-model="newBranch" class="sc-input" placeholder="新分支名" aria-label="新分支名" :disabled="busy" @keydown.enter.prevent="createBranch" />
-        <button class="sc-tool" :disabled="busy || !newBranch.trim()" title="新建并切换到分支" aria-label="新建分支" @click="createBranch"><Plus :size="13" /></button>
-        <select v-model="mergeBranch" class="sc-input sc-select" aria-label="选择要合并的分支">
-          <option value="">合并…</option>
-          <option v-for="branch in branches.filter(name => name !== status.head)" :key="branch" :value="branch">{{ branch }}</option>
-        </select>
-        <button class="sc-tool" :disabled="busy || !mergeBranch" title="合并所选分支到当前分支" aria-label="合并分支" @click="mergeBranchInto"><GitMerge :size="13" /></button>
-        <button class="sc-tool" :disabled="busy || !mergeBranch || mergeBranch === status.head" title="删除所选分支（git branch -D）" aria-label="删除分支" @click="deleteBranch"><Trash2 :size="13" /></button>
-      </div>
-      <div class="sc-branch-ops">
         <input v-model="tagName" class="sc-input" placeholder="新标签名" aria-label="新标签名" :disabled="busy" @keydown.enter.prevent="createTag" />
         <button class="sc-tool" :disabled="busy || !tagName.trim()" title="在当前提交打标签" aria-label="新建标签" @click="createTag"><Tag :size="13" /></button>
         <div v-if="tags.length" class="sc-tags">
@@ -723,27 +707,19 @@ watch(() => [props.root, props.active] as const, () => {
           </span>
         </div>
       </div>
-      <div class="sc-branch-ops">
-        <select v-model="compareBase" class="sc-input sc-select" aria-label="选择要比较的分支" :disabled="busy">
-          <option value="">与分支比较…</option>
-          <option v-for="branch in branches.filter(name => name !== status.head)" :key="branch" :value="branch">{{ branch }}</option>
-        </select>
-        <button class="sc-tool" :disabled="busy || !compareBase" title="列出该分支相对此处多出的文件" aria-label="开始比较" @click="runCompare"><History :size="13" />比较</button>
-        <button v-if="compareTo || compared.length" class="sc-tool" :disabled="busy" title="清除比较结果" aria-label="清除比较" @click="clearCompare"><X :size="13" />清除</button>
-      </div>
       <p v-if="error" class="sc-error" role="alert">{{ error }}</p>
       <p v-else-if="extrasError || tagsError" class="sc-warning" role="status">{{ [extrasError, tagsError].filter(Boolean).join('；') }}</p>
-      <div v-show="!changesCollapsed" class="sc-scroll">
+      <div class="sc-scroll">
         <section v-if="staged.length" class="sc-section">
           <h3>已暂存 <span class="sc-count">{{ staged.length }}</span></h3>
-          <div v-for="change in staged" :key="'s' + change.path" class="sc-row">
+          <div v-for="change in staged" v-show="!changesCollapsed" :key="'s' + change.path" class="sc-row">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.indexStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
             <button class="icon-button" title="取消暂存" aria-label="取消暂存" :disabled="busy" @click="unstage(change.path)"><Minus :size="14" /></button>
           </div>
         </section>
         <section v-if="unstaged.length" class="sc-section">
           <h3>更改 <span class="sc-count">{{ unstaged.length }}</span></h3>
-          <div v-for="change in unstaged" :key="'u' + change.path" class="sc-row">
+          <div v-for="change in unstaged" v-show="!changesCollapsed" :key="'u' + change.path" class="sc-row">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.untracked ? '?' : change.workStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
             <button v-if="!change.untracked" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="14" /></button>
             <button v-if="change.untracked" class="icon-button" title="加入 .gitignore" aria-label="加入 .gitignore" :disabled="busy" @click="ignore(change.path)"><Ban :size="13" /></button>

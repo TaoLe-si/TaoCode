@@ -524,7 +524,6 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 /* IDEA's CommitOptionsPanel groups the commit options under their VCS name and under
    `commit.checks.group` (VcsBundle.properties:44). */
 .sc-options-group { margin: var(--space-1) 0 0; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-.sc-flip { transform: rotate(-90deg); }
 .sc-error { color: var(--error); font-size: 12px; margin: 0 12px; overflow-wrap: anywhere; }
 .sc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 0 12px; }
 .sc-section { margin: 4px 0; }

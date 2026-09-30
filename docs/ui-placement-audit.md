@@ -2262,3 +2262,21 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 `updateProject` 是「先 fetch 再 pull」；②被移走的几个操作仍在 `src/menus/gitMenu.ts`（`git.fetch`/`git.rebase`/
 `git.stash`/`git.unstash`/`git.update`/`git.push`），日志工具窗口是提交历史的上游位置。
 自证有牙：把「获取」按钮放回那一行 ⇒ 当场变红。
+
+## AZ. 2026-09-30 第五十四批：§17 的三条收口 —— 变更树头部那对动作、分支/比较那两行、reformat 的键位
+
+接着 §17 往下判，这一批解决三条：
+
+| 项 | 上游在哪 | 本仓怎么改 |
+|---|---|---|
+| 变更树头部的「折叠/展开」 | **变更树自己的头部动作**：`ChangesTree.createExpandAllAction(true)` / `createCollapseAllAction(true)`（`ChangesTree.java:725-744`，头部工具栏 = `TreeActionsToolbarPanel:53-54`），可见性 = `MyTreeExpander.isExpandAllVisible()`（`:752-762`：分组不是 NONE、或模型不是平铺）。文案 `ActionsBundle`：`action.ExpandAll.text` = **全部展开**、`action.CollapseAll.text` = **全部收起**（是「收起」不是「折叠」）。两个动作还各有默认键位（Ctrl+= / Ctrl+-，`$default.xml:242-245`、`:487-490`），但本仓没接那两键 ⇒ **不写进提示** | 换成一个**动作对**（全部展开 / 全部收起，图标 + 包里文案），可用性 = `hasGroups`（本仓的分组就是已暂存/更改两组）；折叠的语义也按上游改成**收起分组里的行、组节点留着**（原先那个按钮是把整块滚动区藏掉，属于自造行为） |
+| 面板里的 新建/合并/删除分支 与 与分支比较 | 上游这一族在**分支弹窗**（`GitBranchesPopup`，动作成员见 `intellij.vcs.git.backend.xml:303-333`）：`Git.CreateNewBranch` / `Git.MergeRefAction` / `Git.Delete.Branch` / `Git.Ref.Compare.With` | **删掉面板里那两行** —— 本仓的 `src/components/BranchPopup.vue` + `src/branchPopup.ts` 里 `BRANCH_ROW_ACTIONS` 已经有 `checkout / compare / rebase / merge / push / delete`（每个都记着 IDEA 动作 id）；比较的**结果列表**仍留在面板（`props.compareWith` → 跑一次 → 列表），只是触发点回到弹窗 |
+| 重新格式化提交信息的键位 | `Vcs.ReformatCommitMessage` 注册时 `use-shortcut-of="ReformatCode"`（`VcsActions.xml:394-395`）⇒ Windows 上 Alt+L | 提交信息框上接 `@keydown.alt.l.prevent="reformatMessage"`（与 Ctrl+Enter 同一种做法：面板内的键位挂在这个元素上） |
+
+**留下的**（§17 里仍在）：**标签那一行**（新标签名 + 新建标签 + 标签 chips）。上游的新建标签是 **日志窗口右键菜单**里的 `Git.CreateNewTag`（`intellij.vcs.git.backend.xml:108`，加进 `Vcs.Log.ContextMenu` 的那一组 `:418-428`），本仓的日志窗口还没有右键菜单 ⇒ 要么在日志窗口补那条菜单、要么如实登记"本仓把打标签放在提交面板里"；**下一批处理，先不搬**。
+失败行上的「显示详细信息」链接动作同理（通知要能带动作按钮，`emit('notify', …)` 目前没有这一档）。
+
+**真机取证**：面板头部现在是 `[⇕ 全部展开] [⇵ 全部收起]`；点「全部收起」⇒ 5 行变更收起、组节点「更改 5」还在；分支/合并/比较那两行已不在，标签那一行保留。
+
+**判据**：`tests/scm-panel-strings.test.mjs` 新增三条（那对按钮的文案与可用性、折叠的是行不是整块、分支/比较不在面板而弹窗里有、Alt+L 的绑定）。
+自证有牙：把「与分支比较…」塞回面板 ⇒ 红；把「全部收起」写成「全部折叠」⇒ 红。

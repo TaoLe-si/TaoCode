@@ -20,3 +20,8 @@ export const AMEND_SHORTCUT_TEXT = 'Alt+M'
  * 而动作注册里也没有 description 属性）—— 所以这里只有"标题 + 快捷键"。
  */
 export const AMEND_TOOLTIP = `${AMEND_CHECKBOX_TEXT}（${AMEND_SHORTCUT_TEXT}）`
+
+/** `ActionsBundle` `action.ExpandAll.text` —— 变更树头部那对按钮（上图标、无快捷键进提示）。 */
+export const EXPAND_ALL_TEXT = '全部展开'
+/** `ActionsBundle` `action.CollapseAll.text` —— 注意包里是「收起」不是「折叠」。 */
+export const COLLAPSE_ALL_TEXT = '全部收起'
