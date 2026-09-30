@@ -736,8 +736,12 @@ void validate_build_tools(const Json& value) {
     if (!value.contains("gradle")) return;
     const auto& gradle = value.at("gradle");
     if (!gradle.is_object()) fail("INVALID_SETTINGS", "buildTools.gradle 必须是对象。");
-    known_keys(gradle, {"useGradleFrom", "gradlePath", "gradleUserHome", "gradleJvm", "delegatedBuild", "offline",
+    known_keys(gradle, {"enabled", "useGradleFrom", "gradlePath", "gradleUserHome", "gradleJvm", "delegatedBuild", "offline",
                         "linkedProjects"}, "INVALID_SETTINGS");
+    // `enabled=false` = 「不导入 Gradle，用磁盘上的产物当类路径/源根」（见 projects.cpp 的
+    // default_referenced_libraries / default_source_paths）。默认 true = 现在这套导入行为。
+    if (gradle.contains("enabled") && !gradle.at("enabled").is_boolean())
+        fail("INVALID_SETTINGS", "buildTools.gradle.enabled 必须是布尔值。");
     if (gradle.contains("useGradleFrom")) {
         const auto& field = gradle.at("useGradleFrom");
         // `DistributionType`：默认/包装器 → wrapper；本机 → local；指定路径 → path。

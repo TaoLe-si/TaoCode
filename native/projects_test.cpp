@@ -1107,6 +1107,12 @@ int main() {
         int appearances = 0;
         for (const auto& entry : list) if (entry == "lib/**/*.jar") ++appearances;
         check(appearances == 1, "重复的模式只留一次");
+        // Gradle 导入开关：默认 true（现在的行为），显式 false 时要真的传到 JDT
+        const auto on_by_default = taocode::java_lsp_settings(java, Json::object(), globs, {}, {});
+        check(on_by_default.at("java").at("import").at("gradle").at("enabled") == true, "默认开着导入");
+        const Json off = {{"gradle", {{"enabled", false}}}};
+        const auto off_settings = taocode::java_lsp_settings(java, off, globs, {}, {});
+        check(off_settings.at("java").at("import").at("gradle").at("enabled") == false, "关掉导入要传到语言服务");
     });
 
     run("Java project settings persist, migrate, and reach JDT LS shape", [&] {

@@ -284,7 +284,11 @@ Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vec
     // 文件不在任何源根里 ⇒ 没有语义补全、没有语义着色。键名按**实际在跑的那份服务器**核对过
     // （org.eclipse.jdt.ls.core_1.44.0.jar 的 Preferences.class 常量池）。
     const auto gradle = build_tools.value("gradle", Json::object());
-    Json gradle_import{{"wrapper", {{"enabled", gradle.value("useGradleFrom", std::string("wrapper")) == "wrapper"}}}};
+    // `java.import.gradle.enabled`（键名同样在 JDT 1.44.0 的 Preferences 常量里核对过）：
+    // 关掉导入是**这条工程上唯一能真正收敛导入范围**的开关 —— Buildship 不理会
+    // `java.import.exclusions`（真机日志实证），而关掉之后类路径/源根由磁盘兜底提供。
+    Json gradle_import{{"enabled", gradle.value("enabled", true)},
+                       {"wrapper", {{"enabled", gradle.value("useGradleFrom", std::string("wrapper")) == "wrapper"}}}};
     const auto gradle_path = gradle.value("gradlePath", std::string());
     if (gradle.value("useGradleFrom", std::string("wrapper")) == "path" && !gradle_path.empty())
         gradle_import["home"] = gradle_path;
