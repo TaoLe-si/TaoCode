@@ -147,7 +147,51 @@ std::string gradle_java_home(const Json& gradle, const std::string& project_jdk_
 }
 }  // namespace
 
-Json java_lsp_settings(const Json& java, const Json& build_tools) {
+/** 用户的 `referencedLibraries` 在前、磁盘派生兜底在后（去重，保持顺序）。 */
+Json library_list(const Json& java, const std::vector<std::string>& extra) {
+    Json list = Json::array();
+    std::set<std::string> seen;
+    const auto push = [&list, &seen](const std::string& entry) {
+        if (entry.empty() || !seen.insert(entry).second) return;
+        list.push_back(entry);
+    };
+    if (const auto& declared = java.value("referencedLibraries", Json::array()); declared.is_array())
+        for (const auto& entry : declared) if (entry.is_string()) push(entry.get<std::string>());
+    for (const auto& entry : extra) push(entry);
+    return list;
+}
+
+/**
+ * 没有 Gradle 导入时，用**磁盘上已有的 jar** 兜底当外部类路径 —— 这是"IDEA 能解析外部、我们不能"的
+ * 直接修法：IDEA 靠**已经导入过的模型**（模块依赖 = 一堆 jar 路径），我们这边 JDT LS 每次都要重跑
+ * Gradle 导入，而那个导入在这些工程上根本跑不完（1.7.10 的 forge 不在 `~/.gradle/caches` 里，
+ * 1.16.5 那条是 `mapped_snapshot` 变体、要联网现做）。这些 jar 磁盘上其实都有：
+ * `build/rfg/*.jar`（ForgeGradle 反混淆后的 Minecraft/Forge）、`build/libs/*.jar`、`lib/**`。
+ *
+ * 只回**真实存在**的目录对应的 glob（JDT 的 `referencedLibraries` 收相对工作区的 glob），
+ * 免得给语言服务挂一堆指不到东西的模式。
+ */
+std::vector<std::string> default_referenced_libraries(const fs::path& root) {
+    static const char* candidates[] = {
+        "build/rfg/**/*.jar",       // ForgeGradle 的 Minecraft/Forge 反混淆产物
+        "build/libs/**/*.jar",      // 本工程构建产物
+        "build/classes/**",         // 增量编译输出（类目录 JDT 也认）
+        "lib/**/*.jar",             // 传统 lib 目录
+        "run/**/*.jar",
+    };
+    std::vector<std::string> globs;
+    for (const auto* candidate : candidates) {
+        const auto parent = root / fs::path(candidate).begin()->wstring();
+        std::error_code code;
+        if (fs::exists(parent, code) && !code) globs.emplace_back(candidate);
+    }
+    // 子工程各有一份 build/rfg（本工程的形状是多子工程仓库）：给一层通配。
+    std::error_code code;
+    if (fs::exists(root / L"build", code) && !code) globs.emplace_back("**/build/rfg/*.jar");
+    return globs;
+}
+
+Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vector<std::string>& extra_libraries) {
     // 一律用 `value` 而不是 `at`：这段的调用方是 LSP 配置合成，拿到的是**任意**经过校验的
     // `java` 段，而不是"刚写出来的那一份"。缺字段时 `at` 会抛 JSON 异常 —— 那会在启动语言
     // 服务器的那一刻把 IDE 打崩；缺字段的合理语义是"这一项没有"，不是"整件事失败"。
@@ -169,13 +213,15 @@ Json java_lsp_settings(const Json& java, const Json& build_tools) {
     const auto gradle_user_home = gradle.value("gradleUserHome", std::string());
     if (!gradle_user_home.empty()) gradle_import["user"] = {{"home", gradle_user_home}};
     if (gradle.value("offline", false)) gradle_import["offline"] = {{"enabled", true}};
+    // 外部类路径：用户填的 + 磁盘上真实存在的构建产物（见 default_referenced_libraries 的注释）。
     const auto java_home = gradle_java_home(gradle, jdk_home);
     if (!java_home.empty()) gradle_import["java"] = {{"home", java_home}};
     return {{"java", {{"configuration", {{"runtimes", std::move(runtimes)}}},
                       {"import", {{"gradle", std::move(gradle_import)}}},
                       {"project", {{"sourcePaths", java.value("sourcePaths", Json::array())},
                                    {"outputPath", java.value("outputPath", std::string())},
-                                   {"referencedLibraries", java.value("referencedLibraries", Json::array())}}}}}};
+                                   // 用户的显式列表在前，磁盘派生兜底在后（同一份数组，JDT 全收）。
+                                   {"referencedLibraries", library_list(java, extra_libraries)}}}}}};
 }
 
 fs::path project_destination(const fs::path& parent, const std::string& name) {

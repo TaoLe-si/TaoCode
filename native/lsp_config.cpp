@@ -59,7 +59,7 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         if (!spec.command.empty()) servers.emplace("java", std::move(spec));
     }
     if (!project_root.empty() && servers.contains("java"))
-        servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()));
+        servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), default_referenced_libraries(project_root));
     return servers;
 }
 

@@ -1060,6 +1060,32 @@ int main() {
                   "nested partial patches preserve the other template list");
         });
 
+    run("没有 Gradle 导入时用磁盘上已有的 jar 兜底当外部类路径", [&] {
+        const auto root = temporary.path / "classpath-probe";
+        std::filesystem::create_directories(root / "build" / "rfg");
+        std::filesystem::create_directories(root / "lib");
+        {
+            std::ofstream(root / "build" / "rfg" / "recompiled_minecraft-1.7.10.jar").put('x');
+            std::ofstream(root / "lib" / "helper.jar").put('x');
+        }
+        const auto globs = taocode::default_referenced_libraries(root);
+        const auto has = [&globs](const char* needle) {
+            return std::find(globs.begin(), globs.end(), std::string(needle)) != globs.end();
+        };
+        check(has("build/rfg/**/*.jar"), "ForgeGradle 的反混淆产物要进类路径");
+        check(has("lib/**/*.jar"), "lib 目录要进类路径");
+        check(has("**/build/rfg/*.jar"), "多子工程仓库里各子工程的 build/rfg 也要覆盖");
+        check(!has("run/**/*.jar"), "不存在的目录不进（免得挂一堆指不到东西的模式）");
+        const Json java = {{"referencedLibraries", Json::array({"lib/**/*.jar"})}};
+        const auto settings = taocode::java_lsp_settings(java, Json::object(), globs);
+        const auto& list = settings.at("java").at("project").at("referencedLibraries");
+        check(list.is_array() && list.size() >= 3, "用户列表 + 磁盘派生要合成一份");
+        check(list[0] == "lib/**/*.jar", "用户的显式列表在前");
+        int appearances = 0;
+        for (const auto& entry : list) if (entry == "lib/**/*.jar") ++appearances;
+        check(appearances == 1, "重复的模式只留一次");
+    });
+
     run("Java project settings persist, migrate, and reach JDT LS shape", [&] {
             const auto file = temporary.path / "java-settings.json";
             ProjectStore store(file);

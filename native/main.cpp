@@ -910,7 +910,7 @@ struct App {
                     const auto java = result.at("settings").value("java", Json::object());
                     const auto build_tools = result.at("settings").value("buildTools", Json::object());
                     lsp_worker->post([this, java, build_tools] {
-                        if (lsp) lsp->set_configuration("java", taocode::java_lsp_settings(java, build_tools));
+                        if (lsp) lsp->set_configuration("java", taocode::java_lsp_settings(java, build_tools, taocode::default_referenced_libraries(current_root)));
                     });
                 }
                 break;

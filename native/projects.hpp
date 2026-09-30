@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "workspace.hpp"
 
 namespace taocode {
@@ -17,7 +19,10 @@ fs::path project_destination(const fs::path& parent, const std::string& name);
  * @param java        项目设置里的 `java` 段
  * @param build_tools 项目设置里的 `buildTools` 段（只看 `gradle` 子段）
  */
-Json java_lsp_settings(const Json& java, const Json& build_tools);
+// `extra_libraries`：磁盘派生出来的外部类路径兜底（没有 Gradle 导入时用磁盘上已有的 jar 解析外部），
+// 见 native/projects.cpp 的 `default_referenced_libraries`。
+Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vector<std::string>& extra_libraries = {});
+std::vector<std::string> default_referenced_libraries(const std::filesystem::path& root);
 
 // The editor settings a fresh profile starts with, and the fallback for any key a
 // state file written by an older build does not carry. Exported so tests assert
