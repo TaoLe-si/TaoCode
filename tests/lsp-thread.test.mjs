@@ -91,7 +91,7 @@ test('ready 回调只登记状态，补发 didOpen 交回语言服务线程', ()
   const ready = bootstrap.slice(began, bootstrap.indexOf('hosts_[language] = std::move(host)', began))
   assert.ok(ready.length > 40, `ready 回调切片只有 ${ready.length} 字符 —— 判据在空转`)
   assert.doesNotMatch(ready, /did_open\(/, 'ready 回调仍在读线程上直接发请求 —— 锁序死锁会回来')
-  assert.match(ready, /post\(\[this, owned\] \{ flush_opens\(owned\); \}\)/)
+  assert.match(ready, /post\(\[this, owned\] \{ flush_opens\(owned\); request_project_import\(owned\); \}\)/)
   // flush_opens 必须"锁内只收集、锁外才发送"，否则只是把死锁挪个地方。
   const flush = bootstrap.slice(bootstrap.indexOf('void Session::flush_opens'))
   assert.ok(flush.length > 40, 'flush_opens 找不到 —— 判据在空转')

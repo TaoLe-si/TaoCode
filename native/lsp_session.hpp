@@ -50,6 +50,10 @@ public:
 
     void configure(std::map<std::string, ServerConfig> servers) { config_ = std::move(servers); }
     void set_root(std::filesystem::path root);
+    // 「链接的子工程」目录：一并声明成 LSP 的 workspace folder —— JDT 的"非工程文件"（真机诊断原文
+    // "… is a non-project file, only syntax errors are reported"）就是因为源根在**工作区文件夹之外**
+    // 的子目录里；把子工程目录也当工作区文件夹，它才会按 `java.project.sourcePaths` 建不可见工程。
+    void set_extra_roots(std::vector<std::filesystem::path> roots) { extra_roots_ = std::move(roots); }
     // 弃养这一代（语言服务线程卡死、Session 进弃养表）时，按它收掉这一代起的服务器进程。
     long generation() const noexcept { return generation_; }
     void set_edit_sink(EditSink on_edit) { on_edit_ = std::move(on_edit); }
@@ -191,6 +195,7 @@ private:
     std::map<std::string, Document> documents_;            // by workspace-relative path
     std::map<std::string, Json> pending_actions_;          // path -> last raw CodeAction[]
     std::filesystem::path root_;
+    std::vector<std::filesystem::path> extra_roots_;
     DiagnosticsSink on_diagnostics_;
     EditSink on_edit_;
     ProgressSink on_progress_;

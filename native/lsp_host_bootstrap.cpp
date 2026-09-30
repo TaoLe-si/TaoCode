@@ -102,9 +102,19 @@ Host& Session::ensure(const std::string& language) {
     host->set_configuration(config->second.settings);
     host->set_timeout(timeout_);
     const auto root_name = root_.filename().generic_u8string();
+    Json folders = Json::array();
+    if (!root_.empty()) folders.push_back({{"uri", root_uri}, {"name", std::string(root_name.begin(), root_name.end())}});
+    // 链接的子工程目录也算工作区文件夹（见 set_extra_roots 的注释）：JDT 只在这些文件夹里
+    // 建"不可见 / 非托管"工程，源根落在文件夹之外就成了"non-project file"。
+    for (const auto& extra : extra_roots_) {
+        if (extra.empty()) continue;
+        const auto name = extra.filename().generic_u8string();
+        folders.push_back({{"uri", to_uri(u8_path(extra).substr(root_.empty() ? 0 : u8_path(root_).size()))},
+                           {"name", std::string(name.begin(), name.end())}});
+    }
     Json params{
         {"initializationOptions", std::move(initialization)},
-        {"workspaceFolders", root_.empty() ? Json(nullptr) : Json::array({{{"uri", root_uri}, {"name", std::string(root_name.begin(), root_name.end())}}})},
+        {"workspaceFolders", folders.empty() ? Json(nullptr) : folders},
         {"clientInfo", {{"name", "TaoCode"}, {"version", "0.1"}}},
         {"rootUri", root_uri},
         {"capabilities", {

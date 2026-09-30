@@ -2,11 +2,21 @@
 
 #include <vector>
 
+#include "java_lsp_paths.hpp"
 #include "workspace.hpp"
 
 namespace taocode {
 
 namespace fs = std::filesystem;
+
+/**
+ * 喂给 JDT LS 的 `settings.java`（runtimes / 源根 / 输出目录 / `java.import.gradle.*`），
+ * 参数含义见实现处注释。`extra_libraries`/`import_exclusions`/`extra_source_paths` 由
+ * `native/java_lsp_paths.cpp` 从磁盘布局派生。
+ */
+Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vector<std::string>& extra_libraries = {},
+                       const std::vector<std::string>& import_exclusions = {},
+                       const std::vector<std::string>& extra_source_paths = {});
 
 // Checks only the parent path, never enumerates it. No destination is reserved.
 fs::path project_destination(const fs::path& parent, const std::string& name);
@@ -19,16 +29,6 @@ fs::path project_destination(const fs::path& parent, const std::string& name);
  * @param java        项目设置里的 `java` 段
  * @param build_tools 项目设置里的 `buildTools` 段（只看 `gradle` 子段）
  */
-// `extra_libraries`：磁盘派生出来的外部类路径兜底（没有 Gradle 导入时用磁盘上已有的 jar 解析外部），
-// 见 native/projects.cpp 的 `default_referenced_libraries`。
-Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vector<std::string>& extra_libraries = {},
-                       const std::vector<std::string>& import_exclusions = {},
-                       const std::vector<std::string>& extra_source_paths = {});
-std::vector<std::string> default_referenced_libraries(const std::filesystem::path& root, const Json& gradle);
-// 未链接的顶层目录 → `java.import.exclusions`（"只导入链接的子工程"，见实现处注释）。
-std::vector<std::string> import_exclusions(const std::filesystem::path& root, const Json& gradle);
-// 链接的子工程里真实存在的源根（`src/main/java` 等）——没有可用 Gradle 导入时的兜底。
-std::vector<std::string> default_source_paths(const std::filesystem::path& root, const Json& gradle);
 
 // The editor settings a fresh profile starts with, and the fallback for any key a
 // state file written by an older build does not carry. Exported so tests assert

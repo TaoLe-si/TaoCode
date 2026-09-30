@@ -31,7 +31,7 @@ add_library(taocode_workspace native/workspace.cpp native/window_state.cpp nativ
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/git_clone.cpp native/git.cpp
+add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/git_clone.cpp native/git.cpp
                              native/settings_transfer.cpp native/git_log.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history xmllite shlwapi ole32)
 

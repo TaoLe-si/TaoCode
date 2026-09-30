@@ -1114,6 +1114,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      （`lsp_config.cpp` 里改成只有导入开着才发）—— 因为排除模式可能把 JDT 自己的不可见工程扫描也挡了；
      验证配方：`enabled=false` 下启动，`lsp.open` 那个文件，读 `window.__diag` 的诊断原文
      （应当不再是 "non-project file"）与 `definition` 是否可用。
+  8) **三条否定结果（都在 `enabled=false`、大工程上实测）**：
+     · 不发 `java.import.exclusions` ⇒ 诊断不变（仍是 "non-project file"）；
+     · 主动发 `workspace/executeCommand {command:"java.project.import"}` ⇒ **确认发出去了**
+       （trace 里有一条 118 字节的 `workspace/executeCommand`），但 JDT 日志里**一条 "invisible" 都没有**；
+     · 把链接的子工程目录也声明成 LSP 的 workspace folder（`set_extra_roots`）⇒ 诊断不变。
+     ⇒ 下一步用**随发行那份 JDT 里现成的只读命令**把状态读出来（一次就能定位）：
+     `java.project.getAll`（有哪些工程）、`java.project.sourcePaths`（我们的源根到底注册了没）、
+     `java.project.getSettings`（JDT 自己看到的设置）。这三个都在这份 1.44.0 的命令表里。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 

@@ -615,7 +615,7 @@ struct App {
         // and URI mappings silently mix two projects.
         if (lsp) lsp->shutdown_all();
         configure_lsp();
-        lsp->set_root(root.empty() ? fs::path() : fs::path(wide(root)));
+        lsp->set_root(root.empty() ? fs::path() : fs::path(wide(root))); if (lsp) { std::vector<fs::path> linked; const auto linked_json = projects->project_settings(root).value("buildTools", Json::object()).value("gradle", Json::object()).value("linkedProjects", Json::array()); for (const auto& item : linked_json) if (item.is_string() && !item.get<std::string>().empty()) linked.push_back(fs::path(wide(root)) / fs::path(wide(item.get<std::string>()))); lsp->set_extra_roots(std::move(linked)); }
     }
 
     void set_theme(bool dark) {
