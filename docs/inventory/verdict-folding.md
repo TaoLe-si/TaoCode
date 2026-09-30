@@ -17,6 +17,7 @@
 |---|---|---|
 | `src/editorFolding.ts`（`foldingRanges` StateField + fold service + 区域层 + 动作族） | 折叠区间从语言服务来（`kind` 里带 `comment`/`imports`/`region`），逐个动作在"S 服务端区间 ∪ CodeMirror 语法树候选 ∪ 手工区间"上挑目标 | `FoldingBuilder` + `FoldingUpdate`/`CodeFoldingPass`（区间）+ `FoldingUtil`/`BaseFoldingHandler`/`*RegionAction` 那一族（动作） |
 | `src/editorCommands.ts`（`fold`/`unfold`/`foldAll`/`unfoldAll` + 区域/递归/到级别/选区/块/切换/文档注释，一张表给键位与菜单共用） | 折叠族的**全部** 15 条命令（`fold`/`unfold` 指向 `src/editorFolding.ts` 里照 `CollapseRegionAction`/`ExpandRegionAction` 实现的挑法，不是 CodeMirror 自带的 `foldCode`/`unfoldCode`） | `BaseFoldingHandler` + `*RegionAction` 那一族，逐条对应见下面键位表 |
+| `src/editorFoldingSettings.ts` + `src/components/CodeFoldingSettingsPage.vue`（设置页「编辑器 › 折叠」） | 「默认折叠」那两条开关（Import 默认开、自定义折叠区域默认关）：值进 `EditorSettings`（原生 `editor.xml` 那一段），打开文件时按 `kind` 预折叠，设置一改就重算 | `CodeFoldingConfigurable.kt:26-27`（页面）+ `BaseCodeFoldingOptionsProvider.kt:17-21`（五条复选框）+ `LspFoldingBuilder.kt:41-46`（LSP 路径只映射 imports / region） |
 | `src/menus/codeMenu.ts`（`code.folding` 子菜单，13 条一行不差） | Code 菜单里的「折叠」子菜单 = 上游 `FoldingGroup` 的原样顺序与文案（展开/递归展开/全部展开 ‖ 收起/递归收起/全部收起 ‖ 展开到级别(_E) 1-5 ‖ 全部展开到级别(_L) 1-5 ‖ 展开/收起文档注释 ‖ 切换折叠 ‖ 折叠选区/移除区域 ‖ 折叠代码块） | `FoldingGroup`（`platform/platform-impl/resources/idea/LangActions.xml:270-303`），文案逐条取 `ActionsBundle.properties:623-654` |
 | `src/menus/editorPopupMenu.ts`（弹层 `FoldingGroup`，标题「折叠」） | 编辑器右键里的折叠子菜单（成员与 Code 菜单同源，13 条） | `FoldingGroup`（`LangActions.xml:270-303`）—— 这一条与 Code 菜单是**同一段**菜单模型，改一处两处都变 |
 
@@ -46,9 +47,18 @@
     剩下的两处**没有宿主**：`CollapseSelectionHandler:44`（"不能移除自动生成的折叠区域"提示）要编辑器内的
     hint 通道、`:49-58`（重叠确认框）要模态框 —— 都按上游的**默认结果**处理（不动 / 视为「取消」），
     登记在 §G 的 `CollapseSelectionHandler` 行；
-② **`CodeFoldingSettings` 的五个开关**（`COLLAPSE_IMPORTS` 默认 true / `COLLAPSE_METHODS` /
-    `COLLAPSE_FILE_HEADER` 默认 true / `COLLAPSE_DOC_COMMENTS` / `COLLAPSE_CUSTOM_FOLDING_REGIONS`）
-    —— 对应 IDEA「设置 › 编辑器 › 常规 › 代码折叠」那一页；
+② **`CodeFoldingSettings` 的五个开关** —— ✅ **已做（第六十一批）**，按 LSP 路径的口径：
+    `LspFoldingBuilder.kt:41-46` 只把 `Imports → COLLAPSE_IMPORTS`、`Region → COLLAPSE_CUSTOM_FOLDING_REGIONS`
+    接进 `collapsedByDefault`（`Comment` 那一条上游自己写了 null：LSP 与 IDEA 语义对不上），
+    另外三个（文件头 / 方法体 / 文档注释）只有**语言侧 builder** 读（`JavaCodeFoldingSettingsBase.java:67/106/116`、
+    `KotlinFoldingBuilder.kt:220`、`PythonFoldingBuilder.kt:67`）—— 本仓没有语言侧 builder，
+    所以设置页只渲染前两条（不渲染空壳），那三个在 §G 的 `CodeFoldingSettings` 行里写明。
+    落地：`src/editorFoldingSettings.ts`（默认值/映射/文案）+ `src/components/CodeFoldingSettingsPage.vue`
+    （页 = 「代码折叠」，「默认折叠:」分组，文案取本机 IDEA 2026.2 中文包）+ 原生键表与默认值
+    （`native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS`、`settings_schema.cpp` 的 `editor_defaults_impl()`）；
+    打开文件时预折叠、设置一改立刻重算（上游 `CodeFoldingConfigurable.Util.applyCodeFoldingSettingsChanges`）；
+    真机取证：Java 文件（jdtls 给 `kind: imports` / `region`）——默认 imports 折、关掉 Import 立刻展开、
+    勾上自定义折叠区域后 region 折起；
 ③ **折叠状态的持久化**（`EditorFoldingInfo` + necromancy：重开文件后把上次折叠的区间放回去）；
 ④ **「全部收起」的文案** —— ✅ **已做**（第六十批）：Code 菜单与弹层两处都是「全部收起」，
     13 条成员照 `FoldingGroup` 排（`src/menus/codeMenu.ts`，机检 `tests/editor-folding.test.mjs` 盯着顺序与文案）；
@@ -120,8 +130,8 @@
 | `BackendClosureFolding` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/BackendClosureFolding.java` | `[-]` | Java 闭包折叠的区间计算（PSI） |
 | `CommentFoldingUtil` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/CommentFoldingUtil.java` | `[-]` | Java 注释折叠的判定（PSI 注释节点） |
 | `XmlElementSignatureProvider` | `xml/impl/src/com/intellij/codeInsight/folding/impl/XmlElementSignatureProvider.java` | `[-]` | 语义签名族（§D.2）：XML 元素签名 |
-| `CodeFoldingSettings` | `platform/core-api/src/com/intellij/codeInsight/folding/CodeFoldingSettings.java` | `[ ]` | 五个开关（`COLLAPSE_IMPORTS` 默认 true、`COLLAPSE_METHODS`、`COLLAPSE_FILE_HEADER` 默认 true、`COLLAPSE_DOC_COMMENTS`、`COLLAPSE_CUSTOM_FOLDING_REGIONS`，`:8-12`）本仓都没有（§C②） |
-| `CodeFoldingSettingsImpl` | `platform/editor-ui-ex/src/com/intellij/codeInsight/folding/CodeFoldingSettingsImpl.java` | `[ ]` | 那五个开关的持久化（`@State`）；本仓的设置持久化里没有这几个字段（§C②） |
+| `CodeFoldingSettings` | `platform/core-api/src/com/intellij/codeInsight/folding/CodeFoldingSettings.java` | `[~]` | 本仓按 LSP 路径实现：`COLLAPSE_IMPORTS` 默认 true、`COLLAPSE_CUSTOM_FOLDING_REGIONS` 默认 false 两条（`src/editorFoldingSettings.ts` + 设置页 `src/components/CodeFoldingSettingsPage.vue`，预折叠在 `src/editorFolding.ts` 的 `foldKinds`）；**缺** `COLLAPSE_METHODS` / `COLLAPSE_FILE_HEADER` / `COLLAPSE_DOC_COMMENTS` —— 这三个在上游由语言侧 builder 消费（`JavaCodeFoldingSettingsBase.java:67/106/116`），上游自己的 LSP 路径对它们也传 null（`LspFoldingBuilder.kt:41-46`），本仓没有语言侧 builder ⇒ 设置页不渲染这三行 |
+| `CodeFoldingSettingsImpl` | `platform/editor-ui-ex/src/com/intellij/codeInsight/folding/CodeFoldingSettingsImpl.java` | `[~]` | 落盘那一段：上游 `@State(name = "CodeFoldingSettings", storages = @Storage("editor.xml"))`（`:11`），本仓两个键进编辑器设置那一段（`native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS` + `settings_schema.cpp` 的 `editor_defaults_impl()`，`src/settingsModel.ts` 的 `EditorSettings`）；**缺**另外三个键（同上） |
 | `CodeFoldingManager` | `platform/foldings/src/com/intellij/codeInsight/folding/CodeFoldingManager.java` | `[~]` | 折叠的查询/变更面：本仓落在 `src/components/CodeEditor.vue` 的折叠 StateField 与 `src/editorCommands.ts` 的命令表；**缺**按偏移查询折叠区间这类公开面 |
 | `CodeFoldingManagerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingManagerImpl.java` | `[~]` | 同上（本仓没有这个对象，行为分散在 `src/components/CodeEditor.vue` 与 `src/editorCommands.ts`） |
 | `CodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPass.java` | `[~]` | 重建折叠区间的 pass：本仓在打开/更新文档时用 LSP `foldingRange` 建区间（`src/components/CodeEditor.vue`）；**缺**文档变更后的重算 |
@@ -174,4 +184,4 @@
 | `ExpandToLevel4Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel4Action.java` | `[~]` | `unfold.level4` = `src/editorFolding.ts` 的 `expandCaretToLevel(4)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「展开到级别 4」） |
 | `ExpandToLevel5Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel5Action.java` | `[~]` | `unfold.level5` = `src/editorFolding.ts` 的 `expandCaretToLevel(5)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「展开到级别 5」） |
 
-**四档合计**：`[x]` 0 + `[~]` 31 + `[ ]` 12 + `[-]` 26 = 69。（2026-09-30 第六十批：折叠动作族落地，21 行由 `[ ]` 进 `[~]`。）
+**四档合计**：`[x]` 0 + `[~]` 33 + `[ ]` 10 + `[-]` 26 = 69。（2026-09-30 第六十批：折叠动作族落地，21 行由 `[ ]` 进 `[~]`；第六十一批：`CodeFoldingSettings`/`Impl` 两行进 `[~]`。）

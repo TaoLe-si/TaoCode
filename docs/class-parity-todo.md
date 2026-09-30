@@ -615,6 +615,13 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 切换/选区，含"展开取最外层"这种反直觉的一条）—— 对照表与三处真机返工写在 `docs/ui-placement-audit.md` §BF。
 判决四档随之变为 `[x]` 0 / `[~]` 31 / `[ ]` 12 / `[-]` 26 = 69。
 
-**下一批做 §C 剩下的**：② `CodeFoldingSettings` 五个开关（设置页那一页）、③ 折叠状态持久化
-（`EditorFoldingInfo` + necromancy；本仓没有 PSI 元素身份，只能按偏移恢复）、
-⑤ 文档变更后区间重算与"折过的区间边界对不上"这两条自认的缺口。
+**下一批做 §C 剩下的**：③ 折叠状态持久化（`EditorFoldingInfo` + necromancy；本仓没有 PSI 元素身份，
+只能按偏移恢复）、⑤ 文档变更后区间重算与"折过的区间边界对不上"这两条自认的缺口。
+
+### 25.2 §C② 已做（2026-09-30 第六十一批）
+
+「代码折叠」设置页 + 两条真开关（Import 默认开、自定义折叠区域默认关）：
+`src/editorFoldingSettings.ts` + `src/components/CodeFoldingSettingsPage.vue`，值进 `EditorSettings`，
+原生键表/默认值同步（`native/settings_schema.hpp`/`.cpp`），打开文件按 `kind` 预折叠、改了一键重算。
+另三条（文件头/方法体/文档注释）上游只有语言侧 builder 读、上游自己的 LSP 路径也传 null ⇒ 不渲染，
+判决 §G 里写着。四档：`[x]` 0 / `[~]` 33 / `[ ]` 10 / `[-]` 26 = 69。

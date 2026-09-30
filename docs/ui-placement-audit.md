@@ -2476,3 +2476,44 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 命令表与键位的静态核对（含"折叠族必须在常驻 keymap、不在 `lspExtensions()`"与"不许再出现
 `foldCode`/`unfoldCode`/`window.__foldDebug`"）、Code 菜单顺序与文案、以及**无 DOM 的 EditorState 用例**
 （LSP 区间经 `lspFoldService` 真的进了 `foldable`；`enclosingAreas` 对真 TS 语法树给出 while/if/function 三层）。
+
+## BG. 2026-09-30 第六十一批：B4 §C② —— 「代码折叠」设置的两条开关（Import / 自定义折叠区域）
+
+§C② 要的是 `CodeFoldingSettings` 的五个开关。读完上游之后本批只做**两条**，理由全在引文里：
+`platform/lsp-impl/src/impl/features/folding/LspFoldingBuilder.kt:41-46` 把折叠区间的 `kind` 映射到设置 ——
+`Imports → COLLAPSE_IMPORTS`、`Region → COLLAPSE_CUSTOM_FOLDING_REGIONS`，`Comment` 那一条**上游自己写了 null**
+（注释原文：LSP 与 IDEA 的语义对不上），其余 kind 也是 null。另外三个（文件头 / 方法体 / 文档注释）只有
+**语言侧 FoldingBuilder** 读（`JavaCodeFoldingSettingsBase.java:67/106/116`、`KotlinFoldingBuilder.kt:220`、
+`PythonFoldingBuilder.kt:67`）。本仓的折叠区间全部来自 LSP，没有语言侧 builder ⇒ 那三行**不渲染**
+（不留假控件），登记在判决 §G 的 `CodeFoldingSettings` 行里。
+
+**落地**：
+- `src/editorFoldingSettings.ts`（新）：两个开关的默认值（照 `CodeFoldingSettings.java:7-11`：Import 默认开、
+  自定义折叠区域默认关）、`autoCollapseKinds`、`kindOfSetting`、页面文案与两行模型。
+- `src/components/CodeFoldingSettingsPage.vue`（新，从 `SettingsDialog.vue` 拆出去）：页标题「代码折叠」
+  （`CodeFoldingConfigurable.kt:26-27`，id `editor.preferences.folding`）、分组「默认折叠:」、两行复选框
+  （文案取本机 IDEA 2026.2 中文包 `plugins/localization-zh/lib/localization-zh.jar` →
+  `messages/ApplicationBundle.properties`：`group.code.folding=代码折叠`、`label.fold.by.default=默认折叠:`、
+  `checkbox.collapse.title.imports=Import`、`checkbox.collapse.custom.folding.regions=自定义折叠区域`）。
+- `src/editorFolding.ts` 的 `foldKinds(view, kinds, collapse)`：按 `kind` 折/展开一族（幂等）。
+- `CodeEditor.vue`：拿到 `foldingRange` 之后立刻 `applyFoldingSettings()`；两个开关的 watch 一改就重算 ——
+  对应上游 `CodeFoldingConfigurable.Util.applyCodeFoldingSettingsChanges`（重建编辑器 + 重算折叠）。
+- 键表与默认值同时登记进原生的「唯一一份键表」（`native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS`、
+  `settings_schema.cpp` 的 `editor_defaults_impl()`），前端 `bridge.ts` 的白名单也补上。
+
+**真机上踩到的一件事（白名单漏登 ⇒ 保存静默失败）**：只加了 `editor_defaults_impl()`（默认值）而没加
+`EDITOR_SETTING_KEYS`（允许集），设置页勾选 → 应用时原生报 `INVALID_SETTINGS`，界面上的表现是
+「勾了、应用了，折叠行为不变」（对话框不会自己弹错）。补进键表后 IPC 回包里 `collapseImports` 就跟着变了。
+判据里专门钉住这两份表（`tests/editor-folding-settings.test.mjs`），免得下次再漏。
+
+**真机取证**（jdtls 给 `kind` 的 Java 文件，`TAOCODE_DEBUG_PORT` + CDP；探针文件用完即删）：
+
+| 操作 | 宿主设置（IPC 回包） | 编辑器 |
+|---|---|---|
+| 打开文件（默认） | `collapseImports=true, collapseCustomRegions=false` | 1 折：imports 块变 `…`，region 保持展开 |
+| 关掉 Import → 应用 | `false, false` | 0 折（imports 展开） |
+| 勾上自定义折叠区域 → 应用 | `false, true` | 1 折（region 折起） |
+| 开回 Import → 应用 | `true, true` | 2 折（imports + region 都折） |
+
+**判据**：`tests/editor-folding-settings.test.mjs`（7 条）——默认值/映射照上游、文案逐字（含"那三条不许渲染"）、
+树与对话框的落点、原生两份表、编辑器接线（区间到手就应用 + 改了就重算）、`foldKinds` 幂等。

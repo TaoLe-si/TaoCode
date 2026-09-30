@@ -63,6 +63,7 @@
 
 ### A4 提交工具窗口 `ChangesViewCommitPanel.kt`
 
+- [x] **已加（第六十一批）** 设置页「编辑器 › 代码折叠」：`Import`（默认开）与 `自定义折叠区域`（默认关）两条真开关 —— 打开发文件时按 LSP `kind` 预折叠、改了一键重算；上游另外三个开关只有语言侧 builder 读（本仓没有），不渲染（判决 `docs/inventory/verdict-folding.md` §G，审计 §BG）。
 - [x] **已修（第六十批）** 编辑器折叠动作族：Code 菜单「折叠」子菜单（13 条，照 `FoldingGroup` 顺序与 `ActionsBundle` 文案）+ 常驻 keymap 的 9 条键位（`Ctrl+-`/`Ctrl+=`/`Ctrl+Shift+-`/`Ctrl+Shift+=`/`Ctrl+Alt±`/`Ctrl+.`/`Ctrl+Shift+.`/`Ctrl+*`），命令实现在 `src/editorFolding.ts`（挑目标规则逐条照上游；判决 `docs/inventory/verdict-folding.md`，审计 §BF）。
 - [~] **已修（第五十二批修正过）** 变更树头部 `sc-changes-head`：现在只剩「折叠/展开 ⌄」这一个按钮（amend 勾选框已按上游搬去与图例同一行）。**位置待判**：上游 `ChangesView.CommitToolbar` 那一行才是 amend + 消息历史，折叠按钮该在哪一行还没有引文，登记在 `docs/source-todo.md` §16。
 - [x] **已修（第五十二批按上游改正）** 提交信息框：**消息区自己不带工具条** —— 上游非模态面板用的是 `CommitMessage(project, withSeparator=false, showToolbar=false, …)`（`CommitMessage.java:118-155`），所以原先那行「提交信息 + 三个图标按钮」整行删掉；消息历史按钮（`Vcs.ShowMessageHistory` = 「提交消息历史记录」，点击列出 git.log 最近 12 条 subject 可复用）搬去与提交图例同一行，与 amend 勾选框相邻；placeholder = `commit.message.placeholder` = **提交消息**（原先是自造的「默认信息」）。判据 `tests/scm-panel-strings.test.mjs`。
