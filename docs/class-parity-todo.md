@@ -598,3 +598,11 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`，78 类）里 §E 的 ①③
 **方法（写给下一位）**：只要面板里出现一句中文，问三个问题 —— ①上游有没有这句话（在哪个 bundle、
 key 是什么）？②如果没有，它是不是本仓措辞（那就在清单里写明"本仓"两字）？③控件本身呢
 （哪个组件、哪一行、什么条件下可见）？这三问答不上来的，就是下一个 §AX。
+
+## 25. B4 起域：`codeInsight/folding`（2026-09-30 第五十九批）
+
+按 `docs/inventory/_domains.json` 挑了一个规模可控的包：69 类（清单 `docs/inventory/folding.txt`），
+判决 `docs/inventory/verdict-folding.md`，门控 `tests/b4-verdict.test.mjs`。
+四档：`[x]` 0 / `[~]` 10 / `[ ]` 33 / `[-]` 26 = 69。**下一批做 §C 那四条**（动作族 + 键位表 /
+`CodeFoldingSettings` 五个开关 / 折叠状态持久化 /「全部收起」文案与弹层顺序）。
+上游键位表（`$default.xml` 逐条核过）也抄在判决 §A 里 —— 接动作时直接查那张表，别再凭手感。

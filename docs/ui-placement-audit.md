@@ -2386,3 +2386,37 @@ ctx 两条通道、`notifyFromPanel` 的形参顺序）、「显示详细信息�
 自证有牙：把「子」的判据放宽成"所有提交" ⇒ 2 条变红。
 
 **§17 至此全部收口**。提交面板那一带的排布、文案、动作与通知都按上游核过一遍了（第五十二～五十八批）。
+
+## BE. 2026-09-30 第五十九批：**起 B4 域** —— `codeInsight/folding` 69 类逐条判决（判决文件 + 门控）
+
+B3（`vcs/commit`）收口之后按 `docs/inventory/_domains.json` 的域定义挑下一个**规模可控**的包：
+`com/intellij/codeInsight/folding` 在源码树里 72 个非测试… 重算后是 **69 类**（机械枚举排掉 3 个测试类：
+`FoldingUtilTest` / `AbstractFoldingPolicyTest` / `AbstractPsiNamesElementSignatureProviderTest`），
+清单 `docs/inventory/folding.txt`，判决 `docs/inventory/verdict-folding.md`，门控 `tests/b4-verdict.test.mjs`。
+
+**为什么挑它**：本仓的折叠是**一条真链路**（`CodeEditor.vue` 的 `foldingRanges` StateField 吃 LSP
+`textDocument/foldingRange`、`editorCommands.ts` 的四个 CodeMirror 命令、编辑菜单两行、右键弹层一个组），
+正好能逐类对照；而且上游这一族有一张**完整的键位表**（`$default.xml` 逐条核过），缺口是"有键位、有文案、
+本仓没接"这种最实在的一类。
+
+**判决分布**：`[x]` 0 + `[~]` 10 + `[ ]` 33 + `[-]` 26 = 69。
+
+- `[~]`（10，有落点但不全）：`CodeFoldingManager` / `CodeFoldingManagerImpl`（折叠的查询面）、
+  `CodeFoldingPass` / `CodeFoldingPassFactory` / `FoldingUpdate`（区间的重算）、`BaseFoldingHandler`
+  （共用命令表）、`CollapseAllRegionsAction` / `ExpandAllRegionsAction`（**键位与上游一致**，
+  但「全部收起」被写成「全部折叠」）、`CollapseRegionAction` / `ExpandRegionAction`（右键弹层里的 `fold`/`unfold`，
+  缺 `Ctrl+±` 与 Code 菜单里的位置）。
+- `[ ]`（33）：动作族其余 17 个（区域/递归/到级别 1–5/选区/块/切换/文档注释）、
+  `CodeFoldingSettings`+`Impl` 五个开关、折叠状态持久化那一组（`DocumentFoldingInfo`/`EditorFoldingInfo`/
+  `CodeFoldingNecromancy`/`Necromancer`/`Zombie`）、`UpdateFoldRegionsOperation`、`FoldingUtil`/`FoldingPolicy`、
+  四个 handler、悬停提示监听器。
+- `[-]`（26）：Java/XML 语言侧 builder 与其专属设置工具 16 个、语义签名族 6 个、注入片段 pass 2 个、
+  `EditorFoldingInfoWindow`（没有"同文档多编辑器窗口"形态）、`FoldLimb`（复活机制的构件）、
+  `FoldingHintPostStartupActivity`（打开期钩子）—— 四类理由写在判决 §D。
+
+**下一批该做的四条（判决 §C，按用户可见度）**：① 动作族（含键位表）；② `CodeFoldingSettings` 五个开关；
+③ 折叠状态持久化；④ 「全部收起」文案与弹层顺序照 `FoldingGroup`。
+
+**判据（6 条）**：覆盖面从 `editor_scan.md` 重推（排测试源码集）并与 `folding.txt` 对齐；`[x]`/`[~]` 行的引用必须
+落在磁盘上真实存在的 `src/`/`native/` 文件；§D 四类理由必须在；四档计数自洽且与表尾一致；§C 四条在。
+自证有牙：把 §G 里某条依据的文件名改错 ⇒ 红（覆盖率那条靠"行数 ≠ 域内类数"也会先红）。
