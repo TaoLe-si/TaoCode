@@ -1104,6 +1104,16 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      （`title` 不是那个词，找不到）；最稳的是**临时探针**——在编辑器页里把拿到的那份诊断表暴露成
      `window.__diag`（我们前端把它存在模块级的 Map 里，页面读不到），读完即撤，和书签那几轮的做法一致。
      这一步做完就能直接看到「`Configuration` cannot be resolved」这类原文。
+  7) **拿到诊断原文了（临时探针 `window.__diag`，读完即撤）**：
+     `AE2VMConfig.java is a non-project file, only syntax errors are reported`（severity 2 警告）
+     —— JDT 自己说得很清楚：**这个文件不在任何工程里**，所以只报语法错、语义一律不解析。
+     这把问题从"类路径 glob 怎么解析"收敛成了"**为什么 JDT 没把我们的源根建成熟见工程**"：
+     `java.project.sourcePaths` 对应的服务端偏好是 `invisibleProjectSourcePaths`
+     （JDT 1.44.0 的 Preferences 常量里确认存在），我们已按链接子工程派生并下发；
+     下一个已实现但**尚未在真机上验证**的调整：**关掉 Gradle 导入时不再下发 `java.import.exclusions`**
+     （`lsp_config.cpp` 里改成只有导入开着才发）—— 因为排除模式可能把 JDT 自己的不可见工程扫描也挡了；
+     验证配方：`enabled=false` 下启动，`lsp.open` 那个文件，读 `window.__diag` 的诊断原文
+     （应当不再是 "non-project file"）与 `definition` 是否可用。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 

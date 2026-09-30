@@ -63,8 +63,13 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         const auto gradle = settings.value("buildTools", Json::object()).value("gradle", Json::object());
         const auto libraries = default_referenced_libraries(project_root, gradle);
         const auto sources = default_source_paths(project_root, gradle);
+        // 排除模式只在**导入开着**时才发：它的用途是"别去同步那些没链接的 Gradle 工程"
+        // （Buildship 反正也不理它），而关掉导入之后它只会多一层风险 —— JDT 的普通文件夹扫描
+        // 会不会被自己的排除模式挡掉，这一条在真机上还没排除干净（"non-project file" 那个诊断）。
+        const auto excluded = gradle.value("enabled", true) ? import_exclusions(project_root, gradle)
+                                                            : std::vector<std::string>();
         servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), libraries,
-                                                       import_exclusions(project_root, gradle), sources);
+                                                       excluded, sources);
         // 把"实际发给语言服务的那份"记进诊断日志（`TAOCODE_LSP_TRACE` 只记方法名，不记 body）——
         // "外部的类解析不了"这类问题第一步就要看它：源根/类路径到底有没有、链接工程读没读到。
         taocode::diagnostics::event(local_data_root(), "INFO",
