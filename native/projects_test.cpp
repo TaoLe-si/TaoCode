@@ -1062,11 +1062,16 @@ int main() {
 
     run("没有 Gradle 导入时用磁盘上已有的 jar 兜底当外部类路径", [&] {
         const auto root = temporary.path / "classpath-probe";
-        std::filesystem::create_directories(root / "build" / "rfg");
-        std::filesystem::create_directories(root / "lib");
+        // 真机形状：产物在**子工程**里（`<linked>/build/rfg`），不在工作区根下。按根判定的版本
+        // 在真机上一条都没挂上（诊断日志："类路径兜底 0 条"），所以这个夹具必须照真机摆。
+        const auto linked_dir = root / "AE2VMAddon-1.7.10-gtnh";
+        std::filesystem::create_directories(linked_dir / "build" / "rfg");
+        std::filesystem::create_directories(linked_dir / "lib");
+        std::filesystem::create_directories(root / "other" / "lib");
         {
-            std::ofstream(root / "build" / "rfg" / "recompiled_minecraft-1.7.10.jar").put('x');
-            std::ofstream(root / "lib" / "helper.jar").put('x');
+            std::ofstream(linked_dir / "build" / "rfg" / "recompiled_minecraft-1.7.10.jar").put('x');
+            std::ofstream(linked_dir / "lib" / "helper.jar").put('x');
+            std::ofstream(root / "other" / "lib" / "ignored.jar").put('x');
         }
         // 导入范围：只导入链接的子工程（IDEA 的行为），未链接的顶层目录进 exclusions。
         std::filesystem::create_directories(root / "AE2-refs" / "sub");
@@ -1087,18 +1092,18 @@ int main() {
             return std::find(exclusions.begin(), exclusions.end(), std::string(pattern)) != exclusions.end();
         };
         check(excluded("**/AE2-refs/**") && excluded("**/other-addon/**"), "未链接的顶层目录都要排除，形如 **/name/**");
-        check(excluded("**/lib/**"), "普通目录也排除（它们本来也不是 Gradle 工程，排除只是让模式表完整）");
+        check(excluded("**/other/**"), "未链接的普通目录也排除（让模式表完整）");
         check(!excluded("**/AE2VMAddon-1.7.10-gtnh/**"), "链接的那个不排");
         check(std::is_sorted(exclusions.begin(), exclusions.end()), "模式按名字升序（可复现）");
         check(taocode::import_exclusions(root, Json::object()).empty(), "没填 linkedProjects 就不擅自缩小导入范围");
-        const auto globs = taocode::default_referenced_libraries(root);
+        const auto globs = taocode::default_referenced_libraries(root, gradle);
         const auto has = [&globs](const char* needle) {
             return std::find(globs.begin(), globs.end(), std::string(needle)) != globs.end();
         };
-        check(has("build/rfg/**/*.jar"), "ForgeGradle 的反混淆产物要进类路径");
-        check(has("lib/**/*.jar"), "lib 目录要进类路径");
-        check(has("**/build/rfg/*.jar"), "多子工程仓库里各子工程的 build/rfg 也要覆盖");
-        check(!has("run/**/*.jar"), "不存在的目录不进（免得挂一堆指不到东西的模式）");
+        check(has("AE2VMAddon-1.7.10-gtnh/build/rfg/**/*.jar"), "链接子工程的反混淆产物要进类路径（按子工程派生，不按工作区根）");
+        check(has("AE2VMAddon-1.7.10-gtnh/lib/**/*.jar"), "链接子工程的 lib 要进");
+        check(!has("other/lib/**/*.jar"), "未链接的子工程不进（与「只导入链接的工程」同一条口径）");
+        check(!has("AE2VMAddon-1.7.10-gtnh/run/**/*.jar"), "不存在的目录不进（免得挂一堆指不到东西的模式）");
         const Json java = {{"referencedLibraries", Json::array({"lib/**/*.jar"})}};
         const auto settings = taocode::java_lsp_settings(java, Json::object(), globs);
         const auto& list = settings.at("java").at("project").at("referencedLibraries");

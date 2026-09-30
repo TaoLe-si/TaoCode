@@ -243,23 +243,35 @@ std::vector<std::string> import_exclusions(const fs::path& root, const Json& gra
  * 只回**真实存在**的目录对应的 glob（JDT 的 `referencedLibraries` 收相对工作区的 glob），
  * 免得给语言服务挂一堆指不到东西的模式。
  */
-std::vector<std::string> default_referenced_libraries(const fs::path& root) {
+std::vector<std::string> default_referenced_libraries(const fs::path& root, const Json& gradle) {
+    std::vector<std::string> globs;
+    // **按链接的子工程派生**（不是按工作区根）：这个仓库的形状是"根目录下一堆子工程，产物在
+    // `<子工程>/build/rfg|libs`"。真机诊断抓到过按根判断的版本：`fs::exists(root/"build")` 为假
+    // ⇒ 一条都没挂上（日志里"类路径兜底 0 条"）。
+    const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
+    if (!linked.is_array() || linked.empty()) {
+        // 没链接信息：退回按工作区根判一次（单体工程仍然可用）。
+        std::error_code code;
+        if (fs::exists(root / L"build", code) && !code) globs.emplace_back("build/**/*.jar");
+        if (fs::exists(root / L"lib", code) && !code) globs.emplace_back("lib/**/*.jar");
+        return globs;
+    }
     static const char* candidates[] = {
-        "build/rfg/**/*.jar",       // ForgeGradle 的 Minecraft/Forge 反混淆产物
-        "build/libs/**/*.jar",      // 本工程构建产物
-        "build/classes/**",         // 增量编译输出（类目录 JDT 也认）
-        "lib/**/*.jar",             // 传统 lib 目录
+        "build/rfg/**/*.jar",   // ForgeGradle 的 Minecraft/Forge 反混淆产物
+        "build/libs/**/*.jar",  // 本工程构建产物
+        "build/classes/**",     // 增量编译输出（类目录 JDT 也认）
+        "lib/**/*.jar",
         "run/**/*.jar",
     };
-    std::vector<std::string> globs;
-    for (const auto* candidate : candidates) {
-        const auto parent = root / fs::path(candidate).begin()->wstring();
-        std::error_code code;
-        if (fs::exists(parent, code) && !code) globs.emplace_back(candidate);
+    for (const auto& entry : linked) {
+        if (!entry.is_string()) continue;
+        const auto project = entry.get<std::string>();
+        for (const auto* candidate : candidates) {
+            const auto parent = root / from_utf8(project) / fs::path(candidate).begin()->wstring();
+            std::error_code code;
+            if (fs::exists(parent, code) && !code) globs.push_back(project + "/" + candidate);
+        }
     }
-    // 子工程各有一份 build/rfg（本工程的形状是多子工程仓库）：给一层通配。
-    std::error_code code;
-    if (fs::exists(root / L"build", code) && !code) globs.emplace_back("**/build/rfg/*.jar");
     return globs;
 }
 

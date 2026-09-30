@@ -1067,23 +1067,22 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   启动后 `lsp.open` 那个 `AE2VMConfig.java`，再 `lsp.request {kind:'hover'|'definition', line:24, character:45}`
   指向 `net.minecraftforge.common.config.Configuration`：**回包里带 jar 路径 = 外部解析通了**；
   `available:false` = 文件仍不在源根里；无回包 = 服务端仍在导入（JDT 导入期间不答语义请求）。
-- [ ] **LSP 复验的精确落点（2026-10-01 实测）**：写入 `buildTools.gradle.enabled=false` 后在大工程上跑：
-  `definition` 从「20–28s 无回包」变成**立刻回包** ✓（导入 churn 让语义请求全悬死的那一半解决了），
-  但内容是 `{"available": false}` ✗ —— 外部类型仍未解析。两个候选原因（**各一次探针就能定死**）：
-  **2026-10-01 第二次探针（等 75s 再问）**：`definition` 仍 `available:false`，但 `hover` 回
-  `{"available": true, "contents": ""}` —— 文件已被认作 Java（hover 能力在），**只是符号解析不出来**
-  （解析出来时 hover 会回签名）⇒ 更像候选 ②（类路径/源根没真正生效），而不是时序。下一个诊断：
-  把合成出来的 `java.project.{sourcePaths,referencedLibraries}` 打印一次（或问 JDT 的
-  `java.project.getClasspath`），确认服务器收到的到底是什么。
-  ① **时序**：启动后 5s 就 `lsp.open` 并立刻发问，而 `java.project.sourcePaths`/`referencedLibraries`
-  是随 `initialize` 的 settings 下去的 —— 文档可能先被当成"不在任何源根里"建了不可见工程。
-  验证：等 60s 再问一次，或等设置到达后重发 `lsp.open`（我倾向这条：磁盘上的 jar 与
-  `src/main/java` 都实打实存在）；
-  ② **glob 口径**：JDT 的 `referencedLibraries` 是否接受 `**/build/rfg/*.jar` 这类带 `**` 的相对模式、
-  是否相对**工作区根**解析 —— 需要看一次"服务器实际收到的那份 settings"（`TAOCODE_LSP_TRACE` 只记方法
-  不记 body，得临时打印合成的 settings，或问 JDT 的 `java.project.getClasspath`）。
-  探针注意：手写 `projects.json` 时**只加 `enabled` 一个字段**（其余形状照抄应用自己写的那份），
-  写完记得按备份还原、把 exe 与 java 都停掉。
-## 已知抖动（不是缺陷，见到重跑一次）
+- [ ] **LSP「解析外部」的落点（2026-10-01，三次探针）**：
+  1) 关掉 Gradle 导入后 `definition` 从「20–28s 无回包」变成**立刻回包** ✓（导入 churn 让语义请求全悬死那半解决了）；
+  2) 回包仍是 `{"available":false}` / hover 回空 ⇒ 符号解析不了。诊断日志（`lsp_config.cpp` 里那行
+     "java lsp 配置：…"）**抓到一个真缺陷并已修**：`default_referenced_libraries` 原来按**工作区根**判
+     `build/` 是否存在，而这个仓库的产物在 `<子工程>/build/rfg` ⇒ 真机日志是"类路径兜底 **0** 条"。
+     改成**按链接的子工程派生**后，日志变成"源根 4 条（…/src/main/java）、类路径兜底 4 条
+     （AE2VMAddon-1.7.10-gtnh/build/rfg/**/*.jar）" ✓（`projects_test` 的夹具也照真机摆成多子工程形状）；
+  3) 但探针结果没变（hover 可用但空、definition 不可用）⇒ **settings 已经对了，是 JDT 没把这些
+     设置"落成工程"**。下一个动作有了明确依据：服务器自己的命令表里有 `java.project.import`
+     （日志 `Non-Static Commands: [java.project.import, java.project.changeImportedProjects, …]`）——
+     关掉 Gradle 导入后，**需要由客户端触发一次 `workspace/executeCommand {command:"java.project.import"}`**，
+     JDT 才会按 `java.project.sourcePaths`/`referencedLibraries` 把普通文件夹建成不可见工程
+     （VS Code 那边是扩展在 initialize 之后自动做的）。做法：在 native 侧 `Session` 的 ready 回调之后
+     发这条命令（幂等），再按同一配方复验。
+  探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
+  调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
+
 
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。

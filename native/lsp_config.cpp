@@ -3,6 +3,7 @@
 #include <fstream>
 #include <utility>
 
+#include "diagnostics.hpp"
 #include "jdtls.hpp"
 #include "lsp_discovery.hpp"
 #include "projects.hpp"
@@ -58,10 +59,20 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         auto spec = discover_java(project_java, executable_directory, data);
         if (!spec.command.empty()) servers.emplace("java", std::move(spec));
     }
-    if (!project_root.empty() && servers.contains("java"))
-        servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), default_referenced_libraries(project_root),
-            import_exclusions(project_root, settings.value("buildTools", Json::object()).value("gradle", Json::object())),
-            default_source_paths(project_root, settings.value("buildTools", Json::object()).value("gradle", Json::object())));
+    if (!project_root.empty() && servers.contains("java")) {
+        const auto gradle = settings.value("buildTools", Json::object()).value("gradle", Json::object());
+        const auto libraries = default_referenced_libraries(project_root, gradle);
+        const auto sources = default_source_paths(project_root, gradle);
+        servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), libraries,
+                                                       import_exclusions(project_root, gradle), sources);
+        // 把"实际发给语言服务的那份"记进诊断日志（`TAOCODE_LSP_TRACE` 只记方法名，不记 body）——
+        // "外部的类解析不了"这类问题第一步就要看它：源根/类路径到底有没有、链接工程读没读到。
+        taocode::diagnostics::event(local_data_root(), "INFO",
+            std::string("java lsp 配置：链接工程 ") + std::to_string(gradle.value("linkedProjects", Json::array()).size()) +
+            " 个、源根 " + std::to_string(sources.size()) + " 条" + (sources.empty() ? std::string() : "（" + sources.front() + "）") +
+            "、类路径兜底 " + std::to_string(libraries.size()) + " 条" + (libraries.empty() ? std::string() : "（" + libraries.front() + "）") +
+            "、导入 " + (gradle.value("enabled", true) ? "开" : "关"));
+    }
     return servers;
 }
 

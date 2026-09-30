@@ -24,7 +24,7 @@ fs::path project_destination(const fs::path& parent, const std::string& name);
 Json java_lsp_settings(const Json& java, const Json& build_tools, const std::vector<std::string>& extra_libraries = {},
                        const std::vector<std::string>& import_exclusions = {},
                        const std::vector<std::string>& extra_source_paths = {});
-std::vector<std::string> default_referenced_libraries(const std::filesystem::path& root);
+std::vector<std::string> default_referenced_libraries(const std::filesystem::path& root, const Json& gradle);
 // 未链接的顶层目录 → `java.import.exclusions`（"只导入链接的子工程"，见实现处注释）。
 std::vector<std::string> import_exclusions(const std::filesystem::path& root, const Json& gradle);
 // 链接的子工程里真实存在的源根（`src/main/java` 等）——没有可用 Gradle 导入时的兜底。
