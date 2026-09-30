@@ -14,6 +14,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Bookmark, Check, ListTree, Settings2, X } from 'lucide-vue-next'
 import type { Bookmark as BookmarkEntry } from '../bridge'
+import { bookmarkDescription } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings }>()
@@ -100,11 +101,23 @@ function onKeydown(event: KeyboardEvent) {
         </div>
         <div v-for="entry in group.entries" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }">
           <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
-                  :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行`" @click="activate(entry)">
+                  :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行${bookmarkDescription(entry) ? `：${bookmarkDescription(entry)}` : ''}`" @click="activate(entry)">
             <span class="bookmark-digit" :title="entry.mnemonic === undefined ? '无编号' : `Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic ?? '' }}</span>
-            <span class="bookmark-name">{{ entry.path.split('/').pop() }}</span>
-            <span v-if="!group.path" class="bookmark-folder">{{ folderOf(entry.path) }}</span>
-            <span class="bookmark-line">{{ entry.line }}</span>
+            <!-- 分组在文件下：`"行号: "` 灰 + 描述（那一行原文）常规体 —— 逐条照 `ui/tree/LineNode.kt:20-31`。
+                 行号直接用 `entry.line`：上游那份要多一次 `+1`（`LineNode.kt:21`）是因为 IDEA 存 0 基，
+                 本仓存的就是 1 基（见 `src/bookmarks.ts` 的注释）。 -->
+            <template v-if="group.path">
+              <span class="bookmark-line">{{ entry.line }}:</span>
+              <span v-if="bookmarkDescription(entry)" class="bookmark-detail">{{ bookmarkDescription(entry) }}</span>
+            </template>
+            <!-- 不分组：有描述就先描述、文件名退成灰体再加 ` :行号`（`BookmarkNode.kt:78-83`）；
+                 没有描述则文件名 + ` :行号` + 位置（`:72-77`）。 -->
+            <template v-else>
+              <span v-if="bookmarkDescription(entry)" class="bookmark-detail">{{ bookmarkDescription(entry) }}</span>
+              <span class="bookmark-name" :class="{ 'bookmark-name-muted': bookmarkDescription(entry) !== undefined }">{{ entry.path.split('/').pop() }}</span>
+              <span class="bookmark-folder">{{ folderOf(entry.path) }}</span>
+              <span class="bookmark-line">:{{ entry.line }}</span>
+            </template>
           </button>
           <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>
         </div>
@@ -135,6 +148,10 @@ function onKeydown(event: KeyboardEvent) {
 .bookmark-jump { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 3px 0 3px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
 .bookmark-digit { flex-shrink: 0; width: 11px; color: var(--accent); font: 10px var(--font-mono); }
 .bookmark-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 描述（那一行原文）：常规体、可省略号截断；`BookmarkNode.kt:80` 里它是唯一用 REGULAR_ATTRIBUTES 的段。 */
+.bookmark-detail { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 有描述时文件名退成灰体（`BookmarkNode.kt:81` 的 GRAYED_ATTRIBUTES）。 */
+.bookmark-name-muted { color: var(--muted); }
 .bookmark-folder { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
 .bookmark-line { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .bookmark-current .bookmark-name { color: var(--bright); }

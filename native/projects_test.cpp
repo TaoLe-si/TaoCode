@@ -731,8 +731,8 @@ int main() {
             const auto root_b = open_result(b).at("root").get<std::string>();
             store.opened(open_result(a));
             const Json marks = Json::array({
-                {{"path", "src/main.cpp"}, {"line", 12}},
-                {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}},
+                {{"path", "src/main.cpp"}, {"line", 12}, {"text", "int main() {"}},
+                {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}, {"text", ""}},
                 {{"path", "src/app.vue"}, {"line", 88}, {"mnemonic", 9}}});
             check(store.update_project_settings(root_a, {{"bookmarks", marks}}).at("bookmarks") == marks,
                   "Bookmarks must round-trip with their digits");
@@ -741,6 +741,8 @@ int main() {
             store.update_project_settings(root_a, {{"runConfigs", Json::array({{{"name", "build"}, {"command", "cmake"}}})}});
             check(store.project_settings(root_a).at("bookmarks") == marks,
                   "Patching a different key must not lose the bookmarks");
+            // 孤立的续字节（0x80）：不是合法 UTF-8 —— 不能用转义字面量写，避免又被工具链改写。
+            const auto lone_continuation = std::string(1, static_cast<char>(0x80));
             const std::vector<Json> rejected{
                 {{"bookmarks", nullptr}},
                 {{"bookmarks", Json::object()}},
@@ -758,6 +760,10 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 10}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", -1}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 3}, {"note", "x"}}})}},
+                // 行原文（锚）：必须是字符串、不超过 4 KiB 字节、合法 UTF-8（空串合法 —— 空行上的书签）。
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", 5}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", std::string(4097, 'x')}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", lone_continuation}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 2}},
                                             {{"path", "src/y.cpp"}, {"line", 4}, {"mnemonic", 2}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}},

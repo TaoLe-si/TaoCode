@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { bookmarkOwner, nextBookmark, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from '../src/bookmarks.ts'
+import { BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, nextBookmark, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from '../src/bookmarks.ts'
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -103,4 +103,25 @@ test('同一行只留一条：丢掉的那条回来时这一行已有新书签�
   const out = reconcileBookmarks([{ path: 'x.java', line: 2, text: 'b' }], 'x.java', content, [{ path: 'x.java', line: 2, text: 'b' }])
   assert.equal(out.list.length, 1, '保留原有那条')
   assert.equal(out.dropped.length, 1, '回来的那条进回丢弃表')
+})
+
+test('描述 = 那一行的原文（去掉首尾空白）；空白行/旧数据没有描述', () => {
+  assert.equal(bookmarkDescription({ path: 'a.cpp', line: 3, text: '  int x = 1;  ' }), 'int x = 1;')
+  assert.equal(bookmarkDescription({ path: 'a.cpp', line: 3, text: '   ' }), undefined, '全空白按"没有描述"')
+  assert.equal(bookmarkDescription({ path: 'a.cpp', line: 3 }), undefined, '旧数据没有原文')
+})
+
+test('长行锚按 1024 个字符截断，而且存/比两侧口径一致（超长行不会假失效）', () => {
+  const long = 'x'.repeat(BOOKMARK_TEXT_LIMIT + 500)
+  assert.equal(bookmarkAnchor(long).length, BOOKMARK_TEXT_LIMIT, '构造锚时就截断')
+  assert.equal(bookmarkAnchor('  ' + long + '  '), long.slice(0, BOOKMARK_TEXT_LIMIT), '先 trim 再截断')
+  // 放书签时存的就是截断后的锚；对账时比的是同一段 —— 行没变就该留着
+  const stored = [{ path: 'a.cpp', line: 1, text: bookmarkAnchor(long) }]
+  const kept = reconcileBookmarks(stored, 'a.cpp', long, [])
+  assert.equal(kept.list.length, 1, '行没动 ⇒ 书签留着')
+  assert.deepEqual(kept.dropped, [])
+  // 行还在只是内容变了 ⇒ 书签留着，锚刷成**截断后的**当前行（上游"还留着的书签把原文刷成当前那一行"）
+  const changed = reconcileBookmarks(stored, 'a.cpp', 'y' + long.slice(1), [])
+  assert.equal(changed.list.length, 1, '行还在 ⇒ 书签留着')
+  assert.equal(changed.list[0].text, ('y' + long.slice(1)).slice(0, BOOKMARK_TEXT_LIMIT), '刷新后的锚同样按上限截断')
 })

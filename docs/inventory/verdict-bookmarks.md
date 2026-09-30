@@ -29,8 +29,31 @@
     `onEditorChange`。做的是上游 `documentChanged`（`:449-536`）那三条：行号越界的删掉并记进会话内的
     "丢掉表"（`:522-534`）、同一行只留一条（`isDuplicate:517-530`）、原文回到同一行号就放回去
     （`:536`，含单行移动的 `line -= 2` 特例 `:499-506`）。真机取证与"面板观感未复验"的原因写在审计 §BM。
-    **还没做**：自动描述 —— `addTextBookmark` 的描述取自"选中的文本，否则整行 trim，超过 200 字符截断"
-    （`getAutoDescription:127-139`），本仓的 `Bookmark` 没有 description 字段（`Bookmark` 那一行记着）。
+    **自动描述 —— 已做（第七十一批）**，但上游的规则**不是**这里原来记的那条：
+    · 旧记法有误：`getAutoDescription:127-139` 的截断长度是 **50**（`MAX_AUTO_DESCRIPTION_SIZE:70`），不是 200；
+      而且在这个快照里它是**死代码**（全仓只有定义、没有调用点）。
+    · 2026.2 真正生效的是现代实现 `platform/bookmarks/src/com/intellij/ide/bookmark/`：
+      `BookmarksManagerImpl.createDescription:129-136` 对 `LineBookmark` 取
+      `LineBookmarkProvider.Util.readLineText`（`:558-582`：书签带 `expectedText` 就用它，否则读文档的那一整行）
+      再 `trim()`；`getDescription:579-585` 是**首次需要时才算并缓存**的。
+    · 渲染在 `ui/tree/LineNode.kt:20-31`：分组在文件下时是 `"$line: "`（灰）+ 描述（常规体）；
+      没有描述退回 `BookmarkNode.kt:72-77` 那一支（文件名 + ` :行号` + 位置）。
+    **本仓落地**：描述 = `Bookmark.text`（行原文锚，放书签时记、编辑后对账时刷新）去掉首尾空白
+    （`src/bookmarks.ts` 的 `bookmarkDescription`），面板按 `LineNode`/`BookmarkNode` 的两种形状渲染
+    （`src/components/BookmarksPanel.vue`）。**行号口径**：上游存 0 基、显示 `+1`（`LineNode.kt:21`），
+    本仓存的是 1 基（`placeBookmark` 收 `tab.line`，`reconcileBookmarks` 按 `lines[line - 1]` 取，
+    持久化校验要求 `line >= 1`）—— 显示**不 +1**。
+    **顺带修掉一个真缺陷**：`text` 是第六十七批加的，但原生校验的白名单还是 `{path, line, mnemonic}`
+    （`native/settings_schema.cpp` 的 `validate_bookmarks`），于是**带锚的书签一律存不进去**
+    （`Unknown field: text` → 前端弹「书签未能保存」）—— 真机被这条挡过（项目设置里 `bookmarks: []`）。
+    现在白名单放行 `text` 并校验（字符串 / ≤4 KiB 字节 / 合法 UTF-8；空串合法，对应空行上的书签，
+    上游 `writeExternal:329-333` 也是"非空才写 `<bookmark description>`"）；前端 `bookmarkAnchor`
+    按 1024 字符截断，**存与比同一个函数**，长行不会出现"永远比不中"的假失效。
+    **真机取证**：README.md 第 3 行 F11 → 气球「书签 README.md:3」且无保存失败提示；面板行
+    `3: Small scratch project used to compare TaoCode against IntelliJ IDEA side by side.`；
+    项目设置里 `{"line":3,"path":"README.md","text":"Small scratch project …"}`；**重启后**同一行照旧
+    （读路径也通）。判据：`tests/bookmarks.test.mjs`（12 条）+ `projects_test` 的书签用例（往返含 `text`，
+    外加四条拒绝：非字符串 / 4097 字节 / 孤立续字节 / 未知键）。
 ② **书签类型与文件书签**：`BookmarkType`（`Bookmark.java:181`）与 `addFileBookmark`
    （`BookmarkManager.java:120-125`，行 `-1`）—— 本仓只有行书签；书签类型还是那三个"没渲染"的
    视图开关（`rewriteBookmarkType` 等）的前置。

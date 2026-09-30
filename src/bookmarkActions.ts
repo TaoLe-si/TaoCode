@@ -6,7 +6,7 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from './bookmarks'
+import { bookmarkAnchor, bookmarkOwner, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from './bookmarks'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
@@ -82,7 +82,7 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     }, 600)
   }
   function placeAt(path: string, line: number, mnemonic?: number, content?: string) {
-    const lineText = content === undefined ? undefined : (content.split(String.fromCharCode(10))[line - 1] ?? '').trim()
+    const lineText = content === undefined ? undefined : bookmarkAnchor(content.split(String.fromCharCode(10))[line - 1] ?? '')
     bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText)
     const keptEntry = bookmarks.value.find(entry => entry.path === path && entry.line === line)
     if (keptEntry) rememberPlace({ kind: '书签', path, line: line - 1, label: keptEntry.mnemonic === undefined ? baseName(path) + ':' + line : `${keptEntry.mnemonic} · ${baseName(path)}:${line}` })

@@ -17,6 +17,8 @@ namespace {
 
 constexpr std::size_t max_todo_patterns = 20;
 constexpr std::size_t max_run_configs = 40;
+// 书签行原文（锚）的上限：前端按 1024 个字符截断，UTF-8 下最多 4 KiB —— 两边口径一致。
+constexpr std::size_t max_bookmark_text = 4096;
 // 作用域条数上限：状态文件本身有 1 MiB 上限，模式最长 1024 字节，64 条远不会触顶，
 // 同时挡住「无限追加」的写法。IDEA 自己没有条数上限。
 constexpr std::size_t max_scopes = 64;
@@ -488,8 +490,8 @@ void validate_bookmarks(const Json& values) {
     std::set<std::string> places;
     std::set<int> digits;
     for (const auto& value : values) {
-        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?}。");
-        known_keys(value, {"path", "line", "mnemonic"}, "INVALID_SETTINGS");
+        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?, text?}。");
+        known_keys(value, {"path", "line", "mnemonic", "text"}, "INVALID_SETTINGS");
         const auto path = text_or(value, "path");
         if (path.empty() || path.size() > 512) fail("INVALID_SETTINGS", "书签路径不能为空且不超过 512 字节。");
         if (!valid_utf8(path) || path.find('\\') != std::string::npos || path.front() == '/')
@@ -502,6 +504,18 @@ void validate_bookmarks(const Json& values) {
             fail("INVALID_SETTINGS", "书签行号必须是 1 到 1000000 的整数。");
         if (!places.insert(path + ':' + std::to_string(value.at("line").get<std::int64_t>())).second)
             fail("INVALID_SETTINGS", "同一行只能有一个书签：" + path);
+        // `text` = 那一行的原文，是编辑后对账的**锚**（前端 `reconcileBookmarks` 靠它判断
+        // "原文回到同一行就放回"，见 src/bookmarks.ts）。上游把它持久化成
+        // `<bookmark description="…">`（`BookmarkManager.writeExternal:329-333`，只写非空值）——
+        // 大工程里的长行可以很长，所以上限给 4 KiB 字节；前端按 1024 个字符截断后存，
+        // 两边的口径必须一致（1024 字符 UTF-8 最多 4 KiB）。
+        if (value.contains("text")) {
+            if (!value.at("text").is_string())
+                fail("INVALID_SETTINGS", "书签的行原文必须是字符串。");
+            const auto text = value.at("text").get<std::string>();
+            if (text.size() > max_bookmark_text || !valid_utf8(text))
+                fail("INVALID_SETTINGS", "书签的行原文不能超过 4096 字节且必须是 UTF-8。");
+        }
         if (!value.contains("mnemonic")) continue;
         if (!value.at("mnemonic").is_number_integer() || value.at("mnemonic") < 0 || value.at("mnemonic") > 9)
             fail("INVALID_SETTINGS", "书签编号只能是 0 到 9 的整数。");
