@@ -40,12 +40,17 @@ export function commitBlockReason(input: CommitCheckInput): CommitBlockReason | 
   return null
 }
 
-/** Labels of VcsBundle.properties:17-19 (error.no.changes.to.commit and friends). */
+/**
+ * `VcsBundle.properties:17-19` 的三条原文 —— 中文包逐字对照（`localization-zh`）：
+ *   error.no.changes.to.commit        选择要提交的文件
+ *   error.no.commit.message           指定提交消息
+ *   error.no.changes.no.commit.message 选择要提交的文件并指定提交消息
+ */
 export function commitBlockMessage(reason: CommitBlockReason | null): string {
   switch (reason) {
     case 'no-changes': return '选择要提交的文件'
-    case 'no-message': return '填写提交信息'
-    case 'no-changes-no-message': return '选择要提交的文件并填写提交信息'
+    case 'no-message': return '指定提交消息'
+    case 'no-changes-no-message': return '选择要提交的文件并指定提交消息'
     default: return ''
   }
 }

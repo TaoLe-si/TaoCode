@@ -254,3 +254,20 @@
 - [~] `ToolWindowPaneState`（每 pane 的可见性/条纹叠加开关）与 `ToolWindowEntry`（运行期条目对象）：
   本仓的 dock 是全局 ref、窗口集合是常量表，没有对应对象；`ToolWindowSetInitializer` 那一半
   （建模块时装配 + 换项目再装配）已由 `applyProjectLayout` 承担。
+
+## 16. 提交检查的文案与入口（2026-09-30 第四十四/四十五批）
+
+已落：`src/commitChecks.ts`（一处检查链 + 文案常量）、**失败行**（警告图标 + 失败文本 +
+「重新运行提交检查」那把刷新按钮）、「仍然提交」（`action.commit.anyway.text`）、
+提交期间保存的确认（`save.committing.files.confirmation.*` 原文）。
+
+还差的（判决表 `docs/inventory/verdict-vcs-commit.md` §G 里对应的行仍记 `[~]`）：
+
+- 失败行上的**「显示详细信息 / 查看详情」链接动作**（上游 `CommitCheckFailure.WithDetails` 那一档：
+  `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板上）——本仓的失败行是纯文本。
+- **面板内的检查进度**（`CommitChecksProgressIndicator`，`CommitProgressPanel.kt:108-130`）：
+  本仓走状态栏文字（`commit.checks.only.progress.text`），没有面板内的指示器与悬停浮层。
+- **索引期间检查不可用**那条警告（`label.commit.checks.not.available.during.indexing`，`:310`）：
+  本仓没有"索引中"这个状态。
+- `RecentCommitChecks` 的其余几档（`MODIFICATIONS_FAILED` / `POST_FAILED` / `SMART_MODE_REQUIRED`）：
+  本仓的检查是一次性的（全在提交前），没有"提交后再补检查"那两档。

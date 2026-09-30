@@ -499,6 +499,13 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
    commit actions, in the error colour (CommitProgressPanel.setError, CommitProgressPanel
    .kt:80-85, fed by buildErrorText() :321-328). */
 .sc-commit-check { margin: 0; padding: var(--space-1) var(--space-3); color: var(--error); font-size: 11px; }
+/* IDEA's FailuresPanel (CommitProgressPanel.kt:394-471) is a BoxLayout(X) — icon, description,
+   then the checks toolbar — sitting above the commit actions like the error row does. */
+.sc-check-failures { display: flex; align-items: flex-start; gap: 5px; padding: var(--space-1) var(--space-3); font-size: 11px; line-height: 1.5; }
+.sc-check-failures-icon { flex: 0 0 auto; margin-top: 2px; color: var(--warning); }
+.sc-check-failures-text { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+/* RerunCommitChecksAction (CommitProgressPanel.kt:492-521) — the icon-only button on that row. */
+.sc-rerun-checks { flex: 0 0 auto; width: 18px; height: 18px; }
 /* CommitAuthorComponent (vcs/commit/CommitAuthorComponent.kt:124-137): the inactive "By"
    label followed by the short author name. The row only exists while an author is set (:73-77). */
 .sc-author { display: flex; align-items: center; gap: 5px; padding: 0 var(--space-3) var(--space-1); font-size: 11px; }

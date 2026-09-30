@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GitBranch, GitCommitIcon, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Archive, History, Tag, Ban, GitPullRequestArrow, CloudDownload, RotateCcw, Trash2, ChevronDown, Clock, Settings, Undo2, AlignLeft } from 'lucide-vue-next'
+import { GitBranch, GitCommitIcon, GitMerge, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Archive, History, Tag, Ban, GitPullRequestArrow, CloudDownload, RotateCcw, Trash2, ChevronDown, Clock, Settings, Undo2, AlignLeft, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
+import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, checksFailedTitle, commitAnywayLabel,
+  commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
+import { setStatusText } from '../statusBarText'
 import { COMMIT_CANCELED, COMMIT_NOTIFICATION_ID, commitNotificationRows, commitNotificationTitle, countCommittedPaths } from '../commitNotification'
 import { authorEmailPart, authorNamePart, extendsBeyondDefault, fullName, knownAuthors, shortName, splitAuthorInput, type CommitAuthor } from '../commitAuthor'
 import {
@@ -31,6 +34,13 @@ const props = defineProps<{
   commitSettings: CommitMessageInspectionSettings
   /** 「与某分支比较」的目标（工具栏分支弹窗 → 比较）：设好后本面板直接跑一次比较。 */
   compareWith?: string
+  /**
+   * 还没保存的路径（宿主的编辑器标签）。上游 `SaveCommittingDocumentsVetoer` 在提交期间要问
+   * "这些文件要不要立即保存"，本仓由宿主回答"哪些没存"。
+   */
+  dirtyPaths?: () => string[]
+  /** 保存某个路径（宿主 `save(tab)`）：提交期间选「立即保存」时用。 */
+  savePath?: (path: string) => Promise<unknown>
 }>()
 const status = ref<GitStatus>({ available: true, changes: [] })
 const loading = ref(false)
@@ -124,6 +134,10 @@ async function refreshExtras() {
 // the exception actions (`CommitExceptionWithActions`, :63-74) — TaoCode has no plugin EPs, and its
 // notification rows carry no action buttons.
 const emit = defineEmits<{ notify: [message: string, error?: boolean, displayId?: string, detail?: string[]] }>()
+// 提交检查与"提交期间保存文件"要问宿主两件事：哪些要提交的文件还没保存、以及怎么保存它们
+// （上游 `SaveCommittingDocumentsVetoer` + `FileDocumentManager.saveDocument`）。
+function dirtyPaths(): string[] { return props.dirtyPaths?.() ?? [] }
+function savePath(path: string): Promise<unknown> { return props.savePath ? props.savePath(path) : Promise.resolve() }
 function reportCommitResult(text: string, stagedPaths: readonly string[], failures: readonly string[]) {
   const committed = countCommittedPaths(stagedPaths)
   emit(
@@ -168,6 +182,15 @@ const unstage = (path: string) => act(() => request('git.unstage', { path }))
 // running commit (isReady(), :156-159), so it stays clickable and the reason appears on the
 // click — see src/commitCheck.ts for the grouping rules.
 const commitCheckError = ref('')
+// 提交前检查报出来的问题（上游 `FailuresPanel`，`CommitProgressPanel.kt:394`）：**它跟上面那条错误行
+// 不是同一处 UI** —— 错误行说的是"为什么这次不能提交"（空判），这一行说的是"检查发现了什么"。
+// 行只在有 failure 时可见（`isVisible = false` 起步，`:430`；`addFailure` 才显示，`:441`），
+// 行上是：警告图标 + 各条 failure 的文本 + 跑「重新运行提交检查」的刷新按钮（`:492-521`）。
+const checksFailures = ref<string[]>([])
+const checksBusy = ref(false)
+/** `willSkipCommitChecks()`（`NonModalCommitWorkflowHandler.kt:229-233`）：上一轮检查已经失败 ⇒ 提交时跳过检查、按钮改叫「仍然提交」。 */
+const checksSkipped = computed(() => checksFailures.value.length > 0)
+const commitButtonLabel = computed(() => `${checksSkipped.value ? commitAnywayLabel() : COMMIT_ACTION_TEXT}(${staged.value.length})`)
 const commitBlockReasonNow = computed(() => commitBlockReason({
   hasStagedChanges: staged.value.length > 0,
   hasMessage: message.value.trim().length > 0,
@@ -175,8 +198,11 @@ const commitBlockReasonNow = computed(() => commitBlockReason({
 }))
 // CommitProgressPanel.clearError() (:316-319) drops the label as soon as the message or the
 // inclusion change (:146-156 installs the document and inclusion listeners that call it).
-watch(message, () => { commitCheckError.value = '' })
-watch(() => staged.value.length, () => { commitCheckError.value = '' })
+// `resetCommitChecksResult()` (:240-243) does the same for the *check results* on a document
+// change (the listener at :216-226) — so the failures row and the "Commit Anyway" button name
+// go back to normal as soon as the user edits the message or changes what is included.
+watch(message, () => { commitCheckError.value = ''; checksFailures.value = [] })
+watch(() => staged.value.length, () => { commitCheckError.value = ''; checksFailures.value = [] })
 function passedCommitCheck(): boolean {
   const reason = commitBlockReasonNow.value
   commitCheckError.value = reason ? commitBlockMessage(reason) : ''
@@ -247,6 +273,70 @@ function clearAuthorOverride() {
   authorDraft.name = ''
   authorDraft.email = ''
 }
+/**
+ * 提交前的检查 —— **一处来源**：`commit` / `commitAndPush` / 「运行提交检查」三条路都走它
+ * （上游 `checkCommit() → beforeCommitChecks → （只在通过时）performCommit`，见 `src/commitChecks.ts`）。
+ * 原先 TODO 预检在 `commit` 与 `commitAndPush` 里各写了一遍。
+ */
+async function collectCommitChecks(): Promise<CommitCheckReport> {
+  const reason = commitBlockReason({
+    hasStagedChanges: staged.value.length > 0, hasMessage: message.value.trim().length > 0, amend: amend.value,
+  })
+  let hits = 0
+  if (checkTodoBeforeCommit.value) {
+    todoCheckBusy.value = true
+    try { hits = await todoHits() } finally { todoCheckBusy.value = false }
+  }
+  const stagedPaths = new Set(staged.value.map(change => change.path))
+  return commitCheckReport({
+    blockReason: reason, todoHits: hits, messageProblems: messageProblems.value,
+    unsaved: dirtyPaths().filter(path => stagedPaths.has(path)),
+  })
+}
+/**
+ * 「运行提交检查」（`Vcs.RunCommitChecks`，`RunCommitChecksExecutor.kt`）：跑**同一条**检查链但不提交。
+ * 上游**没有**常显按钮：用户能看到的那一处是失败行上的刷新按钮（`RerunCommitChecksAction`，
+ * `CommitProgressPanel.kt:492-521`，工具提示 `tooltip.rerun.commit.checks` = 重新运行提交检查），
+ * 而失败行本身只在检查报出 failure 之后才出现 —— 所以这里也只在 `checksFailures` 非空时才有这个按钮。
+ * 进度那句话用状态栏文字通道（`commit.checks.only.progress.text` = 正在运行提交检查…）。
+ *
+ * 结果怎么落地也照上游：空判没过 ⇒ 只有面板错误行（上游这次会话是 `Cancelled`，不发通知，`:562-564`）；
+ * 检查报出 failure ⇒ 失败行 + 一条标题为 `{0} 检查失败` 的通知（`:284-291`）；全过了 ⇒ 什么都不发、失败行消失。
+ */
+function applyChecksReport(report: CommitCheckReport) {
+  commitCheckError.value = report.blockMessage
+  checksFailures.value = report.failures
+  if (report.failures.length > 0) emit('notify', checksFailedTitle(), true, undefined, report.failures)
+}
+function runCommitChecks() {
+  if (checksBusy.value) return
+  checksBusy.value = true
+  setStatusText(RUNNING_CHECKS_TEXT, null)
+  void act(async () => {
+    try {
+      applyChecksReport(await collectCommitChecks())
+    } finally {
+      checksBusy.value = false
+      setStatusText(null, null)
+    }
+  }, failure => {
+    checksBusy.value = false
+    setStatusText(null, null)
+    throw failure
+  })
+}
+/**
+ * 提交期间保存文件（上游 `SaveCommittingDocumentsVetoer.confirmSave`：标题「在提交期间保存文件」、
+ * 按钮「立即保存」/「延迟保存」）。选"延迟保存"就照常提交磁盘上的版本 —— 上游也是这个意思。
+ */
+async function confirmSaveDuringCommit(stagedPaths: readonly string[]) {
+  if (!props.savePath) return
+  const unsaved = dirtyPaths().filter(path => stagedPaths.includes(path))
+  if (!unsaved.length) return
+  if (!window.confirm(saveDuringCommitQuestion(unsaved))) return
+  for (const path of unsaved) await savePath(path)
+}
+
 const commit = () => {
   // Ctrl+Enter reaches here even while the button is disabled, so say why nothing
   // happened instead of silently doing nothing.
@@ -256,13 +346,16 @@ const commit = () => {
   // the count is taken from what was included in this commit, before the tree reloads.
   const stagedPaths = staged.value.map(change => change.path)
   void act(async () => {
-    if (checkTodoBeforeCommit.value) {
-      todoCheckBusy.value = true
-      try {
-        const hits = await todoHits()
-        if (hits > 0 && !window.confirm(`提交前检查：工作区中仍有 ${hits} 处 TODO/FIXME（全工作区扫描），仍要提交吗？`)) { reportCommitCanceled(); return }
-      } finally { todoCheckBusy.value = false }
+    // 上一轮检查已经失败 ⇒ 这次不再跑检查，直接提交（`willSkipCommitChecks()` 那条路：
+    // 按钮此时写的是「仍然提交」）。
+    const report = checksSkipped.value ? null : await collectCommitChecks()
+    if (report && !report.ok) {
+      // 上游 `CommitProgressPanel.buildErrorText`：理由写在面板那条错误行上，提交不跑。
+      applyChecksReport(report)
+      return
     }
+    commitCheckError.value = ''
+    await confirmSaveDuringCommit(stagedPaths)
     await request('git.commit', {
       message: text, amend: amend.value, signoff: signoff.value,
       // An override only rides this commit; native refuses it without an e-mail
@@ -273,6 +366,8 @@ const commit = () => {
     persistMessage(text)
     message.value = ''
     amend.value = false
+    // 提交会话结束 ⇒ `CommitStateCleaner.resetState()`（:634-641）里的 `resetCommitChecksResult()`。
+    checksFailures.value = []
   }, failure => reportCommitResult(text, stagedPaths, [failure]))
 }
 // IDEA's second action in ChangesViewCommitPanel: commit the included changes, then
@@ -286,13 +381,10 @@ const commitAndPush = () => {
   // failed commit — it keeps the generic error notification instead.
   let committed = false
   void act(async () => {
-    if (checkTodoBeforeCommit.value) {
-      todoCheckBusy.value = true
-      try {
-        const hits = await todoHits()
-        if (hits > 0 && !window.confirm(`提交前检查：工作区中仍有 ${hits} 处 TODO/FIXME（全工作区扫描），仍要提交并推送吗？`)) { reportCommitCanceled(); return }
-      } finally { todoCheckBusy.value = false }
-    }
+    const report = checksSkipped.value ? null : await collectCommitChecks()
+    if (report && !report.ok) { applyChecksReport(report); return }
+    commitCheckError.value = ''
+    await confirmSaveDuringCommit(stagedPaths)
     await request('git.commit', {
       message: text, amend: amend.value, signoff: signoff.value,
       // An override only rides this commit; native refuses it without an e-mail
@@ -300,6 +392,7 @@ const commitAndPush = () => {
       author: authorOverride.value?.name ?? '', authorEmail: authorOverride.value?.email ?? '',
     })
     committed = true
+    checksFailures.value = []
     reportCommitResult(text, stagedPaths, [])
     persistMessage(text)
     message.value = ''
@@ -680,6 +773,18 @@ watch(() => [props.root, props.active] as const, () => {
         </section>
       </div>
       <p v-if="commitCheckError" class="sc-commit-check" role="alert">{{ commitCheckError }}</p>
+      <!-- IDEA's FailuresPanel (CommitProgressPanel.kt:394-471): the commit-check failures live on
+           their own row — warning icon + the failure texts + the "Rerun commit checks" toolbar
+           button (:492-521, `AllIcons.General.InlineRefresh`, tooltip.rerun.commit.checks). The row
+           is hidden until a check actually reports a failure (:430 `isVisible = false`). -->
+      <div v-if="checksFailures.length" class="sc-check-failures" role="status" aria-label="提交检查失败">
+        <TriangleAlert :size="13" class="sc-check-failures-icon" />
+        <span class="sc-check-failures-text">{{ failuresRowText(checksFailures) }}</span>
+        <button class="icon-button sc-rerun-checks" :disabled="busy || checksBusy" :title="RERUN_CHECKS_TOOLTIP"
+                :aria-label="RERUN_CHECKS_TOOLTIP" @click="runCommitChecks">
+          <RefreshCw :size="12" :class="{ 'status-spin': checksBusy }" />
+        </button>
+      </div>
       <!-- IDEA's CommitAuthorComponent: "By <author>" above the commit actions, shown only
            while an author is set (:73-77). The ✕ removes the author and the date again (:117-120). -->
       <div v-if="authorOverride" class="sc-author">
@@ -688,7 +793,7 @@ watch(() => [props.root, props.active] as const, () => {
         <button class="icon-button sc-author-x" title="移除作者覆盖（Remove）" aria-label="移除作者覆盖" @click="clearAuthorOverride"><X :size="12" /></button>
       </div>
       <div class="sc-actions">
-        <button class="primary-button sc-commit-button" :disabled="busy" title="提交（Ctrl+Enter）" @click="commit">提交({{ staged.length }})</button>
+        <button class="primary-button sc-commit-button" :disabled="busy" :title="`${commitButtonLabel}（Ctrl+Enter）`" @click="commit">{{ commitButtonLabel }}</button>
         <button class="sc-tool sc-options-button" :class="{ on: optionsOpen }" :aria-expanded="optionsOpen" title="提交选项" aria-label="提交选项" @click.stop="openOptions"><Settings :size="13" /></button>
         <button class="sc-tool sc-push-button" :disabled="busy" title="提交并推送（Ctrl+Shift+Enter）" @click="commitAndPush">提交并推送(P)<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>
       </div>

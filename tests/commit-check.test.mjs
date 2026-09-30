@@ -5,12 +5,12 @@ import { commitBlockMessage, commitBlockReason } from '../src/commitCheck.ts'
 // NonModalCommitWorkflowHandler.checkCommit() (:177-184) sets isEmptyChanges / isEmptyMessage.
 test('nothing staged and no message reports both missing preconditions', () => {
   assert.equal(commitBlockReason({ hasStagedChanges: false, hasMessage: false, amend: false }), 'no-changes-no-message')
-  assert.equal(commitBlockMessage('no-changes-no-message'), '选择要提交的文件并填写提交信息')
+  assert.equal(commitBlockMessage('no-changes-no-message'), '选择要提交的文件并指定提交消息', 'VcsBundle error.no.changes.no.commit.message（中文包原文）')
 })
 
 test('a staged file with no message only complains about the message', () => {
   assert.equal(commitBlockReason({ hasStagedChanges: true, hasMessage: false, amend: false }), 'no-message')
-  assert.equal(commitBlockMessage('no-message'), '填写提交信息')
+  assert.equal(commitBlockMessage('no-message'), '指定提交消息', 'VcsBundle error.no.commit.message（中文包原文）')
 })
 
 test('a message with nothing staged only complains about the files', () => {

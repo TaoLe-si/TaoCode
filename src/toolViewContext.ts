@@ -47,6 +47,10 @@ export interface ToolViewContext {
   runConfigProgram: any
   /** VCS 日志的显示开关写回（`project.settings.update` 那条通路）。 */
   saveVcsLog: (log: { showTagNames: boolean; showRootNames: boolean }) => unknown
+  /** 还没保存的编辑器路径（宿主 `allTabs` 里 dirty 的那些）。 */
+  dirtyPaths: () => string[]
+  /** 保存某个路径（宿主 `save(findTab(path))`）。 */
+  savePath: (path: string) => Promise<unknown>
   saveBookmarksView: any
   saveSettingsPatch: any
   searchPanelRef: any
@@ -63,7 +67,7 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -108,6 +112,9 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   bindFileTree: instance => { fileTreeRef.value = instance as never },
   diffContextLines: editorSettings.value.diffContextLines,
   vcsLogShowTagNames: projectSettings.value.vcsLog?.showTagNames ?? true,
+  // 提交面板的两条宿主通道（第四十四批：`SaveCommittingDocumentsVetoer` 那一档要用）。
+  dirtyPaths: () => dirtyPaths(),
+  savePath: (path: string) => savePath(path),
   vcsLogShowRootNames: projectSettings.value.vcsLog?.showRootNames ?? true,
   // 日志窗口齿轮里的「标签名称」写回项目设置（与设置页那两个勾选项同一条通路）。
   onSetVcsLogTagNames: (value: boolean) => { void saveVcsLog({ showTagNames: value, showRootNames: projectSettings.value.vcsLog?.showRootNames ?? true }) },

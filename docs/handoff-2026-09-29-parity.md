@@ -4,9 +4,10 @@
 
 - 仓库：https://github.com/TaoLe-si/TaoCode（public）
 - 分支：`parity/rebuild-inventory`（**当前唯一在推的分支，推的是 `HEAD:main`**）
-- HEAD：`767b052`（本机领先 `origin/main` 十个提交：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
+- HEAD：`bc4560d`（本机领先 `origin/main`：侧条拖宽+「更多」按钮、Find 窗口齿轮组、
   Git 日志窗口的「视图选项」齿轮、**工具窗口注册表**、**布局档案 + 项目级布局**、
-  **主工具栏键盘焦点 + §C 无宿主条目的判决清理**，外加两份交接文档跟进）
+  **主工具栏键盘焦点 + §C 无宿主条目的判决清理**、**每窗口可见性**，外加交接文档跟进；
+  下一批在本机提交：B3 域判决 + 提交检查的两条落地，见 §0 的验证状态表）
 - 工作树：干净（除 `.gitignore` 排除的产物/临时件）
 
 ---
@@ -101,6 +102,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 |---|---:|---|---|
 | B1 `ui/tabs` + `ui/popup` | 127 | `docs/inventory/verdict-ui-tabs-popup.md` | — |
 | B2 `toolwindow` + `openapi/wm` | 350 | `docs/inventory/verdict-toolwindow-openapi.md` | `tests/b2-verdict.test.mjs` |
+| B3 `vcs/commit` | 78 | `docs/inventory/verdict-vcs-commit.md` | `tests/b3-verdict.test.mjs` |
 
 判决表四档：`[x]` 已移植 / `[~]` 部分 / `[ ]` 未移植（TODO）/ `[-]` 不适用（附理由）。
 **B2 的 §G 是 350 行逐条表**，每条 `[x]`/`[~]` 都指向**磁盘上真实存在**的 `src/`/`native/` 文件
@@ -133,9 +135,20 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
    编辑器标签现在绑定文件（`Tab extends DocumentData`），"标签承载任意内容"这件事还没有，
    两条都排在它之后（登记在 `docs/source-todo.md` §12）
 
-**B3..B12 尚未开始**（判决 0/4944）：`vcs/commit`、`editor/actions`、`codeInsight/template`、
+**B3 已起底并落了头两条**：`vcs/commit` 78 类逐条判决（`[x]` 13 / `[~]` 48 / `[ ]` 0 / `[-]` 17），
+§E 的 ①「只运行检查」与 ③「提交期间保存」已实现（审计 §AV/§AW，真机取证走通；
+`RunCommitChecksExecutor` 与 `SaveCommittingDocumentsVetoer` 两行已改 `[x]`）。
+**§E 里还剩**：② 「改某一次具体提交」（`CommitToAmend.Resolved` 那条下拉）、
+④ 三层执行器插槽（`CommitExecutor`，要有真消费者才建）。
+
+**B4..B12 尚未开始**（判决 0/4944）：`editor/actions`、`codeInsight/template`、
 `settings-run`、`find`+`diff`、`execution`+`xdebugger`、`projectviews`、`actions`、
 `codeInsight/daemon`。域清单在 `docs/inventory/*_scan.md`。
+
+**一条写给下一位的教训（第四十五批付了学费）**：判决表里 `[~]` 的行**不要凭直觉补形状**。
+「运行提交检查」当时被做成一个常显按钮（"看起来合理"），真机截图 + 上游复核才发现
+上游根本没有这个控件（非模态面板的执行器挂在提交按钮下拉上，而那个组是空的），
+用户能点到的只有**失败行**上那把刷新按钮。先找到「入口在哪个组件、什么条件下可见」，再动手。
 
 ---
 
@@ -160,7 +173,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 
 **文档**
 - `docs/class-parity-todo.md` —— 总控与执行顺序（**每批完成后回来更新状态**）。
-- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§AM，按批次追加）。
+- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§AW，按批次追加）。
 - `docs/source-todo.md` —— "假 UI / 假位置 / 假控件 / 假逻辑"清单，判定不做的逐条在此登记理由。
 - `docs/enum-lsp-dap.md` —— LSP/DAP 承接层对照（协议侧，不按类对照）。
 

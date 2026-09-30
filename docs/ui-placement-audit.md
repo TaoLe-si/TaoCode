@@ -2143,3 +2143,48 @@ FORCE_ONCE 比版本且推完记版本、旧机器级布局只迁一次、档案
 而**非 immediate 的 `watch` 建时会求值一次** ⇒ 这几个 ref 必须声明在 `createToolWindowStripes` 之前。
 `bottomTab` 原先在 388 行（模块之后），已挪到 `bottom` 旁边（229 行）；`activeView` 那一项同时改成可写
 （恢复时要设它）。
+
+## AV. 2026-09-30 第四十四批：提交检查收成**一处来源** + 提交期间保存 + 「只运行检查」（B3 §E 的 ①③）
+
+B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用户能看得见的缺口」，这一批做掉两条：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| 一条链：`checkCommit()` → `beforeCommitChecks` → （**只在通过时**）`performCommit` | `vcs/commit/NonModalCommitWorkflowHandler.kt:177-184` | `src/components/SourceControl.vue` 的 `collectCommitChecks()`（**唯一**入口，提交 / 提交并推送两条路都走它）+ `src/commitChecks.ts` 的 `commitCheckReport()` 收结果 |
+| 「只运行检查、不提交」= 同一个执行器的另一个会话（`isOnlyRunCommitChecks = true`） | `vcs/commit/RunCommitChecksExecutor.kt:14-29` | `src/commitChecks.ts` 的 `RUNNING_CHECKS_TEXT`（`commit.checks.only.progress.text` = 正在运行提交检查…）+ 面板上那条会跑检查的按钮（形态在 §AW 里被修正） |
+| 提交期间「要不要立即保存这些文件」（否决器） | `vcs/commit/SaveCommittingDocumentsVetoer.kt` 的 `confirmSave`，文案 `VcsBundle` `save.committing.files.confirmation.*`（`:961-964`） | `src/commitChecks.ts` 的 `saveDuringCommitQuestion()` + 面板 `confirmSaveDuringCommit()`；文件清单来自宿主通道（`dirtyPaths` / `savePath`，见 `src/App.vue` 与 `src/components/ToolWindowView.vue`） |
+
+**同批的顺带修正**：TODO 预检原先在 `commit()` 与 `commitAndPush()` 里**各写了一遍**，
+现在只剩检查链里的一份（判据里有一条专门盯「不许再出现第二处」）。
+
+**判据**：`tests/commit-checks.test.mjs` + `tests/commit-check.test.mjs`。
+自证有牙：把检查链拆回两处、或让 `commitCheckReport` 不再区分「错误行 / 失败行」，判据当场变红。
+
+## AW. 2026-09-30 第四十五批：按**真 exe 取证**修正上一批 —— 去掉编造的常显按钮，改判 `FailuresPanel` 失败行 + 「仍然提交」
+
+这一批是**先用真机跑、再回头改代码**：上一批把「运行提交检查」做成了一个**常显的文字按钮**，
+真机截图 + 上游复核发现那不是上游形态，而且它把提交按钮那一排挤成了竖排文字。逐条修正：
+
+| 发现 | 上游证据 | 改法 |
+|---|---|---|
+| **常显按钮是编造的** | 非模态面板里「自定义提交动作」挂在提交按钮的**下拉**上（`CommitActionsPanel.kt:110` 的 `setCustomCommitActions` → `commitButton.setOptions`），而平台那个组 `Vcs.CommitExecutor.Actions` 是**空的**（`VcsActions.xml:403`，全仓没有一处 `add-to-group` 指向它）；用户能点到的只有**失败行**上那把 `RerunCommitChecksAction`（`CommitProgressPanel.kt:492-521`：图标 `AllIcons.General.InlineRefresh`、`setText(NULL_STRING)`、提示 `tooltip.rerun.commit.checks` = 重新运行提交检查） | 删掉常显按钮（`.sc-checks-button`），改成上游那条**失败行**：警告图标 + 各条 failure 的文本 + 那把刷新按钮；行**只在有 failure 时可见**（`isVisible = false` 起步，`:430`；`addFailure` 才显示，`:441`） |
+| **按钮 / 通知文案是编的** | `VcsBundle` 中文包：`error.no.commit.message` = **指定提交消息**（不是「填写提交信息」）、`error.no.changes.to.commit` = 选择要提交的文件、`error.no.changes.no.commit.message` = 选择要提交的文件并指定提交消息（`:518-520`）；`commit.checks.failed.notification.title` = `{0} 检查失败`（`:383`）；`label.commit.checks.failed.unknown.reason` = 检查失败（`:647`） | `src/commitCheck.ts` 三条改回中文包原文；通知标题改 `checksFailedTitle()`；**检查全过时不发通知**（上游只在 `!checksPassed` 时发，`:284-291`） |
+| **缺「检查失败之后怎么办」** | `willSkipCommitChecks()`（`NonModalCommitWorkflowHandler.kt:229-233`）⇒ 提交按钮改名 `action.commit.anyway.text` = `仍然{0}`（`AbstractCommitWorkflowHandler.kt:226-237`），按下去**跳过检查**直接提交 | 面板加 `checksSkipped`（= 失败行非空）+ `commitButtonLabel`；`commit()` / `commitAndPush()` 在 `checksSkipped` 时不再跑检查；提交成功后按 `CommitStateCleaner.resetState()`（`:634-641`）清掉失败行 |
+| **编辑信息 / 换勾选要复位** | `resetCommitChecksResult()`（`:240-243`，由文档监听 `:216-226` 触发） | 面板那两条 `watch`（信息 / 暂存集）同时清失败行 —— 真机验证过：改短信息后失败行消失、按钮从「仍然提交」退回「提交」 |
+
+**真机取证（MCP computer-use 驱动 build 里的 exe + 截图，完整走通）**：
+
+1. 提交信息为空点「提交」⇒ 面板错误行「**指定提交消息**」（真实中文包文案），**没有**失败行、没有通知；
+2. 写一条超长主题（> 72 字符）点「提交」⇒ 失败行「提交信息：主题行不能超过 72 个字符」+ 按钮改名
+   「**仍然提交(1)**」+ 通知「提交 检查失败」；
+3. 点失败行上那把「重新运行提交检查」⇒ 重跑一遍检查，行与「仍然提交」都留着（信息还是超长）；
+4. 把信息改短 ⇒ 失败行消失、按钮退回「提交(1)」（复位那条路走通）；
+5. 点「仍然提交(1)」⇒ **跳过检查、真的提交**（探针仓落在 `.tools/ui-parity-proj`，
+   提交 `a01d346` 的主题就是那条超长的话 —— 正是检查会拦下的那条），随后面板回「提交(0)」。
+
+**判据**：`tests/commit-checks.test.mjs` 新增一条「面板上没有常显的「运行提交检查」按钮，只有失败行上那把」
+（盯：`sc-checks-button` 不许出现、失败行 `v-if`、`checksSkipped` 跳过检查、通知标题）。
+
+**还没落的（判决表里仍记 `[~]`）**：失败行没有上游 `CommitCheckFailure.WithDetails` 那条
+「显示详细信息 / 查看详情」链接动作；`CommitChecksProgressIndicator`（面板内的检查进度）
+与 `label.commit.checks.not.available.during.indexing`（索引期间检查不可用）那两条警告也没有。
