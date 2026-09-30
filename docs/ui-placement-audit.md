@@ -2577,3 +2577,30 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 （`getFoldRegionsForSelection`）—— 那一条留在 §G 里当缺口记着，不假装有。
 
 **判据**：`tests/editor-folding-settings.test.mjs` 增加一条（`foldKinds` 折的时候要跳过含光标的那几条）。
+
+## BJ. 2026-09-30 第六十四批：B4 最后一条 —— 折叠状态**落盘**（跨进程活下来）
+
+上游把每个文档的折叠状态写进 **workspace 文件**（`DocumentFoldingInfo.writeExternal:260-295` 写
+`<marker from:to date=文件时间戳>…`，`readExternal:297-368` 读回来、**时间戳对不上就丢**，`:333`），
+本仓的等价位置是**项目级设置那一段**（`projects.json` → `perProject[项目]`，前端走 `project.settings.update`）。
+
+**为什么原生侧要新一个模块**：整份应用状态有 **1 MiB 硬上限**（`project_settings_state.cpp` 的 `state_limit`），
+而折叠状态是里面唯一会随项目规模线性长的字段 —— 所以形状与上限必须在原生侧过一道闸，
+且按仓规抽成 `native/folding_state_schema.cpp`（新能力不往 `settings_schema.cpp` 里堆）。
+上限两层：原生 50 文件 × 40 条、签名 ≤ 96 字节；前端更紧一档（20 × 30，按"最近动过的"裁剪），
+不等到原生报错才发现存不下。
+
+**真机取证**（jdtls 的 Java 文件，CDP）：
+
+| 步骤 | 结果 |
+|---|---|
+| 折两块（imports 自动 + 方法体 Ctrl+-）→ 关标签（触发去抖落盘） | `projects.json` 里出现该项目的 `foldingState`：`{"src/FoldSample.java": [{from:15,to:113,expanded:false,signature:"import java.util.ArrayList;"}, {from:160,to:271,…",signature:"static List<String> names() {"}]}` |
+| **杀掉进程、重启应用** → 打开同一个文件 | **两处折叠都回来**（imports 块与方法体各一个 `…`），没有多折也没少折 |
+
+**踩到的一处**：`is_number_unsigned()` 在原生校验里判不住"从文本解析进来的 JSON"与"原生里用整数字面量构造的 JSON"之间
+的差别（前者 unsigned、后者 signed），回归用例直接红了 —— 改成 `is_number_integer()` + 非负判断，
+真路径与用例都收（负数与小数照样拒）。
+
+**判据**：原生 `native/folding_state_test.cpp`（7 组：形状、条目字段、签名上限与 UTF-8、路径不许 `..`、
+50×40 上限、`validate_project_patch` 收下 `foldingState` 并照旧拒未知键）+ 前端
+`tests/editor-folding-state.test.mjs` 的导出/裁剪/导入一条。

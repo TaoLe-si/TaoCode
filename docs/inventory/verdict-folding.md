@@ -60,11 +60,16 @@
     打开文件时预折叠、设置一改立刻重算（上游 `CodeFoldingConfigurable.Util.applyCodeFoldingSettingsChanges`）；
     真机取证：Java 文件（jdtls 给 `kind: imports` / `region`）——默认 imports 折、关掉 Import 立刻展开、
     勾上自定义折叠区域后 region 折起；
-③ **折叠状态的持久化** —— ✅ **已做（第六十二批，会话内）**：`src/editorFoldingState.ts`（存档 + 恢复）
-    + `src/editorFoldingController.ts`（调度管道），关标签/换文件前存、区间到手后恢复；上游那套 PSI 元素签名
-    与 RangeMarker 的替身是「偏移 + 起点那行原文」的轻签名（`DocumentFoldingInfo.computeExpandRanges:146-164`
-    的按签名找回也照做了）。**缺**落盘那一半：上游 `writeExternal`/`readExternal` 把状态写进 workspace 文件、
-    带文件时间戳挡"磁盘上改过"（`DocumentFoldingInfo.java:260-368`），本仓目前是会话内内存（进程退出即失效）；
+③ **折叠状态的持久化** —— ✅ **已做（第六十二批会话内 + 第六十四批落盘）**：
+    会话内那份在 `src/editorFoldingState.ts`（存档 + 恢复）+ `src/editorFoldingController.ts`（调度管道），
+    关标签/换文件前存、区间到手后恢复；上游那套 PSI 元素签名与 RangeMarker 的替身是「偏移 + 起点那行原文」的
+    轻签名（`computeExpandRanges:146-164` 的按签名找回也照做了）。
+    **落盘**照 `DocumentFoldingInfo.writeExternal`/`readExternal`（`:260-368`）：状态写进**项目级**设置
+    （`ProjectSettings.foldingState`，就是上游那个"项目的 workspace 文件"在本仓的位置），前端去抖写入
+    （`flushFoldState`）+ 打开工作区时读回（`importFoldState`），原生侧新增
+    `native/folding_state_schema.cpp` 做形状与上限校验（整份应用状态有 1 MiB 硬上限，折叠状态是唯一随项目
+    规模线性长的字段，所以前端还会按"最近动过的"裁到 20 个文件 × 30 条）。上游用文件时间戳挡"磁盘上改过"，
+    本仓的替身仍是轻签名。
 ④ **「全部收起」的文案** —— ✅ **已做**（第六十批）：Code 菜单与弹层两处都是「全部收起」，
     13 条成员照 `FoldingGroup` 排（`src/menus/codeMenu.ts`，机检 `tests/editor-folding.test.mjs` 盯着顺序与文案）；
     早先挂在编辑菜单里的四条已删（上游在 Code 菜单）；
@@ -152,7 +157,7 @@
 | `CollapseBlockHandlerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseBlockHandlerImpl.java` | `[~]` | `fold.block` = `src/editorFolding.ts` 的 `foldBlockAtCaret`（`blockAt` 跳过 `kind` 为 comment/imports/region 的区间，取光标处最内层；没有服务端区间时用 `syntaxArea` 的语法树候选顶上）；**缺**上游按语言注册的 `CollapseBlockHandler` EP（`CollapseBlockAction.java:29-46`） |
 | `CollapseExpandDocCommentsHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseExpandDocCommentsHandler.java` | `[~]` | `fold.docs`/`unfold.docs` = `src/editorFolding.ts` 的 `foldDocComments`/`unfoldDocComments`（`commentRanges` 取 `kind === 'comment'` 的区间）；**缺** PSI 侧"文档注释"与普通注释的区分（上游 `CollapseExpandDocCommentsHandler` 只认 doc comment） |
 | `CollapseSelectionHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseSelectionHandler.java` | `[~]` | `fold.selection` = `src/editorFolding.ts` 的 `toggleFoldSelection`，照 `CollapseSelectionHandler.java:24-87`：有选区时精确匹配就移除（手工区间）、搭界就按上游默认「取消」不动、否则折起选区那几行；无选区时切换光标处最内层区域；**缺** `:44` 的提示与 `:49-58` 的模态确认框（本仓没有编辑器内 hint / 模态框宿主） |
-| `DocumentFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java` | `[~]` | 会话内的存档与恢复：`src/editorFoldingState.ts` 的 `captureFoldState`（`:91-110` 的"折着的都记 + 本该默认折着却展开着的按签名记"）与 `restorePlan`（`setToEditor:198-220` + `computeExpandRanges:146-164` 的按签名找回）；**缺** `writeExternal`/`readExternal` 的落盘与文件时间戳（`:260-368`，本仓用"起点那行原文"当时间戳的替身） |
+| `DocumentFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java` | `[~]` | 存档与恢复都在：`src/editorFoldingState.ts` 的 `captureFoldState`（`:91-110` 的"折着的都记 + 本该默认折着却展开着的按签名记"）与 `restorePlan`（`setToEditor:198-220` + `computeExpandRanges:146-164` 的按签名找回），落盘照 `writeExternal`/`readExternal`（`:260-368`）写进项目级设置（`native/folding_state_schema.cpp` 校验）；**缺**上游用**文件时间戳**挡"磁盘上改过"（`:333` 的 `date != e.getAttributeValue(DATE_ATT)`），本仓用轻签名当替身 |
 | `EditorFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfo.java` | `[~]` | 折叠状态与"谁建的折叠"的记录：本仓在 `src/editorFoldingState.ts`（存档）与 `src/editorFolding.ts` 的区域层（手工 vs 自动，`auto` 标记）里；**缺** PSI 元素指针那一层（`addRegion(region, pointer)`）—— 没有 PSI，映射只能按偏移+签名 |
 | `EditorFoldingInfoWindow` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfoWindow.java` | `[-]` | 依附 `EditorWindow` 的那一半（§D.4）：本仓没有"同一文档开在多个编辑器窗口"的形态 |
 | `ElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/ElementSignatureProvider.java` | `[-]` | 语义签名族（§D.2） |
