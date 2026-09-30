@@ -1094,6 +1094,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      而且只报了 **1 个问题**。所以下一个动作最省事也最直接：**把那 1 个问题的原文读出来**
      （`lsp.request {kind:'diagnostics'}` 或问题面板）—— 它会直接说清是"外部类型 cannot be resolved"
      （⇒ 类路径没进编译单元）还是别的东西（⇒ 另一条线）。
+  6) 读那条诊断的第三次尝试（2026-10-01，`enabled=false`）：
+     · `lsp.request {kind:'diagnostics'}` **不是合法 kind**（回 `unknown semantic kind`）；
+       合法的拉取入口叫 `diagnostic`（单文件）—— 参 `native/lsp_capability_queries.cpp` 的 kind 表；
+     · 于是发 `{kind:'diagnostic'}` → JDT 回 **`{"code":"LSP_FAILED","message":"Internal error."}`**
+       （拉取诊断在这个文件上内部报错，同样指向"它不在一个类路径完整的工程里"）；
+     · 状态栏的问题计数 chip（`.status-problems`）默认不渲染，读不到条数。
+     ⇒ 拿诊断原文的可行路径只剩：**问题面板**（点击状态栏/底部「问题」把它打开，或
+     `showOutput('problems')`）或编辑器里的错误提示。下一次从这里继续。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 
