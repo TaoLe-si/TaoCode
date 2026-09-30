@@ -32,6 +32,8 @@ import type { CommitMessageProblem } from './commitMessageInspection.ts'
 export const RUNNING_CHECKS_TEXT = '正在运行提交检查…'
 /** `tooltip.rerun.commit.checks`（中文包 = 重新运行提交检查）—— 失败行上那个刷新按钮的提示。 */
 export const RERUN_CHECKS_TOOLTIP = '重新运行提交检查'
+/** `commit.checks.failed.notification.show.details.action`（中文包 = 显示详细信息）—— 失败通知上那个按钮。 */
+export const SHOW_DETAILS_TEXT = '显示详细信息'
 /** `label.commit.checks.failed.unknown.reason`（中文包 = 检查失败）—— 说不出具体是哪条时的兜底。 */
 export const CHECKS_FAILED_UNKNOWN = '检查失败'
 /**

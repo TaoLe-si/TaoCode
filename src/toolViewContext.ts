@@ -31,6 +31,10 @@ export interface ToolViewContext {
   leftView: any
   lspReady: any
   notify: any
+  /** 面板的通知走这条（`src/notifications.ts` 的 `notifyFromPanel`：带 displayId 与动作按钮）。 */
+  notifyFromPanel: any
+  /** 激活某个工具窗口（上游 `showCommitCheckFailuresPanel` 那类"显示详细信息"的落点）。 */
+  showToolWindow?: (id: string) => void
   onSearchOpen: any
   onSearchReplaced: any
   onTreeContext: any
@@ -67,7 +71,7 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -108,6 +112,8 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   // `UISettingsState.kt:75`）。树的 `behavior` 读的是同一份设置，两处不会各说各话。
   onTreeOpen: (path, preview: boolean) => void openFile(path, false, { preview }),
   onTreeError: message => notify(message, true),
+  // 面板的通知与「显示详细信息」那条动作（上游 `notifyFromPanel` / `showCommitCheckFailuresPanel`）。
+  notifyFromPanel, showToolWindow,
   bindSearchPanel: instance => { searchPanelRef.value = instance as never },
   bindFileTree: instance => { fileTreeRef.value = instance as never },
   diffContextLines: editorSettings.value.diffContextLines,

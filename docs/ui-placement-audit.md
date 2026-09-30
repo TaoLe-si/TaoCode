@@ -2336,3 +2336,31 @@ description 带标签名，`run()` 真去删）、对 local/remote/head 一律�
 
 **§17 现在只剩**：失败行上的「显示详细信息」链接动作（通知要能带动作按钮），以及
 `Vcs.Log.GoToChild`/`GoToParent`（本仓导航是"后退/前进"历史，不是图的父子）。
+
+## BC. 2026-09-30 第五十七批：**面板的通知根本没接上**（真缺陷）+ 失败行那个「显示详细信息」
+
+§17 的最后一条是「失败行上的『显示详细信息』链接动作」。动手时先看通知这条路，发现比这条待办更严重的事：
+
+**`<SourceControl>` 的 `@notify` 从来没绑过。** `ToolWindowView.vue` 里挂面板的那一行只有 props，
+没有 `@notify="…"` —— Vue 里 emit 没有监听者就是**静默丢弃**，所以面板这一批批写出来的通知
+（提交结果 `已提交 N 个文件` / `提交已取消`、失败检查的 `{0} 检查失败`）**一条都没到过用户眼前**。
+这一批先把它接上，再补 §17 那条动作：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| 面板的通知走 workflow 的通知通道（`checkinErrorNotifications.notify(...)`） | `NonModalCommitWorkflowHandler.kt:270-291` | `ToolWindowView.vue` 绑 `@notify="ctx.notifyFromPanel"`；`ctx` 新增 `notifyFromPanel`（= `src/notifications.ts` 的转接，按 `notify(message, error, onClick, detail, displayId, actions)` 的形参顺序转）——面板那边 `emit('notify', message, error?, displayId?, detail?, actions?)` |
+| 失败通知上的「显示详细信息」= `commit.checks.failed.notification.show.details.action`，点了 `showCommitCheckFailuresPanel()`：激活本地变更工具窗口并选中内容 | `:302-316` 产出动作、`:317-321` 实现 | 面板给通知带 `{ label: 显示详细信息, run: () => props.showToolWindow('git') }`；`ctx.showToolWindow` 由 App 的 `showView` 提供（同一个入口，侧栏/底部都能开） |
+| 失败通知上的「仍然{0}」`commit.checks.failed.notification.commit.anyway.action`（**只**在提交路径那条通知上；只跑检查那条没有） | `:270-291` vs `:284-291` | `applyChecksReport(report, commitActions)`：提交路径传 `true` ⇒ 追加「仍然提交」（点了就是 `commit()`，走"跳过检查直接提交"那条路）；只跑检查那条只有「显示详细信息」 |
+
+**真机取证（MCP 驱动，含一个反向证据）**：
+1. 改前：点提交（检查失败）——通知面板里什么都没有（这条通知此前被丢掉）；
+2. 改后：同一步骤 ⇒ 右下角出现错误气泡「**提交 检查失败**」，两个按钮「**显示详细信息**」「**仍然提交**」；
+3. 点气泡里的「仍然提交」⇒ **提交真的发生**（探针仓多出 `14edb40`），紧接着出现「已提交 1 个文件」的成功通知 ——
+   也就是通知的**动作**与**成功结果**两条都通了。
+
+**判据**：`tests/commit-checks.test.mjs` 新增/更新 4 条 —— 通知标题 + 动作常量、接线（`@notify` 绑定、
+ctx 两条通道、`notifyFromPanel` 的形参顺序）、「显示详细信息」= 激活提交工具窗口、「仍然提交」只在提交路径。
+自证有牙：把 `@notify` 绑定去掉 ⇒ 红。
+
+**还没做的**：`Vcs.Log.GoToChild`/`GoToParent`（本仓导航是"后退/前进"历史，不是图的父子）——
+§17 只剩这一条；其余都已收口。

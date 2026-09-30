@@ -45,9 +45,10 @@ function notify(message: string, error = false, onClick?: () => void, detail?: s
   setNoticeStatus({ message, stamp: Date.now() })
 }
 // The commit panel reports its result through `notify` with a display id, so its handler ignores
-// the channel's transient-click action.
-function notifyFromPanel(message: string, error = false, displayId?: string, detail?: string[]) {
-  notify(message, error, undefined, detail, displayId)
+// the channel's transient-click action. `actions` 是面板给通知带的那几个按钮（上游
+// `appendShowDetailsNotificationActions` 那一套：显示详细信息 / 仍然{0}）。
+function notifyFromPanel(message: string, error = false, displayId?: string, detail?: string[], actions?: NoticeAction[]) {
+  notify(message, error, undefined, detail, displayId, actions)
 }
 // 进度型通知：同一个 displayId 就地刷新（跑完由调用方把 percent 收成数字或 null，行就留在列表里）。
 function notifyProgress(entry: Omit<NoticeEntry, 'id' | 'at'>) {

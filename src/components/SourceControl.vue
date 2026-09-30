@@ -7,9 +7,10 @@ import { commitBlockMessage, commitBlockReason } from '../commitCheck'
 import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
   EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../commitPanelStrings'
 import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
-import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, checksFailedTitle, commitAnywayLabel,
+import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, SHOW_DETAILS_TEXT, checksFailedTitle, commitAnywayLabel,
   commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
 import { setStatusText } from '../statusBarText'
+import type { NoticeAction } from '../notices'
 import { COMMIT_CANCELED, COMMIT_NOTIFICATION_ID, commitNotificationRows, commitNotificationTitle, countCommittedPaths } from '../commitNotification'
 import { authorEmailPart, authorNamePart, extendsBeyondDefault, fullName, knownAuthors, shortName, splitAuthorInput, type CommitAuthor } from '../commitAuthor'
 import {
@@ -44,6 +45,8 @@ const props = defineProps<{
   dirtyPaths?: () => string[]
   /** 保存某个路径（宿主 `save(tab)`）：提交期间选「立即保存」时用。 */
   savePath?: (path: string) => Promise<unknown>
+  /** 激活某个工具窗口（宿主的 `showView`）：失败通知里「显示详细信息」那条动作用。 */
+  showToolWindow?: (id: string) => void
 }>()
 const status = ref<GitStatus>({ available: true, changes: [] })
 const loading = ref(false)
@@ -125,7 +128,7 @@ async function refreshExtras() {
 // Not ported: the extension-point actions (`CommitSuccessNotificationActionProvider`, :76-78) and
 // the exception actions (`CommitExceptionWithActions`, :63-74) — TaoCode has no plugin EPs, and its
 // notification rows carry no action buttons.
-const emit = defineEmits<{ notify: [message: string, error?: boolean, displayId?: string, detail?: string[]] }>()
+const emit = defineEmits<{ notify: [message: string, error?: boolean, displayId?: string, detail?: string[], actions?: NoticeAction[]] }>()
 // 提交检查与"提交期间保存文件"要问宿主两件事：哪些要提交的文件还没保存、以及怎么保存它们
 // （上游 `SaveCommittingDocumentsVetoer` + `FileDocumentManager.saveDocument`）。
 function dirtyPaths(): string[] { return props.dirtyPaths?.() ?? [] }
@@ -293,10 +296,16 @@ async function collectCommitChecks(): Promise<CommitCheckReport> {
  * 结果怎么落地也照上游：空判没过 ⇒ 只有面板错误行（上游这次会话是 `Cancelled`，不发通知，`:562-564`）；
  * 检查报出 failure ⇒ 失败行 + 一条标题为 `{0} 检查失败` 的通知（`:284-291`）；全过了 ⇒ 什么都不发、失败行消失。
  */
-function applyChecksReport(report: CommitCheckReport) {
+function applyChecksReport(report: CommitCheckReport, commitActions = false) {
   commitCheckError.value = report.blockMessage
   checksFailures.value = report.failures
-  if (report.failures.length > 0) emit('notify', checksFailedTitle(), true, undefined, report.failures)
+  if (report.failures.length === 0) return
+  // 动作照上游 `appendShowDetailsNotificationActions`（NonModalCommitWorkflowHandler.kt:302-316）：
+  // 「显示详细信息」= 激活提交工具窗口（`showCommitCheckFailuresPanel`，:317-321）；
+  // 「仍然{0}」只在提交路径那条通知上（`commit.checks.failed.notification.commit.anyway.action`）。
+  const actions: NoticeAction[] = [{ label: SHOW_DETAILS_TEXT, run: () => props.showToolWindow?.('git') }]
+  if (commitActions) actions.push({ label: commitAnywayLabel(), run: () => commit() })
+  emit('notify', checksFailedTitle(), true, undefined, report.failures, actions)
 }
 function runCommitChecks() {
   if (checksBusy.value) return
@@ -341,7 +350,7 @@ const commit = () => {
     const report = checksSkipped.value ? null : await collectCommitChecks()
     if (report && !report.ok) {
       // 上游 `CommitProgressPanel.buildErrorText`：理由写在面板那条错误行上，提交不跑。
-      applyChecksReport(report)
+      applyChecksReport(report, true)
       return
     }
     commitCheckError.value = ''
@@ -371,7 +380,7 @@ const commitAndPush = () => {
   let committed = false
   void act(async () => {
     const report = checksSkipped.value ? null : await collectCommitChecks()
-    if (report && !report.ok) { applyChecksReport(report); return }
+    if (report && !report.ok) { applyChecksReport(report, true); return }
     commitCheckError.value = ''
     await confirmSaveDuringCommit(stagedPaths)
     await request('git.commit', {

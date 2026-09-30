@@ -300,7 +300,13 @@
       （`VcsActions.xml:394-395` 的 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L）——
       提交信息框上挂 `@keydown.alt.l.prevent="reformatMessage"`（与 Ctrl+Enter 同一种做法），
       不用动 `src/keymap.ts`。
-- [ ] 失败行上的「显示详细信息 / 查看详情」链接动作（上游 `CommitCheckFailure.WithDetails`，
-      `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板）。
+- [x] 失败通知上的「显示详细信息」链接动作（第五十七批已落）：`appendShowDetailsNotificationActions`
+      （`NonModalCommitWorkflowHandler.kt:302-316`）—— 通知带「显示详细信息」= 激活提交工具窗口
+      （`showCommitCheckFailuresPanel`，`:317-321`），提交路径那条再加「仍然提交」。
+      **顺带修掉一个真缺陷**：面板的 `@notify` 从来没绑过（通知被静默丢掉）——
+      现在 `ToolWindowView` 绑到 `ctx.notifyFromPanel`（ctx 新增 `notifyFromPanel`/`showToolWindow`）。见审计 §BC。
+- [ ] `Vcs.Log.GoToChild` / `Vcs.Log.GoToParent`（跳到子/父提交）：本仓日志的导航是"后退/前进"**历史**
+      （`canBack`/`travel`），不是提交图的父子；要做得先把"父/子"在单根日志里的语义定下来
+      （父 = 第一父提交；子 = 当前已加载提交里第一个以它为父的）。
 - [ ] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
       「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）。

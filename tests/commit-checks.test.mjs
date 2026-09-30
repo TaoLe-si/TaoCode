@@ -100,7 +100,11 @@ test('接线：检查链只有一处；面板上没有常显的「运行提交�
   assert.match(panel, /const checksSkipped = computed\(\(\) => checksFailures\.value\.length > 0\)/, 'willSkipCommitChecks 的等价物')
   assert.match(panel, /checksSkipped\.value \? null : await collectCommitChecks\(\)/, '检查已失败 ⇒ 提交时跳过检查（仍然提交）')
   assert.match(panel, /commitAnywayLabel\(\)/, '按钮文案走 action.commit.anyway.text')
-  assert.match(panel, /emit\('notify', checksFailedTitle\(\), true, undefined, report\.failures\)/, '通知标题 = {0} 检查失败')
+  assert.match(panel, /emit\('notify', checksFailedTitle\(\), true, undefined, report\.failures, actions\)/, '通知标题 = {0} 检查失败（并带上动作）')
+  assert.match(panel, /\{ label: SHOW_DETAILS_TEXT, run: \(\) => props\.showToolWindow\?\.\('git'\) \}/,
+    '「显示详细信息」= 激活提交工具窗口（上游 showCommitCheckFailuresPanel）')
+  assert.match(panel, /if \(commitActions\) actions\.push\(\{ label: commitAnywayLabel\(\), run: \(\) => commit\(\) \}\)/,
+    '提交路径那条通知再加「仍然提交」（上游 commit.checks.failed.notification.commit.anyway.action）')
   assert.match(panel, /await confirmSaveDuringCommit\(stagedPaths\)/, '提交前要问"要不要立即保存"')
   assert.match(panel, /saveDuringCommitQuestion\(unsaved\)/, '问句来自纯模块')
 
@@ -108,4 +112,15 @@ test('接线：检查链只有一处；面板上没有常显的「运行提交�
   assert.match(context, /dirtyPaths: \(\) => dirtyPaths\(\)/, '宿主把"哪些没保存"传进 ctx')
   assert.match(read('src/App.vue'), /dirtyPaths: \(\) => allTabs\.value\.filter\(tab => tab\.dirty\)/, 'App 侧的来源是编辑器标签')
   assert.match(read('src/components/ToolWindowView.vue'), /:dirty-paths="ctx\.dirtyPaths" :save-path="ctx\.savePath"/, '面板要拿到这两条通道')
+})
+
+test('面板的通知真的接得到宿主（此前 @notify 没绑 ⇒ 通知被静默丢掉）', () => {
+  const view = read('src/components/ToolWindowView.vue')
+  assert.match(view, /@notify="ctx\.notifyFromPanel"/, 'SourceControl 的 notify 要绑到 ctx 上')
+  assert.match(read('src/toolViewContext.ts'), /notifyFromPanel, showToolWindow,/, 'ctx 要有这两条通道')
+  assert.match(read('src/App.vue'), /notify, notifyFromPanel, showToolWindow: \(id: string\) => showView/, 'App 把 showView 接成 showToolWindow')
+  const notices = read('src/notifications.ts')
+  assert.match(notices, /function notifyFromPanel\(message: string, error = false, displayId\?: string, detail\?: string\[\], actions\?: NoticeAction\[\]\)/,
+    'notifyFromPanel 收面板那五个参数')
+  assert.match(notices, /notify\(message, error, undefined, detail, displayId, actions\)/, '按 notify 的形参顺序转过去')
 })
