@@ -5,7 +5,9 @@ import {
   addCursorAbove, addCursorBelow, copyLineDown, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp,
   redo, selectAll, toggleBlockComment, toggleLineComment, undo,
 } from '@codemirror/commands'
-import { foldCode, unfoldCode, foldAll, unfoldAll } from '@codemirror/language'
+import { foldAll, unfoldAll } from '@codemirror/language'
+import { expandAllToLevel, expandCaretToLevel, foldAtCaret, foldBlockAtCaret, foldDocComments, foldRecursively,
+  toggleFoldAtCaret, toggleFoldSelection, unfoldAtCaret, unfoldDocComments, unfoldRecursively } from './editorFolding.ts'
 import { findNext, findPrevious, openSearchPanel, replaceAll, replaceNext, selectMatches, selectNextOccurrence } from '@codemirror/search'
 import { EditorSelection, type StateCommand } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
@@ -71,7 +73,20 @@ export const editingCommands: Record<string, Command> = {
   'replace.next': replaceNext,
   'replace.all': replaceAll,
   'comment.line': toggleLineComment, 'comment.block': toggleBlockComment,
-  fold: foldCode, unfold: unfoldCode, foldAll, unfoldAll,
+  // 收起/展开 = 上游 `CollapseRegion` / `ExpandRegion`（在 `src/editorFolding.ts` 里按
+  // `CollapseRegionAction` / `ExpandRegionAction` 的挑法实现）；`foldAll`/`unfoldAll` 用
+  // CodeMirror 自带的那两条 —— 它们逐行问 `foldable`，LSP 区间照样进得来。
+  fold: foldAtCaret, unfold: unfoldAtCaret, foldAll, unfoldAll,
+  // B4（codeInsight/folding）那一族的其余命令：实现在 src/editorFolding.ts（纯逻辑 + 命令），
+  // 名字与上游动作的对应写在那个模块头上，键位见 CodeEditor.vue 的 keymap。
+  'fold.recursively': foldRecursively, 'unfold.recursively': unfoldRecursively,
+  'fold.toggle': toggleFoldAtCaret, 'fold.block': foldBlockAtCaret,
+  'fold.selection': toggleFoldSelection, 'fold.docs': foldDocComments, 'unfold.docs': unfoldDocComments,
+  'unfold.level1': expandCaretToLevel(1), 'unfold.all.level1': expandAllToLevel(1),
+  'unfold.level2': expandCaretToLevel(2), 'unfold.all.level2': expandAllToLevel(2),
+  'unfold.level3': expandCaretToLevel(3), 'unfold.all.level3': expandAllToLevel(3),
+  'unfold.level4': expandCaretToLevel(4), 'unfold.all.level4': expandAllToLevel(4),
+  'unfold.level5': expandCaretToLevel(5), 'unfold.all.level5': expandAllToLevel(5),
   // IDEA's Code menu: 自动缩进 (Auto Indent, Ctrl+Alt+I) re-indents the selection
   // by one step per CodeMirror's indentUnit.
   'indent.selection': indentMore, 'indent.selection.less': indentLess,

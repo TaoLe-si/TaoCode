@@ -97,11 +97,8 @@ export interface EditMenuContext {
     ctx.editable('cursor.below', '在下行添加光标', 'Ctrl Alt Shift ↓', 'multiple cursors column 多光标'),
     ctx.editable('occurrence.next', '添加下一个匹配', 'Alt J', 'next occurrence multiple cursors 下一个匹配'),
     ctx.editable('occurrence.select', '选中所有相同内容', 'Ctrl Shift Alt J', 'all occurrences 所有匹配'),
-    ctx.editable('fold', '折叠代码块', 'Ctrl Shift -', 'fold collapse 折叠'),
-    ctx.editable('unfold', '展开代码块', 'Ctrl Shift =', 'unfold expand 展开'),
-    { id: 'edit.rule5', rule: true },
-    ctx.editable('foldAll', '全部折叠', 'Ctrl Shift NumPad_Subtract', 'fold all recursively 全部折叠'),
-    ctx.editable('unfoldAll', '全部展开', 'Ctrl Shift NumPad_Add', 'unfold all expand all 全部展开'),
+    // 折叠这一族**不在编辑菜单里**：上游是 Code 菜单的 `FoldingGroup` 子菜单
+    // （`LangActions.xml:270-303`），已挪到 `src/menus/codeMenu.ts`。
     { id: 'edit.columnSelect', title: '列选择模式', keys: 'Alt Shift Insert', keywords: 'column selection block selection rectangular 列选择 块选择', enabled: ctx.hasEditor, run: () => ctx.runEditor('column.select') },
     // EditMenu › Macros（`PlatformActions.xml:506-510`）：紧跟 `ConvertIndentsGroup` 之后；
     // 这里的顺序里「转换缩进」在中段，宏组按源码放在菜单收尾前（IDEA 的编辑菜单末尾就是 ConvertIndents + Macros）。

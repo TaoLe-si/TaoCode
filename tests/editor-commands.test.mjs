@@ -60,7 +60,8 @@ test('every name the menus offer is either an editing command or owned by the ed
   const sources = [shellSource(), readFileSync('src/components/CodeEditor.vue', 'utf8')]
   const offered = new Set()
   for (const source of sources)
-    for (const [, name] of source.matchAll(/editable\('([a-zA-Z.]+)'/g)) offered.add(name)
+    // 名字里可以带数字（`unfold.level1`）—— 早先的字符集漏了 0-9，那一族被当成 `unfold.level`。
+    for (const [, name] of source.matchAll(/editable\('([a-zA-Z.0-9]+)'/g)) offered.add(name)
 
   assert.ok(offered.size >= 20, `expected the menus to offer many commands, saw ${offered.size}`)
   for (const name of offered) {

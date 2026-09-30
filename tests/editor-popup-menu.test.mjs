@@ -39,8 +39,12 @@ test('引用顺序照 PlatformActions.xml:857-878 与各处 add-to-group', () =>
   assert.deepEqual(group('Copy.Paste.Special').members, ['edit.pasteSimple', 'edit.pasteMultiple'])
   // Go To 只有上游六项里本仓存在的那三项（GotoSuperMethod/GotoRelated/GotoTest 没有对应动作）。
   assert.deepEqual(group('EditorPopupMenu.GoTo').members, ['definition', 'implementation', 'navigate.typeDeclaration'])
-  // FoldingGroup：Expand → ExpandAll → Collapse → CollapseAll（本仓没有"递归"那一档）。
-  assert.deepEqual(group('FoldingGroup').members, ['unfold', 'unfoldAll', 'fold', 'foldAll'])
+  // FoldingGroup（第五十九/六十批按上游那一族补齐）：展开三项 → 收起三项 → 文档注释 → 切换折叠 →
+  // 折叠选区/块；`到级别` 那两组是**嵌套 popup**，本仓的 popup 成员表是平的，所以只在 Code 菜单里给
+  // （见 src/menus/codeMenu.ts 的 code.folding.caretLevels/allLevels）。
+  assert.deepEqual(group('FoldingGroup').members,
+    ['unfold', 'unfold.recursively', 'unfoldAll', 'fold', 'fold.recursively', 'foldAll',
+      'unfold.docs', 'fold.docs', 'fold.toggle', 'fold.selection', 'fold.block'])
 })
 
 test('三个 popup 组的标题都取自 bundle 文案，不是编的', () => {
@@ -90,7 +94,7 @@ test('整形：缺动作就丢行、空组不占位、分隔线不叠不出头�
   assert.ok(!full[0]?.rule && !full[full.length - 1]?.rule, '首尾都不该是分隔线')
   const popups = full.filter(row => row.children)
   assert.equal(popups.length, 3)
-  assert.deepEqual(popups.map(row => row.children.length), [2, 3, 4])
+  assert.deepEqual(popups.map(row => row.children.length), [2, 3, 11], '特殊粘贴 2 / 转到 3 / 折叠 11（第五十九批补齐后的族）')
 
   // 全部取不到 ⇒ 空菜单（这时宿主不该弹浮层）。
   assert.deepEqual(editorPopupRows(() => undefined), [])

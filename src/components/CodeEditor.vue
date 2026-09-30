@@ -10,6 +10,7 @@ import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/l
 import { tags } from '@lezer/highlight'
 import type { Theme } from '../appearance'
 import { editingCommands, runEditorCommand } from '../editorCommands'
+import { foldingRanges, lspFoldService, setFoldingRanges } from '../editorFolding'
 import { clipboardCommands, copyCutChannel } from '../editorClipboard'
 import { gutterIconsExtension, syncGutterIcons, type GutterIcon } from '../editorGutterIcons'
 import { blameAnnotationsExtension, syncBlameAnnotations } from '../editorBlameAnnotations'
@@ -275,29 +276,6 @@ async function runInlineCompletion() {
   finally { inlineInFlight = false }
 }
 let hintTimer: number | undefined
-// LSP `textDocument/foldingRange`（IDEA 的 `FoldingBuilder`）：服务端给的折叠区间。
-// CodeMirror 的 `foldService` 是**同步**的，所以区间要先取回来放进 state，再由它同步回答；
-// 文档一变就把旧区间清掉（行号已经对不上了），等下一次请求回来再装上。
-const setFoldingRanges = StateEffect.define<readonly LspFoldingRange[]>()
-const foldingRanges = StateField.define<readonly LspFoldingRange[]>({
-  create: () => [],
-  update: (value, tr) => {
-    for (const effect of tr.effects) if (effect.is(setFoldingRanges)) return effect.value
-    return tr.docChanged ? [] : value
-  },
-})
-// 与内置的语法树折叠并存：服务端给了这个起始行的区间就用它的，否则交回 `basicSetup` 里的默认折叠。
-const lspFoldService = foldService.of((state, lineStart) => {
-  const ranges = state.field(foldingRanges, false)
-  if (!ranges || !ranges.length) return null
-  const line = state.doc.lineAt(lineStart)
-  const range = ranges.find(entry => entry.startLine === line.number - 1)
-  if (!range) return null
-  if (range.endLine + 1 > state.doc.lines) return null
-  const from = state.doc.line(range.startLine + 1).from
-  const to = state.doc.line(range.endLine + 1).to
-  return to > from ? { from, to } : null
-})
 let foldTimer: number | undefined
 // LSP `textDocument/semanticTokens/*` 的 decoration —— IDEA 的 daemon 着色路径
 // （见 `src/semanticTokens.ts` 的模块注释：真实机制是 `HighlightVisitor`/`Annotator` +
@@ -989,10 +967,26 @@ onMounted(() => {
           { key: 'Ctrl-Alt-Shift-Down', preventDefault: true, run: editingCommands['cursor.below']! },
           { key: 'Alt-j', preventDefault: true, run: editingCommands['occurrence.next']! },
           { key: 'Ctrl-Shift-Alt-j', preventDefault: true, run: editingCommands['occurrence.select']! },
-          { key: 'Ctrl-Shift--', preventDefault: true, run: editingCommands.fold! },
-          { key: 'Ctrl-Shift-=', preventDefault: true, run: editingCommands.unfold! },
-          { key: 'Ctrl-Shift-Numpad_Subtract', preventDefault: true, run: editingCommands.foldAll! },
-          { key: 'Ctrl-Shift-Numpad_Add', preventDefault: true, run: editingCommands.unfoldAll! },
+          // 折叠这一族（B4 = codeInsight/folding；键位逐条核过 $default.xml，对应表见
+          // docs/inventory/verdict-folding.md §A）。**必须挂在常驻 keymap 上**：折叠只依赖
+          // CodeMirror 自己的区间与 LSP `foldingRange`，与语言服务在不在无关 ——
+          // 早先挂在 lspExtensions() 里，未接语言服务的文件（未跟踪/无服务器）整族都按不出来。
+          //
+          // 键名只有一套：`$default.xml` 那边写 SUBTRACT/ADD/MULTIPLY（Swing 认两套物理键），
+          // 浏览器这边 `w3c-keyname` 按 keyCode 查表，数字键盘的减号与主键区减号**同名**（109/189 → '-'），
+          // 所以主键区那一条就把数字键盘也覆盖了；加号（107/187 → '='）与乘号（106 → '*'）同理。
+          // 代价是 Shift 变体分不开：Shift+= 与数字键盘 + 都报 '+'，Shift+数字键盘- 仍报 '-'，
+          // 会先命中不带 Shift 的那条 —— 所以**只写主键区可靠的写法**，不为数字键盘编一条死键位
+          // （`Ctrl-NumPad-` 这种写法在 CodeMirror 里永远匹配不到，判决 §A 登记了这一点）。
+          { key: 'Ctrl--', preventDefault: true, run: editingCommands.fold! },
+          { key: 'Ctrl-=', preventDefault: true, run: editingCommands.unfold! },
+          { key: 'Ctrl-Shift--', preventDefault: true, run: editingCommands.foldAll! },
+          { key: 'Ctrl-Shift-=', preventDefault: true, run: editingCommands.unfoldAll! },
+          { key: 'Ctrl-Alt--', preventDefault: true, run: editingCommands['fold.recursively']! },
+          { key: 'Ctrl-Alt-=', preventDefault: true, run: editingCommands['unfold.recursively']! },
+          { key: 'Ctrl-.', preventDefault: true, run: editingCommands['fold.selection']! },
+          { key: 'Ctrl-Shift-.', preventDefault: true, run: editingCommands['fold.block']! },
+          { key: 'Ctrl-*', preventDefault: true, run: editingCommands['unfold.level1']! },
           { key: 'Alt-Shift-Insert', preventDefault: true, run: () => { toggleColumnSelection(); return true } },
           // IDEA's template keys. Tab only consumes a pending slot; when there is none
           // the command returns false and normal indentation (or accepting a completion)

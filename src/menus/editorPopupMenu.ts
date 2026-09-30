@@ -52,7 +52,9 @@ export const EDITOR_POPUP_SPEC: readonly EditorPopupRef[] = [
   { rule: true },
   // `FoldingGroup`（popup）：`group.FoldingGroup.text=Folding`（:621）→「折叠」。
   // 上游顺序 Expand → ExpandRecursively → ExpandAll → sep → Collapse → …；本仓只有四个（无递归档）。
-  { popup: 'FoldingGroup', title: '折叠', members: ['unfold', 'unfoldAll', 'fold', 'foldAll'] },
+  // 与 Code 菜单里的 FoldingGroup 同一族（上游 `EditorPopupMenu` 也是这一个组，`LangActions.xml:567` 附近）：
+  { popup: 'FoldingGroup', title: '折叠', members: ['unfold', 'unfold.recursively', 'unfoldAll',
+    'fold', 'fold.recursively', 'foldAll', 'unfold.docs', 'fold.docs', 'fold.toggle', 'fold.selection', 'fold.block'] },
   { rule: true },
   { action: 'tools.externalTools' },               // ExternalToolsGroup（本仓这行自带子项）
   { action: 'code.compareClipboard' },             // CompareClipboardWithSelection
