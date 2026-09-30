@@ -17,7 +17,7 @@ import type { SyntaxNode } from '@lezer/common'
 import type { EditorState } from '@codemirror/state'
 import { StateEffect, StateField } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
-import { signatureAt as signatureOf } from './editorFoldingState.ts'
+import { caretInsideRange, signatureAt as signatureOf } from './editorFoldingState.ts'
 
 /** LSP `textDocument/foldingRange` 的一条（0 基行号，`kind` 见 LSP 规范：comment / imports / region）。 */
 export interface LspFold { startLine: number; endLine: number; kind?: string }
@@ -428,7 +428,16 @@ export function applyFoldPlan(view: EditorView, fold: readonly Bounds[], unfold:
 export function foldKinds(view: EditorView, kinds: readonly string[], collapse: boolean): boolean {
   if (!kinds.length) return false
   const ranges = rangesOf(view.state).filter(range => range.kind !== undefined && kinds.includes(range.kind))
-  return applyRanges(view, ranges, collapse)
+  if (!collapse) return applyRanges(view, ranges, false)
+  // 折的时候跳过"光标**严格**落在里面"的那几条：上游 `UpdateFoldRegionsOperation.shouldExpandNewRegion:236-253`
+  // 在编辑器初始化时就是这么判的（`caretInsideRange`），不然新折的区间会把光标盖住。
+  // 用户主动的收起/切换不走这里（`collapseTarget` 那一条路），所以"在光标处按收起"照旧有效。
+  const caret = view.state.selection.main.head
+  const safe = ranges.filter(range => {
+    const offsets = offsetsOf(view.state, range)
+    return !offsets || !caretInsideRange(caret, offsets)
+  })
+  return applyRanges(view, safe, true)
 }
 
 /** 收起/展开文档注释（`Collapse/ExpandDocCommentsAction`）。 */

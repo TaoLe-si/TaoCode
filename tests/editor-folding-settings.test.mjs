@@ -106,4 +106,6 @@ test('编辑器把「代码折叠」设置交给折叠控制器（顺序与串�
     '按 kind 折/展开（关掉开关要展开回去）')
   const folding = read('src/editorFolding.ts')
   assert.match(folding, /export function foldKinds\(view: EditorView, kinds: readonly string\[\], collapse: boolean\)/)
+  // 光标严格落在区间里就不折（上游 shouldExpandNewRegion 的 caretInsideRange 分支）
+  assert.match(folding, /return !offsets \|\| !caretInsideRange\(caret, offsets\)/, '折的时候要跳过含光标的那几条')
 })
