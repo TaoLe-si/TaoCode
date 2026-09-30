@@ -26,6 +26,7 @@
 #include "git_clone.hpp"
 #include "git.hpp"
 #include "lsp_session.hpp"
+#include "lsp_recover.hpp"
 #include "lsp_worker.hpp"
 #include "request_trace.hpp"
 #include "lsp_config.hpp"
@@ -1064,9 +1065,8 @@ struct App {
             }
             case "lsp.stop"_h: {
                 const auto id = request["id"];
-                post_lsp(id, [this] { stop_lsp_now(); return Json{{"ok", true}}; });
-                trace_posted(traced, profile, "posted");
-                return;
+                taocode::lsp::run_inline(id, [this] { taocode::lsp::recover(lsp_worker, [this] { stop_lsp_now(); reset_lsp_now(current_root); }, [this](const std::string& why) { taocode::diagnostics::event(profile, "WARN", why); }); return Json{{"ok", true}}; }, [this](Json payload) { queue_lsp(std::move(payload)); });   // 就地跑（不排队）：卡死时也要能恢复，见 native/lsp_recover.cpp
+                trace_posted(traced, profile, "inline"); return;
             }
             case "lsp.request"_h: {
                 const auto id = request["id"];

@@ -37,7 +37,7 @@ target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history 
 
 add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cpp
                            native/lsp_support.cpp native/lsp_capability_queries.cpp native/lsp_discovery.cpp
-                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp)
+                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp native/lsp_recover.cpp)
 # lsp_config 要把项目的 `java` 设置喂给 Java 服务器（补全偏好、sourceLevel…），
 # 那是 `java_lsp_settings`（native/projects.cpp）—— 依赖是单向的，不成环。
 target_link_libraries(taocode_lsp PUBLIC taocode_workspace taocode_projects)

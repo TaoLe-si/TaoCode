@@ -5,13 +5,28 @@ import type { LspOpenResult } from './bridge'
 export type CompletionSessionStatus = LspOpenResult & { ready?: boolean; error?: { code?: string | number; message?: string } }
 interface TabState { path: string; content: string; lspRunning?: boolean; lspConfigured?: boolean }
 interface StartupDeps {
-  request: <T>(method: 'lsp.open' | 'lsp.request', params: Record<string, unknown>) => Promise<T>
+  request: <T>(method: 'lsp.open' | 'lsp.request' | 'lsp.stop', params: Record<string, unknown>) => Promise<T>
   notify: (message: string, error?: boolean) => void
   current: () => boolean
   pause?: () => Promise<void>
 }
 
-export async function startCompletionSession(tab: TabState, deps: StartupDeps) {
+// 一次状态查询最多等多久。原生那条语言服务线程**可能卡在一次任务里**（真机上见过：
+// 大工程握手之后整条线程不再接活，请求永远不回）—— 没有这个上限，上面那个 `await` 会
+// 一直挂着：既不给用户任何提示，也不会走到超时分支。
+export const LSP_STATUS_TIMEOUT_MS = 10_000
+const NO_RESPONSE = 'LSP_NO_RESPONSE'
+
+async function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([work, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    })])
+  } finally { if (timer !== undefined) clearTimeout(timer) }
+}
+
+export async function startCompletionSession(tab: TabState, deps: StartupDeps, attempt = 0) {
   tab.lspRunning = false
   try {
     let status = await deps.request<CompletionSessionStatus>('lsp.open', { path: tab.path, text: tab.content })
@@ -22,11 +37,26 @@ export async function startCompletionSession(tab: TabState, deps: StartupDeps) {
       await (deps.pause?.() ?? new Promise(resolve => setTimeout(resolve, 250)))
       if (!deps.current()) return
       try {
-        status = await deps.request<CompletionSessionStatus>('lsp.request', { kind: 'status', path: tab.path })
+        status = await withTimeout(
+          deps.request<CompletionSessionStatus>('lsp.request', { kind: 'status', path: tab.path }),
+          LSP_STATUS_TIMEOUT_MS, NO_RESPONSE)
       } catch (error) {
-        // A host without the status route cannot certify readiness either.
+        // 语言服务线程没响应（而不是"答了一个错"）：`lsp.stop` 现在**不排那条队列**，
+        // 它在原生里会把卡住的线程收掉、换一条新的、并重配服务器（见 main.cpp 的 recover_lsp_now）。
+        // 恢复之后整体重来一次；第二次再没响应就按普通错误报出去。
         const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`无法查询语言服务器状态：${message}`)
+        if (attempt === 0 && deps.current()) {
+          deps.notify(`${tab.path}：语言服务没有响应，正在重启语言服务…`)
+          try { await withTimeout(deps.request('lsp.stop', {}), 15_000, NO_RESPONSE) } catch { /* 收不掉也照旧往下报 */ }
+          // 递归这一下要 `await` 并**接住它自己的报错**（它有自己那份 catch 会 notify）：
+          // 直接 `return` 这个 promise 的话，第二次的错误会绕开两边的 catch 变成未处理的 rejection。
+          if (deps.current()) { await startCompletionSession(tab, deps, attempt + 1); return }
+          return
+        }
+        // A host without the status route cannot certify readiness either.
+        throw new Error(message === NO_RESPONSE
+          ? '语言服务器没有响应（已尝试重启语言服务）。'
+          : `无法查询语言服务器状态：${message}`)
       }
     }
     if (!deps.current()) return

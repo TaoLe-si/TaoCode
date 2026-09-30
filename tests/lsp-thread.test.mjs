@@ -43,6 +43,9 @@ test('五个 lsp.* 处理器只投递，不在 UI 线程上调 Session', () => {
   for (const name of LSP_METHODS) {
     const body = handler(main, name)
     assert.ok(body.length > 40, `${name} 的分支切片只有 ${body.length} 字符 —— 判据在空转`)
+    // `lsp.stop` 是唯一的例外：它**就地跑**（`taocode::lsp::run_inline`），因为语言服务线程卡死时
+    // "重开一次"必须仍然能做到 —— 否则用户只能重启应用（见 native/lsp_recover.cpp）。
+    if (name === 'lsp.stop') { assert.match(body, /taocode::lsp::run_inline\(/, '恢复那条要走就地通路'); continue }
     assert.match(body, /post_lsp\(|lsp_worker->post\(/, `${name} 没有投递到语言服务线程`)
     assert.deepEqual(calls_before_post(body), [], `${name} 在投递之前就同步调了 Session：${calls_before_post(body).join(', ')}`)
     assert.doesNotMatch(body, /result = lsp->/, `${name} 把 Session 的返回值同步交回分派链 = 在 UI 线程上等语言服务`)
@@ -100,8 +103,17 @@ test('ready 回调只登记状态，补发 didOpen 交回语言服务线程', ()
 test('投递型处理器的 trace 也收尾，别留下「begin 无 end」的假死锁形状', () => {
   // 真死锁的形状就是"begin 了没有 end"（这次就是靠它定位的）；投递成功也必须留一行收尾，
   // 否则下一个排查的人会被引到错误的方向。
+  // `lsp.stop` 是例外：它**就地跑**（不排进那条可能卡死的队列，否则线程卡死时连"重开一次"都做不到，
+  // 见 native/lsp_recover.cpp），所以它留的是 `inline` 而不是 `posted`。
   for (const name of LSP_METHODS) {
-    assert.match(handler(main, name), /trace_posted\(traced, profile, "posted"\)/, `${name} 少了 posted 收尾`)
+    // `handler()` 的切片到 `return;` 为止，而 trace 收尾那行在 return 之前取决于写法 —— 这里从分支头
+    // 一直切到随后的那行 `trace_posted(`，才看得到收尾。
+    const start = main.indexOf(`case "${name}"_h: {`)
+    const body = start < 0 ? '' : main.slice(start, main.indexOf('trace_posted(', start) + 120)
+    const expected = name === 'lsp.stop' ? '"inline"' : '"posted"'
+    assert.ok(body.includes(`trace_posted(traced, profile, ${expected})`), `${name} 少了 ${expected} 收尾`)
+    if (name === 'lsp.stop') assert.match(body, /taocode::lsp::run_inline\(/, '恢复那条必须走就地通路')
+    else assert.match(body, /post_lsp\(|lsp_worker->post\(/, `${name} 仍该是投递型`)
   }
   assert.match(main, /if \(!traced\.empty\(\)\) taocode::trace::begin\(profile, "end " \+ traced \+ " \(" \+ how \+ "\)"\);/)
 })

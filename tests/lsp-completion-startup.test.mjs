@@ -82,3 +82,52 @@ test('native records the startup failure and reports running/ready separately', 
   // A retry has to drop the dead client, not reuse it.
   assert.match(session, /doomed->stop\(\)/)
 })
+
+// 语言服务线程卡死时的恢复（真机上见过：大工程握手之后那条线程不再接活，请求永不回包）。
+// 这一条盯三件事：① 状态查询有上限，不会永远挂着；② 没响应时先用 `lsp.stop`（原生不排队）重启；
+// ③ 重启之后重来一次，第二次再没响应就如实报错，不再重试。
+test('状态查询没响应：重启语言服务一次并重来', async () => {
+  const calls = []
+  const notices = []
+  let statusCalls = 0
+  const tab = { path: 'src/A.java', content: 'class A {}' }
+  const deps = {
+    request: async (method, params) => {
+      calls.push(method + (params.kind ? ':' + params.kind : ''))
+      if (method === 'lsp.open') return { running: true, ready: false, configured: true, language: 'java' }
+      if (method === 'lsp.stop') return { ok: true }
+      statusCalls += 1
+      // 第一次启动：永远不回（模拟卡死）；重启之后：回一个就绪
+      if (statusCalls <= 1) return new Promise(() => {})
+      return { running: true, ready: true, configured: true, language: 'java' }
+    },
+    notify: (message, error) => notices.push({ message, error }),
+    current: () => true,
+    pause: async () => {},
+  }
+  await startCompletionSession(tab, deps)
+  assert.equal(tab.lspRunning, true, '重启之后应当就绪')
+  assert.deepEqual(calls, ['lsp.open', 'lsp.request:status', 'lsp.stop', 'lsp.open', 'lsp.request:status'], '顺序：查询 → 重启 → 重来')
+  assert.ok(notices.some(n => /没有响应/.test(n.message) && !n.error), '重启时给一条提示（不是错误）')
+})
+
+test('重启之后仍然没响应：如实报错并且不再重试', async () => {
+  const calls = []
+  const notices = []
+  const tab = { path: 'src/A.java', content: 'class A {}' }
+  const deps = {
+    request: async (method, params) => {
+      calls.push(method + (params.kind ? ':' + params.kind : ''))
+      if (method === 'lsp.open') return { running: true, ready: false, configured: true, language: 'java' }
+      if (method === 'lsp.stop') return { ok: true }
+      return new Promise(() => {})
+    },
+    notify: (message, error) => notices.push({ message, error }),
+    current: () => true,
+    pause: async () => {},
+  }
+  await startCompletionSession(tab, deps)
+  assert.equal(tab.lspRunning, false)
+  assert.equal(calls.filter(c => c === 'lsp.stop').length, 1, '只重启一次')
+  assert.ok(notices.some(n => n.error && /没有响应/.test(n.message)), '第二次报错')
+})
