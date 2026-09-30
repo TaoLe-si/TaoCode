@@ -73,8 +73,9 @@
     ②「用户展开过的块在重算里活得下来」（`shouldExpandNewRegion` 的 `oldStatus` 那一支：重算前先 `capture`，
     展开态按签名记，恢复那一步顶掉自动折叠）。边界对不上时按**签名**认块（`applyFoldPlan` 的匹配规则），
     这样"编辑把块推走"不会丢折叠。
-    **仍缺**：`caretInsideRange` 的"新块含光标就不折"只做成了纯函数（`src/editorFoldingState.ts`），
-    没接进管道（本仓的折叠不隐藏光标，接上反而会把刚折的块弹开，留待与"折起来时要不要动光标"一起判）。
+    `caretInsideRange` 的"光标严格落在里面就不折"也接进管道了（`foldKinds` 折的时候跳过那些区间）。
+    **仍缺**：`ApplyDefaultStateMode` 的另外两种模式（本仓只有默认这一种）、`getFoldRegionsForSelection`
+    （带选区时「全部收起/展开」只作用于选区内的区间）。
 
 ## D. 不适用（`[-]`，26 类）
 
@@ -165,18 +166,18 @@
 | `FoldingUpdate` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingUpdate.java` | `[~]` | 按语言重算折叠区间：本仓在打开文档时请求 LSP `foldingRange`（`src/components/CodeEditor.vue`）；**缺**编辑后重算 |
 | `InjectedCodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPass.java` | `[-]` | 注入片段的折叠（§D.3） |
 | `InjectedCodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPassFactory.java` | `[-]` | 同上 |
-| `UpdateFoldRegionsOperation` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/UpdateFoldRegionsOperation.java` | `[~]` | 重算的两条规矩都接了：失效项先存后删（`removeInvalidRegions`）+ 用户展开过的块活在重算里（`shouldExpandNewRegion` 的 `oldStatus`），管道在 `src/editorFoldingController.ts`；**缺** `caretInsideRange` 接进管道与 `twoStepFoldToggling`（见 `CollapseAllRegionsAction` 行） |
+| `UpdateFoldRegionsOperation` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/UpdateFoldRegionsOperation.java` | `[~]` | 三条都接了：失效项先存后删（`removeInvalidRegions`）、用户展开过的块活在重算里（`shouldExpandNewRegion` 的 `oldStatus`）、**默认折叠时跳过光标严格落在里面的那几条**（`caretInsideRange:236-238`，见 `src/editorFolding.ts` 的 `foldKinds`），管道在 `src/editorFoldingController.ts`；**缺** `ApplyDefaultStateMode` 的另外两种模式（`NO`/`EXCEPT_CARET_REGION` 是给别的调用方用的，本仓只有默认这一种） |
 | `CollapseBlockHandler` | `platform/lang-api/src/com/intellij/codeInsight/folding/CollapseBlockHandler.java` | `[ ]` | 「折叠代码块」的 handler 接口（§C①） |
 | `FoldingUtil` | `platform/platform-impl/src/com/intellij/codeInsight/folding/impl/FoldingUtil.java` | `[ ]` | 折叠区间工具：按偏移/行找区间、折叠树迭代器、`isTextRangeFolded`（§C①） |
 | `BaseExpandToLevelAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseExpandToLevelAction.java` | `[~]` | `src/editorFolding.ts` 的 `levelPlan`，照 `BaseExpandToLevelAction.java:43-70` 的相对层级：比第 N 层浅的展开、正好第 N 层的**折起**、更深的原样不动；`expandCaretToLevel`/`expandAllToLevel` 分别对应 `expandAll=false/true`（根 = `rootAtLine`） |
 | `BaseFoldingHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseFoldingHandler.java` | `[~]` | handler 基类：本仓的等价物是 `src/editorCommands.ts` 的命令表 + `src/editorFolding.ts` 的区域层，`getFoldRegionsForCaret`（递归那两条的根挑法）照 `:61-86` 实现了；**缺** `getFoldRegionsForSelection`（带选区时"全部收起/展开只作用于选区内的区间"——本仓的 `foldAll`/`unfoldAll` 是整篇） |
-| `CollapseAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseAllRegionsAction.java` | `[~]` | `src/editorCommands.ts` 的 `foldAll`（`Ctrl+Shift+-`/`Ctrl+Shift+NumPad-`），Code 菜单文案「全部收起」；**缺** `twoStepFoldToggling`（`ExpandAllRegionsAction.java:39-70` 的两段式：先折"该折的"，若没折成再折全部）与 `keepExpandedOnFirstCollapseAll`（`FoldingPolicy`，见那一行） |
+| `CollapseAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseAllRegionsAction.java` | `[~]` | `src/editorCommands.ts` 的 `foldAll`（`Ctrl+Shift+-`/`Ctrl+Shift+NumPad-`），Code 菜单文案「全部收起」。**两段式在本仓退化成一段**（分析，不是偷懒）：第一步只折"展开着且不 keep 的"（`collapseInFirstStep:35-38`），而 `keepExpandedOnFirstCollapseAll` 是**语言侧 FoldingBuilder 的钩子**（`FoldingBuilder.java:65-70` 默认 false），上游的 LSP builder 也没覆盖它 ⇒ 第一步就等于"折全部展开着的"，第二步（全折一遍，`ExpandAllRegionsAction.java:70-75`）只在"什么都没折着"时跑、那时是空操作；**缺** `getFoldRegionsForSelection`（带选区时"全部"只作用于选区内的区间） |
 | `CollapseBlockAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseBlockAction.java` | `[~]` | `fold.block`，命令表与键位见 §A；实现见 `src/editorFolding.ts` |
 | `CollapseDocCommentsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseDocCommentsAction.java` | `[~]` | `fold.docs`，Code 菜单 `code.folding` 里那一条（`src/menus/codeMenu.ts`）；实现见 `src/editorFolding.ts` |
 | `CollapseRegionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseRegionAction.java` | `[~]` | `fold` = `src/editorFolding.ts` 的 `foldAtCaret`，照 `CollapseRegionAction.java:26-38` 挑目标：先看"起始行落在光标行"的区域，否则光标处最内层**未折叠**的那条；键位 `Ctrl+-`/`Ctrl+NumPad-`，菜单在 Code 菜单（`src/menus/codeMenu.ts`）；**缺** 上游按 PSI 判"是否可折叠"的那层 |
 | `CollapseRegionRecursivelyAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseRegionRecursivelyAction.java` | `[~]` | `fold.recursively` = `src/editorFolding.ts` 的 `foldRecursively`（`recursiveScope`，照 `BaseFoldingHandler.java:61-86`：根 + 套在里面的全部） |
 | `CollapseSelectionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseSelectionAction.java` | `[~]` | `fold.selection`，键位 `Ctrl+.`（`$default.xml:1036-1038`），实现在 `src/editorFolding.ts`；宿主侧的限制记在 `CollapseSelectionHandler` 行 |
-| `ExpandAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllRegionsAction.java` | `[~]` | `src/editorCommands.ts` 的 `unfoldAll`（`Ctrl+Shift+=`/`Ctrl+Shift+NumPad+`，Code 菜单「全部展开」）——键位与文案与上游一致；**缺**同上那条两段式与"只作用于选区"（`getFoldRegionsForSelection`） |
+| `ExpandAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllRegionsAction.java` | `[~]` | `src/editorCommands.ts` 的 `unfoldAll`（`Ctrl+Shift+=`，Code 菜单「全部展开」）——键位与文案与上游一致；两段式同样退化成一段（`expandInFirstStep:77-81` 只认"折着且不含 shouldNeverExpand 且不 collapsedByDefault 的"，本仓没有 `shouldNeverExpand` 那一类）；**缺**"只作用于选区"（`getFoldRegionsForSelection`） |
 | `ExpandAllToLevel1Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel1Action.java` | `[~]` | `unfold.all.level1` = `src/editorFolding.ts` 的 `expandAllToLevel(1)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「全部展开到级别 1」） |
 | `ExpandAllToLevel2Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel2Action.java` | `[~]` | `unfold.all.level2` = `src/editorFolding.ts` 的 `expandAllToLevel(2)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「全部展开到级别 2」） |
 | `ExpandAllToLevel3Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel3Action.java` | `[~]` | `unfold.all.level3` = `src/editorFolding.ts` 的 `expandAllToLevel(3)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「全部展开到级别 3」） |

@@ -622,8 +622,13 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 
 折叠状态的存/取与重算：`src/editorFoldingState.ts`（轻签名 + 存档 + 恢复计划 + 失效判定）+
 `src/editorFoldingController.ts`（管道：存 → 装区间 → 记候选 → 按默认折 → 清失效 → 恢复，串行）。
-四档：`[x]` 0 / `[~]` 38 / `[ ]` 5 / `[-]` 26 = 69。**仍缺**：落盘（上游写 workspace 文件 + 文件时间戳）、
-`caretInsideRange` 接管道、`twoStepFoldToggling`。
+四档：`[x]` 0 / `[~]` 38 / `[ ]` 5 / `[-]` 26 = 69。### 25.4 收尾两条（2026-09-30 第六十三批）
+
+`caretInsideRange` 接进了默认折叠（`foldKinds` 折的时候跳过含光标的那几条）；「全部收起/展开」的两段式
+**经分析在本仓退化成一段**（`keepExpandedOnFirstCollapseAll` 是语言侧钩子、LSP builder 没覆盖 ⇒ 第一步就
+等于折全部展开着的），所以不写死代码、改判在判决 §G 里写清依据（审计 §BI）。
+**B4 只剩一条缺口**：把折叠状态**落盘**（上游 `DocumentFoldingInfo.writeExternal/readExternal` 写进
+workspace 文件并带文件时间戳；本仓目前是会话内内存）。
 
 ### 25.2 §C② 已做（2026-09-30 第六十一批）
 

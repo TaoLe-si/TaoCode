@@ -2554,3 +2554,26 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 **仍缺**（写进判决 §C③/§G）：落盘那半 —— 上游把状态写进 workspace 文件并带文件时间戳
 （`writeExternal`/`readExternal:260-368`），本仓目前是会话内内存；`caretInsideRange` 只做成了纯函数没接管道
 （本仓的折叠不隐藏光标，接上会把刚折的块弹开）。判据 `tests/editor-folding-state.test.mjs`（10 条）。
+
+## BI. 2026-09-30 第六十三批：B4 收尾两条 —— 光标例外接管道 +「全部收起」两段式的分析判决
+
+**一、`caretInsideRange` 接进默认折叠**（`UpdateFoldRegionsOperation.shouldExpandNewRegion:236-253`）：
+编辑器初始化时，**光标严格落在里面**的新区间不折（`:236-238` 的 `contains(caret) && start != caret`）——
+否则刚折的块会把光标盖住。本仓落在 `src/editorFolding.ts` 的 `foldKinds`：折的时候跳过"光标严格落在里面"的那几条；
+用户主动的收起/切换不走这条路（`collapseTarget`），所以"在光标处按收起"照旧有效。
+
+**这一条的实测范围**（写在审计里免得下次高估它）：重开文件时光标总在**第一行**（本仓不按上次光标位置恢复，
+实测 `activeLine = package demo;`），而"撞区间起点"按上游的判据不算"里面" ⇒ 最常见的重开路径上它不触发；
+真正会命中的是"用户在设置里打开某个开关时光标正好落在那一块里"，以及"转到符号落进块里"——后者宿主另有
+"落点所在的折叠区自动展开"的逻辑（`navigateToError` 那条路）。所以它是**判据对齐**，不是可见行为的修复。
+
+**二、「全部收起/全部展开」的两段式：经分析在本仓退化成一段，不写死代码**（判决 §G 两行已按此改写）：
+- 第一步只折"展开着且 `!keepExpandedOnFirstCollapseAll` 的"（`CollapseAllRegionsAction.collapseInFirstStep:35-38`）；
+- `keepExpandedOnFirstCollapseAll` 是**语言侧 `FoldingBuilder` 的钩子**（`FoldingBuilder.java:65-70`，
+  `CompositeFoldingBuilder.java:100-102` 转发），上游的 `LspFoldingBuilder` 没有覆盖它 ⇒ 默认 false；
+- 于是第一步 ≡ 折全部展开着的（这与 CodeMirror 的 `foldAll` 等价），第二步（全折一遍）只在
+  "什么都没折着"时跑、那时是空操作。
+⇒ 本仓的 `foldAll`/`unfoldAll` **行为等价**，缺的只是"带选区时只作用于选区内的区间"
+（`getFoldRegionsForSelection`）—— 那一条留在 §G 里当缺口记着，不假装有。
+
+**判据**：`tests/editor-folding-settings.test.mjs` 增加一条（`foldKinds` 折的时候要跳过含光标的那几条）。

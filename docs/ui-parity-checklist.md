@@ -63,6 +63,7 @@
 
 ### A4 提交工具窗口 `ChangesViewCommitPanel.kt`
 
+- [x] **已加（第六十三批）** `caretInsideRange` 接进默认折叠（光标严格落在区间里就不折，上游 `shouldExpandNewRegion:236-238`）；「全部收起/展开」的两段式经分析在本仓退化成一段（`keepExpandedOnFirstCollapseAll` 是语言侧钩子），依据写进判决 §G（审计 §BI）。
 - [x] **已加（第六十二批）** 折叠状态的存/取与重算：关标签/换文件前存档、区间到手后按偏移+签名恢复（区间被编辑推走的按签名认回）；文档一变重算时先存后删失效项、"用户展开过"的块活在重算里。落点在 `src/editorFoldingState.ts` + `src/editorFoldingController.ts`（判决 §C③⑤，审计 §BH）；**缺**落盘那半。
 - [x] **已加（第六十一批）** 设置页「编辑器 › 代码折叠」：`Import`（默认开）与 `自定义折叠区域`（默认关）两条真开关 —— 打开发文件时按 LSP `kind` 预折叠、改了一键重算；上游另外三个开关只有语言侧 builder 读（本仓没有），不渲染（判决 `docs/inventory/verdict-folding.md` §G，审计 §BG）。
 - [x] **已修（第六十批）** 编辑器折叠动作族：Code 菜单「折叠」子菜单（13 条，照 `FoldingGroup` 顺序与 `ActionsBundle` 文案）+ 常驻 keymap 的 9 条键位（`Ctrl+-`/`Ctrl+=`/`Ctrl+Shift+-`/`Ctrl+Shift+=`/`Ctrl+Alt±`/`Ctrl+.`/`Ctrl+Shift+.`/`Ctrl+*`），命令实现在 `src/editorFolding.ts`（挑目标规则逐条照上游；判决 `docs/inventory/verdict-folding.md`，审计 §BF）。
