@@ -39,13 +39,21 @@ public:
      * （`kDrainWaitMs`），没退就把这条线程卡住的同步 IO 取消掉（`CancelSynchronousIo`，
      * 与 native/watcher.cpp 的 `CancelIoEx` 同一思路），再收它。
      */
+    /** 见 .cpp 的说明。 */
     void stop() noexcept;
+
+    /**
+     * 收尾时那条线程**没能收掉**（卡在锁上，`CancelSynchronousIo` 取消不了）⇒ 它被 detach 了，
+     * `this` 与它保护的东西还在被它用着，**调用方不能销毁这个 Worker**（见 lsp_recover.cpp 的弃养表）。
+     */
+    bool abandoned() const noexcept { return abandoned_; }
 
     /** 排队中的任务数（诊断与测试用）。 */
     std::size_t queued() const;
 
     /** 第一次有界等待的长度（毫秒），测试与说明都引用它。 */
     static constexpr int kDrainWaitMs = 2000;
+    static constexpr int kJoinWaitMs = 3000;
 
 private:
     void loop();
@@ -55,6 +63,7 @@ private:
     std::condition_variable done_;
     std::deque<std::function<void()>> queue_;
     std::thread thread_;
+    bool abandoned_ = false;
     bool stopping_ = false;
     bool finished_ = false;
     /** loop() 自己复制出来的线程句柄，供 `CancelSynchronousIo` 用（std::thread 拿不到 HANDLE）。 */

@@ -38,6 +38,8 @@ Host& Session::ensure(const std::string& language) {
     if (config == config_.end()) throw WorkspaceError("LSP_UNAVAILABLE", "no server configured for " + language);
 
     auto host = std::make_unique<Host>();
+    // 这台服务器属于这一代会话：它登记自己，弃养这一代时按号收进程（见 lsp_children.hpp）。
+    host->set_generation(generation_);
     // The root is snapshotted when the host is created and never changes while it
     // lives (reset_lsp shuts every host down before set_root), so the reader-thread
     // callback below can map URIs without touching mutable Session state.

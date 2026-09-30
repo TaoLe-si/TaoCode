@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <cstdint>
 #include <functional>
@@ -18,16 +20,19 @@ namespace taocode {
 namespace lsp {
 
 // Owns one language-server child process and its two stdio pipes. A reader
-// thread decodes the server's stdout and drives a Client; all Client access is
+// thread decodes the server's stdout and drives a Client; a **writer thread**
+// owns the blocking side of the other pipe (`WriteFile` to a server that is not
+// reading its stdin blocks; it must never block a caller). All Client access is
 // serialised so the reader thread and the caller never race the pending-request
 // map. Handlers (hover result, diagnostics) run on the reader thread — callers
 // must marshal to their UI thread exactly like the clone events do.
 class Host {
 public:
-    // 写服务器 stdin 单帧阻塞超过 200ms 时的诊断钩子（线程 id / 毫秒 / 本帧字节数）。
-    // 存在的理由：调用方可能正抱着 `Session::mutex_`（`Session::change` 就在锁里写），
-    // 那时服务器一旦不读 stdin（大项目在索引），整条 UI 线程会在别的地方 park 成"未响应"，
-    // 现象里看不到任何线索。静态而不是成员：它只用于诊断，不该参与对象生命周期。
+    // 写服务器 stdin 单帧阻塞超过 200ms 时的诊断钩子（写线程 id / 毫秒 / 本帧字节数）。
+    // 只有写线程会触发它：2026-09-30 之前这个写就发生在调用方线程上（常常是那条唯一的
+    // 语言服务线程，抱着 `Session::mutex_`），服务器一不读 stdin（大工程在索引）整条队列
+    // 就停摆 —— 界面看到的是"语言服务没响应"，日志里却什么都没有。静态而不是成员：
+    // 它只用于诊断，不该参与对象生命周期。
     static inline std::function<void(unsigned long, unsigned long, unsigned long)> slow_write_hook;
 
     struct Spec {
@@ -47,6 +52,9 @@ public:
     void start(const Spec& spec, Json initialize_params, Ready on_ready);
     void stop() noexcept;
     bool alive() const { return alive_; }
+    // 这台服务器属于哪一代会话：`start()` 时连同作业对象一起登记，弃养那一代时按号收进程
+    // （见 lsp_children.hpp —— 弃养的 Host 析构永远不会跑）。
+    void set_generation(long generation) { generation_ = generation; }
 
     void set_diagnostics(Client::Notify handler);
     // LSP `$/progress` 通知的出口（与诊断同一条读线程回调，见 Client::on_progress）。
@@ -75,7 +83,12 @@ private:
     static bool is_superseding(std::string_view method);
     std::mutex inflight_mutex_;
     std::map<std::string, std::int64_t> in_flight_;
-    void write_frame(std::string_view frame);  // caller holds io_mutex_
+    // 出站帧只入队，不写：真正阻塞的 `WriteFile` 交给写线程。调用方（语言服务线程 /
+    // 读线程 / IPC 线程）从此不会因为服务器不读 stdin 而停住 —— 这是"status/诊断/补全
+    // 一起没响应"的根因修法，见 lsp_host.cpp 里写线程的注释。
+    void enqueue_frame(std::string_view frame);
+    void write_frame_now(std::string_view frame);  // 只允许写线程调用（可能阻塞）
+    void pump_writes();  // 写线程主循环：取出站帧、做那次可能阻塞的写
     // Diagnostics for "server started but never saw initialize": when the env var
     // TAOCODE_LSP_TRACE is set to a file path, every frame we hand the server and
     // every frame we read back is appended there with a byte count. Off (one
@@ -84,9 +97,17 @@ private:
     void* trace_ = nullptr;  // std::FILE* when TAOCODE_LSP_TRACE is set
 
     mutable std::recursive_mutex io_mutex_;  // the pipes only: never held while a callback runs
+    long generation_ = 0;                    // 会话代号，见 set_generation
     Client client_;
     std::unique_ptr<Pipe> pipe_;
     std::thread reader_;
+    // 出站队列：写线程是它唯一的消费者，生产者可以有多个（帧序即入队序，和以前
+    // io_mutex_ 串起来的那条顺序等价）。
+    std::mutex outbox_mutex_;
+    std::condition_variable outbox_cv_;
+    std::deque<std::string> outbox_;
+    bool writer_stop_ = false;
+    std::thread writer_;
     std::atomic<bool> alive_{false};
 };
 

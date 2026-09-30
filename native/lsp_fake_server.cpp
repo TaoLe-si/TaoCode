@@ -90,6 +90,8 @@ int main(int argc, char** argv) {
     // request deadline is the only thing that can end the wait.
     for (const auto& option : switches)
         if (option.rfind("--hang=", 0) == 0) flags.hang = option.substr(7);
+    for (const auto& option : switches)
+        if (option.rfind("--stall-stdin=", 0) == 0) flags.stall_stdin_ms = std::atoi(option.c_str() + 14);
     // 把真正的 stdio 写入注入给请求处理那边（它只管构造消息，见 lsp_fake_server.hpp）。
     // **漏了这一行服务器的请求就全部石沉大海** —— 编译期看不出来，只有跑起来才发现
     // （拆这个文件时真的漏过一次，lsp_host_test 立刻红了）。
@@ -181,6 +183,9 @@ int main(int argc, char** argv) {
             const Json params = inbound.contains("params") && inbound.at("params").is_object()
                                     ? inbound.at("params") : Json::object();
             handle_request(flags, method, params, id);
+            // 答完 initialize 就"去忙了"：不读 stdin（真实 jdtls 导入大工程时就是这样）。
+            // 客户端这期间发来的帧会把管道写满 —— 只有把写放到自己的线程上，调用方才不会被堵住。
+            if (method == "initialize" && flags.stall_stdin_ms > 0) Sleep(static_cast<DWORD>(flags.stall_stdin_ms));
         }
     }
     return 0;

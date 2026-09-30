@@ -2745,3 +2745,58 @@ IDEA 的等价物是它自己的 PSI 引擎 + 索引，那是 IDE 里最重的�
 慢写告警 `写语言服务 stdin 阻塞`）。下一次复现时按这条链继续收（checklist 有复现步骤）。
 **端到端复验也待补**：大工程上跑到卡死 → 看是否出现「没有响应，正在重启语言服务…」提示 → 恢复后
 代码洞察是否回来（判据层已绿，真机这一步还没跑）。
+→ 更深根因与真机复验见下一节（§BP）：根因是**写管道阻塞在语言服务线程上**，已修并复验。
+
+## BP. 2026-09-30 第六十九批：**那句「语言服务没响应」的真根因** —— 写 stdin 阻塞在语言服务线程上
+
+§BO 留下的问题「线程为什么不再接活」，这一批定死了。**不是锁死，是阻塞写**：`Host` 往服务器
+stdin 写帧用的是调用方线程上的阻塞 `WriteFile`（`native/lsp_host.cpp`，出站管道 `CreatePipe(…, 0)`
+只有默认 4KB）。JDT LS 导入大工程时不读 stdin，管道一满：
+**那条唯一的语言服务线程就停在 `WriteFile` 里**，`lsp.request`/`lsp.open`/诊断/折叠全部排队 ——
+而它手里的 `Session::mutex_` 也跟着一起被占住，`status` 同样答不出来。
+
+**取证链（把 §BO 的三条现象一次解释完）**：
+
+| 观察 | 证据 |
+|---|---|
+| 旧宿主**握手之后一个 `didOpen` 都发不出去**，但握手本身是成功的 | `.tmp-lsp-trace-e2e2.log`（旧构建）：`initialize` → 两个 40B 响应 → `initialized` → `didChangeConfiguration`，**全程没有 `didOpen`** |
+| 恢复出来的新一代仍"没响应"，而手工 `lsp.stop`+`lsp.open` 之后就好了 | 手工那条路换了一台**新 JVM**（冷启动的每帧都进得去管道）；自动重试那条路接着撞同一堵墙 |
+| 界面请求在超时前没有任何回包 | §BO 的 196s / 30s 实测，与"线程停在 WriteFile"完全一致 |
+
+**修复（两处，都在原生）**：
+1. **出站帧改由专写线程写**（`Host::enqueue_frame` 入队 → `Host::pump_writes` 写）：调用方只做一次
+   `memcpy`，阻塞的 `WriteFile` 落在写线程上，**且不持有任何调用方的锁**。`stop()` 先让队尾
+   （`exit` 等）出门、`CancelSynchronousIo` 打断卡住的那次写，再收句柄。
+2. 两条管道 `4KB → 1MB`：降低阻塞概率，也让服务器成批的结果帧不再顶住它自己的写。
+3. **弃养的一代要收掉它的服务器进程**（新模块 `native/lsp_children.*` + `Session::generation()`）：
+   §BO 的弃养表让 `Host` 的析构永远不跑，它手里 `KILL_ON_JOB_CLOSE` 的作业对象也就没人关 ——
+   真机上表现为**每恢复一次就多留一台 ~1GB 的 JVM 在后台索引同一个工程**（实测两代并存）。
+
+**判据（红/绿都跑过）**：`native/lsp_host_test.cpp` 新增「服务器停读 stdin 时 `didOpen` 不阻塞
+调用方，帧最终仍送达」—— 假服务器加 `--stall-stdin=3000`（答完 `initialize` 就停读 3s），客户端写
+3MB 文档：
+- 把写还原成旧行为（调用方自己写）→ **红**：`didOpen 堵住了调用方 3006ms`（正好是停读时长）。
+- 写线程那版 → **绿**：调用 <500ms 返回，同一帧在服务器恢复读之后仍送达（诊断回声到了），
+  慢写告警记的线程 id **不是**调用方线程、耗时 ≥200ms。
+另加 `native/lsp_children_test.cpp`：按代号回收真子进程（老一代被收掉、新一代不受影响、注销过的不重复收）。
+原生 **34/34**、前端 **1320 passed**。
+
+**真机复验（同一个 3GB / 13904 java 工程，新构建）**：
+
+| 判据 | 结果 |
+|---|---|
+| 状态查询不再沉默 | 连续 6 次 `lsp.request status` **259–265ms** 全部回包（旧构建：30s 无回包） |
+| 界面上不再有「没有响应」提示 | 扫全页文本：`没有响应 / 未就绪 / 初始化超时` **全部为 0**（旧构建会弹「已尝试重启语言服务」） |
+| 只起一台服务器、不反复重启 | trace 全程只有 **1 次 `initialize`**（旧构建：3 次） |
+| **文档真的推给服务器了** | 握手后第一帧就是 `textDocument/didOpen` **85376 字节**（旧构建：0 次 didOpen） |
+| 功能请求真的发出去了 | trace 里 `documentSymbol`/`documentHighlight`/`inlayHint`/`inlineCompletion`/`documentLink`/`codeLens`/`semanticTokens`/`diagnostic`/`didChange`/`foldingRange` 都有出帧 |
+| 服务器不答时如实报错（不再沉默） | `foldingRange` 在客户端 60s 期限上回 `{code:"LSP_FAILED", message:"TIMEOUT"}` |
+| 退出不留孤儿进程 | 关掉 TaoCode 后 `java.exe` 计数 **0**（两个都被作业对象带走） |
+
+**这一轮 JDT 侧为什么仍不答语义请求（不是本仓的缺陷）**：该工程的 `AE2-refs/*` 里有十几个 Gradle
+子工程，JDT 的 buildship 导入在逐个同步，而机器上的代理没开 —— `.metadata/.log` 里成片的
+`Could not resolve net.minecraftforge.gradle:ForgeGradle:2.2-SNAPSHOT … Connect to 127.0.0.1:7890
+failed: Connection refused`（时间戳 00:21→00:25 仍在往下走）。导入没完成的 JDT 对
+`foldingRange`/`documentSymbol` 就是不回答。**这一条要跟用户说清楚**：语言服务本身起来了、文档与请求
+都通了，语义结果取决于 JDT 能不能把这个工程的 Gradle 同步做完（离线/代理不通时会一直卡在导入）。
+

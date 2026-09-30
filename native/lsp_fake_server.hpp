@@ -48,6 +48,9 @@ struct Flags {
     bool stop_on_exception = false;
     bool bare_exception_info = false;
     std::string hang;                      // --hang=<method>：收到就不回答
+    // --stall-stdin=<毫秒>：答完 initialize 之后**停止读 stdin** 这么久 —— 真实世界里
+    // JDT LS 导入大工程时就是这样。用来验证客户端写文档不会把调用方堵在 WriteFile 上。
+    int stall_stdin_ms = 0;
 };
 
 // 会话状态（单会话夹具，见文件头说明）。

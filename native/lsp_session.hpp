@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "lsp_children.hpp"
 #include "lsp_host.hpp"
 #include "workspace.hpp"
 
@@ -49,6 +50,8 @@ public:
 
     void configure(std::map<std::string, ServerConfig> servers) { config_ = std::move(servers); }
     void set_root(std::filesystem::path root);
+    // 弃养这一代（语言服务线程卡死、Session 进弃养表）时，按它收掉这一代起的服务器进程。
+    long generation() const noexcept { return generation_; }
     void set_edit_sink(EditSink on_edit) { on_edit_ = std::move(on_edit); }
     void set_progress_sink(ProgressSink on_progress) { on_progress_ = std::move(on_progress); }
 
@@ -173,6 +176,9 @@ private:
 
     std::mutex mutex_;
     std::mutex edit_mutex_;                               // guards editor_ / on_edit_ (leaf lock)
+    // 这一代会话的代号：它起的每台服务器都按这个号登记，弃养这一代时按号收进程
+    // （见 lsp_children.hpp —— 弃养的 Session 析构不会跑，Host 手里那个作业对象也就没人关）。
+    long generation_ = children::next_generation();
     std::map<std::string, std::unique_ptr<Host>> hosts_;   // by language
     std::map<std::string, bool> ready_;                    // language -> initialize handshake done
     std::map<std::string, Json> startup_errors_;           // preserve spawn/initialize failures for the UI

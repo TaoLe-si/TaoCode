@@ -43,12 +43,25 @@ void Worker::stop() noexcept {
         std::unique_lock lock(mutex_);
         return done_.wait_for(lock, std::chrono::milliseconds(kDrainWaitMs), [this] { return finished_; });
     };
+    const auto joined2 = [this] {
+        std::unique_lock lock(mutex_);
+        return done_.wait_for(lock, std::chrono::milliseconds(kJoinWaitMs), [this] { return finished_; });
+    };
     if (joined()) { thread_.join(); return; }
     // 到这儿还没退 = 任务正堵在一次同步 I/O 上（最典型：往一个不再读 stdin 的服务器写数据）。
     // 取消它，让那次 WriteFile 以 ERROR_OPERATION_ABORTED 返回；任务本身随后收尾。
     // 与 native/watcher.cpp 的 stop() 同一形状：先给退出信号，再取消挂住的 I/O，最后收线程。
     if (const auto handle = thread_handle_.load()) CancelSynchronousIo(static_cast<HANDLE>(handle));
-    // 取消之后剩下的等待都是有界的（请求超时、进程回收各自带时限），所以这里可以安心 join。
+    // **再等一小段**：卡在同步 I/O 上的任务这时会回来。但真机上还有另一种卡法 —— 卡在**锁**上
+    // （2026-09-30：大工程上语言服务线程不再接活，三个 lsp.* 请求 30s 无回包，而 `CancelSynchronousIo`
+    // 对等锁的线程无能为力），那时 join 永远回不来、连"关掉重来"都做不到。
+    // 于是这里只等到 kJoinWaitMs：等不到就**弃养**这条线程（detach），让调用方连 Worker 对象一起留着
+    // （弃养表），另起一代。宁可漏一条线程，也不能把界面和恢复路径一起拖死。
+    if (!joined2()) {
+        abandoned_ = true;
+        if (thread_.joinable()) thread_.detach();
+        return;
+    }
     thread_.join();
 }
 
