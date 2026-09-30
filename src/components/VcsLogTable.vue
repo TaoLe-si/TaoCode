@@ -6,7 +6,8 @@ import type { GitFullCommit } from '../bridge'
 import { buildLogGraph, lanePath, laneX, logDate, rootColor, ROW_H } from '../vcsLogGraph'
 import { visibleColumns, type LogColumn } from '../vcsLogColumns'
 const props = defineProps<{ commits: GitFullCommit[]; selected: string; root: string; loading?: boolean; showTagNames?: boolean; showRootNames?: boolean; hidden?: LogColumn[] }>()
-const emit = defineEmits<{ select: [hash: string]; copy: []; more: []; menu: [{ hash: string; x: number; y: number }] }>()
+const emit = defineEmits<{ select: [hash: string]; copy: []; more: []; menu: [{ hash: string; x: number; y: number }];
+  refMenu: [{ name: string; type: 'local' | 'remote' | 'tag' | 'head'; x: number; y: number }] }>()
 const list = ref<HTMLElement>()
 const viewportWidth = ref(0)
 const columnRows = computed(() => props.commits.map(commit => ({ ...commit, date: logDate(commit.date) })))
@@ -70,7 +71,8 @@ defineExpose({ focusHash })
           <path v-for="(edge, i) in row.down" :key="`d${i}`" :d="lanePath(edge.from, edge.to)" fill="none" :stroke="edge.color" stroke-width="1.5" />
           <circle :cx="laneX(row.lane)" :cy="ROW_H / 2" r="3.5" :fill="row.color" />
         </svg>
-        <span v-for="r in row.commit.refs.filter(r => showTagNames !== false || r.type !== 'tag')" :key="`${r.type}:${r.name}`" class="ref" :class="r.type">{{ r.name }}</span>
+        <span v-for="r in row.commit.refs.filter(r => showTagNames !== false || r.type !== 'tag')" :key="`${r.type}:${r.name}`" class="ref" :class="r.type"
+              @contextmenu.prevent.stop="emit('refMenu', { name: r.name, type: r.type, x: $event.clientX, y: $event.clientY })">{{ r.name }}</span>
         <span class="subject" :title="row.commit.subject">{{ row.commit.subject }}</span>
       </span>
       <span v-if="columns.includes('author')" class="author" :title="row.commit.author">{{ row.commit.author }}</span>

@@ -13,19 +13,21 @@ import VcsLogDetails from './VcsLogDetails.vue'
 import VcsLogFilters from './VcsLogFilters.vue'
 import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
-import { logCommitMenu, type LogMenuRow } from '../vcsLogMenu'
+import { logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
 
 const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
 // 「标签名称」是**项目设置**（`vcsLog.showTagNames`），写回走宿主；其余行是本窗口自己的排布。
 const emit = defineEmits<{ setTagNames: [value: boolean] }>()
 const { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
   canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick,
-  resetTo, uncommit, createTagOn, scope } =
+  resetTo, uncommit, createTagOn, deleteTag, scope } =
   useVcsLogData(toRef(props, 'root'), toRef(props, 'active'))
 const previewChange = ref<GitCommitChange | null>(null)
 // 提交行的右键菜单（`Vcs.Log.ContextMenu` 一族）：行模型与文案在 `src/vcsLogMenu.ts`。
 const panel = ref<HTMLElement>()
 const menu = ref<{ hash: string; shortHash: string; isHead: boolean; x: number; y: number } | null>(null)
+// 引用 chip 的菜单（同一次只开一个）。
+const refMenu = ref<{ name: string; type: 'local' | 'remote' | 'tag' | 'head'; x: number; y: number } | null>(null)
 const menuRows = computed<LogMenuRow[]>(() => menu.value ? logCommitMenu(
   { hash: menu.value.hash, shortHash: menu.value.shortHash, isHead: menu.value.isHead },
   {
@@ -60,7 +62,17 @@ function openMenu(payload: { hash: string; x: number; y: number }) {
   select(payload.hash)
   menu.value = { hash: payload.hash, shortHash: commit?.shortHash ?? payload.hash.slice(0, 8), isHead, x, y }
 }
-function closeMenu() { menu.value = null }
+function openRefMenu(payload: { name: string; type: 'local' | 'remote' | 'tag' | 'head'; x: number; y: number }) {
+  const box = panel.value?.getBoundingClientRect()
+  const rows = logRefMenu({ name: payload.name, type: payload.type }, { deleteTag: name => void deleteTag(name) })
+  if (!rows.length) return
+  menu.value = null
+  refMenu.value = { ...payload, x: box ? payload.x - box.left : payload.x, y: box ? payload.y - box.top : payload.y }
+}
+const refMenuRows = computed<LogMenuRow[]>(() => refMenu.value
+  ? logRefMenu({ name: refMenu.value.name, type: refMenu.value.type }, { deleteTag: name => { closeMenu(); void deleteTag(name) } })
+  : [])
+function closeMenu() { menu.value = null; refMenu.value = null }
 // 勾掉的列（`Vcs.Log.ToggleColumns`）：与列宽/顺序一样按仓库根存。
 const hidden = ref<LogColumn[]>([])
 const columnsKey = computed(() => `taocode.vcs.log.${encodeURIComponent(props.root)}.columns.hidden`)
@@ -155,7 +167,7 @@ async function jump(hash: string) {
         <p v-if="!isDesktop" class="note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
-        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more" @menu="openMenu">
+        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
           <div v-else-if="!commits.length" class="empty">{{ loaded ? '没有匹配的提交。' : '打开 Git 仓库后显示提交图。' }}</div>
           <button v-if="hasMore" class="load-more" :disabled="loading" @click="load(true)">加载更多提交</button>
@@ -173,9 +185,9 @@ async function jump(hash: string) {
     </VcsLogSplitter>
     <!-- 提交行的右键菜单：`Vcs.Log.ContextMenu`（平台组）+ `Git.Log.ContextMenu`（Git 追加）里本仓有落点的四条
          （模型与文案见 src/vcsLogMenu.ts，其余条目逐条记了不做原因）。 -->
-    <div v-if="menu" class="log-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu">
-      <div class="log-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
-        <template v-for="(row, index) in menuRows" :key="row.id">
+    <div v-if="menu || refMenu" class="log-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu">
+      <div class="log-menu" role="menu" :style="{ left: `${(menu ?? refMenu)!.x}px`, top: `${(menu ?? refMenu)!.y}px` }">
+        <template v-for="(row, index) in (menu ? menuRows : refMenuRows)" :key="row.id">
           <div v-if="row.separatorBefore && index" class="log-menu-separator" role="separator" />
           <button type="button" class="menu-button" role="menuitem" :title="row.description" :disabled="row.disabled" :aria-disabled="row.disabled" @click.stop="row.run?.()">{{ row.title }}</button>
         </template>

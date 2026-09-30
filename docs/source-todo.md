@@ -293,8 +293,9 @@
 - [x] **标签那一行**（第五十五批：新建标签已放到上游那一处）—— 上游是**日志窗口右键菜单**里的
       `Git.CreateNewTag`（`intellij.vcs.git.backend.xml:108`，加进 `Vcs.Log.ContextMenu` 的 `:400-428`）；
       第五十五批已把日志窗口的提交行右键菜单建起来（`src/vcsLogMenu.ts`），新建标签就在那里。
-      **面板那一行的标签 chips 与删除仍留在原地** —— 上游的标签列表是日志窗口结构里的"标签节点"，
-      本仓日志行只显示引用、没有那一层 ⇒ 下一批要么补标签节点、要么如实登记。见审计 §BA。
+      第五十六批把剩下的一半也落了：**引用 chip 上挂右键菜单**（`logRefMenu`，标签给「删除」= `GitDeleteRefAction`，
+      走原生 `git.tag.delete`），面板里那条自造的标签行（输入 + 新建 + chips + 删除）连带状态与 CSS 整行拆掉 ——
+      列表就是日志行的引用 chip。见审计 §BB。
 - [x] `重新格式化提交信息` 的**键位**（第五十四批已接）：上游 `Vcs.ReformatCommitMessage`
       （`VcsActions.xml:394-395` 的 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L）——
       提交信息框上挂 `@keydown.alt.l.prevent="reformatMessage"`（与 Ctrl+Enter 同一种做法），

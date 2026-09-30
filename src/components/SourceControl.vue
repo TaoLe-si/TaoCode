@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GitBranch, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Tag, Ban, GitPullRequestArrow, ChevronsUpDown, ChevronsDownUp, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
+import { GitBranch, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Ban, GitPullRequestArrow, ChevronsUpDown, ChevronsDownUp, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
@@ -25,7 +25,7 @@ import {
   type CommitMessageInspectionSettings,
   type CommitMessageProblem,
 } from '../commitMessageInspection'
-import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStatus, type GitTags, type TodoPattern } from '../bridge'
+import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStatus, type TodoPattern } from '../bridge'
 
 const props = defineProps<{
   root: string
@@ -89,10 +89,9 @@ function measureLegend() {
   legendCompact.value = probe.getBoundingClientRect().width > available
 }
 const ahead = ref<GitAheadBehind>({ available: false, ahead: 0, behind: 0 })
-// Secondary reads (remote status, stash count, tags, hunk list) must not fail the
+// Secondary reads (remote status, hunk list) must not fail the
 // whole panel, but they must not fail silently either.
 const extrasError = ref('')
-const tagsError = ref('')
 
 function errorText(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 // Every status read carries a token: another project taking over mid-request makes
@@ -110,7 +109,6 @@ async function load() {
   }
   catch (caught) { if (token === statusToken) error.value = errorText(caught) }
   finally { if (token === statusToken) loading.value = false }
-  void loadTags()
 }
 async function refreshExtras() {
   const token = statusToken
@@ -156,7 +154,6 @@ async function act(operation: () => Promise<unknown>, onFailure?: (message: stri
     // Any git operation can change the branch comparison: invalidate it so the next
     // render reflects the new repo state.
     compared.value = []
-    void loadTags()
   }
 }
 const stage = (path: string) => act(() => request('git.stage', { path }))
@@ -517,18 +514,9 @@ const checkout = (branch: string) => act(() => request('git.checkout', { branch 
 const updateProject = () => act(async () => { await request('git.fetch'); await request('git.pull') })
 const push = () => act(() => request('git.push'))
 // IDEA Git menu rows: Fetch (refresh remotes), Rebase onto upstream, branch delete,
-// the Tag dialog, "Add to .gitignore" for untracked rows.
+// "Add to .gitignore" for untracked rows.
 const fetch = () => act(() => request('git.fetch'))
 const ignore = (path: string) => act(() => request('git.ignore', { path }))
-const tagName = ref('')
-const createTag = () => { const name = tagName.value.trim(); if (!name) return; void act(async () => { await request('git.tag.create', { name }); tagName.value = '' }) }
-async function deleteTag(name: string) { await act(() => request('git.tag.delete', { name })) }
-const tags = ref<string[]>([])
-async function loadTags() {
-  const token = statusToken
-  try { tags.value = (await request<GitTags>('git.tags')).tags; if (token === statusToken) tagsError.value = '' }
-  catch (caught) { tags.value = []; if (token === statusToken) tagsError.value = `读取标签失败：${errorText(caught)}` }
-}
 async function applyHunks(reverse: boolean) {
   if (!diff.value || !diff.value.hunks) return
   const selectedIndexes = diff.value.hunks.hunks.filter(hunk => diff.value?.hunkPicked?.has(hunk.index)).map(hunk => hunk.index)
@@ -629,7 +617,6 @@ watch(() => [props.root, props.active] as const, () => {
   // plus any status request still running for the previous root.
   statusToken++
   extrasError.value = ''
-  tagsError.value = ''
   compareTo.value = ''
   compared.value = []
   // The author comes from the repository configuration, so a new project needs a re-read
@@ -697,18 +684,8 @@ watch(() => [props.root, props.active] as const, () => {
         <button class="sc-tool" :disabled="busy" title="更新项目（Ctrl+T）" @click="updateProject"><Download :size="13" />更新项目<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
         <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
       </div>
-      <div class="sc-branch-ops">
-        <input v-model="tagName" class="sc-input" placeholder="新标签名" aria-label="新标签名" :disabled="busy" @keydown.enter.prevent="createTag" />
-        <button class="sc-tool" :disabled="busy || !tagName.trim()" title="在当前提交打标签" aria-label="新建标签" @click="createTag"><Tag :size="13" /></button>
-        <div v-if="tags.length" class="sc-tags">
-          <span v-for="tag in tags" :key="tag" class="sc-tag" :title="`删除标签 ${tag}`">
-            {{ tag }}
-            <button class="sc-tag-x" :disabled="busy" aria-label="删除标签" @click="deleteTag(tag)"><X :size="10" /></button>
-          </span>
-        </div>
-      </div>
       <p v-if="error" class="sc-error" role="alert">{{ error }}</p>
-      <p v-else-if="extrasError || tagsError" class="sc-warning" role="status">{{ [extrasError, tagsError].filter(Boolean).join('；') }}</p>
+      <p v-else-if="extrasError" class="sc-warning" role="status">{{ extrasError }}</p>
       <div class="sc-scroll">
         <section v-if="staged.length" class="sc-section">
           <h3>已暂存 <span class="sc-count">{{ staged.length }}</span></h3>

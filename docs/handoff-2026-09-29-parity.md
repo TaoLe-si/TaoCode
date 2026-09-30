@@ -173,7 +173,7 @@ cmd //c "scripts\run-ctest.bat"                 # 32/32（改了 native/ 才需�
 
 **文档**
 - `docs/class-parity-todo.md` —— 总控与执行顺序（**每批完成后回来更新状态**）。
-- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§BA，按批次追加）。
+- `docs/ui-placement-audit.md` —— 每批的审计记录（§A…§BB，按批次追加）。
 - `docs/source-todo.md` —— "假 UI / 假位置 / 假控件 / 假逻辑"清单，判定不做的逐条在此登记理由。
 - `docs/enum-lsp-dap.md` —— LSP/DAP 承接层对照（协议侧，不按类对照）。
 

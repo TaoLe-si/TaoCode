@@ -2314,3 +2314,25 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 
 **还没做的**（§17 里剩下）：面板那一行的**标签 chips 与删除**（上游的标签列表在日志窗口的结构里，
 本仓日志行只显示引用、没有"标签节点"这一层）；失败行上的「显示详细信息」链接动作（通知要能带动作按钮）。
+
+## BB. 2026-09-30 第五十六批：标签那一行的收尾 —— 删除放到"引用 chip 的右键菜单"，面板里那行整行拆掉
+
+上一批把**新建标签**放回了上游那一处（日志窗口提交行右键菜单，`Git.CreateNewTag`）。这一批处理剩下的一半：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `GitDeleteRefAction`（文案 `branches.action.delete` = **删除**，`use-shortcut-of="$Delete"`）在 `Git.Branch.Backend`（`intellij.vcs.git.backend.xml:320-344`）里 —— 这一族是**按引用类型过滤**的：`GitTag -> brancher.deleteTag` / `GitLocalBranch -> deleteBranch` / `GitRemoteBranch -> deleteRemoteBranch` | `git4idea/backend/src/actions/ref/GitDeleteRefAction.kt:29` | **引用 chip 上挂右键菜单**：`logRefMenu()` 只给**标签**这一列（`GitDeleteRefAction` + 文案「删除」），删除走原生 `git.tag.delete`；其余类型返回空 ⇒ 干脆不开菜单（分支那一族本仓在分支弹窗里已有，见 `src/branchPopup.ts` 的 `BRANCH_ROW_ACTIONS`） |
+| 标签列表本身：日志行的引用 chip（`showTagNames` 开关控制） | `Vcs.Log.ShowTagNames`（齿轮里已有） | 就是日志行那些 chip —— 不需要面板里再列一份 |
+| — | — | **面板里那条自造的「新标签名 + 新建标签 + 标签 chips + 删除」整行拆掉**：新建在上一批的提交菜单里，删除在引用 chip 菜单里，列表在日志行里。连带 `tagName`/`createTag`/`deleteTag`/`tags`/`loadTags`/`tagsError` 与那套 CSS 一并清掉（`git.tags` 的读取也没了消费者） |
+
+**真机取证（MCP 驱动）**：日志行右键标签 chip ⇒ 菜单只有一行「删除」；点它 ⇒ **那个标签引用从日志行消失**，
+`git tag -l` 也随之清空（探针标签在验证过程中被删掉，仓库回到只有 3 次提交的干净状态）；
+面板里那行（「新标签名」+ 图标 + chips）已经不在了 —— 截图里「推送」下面直接就是「更改 5」。
+
+**判据**：`tests/vcs-log-menu.test.mjs` 新增三条 —— ①`logRefMenu` 对标签给「删除」（文案 = `branches.action.delete`，
+description 带标签名，`run()` 真去删）、对 local/remote/head 一律空数组；②chip 上挂 `@contextmenu`、
+日志视图两套菜单共用一份渲染、删除走 `git.tag.delete`；③面板里不再有「新标签名 / 新建标签 / 删除标签 / sc-tag」。
+自证有牙：让 `logRefMenu` 对分支也给一行 ⇒ 红。
+
+**§17 现在只剩**：失败行上的「显示详细信息」链接动作（通知要能带动作按钮），以及
+`Vcs.Log.GoToChild`/`GoToParent`（本仓导航是"后退/前进"历史，不是图的父子）。

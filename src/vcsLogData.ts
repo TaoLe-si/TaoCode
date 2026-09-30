@@ -161,6 +161,17 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
     } catch (caught) { if (current()) error.value = message(caught) }
     finally { if (current()) busy.value = false }
   }
+  /** 日志行引用 chip 的「删除」（`GitDeleteRefAction` 的标签分支 → `brancher.deleteTag`）。 */
+  async function deleteTag(name: string) {
+    if (!isDesktop || !name || busy.value) return
+    const current = scope()
+    busy.value = true; error.value = ''
+    try {
+      await request('git.tag.delete', { name })
+      if (current()) { await load(); if (current()) await loadSelection() }
+    } catch (caught) { if (current()) error.value = message(caught) }
+    finally { if (current()) busy.value = false }
+  }
   watch(root, () => {
     generation++; logToken++; selectionToken++; navigationToken++
     back.value = []; forward.value = []
@@ -175,5 +186,5 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
   onBeforeUnmount(() => { generation++; logToken++; selectionToken++; navigationToken++ })
   return { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
     canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, loadSelection, scope,
-    resetTo, uncommit, createTagOn }
+    resetTo, uncommit, createTagOn, deleteTag }
 }

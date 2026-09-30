@@ -8,8 +8,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { logCommitMenu, COPY_REVISION_TITLE, COPY_REVISION_DESCRIPTION, RESET_TO_HERE_TITLE,
-  UNCOMMIT_TITLE, UNCOMMIT_DESCRIPTION, UNCOMMIT_DISABLED_DESCRIPTION, CREATE_TAG_TITLE, CREATE_TAG_DESCRIPTION } from '../src/vcsLogMenu.ts'
+import { logCommitMenu, logRefMenu, COPY_REVISION_TITLE, COPY_REVISION_DESCRIPTION, RESET_TO_HERE_TITLE,
+  UNCOMMIT_TITLE, UNCOMMIT_DESCRIPTION, UNCOMMIT_DISABLED_DESCRIPTION, CREATE_TAG_TITLE, CREATE_TAG_DESCRIPTION,
+  DELETE_REF_TITLE } from '../src/vcsLogMenu.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -56,4 +57,37 @@ test('跑得动的那三条都点在真原生请求上（不是空壳）', () =>
   assert.match(view, /ref\.type === 'head'/, 'isHead 按引用判（原生 git.logFull 的 head 引用）')
   const table = read('src/components/VcsLogTable.vue')
   assert.match(table, /@contextmenu\.prevent\.stop="emit\('menu'/, '行上挂右键')
+})
+
+test('引用 chip 的菜单：标签给「删除」（GitDeleteRefAction），其余类型不给空菜单', () => {
+  assert.equal(DELETE_REF_TITLE, '删除', 'GitBundle branches.action.delete = 删除(&D)（GitDeleteRefAction 的文案）')
+  const calls = []
+  const rows = logRefMenu({ name: 'v1.2', type: 'tag' }, { deleteTag: name => calls.push(name) })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].action, 'GitDeleteRefAction')
+  assert.equal(rows[0].title, '删除')
+  assert.match(rows[0].description, /v1\.2/, '说明里带上标签名')
+  rows[0].run?.()
+  assert.deepEqual(calls, ['v1.2'], '真去删那个标签')
+  for (const type of ['local', 'remote', 'head']) {
+    assert.deepEqual(logRefMenu({ name: 'master', type }, { deleteTag: noop }), [],
+      `${type} 不在日志里给这一列（分支的一族在分支弹窗，见 src/vcsLogMenu.ts 的说明）`)
+  }
+})
+
+test('接线：chip 上挂右键、日志视图两套菜单共用一份渲染', () => {
+  const table = read('src/components/VcsLogTable.vue')
+  assert.match(table, /@contextmenu\.prevent\.stop="emit\('refMenu'/, '引用 chip 上挂右键')
+  const view = read('src/components/VcsLog.vue')
+  assert.match(view, /@ref-menu="openRefMenu"/)
+  assert.match(view, /logRefMenu\(\{ name: payload\.name, type: payload\.type \}/, '引用菜单由模型给出（空行就不开菜单）')
+  assert.match(read('src/vcsLogData.ts'), /request\('git\.tag\.delete', \{ name \}\)/, '删除走原生 git.tag.delete')
+})
+
+test('面板里那条自造的标签行已删（新建在日志菜单、删除在引用 chip、列表=日志行的引用）', () => {
+  const panel = read('src/components/SourceControl.vue')
+  for (const gone of ['新标签名', '新建标签', '删除标签', 'sc-tag']) {
+    assert.ok(!panel.includes(gone), `面板里不该再有「${gone}」`)
+  }
+  assert.ok(!read('src/style.css').includes('.sc-tag {'), '那套 chip 样式也删了')
 })

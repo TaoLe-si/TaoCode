@@ -78,3 +78,39 @@ export function logCommitMenu(commit: LogMenuCommit, actions: LogMenuActions): L
     { id: 'createTag', action: 'Git.CreateNewTag', title: CREATE_TAG_TITLE, description: CREATE_TAG_DESCRIPTION, separatorBefore: true, run: actions.createTag },
   ]
 }
+
+/** `GitBundle` `branches.action.delete` = 删除(&D)（`GitDeleteRefAction` 的文案，用于分支/远端分支/标签）。 */
+export const DELETE_REF_TITLE = '删除'
+
+export type RefType = 'local' | 'remote' | 'tag' | 'head'
+
+export interface LogMenuRef {
+  name: string
+  type: RefType
+}
+
+export interface LogRefMenuActions {
+  deleteTag: (name: string) => void
+}
+
+/**
+ * 右键一个**引用 chip**（日志行上的分支/标签小标签）时的菜单。上游是 `Git.Branch.Backend`
+ * （`intellij.vcs.git.backend.xml:320-344`）那一族按引用类型过滤后的子集，其中
+ * `GitDeleteRefAction`（`:341-343`，`use-shortcut-of="$Delete"`）对标签走 `brancher.deleteTag`。
+ *
+ * 本仓只给**标签**这一列（§17 的最后一条：面板里那条自造的"新标签名 + chips + 删除"要拆掉，
+ * 删除得有个上游位置）。其余类型的落点：
+ *   · 分支（local）：`Git.Branch.Backend` 那一族本仓在**分支弹窗**里已有（`src/branchPopup.ts` 的
+ *     `BRANCH_ROW_ACTIONS`：checkout / compare / rebase / merge / push / delete），不在这里重复；
+ *   · 远端分支：本仓没有 `deleteRemoteBranch` 的原生落点（只有 `git.push`）；
+ *   · `head`：不是可操作对象（它就是 HEAD）。
+ * 标签那一列里上游还有「推送标签」（`Git.Tag.Push`）与「与本地比较」（`Git.Ref.Diff.With.Local`）：
+ * 前者要原生 `push <tag>`（只有 `git.push` = 推当前分支），后者要"引用↔工作区"的 diff 视图 —— 都还没落。
+ */
+export function logRefMenu(ref: LogMenuRef, actions: LogRefMenuActions): LogMenuRow[] {
+  if (ref.type !== 'tag') return []
+  return [{
+    id: 'deleteRef', action: 'GitDeleteRefAction', title: DELETE_REF_TITLE,
+    description: `删除标签 ${ref.name}`, run: () => actions.deleteTag(ref.name),
+  }]
+}
