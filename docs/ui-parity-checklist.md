@@ -1088,6 +1088,12 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
         ⇒ 命令到底有没有被当真；
      ② 把 `java.import.exclusions` 暂时清空再复验一次 ⇒ 排除"排除模式误伤链接目录"这个嫌疑
         （我推导的模式里含 `**/AE2-refs/**` 这类，理论上不碰 `AE2VMAddon-1.7.10-gtnh`，但值得实测）。
+  5) **从 JDT 日志又挖到一条硬线索**（2026-10-01 06:06 那次运行）：
+     `!MESSAGE begin problem for /AE2VMConfig.java` / `1 problems reported for /AE2VMConfig.java` /
+     `Validated 1. Took 5 ms` —— 该文件**确实被当成 Java 在编译与诊断**（不是"没进任何工程"），
+     而且只报了 **1 个问题**。所以下一个动作最省事也最直接：**把那 1 个问题的原文读出来**
+     （`lsp.request {kind:'diagnostics'}` 或问题面板）—— 它会直接说清是"外部类型 cannot be resolved"
+     （⇒ 类路径没进编译单元）还是别的东西（⇒ 另一条线）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 
