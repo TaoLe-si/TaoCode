@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, nextBookmark, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from '../src/bookmarks.ts'
+import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkOwner, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, withoutMnemonic } from '../src/bookmarks.ts'
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -11,19 +11,21 @@ test('F11 adds a bookmark on the line and clears it again', () => {
   assert.deepEqual(placeBookmark(once, 'src/a.cpp', 13), [once[0], { path: 'src/a.cpp', line: 13 }])
 })
 
-test('a digit moves to the new line and frees its old owner', () => {
-  const first = placeBookmark([], 'src/a.cpp', 10, 3)
-  const moved = placeBookmark(first, 'src/b.cpp', 7, 3)
-  assert.deepEqual(moved, [{ path: 'src/a.cpp', line: 10 }, { path: 'src/b.cpp', line: 7, mnemonic: 3 }])
-  assert.equal(bookmarkOwner(moved, 3).path, 'src/b.cpp')
-  assert.equal(bookmarkOwner(moved, 0), undefined, 'an unused digit has no owner')
+test('一个已被占用的助记键改贴到新行：老的那条行书签被删掉（上游 rewriteType:285-295）', () => {
+  // 上游不是"把编号从老的那条摘下来"：`rewriteType` 对行书签走的是 `removeFromAllGroups`
+  // （整条删掉），所以这里老书签也消失 —— 真机上点"重写"就是这个效果。
+  const first = placeBookmark([], 'src/a.cpp', 10, '3')
+  const moved = placeBookmark(first, 'src/b.cpp', 7, '3')
+  assert.deepEqual(moved, [{ path: 'src/b.cpp', line: 7, mnemonic: '3' }])
+  assert.equal(bookmarkOwner(moved, '3').path, 'src/b.cpp')
+  assert.equal(bookmarkOwner(moved, '0'), undefined, 'an unused mnemonic has no owner')
 })
 
 test('the same digit on the same line is a toggle off', () => {
-  const marked = placeBookmark([], 'src/a.cpp', 10, 9)
-  assert.deepEqual(placeBookmark(marked, 'src/a.cpp', 10, 9), [])
-  const renamed = placeBookmark(marked, 'src/a.cpp', 10, 1)
-  assert.deepEqual(renamed, [{ path: 'src/a.cpp', line: 10, mnemonic: 1 }], 'a different digit renames it')
+  const marked = placeBookmark([], 'src/a.cpp', 10, '9')
+  assert.deepEqual(placeBookmark(marked, 'src/a.cpp', 10, '9'), [])
+  const renamed = placeBookmark(marked, 'src/a.cpp', 10, '1')
+  assert.deepEqual(renamed, [{ path: 'src/a.cpp', line: 10, mnemonic: '1' }], 'a different digit renames it')
   assert.deepEqual(placeBookmark(renamed, 'src/a.cpp', 10), [], 'F11 removes a digit bookmark outright')
 })
 
@@ -140,4 +142,27 @@ test('选中文字再放书签：那段文本成为自定义描述，且优先�
   // 数字编号换行时描述一起搬（withMnemonic 不许把它丢掉）
   const moved = placeBookmark(once, 'a.cpp', 9, 3)
   assert.equal(moved[0].description, 'selected  text')
+})
+
+test('助记键是单个 0-9/A-Z 字符：字母能用，大小写归一，非单字符不认', () => {
+  assert.equal(normalizeMnemonic('a'), 'A')
+  assert.equal(normalizeMnemonic('Z'), 'Z')
+  assert.equal(normalizeMnemonic('7'), '7')
+  assert.equal(normalizeMnemonic(''), undefined)
+  assert.equal(normalizeMnemonic('ab'), undefined)
+  assert.equal(normalizeMnemonic('!'), undefined)
+  assert.deepEqual(BOOKMARK_MNEMONICS.length, 36, '0-9 + A-Z = 36 个可贴的助记键')
+  const placed = placeBookmark([], 'a.cpp', 2, 'A')
+  assert.equal(bookmarkOwner(placed, 'A')?.line, 2, '字母助记键照样能查到主人')
+  assert.deepEqual(withoutMnemonic(placed[0]), { path: 'a.cpp', line: 2 }, '移除助记键只摘键，书签留着')
+})
+
+test('助记键被占用：重写 = 老的那条被删掉（上游 rewriteType:285-295）；取消 = 整件事作废', () => {
+  const taken = placeBookmark([], 'old.cpp', 5, 'B', 'old line')
+  // 取消（rewrite = false）：列表原样，不新增也不动老主人
+  const cancelled = placeBookmark(taken, 'new.cpp', 9, 'B', 'new line', undefined, false)
+  assert.deepEqual(cancelled, taken, '取消重写 ⇒ 什么也不变')
+  // 重写：老的那条行书签被删掉，新的拿到 B
+  const rewritten = placeBookmark(taken, 'new.cpp', 9, 'B', 'new line', undefined, true)
+  assert.deepEqual(rewritten.map(entry => [entry.path, entry.line, entry.mnemonic]), [['new.cpp', 9, 'B']])
 })

@@ -38,10 +38,10 @@ export interface MenuUiDeps {
   toolsMenuRows: MenuRow[]
   /** 已安装插件（EXT-01）：启用插件贡献的命令接成一个「插件」菜单组（见 src/pluginCommands.ts）。 */
   pluginList: Ref<PluginInfo[]>
-  /** 书签助记符（IDEA 把十个跳转也列成动作，但菜单栏里放不下）。 */
-  digits: readonly number[]
+  /** 书签助记键（0-9 + A-Z，见 BOOKMARK_MNEMONICS）：IDEA 把每个跳转都列成动作。 */
+  mnemonics: readonly string[]
   bookmarks: Ref<any[]>
-  jumpMnemonic: (digit: number) => void
+  jumpMnemonic: (mnemonic: string) => void
   focusStatusBar: () => void
   recentProjects: Ref<RecentProject[]>
   /** 有未完成的写入/加载时，切换项目要拦住。 */
@@ -68,7 +68,7 @@ export interface MenuUiDeps {
 
 export function createMenuUi(deps: MenuUiDeps) {
   const { notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows,
-          pluginList, digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace,
+          pluginList, mnemonics, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace,
           popupExtras, gearHostRows = () => ({}), bottomGearHostRows = () => ({}) } = deps
 // 插件命令的执行：在动作表里按 id 找（IDEA 的 `ActionManager.getAction(id).actionPerformed`）。
 // 先记宏再执行，与其它菜单行同一条链 —— 所以走 `runAction` 而不是直接 `entry.run()`。
@@ -188,13 +188,19 @@ const actionList = computed<ActionEntry[]>(() => {
     seen.set(row.id, { id: row.id, title: rowTitle(row), keywords: row.keywords, keys: row.keys, group: group.label, enabled: row.enabled, run: row.run })
   }
   const list = [...seen.values()]
-  // IDEA lists the ten mnemonic jumps as actions of their own, even though the menubar
-  // has no room for them.
-  for (const digit of digits) list.push({
-    id: `navigate.bookmark${digit}`, title: `跳转到书签 ${digit}`, keys: `Ctrl ${digit}`,
-    keywords: `bookmark mnemonic digit 书签 ${digit}`, group: '导航',
-    enabled: () => Boolean(bookmarkOwner(bookmarks.value, digit)), run: () => jumpMnemonic(digit),
-  })
+  // IDEA lists one jump action per mnemonic (`Bookmarks.Goto` 弹出组，36 个：
+  // `intellij.platform.bookmarks.xml:81-117` 的 GotoBookmark0..9/A..Z），文案取中文包的
+  // 「转到书签 {0}」(`goto.bookmark.type.action.text`)。**只有 0-9 有默认键位**
+  // （`$default.xml:173-197` 的 control 0..9）；字母没有全局键，只有书签树内的裸键
+  // （`actions/extensions.kt:126-135`）。
+  for (const mnemonic of mnemonics) {
+    const digit = mnemonic >= '0' && mnemonic <= '9'
+    list.push({
+      id: `navigate.bookmark${mnemonic}`, title: `转到书签 ${mnemonic}`, keys: digit ? `Ctrl ${mnemonic}` : '',
+      keywords: `bookmark mnemonic 书签 ${mnemonic}`, group: '导航',
+      enabled: () => Boolean(bookmarkOwner(bookmarks.value, mnemonic)), run: () => jumpMnemonic(mnemonic),
+    })
+  }
   // IDEA's `FocusStatusBar` (ActionsBundle.properties:81-82 `Focus Status Bar` /
   // "Move focus to the first widget in the status bar") is not a menu item either: it lives in the
   // `ToolbarPopupActions` group (PlatformActions.xml:1366) that CustomizationUtil.java:567-568

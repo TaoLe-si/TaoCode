@@ -82,8 +82,8 @@ Json exclusions() {
             {"scopes", Json::array()},
             // 文件颜色（IDEA `com.intellij.ui.tabs` 的 File Colors）：默认空，与 FileColorsModel 的两个空列表一致。
             {"fileColors", Json::array()}, {"localFileColors", Json::array()},
-            {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
-                               {"autoscrollFromSource", false}}},
+            {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                               {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_patterns()},
             {"templates", empty_templates()}, {"java", java_defaults()},
@@ -406,8 +406,8 @@ int main() {
                                  {"scopes", Json::array()},
                                  // 文件颜色（IDEA `FileColorsConfigurable`）：整表替换，顺序即优先级。
                                  {"fileColors", Json::array()}, {"localFileColors", Json::array()},
-                                 {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
-                                                    {"autoscrollFromSource", false}}},
+                                 {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                                                    {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
                                  {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
                                  {"todoPatterns", Json::array({{{"pattern", "REVIEW"}, {"description", utf8(u8"待评审")}}})},
                                  {"templates", empty_templates()}, {"java", java_defaults()},
@@ -733,7 +733,13 @@ int main() {
             const Json marks = Json::array({
                 {{"path", "src/main.cpp"}, {"line", 12}, {"text", "int main() {"}},
                 {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}, {"text", ""}, {"description", "选中的那段"}},
-                {{"path", "src/app.vue"}, {"line", 88}, {"mnemonic", 9}}});
+                {{"path", "src/app.vue"}, {"line", 88}, {"mnemonic", "9"}},
+                {{"path", "src/logo.svg"}, {"line", 2}, {"mnemonic", "A"}}});
+            // 旧版本写过的**整数形式**仍然收下（不判损坏 —— 老状态文件不该因为这次扩到 A-Z 就变成坏的）；
+            // 新的写入一律是单个字符（上游 `writeExternal:337-340` 存的就是 `String.valueOf(char)`）。
+            const Json legacy_marks = Json::array({{{"path", "src/main.cpp"}, {"line", 12}, {"mnemonic", 3}}});
+            check(store.update_project_settings(root_a, {{"bookmarks", legacy_marks}}).at("bookmarks") == legacy_marks,
+                  "旧版整数助记键必须还能写进状态文件（同一份读数不许因此判损坏）");
             check(store.update_project_settings(root_a, {{"bookmarks", marks}}).at("bookmarks") == marks,
                   "Bookmarks must round-trip with their digits");
             check(store.project_settings(root_b).at("bookmarks").empty(),
@@ -759,6 +765,11 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", "3"}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 10}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", -1}}})}},
+                // 助记键的字符形式：单个 0-9/A-Z；小写、多字符、数字字符串以外的都拒
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", "a"}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", "AB"}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", ""}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", true}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 3}, {"note", "x"}}})}},
                 // 行原文（锚）：必须是字符串、不超过 4 KiB 字节、合法 UTF-8（空串合法 —— 空行上的书签）。
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", 5}}})}},
@@ -771,12 +782,13 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}},
                                             {{"path", "src/x.cpp"}, {"line", 3}}})}},
                 {{"bookmarks", Json::array({{{"path", std::string("\xC0\xAF", 2)}, {"line", 3}}})}},
-                // bookmarksView（IDEA BookmarksViewState）：只接受三个有落点的布尔开关。
+                // bookmarksView（IDEA BookmarksViewState）：只接受有落点的布尔开关（含 rewriteBookmarkType）。
                 {{"bookmarksView", Json::array()}}, {{"bookmarksView", "on"}},
                 {{"bookmarksView", {{"groupLineBookmarks", "true"}}}},
                 {{"bookmarksView", {{"groupLineBookmarks", 1}}}},
                 {{"bookmarksView", {{"showPreview", true}}}},
                 {{"bookmarksView", {{"askBeforeDeletingLists", true}}}},
+                {{"bookmarksView", {{"rewriteBookmarkType", "yes"}}}},
             };
             for (const auto& patch : rejected)
                 expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, patch); });

@@ -17,6 +17,7 @@ export interface NavigateContext {
   openSearchEverywhere: any
   openGoLine: any
   openMnemonicPrompt: any
+  bookmarkMnemonicLabel: () => string
   openPalette: any
   openRecentFiles: any
   openRecentPlaces: any
@@ -82,7 +83,9 @@ export function createNavigateMenuRows(ctx: NavigateContext): MenuRow[] {
     // the jump row appears here.
     { id: 'navigate.rule2', rule: true },
     { id: 'navigate.bookmark', title: '切换书签', keys: 'F11', keywords: 'bookmark toggle 书签', enabled: ctx.hasEditor, run: () => ctx.toggleBookmark() },
-    { id: 'navigate.bookmarkMnemonic', title: '为书签编号…', keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: ctx.hasEditor, run: ctx.openMnemonicPrompt },
+    // 标题随状态变：没有书签=添加助记书签… / 有书签没助记键=指定助记符… / 有助记键=更改助记符…
+    // （上游 `ChooseBookmarkTypeAction.update:33-41`；文案取中文包的 BookmarkBundle。）
+    { id: 'navigate.bookmarkMnemonic', title: () => ctx.bookmarkMnemonicLabel(), keys: 'Ctrl F11', keywords: 'bookmark mnemonic digit 书签编号', enabled: ctx.hasEditor, run: ctx.openMnemonicPrompt },
     { id: 'navigate.bookmarkNext', title: '下一个书签', keywords: 'next bookmark project wide 下一个书签', run: () => ctx.cycleBookmark(false) },
     { id: 'navigate.bookmarkPrevious', title: '上一个书签', keywords: 'previous bookmark project wide 上一个书签', run: () => ctx.cycleBookmark(true) },
     { id: 'view.bookmarks', title: '书签窗口', keys: 'Shift F11', keywords: 'bookmarks tool window list 书签窗口', enabled: () => Boolean(ctx.workspace.value), run: () => ctx.showView('bookmarks') },

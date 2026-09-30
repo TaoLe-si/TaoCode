@@ -818,6 +818,21 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .mnemonic-grid kbd { color: var(--accent); font-size: 12px; }
 .mnemonic-grid span { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .mnemonic-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
+/* 选择器的两栏（数字 / 字母）、说明行、描述输入与图例 —— 上游 BookmarkTypeChooser 的 RowGridLayout
+   两栏 + comment + description 输入框 + 两个图例点（BookmarkTypeChooser.kt:92-121,151-166）。 */
+.mnemonic-comment { margin: 0; padding: 0 14px 6px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.mnemonic-columns { display: flex; gap: var(--space-3); padding: 0 14px; }
+.mnemonic-columns .mnemonic-grid { flex: 1; padding: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.mnemonic-grid-letters { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; }
+.mnemonic-grid > button.mnemonic-current { background: var(--accent); border-color: var(--accent); }
+.mnemonic-grid > button.mnemonic-current kbd, .mnemonic-grid > button.mnemonic-current span { color: var(--accent-text, #fff); }
+.mnemonic-grid > button.mnemonic-assigned { background: var(--warning-soft, #f7c77733); border-color: var(--warning, #f7c777); }
+.mnemonic-description { margin: var(--space-2) 14px; width: calc(100% - 28px); padding: 5px var(--space-2); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 12px; }
+.mnemonic-legend { display: flex; align-items: center; gap: var(--space-1); padding: 0 14px 8px; color: var(--muted); font-size: 11px; }
+.mnemonic-legend .mnemonic-dot { width: 8px; height: 8px; margin-left: var(--space-2); border-radius: 50%; background: var(--warning, #f7c777); }
+.mnemonic-legend .mnemonic-dot.current { background: var(--accent); }
+.mnemonic-confirm { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); }
+.mnemonic-confirm p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .help-dialog { position: relative; width: 520px; max-width: 100%; max-height: 100%; overflow: auto; padding: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--elevated); box-shadow: var(--shadow-3); }
 .help-close { position: absolute; right: 13px; top: 13px; }
 .help-dialog h2 { font: 22px var(--font-brand); color: var(--bright); padding-right: 20px; }

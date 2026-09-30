@@ -62,9 +62,38 @@
     （上游 `getDescription:579-585` 的顺序），持久化字段名与上游一致。真机取证：第 6 行 Shift+左 选中 4 个
     字符再 F11 → 项目设置 `{"line":6,"path":"README.md","text":"probe line …","description":"940"}` ——
     锚是整行、描述是选中那段，各就各位。
-② **书签类型与文件书签**：`BookmarkType`（`Bookmark.java:181`）与 `addFileBookmark`
-   （`BookmarkManager.java:120-125`，行 `-1`）—— 本仓只有行书签；书签类型还是那三个"没渲染"的
-   视图开关（`rewriteBookmarkType` 等）的前置。
+② **书签类型（= 助记键）—— ✅ 已做（第七十三批）；文件书签未做**。
+   **先更正"书签类型"是什么**：2026.2 的 `BookmarkType` 就是**助记键枚举** ——
+   `platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:24-45`：
+   `DIGIT_1..DIGIT_0`、`LETTER_A..LETTER_Z`、`DEFAULT(mnemonic = 0)`，外加 `BookmarkIcon`
+   把字符画在书签图标上（`:80-115`）——**不是**颜色/图标类型体系（旧记法把它想复杂了）。
+   于是"类型"这一条的用户可见面是：
+   · 助记键可选 **0-9 与 A-Z 共 36 个**，选择器是 `ToggleBookmarkWithMnemonic` →
+     `ChooseBookmarkTypeAction`（`resources/intellij.platform.bookmarks.xml:67`）→
+     `BookmarkTypeChooser`（两块网格按 `isDigit()`/`isLetter()` 分栏 `:151-166`、说明行、描述输入框、
+     两个图例点 `:205-222`），标题随状态三段（`ChooseBookmarkTypeAction:33-41`）；
+   · 摘掉助记键 = `DeleteMnemonicFromBookmark` → `DeleteBookmarkTypeAction`（`:68`，`setType(DEFAULT)`）；
+   · 跳转 = 每个助记键一个动作（`xml:81-117` 的 `GotoBookmark0..9/A..Z`，菜单文案「转到书签 {0}」），
+     **只有 0-9 有默认键位**（`keymaps/$default.xml:173-197` 的 `control 0..9`），字母没有全局键
+     （书签窗口内的裸键 `actions/extensions.kt:126-135`）；
+   · 改贴一个**已被占用**的助记键：`BookmarksManagerImpl.canRewriteType:262-283` 先问
+     （`rewriteBookmarkType` 开着就直接改；确认框带"不再询问"回写这个开关），同意后
+     `rewriteType:285-295` 把老的那条**行书签整条删掉**（不是摘它的编号）。
+   **本仓落地**：`Bookmark.mnemonic` 由数字改成单个字符（上游 XML 存的也是字符：
+   `BookmarkManager.writeExternal:337-340`），`src/bookmarks.ts` 的 `BOOKMARK_MNEMONICS` /
+   `normalizeMnemonic` / 重写语义（`placeBookmark(..., rewrite)`）；
+   选择器拆成 `src/components/BookmarkMnemonicChooser.vue`（数字+字母两栏、描述输入、图例、状态标题、
+   重写确认、「移除助记键」，文案逐条取本机 IDEA 2026.2 中文包）；导航菜单 36 行「转到书签 {0}」；
+   齿轮补上「重写助记键之前询问」（选中态取反，默认选中 —— `RewriteBookmarkTypeToggleAction:17-27`）；
+   持久化白名单放行字符形式并**兼容旧整数**（老状态文件不因这次扩展变成坏的）。
+   **真机取证（本轮）**：选择器标题随状态（「指定助记符…」）、两栏 `10 + 26`、说明/图例/「描述(可选)」
+   都在；敲 `A` 直接落盘 `{"line":8,"mnemonic":"A"}`；改贴已占用的 A 时弹
+   「A 助记键已被占用（README.md:8）。是否要重写?」（重写 / 重写且不再询问 / 取消），点「重写」后
+   老的从持久化里消失、新的拿到 A；气球按"有没有全局键"分别说「Ctrl+3 跳转」与「导航菜单：转到书签 A」。
+   **仍未做**：`FileBookmark`（文件书签，行 `-1`；上游由 `manager.createBookmark(file)` 从项目树/编辑器
+   标签右键产生，见 `actions/extensions.kt:58-72`）、命名/分组书签列表（`BookmarkGroup`、
+   `GroupCreateDialog`、把某个列表标为默认）、`EditBookmark`（F2 改描述）、`AddAnotherBookmark`、
+   `BookmarkOpenTabs`。
 ③ **列表项的富渲染**：`BookmarkItem.setupRenderer`（`:46-86` 图标 + 描述 + 行的文本）、
    `speedSearchText`（`:104`）、`footerText`（`:109`）—— 本仓面板只有编号/文件/行号。
 

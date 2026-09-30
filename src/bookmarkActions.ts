@@ -6,7 +6,8 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkAnchor, bookmarkOwner, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks } from './bookmarks'
+import { bookmarkAnchor, bookmarkDescription, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, withoutMnemonic } from './bookmarks'
+import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
@@ -27,6 +28,8 @@ export interface BookmarkActionsDeps {
   editorContent?: (path: string) => string | undefined
   /** 编辑器里当前选中的文本（上游 F11 用它当自定义描述，见 Bookmark.description）。 */
   selection?: (path: string) => string | undefined
+  /** 写回书签视图设置（「不再询问」把 `rewriteBookmarkType` 打开，见 canRewriteType:276-280）。 */
+  updateBookmarkViewSettings: (patch: Partial<BookmarksViewSettings>) => void
   revealLocation: (target: { path: string; line: number }) => unknown
 }
 
@@ -43,6 +46,7 @@ export function notifyEditorContentChanged(path: string, content: string): void 
 export function createBookmarkActions(deps: BookmarkActionsDeps) {
   const isDesktop = deps.isDesktop
   const { menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation } = deps
+  const viewSettings = (): BookmarksViewSettings => ({ ...DEFAULT_BOOKMARKS_VIEW, ...(projectSettings.value.bookmarksView ?? {}) })
   const bookmarks = ref<Bookmark[]>([])
   const sortedAll = computed(() => sortedBookmarks(bookmarks.value))
   const bookmarkLines = computed(() => {
@@ -50,7 +54,16 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     for (const entry of bookmarks.value) (map[entry.path] ??= []).push(entry.line)
     return map
   })
-  const mnemonicPrompt = ref<{ path: string; line: number } | null>(null)
+  /**
+   * 助记键选择器（上游 `BookmarkTypeChooser`，`actions/BookmarkTypeChooser.kt`）。
+   * 状态比原来多两样：这条书签**当前**的助记键（网格要标出"当前"）与描述（映射到那个描述输入框）。
+   */
+  const mnemonicPrompt = ref<{ path: string; line: number; current?: string; description?: string } | null>(null)
+  /**
+   * "这个助记键已被占用，是否重写" 的确认态（上游 `BookmarksManagerImpl.canRewriteType:262-283`：
+   * `rewriteBookmarkType` 关着时弹一个带「重写」按钮的警告，还有"不再询问"把开关写回去）。
+   */
+  const rewriteAsk = ref<{ path: string; line: number; mnemonic: string; description?: string; owner: Bookmark } | null>(null)
   // 行号越界被删掉的书签（会话内）。上游的 `myDeletedDocumentBookmarks` 也不进持久化状态
   // （`getState()` 只给书签表），撤销时按"同一行号 + 同一行原文"放回去。
   let dropped: Bookmark[] = []
@@ -83,16 +96,20 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
         .catch(error => deps.notify(`书签未能保存：${errorMessage(error)}`, true))
     }, 600)
   }
-  function placeAt(path: string, line: number, mnemonic?: number, content?: string, description?: string) {
+  function placeAt(path: string, line: number, mnemonic?: string, content?: string, description?: string, rewrite = true) {
     const lineText = content === undefined ? undefined : bookmarkAnchor(content.split(String.fromCharCode(10))[line - 1] ?? '')
-    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText, description)
+    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText, description, rewrite)
     const keptEntry = bookmarks.value.find(entry => entry.path === path && entry.line === line)
     if (keptEntry) rememberPlace({ kind: '书签', path, line: line - 1, label: keptEntry.mnemonic === undefined ? baseName(path) + ':' + line : `${keptEntry.mnemonic} · ${baseName(path)}:${line}` })
     const kept = bookmarks.value.find(entry => entry.path === path && entry.line === line)
-    deps.notify(kept ? (kept.mnemonic === undefined ? `书签 ${path}:${line}` : `书签 ${path}:${line} 编号 ${kept.mnemonic}（Ctrl+${kept.mnemonic} 跳转）`) : `已取消书签 ${path}:${line}`)
+    // 跳法只有数字键有默认键位（`$default.xml` 173-197 只给了 Ctrl+0..9）；字母在 IDEA 里
+    // 也没有全局键（书签窗口内的裸键 + `Bookmarks.Goto` 菜单），所以提示要分开说。
+    const how = kept?.mnemonic === undefined ? ''
+      : kept.mnemonic >= '0' && kept.mnemonic <= '9' ? `（Ctrl+${kept.mnemonic} 跳转）` : `（导航菜单：转到书签 ${kept.mnemonic}）`
+    deps.notify(kept ? (kept.mnemonic === undefined ? `书签 ${path}:${line}` : `书签 ${path}:${line} 助记键 ${kept.mnemonic}${how}`) : `已取消书签 ${path}:${line}`)
     persistBookmarks()
   }
-  function toggleBookmark(mnemonic?: number) {
+  function toggleBookmark(mnemonic?: string) {
     const tab = active.value
     if (!tab) return
     // 放书签时把那一行原文一起记下（上游的 `myBeforeChangeData` 记的是同一个东西，只是记在变更前）。
@@ -105,17 +122,66 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     const tab = active.value
     if (!tab) return
     menu.value = null
-    mnemonicPrompt.value = { path: tab.path, line: tab.line }
+    rewriteAsk.value = null
+    const here = bookmarks.value.find(entry => entry.path === tab.path && entry.line === tab.line)
+    mnemonicPrompt.value = { path: tab.path, line: tab.line, current: here?.mnemonic, description: here === undefined ? undefined : bookmarkDescription(here) }
   }
-  function pickMnemonic(digit: number) {
+  /**
+   * 选了一个助记键（网格点击 / 直接敲键）。助记键被别的书签占着时要先确认 ——
+   * 上游 `canRewriteType`：`rewriteBookmarkType` 打开就直接改，否则弹确认，确认后老的那条被删掉
+   * （`rewriteType:285-295`）。
+   */
+  function pickMnemonic(value: string, description?: string) {
+    const at = mnemonicPrompt.value
+    if (!at) return
+    const mnemonic = normalizeMnemonic(value)
+    if (mnemonic === undefined) return
+    const squatted = bookmarkOwner(bookmarks.value, mnemonic)
+    const wanted = description ?? at.description
+    const other = squatted !== undefined && !(squatted.path === at.path && squatted.line === at.line)
+    if (other && !viewSettings().rewriteBookmarkType) {
+      rewriteAsk.value = { path: at.path, line: at.line, mnemonic, description: wanted, owner: squatted }
+      return
+    }
+    mnemonicPrompt.value = null
+    rewriteAsk.value = null
+    placeAt(at.path, at.line, mnemonic, deps.editorContent?.(at.path), wanted, true)
+  }
+  /** 确认重写：同一次选择继续走（老主人被删）。 */
+  function confirmRewrite() {
+    const ask = rewriteAsk.value
+    rewriteAsk.value = null
+    if (!ask) return
+    mnemonicPrompt.value = null
+    placeAt(ask.path, ask.line, ask.mnemonic, deps.editorContent?.(ask.path), ask.description, true)
+  }
+  /** 「不再询问」：写回 `rewriteBookmarkType`（上游那个 DoNotAskOption 的回写，`:276-280`）。 */
+  function dontAskRewrite() {
+    deps.updateBookmarkViewSettings({ rewriteBookmarkType: true })
+    confirmRewrite()
+  }
+  /** 菜单里那一行的标题随状态变（上游 `ChooseBookmarkTypeAction.update:33-41` 的三段文案）。 */
+  function bookmarkMnemonicLabel(): string {
+    const tab = active.value
+    const here = tab === undefined ? undefined : bookmarks.value.find(entry => entry.path === tab.path && entry.line === tab.line)
+    if (here === undefined) return '添加助记书签…'
+    return here.mnemonic === undefined ? '指定助记符…' : '更改助记符…'
+  }
+  /** 「移除助记键」= 上游 `DeleteBookmarkTypeAction`（可见文案取自 `BookmarksView.DeleteType.text`）：
+   *  把这条书签的助记键摘掉（`setType(bookmark, DEFAULT)`），书签本身留着。 */
+  function removeMnemonic() {
     const at = mnemonicPrompt.value
     if (!at) return
     mnemonicPrompt.value = null
-    placeAt(at.path, at.line, digit)
+    rewriteAsk.value = null
+    bookmarks.value = bookmarks.value.map(entry =>
+      entry.path === at.path && entry.line === at.line ? withoutMnemonic(entry) : entry)
+    persistBookmarks()
   }
-  function jumpMnemonic(digit: number) {
-    const found = bookmarkOwner(bookmarks.value, digit)
-    if (!found) { deps.notify(`没有编号 ${digit} 的书签（Ctrl+F11 可以贴编号）。`, true); return }
+  /** 转到某个助记键的书签（上游 `GotoBookmarkTypeAction`，菜单文案「转到书签 {0}」）。 */
+  function jumpMnemonic(mnemonic: string) {
+    const found = bookmarkOwner(bookmarks.value, normalizeMnemonic(mnemonic) ?? mnemonic)
+    if (!found) { deps.notify(`没有助记键 ${mnemonic} 的书签（Ctrl+F11 可以贴一个）。`, true); return }
     void revealLocation({ path: found.path, line: found.line - 1 })
   }
   // IDEA walks the whole project, not just the open file, and wraps around.
@@ -129,13 +195,14 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     bookmarks.value = removeBookmark(bookmarks.value, entry)
     persistBookmarks()
   }
-  function mnemonicOwner(digit: number) {
-    const found = bookmarkOwner(bookmarks.value, digit)
+  function mnemonicOwner(mnemonic: string) {
+    const found = bookmarkOwner(bookmarks.value, mnemonic)
     return found ? `${found.path.split('/').pop()}:${found.line}` : '—'
   }
 
   return {
-    bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
+    bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
+    confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,
     jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,

@@ -8,6 +8,7 @@ const mark = (path, line, mnemonic) => (mnemonic === undefined ? { path, line } 
 test('the view defaults match BookmarksViewState', () => {
   assert.deepEqual(DEFAULT_BOOKMARKS_VIEW, {
     groupLineBookmarks: true,
+    rewriteBookmarkType: false,
     autoscrollToSource: false,
     autoscrollFromSource: false,
   })

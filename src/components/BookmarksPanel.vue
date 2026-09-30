@@ -76,6 +76,9 @@ function onKeydown(event: KeyboardEvent) {
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.groupLineBookmarks" @click="toggle({ groupLineBookmarks: !settings.groupLineBookmarks })">
           <span class="gear-check"><ListTree :size="13" /></span><span>按文件分组行书签</span><span v-if="settings.groupLineBookmarks" class="gear-on"><Check :size="12" /></span>
         </button>
+        <button type="button" role="menuitemcheckbox" :aria-checked="!settings.rewriteBookmarkType" @click="toggle({ rewriteBookmarkType: !settings.rewriteBookmarkType })">
+          <span class="gear-check"><ListTree :size="13" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><Check :size="12" /></span>
+        </button>
         <div class="gear-rule" role="separator" />
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollToSource" @click="toggle({ autoscrollToSource: !settings.autoscrollToSource })">
           <span class="gear-check" /><span>自动滚动到源代码</span><span v-if="settings.autoscrollToSource" class="gear-on"><Check :size="12" /></span>

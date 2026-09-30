@@ -79,7 +79,7 @@ export interface KeymapContext {
   hideActiveToolWindow: () => void
   inlineVariable: () => void
   jumpLastEditLocation: () => void
-  jumpMnemonic: (digit: number) => void
+  jumpMnemonic: (mnemonic: string) => void
   jumpToLastToolWindow: () => void
   maximizeActiveToolWindow: () => void
   moveActiveFile: () => unknown
@@ -107,7 +107,7 @@ export interface KeymapContext {
   openSettings: (id?: any) => unknown
   openSymbol: (mode: 'file' | 'global' | 'class') => void
   openWorkspace: (path?: string) => unknown
-  pickMnemonic: (digit: number) => void
+  pickMnemonic: (mnemonic: string, description?: string) => void
   rerunLast: () => unknown
   resolveConflictKeep: () => void
   restoreCurrentToolLayout: () => void
@@ -129,7 +129,7 @@ export interface KeymapContext {
   startBuild: (rebuild: boolean) => unknown
   stopRun: () => unknown
   stretchToolWindow: (direction: any) => void
-  toggleBookmark: (digit?: number) => void
+  toggleBookmark: (mnemonic?: string) => void
   toggleBreakpointAt: (path: string, line: number) => unknown
   toggleMaximizeEditor: () => void
   updateProject: () => unknown
@@ -196,7 +196,12 @@ function onKey(event: KeyboardEvent) {
     return
   }
   const digit = /^Digit([0-9])$/.exec(event.code)?.[1]
-  if (digit !== undefined && mnemonicPrompt.value) { event.preventDefault(); pickMnemonic(Number(digit)); return }
+  // 选择器开着时**直接敲键**就贴上去（上游 `mnemonic.chooser.comment`：快速设置 —— 输入或双击助记键）：
+  // 数字与字母都认，字母没有全局键（`$default.xml` 只给了 Ctrl+0..9），只在这个弹层里有意义。
+  if (mnemonicPrompt.value) {
+    const typed = /^[0-9A-Za-z]$/.test(event.key) ? event.key : undefined
+    if (typed !== undefined) { event.preventDefault(); pickMnemonic(typed); return }
+  }
   // RecentLocations popup owns the keyboard while open (IDEA's popup list: Up/Down
   // move, Enter jumps, Delete drops the place, Ctrl+E toggles the edited filter).
   if (placesPrompt.value) {
@@ -279,7 +284,7 @@ function onKey(event: KeyboardEvent) {
   }
   if (digit !== undefined && event.ctrlKey && !event.altKey) {
     event.preventDefault()
-    if (event.shiftKey) toggleBookmark(Number(digit)); else jumpMnemonic(Number(digit))
+    if (event.shiftKey) toggleBookmark(digit); else jumpMnemonic(digit)
     return
   }
   // Ctrl+Shift+Backspace = Jump to Last Change (project-wide).

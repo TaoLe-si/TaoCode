@@ -303,8 +303,8 @@ Json project_defaults() {
             // Upstream predefined local colors require scope providers; do not invent path-based defaults here.
             {"fileColors", Json::array()}, {"localFileColors", Json::array()},
             // 书签工具窗口的视图状态（IDEA `BookmarksViewState`，workspace.xml，默认值见 :23-29）。
-            {"bookmarksView", {{"groupLineBookmarks", true}, {"autoscrollToSource", false},
-                               {"autoscrollFromSource", false}}},
+            {"bookmarksView", {{"groupLineBookmarks", true}, {"rewriteBookmarkType", false},
+                               {"autoscrollToSource", false}, {"autoscrollFromSource", false}}},
             // VCS Log 的 UI 开关（IDEA `VcsLogApplicationSettings` 的 SHOW_TAG_NAMES / SHOW_ROOT_NAMES）。
             {"vcsLog", {{"showTagNames", true}, {"showRootNames", true}}},
             {"todoPatterns", default_todo_markers()},
@@ -488,7 +488,7 @@ void validate_bookmarks(const Json& values) {
     if (values.size() > max_bookmarks)
         fail("INVALID_SETTINGS", "每个项目的书签不能超过 " + std::to_string(max_bookmarks) + " 个。");
     std::set<std::string> places;
-    std::set<int> digits;
+    std::set<std::string> mnemonics;
     for (const auto& value : values) {
         if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?, text?, description?}。");
         known_keys(value, {"path", "line", "mnemonic", "text", "description"}, "INVALID_SETTINGS");
@@ -521,11 +521,28 @@ void validate_bookmarks(const Json& values) {
             if (field_text.size() > max_bookmark_text || !valid_utf8(field_text))
                 fail("INVALID_SETTINGS", std::string("书签的") + label + "不能超过 4096 字节且必须是 UTF-8。");
         }
+        // 助记键：上游 2026.2 就是 `BookmarkType` 的一个枚举值（0-9 与 A-Z，
+        // `platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:24-45`），
+        // 持久化成**单个字符**（`BookmarkManager.writeExternal:337-340`
+        // `bookmarkElement.setAttribute("mnemonic", String.valueOf(mnemonic))`）。
+        // 本仓原来只收 0-9 的整数：读旧文件时按整数迁移成字符，写出去一律是字符。
         if (!value.contains("mnemonic")) continue;
-        if (!value.at("mnemonic").is_number_integer() || value.at("mnemonic") < 0 || value.at("mnemonic") > 9)
-            fail("INVALID_SETTINGS", "书签编号只能是 0 到 9 的整数。");
-        if (!digits.insert(value.at("mnemonic").get<int>()).second)
-            fail("INVALID_SETTINGS", "同一个编号只能贴在一个书签上。");
+        std::string mnemonic;
+        if (value.at("mnemonic").is_number_integer()) {
+            const auto legacy = value.at("mnemonic").get<int>();
+            if (legacy < 0 || legacy > 9)
+                fail("INVALID_SETTINGS", "助记键只能是 0-9 或 A-Z 的单个字符。");
+            mnemonic = std::string(1, static_cast<char>('0' + legacy));
+        } else if (value.at("mnemonic").is_string()) {
+            mnemonic = value.at("mnemonic").get<std::string>();
+        } else {
+            fail("INVALID_SETTINGS", "助记键只能是 0-9 或 A-Z 的单个字符。");
+        }
+        if (mnemonic.size() != 1 ||
+            !((mnemonic[0] >= '0' && mnemonic[0] <= '9') || (mnemonic[0] >= 'A' && mnemonic[0] <= 'Z')))
+            fail("INVALID_SETTINGS", "助记键只能是 0-9 或 A-Z 的单个字符。");
+        if (!mnemonics.insert(mnemonic).second)
+            fail("INVALID_SETTINGS", "同一个助记键只能贴在一个书签上。");
     }
 }
 
@@ -755,11 +772,13 @@ void validate_project_patch(const Json& patch) {
     if (patch.contains("scopes")) validate_scopes(patch.at("scopes"));
     for (const auto* key : {"localFileColors", "fileColors"}) if (patch.contains(key)) validate_file_colors(patch.at(key));
     if (patch.contains("bookmarksView")) {
-        // 只收录有真实落点的三个开关（IDEA 还有 askBeforeDeletingLists / showPreview /
-        // rewriteBookmarkType，本仓没有对应概念，故不接受它们 —— 免得存下一个没人读的值）。
+        // 只收录有真实落点的四个开关（IDEA 还有 askBeforeDeletingLists / showPreview，
+        // 本仓没有对应概念，故不接受它们 —— 免得存下一个没人读的值）。
+        // `rewriteBookmarkType` 第七十三批接上了落点：改贴已占用的助记键时是否还问
+        // （`BookmarksManagerImpl.canRewriteType:262-283`），齿轮里那一行也是它。
         const auto& view = patch.at("bookmarksView");
         if (!view.is_object()) fail("INVALID_SETTINGS", "bookmarksView 必须是对象。");
-        known_keys(view, {"groupLineBookmarks", "autoscrollToSource", "autoscrollFromSource"}, "INVALID_SETTINGS");
+        known_keys(view, {"groupLineBookmarks", "rewriteBookmarkType", "autoscrollToSource", "autoscrollFromSource"}, "INVALID_SETTINGS");
         for (auto it = view.begin(); it != view.end(); ++it)
             if (!it.value().is_boolean()) fail("INVALID_SETTINGS", "bookmarksView 的值必须是布尔值。");
     }

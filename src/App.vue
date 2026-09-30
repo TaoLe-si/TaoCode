@@ -13,6 +13,7 @@ import TodoPanel from './components/TodoPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import TestRunnerPanel from './components/TestRunnerPanel.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
+import BookmarkMnemonicChooser from './components/BookmarkMnemonicChooser.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
@@ -90,7 +91,7 @@ import { themeRipple } from './themeRipple'
 import { parseAnyIssue } from './buildOutput'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings, type CommitMessageInspectionSettings } from './commitMessageInspection'
 import { rankCommands } from './commandSearch'
-import { bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
+import { BOOKMARK_MNEMONICS, bookmarkOwner, nextBookmark as nextInList, placeBookmark, removeBookmark, sortedBookmarks } from './bookmarks'
 import { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, swapGroups, tabClosingOrder, type Pane, type SplitModel } from './editorGroups'
 import { dropSideFor, dropSidePutsNewGroupFirst, splitOrientationForSide, updateBoundsWithDropSide, type DropSide } from './tabDragSplit'
 import { MIN_TAB_WIDTH, layoutSingleRow, preferredTabWidth, type TabStripLayout } from './tabStripLayout'
@@ -1312,10 +1313,11 @@ const {
 })
 // 书签是一个域（书签表 + 助记符 + 跳转，状态在模块里自持）。
 const {
-  bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
-  useProjectSettings, digits, bookmarkSave,
-  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,
-} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText() })
+  bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic, confirmRewrite, dontAskRewrite, removeMnemonic,
+  useProjectSettings, bookmarkSave,
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel,
+} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(),
+  updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
 // language-neutral templates in surround.ts.
@@ -1535,7 +1537,7 @@ const viewMenuContext: ViewMenuContext = {
   chooseBackgroundImage: () => void chooseBackgroundImage(), editorSettings, explorer, fileTreeRef, saveSettingsPatch, showOutput, splitOrientation, splitTabOut, theme, togglePowerSave, toggleZenMode, unsplit, unsplitAll, workspace, zenMode, hasEditor, editable, toolWindow, localHistoryDialog: localHistoryDialogRow, changeSplitOrientation, isDesktop, activateToolWindow, toolDisabled }
 const viewMenuRows = createViewMenuRows(viewMenuContext)
 // 导航菜单：见 src/menus/navigateMenu.ts（一组一文件）。
-const navigateMenuContext: NavigateContext = { active, cycleBookmark, goBack, goForward, hasEditor, jumpLastEditLocation, jumpMethod, lspReady, navBack, navForward, openActionSearch: () => openActionSearch(), openSearchEverywhere: () => openSearchEverywhere(), openGoLine, openMnemonicPrompt, openPalette, openRecentFiles, openRecentPlaces, openSymbol, runEditor, openSelectIn, showNavBar, showView, toggleBookmark, workspace }
+const navigateMenuContext: NavigateContext = { active, cycleBookmark, goBack, goForward, hasEditor, jumpLastEditLocation, jumpMethod, lspReady, navBack, navForward, openActionSearch: () => openActionSearch(), openSearchEverywhere: () => openSearchEverywhere(), openGoLine, openMnemonicPrompt, bookmarkMnemonicLabel, openPalette, openRecentFiles, openRecentPlaces, openSymbol, runEditor, openSelectIn, showNavBar, showView, toggleBookmark, workspace }
 const navigateMenuRows = createNavigateMenuRows(navigateMenuContext)
 // 代码菜单：见 src/menus/codeMenu.ts（一组一文件）。
 const codeMenuContext: CodeMenuContext = { hasEditor, active, lspReady, isDesktop, editable, semantic, openTemplateChooser, openSurround, openGeneratePopup, showQuickDoc, copyReference, runOrganizeImports, showBlame, blameEnabled: () => blameEnabled.value, compareWithClipboard, copyFilePath, workspace, caretPayload, openCodeActions, runWorkspaceInspection: runWorkspaceInspectionAction }
@@ -1674,7 +1676,7 @@ const {
   openActionSearch, moveAction, runAction, runActionResult, flattenMenuRows, editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, toolWindowGearRows, bottomGearRows,
 } = createMenuUi({
   notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows, pluginList,
-  digits, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, bottomGearHostRows: () => usageViewGearRows(bottomTab.value),
+  mnemonics: BOOKMARK_MNEMONICS, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, bottomGearHostRows: () => usageViewGearRows(bottomTab.value),
   openWorkspace: (...a) => openWorkspace(...a), // 惰性：工作区生命周期模块装配在本块之后。
   // 只挂在弹出组上的动作：`Gradle.ImportExternalProject` 进项目树右键与 EditorPopupMenu，不进主菜单
   // （可见性判据与上游 `isVisible` 同一条：文件名 ∈ KNOWN_GRADLE_FILES 且该目录还没有链接设置）。
@@ -2679,13 +2681,9 @@ onBeforeUnmount(() => {
     <div v-if="palette" class="modal-backdrop" @click.self="palette = false">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="转到文件" @keydown="trapFocus"><div class="palette-input"><Search :size="18" /><input ref="queryInput" v-model="query" placeholder="转到文件…" aria-label="搜索已打开或根目录文件" @keydown.down.prevent="paletteIndex = (paletteIndex + 1) % Math.max(1, candidates.length)" @keydown.up.prevent="paletteIndex = (paletteIndex + candidates.length - 1) % Math.max(1, candidates.length)" @keydown.enter="candidates[paletteIndex] && openFile(candidates[paletteIndex]!)" /><button class="icon-button" aria-label="关闭文件选择器" @click="palette = false"><X :size="16" /></button></div><div class="palette-scope">已打开文件与工作区根目录文件 · 子目录请在左侧展开</div><div class="palette-results"><button v-for="(path, index) in candidates" :key="path" :class="{ highlighted: index === paletteIndex }" @click="openFile(path)"><FileCode2 :size="15" /><span>{{ path }}</span><span v-if="path === activePath" class="small-muted">当前文件</span><ArrowRight :size="14" /></button><p v-if="!candidates.length" class="palette-empty">没有匹配的文件。先打开文件夹或在资源管理器中展开目录。</p></div></section>
     </div>
-    <div v-if="mnemonicPrompt" class="modal-backdrop" @click.self="mnemonicPrompt = null">
-      <section class="mnemonic-pop" role="dialog" aria-modal="true" aria-label="为书签编号" @keydown="trapFocus">
-        <div class="palette-scope">给 {{ mnemonicPrompt.path }}:{{ mnemonicPrompt.line }} 贴一个 0-9 编号 · 直接按数字键，Ctrl+编号 随时跳回</div>
-        <div class="mnemonic-grid"><button v-for="digit in digits" :key="digit" :title="mnemonicOwner(digit)" @click="pickMnemonic(digit)"><kbd>{{ digit }}</kbd><span>{{ mnemonicOwner(digit) }}</span></button></div>
-        <div class="mnemonic-foot"><button class="subtle-button" @click="toggleBookmark(); mnemonicPrompt = null">不编号，只标记（F11）</button><button class="icon-button" aria-label="关闭编号选择" @click="mnemonicPrompt = null"><X :size="16" /></button></div>
-      </section>
-    </div>
+    <BookmarkMnemonicChooser v-if="mnemonicPrompt" :prompt="mnemonicPrompt" :rewrite="rewriteAsk" :owner-of="mnemonicOwner" :trap-focus="trapFocus"
+                            @pick="pickMnemonic" @remove="removeMnemonic" @confirm="confirmRewrite" @dont-ask="dontAskRewrite"
+                            @close="mnemonicPrompt = null; rewriteAsk = null" />
     <div v-if="surroundPrompt" class="modal-backdrop" @click.self="surroundPrompt = false">
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="用模板包裹" @keydown="trapFocus"><div class="palette-input"><Braces :size="18" /><input ref="surroundInput" v-model="surroundQuery" placeholder="包裹选中代码…（未选中则包裹当前行）" aria-label="选择包裹模板" @keydown.down.prevent="moveSurround(1)" @keydown.up.prevent="moveSurround(-1)" @keydown.enter.prevent="applySurround(surroundChoices[surroundIndex])" /><button class="icon-button" aria-label="关闭包裹选择" @click="surroundPrompt = false"><X :size="16" /></button></div><div class="palette-scope">Surround With · {{ surroundChoices.length }}/{{ surroundTemplates.length }} 个模板 · 回车应用，Ctrl Alt T 随时唤起</div><div class="palette-results"><button v-for="(template, index) in surroundChoices" :key="template.title" :class="{ highlighted: index === surroundIndex }" @click="applySurround(template)"><Braces :size="15" /><span>{{ template.title }}</span><span class="small-muted">{{ template.block ? '整块缩进' : '行内' }}</span><ArrowRight :size="14" /></button><p v-if="!surroundChoices.length" class="palette-empty">没有匹配的包裹模板。</p></div></section>
     </div>

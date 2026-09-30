@@ -4,7 +4,13 @@
 export interface Bookmark {
   path: string
   line: number
-  mnemonic?: number
+  /**
+   * 助记键：单个字符 `0-9` 或 `A-Z`。上游 2026.2 把它建成 `BookmarkType` 枚举
+   * （`platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:24-45`：
+   * DIGIT_1..DIGIT_0、LETTER_A..LETTER_Z、DEFAULT(无)，`get(mnemonic)`）；没有助记键的
+   * 书签就是 `BookmarkType.DEFAULT`（枚举里 mnemonic 为 0 的那一项）——本仓用"字段不存在"表示。
+   */
+  mnemonic?: string
   /** 放书签时那一行的原文（上游 `BookmarkManager` 的 `myBeforeChangeData` 记的是同一个东西）。 */
   text?: string
   /**
@@ -59,7 +65,7 @@ export function sortedBookmarks(list: readonly Bookmark[]): Bookmark[] {
   return [...list].sort(compare)
 }
 
-const withMnemonic = (entry: Bookmark, mnemonic?: number): Bookmark => {
+const withMnemonic = (entry: Bookmark, mnemonic?: string): Bookmark => {
   const next: Bookmark = { path: entry.path, line: entry.line }
   if (mnemonic !== undefined) next.mnemonic = mnemonic
   if (entry.text !== undefined) next.text = entry.text
@@ -73,14 +79,20 @@ const withMnemonic = (entry: Bookmark, mnemonic?: number): Bookmark => {
  * Ctrl+Shift+digit, i.e. it moves the digit to this line (freeing its old owner) and
  * removes the bookmark when the digit already sits here.
  */
-export function placeBookmark(list: readonly Bookmark[], path: string, line: number, mnemonic?: number, text?: string,
-                             description?: string): Bookmark[] {
+export function placeBookmark(list: readonly Bookmark[], path: string, line: number, mnemonic?: string, text?: string,
+                             description?: string, rewrite = true): Bookmark[] {
   const here = (entry: Bookmark) => entry.path === path && entry.line === line
   const existing = list.find(here)
   if (existing && (mnemonic === undefined || existing.mnemonic === mnemonic)) return list.filter(entry => !here(entry))
+  // 助记键被别的书签占着：上游 `BookmarksManagerImpl.canRewriteType:262-283` 先问（`rewriteBookmarkType`
+  // 打开时直接放行），同意之后 `rewriteType:285-295` 把老的那条**从所有分组里删掉**（行书签就是删除；
+  // 非行书签才降级成 DEFAULT）—— 所以这里同样是"删掉旧主人"，不是"摘掉它的编号"。
+  // `rewrite === false` = 用户在确认里选了取消：整件事作废（书签也不添加，与上游那条早退一致）。
+  const squatted = mnemonic === undefined ? undefined : list.find(entry => entry.mnemonic === mnemonic)
+  if (squatted !== undefined && !here(squatted) && !rewrite) return [...list]
   const freed = mnemonic === undefined
     ? [...list]
-    : list.map(entry => (entry.mnemonic === mnemonic ? withMnemonic(entry) : entry))
+    : list.filter(entry => entry.mnemonic !== mnemonic || here(entry))
   // 选中文字时 F11 记下的是**自定义**描述：它只在这条书签被放上时写一次（上游同样只在 toggle 之后 setDescription），
   // 之后不再跟着行内容走；行原文锚 `text` 仍由对账刷新。
   const extra = { ...(text === undefined ? {} : { text }), ...(description === undefined ? {} : { description }) }
@@ -90,7 +102,25 @@ export function placeBookmark(list: readonly Bookmark[], path: string, line: num
     : [...freed, withMnemonic(anchored, mnemonic)]
 }
 
-export function bookmarkOwner(list: readonly Bookmark[], mnemonic: number): Bookmark | undefined {
+/**
+ * 可用的助记键，顺序照 `BookmarkType.values()`：先 0-9（数字盘，`$default.xml` 174-197 给了
+ * Ctrl+0..9 的跳转键），再 A-Z（**默认键位表里没有全局键** —— 只有书签树内的裸键
+ * `extensions.kt:126-135` 与 `Bookmarks.Goto` 菜单里的「转到书签 {0}」行）。
+ */
+export const BOOKMARK_MNEMONICS: readonly string[] = [
+  ...'0123456789', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+]
+
+/** 是不是一个合法的助记键（单个 0-9 / A-Z 字符，大小写归一到大写）。 */
+export function normalizeMnemonic(value: string): string | undefined {
+  const upper = value.trim().toUpperCase()
+  return BOOKMARK_MNEMONICS.includes(upper) ? upper : undefined
+}
+
+/** 去掉助记键（上游 `DeleteBookmarkTypeAction` → `setType(bookmark, DEFAULT)`），书签本身留着。 */
+export const withoutMnemonic = (entry: Bookmark): Bookmark => withMnemonic(entry)
+
+export function bookmarkOwner(list: readonly Bookmark[], mnemonic: string): Bookmark | undefined {
   return list.find(entry => entry.mnemonic === mnemonic)
 }
 

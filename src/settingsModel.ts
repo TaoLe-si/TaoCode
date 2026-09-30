@@ -59,8 +59,9 @@ export interface NamedScopeSetting { name: string; pattern: string; shared: bool
 // 数组顺序即优先级（`FileColorsModel.findConfigurationWithScopeFilter:247-260` 首个命中就返回）。
 export type { FileColorSetting } from './fileColors.ts'
 import type { FileColorSetting } from './fileColors.ts'
-// 书签工具窗口的视图状态（IDEA `BookmarksViewState`）：只收录有真实落点的三个开关。
-export interface BookmarksViewState { groupLineBookmarks: boolean; autoscrollToSource: boolean; autoscrollFromSource: boolean }
+// 书签工具窗口的视图状态（IDEA `BookmarksViewState`）：只收录有真实落点的四个开关
+// （`rewriteBookmarkType` 的落点是"改贴已占用的助记键时是否还问"，见 bookmarkActions）。
+export interface BookmarksViewState { groupLineBookmarks: boolean; rewriteBookmarkType: boolean; autoscrollToSource: boolean; autoscrollFromSource: boolean }
 /**
  * 导出到 HTML 的设置（IDEA `ExportToHTMLSettings`，`:14-15`
  * `@State(name = "ExportToHTMLSettings", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))` ⇒ **项目级**）。
@@ -155,7 +156,7 @@ export const defaultProjectSettings: ProjectSettings = {
   // NamedScope.EMPTY_ARRAY: a fresh project has no scopes.
   scopes: [], fileColors: [], localFileColors: [],
   // BookmarksViewState 的默认值（platform/bookmarks/.../BookmarksViewState.kt:23-29）。
-  bookmarksView: { groupLineBookmarks: true, autoscrollToSource: false, autoscrollFromSource: false },
+  bookmarksView: { groupLineBookmarks: true, rewriteBookmarkType: false, autoscrollToSource: false, autoscrollFromSource: false },
   // 构建工具（IDEA 设置「构建、执行、部署 › 构建工具」）。**项目级**：IDEA 的
   // `ExternalSystemGroupConfigurable` 是 projectConfigurable，`GradleSettings` 存 `.idea/gradle.xml`。
   buildTools: structuredClone(DEFAULT_BUILD_TOOLS),

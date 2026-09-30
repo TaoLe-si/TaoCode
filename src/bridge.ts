@@ -1,5 +1,7 @@
 import { reactive } from 'vue'
 import { normalizeFileColor, normalizeFileColors } from './fileColors.ts'
+import { normalizeBookmarks, normalizeBookmarksView } from './bookmarkSettings.ts'
+import { errorMessage } from './errors.ts'
 // base64（桥上的二进制载荷）与 Gradle 同步通道都拆成了独立模块；这里转出给既有调用方。
 import { fromBase64, toBase64 } from './base64.ts'
 import { handleGradleEvent } from './gradleEvents.ts'
@@ -899,23 +901,16 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           ? { pattern: entry.pattern.trim(), description: entry.description.trim() }
           : { pattern: entry.pattern.trim(), description: entry.description.trim(), caseSensitive: entry.caseSensitive })
       }
+      // 书签两段的形状校验在 src/bookmarkSettings.ts（桥接文件贴着机检上限；那边也能单测）。
       if (params.bookmarks !== undefined) {
-        const list = params.bookmarks as Bookmark[]
-        const malformed = !Array.isArray(list) || list.length > 200 || list.some(entry =>
-          !entry || typeof entry.path !== 'string' || !entry.path || entry.path.startsWith('/') || entry.path.includes('\\') || entry.path.includes('..')
-          || !Number.isInteger(entry.line) || entry.line < 1 || entry.line > 1000000
-          || (entry.mnemonic !== undefined && (!Number.isInteger(entry.mnemonic) || entry.mnemonic < 0 || entry.mnemonic > 9)))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '书签要写成 {path, line, mnemonic?}：行号从 1 开始，编号只能是 0-9。')
-        next.bookmarks = list.map(entry => (entry.mnemonic === undefined ? { path: entry.path, line: entry.line } : { ...entry }))
+        try {
+          next.bookmarks = normalizeBookmarks(params.bookmarks)
+        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
       }
       if (params.bookmarksView !== undefined) {
-        const view = params.bookmarksView as Record<string, unknown>
-        const keys = ['groupLineBookmarks', 'autoscrollToSource', 'autoscrollFromSource']
-        const malformed = !view || typeof view !== 'object' || Array.isArray(view)
-          || Object.keys(view).some(key => !keys.includes(key))
-          || Object.entries(view).some(([, flag]) => typeof flag !== 'boolean')
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '书签视图设置要写成 {groupLineBookmarks, autoscrollToSource, autoscrollFromSource} 三个布尔值。')
-        next.bookmarksView = { ...(next.bookmarksView ?? defaultProjectSettings.bookmarksView!), ...view as unknown as BookmarksViewState }
+        try {
+          next.bookmarksView = { ...(next.bookmarksView ?? defaultProjectSettings.bookmarksView!), ...normalizeBookmarksView(params.bookmarksView) }
+        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
       }
       if (params.fileAssociations !== undefined) {
         const value = params.fileAssociations as Record<string, unknown>
