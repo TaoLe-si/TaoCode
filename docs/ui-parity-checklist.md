@@ -1067,6 +1067,18 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   启动后 `lsp.open` 那个 `AE2VMConfig.java`，再 `lsp.request {kind:'hover'|'definition', line:24, character:45}`
   指向 `net.minecraftforge.common.config.Configuration`：**回包里带 jar 路径 = 外部解析通了**；
   `available:false` = 文件仍不在源根里；无回包 = 服务端仍在导入（JDT 导入期间不答语义请求）。
+- [ ] **LSP 复验的精确落点（2026-10-01 实测）**：写入 `buildTools.gradle.enabled=false` 后在大工程上跑：
+  `definition` 从「20–28s 无回包」变成**立刻回包** ✓（导入 churn 让语义请求全悬死的那一半解决了），
+  但内容是 `{"available": false}` ✗ —— 外部类型仍未解析。两个候选原因（**各一次探针就能定死**）：
+  ① **时序**：启动后 5s 就 `lsp.open` 并立刻发问，而 `java.project.sourcePaths`/`referencedLibraries`
+  是随 `initialize` 的 settings 下去的 —— 文档可能先被当成"不在任何源根里"建了不可见工程。
+  验证：等 60s 再问一次，或等设置到达后重发 `lsp.open`（我倾向这条：磁盘上的 jar 与
+  `src/main/java` 都实打实存在）；
+  ② **glob 口径**：JDT 的 `referencedLibraries` 是否接受 `**/build/rfg/*.jar` 这类带 `**` 的相对模式、
+  是否相对**工作区根**解析 —— 需要看一次"服务器实际收到的那份 settings"（`TAOCODE_LSP_TRACE` 只记方法
+  不记 body，得临时打印合成的 settings，或问 JDT 的 `java.project.getClasspath`）。
+  探针注意：手写 `projects.json` 时**只加 `enabled` 一个字段**（其余形状照抄应用自己写的那份），
+  写完记得按备份还原、把 exe 与 java 都停掉。
 ## 已知抖动（不是缺陷，见到重跑一次）
 
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
