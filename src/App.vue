@@ -1164,7 +1164,6 @@ async function save(tab = active.value): Promise<boolean> {
     tab.content = content
     tab.version = result.version
     tab.dirty = false
-    editorFor(tab.path)?.markSaved()
     notify(isDesktop ? `已保存 ${tab.path} · ${result.bytes} 字节 · ${encodingLabels[tab.encoding]}` : `示例已保存到内存 · ${result.bytes} 字节（未写入磁盘）`)
     // IDEA's FileStatusManager fires a status change on save, which repaints the toolbar
     // filename widget; refresh the change list it reads so the colour follows the file.

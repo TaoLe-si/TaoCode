@@ -73,7 +73,6 @@ const codeLens = createCodeLens({
   view: () => view,
   onCommand: (command, args) => emit('codeLens', { command, arguments: args }),
 })
-let dirty = false
 let replacing = false
 // IDEA's Column Selection Mode: Alt+Shift+Insert toggles a mode where plain drags and
 // arrow keys select rectangles. The installed rectangularSelection only takes an
@@ -465,7 +464,6 @@ defineExpose({
   // 粘贴通道的实现在 src/editorPaste.ts（纯函数，接收 EditorView）
   insertText: (text: string) => (view ? insertTextAtCaret(view, text) : null),
   replaceRange: (from: number, to: number, text: string) => (view ? replaceInsertedRange(view, from, to, text) : false),
-  markSaved: () => { dirty = false },
   getCursor: () => {
     if (!view) return { line: 0, ch: 0 }
     const pos = view.state.selection.main.head
@@ -487,7 +485,6 @@ defineExpose({
     replacing = true
     try { editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value } }) }
     finally { replacing = false }
-    dirty = false
     if (props.lspEnabled) void request('lsp.change', { path: props.path, text: value }).catch(() => undefined)
   },
   setReadOnly: (value: boolean) => {
@@ -1071,7 +1068,14 @@ onMounted(() => {
         EditorView.updateListener.of(update => {
           // HIDE_BY_TEXT_CHANGE (HintManagerImpl.java:624): typing dismisses the hint.
           if (update.docChanged) hideErrorHint()
-          if (update.docChanged && !replacing) { if (!dirty) { dirty = true; emit('change') } scheduleLspChange(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); rangeStack = null; templateStops = []; noteEdit(); scheduleHints() }
+          // 每一次内容变更都要通知宿主，不能只在"变脏那一拍"发一次：书签对账
+          // （BookmarkManager 监听的是每个文档变更）、断点位置缓存失效、最近更改位置、
+          // 草稿与自动保存重排都挂在 `change` 上 —— 漏了第二次以后的编辑，撤销就更明显
+          // （Ctrl+Z 也是带 changes 的一次事务：CodeMirror history 的 `pop` 用
+          //  node_modules/@codemirror/commands/dist/index.js:548-556 的 state.update({changes…})
+          //  派发，userEvent 是 "undo"）。宿主侧对重复通知是幂等的（rememberPlace 按
+          //  文件+行去重，定时器重排就是 clear+set）。
+          if (update.docChanged && !replacing) { emit('change'); scheduleLspChange(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); rangeStack = null; templateStops = []; noteEdit(); scheduleHints() }
           // 宏录制要的是「敲进去的字」（IDEA 的按键级录制在本仓的等价物）
           if (!replacing) { const typed = insertedText(update); if (typed) emit('typing', typed) }
           if (update.selectionSet) scheduleInlineCompletion()

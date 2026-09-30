@@ -12,7 +12,6 @@ import type { StyledLine } from './htmlExport.ts'
 
 export interface EditorHandle {
   text(): string
-  markSaved(): void
   setDraft(value: string): void
   command(name: string): boolean
   expandAtCursor(text: string): boolean

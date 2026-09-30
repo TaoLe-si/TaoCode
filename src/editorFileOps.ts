@@ -65,7 +65,6 @@ async function resolveConflictReload() {
     const doc = await request<DocumentData>('file.read', { path: tab.path, encoding: tab.encoding })
     Object.assign(tab, { content: doc.content, version: doc.version, encoding: doc.encoding, bom: doc.bom, dirty: false })
     editorFor(tab.path)?.setDraft(doc.content)
-    editorFor(tab.path)?.markSaved()
     if (tab.lspRunning) void request('lsp.change', { path: tab.path, text: doc.content }).catch(() => undefined)
     notify(`已重新载入磁盘上的 ${tab.path}`)
   } catch (error) { notify(errorMessage(error), true) }
