@@ -290,9 +290,11 @@
       （`GitBranchesPopup`，`intellij.vcs.git.backend.xml:303-333`），本仓 `src/branchPopup.ts` 的
       `BRANCH_ROW_ACTIONS` 里 `checkout/compare/rebase/merge/push/delete` 都有；比较的**结果列表**仍在面板，
       触发点回到弹窗（`props.compareWith`）。见审计 §AZ。
-- [ ] **标签那一行**（新标签名 + 新建标签 + 标签 chips）—— 上游是**日志窗口右键菜单**里的
-      `Git.CreateNewTag`（`intellij.vcs.git.backend.xml:108`，加进 `Vcs.Log.ContextMenu` 的 `:418-428`），
-      本仓日志窗口还没有右键菜单 ⇒ 下一批：要么在日志窗口补那条菜单、要么如实登记为有意偏差。
+- [x] **标签那一行**（第五十五批：新建标签已放到上游那一处）—— 上游是**日志窗口右键菜单**里的
+      `Git.CreateNewTag`（`intellij.vcs.git.backend.xml:108`，加进 `Vcs.Log.ContextMenu` 的 `:400-428`）；
+      第五十五批已把日志窗口的提交行右键菜单建起来（`src/vcsLogMenu.ts`），新建标签就在那里。
+      **面板那一行的标签 chips 与删除仍留在原地** —— 上游的标签列表是日志窗口结构里的"标签节点"，
+      本仓日志行只显示引用、没有那一层 ⇒ 下一批要么补标签节点、要么如实登记。见审计 §BA。
 - [x] `重新格式化提交信息` 的**键位**（第五十四批已接）：上游 `Vcs.ReformatCommitMessage`
       （`VcsActions.xml:394-395` 的 `use-shortcut-of="ReformatCode"` ⇒ Windows 上 Alt+L）——
       提交信息框上挂 `@keydown.alt.l.prevent="reformatMessage"`（与 Ctrl+Enter 同一种做法），

@@ -2280,3 +2280,37 @@ B3 判决（`docs/inventory/verdict-vcs-commit.md`）里 §E 列了四条「用�
 
 **判据**：`tests/scm-panel-strings.test.mjs` 新增三条（那对按钮的文案与可用性、折叠的是行不是整块、分支/比较不在面板而弹窗里有、Alt+L 的绑定）。
 自证有牙：把「与分支比较…」塞回面板 ⇒ 红；把「全部收起」写成「全部折叠」⇒ 红。
+
+## BA. 2026-09-30 第五十五批：日志窗口的**提交行右键菜单**（`Vcs.Log.ContextMenu`）—— 把「新建标签」放回上游那一处
+
+§17 里最后一条"有操作、没上游位置"的是**标签那一行**（新标签名 + 新建标签 + 标签 chips）。上游的新建标签
+不在提交面板里，而在**日志窗口提交行的右键菜单**里（`Git.CreateNewTag`，`intellij.vcs.git.backend.xml:108`，
+被加进 `Vcs.Log.ContextMenu` 的那一组 `:400-428`）。本仓的日志窗口此前**没有右键菜单**，所以这一批先把它建起来：
+
+| 上游（两组合起来，插点 = `relative-to-action="Vcs.Log.GoToChild" anchor="before"`） | 本仓 |
+|---|---|
+| `Vcs.CopyRevisionNumberAction` 复制修订号（`ActionsBundle:2366-2367`） | ✅ 走既有的复制哈希 |
+| `ChangesView.CreatePatchFromChanges` 从变更创建补丁… | ❌ 没有补丁后端 |
+| `Vcs.Log.CompareRevisions` / `Vcs.ShowDiffWithLocal` | ❌ 本仓的 compare 是"分支→工作区"，没有"提交↔提交" |
+| `Git.Reset.In.Log` 将当前分支重置到此处…（`GitBundle`） | ✅ `git.reset { target, mode }`，三档模式照 IDEA 的重置对话框 |
+| `Git.Revert.In.Log` 还原提交 | ❌ 本仓的 `git.revert` 是"丢弃工作区改动"（IDEA 的 Rollback），没有 `git revert <commit>` |
+| `Git.Uncommit` 撤消提交…（`GitBundle action.Git.Uncommit.*`） | ✅ `git.reset --soft HEAD~1`；**只对当前分支最后一个提交可用**（`GitUncommitAction.update` 的 `isHeadCommit()`，灰着时给 `git.undo.action.description` = 所选提交不是当前分支中的最后一次提交） |
+| `Git.Reword.Commit` / `Fixup` / `Squash` / `Drop` / `Interactive.Rebase` / `PushUpToCommit` | ❌ 全都建立在交互式变基上 |
+| `Git.BranchOperationGroup` / `Git.CreateNewBranch.FromCommit` | ❌ 需要"以某次提交为起点"的分支操作 |
+| `Git.CreateNewTag` 新建标记…（包里就是「标记」） | ✅ `git.tag.create { name, target }` |
+| `Vcs.Log.GoToChild` / `GoToParent` 跳到子/父提交 | ❌ 本仓的导航是"后退/前进"历史，不是图的父子 |
+
+行模型与文案集中在 **`src/vcsLogMenu.ts`**（值 + 上游 key 一起写，逐条注释了不做项的原因），
+判据 `tests/vcs-log-menu.test.mjs`（4 条）。
+
+**真机取证（MCP 驱动，含一个真缺陷）**：
+1. 右键 HEAD 行 ⇒ 菜单出现，行序与文案与上游一致（复制修订号 / 将当前分支重置到此处… / 撤消提交… / 新建标记…）；
+2. 点「复制修订号」⇒ **剪贴板真的拿到那个 hash**（`a01d34652569fd440d245afb113ff086945609cb`）；
+3. 点「新建标记…」⇒ 弹出输入框（`window.prompt`，宿主是支持的）、填名字确定 ⇒ **日志行出现该标签引用**
+   （`git tag` 落在选中的那次提交上，探针仓验证后已删除探针标签）。
+4. **顺带修掉一个真缺陷**：菜单最初用 `position: fixed + clientX/clientY`，而工具窗口内容里有带 `transform`
+   的祖代 ⇒ `fixed` 的包含块不是视口，菜单被画到了别处（DOM 里有、看不见），点它等于点空。
+   现已改成"面板内 `position: absolute` + 用面板 rect 换算坐标"。
+
+**还没做的**（§17 里剩下）：面板那一行的**标签 chips 与删除**（上游的标签列表在日志窗口的结构里，
+本仓日志行只显示引用、没有"标签节点"这一层）；失败行上的「显示详细信息」链接动作（通知要能带动作按钮）。

@@ -13,14 +13,54 @@ import VcsLogDetails from './VcsLogDetails.vue'
 import VcsLogFilters from './VcsLogFilters.vue'
 import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
+import { logCommitMenu, type LogMenuRow } from '../vcsLogMenu'
 
 const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
 // 「标签名称」是**项目设置**（`vcsLog.showTagNames`），写回走宿主；其余行是本窗口自己的排布。
 const emit = defineEmits<{ setTagNames: [value: boolean] }>()
 const { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
-  canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, scope } =
+  canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick,
+  resetTo, uncommit, createTagOn, scope } =
   useVcsLogData(toRef(props, 'root'), toRef(props, 'active'))
 const previewChange = ref<GitCommitChange | null>(null)
+// 提交行的右键菜单（`Vcs.Log.ContextMenu` 一族）：行模型与文案在 `src/vcsLogMenu.ts`。
+const panel = ref<HTMLElement>()
+const menu = ref<{ hash: string; shortHash: string; isHead: boolean; x: number; y: number } | null>(null)
+const menuRows = computed<LogMenuRow[]>(() => menu.value ? logCommitMenu(
+  { hash: menu.value.hash, shortHash: menu.value.shortHash, isHead: menu.value.isHead },
+  {
+    copy: () => { copyHash(); closeMenu() },
+    reset: () => {
+      const hash = menu.value?.hash ?? ''
+      closeMenu()
+      // `Git.Reset.In.Log` 落到原生是 `git reset <mode> <commit>`；三档模式照 IDEA 的重置对话框。
+      const mode = window.prompt('重置模式：\n  soft — 保留更改在暂存区\n  mixed — 保留更改在工作区\n  hard — 丢弃全部更改', 'mixed')
+      const chosen = (mode ?? '').trim().toLowerCase()
+      if (!chosen) return
+      if (!['soft', 'mixed', 'hard'].includes(chosen)) { error.value = '模式只能是 soft、mixed 或 hard。'; return }
+      void resetTo(hash, chosen)
+    },
+    uncommit: () => { closeMenu(); void uncommit() },
+    createTag: () => {
+      const hash = menu.value?.hash ?? ''
+      closeMenu()
+      const name = window.prompt('标签名（指向这次提交）', '')
+      if (!name?.trim()) return
+      void createTagOn(hash, name.trim())
+    },
+  }) : [])
+function openMenu(payload: { hash: string; x: number; y: number }) {
+  const commit = commits.value.find(c => c.hash === payload.hash)
+  // 用面板自己的盒子换算（工具窗口内容可能带 transform/滚动，`position: fixed` 不可靠）。
+  const box = panel.value?.getBoundingClientRect()
+  const x = box ? payload.x - box.left : payload.x
+  const y = box ? payload.y - box.top : payload.y
+  // `GitUncommitAction.update` 的 `isHeadCommit()`：HEAD 那一行在日志里带一个 head 引用。
+  const isHead = Boolean(commit?.refs?.some(ref => ref.type === 'head'))
+  select(payload.hash)
+  menu.value = { hash: payload.hash, shortHash: commit?.shortHash ?? payload.hash.slice(0, 8), isHead, x, y }
+}
+function closeMenu() { menu.value = null }
 // 勾掉的列（`Vcs.Log.ToggleColumns`）：与列宽/顺序一样按仓库根存。
 const hidden = ref<LogColumn[]>([])
 const columnsKey = computed(() => `taocode.vcs.log.${encodeURIComponent(props.root)}.columns.hidden`)
@@ -83,7 +123,7 @@ async function jump(hash: string) {
 </script>
 
 <template>
-  <div class="vcslog-panel">
+  <div ref="panel" class="vcslog-panel">
     <!-- MainFrame: table+toolbar left; changes above details right; initial ratios 0.7. -->
     <VcsLogSplitter vertical :storage-key="`${layoutKey}.diff.splitter.proportion`" :second-visible="!!previewChange">
       <template #first>
@@ -115,7 +155,7 @@ async function jump(hash: string) {
         <p v-if="!isDesktop" class="note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
-        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more">
+        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more" @menu="openMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
           <div v-else-if="!commits.length" class="empty">{{ loaded ? '没有匹配的提交。' : '打开 Git 仓库后显示提交图。' }}</div>
           <button v-if="hasMore" class="load-more" :disabled="loading" @click="load(true)">加载更多提交</button>
@@ -131,11 +171,26 @@ async function jump(hash: string) {
       </template>
       <template #second><VcsLogDiff :root="root" :change="previewChange" @close="previewChange = null" /></template>
     </VcsLogSplitter>
+    <!-- 提交行的右键菜单：`Vcs.Log.ContextMenu`（平台组）+ `Git.Log.ContextMenu`（Git 追加）里本仓有落点的四条
+         （模型与文案见 src/vcsLogMenu.ts，其余条目逐条记了不做原因）。 -->
+    <div v-if="menu" class="log-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu">
+      <div class="log-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+        <template v-for="(row, index) in menuRows" :key="row.id">
+          <div v-if="row.separatorBefore && index" class="log-menu-separator" role="separator" />
+          <button type="button" class="menu-button" role="menuitem" :title="row.description" :disabled="row.disabled" :aria-disabled="row.disabled" @click.stop="row.run?.()">{{ row.title }}</button>
+        </template>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.vcslog-panel { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.vcslog-panel { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+/* 提交行右键菜单：背景层铺满窗口（点外面关掉），菜单位置用鼠标坐标（position: fixed）。 */
+.log-menu-backdrop { position: absolute; inset: 0; z-index: 40; }
+.log-menu { position: absolute; min-width: 180px; padding: var(--space-1); display: flex; flex-direction: column; background: var(--popup); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-3); }
+.log-menu .menu-button { text-align: left; white-space: nowrap; }
+.log-menu-separator { height: 1px; margin: var(--space-1) 0; background: var(--line); }
 .vcslog-toolbar { position: relative; display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 6px; border-bottom: 1px solid var(--line); }
 .count { color: var(--muted); font-size: 10px; }
 .note, .error { margin: 0; padding: 6px 10px; font-size: 11px; overflow-wrap: anywhere; }

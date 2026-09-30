@@ -128,6 +128,39 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
     } catch (caught) { if (current()) error.value = message(caught) }
     finally { if (current()) busy.value = false }
   }
+  // 日志窗口提交行右键菜单里那三条（`Vcs.Log.ContextMenu` 一族，模型与文案见 `src/vcsLogMenu.ts`）。
+  async function resetTo(hash: string, mode: string) {
+    if (!isDesktop || !hash || busy.value) return
+    const current = scope()
+    busy.value = true; error.value = ''
+    try {
+      await request('git.reset', { target: hash, mode })
+      if (current()) { await load(); if (current()) await loadSelection() }
+    } catch (caught) { if (current()) error.value = message(caught) }
+    finally { if (current()) busy.value = false }
+  }
+  async function uncommit() {
+    if (!isDesktop || busy.value) return
+    const current = scope()
+    busy.value = true; error.value = ''
+    try {
+      // `GitUncommitAction`：只对最后一个提交可用，落到原生是 `reset --soft HEAD~1`
+      // （改动回暂存区，等于"撤消这次提交但留着内容"）。
+      await request('git.reset', { target: 'HEAD~1', mode: 'soft' })
+      if (current()) { await load(); if (current()) await loadSelection() }
+    } catch (caught) { if (current()) error.value = message(caught) }
+    finally { if (current()) busy.value = false }
+  }
+  async function createTagOn(hash: string, name: string) {
+    if (!isDesktop || !hash || busy.value) return
+    const current = scope()
+    busy.value = true; error.value = ''
+    try {
+      await request('git.tag.create', { name, target: hash })
+      if (current()) { await load(); if (current()) await loadSelection() }
+    } catch (caught) { if (current()) error.value = message(caught) }
+    finally { if (current()) busy.value = false }
+  }
   watch(root, () => {
     generation++; logToken++; selectionToken++; navigationToken++
     back.value = []; forward.value = []
@@ -141,5 +174,6 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
   watch(active, value => { if (value && !loaded.value) void load() }, { immediate: true })
   onBeforeUnmount(() => { generation++; logToken++; selectionToken++; navigationToken++ })
   return { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
-    canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, loadSelection, scope }
+    canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, loadSelection, scope,
+    resetTo, uncommit, createTagOn }
 }

@@ -6,7 +6,7 @@ import type { GitFullCommit } from '../bridge'
 import { buildLogGraph, lanePath, laneX, logDate, rootColor, ROW_H } from '../vcsLogGraph'
 import { visibleColumns, type LogColumn } from '../vcsLogColumns'
 const props = defineProps<{ commits: GitFullCommit[]; selected: string; root: string; loading?: boolean; showTagNames?: boolean; showRootNames?: boolean; hidden?: LogColumn[] }>()
-const emit = defineEmits<{ select: [hash: string]; copy: []; more: [] }>()
+const emit = defineEmits<{ select: [hash: string]; copy: []; more: []; menu: [{ hash: string; x: number; y: number }] }>()
 const list = ref<HTMLElement>()
 const viewportWidth = ref(0)
 const columnRows = computed(() => props.commits.map(commit => ({ ...commit, date: logDate(commit.date) })))
@@ -60,7 +60,8 @@ defineExpose({ focusHash })
     <div v-for="(row, index) in graph.rows.slice(start, end)" :key="row.commit.hash" class="log-row" role="option" :data-index="index + start" :aria-posinset="index + start + 1" :aria-setsize="commits.length"
       :class="{ selected: selected === row.commit.hash }" :aria-selected="selected === row.commit.hash"
       :tabindex="selected === row.commit.hash || (!commits.some(c => c.hash === selected) && index === 0) ? 0 : -1"
-      @click="emit('select', row.commit.hash)" @keydown="keys(index + start, $event)">
+      @click="emit('select', row.commit.hash)" @keydown="keys(index + start, $event)"
+      @contextmenu.prevent.stop="emit('menu', { hash: row.commit.hash, x: $event.clientX, y: $event.clientY })">
       <span class="root" :class="{ named: showRootNames }" :title="root" :style="{ '--root-color': rootColor(root) }">{{ showRootNames ? rootName : '' }}</span>
       <span class="commit-cell">
         <svg class="graph" :width="graph.width" :height="ROW_H" :viewBox="`0 0 ${graph.width} ${ROW_H}`" aria-hidden="true">
