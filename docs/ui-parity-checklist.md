@@ -65,6 +65,8 @@
 
 - [x] **已加（第六十七批）** 书签的**行文本锚与编辑后对账**：一次删掉整行 ⇒ 越界的书签被丢（记在会话内的"丢掉表"里），撤销让原文回到同一行号 ⇒ 放回去；同一行只留一条（上游 `isDuplicate:517-530`）。落点 `src/bookmarks.ts` 的 `reconcileBookmarks` + `src/bookmarkActions.ts` / `src/lspNavigation.ts` 的变更接线（审计 §BM）。
 - [x] **已修（第六十七批）** 项目树**偶发空白**：`refreshTree()` 原来在**全应用的** `busy` 为真时**静默放弃**且不排队 —— 打开项目那一串里正好 busy，这次刷新就被丢掉，`workspace.entries` 停在 `[]`，项目视图一片空白（切一次左视图才恢复，那时 busy 已落下、`showView` 又刷了一次）。改成**自己的忙标 + 排队**（`src/editorSideViews.ts`：`treeBusy`/`treeAgain`，放弃时置 `treeAgain` 而不是丢）。验证：新起 3 个实例，开项目视图后树都是 8 行、名字齐全 ✓（面板**关着**时 0 行是正常的，不是缺陷 —— 这一轮一半时间花在把这两种情况分开上）。
+- [x] **已修（第六十八批）** 大工程上语言服务卡死不再"只能重启应用"：`lsp.stop` 改走**就地**通路（不排那条可能卡死的队列）→ 原生换掉卡住的线程并重配；前端状态查询加 10s 上限，没响应就先重启再重来一次。真机取证（13904 个 .java 的真工程：`app.memory` 15ms 回、三个 lsp.* 请求 30s 不回）与三处结构性缺陷写在审计 §BO；判据 `tests/lsp-completion-startup.test.mjs` + `tests/lsp-thread.test.mjs`。
+- [ ] **待补（第六十八批）** 上面那条的**端到端复验**：大工程跑到卡死 → 出现「语言服务没有响应，正在重启语言服务…」→ 恢复后语义功能回来。另外**卡死的更深根因**未定死（只知道线程不再接活；09-29 的锁追踪指向 `ensure::<lambda_3>` 持 `Session::mutex_` 20s+，本批今天的运行没有慢写告警与锁告警）。
 - [ ] **待查（第六十七批遗留）** 撤销（Ctrl+Z）之后 `onEditorChange` 有没有被调用**未定论**：带探针的那一轮里，撤销那一下没有产生 `reconcile` 记录（记录停在删除那一轮），要等"撤销之后的**下一次**内容变更"才看到 `dropped 1 → 0` 的放回。可能是 CM 的 undo 没走到 `emit('change')`，也可能是当轮读得太早。取证姿势：在 `src/lspNavigation.ts` 的 `onEditorChange` 里临时记 `window.__oc`、在 `src/bookmarkActions.ts` 的 `reconcile` 里记 `window.__bk`，打开文件 → F11 → 删整行 → Ctrl+Z → 分别读两个记录（探针用完必须撤，仓里不留）。
   另外记两条**探针姿势**（这一轮踩了很久，已写进 memory）：工具窗口的活动条**合成 `MouseEvent` 点不动，要 `el.click()`**；连点两次会把它关掉 —— 判断"要不要点"必须先读 `.explorer-panel` 的 `clientHeight`。
 - [x] **已起域（第六十六批）** B5 = `ide/bookmarks` 5 类：判决 `docs/inventory/verdict-bookmarks.md` + 门控 `tests/b5-verdict.test.mjs`（覆盖率从扫描件重推、引用要落在真文件上）。五条全 `[~]`，缺口按 §G 行内逐条写明（编辑后重锚 / 描述与书签类型 / 列表项富渲染），§C 三条是下一批。
