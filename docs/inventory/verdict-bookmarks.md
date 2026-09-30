@@ -52,8 +52,16 @@
     **真机取证**：README.md 第 3 行 F11 → 气球「书签 README.md:3」且无保存失败提示；面板行
     `3: Small scratch project used to compare TaoCode against IntelliJ IDEA side by side.`；
     项目设置里 `{"line":3,"path":"README.md","text":"Small scratch project …"}`；**重启后**同一行照旧
-    （读路径也通）。判据：`tests/bookmarks.test.mjs`（12 条）+ `projects_test` 的书签用例（往返含 `text`，
-    外加四条拒绝：非字符串 / 4097 字节 / 孤立续字节 / 未知键）。
+    （读路径也通）。判据：`tests/bookmarks.test.mjs`（13 条）+ `projects_test` 的书签用例（往返含 `text`/`description`，
+    外加六条拒绝：非字符串 / 4097 字节 / 孤立续字节 × 两字段 / 未知键）。
+    **选中的文字 → 自定义描述（同批补）**：2026.2 的 F11 在**有非空白选中**时把那段文本设成书签的
+    `description`（`actions/ToggleBookmarkAction.kt:88-93`：`selectedText` 非空白 →
+    `group.setDescription(bookmark, selectedText)`），与"行原文锚"是**两个字段**（上游 XML 里是
+    `<bookmark description>`，内存里的 `expectedText` 另算）。本仓新增 `Bookmark.description`
+    —— 放上那一刻写一次的快照（对账只刷锚 `text`、不碰它），面板显示优先取它、没有才退回行原文
+    （上游 `getDescription:579-585` 的顺序），持久化字段名与上游一致。真机取证：第 6 行 Shift+左 选中 4 个
+    字符再 F11 → 项目设置 `{"line":6,"path":"README.md","text":"probe line …","description":"940"}` ——
+    锚是整行、描述是选中那段，各就各位。
 ② **书签类型与文件书签**：`BookmarkType`（`Bookmark.java:181`）与 `addFileBookmark`
    （`BookmarkManager.java:120-125`，行 `-1`）—— 本仓只有行书签；书签类型还是那三个"没渲染"的
    视图开关（`rewriteBookmarkType` 等）的前置。
@@ -64,10 +72,10 @@
 
 | 类 | 源码 | 判决 | 依据（有实现点的指到真实 `src/` 文件） |
 |---|---|---|---|
-| `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | `[~]` | 本仓的 `src/bookmarks.ts` 有 `Bookmark{path,line,mnemonic?}`（`Navigatable` 那一面 = 面板/动作跳到 `path:line`；`Comparable` 那一面 = `sortedBookmarks` 按路径+行）；**缺** `description`（`:57` 与 `:173-179`，`@Nls` 文本）、`BookmarkType`（`:181`，行/文件书签）、`getBookmarkFont`（`:95`，编号书签的粗体）、`release`/`updateHighlighter`（`:118-126`，高亮器生命周期 —— 本仓的图标由 `src/editorGutterIcons.ts` 统一重算，没有"每条书签自己持一个高亮器"的形态） |
+| `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | `[~]` | 本仓的 `src/bookmarks.ts` 有 `Bookmark{path,line,mnemonic?}`（`Navigatable` 那一面 = 面板/动作跳到 `path:line`；`Comparable` 那一面 = `sortedBookmarks` 按路径+行）；`description` 已有（本仓 `Bookmark.description`：选中文字再 F11 时记下，持久化字段名与上游一致）、`BookmarkType`（`:181`，行/文件书签）、`getBookmarkFont`（`:95`，编号书签的粗体）、`release`/`updateHighlighter`（`:118-126`，高亮器生命周期 —— 本仓的图标由 `src/editorGutterIcons.ts` 统一重算，没有"每条书签自己持一个高亮器"的形态） |
 | `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | `[~]` | 资源包只是取文案的机制（`:21-28` 的 `message`/`messagePointer`）；本仓的对应物是面板与动作里的字面量（文案逐条核过本机 IDEA 2026.2 中文包），见 `src/components/BookmarksPanel.vue`；**缺** `messagePointer` 那半（延迟取文案的 `Supplier` 形态 —— 本仓直接取字符串，没有它要解决的问题） |
 | `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | `[~]` | 列表项在 `src/components/BookmarksPanel.vue`（编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查）；**缺** `setupRenderer`（`:46-86`：图标 + 描述 + 行文本）、`speedSearchText`（`:104`，快速搜索命中串）、`footerText`（`:109`）、`updateAccessoryView`（`:92`，编号在右侧附件位）、`allowedToRemove`/`removed`（`:119-127`，类型化书签才有的"许可删除"） |
-| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[~]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）+ `getValidBookmarks` 的"按位置排序"那一支（`src/bookmarks.ts` 的 `sortedBookmarks`）；**缺** 编辑后按行文本重锚与失效/查重（`:439-495`）、自动描述（`:127-139`）、`UISettings.sortBookmarks` 的"按加入顺序"排序（`:141-150` 的另一支）、`addFileBookmark`（`:120-125`） |
+| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[~]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）+ `getValidBookmarks` 的"按位置排序"那一支（`src/bookmarks.ts` 的 `sortedBookmarks`）；**缺** 编辑后按行文本重锚与失效/查重（`:439-495`）、自动描述（`:127-139`，已按 2026.2 的 `createDescription` 实现；旧记法的 200 字符是错的，实为 50 且在快照里是死代码）、`UISettings.sortBookmarks` 的"按加入顺序"排序（`:141-150` 的另一支）、`addFileBookmark`（`:120-125`） |
 | `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | `[~]` | 事件面（`:10-16` 的 added/removed/changed/orderChanged）在本仓是 Vue 响应式：书签表一变，面板、装订线图标（`src/editorGutterIcons.ts`）与跳转动作自己跟着重算；**缺** 给他人用的监听接口（本仓没有插件，也没有第二个消费者需要订阅） |
 
 **四档合计**：`[x]` 0 + `[~]` 5 + `[ ]` 0 + `[-]` 0 = 5。
