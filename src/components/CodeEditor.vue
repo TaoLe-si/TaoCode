@@ -10,7 +10,8 @@ import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/l
 import { tags } from '@lezer/highlight'
 import type { Theme } from '../appearance'
 import { editingCommands, runEditorCommand } from '../editorCommands'
-import { foldKinds, foldingRanges, lspFoldService, setFoldingRanges } from '../editorFolding'
+import { foldingRanges, lspFoldService } from '../editorFolding'
+import { createFoldingController } from '../editorFoldingController'
 import { defaultCodeFoldingSettings, FOLDING_SETTING_ROWS, kindOfSetting } from '../editorFoldingSettings'
 import { clipboardCommands, copyCutChannel } from '../editorClipboard'
 import { gutterIconsExtension, syncGutterIcons, type GutterIcon } from '../editorGutterIcons'
@@ -277,7 +278,6 @@ async function runInlineCompletion() {
   finally { inlineInFlight = false }
 }
 let hintTimer: number | undefined
-let foldTimer: number | undefined
 // LSP `textDocument/semanticTokens/*` 的 decoration —— IDEA 的 daemon 着色路径
 // （见 `src/semanticTokens.ts` 的模块注释：真实机制是 `HighlightVisitor`/`Annotator` +
 //  `TextAttributesKey`，不是网上流传的 "SemanticHighlightingPass"，那个类不存在）。
@@ -350,30 +350,21 @@ async function runSemanticTokens() {
     target.dispatch({ effects: setSemanticTokens.of(decodeSemanticTokens(semanticData, result.legend)) })
   } catch { /* 服务器没有语义高亮能力时保持词法着色，不影响编辑 */ }
 }
-// 「编辑器 › 代码折叠」里那两个开关只影响 `imports` / `region` 两族区间的**默认折叠**：
-// 开着的预折叠，关掉的展开（设置一改立刻重算，对应上游 `CodeFoldingConfigurable.Util.applyCodeFoldingSettingsChanges`）。
-function applyFoldingSettings() {
-  if (!view) return
-  for (const row of FOLDING_SETTING_ROWS) {
-    foldKinds(view, [kindOfSetting(row.key)], props.settings[row.key] ?? defaultCodeFoldingSettings[row.key])
-  }
-}
-function scheduleFolding() {
-  if (!props.lspEnabled || heavy) return
-  if (foldTimer !== undefined) clearTimeout(foldTimer)
-  // 折叠区间只随文件内容变，比高亮/提示的节流更宽松（IDEA 也是语言分析完才更新折叠）。
-  foldTimer = window.setTimeout(() => { foldTimer = undefined; void runFolding() }, 400)
-}
-async function runFolding() {
-  const editor = view
-  if (!editor || !props.lspEnabled) return
-  try {
+// 折叠的调度管道（存 → 装区间 → 按设置折默认 → 清失效 → 恢复）在 src/editorFoldingController.ts ——
+// 宿主只注入依赖。顺序与两个真机踩过的坑（先存后折、管道必须串行）都写在那个模块头上。
+const folding = createFoldingController({
+  path: () => props.path,
+  view: () => view,
+  foldingKinds: () => FOLDING_SETTING_ROWS.map(row => ({
+    kind: kindOfSetting(row.key),
+    collapse: props.settings[row.key] ?? defaultCodeFoldingSettings[row.key],
+  })),
+  fetchRanges: async () => {
     const result = await request<LspFoldingRangeResult>('lsp.request', { kind: 'foldingRange', path: props.path, line: 0, character: 0 })
-    editor.dispatch({ effects: setFoldingRanges.of(result.available ? result.ranges ?? [] : []) })
-    // 区间到手就按「代码折叠」设置预折叠（上游 `LspFoldingBuilder.kt:41-46` 的 collapsedByDefault）。
-    applyFoldingSettings()
-  } catch { /* 服务器不给折叠区间时保持内置折叠，不影响编辑 */ }
-}
+    return result.available ? result.ranges ?? [] : []
+  },
+  onError: () => undefined,   // 服务器不给折叠区间时保持内置折叠，不影响编辑
+})
 // LSP `textDocument/diagnostic`（**pull 模型**，IDEA 的批处理 Inspection）：服务器声明了
 // `diagnosticProvider` 时由客户端主动来问，结果写进同一个诊断 store；`previousResultId` 让服务器
 // 可以回答 `unchanged`。规范要求 pull 与 push 二选一，所以标记为 pull 的文件不再接受推送
@@ -1113,8 +1104,8 @@ onMounted(() => {
   scheduleHints()
 })
 // The hint belongs to one file and to the focused tab, so leaving either dismisses it.
-watch(() => FOLDING_SETTING_ROWS.map(row => props.settings[row.key]).join(','), () => applyFoldingSettings())
-watch(() => props.path, () => { hideErrorHint(); void loadLanguage(props.path); resetSemanticTokens(); scheduleFolding(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion() })
+watch(() => FOLDING_SETTING_ROWS.map(row => props.settings[row.key]).join(','), () => folding.applyDefaults())
+watch(() => props.path, () => { folding.capture(); hideErrorHint(); void loadLanguage(props.path); resetSemanticTokens(); folding.schedule(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion() })
 watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }
   else hideErrorHint()
@@ -1133,19 +1124,19 @@ watch(() => props.lspEnabled, enabled => {
   if (view) { forceLinting(view); scheduleLspChange() }
   scheduleHighlight()
   scheduleHints()
-  scheduleFolding()
+  folding.schedule()
   schedulePullDiagnostics()
   scheduleSemanticTokens()
   documentLinks.schedule()
   codeLens.schedule()
   scheduleInlineCompletion()
 })
-watch(() => lspDiagnostics.get(props.path), () => { if (view && props.lspEnabled) { forceLinting(view); scheduleFolding() } })
+watch(() => lspDiagnostics.get(props.path), () => { if (view && props.lspEnabled) { forceLinting(view); folding.schedule() } })
 watch(() => props.reveal, target => applyReveal(target))
 // The parent already flips EditorState.readOnly through setReadOnly(); watching the
 // prop too would re-dispatch the effect on every later re-render.
 watch(() => [props.debugLine, props.gutterIcons, props.blame], () => { syncDebugLine(view, props.debugLine ?? 0); syncGutter(); syncBlame() })
-onBeforeUnmount(() => { if (lspTimer !== undefined) clearTimeout(lspTimer); if (highlightTimer !== undefined) clearTimeout(highlightTimer); if (foldTimer !== undefined) clearTimeout(foldTimer); if (pullTimer !== undefined) clearTimeout(pullTimer); if (semanticTimer !== undefined) clearTimeout(semanticTimer); documentLinks.dispose(); codeLens.dispose(); if (inlineTimer !== undefined) clearTimeout(inlineTimer); view?.destroy(); view = undefined })
+onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTimeout(lspTimer); if (highlightTimer !== undefined) clearTimeout(highlightTimer); if (pullTimer !== undefined) clearTimeout(pullTimer); if (semanticTimer !== undefined) clearTimeout(semanticTimer); folding.dispose(); documentLinks.dispose(); codeLens.dispose(); if (inlineTimer !== undefined) clearTimeout(inlineTimer); view?.destroy(); view = undefined })
 </script>
 
 <template>

@@ -17,6 +17,7 @@ import type { SyntaxNode } from '@lezer/common'
 import type { EditorState } from '@codemirror/state'
 import { StateEffect, StateField } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
+import { signatureAt as signatureOf } from './editorFoldingState.ts'
 
 /** LSP `textDocument/foldingRange` 的一条（0 基行号，`kind` 见 LSP 规范：comment / imports / region）。 */
 export interface LspFold { startLine: number; endLine: number; kind?: string }
@@ -124,7 +125,7 @@ export function levelPlan(ranges: readonly LspFold[], root: LspFold | null, leve
 // 两者并起来就是上游 `getAllFoldRegions` 的等价物；`auto` 标出自动生成的（LSP / 语法树）那些 ——
 // 上游靠 `EditorFoldingInfo.getPsiElement(region) == null` 认手工建的区间
 // （`CollapseSelectionHandler.java:39`、`:79`）。
-export interface FoldArea { from: number; to: number; auto: boolean }
+export interface FoldArea { from: number; to: number; auto: boolean; kind?: string }
 
 /** 一段偏移区间（`foldedRanges` 里那条折叠区间的边界）。 */
 interface Bounds { from: number; to: number }
@@ -220,7 +221,7 @@ function lspAreas(state: EditorState): FoldArea[] {
   const out: FoldArea[] = []
   for (const range of rangesOf(state)) {
     const offsets = offsetsOf(state, range)
-    if (offsets) out.push({ ...offsets, auto: true })
+    if (offsets) out.push({ ...offsets, auto: true, kind: range.kind })
   }
   return out
 }
@@ -318,6 +319,16 @@ function applyRanges(view: EditorView, ranges: readonly LspFold[], collapse: boo
   return true
 }
 
+/** 当前折着的区间（偏移）—— 存档与"重算时清失效项"都要读它。 */
+export function foldedAreasOf(state: EditorState): Bounds[] {
+  return foldedBounds(state)
+}
+
+/** 当前候选区间（服务端 + 语法树 + 手工），带 `kind` —— 存档判断"本该默认折着"用。 */
+export function candidatesOf(state: EditorState): { from: number; to: number; kind?: string }[] {
+  return areasOf(state, state.selection.main.head).map(area => ({ from: area.from, to: area.to, kind: area.kind }))
+}
+
 const caretLine = (state: EditorState) => state.doc.lineAt(state.selection.main.head).number - 1
 
 /** 一个光标所在的行（挑区域时要比"起始行是不是光标行"）。 */
@@ -381,6 +392,32 @@ export const foldBlockAtCaret: Command = view => {
   // （祖先链上带的 `foldNodeProp` 都是花括号块，注释不在链上，所以不用再挑 kind）。
   const candidate = syntaxArea(view.state, pos) ?? enclosingAreas(view.state, pos)[0] ?? null
   return candidate ? applyAreas(view, [candidate], true) : false
+}
+
+/**
+ * 按存档恢复折叠状态（`DocumentFoldingInfo.setToEditor` 的等价物）：折起 `fold` 里的、展开 `unfold` 里的。
+ * 只认精确边界（`unfoldEffect` 的规矩），越界或不成立的直接跳过。
+ */
+export function applyFoldPlan(view: EditorView, fold: readonly Bounds[], unfold: readonly Bounds[]): boolean {
+  const doc = view.state.doc
+  const length = doc.length
+  const folded = foldedBounds(view.state)
+  const effects = []
+  // 匹配不只看边界相等：编辑会把旧折叠的偏移推走一点（上游是 RangeMarker，自己跟着动），
+  // 所以同一块（**签名**相同）也认 —— 不然"用户展开过的块"会在重算后留在折着的状态（真机上踩过）。
+  const sameBlock = (target: Bounds) => folded.filter(current => current.from === target.from && current.to === target.to
+    || signatureOf(doc, current) === signatureOf(doc, target))
+  for (const bounds of fold) {
+    if (bounds.from < 0 || bounds.to > length || bounds.from >= bounds.to) continue
+    if (sameBlock(bounds).length) continue
+    effects.push(foldEffect.of(bounds))
+  }
+  for (const bounds of unfold) {
+    for (const current of sameBlock(bounds)) effects.push(unfoldEffect.of(current))
+  }
+  if (!effects.length) return false
+  view.dispatch({ effects })
+  return true
 }
 
 /**

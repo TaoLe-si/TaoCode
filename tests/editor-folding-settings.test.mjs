@@ -78,15 +78,32 @@ test('设置被接受并保存（前端白名单 + 编辑器设置默认值 + �
   assert.match(defaults, /\{"collapseImports", true\}, \{"collapseCustomRegions", false\},/, 'native 默认值要与上游一致')
 })
 
-test('编辑器收到区间后按设置预折叠；设置一改就重算', () => {
+test('编辑器把「代码折叠」设置交给折叠控制器（顺序与串行化都在那个模块里）', () => {
   const editor = read('src/components/CodeEditor.vue')
-  assert.match(editor, /editor\.dispatch\(\{ effects: setFoldingRanges\.of\([\s\S]{0,400}applyFoldingSettings\(\)/,
-    '区间到手就应用设置')
-  assert.match(editor, /function applyFoldingSettings\(\)[\s\S]{0,260}foldKinds\(view, \[kindOfSetting\(row\.key\)\]/,
+  // 宿主只注入依赖：路径 / 编辑器 / 两族的开关 / 区间怎么取。
+  assert.match(editor, /const folding = createFoldingController\(\{/)
+  assert.match(editor, /foldingKinds: \(\) => FOLDING_SETTING_ROWS\.map\(row => \(\{/)
+  assert.match(editor, /kind: kindOfSetting\(row\.key\),/, '两族的 kind 由设置行的键推出来')
+  assert.match(editor, /collapse: props\.settings\[row\.key\] \?\? defaultCodeFoldingSettings\[row\.key\]/)
+  assert.match(editor, /fetchRanges: async \(\) => \{[\s\S]{0,200}kind: 'foldingRange'/, '区间仍走 lsp.request 的 foldingRange')
+  // 设置一改就重算（上游 applyCodeFoldingSettingsChanges）；关标签/换文件前存档。
+  assert.match(editor, /FOLDING_SETTING_ROWS\.map\(row => props\.settings\[row\.key\]\)[\s\S]{0,40}folding\.applyDefaults\(\)/, '设置一改就重算')
+  assert.match(editor, /onBeforeUnmount\(\(\) => \{ folding\.capture\(\)/)
+  assert.match(editor, /watch\(\(\) => props\.path, \(\) => \{ folding\.capture\(\)/)
+
+  // 管道本体：顺序是语义（先存后折默认），并且必须串行。
+  const controller = read('src/editorFoldingController.ts')
+  const run = controller.slice(controller.indexOf('async function run()'))
+  const order = ['capture()', 'setFoldingRanges.of(ranges)', 'rememberCandidates(', 'applyDefaults()', 'dropStale()', 'restore()']
+  let last = -1
+  for (const step of order) {
+    const at = run.indexOf(step)
+    assert.ok(at > last, `管道顺序不对：${step}`)
+    last = at
+  }
+  assert.match(controller, /if \(busy\) \{ again = true; return \}/, '管道必须串行（两轮并存会把覆盖状态记错）')
+  assert.match(controller, /for \(const entry of deps\.foldingKinds\(\)\) foldKinds\(view, \[entry\.kind\], entry\.collapse\)/,
     '按 kind 折/展开（关掉开关要展开回去）')
-  assert.match(editor, /watch\(\(\) => FOLDING_SETTING_ROWS\.map\(row => props\.settings\[row\.key\]\)\.join\(','\)/,
-    '设置改了要重算（上游 CodeFoldingConfigurable.Util 也是改完重算）')
-  // 具体的折/展开在折叠模块里，且必须**幂等**（applyRanges 跳过已经折着的）。
   const folding = read('src/editorFolding.ts')
   assert.match(folding, /export function foldKinds\(view: EditorView, kinds: readonly string\[\], collapse: boolean\)/)
 })
