@@ -71,6 +71,10 @@ public:
     // 把该语言下已登记但还没同步给服务器的文档补发 didOpen（只在语言服务线程上调）。
     void change(const std::string& path, const std::string& text);
     void flush_opens(const std::string& language);
+    // 关掉 Gradle 导入时，替客户端主动要一次"把普通文件夹建成工程"（JDT 的 `java.project.import`
+    // 命令）—— 否则 `java.project.sourcePaths`/`referencedLibraries` 不会被落成不可见工程，
+    // 表现就是"语言服务起来了、文件却不在任何源根里"（真机探针：hover 可用但空、definition 不可用）。
+    void request_project_import(const std::string& language);
     // 读线程兜底路径：调用方**已持有** `mutex_`（没有宿主线程可交活儿时的老行为）。
     void flush_opens_here(const std::string& language);
     void close(const std::string& path);

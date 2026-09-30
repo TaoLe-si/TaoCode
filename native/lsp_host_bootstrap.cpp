@@ -300,11 +300,32 @@ Host& Session::ensure(const std::string& language) {
         const std::string owned = language;
         // 没有宿主线程可交（离线自测里就是这种情况）时只能就地补发 —— 否则文档永远不发
         // didOpen，握手看起来"没落地"，测试与真实行为会分叉。
-        if (post) post([this, owned] { flush_opens(owned); });
+        if (post) post([this, owned] { flush_opens(owned); request_project_import(owned); });
         else flush_opens_here(owned);
     });
     hosts_[language] = std::move(host);
     return *hosts_[language];
+}
+
+void Session::request_project_import(const std::string& language) {
+    // 只在**关掉 Gradle 导入**时才要这一下：导入开着时 JDT 自己会建工程，而 Buildship 导入
+    // 又不理会 exclusions（真机实证），所以"关导入 + 主动 import 一次"才是这条工程上走得通的路。
+    Host* host = nullptr;
+    {
+        taocode::trace::Lock lock(mutex_, __FUNCSIG__);
+        if (config_.find(language) == config_.end()) return;
+        const auto& settings = config_.at(language).settings;
+        const auto& gradle = settings.contains("java") && settings.at("java").is_object() && settings.at("java").contains("import")
+                                && settings.at("java").at("import").is_object() && settings.at("java").at("import").contains("gradle")
+                            ? settings.at("java").at("import").at("gradle") : Json();
+        if (!gradle.is_object() || gradle.value("enabled", true)) return;
+        const auto found = hosts_.find(language);
+        if (found == hosts_.end()) return;
+        host = found->second.get();
+    }
+    // 锁外发（与 flush_opens 同一条纪律：阻塞写只挡这条语言服务线程）。
+    host->request("workspace/executeCommand", {{"command", "java.project.import"}, {"arguments", Json::array()}},
+                  [](Json, Json) { /* 命令是幂等的，答不答都不影响后续请求 */ });
 }
 
 void Session::flush_opens_here(const std::string& language) {
