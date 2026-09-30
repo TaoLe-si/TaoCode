@@ -25,6 +25,8 @@ export interface BookmarkActionsDeps {
   rememberPlace: (entry: any) => void
   /** 某个文件**当前**的编辑器内容（编辑器里改了还没保存时 `tab.content` 是旧的）。 */
   editorContent?: (path: string) => string | undefined
+  /** 编辑器里当前选中的文本（上游 F11 用它当自定义描述，见 Bookmark.description）。 */
+  selection?: (path: string) => string | undefined
   revealLocation: (target: { path: string; line: number }) => unknown
 }
 
@@ -81,9 +83,9 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
         .catch(error => deps.notify(`书签未能保存：${errorMessage(error)}`, true))
     }, 600)
   }
-  function placeAt(path: string, line: number, mnemonic?: number, content?: string) {
+  function placeAt(path: string, line: number, mnemonic?: number, content?: string, description?: string) {
     const lineText = content === undefined ? undefined : bookmarkAnchor(content.split(String.fromCharCode(10))[line - 1] ?? '')
-    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText)
+    bookmarks.value = placeBookmark(bookmarks.value, path, line, mnemonic, lineText, description)
     const keptEntry = bookmarks.value.find(entry => entry.path === path && entry.line === line)
     if (keptEntry) rememberPlace({ kind: '书签', path, line: line - 1, label: keptEntry.mnemonic === undefined ? baseName(path) + ':' + line : `${keptEntry.mnemonic} · ${baseName(path)}:${line}` })
     const kept = bookmarks.value.find(entry => entry.path === path && entry.line === line)
@@ -94,7 +96,10 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     const tab = active.value
     if (!tab) return
     // 放书签时把那一行原文一起记下（上游的 `myBeforeChangeData` 记的是同一个东西，只是记在变更前）。
-    placeAt(tab.path, tab.line, mnemonic, deps.editorContent?.(tab.path))
+    // 选中了一段非空白文字时，那段的文本成为这条书签的**自定义描述**
+    // （`ToggleBookmarkAction.addSingleBookmark:88-93`：`selectedText` 非空白 → `group.setDescription`）。
+    const selected = deps.selection?.(tab.path)
+    placeAt(tab.path, tab.line, mnemonic, deps.editorContent?.(tab.path), selected && selected.trim() ? selected : undefined)
   }
   function openMnemonicPrompt() {
     const tab = active.value

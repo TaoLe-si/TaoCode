@@ -1315,7 +1315,7 @@ const {
   bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
   useProjectSettings, digits, bookmarkSave,
   jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,
-} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text() })
+} = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText() })
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
 // language-neutral templates in surround.ts.

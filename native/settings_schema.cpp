@@ -490,8 +490,8 @@ void validate_bookmarks(const Json& values) {
     std::set<std::string> places;
     std::set<int> digits;
     for (const auto& value : values) {
-        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?, text?}。");
-        known_keys(value, {"path", "line", "mnemonic", "text"}, "INVALID_SETTINGS");
+        if (!value.is_object()) fail("INVALID_SETTINGS", "书签要写成 {path, line, mnemonic?, text?, description?}。");
+        known_keys(value, {"path", "line", "mnemonic", "text", "description"}, "INVALID_SETTINGS");
         const auto path = text_or(value, "path");
         if (path.empty() || path.size() > 512) fail("INVALID_SETTINGS", "书签路径不能为空且不超过 512 字节。");
         if (!valid_utf8(path) || path.find('\\') != std::string::npos || path.front() == '/')
@@ -509,12 +509,17 @@ void validate_bookmarks(const Json& values) {
         // `<bookmark description="…">`（`BookmarkManager.writeExternal:329-333`，只写非空值）——
         // 大工程里的长行可以很长，所以上限给 4 KiB 字节；前端按 1024 个字符截断后存，
         // 两边的口径必须一致（1024 字符 UTF-8 最多 4 KiB）。
-        if (value.contains("text")) {
-            if (!value.at("text").is_string())
-                fail("INVALID_SETTINGS", "书签的行原文必须是字符串。");
-            const auto text = value.at("text").get<std::string>();
-            if (text.size() > max_bookmark_text || !valid_utf8(text))
-                fail("INVALID_SETTINGS", "书签的行原文不能超过 4096 字节且必须是 UTF-8。");
+        // 行原文 `text`（本仓的锚）与自定义描述 `description`（选中文字再按 F11 时记下的那段文本，
+        // 上游 2026.2 `ToggleBookmarkAction.addSingleBookmark:88-93` → `group.setDescription`；
+        // 持久化成 `<bookmark description>`，`BookmarkManager.writeExternal:329-333`）同一条口径。
+        for (const char* field : {"text", "description"}) {
+            if (!value.contains(field)) continue;
+            const auto label = std::string(field) == "text" ? "行原文" : "描述";
+            if (!value.at(field).is_string())
+                fail("INVALID_SETTINGS", std::string("书签的") + label + "必须是字符串。");
+            const auto field_text = value.at(field).get<std::string>();
+            if (field_text.size() > max_bookmark_text || !valid_utf8(field_text))
+                fail("INVALID_SETTINGS", std::string("书签的") + label + "不能超过 4096 字节且必须是 UTF-8。");
         }
         if (!value.contains("mnemonic")) continue;
         if (!value.at("mnemonic").is_number_integer() || value.at("mnemonic") < 0 || value.at("mnemonic") > 9)

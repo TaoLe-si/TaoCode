@@ -7,6 +7,13 @@ export interface Bookmark {
   mnemonic?: number
   /** 放书签时那一行的原文（上游 `BookmarkManager` 的 `myBeforeChangeData` 记的是同一个东西）。 */
   text?: string
+  /**
+   * **自定义**描述：选中一段文字再按 F11 时，那段的文本（上游 2026.2 的
+   * `ToggleBookmarkAction.addSingleBookmark:88-93` —— `selectedText` 非空白就
+   * `group.setDescription(bookmark, selectedText)`；持久化成 `<bookmark description>`，
+   * `BookmarkManager.writeExternal:329-333`）。没设过时用行原文当描述（见 `bookmarkDescription`）。
+   */
+  description?: string
 }
 
 const compare = (a: Bookmark, b: Bookmark) => a.path.localeCompare(b.path) || a.line - b.line
@@ -29,6 +36,10 @@ const compare = (a: Bookmark, b: Bookmark) => a.path.localeCompare(b.path) || a.
  * 持久化校验也要求 `line >= 1`）—— 显示时**不要再 +1**。
  */
 export function bookmarkDescription(entry: Bookmark): string | undefined {
+  // 上游的优先级：`BookmarkGroup.getDescription`（`BookmarksManagerImpl.kt:579-585`）先给自定义描述，
+  // 没有才在首次需要时用 `createDescription`（行原文）算一个 —— 本仓就按这个顺序取。
+  const custom = entry.description?.trim()
+  if (custom) return entry.description
   const text = entry.text?.trim()
   return text ? text : undefined
 }
@@ -52,6 +63,7 @@ const withMnemonic = (entry: Bookmark, mnemonic?: number): Bookmark => {
   const next: Bookmark = { path: entry.path, line: entry.line }
   if (mnemonic !== undefined) next.mnemonic = mnemonic
   if (entry.text !== undefined) next.text = entry.text
+  if (entry.description !== undefined) next.description = entry.description
   return next
 }
 
@@ -61,16 +73,20 @@ const withMnemonic = (entry: Bookmark, mnemonic?: number): Bookmark => {
  * Ctrl+Shift+digit, i.e. it moves the digit to this line (freeing its old owner) and
  * removes the bookmark when the digit already sits here.
  */
-export function placeBookmark(list: readonly Bookmark[], path: string, line: number, mnemonic?: number, text?: string): Bookmark[] {
+export function placeBookmark(list: readonly Bookmark[], path: string, line: number, mnemonic?: number, text?: string,
+                             description?: string): Bookmark[] {
   const here = (entry: Bookmark) => entry.path === path && entry.line === line
   const existing = list.find(here)
   if (existing && (mnemonic === undefined || existing.mnemonic === mnemonic)) return list.filter(entry => !here(entry))
   const freed = mnemonic === undefined
     ? [...list]
     : list.map(entry => (entry.mnemonic === mnemonic ? withMnemonic(entry) : entry))
-  const anchored = text === undefined ? { path, line } : { path, line, text }
+  // 选中文字时 F11 记下的是**自定义**描述：它只在这条书签被放上时写一次（上游同样只在 toggle 之后 setDescription），
+  // 之后不再跟着行内容走；行原文锚 `text` 仍由对账刷新。
+  const extra = { ...(text === undefined ? {} : { text }), ...(description === undefined ? {} : { description }) }
+  const anchored = { path, line, ...extra }
   return existing
-    ? freed.map(entry => (here(entry) ? withMnemonic({ ...entry, ...(text === undefined ? {} : { text }) }, mnemonic) : entry))
+    ? freed.map(entry => (here(entry) ? withMnemonic({ ...entry, ...extra }, mnemonic) : entry))
     : [...freed, withMnemonic(anchored, mnemonic)]
 }
 

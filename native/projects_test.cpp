@@ -732,7 +732,7 @@ int main() {
             store.opened(open_result(a));
             const Json marks = Json::array({
                 {{"path", "src/main.cpp"}, {"line", 12}, {"text", "int main() {"}},
-                {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}, {"text", ""}},
+                {{"path", utf8(u8"源文件/核心.cpp")}, {"line", 3}, {"mnemonic", 0}, {"text", ""}, {"description", "选中的那段"}},
                 {{"path", "src/app.vue"}, {"line", 88}, {"mnemonic", 9}}});
             check(store.update_project_settings(root_a, {{"bookmarks", marks}}).at("bookmarks") == marks,
                   "Bookmarks must round-trip with their digits");
@@ -764,6 +764,8 @@ int main() {
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", 5}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", std::string(4097, 'x')}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"text", lone_continuation}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"description", 5}}})}},
+                {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"description", std::string(4097, 'y')}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}, {"mnemonic", 2}},
                                             {{"path", "src/y.cpp"}, {"line", 4}, {"mnemonic", 2}}})}},
                 {{"bookmarks", Json::array({{{"path", "src/x.cpp"}, {"line", 3}},

@@ -125,3 +125,19 @@ test('长行锚按 1024 个字符截断，而且存/比两侧口径一致（超�
   assert.equal(changed.list.length, 1, '行还在 ⇒ 书签留着')
   assert.equal(changed.list[0].text, ('y' + long.slice(1)).slice(0, BOOKMARK_TEXT_LIMIT), '刷新后的锚同样按上限截断')
 })
+
+test('选中文字再放书签：那段文本成为自定义描述，且优先于行原文', () => {
+  const once = placeBookmark([], 'a.cpp', 4, undefined, 'int x = 1;', 'selected  text')
+  assert.deepEqual(once, [{ path: 'a.cpp', line: 4, text: 'int x = 1;', description: 'selected  text' }])
+  assert.equal(bookmarkDescription(once[0]), 'selected  text', '自定义描述优先（上游 BookmarkGroup.getDescription 的顺序）')
+  // 没有选中文字时退回行原文
+  const plain = placeBookmark([], 'a.cpp', 4, undefined, 'int x = 1;')
+  assert.equal(bookmarkDescription(plain[0]), 'int x = 1;')
+  // 描述是"放上时写一次"的快照：对账刷新的是锚，不是它
+  const next = reconcileBookmarks(once, 'a.cpp', ['one', 'two', 'three', 'int y = 2;'].join(String.fromCharCode(10)), [])
+  assert.equal(next.list[0].text, 'int y = 2;', '锚跟着当前行刷新')
+  assert.equal(next.list[0].description, 'selected  text', '自定义描述不动')
+  // 数字编号换行时描述一起搬（withMnemonic 不许把它丢掉）
+  const moved = placeBookmark(once, 'a.cpp', 9, 3)
+  assert.equal(moved[0].description, 'selected  text')
+})
