@@ -118,7 +118,12 @@
    默认值 + 补丁白名单，判据见 `projects_test` 的「命名书签列表」一档与
    `tests/bookmark-settings.test.mjs`）；「默认列表」暂用历史字段 `bookmarks`（一个平铺列表），
    `bookmarkLists` 装**其余**的列表 —— 迁移规划见 `src/bookmarkLists.ts` 的 `listsFromLegacy`。
-   **还没接**：面板的分区渲染、
+   **第七十六批（c）已接面板分区**：书签面板能按列表分段（上游的列表节点 —— 段头是列表名 +
+   「默认」标记 + 条数，`default.group.marker` 的文案），默认列表用历史字段 `bookmarks` 的内容、
+   名字取项目名（迁移规则），命名列表来自 `projectSettings.bookmarkLists`；分段与"按文件分组"
+   是两层（列表 → 文件 → 行，与上游树同形）。真机取证：面板显示
+   `ui-parity-proj 默认 2` 段头，下面是 `CMakeLists.txt` 与 `README.md 1` 两个文件段。
+   **还没接**：
    `GroupCreateDialog`/`GroupRenameDialog`/`GroupSelectDialog` 三个对话框、齿轮的
    `askBeforeDeletingLists`（有了列表它才有落点），以及依赖列表的两个动作：
    `AddAnotherBookmark`（`AddAnotherBookmarkAction`）与 `BookmarkOpenTabs`

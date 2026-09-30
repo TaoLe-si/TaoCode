@@ -133,6 +133,14 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   gitCompareWith: gitCompareWith.value,
   bookmarksView: projectSettings.value.bookmarksView ?? DEFAULT_BOOKMARKS_VIEW,
   onUpdateBookmarksView: (patch: unknown) => { void saveBookmarksView(patch as Partial<BookmarksViewState>) },
+  // 书签列表（上游 `ManagerState.groups`）：命名列表来自 `projectSettings.bookmarkLists`，
+  // **默认列表**用历史字段 `bookmarks` 的内容（迁移规则：旧平铺列表 = 一张用项目名命名的默认列表，
+  // 见 src/bookmarkLists.ts 的 `listsFromLegacy`）。
+  bookmarkLists: [
+    ...(projectSettings.value.bookmarkLists ?? []).filter((list: { isDefault: boolean }) => !list.isDefault)
+      .map((list: { name: string; bookmarks: unknown[] }) => ({ name: list.name, isDefault: false, entries: list.bookmarks })),
+    { name: workspace.value?.name ?? '默认', isDefault: true, entries: sortedAll.value },
+  ],
   onFoldAll: () => fileTreeRef.value?.collapseAll(),
   onExpandAll: () => fileTreeRef.value?.expandAll(),
   onExpandRecursively: () => void fileTreeRef.value?.expandRecursively(),

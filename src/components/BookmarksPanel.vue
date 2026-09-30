@@ -17,7 +17,8 @@ import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 
-const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings }>()
+export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
+const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings; lists?: PanelList[] }>()
 const emit = defineEmits<{
   jump: [entry: BookmarkEntry]
   remove: [entry: BookmarkEntry]
@@ -31,6 +32,12 @@ const scrollBox = ref<HTMLDivElement>()
 
 const folderOf = (path: string) => path.slice(0, path.length - path.split('/').pop()!.length).replace(/\/$/, '')
 const groups = computed(() => groupBookmarks(props.entries, props.settings.groupLineBookmarks))
+/**
+ * 列表分区（上游 `ManagerState.groups` 的树节点）：`lists` 给了就按它分段，每段下面再按
+ * 分组设置切文件；没给就还是老样子（一段 = 全部）。默认列表带「默认」标记
+ * （`default.group.marker` = 「默认」）。
+ */
+const sections = computed(() => props.lists?.length ? props.lists : [{ name: '', isDefault: false, entries: props.entries }])
 /**
  * 文件书签（没有行号）与行书签分开：前者渲染成"文件那一行"（上游的 `FileNode`，
  * `providers/FileBookmarkImpl.kt:26-29` 按 isDirectory 建 FolderNode/FileNode），
@@ -103,7 +110,13 @@ function onKeydown(event: KeyboardEvent) {
       <button class="subtle-button" @click="emit('assign')">为当前行编号</button>
     </div>
     <div v-else ref="scrollBox" class="bookmark-scroll" role="list" aria-label="项目书签" tabindex="0" @keydown="onKeydown" @focus="cursor = cursor || (visible.length ? bookmarkKey(visible[0]) : '')">
-      <template v-for="group in groups" :key="group.path || 'flat'">
+      <template v-for="section in sections" :key="section.name || 'all'">
+      <div v-if="section.name" class="bookmark-list-head" role="presentation">
+        <span class="bookmark-list-name">{{ section.name }}</span>
+        <span v-if="section.isDefault" class="bookmark-list-default" title="新书签会自动添加到这个列表">默认</span>
+        <span class="bookmark-list-count">{{ section.entries.length }}</span>
+      </div>
+      <template v-for="group in groupBookmarks(section.entries, props.settings.groupLineBookmarks)" :key="(section.name || 'all') + ':' + (group.path || 'flat')">
         <!-- 分组模式下的文件标题行（IDEA 的 GroupLineBookmarks = 按文件分组） -->
         <div v-if="group.path" class="bookmark-group-head" :role="fileBookmarks.get(group.path) ? 'listitem' : 'presentation'" :title="group.path">
           <button v-if="fileBookmarks.get(group.path)" class="bookmark-group-name bookmark-file-open" :title="`打开 ${group.path}${bookmarkDescription(fileBookmarks.get(group.path)!) ? '：' + bookmarkDescription(fileBookmarks.get(group.path)!) : ''}`" @click="activate(fileBookmarks.get(group.path)!)">{{ group.path.split('/').pop() }}</button>
@@ -139,6 +152,7 @@ function onKeydown(event: KeyboardEvent) {
           <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>
         </div>
       </template>
+      </template>
     </div>
   </div>
 </template>
@@ -155,6 +169,10 @@ function onKeydown(event: KeyboardEvent) {
 .gear-rule { height: 1px; margin: 2px 0; background: var(--line); }
 .bookmark-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); outline: none; }
 .bookmark-scroll:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.bookmark-list-head { display: flex; align-items: baseline; gap: var(--space-2); padding: 5px var(--space-2) 3px; border-top: 1px solid var(--line); color: var(--bright); font-size: 11px; font-weight: 600; }
+.bookmark-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-list-default { padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); font-size: 9px; font-weight: 400; }
+.bookmark-list-count { margin-left: auto; color: var(--muted); font-size: 10px; font-weight: 400; }
 .bookmark-group-head { display: flex; align-items: baseline; gap: var(--space-2); padding: 4px var(--space-2) 2px; color: var(--secondary); font-size: 11px; }
 .bookmark-group-name { color: var(--bright); }
 .bookmark-group-folder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
