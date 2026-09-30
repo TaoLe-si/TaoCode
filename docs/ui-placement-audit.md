@@ -2517,3 +2517,40 @@ CodeMirror 语法树候选（`foldable` 给起始行那块 + `enclosingAreas` �
 
 **判据**：`tests/editor-folding-settings.test.mjs`（7 条）——默认值/映射照上游、文案逐字（含"那三条不许渲染"）、
 树与对话框的落点、原生两份表、编辑器接线（区间到手就应用 + 改了就重算）、`foldKinds` 幂等。
+
+## BH. 2026-09-30 第六十二批：B4 §C③⑤ —— 折叠状态的存/取与文档变动后的重算
+
+§C③（折叠状态持久化）与 §C⑤（重算）一起做，因为它们本来就是一段管道。上游两条依据：
+`DocumentFoldingInfo`（每个文档的状态：`loadFromEditor:83-114` 存什么、`setToEditor:198-220` 怎么放回去、
+`computeExpandRanges:146-164` 按**元素签名**找回搬走的块）+ `UpdateFoldRegionsOperation`
+（`removeInvalidRegions` 删失效区间、`shouldExpandNewRegion` 的 `oldStatus` 保住"用户展开过"的那块）。
+本仓没有 PSI，元素签名的替身是「偏移 + 起点那行的原文」的**轻签名**。
+
+**落点**：`src/editorFoldingState.ts`（纯逻辑：签名、存档、恢复计划、失效判定）+ `src/editorFoldingController.ts`
+（调度管道：存 → 装区间 → 记候选 → 按默认折 → 清失效 → 恢复，**串行**）。宿主 `CodeEditor.vue` 只注入依赖
+（路径/编辑器/两族开关/怎么取区间）—— 逻辑进模块是因为宿主贴着机检上限（这一批去掉折叠逻辑后从 1200 行回落到 1149）。
+
+**这一批踩到的三个真问题（都是先按下去才发现的）**：
+
+1. **重算前必须先存档**：`applyFoldingSettings` 会按默认把 `imports` 折上，而"用户手动展开过"这个覆盖状态
+   只在**重算之前**读得到（文档一变 `foldingRanges` 字段就被清空）—— 顺序错了，用户展开过的块每次重算都会被
+   重新折上。上游不需要这一步：它的 `FoldRegion` 对象一直在模型里（`oldStatus` 直接查得到）。
+2. **管道必须串行**：两轮 `runFolding` 并存时，第二轮会在第一轮"折好默认、还没恢复覆盖"的中间态上存档，
+   把"用户展开过"记成"折着"（真机上就是这么丢的，加了 trace 才看出来）。
+3. **匹配不能只看边界相等**：编辑会把旧折叠的偏移推走一点（上游是 RangeMarker，自己跟着动），
+   `unfoldEffect` 又只认精确边界 —— 于是"该展开的那条"匹配不上、折叠留在原地。改成"边界相等**或签名相同**"
+   之后，`Ctrl+Shift+=` 展开过的 imports 在编辑触发重算后保持展开（真机验证）。
+
+**真机取证**（jdtls 的 Java 文件，CDP）：
+
+| 动作 | 结果 |
+|---|---|
+| 折两块（imports 自动 + 方法体 Ctrl+-）→ 关标签 → 重开 | 两块都回来（折叠状态跨重开） |
+| 全部展开 → 关标签 → 重开 | 仍是全展开（"用户展开过"的覆盖活着） |
+| 全部展开 → 敲一个字符触发重算 | 仍是全展开（覆盖在重算里活下来） |
+| 折一块 → 删掉它上面的一行（块被推走）→ 等重算 | 折叠跟着块走，仍在同一块上 |
+| 折 `//region` 块 → 删掉 region 标记（候选没了）→ 等重算 | 折叠被清掉（`removeInvalidRegions` 的等价物） |
+
+**仍缺**（写进判决 §C③/§G）：落盘那半 —— 上游把状态写进 workspace 文件并带文件时间戳
+（`writeExternal`/`readExternal:260-368`），本仓目前是会话内内存；`caretInsideRange` 只做成了纯函数没接管道
+（本仓的折叠不隐藏光标，接上会把刚折的块弹开）。判据 `tests/editor-folding-state.test.mjs`（10 条）。
