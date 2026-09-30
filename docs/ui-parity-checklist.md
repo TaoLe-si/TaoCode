@@ -1081,6 +1081,13 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      JDT 才会按 `java.project.sourcePaths`/`referencedLibraries` 把普通文件夹建成不可见工程
      （VS Code 那边是扩展在 initialize 之后自动做的）。做法：在 native 侧 `Session` 的 ready 回调之后
      发这条命令（幂等），再按同一配方复验。
+  4) 又补了一步：关掉导入时由客户端主动发 `java.project.import`（`Session::request_project_import`，
+     只在 `gradle.enabled == false` 时发）——**复验结果与加它之前完全一样**（hover 空、definition 不可用）。
+  **于是只剩两条各一次探针的判定**（下次从这里开始）：
+     ① grep JDT 的 `.metadata/.log`：加命令前后 `Importing … project(s)` 那几行有没有差异
+        ⇒ 命令到底有没有被当真；
+     ② 把 `java.import.exclusions` 暂时清空再复验一次 ⇒ 排除"排除模式误伤链接目录"这个嫌疑
+        （我推导的模式里含 `**/AE2-refs/**` 这类，理论上不碰 `AE2VMAddon-1.7.10-gtnh`，但值得实测）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 
