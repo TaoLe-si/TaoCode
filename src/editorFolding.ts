@@ -383,6 +383,17 @@ export const foldBlockAtCaret: Command = view => {
   return candidate ? applyAreas(view, [candidate], true) : false
 }
 
+/**
+ * 按 LSP `kind` 折起/展开一族区间 —— 「打开时按设置预折叠」与"设置改了重算"都用它
+ * （上游 `LspFoldingBuilder.kt:41-46` 的 `collapsedByDefault` + `CodeFoldingConfigurable.Util` 的重算）。
+ * 幂等：`applyRanges` 自己跳过已经折着的。
+ */
+export function foldKinds(view: EditorView, kinds: readonly string[], collapse: boolean): boolean {
+  if (!kinds.length) return false
+  const ranges = rangesOf(view.state).filter(range => range.kind !== undefined && kinds.includes(range.kind))
+  return applyRanges(view, ranges, collapse)
+}
+
 /** 收起/展开文档注释（`Collapse/ExpandDocCommentsAction`）。 */
 export const foldDocComments: Command = view => applyRanges(view, commentRanges(rangesOf(view.state)), true)
 export const unfoldDocComments: Command = view => applyRanges(view, commentRanges(rangesOf(view.state)), false)

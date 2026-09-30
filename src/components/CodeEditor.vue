@@ -10,7 +10,8 @@ import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/l
 import { tags } from '@lezer/highlight'
 import type { Theme } from '../appearance'
 import { editingCommands, runEditorCommand } from '../editorCommands'
-import { foldingRanges, lspFoldService, setFoldingRanges } from '../editorFolding'
+import { foldKinds, foldingRanges, lspFoldService, setFoldingRanges } from '../editorFolding'
+import { defaultCodeFoldingSettings, FOLDING_SETTING_ROWS, kindOfSetting } from '../editorFoldingSettings'
 import { clipboardCommands, copyCutChannel } from '../editorClipboard'
 import { gutterIconsExtension, syncGutterIcons, type GutterIcon } from '../editorGutterIcons'
 import { blameAnnotationsExtension, syncBlameAnnotations } from '../editorBlameAnnotations'
@@ -349,6 +350,14 @@ async function runSemanticTokens() {
     target.dispatch({ effects: setSemanticTokens.of(decodeSemanticTokens(semanticData, result.legend)) })
   } catch { /* 服务器没有语义高亮能力时保持词法着色，不影响编辑 */ }
 }
+// 「编辑器 › 代码折叠」里那两个开关只影响 `imports` / `region` 两族区间的**默认折叠**：
+// 开着的预折叠，关掉的展开（设置一改立刻重算，对应上游 `CodeFoldingConfigurable.Util.applyCodeFoldingSettingsChanges`）。
+function applyFoldingSettings() {
+  if (!view) return
+  for (const row of FOLDING_SETTING_ROWS) {
+    foldKinds(view, [kindOfSetting(row.key)], props.settings[row.key] ?? defaultCodeFoldingSettings[row.key])
+  }
+}
 function scheduleFolding() {
   if (!props.lspEnabled || heavy) return
   if (foldTimer !== undefined) clearTimeout(foldTimer)
@@ -361,6 +370,8 @@ async function runFolding() {
   try {
     const result = await request<LspFoldingRangeResult>('lsp.request', { kind: 'foldingRange', path: props.path, line: 0, character: 0 })
     editor.dispatch({ effects: setFoldingRanges.of(result.available ? result.ranges ?? [] : []) })
+    // 区间到手就按「代码折叠」设置预折叠（上游 `LspFoldingBuilder.kt:41-46` 的 collapsedByDefault）。
+    applyFoldingSettings()
   } catch { /* 服务器不给折叠区间时保持内置折叠，不影响编辑 */ }
 }
 // LSP `textDocument/diagnostic`（**pull 模型**，IDEA 的批处理 Inspection）：服务器声明了
@@ -1102,6 +1113,7 @@ onMounted(() => {
   scheduleHints()
 })
 // The hint belongs to one file and to the focused tab, so leaving either dismisses it.
+watch(() => FOLDING_SETTING_ROWS.map(row => props.settings[row.key]).join(','), () => applyFoldingSettings())
 watch(() => props.path, () => { hideErrorHint(); void loadLanguage(props.path); resetSemanticTokens(); scheduleFolding(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion() })
 watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }

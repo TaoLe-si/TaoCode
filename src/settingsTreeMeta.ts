@@ -7,7 +7,7 @@
 // 这样"这一页对应源码哪一条注册"在代码里就是答案；早期批次用过的键（appearance / editor.general /
 // structure / commit …）保持不变，以免打断跳转目标与测试。
 import {
-  AlignLeft, Braces, Cog, FileType, Filter, GitBranch, GitCommitIcon, Hammer, History, Layers,
+  AlignLeft, Braces, Cog, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Layers,
   ListChecks, Palette, Save, SlidersHorizontal, Sparkles, Terminal,
 } from 'lucide-vue-next'
 
@@ -34,7 +34,7 @@ export const SETTINGS_GROUPS = [
   { key: 'group:other', label: '其它设置' },
 ] as const
 
-export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs' | 'editor.preferences.smartKeys' | 'editor.preferences.gutterIcons' | 'advanced'
+export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.appearance' | 'editor.preferences.tabs' | 'editor.preferences.smartKeys' | 'editor.preferences.gutterIcons' | 'editor.preferences.folding' | 'advanced'
   | 'preferences.sourceCode' | 'preferences.sourceCode.indents' | 'tools.actionsOnSave'
   | 'preferences.general' | 'editing.templates' | 'commit' | 'project.scopes'
   | 'reference.settings.ide.settings.file-colors'
@@ -78,6 +78,10 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // intellij.platform.lang.impl.xml:1181 `<editorOptionsProvider instance="...EditorSmartKeysConfigurable" id="editor.preferences.smartKeys">` ——
   // 与「编辑器标签页」同属 preferences.editor.general 的子页。
   { key: 'editor.preferences.smartKeys', label: '智能键', icon: Sparkles, parent: 'editor', keywords: '智能键 粘贴 缩进 重新格式化 smart keys paste reformat indent' },
+  // intellij.platform.lang.impl.xml:1179 的 `codeFoldingOptionsProvider` + `CodeFoldingConfigurable.kt:26-27`
+  // （`group.code.folding` = 「代码折叠」，id `editor.preferences.folding`）—— 五个开关里本仓只渲染
+  // LSP 路径真会读的两条（Import / 自定义折叠区域），理由见 src/editorFoldingSettings.ts 的模块注释。
+  { key: 'editor.preferences.folding', label: '代码折叠', icon: FoldVertical, parent: 'editor', keywords: '折叠 Import 自定义折叠区域 默认折叠 code folding collapse imports region' },
   // intellij.platform.lang.impl.xml:1187 `<editorOptionsProvider instance="...GutterIconsConfigurable" id="editor.preferences.gutterIcons">`
   { key: 'editor.preferences.gutterIcons', label: '装订线图标', icon: ListChecks, parent: 'editor', keywords: '装订线 图标 行标记 gutter icons line markers' },
   // preferences.sourceCode groupWeight=170（intellij.platform.lang.impl.xml:987）

@@ -1120,7 +1120,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           key === 'uiZoomPercent' || key === 'compactMode' || key === 'fullPathsInWindowHeader' ||
           key === 'showTreeIndentGuides' || key === 'compactTreeIndents' ||
           key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' ||
-          key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
+          key === 'collapseImports' || key === 'collapseCustomRegions' || key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
           key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || key === 'fileColorsForProjectView' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
           key === 'smoothScrolling' || key === 'showIconsInMenus' ||
           key === 'rememberSizeForEachToolWindow' || key === 'showToolWindowNames' || key === 'showToolWindowBars' ||

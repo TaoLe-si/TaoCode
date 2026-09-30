@@ -229,6 +229,10 @@ Json editor_defaults_impl() {
             // (IDEA: Editor → Code Style "Use tab character", "Show whitespaces",
             // "Reformat code" in Actions on Save).
             {"useTabCharacter", false}, {"showWhitespaces", false}, {"formatOnSave", false},
+            // 代码折叠（CodeFoldingSettings.java:7-11）：COLLAPSE_IMPORTS 默认 true、
+            // COLLAPSE_CUSTOM_FOLDING_REGIONS 默认 false。另外三个（文件头/方法体/文档注释）只有
+            // 语言侧 FoldingBuilder 读，本仓不渲染也不落盘（见 src/editorFoldingSettings.ts）。
+            {"collapseImports", true}, {"collapseCustomRegions", false},
             // Delete through the platform recycle bin instead of unlinking the file
             // (IDEA's "Safe delete" fallback); `file.delete` honours it per call, this
             // is just the remembered default.

@@ -26,6 +26,7 @@ import { createSettingsDraftActions, createSettingsDraftPages, type SettingsDraf
 import { createGeneralSettingsTextModels } from '../generalSettingsTextModels'
 import TodoPatternsPage from './TodoPatternsPage.vue'
 import FileTypesPage from './FileTypesPage.vue'
+import CodeFoldingSettingsPage from './CodeFoldingSettingsPage.vue'
 import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, NamedScopeSetting, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
 import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '../bridge'
 // 构建工具组（`build.tools` + Gradle 页）的取值/文案/控件都在 src/gradle.ts 与两个子页组件里；
@@ -989,6 +990,10 @@ defineExpose({ handleEscape })
           </fieldset>
         </form>
 
+        <section v-show="section === 'editor.preferences.folding'" :id="`${id}-panel-editor.preferences.folding`" class="settings-panel" data-page="editor.preferences.folding" role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.folding`" :aria-busy="busy">
+          <CodeFoldingSettingsPage :settings="editor" :busy="busy" @reset="resetEditorPage()" />
+        </section>
+
         <form
           v-show="section === 'preferences.sourceCode.indents'" :id="`${id}-panel-editor.codeStyle.indents`" :ref="registerEditorForm" class="settings-panel" data-page="preferences.sourceCode.indents"
           role="tabpanel" :aria-labelledby="`${id}-tab-editor.codeStyle.indents`" :aria-busy="busy" @submit.prevent="applyEditor()"
@@ -1059,7 +1064,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'editor.breadcrumbs'" :id="`${id}-panel-editor.breadcrumbs`" class="settings-panel" data-page="editor.breadcrumbs" role="tabpanel" :aria-labelledby="`${id}-tab-editor.breadcrumbs`" :aria-busy="busy">
           <h3>编辑器 › 面包屑</h3>
           <p class="section-description">对应 IDEA Settings › Editor › Breadcrumbs（platform-impl/.../xml/breadcrumbs/BreadcrumbsConfigurable.java:24；UI 在 BreadcrumbsConfigurableUI.kt:44-70）。注册证据：intellij.platform.ide.impl.xml:1231 `&lt;applicationConfigurable parentId="preferences.editor" id="editor.breadcrumbs"&gt;` —— 它是**编辑器的直接子页**，不是「常规 › 外观」里的行。</p>
-          
             <!-- IDEA BreadcrumbsConfigurableUI.kt:44-70 三段：显示开关 → 位置单选（上/下，随总开关禁用）
                  → 按语言的开关（mapLanguageBreadcrumbs，只存显式配置过的语言）。
                  最后那个「配置面包屑颜色」链接指向颜色方案页（ColorAndFontOptions），本仓没有色板页，
@@ -1088,7 +1092,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'editor.stickyLines'" :id="`${id}-panel-editor.stickyLines`" class="settings-panel" data-page="editor.stickyLines" role="tabpanel" :aria-labelledby="`${id}-tab-editor.stickyLines`" :aria-busy="busy">
           <h3>编辑器 › 粘性行</h3>
           <p class="section-description">对应 IDEA Settings › Editor › Sticky Lines（StickyLinesConfigurable.kt:7-20）。注册证据：intellij.platform.ide.impl.xml:1236 `&lt;applicationConfigurable parentId="preferences.editor" id="editor.stickyLines"&gt;` —— 同样是编辑器的直接子页。</p>
-          
             <!-- IDEA StickyLinesConfigurable（`editor.stickyLines`）。 -->
             <label class="checkbox-row"><input v-model="settings.showStickyLines" type="checkbox" aria-describedby="editor-sticky-hint" /><span>在编辑器顶边固定显示当前作用域</span></label>
             <label class="field-row"><span>层数上限</span><input v-model.number="settings.stickyLinesLimit" type="number" min="0" max="10" step="1" :disabled="!settings.showStickyLines" aria-describedby="editor-sticky-hint" /></label>
@@ -1098,7 +1101,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'Errors'" :id="`${id}-panel-Errors`" class="settings-panel" data-page="Errors" role="tabpanel" :aria-labelledby="`${id}-tab-Errors`" :aria-busy="busy">
           <h3>编辑器 › 检查</h3>
           <p class="section-description">对应 IDEA Settings › Editor › Inspections（`Errors`，注册证据 intellij.platform.lang.impl.xml:1823 `groupId="editor" groupWeight="160" key="configurable.InspectionToolsConfigurable.display.name"`=Inspections）。TaoCode 用 LSP 诊断，等价开关是显示诊断与滚动条标记。</p>
-          
             <!-- IDEA Error highlighting（`Errors` + ErrorOptionsProvider）：TaoCode 用 LSP 诊断，等价开关是显示诊断与 stripe 标记。 -->
             <label class="checkbox-row"><input v-model="settings.showDiagnostics" type="checkbox" aria-describedby="editor-diagnostics-hint" /><span>在编辑器里显示错误与警告</span></label>
             <label class="checkbox-row"><input v-model="settings.showErrorStripe" type="checkbox" :disabled="!settings.showDiagnostics" aria-describedby="editor-diagnostics-hint" /><span>在滚动条旁显示错误标记</span></label>
@@ -1108,7 +1110,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'Console'" :id="`${id}-panel-Console`" class="settings-panel" data-page="Console" role="tabpanel" :aria-labelledby="`${id}-tab-Console`" :aria-busy="busy">
           <h3>编辑器 › 控制台</h3>
           <p class="section-description">对应 IDEA Settings › Editor › Console（注册证据 intellij.platform.lang.impl.xml:983 `&lt;applicationConfigurable parentId="preferences.editor" id="Console"&gt;`）。</p>
-          
             <!-- IDEA ConsoleConfigurable（`Console`，ConsoleConfigurable.java:43-73）：两个折叠列表。 -->
             <label class="field-row field-row-block"><span>折叠行</span><textarea :value="foldConsoleText" rows="3" aria-label="要折叠的控制台行" placeholder="每行一条：匹配到该子串的重复行会被折叠" @input="foldConsoleText = ($event.target as HTMLTextAreaElement).value" /></label>
             <label class="field-row field-row-block"><span>例外</span><textarea :value="foldExceptionText" rows="3" aria-label="不折叠的例外" placeholder="每行一条：命中例外的行永不折叠" @input="foldExceptionText = ($event.target as HTMLTextAreaElement).value" /></label>
@@ -1118,7 +1119,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'preferences.externalTools'" :id="`${id}-panel-preferences.externalTools`" class="settings-panel" data-page="preferences.externalTools" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.externalTools`" :aria-busy="busy">
           <h3>工具 › 外部工具</h3>
           <p class="section-description">对应 IDEA Settings › Tools › External Tools（注册证据 intellij.platform.lang.impl.xml:1013 `groupId="tools" id="preferences.externalTools" key="tools.settings.title"`=External Tools）。</p>
-          
             <!-- IDEA ToolConfigurable（`preferences.externalTools`）：应用级命令收藏，每行一条「名称|命令」。 -->
             <label class="field-row field-row-block"><span>工具</span><textarea :value="externalToolsText" rows="4" aria-label="外部工具" placeholder="名称|命令（每行一条，例如：格式化|clang-format -i *.cpp）" @input="externalToolsText = ($event.target as HTMLTextAreaElement).value" aria-describedby="general-external-tools-hint" /></label>
             <p id="general-external-tools-hint" class="field-hint">对应 IDEA 的 `preferences.externalTools`：这里定义的工具会出现在「工具 › 外部工具」子菜单里，运行时复用构建的同一条输出通道。</p>
@@ -1127,7 +1127,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'diff.base'" :id="`${id}-panel-diff.base`" class="settings-panel" data-page="diff.base" role="tabpanel" :aria-labelledby="`${id}-tab-diff.base`" :aria-busy="busy">
           <h3>工具 › 差异与合并</h3>
           <p class="section-description">对应 IDEA Settings › Tools › Diff &amp; Merge（注册证据 platform/diff-impl/resources/intellij.platform.diff.impl.xml:78 `groupId="tools" id="diff.base"`）。</p>
-          
             <!-- IDEA DiffSettingsConfigurable（`diff.base`）：settings.context.lines。 -->
             <label class="field-row"><span>上下文行数</span><input v-model.number="settings.diffContextLines" type="number" min="1" max="100" step="1" aria-describedby="general-diff-hint" /></label>
             <p id="general-diff-hint" class="field-hint">对应 IDEA 的 `diff.base` › settings.context.lines：统一差异（`git diff`）保留的上下文行数，TaoCode 会把它作为 <code>-U&lt;n&gt;</code> 传给 git（默认 3，与 git 一致）。</p>
@@ -1148,7 +1147,6 @@ defineExpose({ handleEscape })
         <section v-show="section === 'vcs.log'" :id="`${id}-panel-vcs.log`" class="settings-panel" data-page="vcs.log" role="tabpanel" :aria-labelledby="`${id}-tab-vcs.log`" :aria-busy="busy">
           <h3>版本控制 › VCS 日志</h3>
           <p class="section-description">对应 IDEA Settings › Version Control › VCS Log（注册证据 platform/vcs-log/impl/resources/intellij.platform.vcs.log.impl.xml:86 `id="vcs.log" parentId="project.propVCSSupport.Mappings"`）。</p>
-          
           <!-- IDEA VcsLogApplicationSettings（vcs.log）：日志图的 UI 开关。 -->
           <label class="checkbox-row"><input type="checkbox" :checked="projectSettings?.vcsLog?.showTagNames ?? true" :disabled="!projectSettings || busy" @change="emit('saveVcsLog', { showTagNames: !(projectSettings?.vcsLog?.showTagNames ?? true), showRootNames: projectSettings?.vcsLog?.showRootNames ?? true })" /><span>在日志行上显示标签名</span></label>
           <label class="checkbox-row"><input type="checkbox" :checked="projectSettings?.vcsLog?.showRootNames ?? true" :disabled="!projectSettings || busy" @change="emit('saveVcsLog', { showTagNames: projectSettings?.vcsLog?.showTagNames ?? true, showRootNames: !(projectSettings?.vcsLog?.showRootNames ?? true) })" /><span>显示仓库根名</span></label>
