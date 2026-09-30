@@ -640,6 +640,8 @@ export const BUILD_TOOLS_GROUP_ID = 'build.tools'
 export type GradleDistribution = 'wrapper' | 'local' | 'path'
 
 export interface BuildToolsGradleSettings {
+  /** `java.import.gradle.enabled`：关掉 = 语言服务不跑 Gradle 导入，用磁盘上的产物当类路径/源根。 */
+  enabled?: boolean
   useGradleFrom: GradleDistribution
   /** `useGradleFrom === 'path'` 时的 gradle 可执行文件（`GradleProjectSettings.gradleHome`）。 */
   gradlePath: string
