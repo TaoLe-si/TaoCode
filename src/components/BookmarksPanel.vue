@@ -16,7 +16,7 @@ import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } fro
 import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
-import { confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
+import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
 import BookmarkListDialog from './BookmarkListDialog.vue'
 
 export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
@@ -28,6 +28,8 @@ const emit = defineEmits<{
   updateSettings: [patch: Partial<BookmarksViewSettings>]
   /** 「书签打开的标签页…」（上游 `BookmarkOpenTabs`）：宿主把所有打开的标签页加成文件书签。 */
   bookmarkTabs: []
+  /** 右键菜单里的「编辑描述」：走宿主的那个对话框（`EditBookmarkAction`）。 */
+  edit: [entry: BookmarkEntry]
 }>()
 
 const gearOpen = ref(false)
@@ -68,6 +70,22 @@ watch(() => props.activePath, async path => {
 })
 
 function toggle(patch: Partial<BookmarksViewSettings>) { emit('updateSettings', patch) }
+/**
+ * 行右键菜单 —— 上游书签节点右键那个 `popup@BookmarkContextMenu` 里本仓能真做的三条：
+ * 「添加另一书签…」（`AddAnotherBookmarkAction`：加到另一张列表）、「编辑描述」（`EditBookmarkAction`，
+ * 走宿主的对话框）、「移除书签」（`NodeDeleteAction`）。其余行（切换助记键/取消默认列表/移到…）
+ * 需要各自的契约，登记在判决表里。
+ */
+const rowMenu = ref<{ x: number; y: number; entry: BookmarkEntry } | null>(null)
+function openRowMenu(event: MouseEvent, entry: BookmarkEntry) {
+  rowMenu.value = { x: event.clientX, y: event.clientY, entry }
+}
+/** 「添加另一书签…」：按上游的捷径挑列表（没有先建 / 一张直接用 / 多张弹选择）。 */
+function addToAnotherList() {
+  const entry = rowMenu.value?.entry
+  rowMenu.value = null
+  if (entry) runWithChosenList(name => addBookmarkToNamedList(name, entry))
+}
 /**
  * 删除列表：`askBeforeDeletingLists`（上游 `BookmarksViewState:24`，默认 **true**）开着就先弹确认
  * （文案「确定要删除 ''{0}'' 书签列表吗? 此操作无法撤消。」），关着直接删。
@@ -149,7 +167,7 @@ function onKeydown(event: KeyboardEvent) {
           <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="13" /></button>
           <span v-else class="bookmark-group-count">{{ group.entries.length }}</span>
         </div>
-        <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }">
+        <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }" @contextmenu.prevent.stop="openRowMenu($event, entry)">
           <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
                   :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行${bookmarkDescription(entry) ? `：${bookmarkDescription(entry)}` : ''}`" @click="activate(entry)">
 
@@ -177,6 +195,15 @@ function onKeydown(event: KeyboardEvent) {
       </template>
       </template>
     </div>
+    <div v-if="rowMenu" class="bookmark-row-menu-backdrop" @pointerdown="rowMenu = null" @contextmenu.prevent="rowMenu = null">
+      <div class="bookmark-row-menu" role="menu" :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }" @pointerdown.stop>
+        <button role="menuitem" @click="addToAnotherList()">添加另一书签…</button>
+        <button role="menuitem" @click="emit('edit', rowMenu.entry); rowMenu = null">编辑描述</button>
+        <div class="menu-rule" role="separator" />
+        <button role="menuitem" @click="activate(rowMenu.entry); rowMenu = null">转到书签</button>
+        <button role="menuitem" @click="emit('remove', rowMenu.entry); rowMenu = null">移除书签</button>
+      </div>
+    </div>
     <BookmarkListDialog v-if="listDialog" :ask-before-deleting="settings.askBeforeDeletingLists" />
   </div>
 </template>
@@ -193,6 +220,10 @@ function onKeydown(event: KeyboardEvent) {
 .gear-rule { height: 1px; margin: 2px 0; background: var(--line); }
 .bookmark-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); outline: none; }
 .bookmark-scroll:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.bookmark-row-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
+.bookmark-row-menu { position: absolute; display: flex; flex-direction: column; min-width: 160px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.bookmark-row-menu button { padding: 4px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
+.bookmark-row-menu button:hover { background: var(--hover); }
 .bookmark-list-head { display: flex; align-items: baseline; gap: var(--space-2); padding: 5px var(--space-2) 3px; border-top: 1px solid var(--line); color: var(--bright); font-size: 11px; font-weight: 600; }
 .bookmark-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bookmark-list-default { padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); font-size: 9px; font-weight: 400; }

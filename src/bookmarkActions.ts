@@ -46,6 +46,15 @@ export function notifyEditorContentChanged(path: string, content: string): void 
   contentChanged?.(path, content)
 }
 
+/**
+ * 「编辑描述」的模块级入口（同一条先例）：书签面板的行右键菜单要用它，而面板拿不到本模块的实例
+ * —— `createBookmarkActions` 建实例时把实现挂上。
+ */
+let editRequested: ((path: string, line?: number) => void) | undefined
+export function requestBookmarkEdit(path: string, line?: number): void {
+  editRequested?.(path, line)
+}
+
 export function createBookmarkActions(deps: BookmarkActionsDeps) {
   const isDesktop = deps.isDesktop
   const { menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation } = deps
@@ -82,6 +91,7 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     persistBookmarks()
   }
   contentChanged = reconcile
+  editRequested = (path, line) => editBookmarkAt(path, line ?? undefined)
   const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   let bookmarkSave: number | undefined
   function useProjectSettings(settings: ProjectSettings) {
@@ -93,7 +103,8 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     configureBookmarkLists({
       isDesktop, settings: projectSettings, workspace, notify: deps.notify,
       defaultEntries: () => sortedAll.value,
-      removeFromDefault: entry => { bookmarks.value = removeBookmark(bookmarks.value, entry) },
+      // 行书签换家时要**落盘**：只改内存会让默认列表在重启后把它捡回来（真机探针抓到过）。
+      removeFromDefault: entry => { bookmarks.value = removeBookmark(bookmarks.value, entry); persistBookmarks() },
     })
     syncBookmarkLists(settings)
   }

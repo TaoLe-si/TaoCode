@@ -10,6 +10,7 @@
 // 与搬过来之前一模一样（所以这里不需要手写任何 `any`）。
 import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView.ts'
 import { addBookmarkToNamedList, runWithChosenList } from './bookmarkListActions.ts'
+import { requestBookmarkEdit } from './bookmarkActions.ts'
 import { isDesktop, type BookmarksViewState } from './bridge.ts'
 import { getProjectTreeState } from './projectTreeState'
 import type { ToolWindowViewContext } from './components/ToolWindowView.vue'
@@ -138,6 +139,7 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   onUpdateBookmarksView: (patch: unknown) => { void saveBookmarksView(patch as Partial<BookmarksViewState>) },
   // 「书签打开的标签页…」（上游 `BookmarkOpenTabsAction`）：先按上游的捷径挑一张列表
   // （没有就现建、只有一张直接用、多张弹选择），再把每个打开的标签页加成文件书签。
+  onBookmarkEdit: (entry: { path: string; line?: number }) => requestBookmarkEdit(entry.path, entry.line),
   onBookmarkTabs: () => runWithChosenList(name => {
     for (const path of openTabPaths()) addBookmarkToNamedList(name, { path })
     notify(`已把 ${openTabPaths().length} 个打开的标签页加到列表「${name}」`)
