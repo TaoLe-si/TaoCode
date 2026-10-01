@@ -2,6 +2,7 @@ import { pickedCompletion, type CompletionContext, type CompletionResult } from 
 import type { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import type { LspCompletionItem, LspCompletionItemResolveResult, LspCompletionResult, LspTextEdit } from './bridge'
+import { sortCompletions } from './completionSort.ts'
 
 interface CompletionDeps {
   enabled: () => boolean
@@ -102,11 +103,23 @@ export function createLspCompletion(deps: CompletionDeps) {
         }
         return pending
       }
+      // 顺序在交给 CodeMirror 之前排好（src/completionSort.ts：IDEA 排序器链的四档 + 预选），
+      // 它自己的 sortText 排序从此不参与语义；这里只排候选表，`Completion` 对象的形状不变。
+      const ordered = sortCompletions(result.items
+        .filter(item => (item.raw as RawItem | undefined)?.insertTextFormat !== 2)
+        .map(item => {
+          const raw = item.raw as (RawItem & { sortText?: unknown; preselect?: unknown }) | undefined
+          return [
+            item,
+            typeof raw?.sortText === 'string' ? raw.sortText : item.label,
+            raw?.preselect === true,
+          ] as const
+        })
+        .map(([item, sortText, preselected]) => ({ item, label: item.label, sortText, preselected })))
       return {
         from: word?.from ?? context.pos,
         // No validFor: every edit requests a fresh semantic result (also handles
         // CompletionList.isIncomplete without reusing an incomplete/stale list).
-        options: result.items.filter(item => (item.raw as RawItem | undefined)?.insertTextFormat !== 2).map(item => ({
           // LSP `filterText` 是**过滤键**、不一定是可见文本（别名/缩写就是靠它），而 CodeMirror 的
           // 过滤走 `label` ⇒ 有 filterText 时把 label 设成它、可见文本交给 `displayLabel`；
           // `completionMatch` 会把高亮范围按 displayLabel 里的偏移重算回来（那里记着这条约定）。
