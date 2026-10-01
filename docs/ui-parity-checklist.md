@@ -1051,7 +1051,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 ---
 
 - [x] **已补（第七十六批）** 书签**列表**这条线：运行时 `src/bookmarkListActions.ts`（建/改名/删/把书签加进某张列表）、对话框 `src/components/BookmarkListDialog.vue`（上游三个对话框合一的形状）、面板段头的重命名/删除按钮、标题栏的「创建书签列表」「书签打开的标签页…」，以及齿轮的「删除多个书签前询问」（默认开）。真机取证：建「待办」→ 改名「待办2」→「书签打开的标签页…」把打开的标签页加成**文件书签**并落盘 → 删除时弹出上游那句「确定要删除 ''待办2'' 书签列表吗? 此操作无法撤消。」。
-- [ ] **待补（第七十六批遗留）** `AddAnotherBookmark`（把一条**已有**书签加到另一张列表）：运行时与对话框都就绪（`runWithChosenList` + `addBookmarkToNamedList` + select 模式），缺的是上游那个入口（书签节点右键菜单里的「添加另一书签…」）。
+- [x] **已补（第七十八批·更正第七十六批遗留）** `AddAnotherBookmark`：上一批记的"缺入口（书签节点右键菜单里的「添加另一书签…」）"
+  **两处都不准** —— 入口早在 `539aacd` 就加进了书签面板的行右键菜单，而上游的书签**工具窗口**节点菜单里根本没有这个动作
+  （`Bookmarks.ToolWindow.PopupMenu` = `platform/bookmarks/resources/intellij.platform.bookmarks.xml:158-177`：默认列表/重命名/删除/删类型/选类型/上移/下移/按组排序/打开组）。
+  它的真实挂点是**编辑器那一侧**：gutter 弹出菜单（`popup@BookmarkContextMenu`，`:211-219`）与编辑器标签/项目视图弹出菜单
+  （`popup@ExpandableBookmarkContextMenu`，`:222-227`），而且 `AddAnotherBookmarkAction.update:16-19` 对**行**书签直接
+  `return false`（行书签只有一个家，能进多张列表的是**文件**书签）。本批按这条启用规则把面板行菜单里那一行只留给文件书签
+  （判据在 `tests/bookmark-lists.test.mjs`）。**仍待补**：tab 菜单 / 项目视图菜单 / gutter 弹出菜单这三处挂点
+  —— 前两处的行数据在 `App.vue` 的模板里（贴着机检上限），要落得先拆出菜单模块；gutter 弹出菜单本仓整体还没有。
 - [x] **已补（第七十七批）** 代码提示框（补全弹层）那条线的收尾 + 一个真缺陷。
   **① 「选择声明」弹层**（IDEA `GotoDeclarationAction` 多目标时的 Choose Declaration）：
   上游形状核过一遍 —— 一个目标直接跳、多个才弹层（`GotoDeclarationOnlyHandler2.kt:60-76`），

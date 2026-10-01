@@ -14,7 +14,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } from 'lucide-vue-next'
 import type { Bookmark as BookmarkEntry } from '../bridge'
-import { bookmarkDescription } from '../bookmarks'
+import { bookmarkDescription, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
 import BookmarkListDialog from './BookmarkListDialog.vue'
@@ -197,7 +197,11 @@ function onKeydown(event: KeyboardEvent) {
     </div>
     <div v-if="rowMenu" class="bookmark-row-menu-backdrop" @pointerdown="rowMenu = null" @contextmenu.prevent="rowMenu = null">
       <div class="bookmark-row-menu" role="menu" :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }" @pointerdown.stop>
-        <button role="menuitem" @click="addToAnotherList()">添加另一书签…</button>
+        <!-- 「添加另一书签…」上游对**行**书签是隐藏的（`AddAnotherBookmarkAction.update:16-19`
+             的 `if (bookmark is LineBookmark) return false`）：行书签只有一个家，能进多张列表的是
+             **文件**书签。本仓的运行时也会把行书签"搬"过去（`addBookmarkToNamedList` 先摘默认列表），
+             但那是上游另一个动作的语义，所以这里按上游把这一行只留给文件书签。 -->
+        <button v-if="isFileBookmark(rowMenu.entry)" role="menuitem" @click="addToAnotherList()">添加另一书签…</button>
         <button role="menuitem" @click="emit('edit', rowMenu.entry); rowMenu = null">编辑描述</button>
         <div class="menu-rule" role="separator" />
         <button role="menuitem" @click="activate(rowMenu.entry); rowMenu = null">转到书签</button>

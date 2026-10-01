@@ -69,3 +69,14 @@ test('旧状态迁移：平铺的书签成为**默认列表**，名字取项目�
   assert.deepEqual(lists.map(entry => [entry.name, entry.isDefault]), [['ui-parity-proj', true]])
   assert.equal(lists[0].bookmarks.length, 1)
 })
+
+// `AddAnotherBookmarkAction`（`platform/bookmarks/src/com/intellij/ide/bookmark/actions/AddAnotherBookmarkAction.kt:16-32`）：
+// · `update` 里 `if (bookmark is LineBookmark) return false` ⇒ 行书签**不出现**这一行；
+// · 动作体是 `manager.add(bookmark, type)` ⇒ 挑一张列表再加进去（本仓的 `runWithChosenList` 捷径）。
+test('「添加另一书签…」只给文件书签、且走"挑列表再加"的捷径', async () => {
+  const panel = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/components/BookmarksPanel.vue', import.meta.url), 'utf8'))
+  assert.match(panel, /<button v-if="isFileBookmark\(rowMenu\.entry\)" role="menuitem" @click="addToAnotherList\(\)">添加另一书签…<\/button>/,
+    '行书签那一行不该出现「添加另一书签…」（上游 update 直接 return false）')
+  assert.match(panel, /function addToAnotherList\(\) \{[\s\S]{0,220}?runWithChosenList\(name => addBookmarkToNamedList\(name, entry\)\)/,
+    '挑列表的捷径 + 加进那张列表（没有列表先建、只有一张直接用、多张弹选择）')
+})
