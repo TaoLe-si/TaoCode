@@ -176,6 +176,10 @@ private:
     // 职责，且是 `pending_actions_` 唯一的读写方。返回 true 表示 kind 已被本方法处理。
     // `on_result` 按左值引用收：kind 不属于这一族时要把它原样交还，按值收会让
     // semantic() 后面的分支拿到一个空处理器（std::bad_function_call）。
+    // 「转到声明」那一族（`definition` / `declaration`）在 native/lsp_navigation.cpp（同一个先例：
+    // 会话文件贴着上限，这条两跳退化自成一段）。已处理返回 true。
+    bool dispatch_navigation(const std::string& kind, const std::string& uri, Host& host, const Json& position,
+                             ResultHandler& on_result);
     bool dispatch_code_action(const std::string& kind, const std::string& path, Host& host, const std::string& uri,
                               const Json& args, int line, int character, ResultHandler& on_result);
     // `pending_actions_[path]` 的第 `index` 条原始 CodeAction。false = 这次引用已过期
