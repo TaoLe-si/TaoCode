@@ -1127,8 +1127,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      `materialize_eclipse_project`：源根用工程内相对路径、jar 用绝对路径、**已有配置不覆盖**），
      启动日志出现"物化 Eclipse 工程 2 个文件"，随后探针里 **`hover` 回出了
      `net.minecraftforge.common.config.Configuration`** —— 外部类型解析成功（此前一直是空串）。
-     仍差一处：**`definition` 仍回 `available:false`**（我们自己的能力门控；hover 已过同一套门控），
-     下一步查 `unsupported(language, "definition")` 那条判据为什么在这个工程上不成立。
+     物化器又补了两处（真机踩出来的）：① 两个文件**各自**判断（原来"任意一个存在就整体跳过"，
+     删掉 `.classpath` 后再也不写）；② `*-sources.jar` 不当普通 lib，而是找**同名**二进制 jar 当
+     `sourcepath`（本工程的源码 jar 名字与二进制不配对 ⇒ 一处都没配上，这是预期）。
+     **仍差一处**：`definition` 对 jar 里的类型给不出位置（`available:false`）—— 我们这边的
+     `available` 语义是"有没有目标"（`unsupported()` 只在服务端显式声明 `false`/`null` 时才拦），
+     所以是 JDT 在没有**源码附件**时不给库类型的定义位置。下一步（对齐 IDEA 的"反编译/附加源码"）：
+     把 `*-sources.jar` 按**前缀匹配**（如 `srg_patched_minecraft-sources.jar` ↔ `srg_merged_minecraft.jar`
+     这类不同名但同源的产物）配成 `sourcepath`，或接受当前行为并在文档里写明。
      产物说明：`.project`/`.classpath` 会写进**被链接的子工程目录**（这就是本功能的落点），
      已有同名文件时一字不动；不想要时删掉即可（下次启动会重建）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；

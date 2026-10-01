@@ -166,26 +166,35 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
     if (!fs::is_directory(project_dir, code) || code) return 0;
     const auto project_file = project_dir / L".project";
     const auto classpath_file = project_dir / L".classpath";
-    // 已有 Eclipse 配置就一字不动（用户自己的工程描述比我们猜的准）。
-    if (fs::exists(project_file, code) || fs::exists(classpath_file, code)) return 0;
+    // 两个文件**各自**判断：已有的不动（用户自己的工程描述比我们猜的准），缺的重建 ——
+    // 之前写成"任意一个存在就整体跳过"，结果删掉 `.classpath` 之后它再也不写了（真机踩到）。
+    const bool need_project = !fs::exists(project_file, code);
+    const bool need_classpath = !fs::exists(classpath_file, code);
+    if (!need_project && !need_classpath) return 0;
+    code.clear();
 
     const auto name = utf8_path(project_dir.filename());
     const auto prefix = name + "/";
     const std::string quote(1, '"');
     const auto quoted = [&quote](const std::string& value) { return quote + value + quote; };
 
-    std::ofstream project_out(project_file, std::ios::binary);
-    if (!project_out) return 0;
-    project_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
+    int written = 0;
+    std::ofstream project_out(need_project ? project_file : fs::path(), std::ios::binary);
+    if (!need_project) { /* 已有的 .project 不动 */ }
+    else if (project_out) {
+        project_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
     project_out << "<projectDescription>" << std::endl;
     project_out << "  <name>" << xml_escape(name) << "</name>" << std::endl;
     project_out << "  <comment>由 TaoCode 生成：Gradle 导入不可用时的外部类路径与源根（见 native/java_lsp_paths.cpp）</comment>" << std::endl;
     project_out << "  <buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec>" << std::endl;
     project_out << "  <natures><nature>org.eclipse.jdt.core.javanature</nature></natures>" << std::endl;
-    project_out << "</projectDescription>" << std::endl;
+        project_out << "</projectDescription>" << std::endl;
+        ++written;
+    }
 
-    std::ofstream classpath_out(classpath_file, std::ios::binary);
-    if (!classpath_out) return 1;
+    std::ofstream classpath_out(need_classpath ? classpath_file : fs::path(), std::ios::binary);
+    if (!need_classpath) return written;  // 已有的 .classpath 不动
+    if (!classpath_out) return written;
     classpath_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
     classpath_out << "<classpath>" << std::endl;
     for (const auto& source : source_paths) {
@@ -195,14 +204,33 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
         classpath_out << "  <classpathentry kind=" << quoted("src") << " path=" << quoted(relative) << "/>" << std::endl;
     }
     classpath_out << "  <classpathentry kind=" << quoted("con") << " path=" << quoted("org.eclipse.jdt.launching.JRE_CONTAINER") << "/>" << std::endl;
+    // `*-sources.jar` 不当普通 lib（它里面是 .java，放类路径上只会添噪音），而是当同名 jar 的
+    // `sourcepath`（Eclipse 的"源码附件"）—— JDT 有了源码附件，跳进 jar 里的类才能落到 .java 上，
+    // 否则 `textDocument/definition` 对库里的类型给不出位置（真机：hover 已经解析出外部类型，
+    // 但 definition 空手而归）。
+    std::vector<std::string> binaries, sources;
     for (const auto& glob : library_globs) {
         if (glob.rfind(prefix, 0) != 0) continue;
-        for (const auto& jar : jars_under(project_dir, glob.substr(prefix.size())))
-            classpath_out << "  <classpathentry kind=" << quoted("lib") << " path=" << quoted(jar) << "/>" << std::endl;
+        for (const auto& jar : jars_under(project_dir, glob.substr(prefix.size()))) {
+            const auto name = fs::path(from_utf8(jar)).filename().string();
+            if (name.find("-sources") != std::string::npos) sources.push_back(jar);
+            else binaries.push_back(jar);
+        }
+    }
+    for (const auto& jar : binaries) {
+        const auto stem = fs::path(from_utf8(jar)).stem().string();
+        const std::string* match = nullptr;
+        for (const auto& source : sources) {
+            const auto source_stem = fs::path(from_utf8(source)).stem().string();
+            if (source_stem == stem + "-sources") { match = &source; break; }
+        }
+        classpath_out << "  <classpathentry kind=" << quoted("lib") << " path=" << quoted(jar);
+        if (match) classpath_out << " sourcepath=" << quoted(*match);
+        classpath_out << "/>" << std::endl;
     }
     classpath_out << "  <classpathentry kind=" << quoted("output") << " path=" << quoted("bin") << "/>" << std::endl;
     classpath_out << "</classpath>" << std::endl;
-    return 2;
+    return written + 1;
 }
 
 }  // namespace taocode
