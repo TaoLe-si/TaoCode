@@ -79,6 +79,14 @@ with connect(ws_url, max_size=64 * 1024 * 1024) as ws:
                                             "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk})
             call("Input.dispatchKeyEvent", {"type": "keyUp", "key": key, "code": code, "windowsVirtualKeyCode": vk})
         print("UNDO")
+    elif mode == 'rclick':
+        # rclick <selector> <text>
+        rect = call("Runtime.evaluate", {"expression": f"(() => {{ const e = [...document.querySelectorAll({sys.argv[3]!r})].find(x => x.textContent.trim() === {sys.argv[4]!r}); if (!e) return null; const r = e.getBoundingClientRect(); return {{x: r.left + r.width/2, y: r.top + r.height/2}}; }})()", "returnByValue": True})["result"]["result"].get("value")
+        if not rect:
+            print("NOT FOUND " + sys.argv[4]); raise SystemExit(1)
+        call("Input.dispatchMouseEvent", {"type": "mousePressed", "x": rect["x"], "y": rect["y"], "button": "right", "clickCount": 1})
+        call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": rect["x"], "y": rect["y"], "button": "right", "clickCount": 1})
+        print("RCLICK " + sys.argv[4] + " at " + str(rect))
     elif mode == 'sleep':
         time.sleep(float(sys.argv[3]))
         print("SLEPT " + sys.argv[3])

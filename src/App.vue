@@ -14,7 +14,7 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import TestRunnerPanel from './components/TestRunnerPanel.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import BookmarkMnemonicChooser from './components/BookmarkMnemonicChooser.vue'
-import BookmarkDescriptionDialog from './components/BookmarkDescriptionDialog.vue'
+import BookmarkDescriptionDialog from './components/BookmarkDescriptionDialog.vue'; import BookmarkListDialog from './components/BookmarkListDialog.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import MarkdownPreview from './components/MarkdownPreview.vue'
 import WelcomePage from './components/WelcomePage.vue'
@@ -134,7 +134,7 @@ import { createGitMenuRows, type GitMenuContext } from './menus/gitMenu'
 import { PROCESS_CLOSE_LABELS, TERMINAL_CAN_DISCONNECT, confirmationResult, processClosePromptText, rememberedSetting, resolveProcessClose, type ProcessCloseChoice, type ProcessCloseConfirmation, type ProcessCloseResult } from './processClose'
 import { locationSnippet } from './recentLocations'
 import { effectiveTemplates, languageFor, type Template } from './templates'
-import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView'
+import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView'; import { listDialog } from './bookmarkListActions'
 import { surroundTemplates, type SurroundTemplate } from './surround'
 import { mnemonicBindings, mnemonicOf, sortedByTitle } from './toolWindows'
 import { lastActiveId, nextContentIndex, pushActive } from './activeToolWindow'
@@ -1316,7 +1316,7 @@ const {
 const {
   bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic, confirmRewrite, dontAskRewrite, removeMnemonic,
   useProjectSettings, bookmarkSave,
-  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, gutterBookmarks, toggleBookmarkAt, editBookmarkAt, descriptionPrompt, saveBookmarkDescription,
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, addFileBookmarkToAnotherList, gutterBookmarks, toggleBookmarkAt, editBookmarkAt, descriptionPrompt, saveBookmarkDescription,
 } = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(), openPath: path => void openFile(path), updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
@@ -2412,7 +2412,7 @@ onBeforeUnmount(() => {
     </Teleport>
     <!-- Alt+F1 的目标列表（IDEA SelectInAction.java:62-72 `popup.showInBestPositionFor`）。 -->
     <Teleport v-if="anchorMenu" to="body"><ToolWindowAnchorMenu :anchor="anchorMenuAnchor" :x="anchorMenu.x" :y="anchorMenu.y" @move="moveAnchorTo($event)" @close="closeAnchorMenu()" /></Teleport>
-    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport> <Teleport v-if="targetChooser" to="body"><TargetChooserPopup :title="targetChooser.title" :rows="targetChooser.rows" :x="targetChooser.x" :y="targetChooser.y" :pinnable="targetChooser.pinnable" @pick="pickTarget($event)" @close="closeTargetChooser()" @pin="pinTargetChooser()" /></Teleport> <Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
+    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport> <Teleport v-if="targetChooser" to="body"><TargetChooserPopup :title="targetChooser.title" :rows="targetChooser.rows" :x="targetChooser.x" :y="targetChooser.y" :pinnable="targetChooser.pinnable" @pick="pickTarget($event)" @close="closeTargetChooser()" @pin="pinTargetChooser()" /></Teleport> <BookmarkListDialog v-if="listDialog" :ask-before-deleting="projectSettings.bookmarksView?.askBeforeDeletingLists ?? true" /><Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
     <!-- Signature help popup: IDEA's parameter info panel with overload navigation -->
     <Teleport v-if="signaturePopup" to="body">
       <div class="signature-popup" :style="{ left: `${Math.min(signaturePopup.x, viewport.width - 500)}px`, top: `${Math.min(signaturePopup.y + 4, viewport.height - 200)}px` }" @pointerdown.stop @keydown.up.prevent="navigateSignature(-1)" @keydown.down.prevent="navigateSignature(1)" @keydown.esc.prevent="closeSignaturePopup()" tabindex="-1">
@@ -2456,18 +2456,15 @@ onBeforeUnmount(() => {
           </template>
         </template>
         <div class="menu-rule" />
-        <button :disabled="!treeMenu.entry.path" @click="cutTreeEntry()">剪切</button>
-        <button :disabled="!treeMenu.entry.path" @click="copyTreeEntry()">复制</button>
-        <button @click="copyPath()">复制路径</button>
-        <button :disabled="!fileClipboard" @click="pasteFromClipboard()">粘贴</button>
+        <button :disabled="!treeMenu.entry.path" @click="cutTreeEntry()">剪切</button><button :disabled="!treeMenu.entry.path" @click="copyTreeEntry()">复制</button>
+        <button @click="copyPath()">复制路径</button><button :disabled="!fileClipboard" @click="pasteFromClipboard()">粘贴</button>
         <div class="menu-rule" />
         <button @click="bookmarkFile(treeMenu.entry.path); treeMenu = null">{{ fileBookmarkLabel(treeMenu.entry.path) }}</button>
-        <button v-if="fileBookmarkLabel(treeMenu.entry.path) === '删除书签'" @click="editBookmarkAt(treeMenu.entry.path); treeMenu = null">编辑描述</button>
+        <button v-if="fileBookmarkLabel(treeMenu.entry.path) === '删除书签'" @click="editBookmarkAt(treeMenu.entry.path); treeMenu = null">编辑描述</button><button v-if="fileBookmarkLabel(treeMenu.entry.path) === '删除书签'" @click="addFileBookmarkToAnotherList(treeMenu.entry.path); treeMenu = null; treeSubmenu = null">添加另一书签…</button>
         <button v-if="treeMenu.entry.kind === 'file'" @click="openFile(treeMenu.entry.path); treeMenu = null; treeSubmenu = null">打开</button>
         <div class="menu-rule" />
         <button v-if="treeMenu.entry.kind === 'file'" :disabled="!lspReady" @click="findUsagesOf(treeMenu.entry.path)">查找用法…</button>
-        <button @click="treeMenu = null; treeSubmenu = null; explorer = true; leftView = 'search'">在路径中查找…</button>
-        <button @click="treeMenu = null; treeSubmenu = null; openReplaceInPath()">在路径中替换…（Replace in Path）</button>
+        <button @click="treeMenu = null; treeSubmenu = null; explorer = true; leftView = 'search'">在路径中查找…</button><button @click="treeMenu = null; treeSubmenu = null; openReplaceInPath()">在路径中替换…（Replace in Path）</button>
         <!-- 上游把 `AnalyzeMenu` 挂在 ProjectViewPopupMenu 的 `ReplaceInPath` 之后
              （`JavaActions.xml:61-66`），所以这一格紧跟在「在路径中替换…」下面。 -->
         <button class="has-sub" @click="treeSubmenu = treeSubmenu === 'analyze' ? null : 'analyze'">分析 ▸</button>
@@ -2483,8 +2480,7 @@ onBeforeUnmount(() => {
         <button class="menu-danger" :disabled="!treeMenu.entry.path" @click="beginDelete()">删除…</button>
         <div class="menu-rule" />
         <button v-if="isDesktop && treeMenu.entry.kind === 'file'" @click="showFileProperties()">{{ findTab(treeMenu.entry.path)?.readOnly ? '去掉只读属性' : '设为只读' }}</button>
-        <button v-if="isDesktop" :disabled="!workspace" @click="openInTerminal()">在终端中打开</button>
-        <button v-if="isDesktop" @click="revealInExplorer()">在资源管理器中显示</button>
+        <button v-if="isDesktop" :disabled="!workspace" @click="openInTerminal()">在终端中打开</button><button v-if="isDesktop" @click="revealInExplorer()">在资源管理器中显示</button>
         <div class="menu-rule" />
         <button @click="treeMenu = null; refreshTree()">刷新目录</button>
       </div>
@@ -2492,8 +2488,12 @@ onBeforeUnmount(() => {
     <div v-if="tabMenu" class="tree-menu-backdrop" @pointerdown="tabMenu = null" @contextmenu.prevent="tabMenu = null">
       <div class="tree-menu" :style="{ left: `${Math.min(tabMenu.x, viewport.width - 210)}px`, top: `${Math.min(tabMenu.y, viewport.height - 260)}px` }" @pointerdown.stop>
         <template v-for="menu in [tabMenu]" :key="menu.path">
-          <!-- IDEA's EditorTabPopupMenu order: Close group | Copy Paths | split rows |
-               Pin / Keep / Configure. -->
+          <!-- IDEA's EditorTabPopupMenu order: Close group | Copy Paths | split rows | Pin / Keep / Configure；
+               书签那三条（ToggleBookmark / EditBookmark / AddAnotherBookmark 的相对顺序）来自挂在
+               `EditorTabPopupMenu` 上的 `popup@ExpandableBookmarkContextMenu`
+               （platform/bookmarks/resources/intellij.platform.bookmarks.xml:222-227）。 -->
+          <button @click="bookmarkFile(menu.path); tabMenu = null">{{ fileBookmarkLabel(menu.path) }}</button><button v-if="fileBookmarkLabel(menu.path) === '删除书签'" @click="editBookmarkAt(menu.path); tabMenu = null">编辑描述</button><button v-if="fileBookmarkLabel(menu.path) === '删除书签'" @click="addFileBookmarkToAnotherList(menu.path); tabMenu = null">添加另一书签…</button>
+          <div class="menu-rule" />
           <button @click="const tab = findTab(menu.path); if (tab) void closeTabIn(menu.pane, tab); tabMenu = null">关闭</button>
           <button :disabled="groups[menu.pane].tabs.length < 2" @click="const tab = findTab(menu.path); if (tab) void closeOtherTabsIn(menu.pane, tab)">关闭其他标签页</button>
           <button :disabled="!hasTabsToRight(menu.pane, menu.path)" @click="const tab = findTab(menu.path); if (tab) void closeTabsToRightIn(menu.pane, tab)">关闭右侧标签页</button>

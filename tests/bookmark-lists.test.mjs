@@ -80,3 +80,28 @@ test('「添加另一书签…」只给文件书签、且走"挑列表再加"的
   assert.match(panel, /function addToAnotherList\(\) \{[\s\S]{0,220}?runWithChosenList\(name => addBookmarkToNamedList\(name, entry\)\)/,
     '挑列表的捷径 + 加进那张列表（没有列表先建、只有一张直接用、多张弹选择）')
 })
+
+// 三处菜单挂点（上游 `popup@ExpandableBookmarkContextMenu` 挂在 `EditorTabPopupMenu` /
+// `ProjectViewPopupMenu` 上，见 platform/bookmarks/resources/intellij.platform.bookmarks.xml:222-227）：
+// 编辑器标签页与项目视图都要有 ToggleBookmark / EditBookmark / AddAnotherBookmark 这三条，
+// 且 AddAnotherBookmark 只在**文件书签已存在**时出现（`AddAnotherBookmarkAction.update:16-22`）。
+test('编辑器标签页与项目视图菜单都有文件书签那三条，且"添加另一书签"要已有书签', async () => {
+  const fs = await import('node:fs')
+  const app = fs.readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+  const runtime = fs.readFileSync(new URL('../src/bookmarkActions.ts', import.meta.url), 'utf8')
+  // 用"同一行里同时出现"来判，不写正则（引号/括号的转义在这条链上已经错过两次）。
+  const lines = app.split(String.fromCharCode(10))
+  const rowHas = (needle, ...also) => lines.some(line => line.includes(needle) && also.every(part => line.includes(part)))
+  for (const [menu, path] of [['标签页', 'menu.path'], ['项目视图', 'treeMenu.entry.path']]) {
+    assert.ok(rowHas(`bookmarkFile(${path})`), `${menu}菜单没有「添加/删除书签」那一行`)
+    assert.ok(rowHas(`fileBookmarkLabel(${path}) === '删除书签'`, `editBookmarkAt(${path})`),
+      `${menu}菜单没有「编辑描述」那一行`)
+    assert.ok(rowHas(`fileBookmarkLabel(${path}) === '删除书签'`, `addFileBookmarkToAnotherList(${path})`),
+      `${menu}菜单没有「添加另一书签…」那一行（且要跟着"已有书签"的门）`)
+  }
+  // 动作体：只认**文件**书签，且走"挑一张列表再加"的捷径。
+  assert.match(runtime, /function addFileBookmarkToAnotherList\(path: string\) \{[\s\S]{0,260}?item\.path === path && item\.line === undefined/,
+    '行书签不该出现这个入口（上游 update 直接 return false）')
+  assert.match(runtime, /runWithChosenList\(name => addBookmarkToNamedList\(name, entry\)\)/,
+    '加进另一张列表要复用挑列表的捷径')
+})

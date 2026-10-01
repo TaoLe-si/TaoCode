@@ -1166,6 +1166,38 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   ④ 桥接直调 `file.librarySource{qualifier:"com.example.Greeter"}` 对真实的 deflate sources jar
   回 `available:true` + 解出的路径（29ms）与内容。
 
+- [x] **已补（第八十批）** 文件书签的三条菜单挂点（上游 `popup@ExpandableBookmarkContextMenu`）+
+  一个随之暴露的真缺陷。
+  **① 标签页右键菜单**（上游挂在 `EditorTabPopupMenu` 的 `ReopenClosedTab` 之后，
+  `platform/bookmarks/resources/intellij.platform.bookmarks.xml:222-227`）：
+  加/删书签、编辑描述、添加另一书签… —— 三条都是**文件**书签（`fileBookmarkLabel` + `bookmarkFile` +
+  `editBookmarkAt` + 新的 `addFileBookmarkToAnotherList`），后两条只在书签已存在时出现
+  （上游 `AddAnotherBookmarkAction.update:16-22`）。
+  **② 项目视图菜单**同三条（上游同一个 popup 挂在 `ProjectViewPopupMenu` 上）：原来已有前两条，
+  本批补上「添加另一书签…」。**③ gutter 弹出菜单**（`popup@BookmarkContextMenu` → `EditorGutterPopupMenu`）
+  仍待补：本仓**整体**还没有 gutter 弹出菜单（不是一个书签行的问题，见下方遗留）。
+  **④ 真机取证时抓到的真缺陷（已修）**：「添加另一书签…」在**书签工具窗口没打开**时"点了没反应" ——
+  那个列表对话框挂在 `BookmarksPanel.vue` 里（`<BookmarkListDialog v-if="listDialog">`），而面板是
+  `ToolWindowView` 按 `leftView === 'bookmarks'` 条件渲染的：从标签页/项目视图菜单触发时面板根本不在场，
+  `listDialog` 被置位却没有任何东西渲染。修法：对话框提到外壳（`App.vue`，与 SelectIn/EditorPopup 同一条
+  弹层链），面板里那份删掉。
+  **真机复验**：项目视图右键 README.md →「添加书签」（通知「书签 README.md」）→ 再右键出现
+  「删除书签 / 编辑描述 / 添加另一书签…」→ 点第三条 → 通知「书签 README.md 已加到列表「待办2」」，
+  `project.settings.get` 里 `bookmarkLists[0].bookmarks` 出现 `{path:"README.md"}`（没有 `line` = 文件书签）；
+  标签页右键的菜单头三条同样是那三条（截图 `screenshots/bookmark-tab-menu.png`）。
+  **遗留**：gutter 弹出菜单（要有 gutter 上的一整套弹出菜单才能挂，单独立项）；上游
+  `popup@BookmarkContextMenu` 里的助记键两条（本仓助记键在书签面板与编辑器动作里，未挂到 gutter）。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1372/1372**（1371 → 1372：`bookmark-lists` +1 条菜单挂点判据） |
+| `npx vite build --emptyOutDir false` | exit 0，9.91s |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / 0 warning |
+| `ctest --output-on-failure -j4` | **36/36** |
+| 真 exe 取证 | 见 ④（两条菜单 + 落盘证据 + 截图） |
+
+
 | 检查 | 结果 |
 |---|---|
 | `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |

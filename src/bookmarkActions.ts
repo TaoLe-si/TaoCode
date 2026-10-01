@@ -8,7 +8,7 @@ import { request } from './bridge'
 import { errorMessage } from './errors'
 import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
-import { configureBookmarkLists, syncBookmarkLists } from './bookmarkListActions.ts'
+import { addBookmarkToNamedList, configureBookmarkLists, runWithChosenList, syncBookmarkLists } from './bookmarkListActions.ts'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
@@ -237,6 +237,16 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   function fileBookmarkLabel(path: string): string {
     return bookmarks.value.some(entry => entry.path === path && entry.line === undefined) ? '删除书签' : '添加书签'
   }
+  /**
+   * 「添加另一书签…」（上游 `AddAnotherBookmarkAction`）：把该文件的**文件书签**加到另一张列表。
+   * 上游 `update` 对**行**书签直接 `return false`、且要求上下文里真有这条书签 —— 两条都照搬
+   * （tab / 项目视图菜单都是"文件"这一侧，所以这里只会拿到文件书签）。
+   */
+  function addFileBookmarkToAnotherList(path: string) {
+    const entry = bookmarks.value.find(item => item.path === path && item.line === undefined)
+    if (!entry) { deps.notify('这个文件还没有书签，先添加书签。', true); return }
+    runWithChosenList(name => addBookmarkToNamedList(name, entry))
+  }
   /** 菜单里那一行的标题随状态变（上游 `ChooseBookmarkTypeAction.update:33-41` 的三段文案）。 */
   function bookmarkMnemonicLabel(): string {
     const tab = active.value
@@ -279,7 +289,8 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
 
   return {
     bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
-    confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, goTo,
+    confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel,
+    addFileBookmarkToAnotherList, goTo,
     gutterBookmarks, toggleBookmarkAt, descriptionPrompt, editBookmarkAt, saveBookmarkDescription,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,

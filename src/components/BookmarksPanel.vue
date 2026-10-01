@@ -17,7 +17,6 @@ import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
-import BookmarkListDialog from './BookmarkListDialog.vue'
 
 export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings; lists?: PanelList[] }>()
@@ -208,7 +207,6 @@ function onKeydown(event: KeyboardEvent) {
         <button role="menuitem" @click="emit('remove', rowMenu.entry); rowMenu = null">移除书签</button>
       </div>
     </div>
-    <BookmarkListDialog v-if="listDialog" :ask-before-deleting="settings.askBeforeDeletingLists" />
   </div>
 </template>
 
