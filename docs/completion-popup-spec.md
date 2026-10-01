@@ -36,9 +36,15 @@
 
 ## 三、真正的差距（三件，按顺序）
 
-1. **排序与分组**：上游 `platform/lang-impl/src/com/intellij/codeInsight/completion/CompletionLookupArranger.java`
-   有自己的**排序器链**（相关性 / 大小写 / 长度 / 字母序）与**按类型分组**；我们现在把顺序交给
-   CodeMirror 的 `sortText`。先读 arranger 的排序器清单，再决定移植哪几档（每档都是纯函数，可单测）。
+1. **排序与分组**（读源码后的结论）：排序不是写死在 arranger 里的，而是一条**可扩展的排序器链** ——
+   接口 `platform/analysis-impl/src/com/intellij/codeInsight/completion/CompletionLookupArranger.java:16,25`
+   （`arrange` 收一个 `CompletionSorter`），实现是
+   `platform/analysis-impl/src/com/intellij/codeInsight/completion/impl/CompletionSorterImpl.java:18`
+   （`weighingFactory:28` 把 `LookupElementWeigher` 折成 `ClassifierFactory`，
+   `weighBefore:44` / `weighAfter:55` 往链里插档）；分组在 `BaseCompletionLookupArranger`（`LookupArranger` 那一路）。
+   **移植口径**：做一个纯函数 `sortCompletions()`，按 IDEA 默认链的档位依次比较
+   （相关性 → 大小写不敏感 → 长度 → 字母序；相关性档在 LSP 侧取 `sortText`，缺省退回 label），
+   在交给 CodeMirror 之前排好 —— 这样 CodeMirror 只负责画，不参与排序语义。每一档一个纯函数、各有单测。
 2. **`filterText` 契约**：LSP 的 `filterText` 是"过滤键、不一定要显示"；`src/completionPresentation.ts`
    的 `completionMatch` 已经处理了"别名不等于可见文本时不高亮无关字符"（注释里写着），
    但**过滤本身**仍要确认走的是 `filterText` 而不是 `label`（`src/lspCompletion.ts` 一线）。
