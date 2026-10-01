@@ -16,9 +16,12 @@
 | 类型文本 | `setTypeText`（`:125`，可带 `setTypeText(text, icon)` 的第二图标 `:129`） | **右对齐**的类型标注（`String`、`int`…），有独立前景色 |
 | 删除线 | `setStrikeout`（`:45`） | 已废弃/不可用的候选 |
 
-我们的弹层现在只用 LSP 的 `label` + `detail` + `kind` 图标（`src/lspCompletion*.ts` 一线），
-上面六段里**只落了一段半**，所以「严格对齐」的差距主要在：灰尾、类型文本（右对齐）、匹配高亮、
-删除线。
+**本仓现状（核过代码，别再重做）**：上面六段**已经落地** ——
+`src/completionPresentation.ts` 照 `platform/lsp/src/api/customization/LspCompletionCustomizer.kt:128-184`
+把 `labelDetails.detail` 当**灰尾**、`labelDetails.description`/`detail` 当**右对齐类型文本**、
+`keyword` 加粗、`deprecated`/`tags` 含 1 出删除线、`kind` 出图标（缺图标**故意留空**，不发明字形）；
+`src/completionUi.ts:77-86` 把这三段和删除线画出来（行首图标 + 名字 + 灰尾 + 右对齐类型 +
+`tc-completion-deprecated` 类）。**所以差距不在这六段**，而在下面三件。
 
 ## 二、LSP `CompletionItem` → 上面六段
 
@@ -31,15 +34,18 @@
 | 删除线 | `tags` 含 `1`（Deprecated） | 待做 |
 | 匹配高亮 | 无直接字段；用 `filterText` 决定匹配，**高亮由客户端自己算**（前缀 → 驼峰 → 子串） | 待做 |
 
-## 三、重做的动作（按顺序，每步都能单测）
+## 三、真正的差距（三件，按顺序）
 
-1. **整形层**（纯函数、先测）：把 `CompletionItem` 折成一个 `{icon, name, tail, tailGray, type, deprecated}`
-   结构 —— 与弹层解耦，判据直接喂 JSON。
-2. **弹层渲染**：三段文本（名字 / 灰尾 / 右对齐类型）+ 删除线 + 匹配高亮（高亮范围由第 1 步一起算出来，
-   渲染只画 `decorations`）—— 与上游 `CompletionLookupArranger`（排序/分组，另一步）分开做。
-3. **两个已有契约别破坏**：`completionItem/resolve`（选中某项时才拉文档/自动导入，见 `native/lsp_host_bootstrap.cpp`
-   的 `resolveSupport.properties` 声明）与 `filterText`/`sortText` 的用法（现在按 label 过滤 ✗ 需改成 filterText）。
-4. **跳转侧配套**：`GotoDeclarationAction` 的多目标 **Choose Target** 弹层（上游
-   `platform/lang-impl/src/com/intellij/codeInsight/navigation/actions/GotoDeclarationAction.java`
-   的 `showUsages`/`ChooseTargetAction` 那一路）—— 现在多目标直接取第一个，要补"选哪个"的弹层，
-   条目按「类型/成员/文件」分组并带图标。
+1. **排序与分组**：上游 `platform/lang-impl/src/com/intellij/codeInsight/completion/CompletionLookupArranger.java`
+   有自己的**排序器链**（相关性 / 大小写 / 长度 / 字母序）与**按类型分组**；我们现在把顺序交给
+   CodeMirror 的 `sortText`。先读 arranger 的排序器清单，再决定移植哪几档（每档都是纯函数，可单测）。
+2. **`filterText` 契约**：LSP 的 `filterText` 是"过滤键、不一定要显示"；`src/completionPresentation.ts`
+   的 `completionMatch` 已经处理了"别名不等于可见文本时不高亮无关字符"（注释里写着），
+   但**过滤本身**仍要确认走的是 `filterText` 而不是 `label`（`src/lspCompletion.ts` 一线）。
+3. **跳转侧配套**：`GotoDeclarationAction` 的多目标 **Choose Target** 弹层
+   （上游 `platform/lang-impl/src/com/intellij/codeInsight/navigation/actions/GotoDeclarationAction.java`）
+   —— 现在多目标直接取第一个，要补"选哪个"的弹层，条目按「类型/成员/文件」分组并带图标。
+   这一条与刚补的 `declaration → definition` 退化链是同一个落点（`native/lsp_navigation.cpp`）。
+
+**别破坏的两条既有契约**：`completionItem/resolve`（选中某项时才拉文档/自动导入，见
+`native/lsp_host_bootstrap.cpp` 的 `resolveSupport.properties` 声明）与上面的六段整形。
