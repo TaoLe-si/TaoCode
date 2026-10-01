@@ -100,3 +100,47 @@ export function moveChooseTarget(count: number, from: number, delta: number): nu
   const next = from + delta
   return next < 0 || next >= count ? from : next
 }
+
+/**
+ * 从一批位置取行文本（用来取声明点上的名字）：
+ * **打开中的缓冲优先**（用户可能还没保存），其次问磁盘，读不到就留 null（行模型会退到文件名）。
+ */
+export async function loadTargetContents(targets: readonly TargetLocation[],
+                                          openBuffer: (path: string) => string | null,
+                                          readFile: (path: string) => Promise<string | null>): Promise<Map<string, string | null>> {
+  const contents = new Map<string, string | null>()
+  for (const target of targets) {
+    if (contents.has(target.path)) continue
+    const open = openBuffer(target.path)
+    if (open !== null) { contents.set(target.path, open); continue }
+    try { contents.set(target.path, await readFile(target.path)) } catch { contents.set(target.path, null) }
+  }
+  return contents
+}
+
+// 上游那几种动作的标题/提示文案（都取自资源串，中文按本仓界面语言写）：
+//   · `goto.implementation.chooserTitle`（`platform/lang-api/resources/messages/CodeInsightBundle.properties:107`
+//     = "Choose Implementation of <b>{0}</b> ({1} found{2})"）—— `{2}` 是后台搜索还没跑完时的 " so far"，
+//     LSP 的 `textDocument/implementation` 一次就把整份给全了，所以永远是 finished（不带那截）。
+//   · `goto.implementation.notFound`（`:109` = "No implementations found"）。
+//   · `goto.implementation.findUsages.title`（`:108` = "Implementations of {0}"）—— 钉到用法视图时那个标题。
+//   · `choose.type.popup.title`（`:205` = "Choose Type"）—— 转到类型声明（Ctrl+Shift+B）用的标题。
+export const implementationChooserTitle = (name: string, count: number): string =>
+  name ? `选择 ${name} 的实现（找到 ${count} 个）` : `选择实现（找到 ${count} 个）`
+export const typeChooserTitle = (): string => '选择类型'
+/** `goto.implementation.notFound`：一个实现都没有时 IDEA 弹的是错误提示。 */
+export const NO_IMPLEMENTATIONS_MESSAGE = '没有找到实现。'
+export const implementationsUsageTitle = (name: string): string => (name ? `${name} 的实现` : '实现')
+
+/**
+ * 「选择实现」这一类的行要**排序**（上游 `GotoTargetHandler.shouldSortTargets()` + `getComparingObject`，
+ * `platform/lang-impl/src/com/intellij/codeInsight/navigation/GotoTargetHandler.java:396-418`）：
+ * 按 主文本 → 容器 → 位置 拼出来的串比较；「选择声明」那条路（PsiTargetNavigator）不排、保持服务端顺序。
+ */
+export function sortTargetRows(rows: readonly ChooseTargetRow[]): ChooseTargetRow[] {
+  return [...rows].sort((left, right) => {
+    const a = `${left.name} ${left.container} ${left.position}`
+    const b = `${right.name} ${right.container} ${right.position}`
+    return a.localeCompare(b)
+  })
+}

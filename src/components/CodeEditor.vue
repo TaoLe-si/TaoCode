@@ -28,8 +28,8 @@ import { clearPullDiagnostics, setPullDiagnostics } from '../bridge'
 import { createLspCompletion } from '../lspCompletion'
 import { completionUi } from '../completionUi'
 import { mergeCompletionResults } from '../completionMerge'
-import ChooseTargetPopup from './ChooseTargetPopup.vue'
-import { chooseTargetRows, type ChooseTargetRow, type TargetLocation } from '../chooseTarget'
+import TargetChooserPopup from './TargetChooserPopup.vue'
+import { chooseTargetRows, loadTargetContents, type ChooseTargetRow, type TargetLocation } from '../chooseTarget'
 import { candidates as templateCandidates, expand as expandTemplateAt, defaultTemplateSettings, type PluginTemplateSource, type TemplateSettings } from '../templates'
 import { wrapSelection, type SurroundTemplate } from '../surround'
 import { applySemanticTokenEdits, decodeSemanticTokens, semanticTokenClass, type SemanticToken } from '../semanticTokens'
@@ -630,13 +630,10 @@ async function revealDefinition(pos: number) {
 // 「选择声明」弹层：目标文件的内容用来取声明点的名字（主文本），读不到就退到文件名。
 const chooseTarget = ref<{ rows: ChooseTargetRow[]; x?: number; y?: number } | null>(null)
 async function openChooseTarget(targets: TargetLocation[], pos: number) {
-  const contents = new Map<string, string | null>()
-  for (const target of targets) {
-    if (contents.has(target.path)) continue
-    if (target.path === props.path) { contents.set(target.path, view?.state.doc.toString() ?? props.content); continue }
-    try { contents.set(target.path, (await request<{ content: string }>('file.read', { path: target.path })).content) }
-    catch { contents.set(target.path, null) }   // 工作区外的文件（jar 里的源码等）读不到
-  }
+  // 打开中的缓冲优先（就是本文件），其次问磁盘，心跳外的 jar 源码读不到就留空。
+  const contents = await loadTargetContents(targets,
+    path => (path === props.path ? view?.state.doc.toString() ?? props.content : null),
+    async path => (await request<{ content: string }>('file.read', { path })).content)
   if (!view) return
   const coords = view.coordsAtPos(pos)
   chooseTarget.value = { rows: chooseTargetRows(targets, contents), x: coords?.left, y: coords?.bottom }
@@ -1177,6 +1174,6 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
   </div>
   <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉。 -->
   <Teleport v-if="chooseTarget" to="body">
-    <ChooseTargetPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" @pick="pickChooseTarget" @close="chooseTarget = null" />
+    <TargetChooserPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" title="选择声明" @pick="pickChooseTarget" @close="chooseTarget = null" />
   </Teleport>
 </template>

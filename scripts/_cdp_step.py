@@ -14,6 +14,8 @@ KEY = {
     'enter': dict(key='Enter', code='Enter', windowsVirtualKeyCode=13, nativeVirtualKeyCode=13),
     'esc': dict(key='Escape', code='Escape', windowsVirtualKeyCode=27, nativeVirtualKeyCode=27),
     'down': dict(key='ArrowDown', code='ArrowDown', windowsVirtualKeyCode=40, nativeVirtualKeyCode=40),
+    'ctrl+alt+b': dict(modifiers=3, key='b', code='KeyB', windowsVirtualKeyCode=66, nativeVirtualKeyCode=66),
+    'ctrl+shift+b': dict(modifiers=10, key='B', code='KeyB', windowsVirtualKeyCode=66, nativeVirtualKeyCode=66),
 }
 
 with connect(ws_url, max_size=64 * 1024 * 1024) as ws:
@@ -56,7 +58,7 @@ with connect(ws_url, max_size=64 * 1024 * 1024) as ws:
         # click <selector> [index] [dx dy]
         sel = sys.argv[3]
         index = int(sys.argv[4]) if len(sys.argv) > 4 else 0
-        js = f"(() => {{ const e = document.querySelectorAll({sel!r})[{index}]; if (!e) return null; const r = e.getBoundingClientRect(); return {{x: r.left + 40, y: r.top + 30}}; }})()"
+        js = f"(() => {{ const e = document.querySelectorAll({sel!r})[{index}]; if (!e) return null; const r = e.getBoundingClientRect(); return {{x: r.left + (window.__clickDx ?? 40), y: r.top + (window.__clickDy ?? 30)}}; }})()"
         rect = call("Runtime.evaluate", {"expression": js, "returnByValue": True})["result"]["result"].get("value")
         if not rect:
             print("NOT FOUND " + sel); raise SystemExit(1)

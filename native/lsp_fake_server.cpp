@@ -86,6 +86,9 @@ int main(int argc, char** argv) {
     // definition 回两个位置：多目标时客户端要弹「选择声明」（IDEA 的 Choose Declaration）。
     flags.multi_definition =
         std::find(switches.begin(), switches.end(), std::string("--multi-definition")) != switches.end();
+    // implementation 同理（「选择实现」）。
+    flags.multi_implementation =
+        std::find(switches.begin(), switches.end(), std::string("--multi-implementation")) != switches.end();
     // --hang=<method>: that method is accepted and never answered, so the client's
     // request deadline is the only thing that can end the wait.
     for (const auto& option : switches)

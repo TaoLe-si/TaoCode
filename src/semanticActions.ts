@@ -7,9 +7,11 @@
 // `prepareHierarchy` 的触发。
 import { computed, nextTick, ref, type Ref } from 'vue'
 import { lspDiagnostics, request, type DocumentData, type GeneralSettingsState, type LspCodeAction, type LspCodeActionResults,
-         type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspPrepareRenameResult,
+         type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspLocation, type LspPrepareRenameResult,
          type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type SaveResult, type Workspace } from './bridge'
 import { applyTextEdits, wordAt } from './editorText'
+import { chooseTargetRows, implementationChooserTitle, implementationsUsageTitle, loadTargetContents, NO_IMPLEMENTATIONS_MESSAGE,
+         sortTargetRows, typeChooserTitle, type ChooseTargetRow } from './chooseTarget.ts'
 import { failReferences, finishReferences, startReferences } from './referenceContents.ts'
 import { errorMessage } from './errors'
 import type { Tab } from './editorTab'
@@ -78,7 +80,12 @@ async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction
   if (payload.kind === 'codeAction') { await openCodeActions(payload); return }
   if (payload.kind === 'callHierarchy') { await prepareHierarchy('call', payload); return }
   if (payload.kind === 'typeHierarchy') { await prepareHierarchy('type', payload); return }
-  // 引用与实现共用"把一批地点列出来"的那套界面。一条搜索 = 一条内容
+  // 实现与类型声明**不是**引用那套：上游是 goto 动作 —— 一个目标直接跳、多个才开选择弹层
+  // （`GotoTargetHandler.java:140-160` 的 `targets.length == 1 && finished` 分支，
+  // `GotoTypeDeclarationHandler2.kt:52-62` 同一个形状）；一个都没找到时实现那条给错误提示
+  // （`goto.implementation.notFound`），类型声明那条静默返回（`:47` 的 `if (result == null) return`）。
+  if (payload.kind === 'implementation' || payload.kind === 'typeDefinition') { await runGotoTargets({ ...payload, kind: payload.kind }); return }
+  // 引用仍是"把一批地点列出来"的那套界面。一条搜索 = 一条内容
   // （`src/referenceContents.ts`）：先挂上"正在搜索"的那一行，回来再填地点，失败或空结果就撤掉它。
   const source = findTab(payload.path)
   const symbol = wordAt(source?.content ?? '', payload.line, payload.character)
@@ -91,6 +98,47 @@ async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction
     failReferences(search)
     notify(errorMessage(error), true)
   }
+}
+/** 「选择实现 / 选择类型」弹层的状态；行的三段与过滤在 src/chooseTarget.ts。 */
+const targetChooser = ref<{ title: string; rows: ChooseTargetRow[]; x?: number; y?: number; pinnable: boolean;
+                             refs: LspLocation[]; usageTitle: string } | null>(null)
+async function runGotoTargets(payload: { kind: 'implementation' | 'typeDefinition'; path: string; line: number; character: number }) {
+  const source = findTab(payload.path)
+  const symbol = wordAt(source?.content ?? '', payload.line, payload.character)
+  try {
+    const result = await request<LspReferencesResult>('lsp.request', { kind: payload.kind, path: payload.path, line: payload.line, character: payload.character })
+    const refs = result.refs ?? []
+    if (!refs.length) {
+      if (payload.kind === 'implementation') notify(NO_IMPLEMENTATIONS_MESSAGE, true)
+      return
+    }
+    if (refs.length === 1) { void revealLocation({ path: refs[0]!.path, line: refs[0]!.line, column: refs[0]!.character + 1 }); return }
+    const contents = await loadTargetContents(refs, path => findTab(path)?.content ?? null,
+      async path => (await request<{ content: string }>('file.read', { path })).content)
+    const coords = editorFor(payload.path)?.getCursorCoords?.() as { left?: number; bottom?: number } | null | undefined
+    targetChooser.value = {
+      title: payload.kind === 'implementation' ? implementationChooserTitle(symbol, refs.length) : typeChooserTitle(),
+      rows: sortTargetRows(chooseTargetRows(refs, contents)),
+      x: coords?.left, y: coords?.bottom,
+      // 上游只有实现那条挂了 `setCouldPin`（`GotoTargetHandler.java:238-246`）：类型声明的弹层没有钉。
+      pinnable: payload.kind === 'implementation',
+      refs, usageTitle: implementationsUsageTitle(symbol),
+    }
+  } catch (error) { notify(errorMessage(error), true) }
+}
+function pickTarget(row: ChooseTargetRow) {
+  targetChooser.value = null
+  void revealLocation({ path: row.path, line: row.line, column: row.character + 1 })
+}
+function closeTargetChooser() { targetChooser.value = null }
+/** 钉住 = 上游的 `FindUtil.showInUsageView`：把这批地点放进"查找"窗口（本仓的引用面板）。 */
+function pinTargetChooser() {
+  const chooser = targetChooser.value
+  if (!chooser) return
+  targetChooser.value = null
+  const search = startReferences(chooser.usageTitle, chooser.usageTitle)
+  if (!finishReferences(search, chooser.refs)) { notify('没有找到结果。'); return }
+  showOutput('references')
 }
 // Reformat: a live selection goes through rangeFormatting (IDEA's "reformat the
 // selected lines"), otherwise the whole buffer.
@@ -325,5 +373,6 @@ async function jumpDebugLocation(target: { path?: string; line: number }) {
     onSemantic, runFormatting, runSignature, openCodeActions, caretPayload, runOrganizeImports,
     applyCodeAction, renameEntryWithReferences, applyEditsToFiles, submitRename, applyRename,
     toggleOutline, jumpDebugLocation,
+    targetChooser, pickTarget, closeTargetChooser, pinTargetChooser,
   }
 }

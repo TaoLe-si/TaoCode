@@ -22,7 +22,7 @@ import PluginDialog from './components/PluginDialog.vue'
 import RunConfigurationsDialog from './components/RunConfigurationsDialog.vue'
 import ToolWindowView, { type ToolWindowViewContext } from './components/ToolWindowView.vue'
 import SearchEverywhereDialog from './components/SearchEverywhereDialog.vue'
-import SelectInPopup from './components/SelectInPopup.vue'
+import SelectInPopup from './components/SelectInPopup.vue'; import TargetChooserPopup from './components/TargetChooserPopup.vue'
 import ToolWindowAnchorMenu from './components/ToolWindowAnchorMenu.vue'; import EditorPopupMenu from './components/EditorPopupMenu.vue'; import ToolWindowGear from './components/ToolWindowGear.vue'
 import ToolStripe from './components/ToolStripe.vue'
 import { createSearchEverywhereHost } from './searchEverywhereHost'
@@ -1035,7 +1035,7 @@ const {
   signaturePopup, closeSignaturePopup, navigateSignature, batchFixBusy, fixAllInFile,
   onSemantic, runFormatting, runSignature, openCodeActions, caretPayload, runOrganizeImports,
   applyCodeAction, renameEntryWithReferences, applyEditsToFiles, submitRename, applyRename,
-  toggleOutline, jumpDebugLocation,
+  toggleOutline, jumpDebugLocation, targetChooser, pickTarget, closeTargetChooser, pinTargetChooser,
 } = createSemanticActions({
   notify, isDesktop, generalSettings, workspace: () => workspace.value, active, activePath, findTab, editorFor,
   lspReady, save, codeActions, actionPrompt, renamePrompt, renameValue, renameInput, invalidRenameName,
@@ -2412,7 +2412,7 @@ onBeforeUnmount(() => {
     </Teleport>
     <!-- Alt+F1 的目标列表（IDEA SelectInAction.java:62-72 `popup.showInBestPositionFor`）。 -->
     <Teleport v-if="anchorMenu" to="body"><ToolWindowAnchorMenu :anchor="anchorMenuAnchor" :x="anchorMenu.x" :y="anchorMenu.y" @move="moveAnchorTo($event)" @close="closeAnchorMenu()" /></Teleport>
-    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport>    <Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
+    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport> <Teleport v-if="targetChooser" to="body"><TargetChooserPopup :title="targetChooser.title" :rows="targetChooser.rows" :x="targetChooser.x" :y="targetChooser.y" :pinnable="targetChooser.pinnable" @pick="pickTarget($event)" @close="closeTargetChooser()" @pin="pinTargetChooser()" /></Teleport> <Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
     <!-- Signature help popup: IDEA's parameter info panel with overload navigation -->
     <Teleport v-if="signaturePopup" to="body">
       <div class="signature-popup" :style="{ left: `${Math.min(signaturePopup.x, viewport.width - 500)}px`, top: `${Math.min(signaturePopup.y + 4, viewport.height - 200)}px` }" @pointerdown.stop @keydown.up.prevent="navigateSignature(-1)" @keydown.down.prevent="navigateSignature(1)" @keydown.esc.prevent="closeSignaturePopup()" tabindex="-1">

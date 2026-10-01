@@ -7,6 +7,7 @@ namespace fake_server {
 void handle_request(const Flags& flags, const std::string& method, const Json& params, const Json& id) {
     const bool& incremental = flags.incremental;
     const bool& multi_definition = flags.multi_definition;
+    const bool& multi_implementation = flags.multi_implementation;
     const bool& no_selection_range = flags.no_selection_range;
     const bool& no_folding_range = flags.no_folding_range;
     const bool& no_resolve = flags.no_resolve;
@@ -433,8 +434,13 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
             // declared type lives in the sibling, so both mapping paths are covered.
             const auto document = requested(params);
             const auto inside = method == "textDocument/implementation";
-            const Json found = Json::array({location(inside ? document : sibling_of(document, "Helper.java"),
-                                                     inside ? 3 : 9, inside ? 4 : 7, inside ? 3 : 9, inside ? 12 : 14)});
+            Json found = Json::array({location(inside ? document : sibling_of(document, "Helper.java"),
+                                               inside ? 3 : 9, inside ? 4 : 7, inside ? 3 : 9, inside ? 12 : 14)});
+            // `--multi-implementation`：再补一条（同目录的 Helper.java）—— 多目标时客户端要弹
+            // 「选择实现」（IDEA 的 Choose Implementation of …，单目标则直接跳），一条测不到。
+            if (inside && multi_implementation) {
+                found.push_back(location(sibling_of(document, "Helper.java"), 4, 8, 4, 14));
+            }
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", found}});
         } else if (method == "textDocument/documentHighlight") {
             // DocumentHighlight[]: one read, one write, both derived from the

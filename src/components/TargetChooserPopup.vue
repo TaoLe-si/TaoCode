@@ -1,19 +1,23 @@
 <script setup lang="ts">
-// 「选择声明」弹层 —— IDEA 的 `GotoDeclarationAction` 在**多个目标**时开的那一个
-// （`GotoDeclarationOnlyHandler2.kt:60-76` 的 `MultipleTargets` 分支）。
+// 「选一个目标」的弹出列表 —— IDEA 那几个 goto 动作在多目标时共用的那个 chooser
+// （`GotoDeclarationOnlyHandler2.kt:60-76` 的 Choose Declaration、`GotoTargetHandler.java:140-260`
+// 的 Choose Implementation、`GotoTypeDeclarationHandler2.kt:52-62` 的 Choose Type）。
 //
-// 只负责渲染与派发：行怎么来的、怎么过滤怎么移动都在 `src/chooseTarget.ts`（纯函数，可测）。
-// 标题文案取自上游资源串 `declaration.navigation.title`
-// （`platform/lang-api/resources/messages/CodeInsightBundle.properties:146` = "Choose Declaration"）。
-// 行首图标：上游画的是元素的图标（`TargetPresentationMainRenderer.kt:40` 的 `icon = presentation.icon`），
-// LSP 给不出元素图标，这里用本仓"定位到一个位置"的统一图标（与引用/问题列表同一枚），不发明字形。
+// 只负责渲染与派发：行怎么来的、怎么过滤怎么移动都在 `src/chooseTarget.ts`（纯函数，可测）；
+// 标题由调用方给（三个动作各取自己的资源串，见那里的注释）。行的三段照
+// `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationMainRenderer.kt:30-44` +
+// 右对齐的位置列 `.../TargetPresentationRenderer.kt:70-83`；行首图标用本仓"定位到一个位置"的统一图标
+// （上游画的是元素图标，LSP 给不出，不发明字形）。
+// `pinnable` = 上游 `setCouldPin`：标题栏右上角一个按钮，把结果放进"查找"窗口
+// （`AbstractPopup.java:501-508`，按钮 tooltip 取 `show.in.find.window.button.name.newui`
+// = `platform/platform-api/resources/messages/IdeBundle.properties:1150` "Open Results in Find Window"）。
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FileCode2 } from 'lucide-vue-next'
+import { FileCode2, Pin } from 'lucide-vue-next'
 import { filterChooseTargets, moveChooseTarget, type ChooseTargetRow } from '../chooseTarget'
 import { popupCancelKeyAction } from '../popupCancel'
 
-const props = defineProps<{ rows: ChooseTargetRow[]; x?: number; y?: number }>()
-const emit = defineEmits<{ (event: 'pick', row: ChooseTargetRow): void; (event: 'close'): void }>()
+const props = defineProps<{ title: string; rows: ChooseTargetRow[]; x?: number; y?: number; pinnable?: boolean }>()
+const emit = defineEmits<{ (event: 'pick', row: ChooseTargetRow): void; (event: 'close'): void; (event: 'pin'): void }>()
 
 const filter = ref('')
 const list = ref<HTMLElement>()
@@ -60,8 +64,10 @@ onUnmounted(() => window.removeEventListener('pointerdown', onPointerDown, true)
 </script>
 
 <template>
-  <div ref="list" class="choose-target" role="listbox" aria-label="选择声明" tabindex="-1" :style="anchor" @keydown.stop="onKeydown">
-    <p class="choose-target-title">选择声明</p>
+  <div ref="list" class="choose-target" role="listbox" :aria-label="title" tabindex="-1" :style="anchor" @keydown.stop="onKeydown">
+    <p class="choose-target-title"><span>{{ title }}</span>
+      <button v-if="pinnable" type="button" class="choose-target-pin" title="在查找窗口中打开结果" aria-label="在查找窗口中打开结果" @click="emit('pin')"><Pin :size="12" /></button>
+    </p>
     <p v-if="filter" class="choose-target-filter">{{ filter }}</p>
     <button v-for="(row, index) in visible" :key="row.id" class="choose-target-row" :class="{ 'is-selected': visible[selected]?.id === row.id }"
             role="option" :aria-selected="visible[selected]?.id === row.id" @click="pick(row)" @mouseenter="selected = index">

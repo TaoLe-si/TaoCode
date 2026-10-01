@@ -1051,6 +1051,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 ---
 
 - [x] **已补（第七十六批）** 书签**列表**这条线：运行时 `src/bookmarkListActions.ts`（建/改名/删/把书签加进某张列表）、对话框 `src/components/BookmarkListDialog.vue`（上游三个对话框合一的形状）、面板段头的重命名/删除按钮、标题栏的「创建书签列表」「书签打开的标签页…」，以及齿轮的「删除多个书签前询问」（默认开）。真机取证：建「待办」→ 改名「待办2」→「书签打开的标签页…」把打开的标签页加成**文件书签**并落盘 → 删除时弹出上游那句「确定要删除 ''待办2'' 书签列表吗? 此操作无法撤消。」。
+- [ ] **待补（第七十六批遗留）** `AddAnotherBookmark`（把一条**已有**书签加到另一张列表）：运行时与对话框都就绪（`runWithChosenList` + `addBookmarkToNamedList` + select 模式），缺的是上游那个入口（书签节点右键菜单里的「添加另一书签…」）。
 - [x] **已补（第七十七批）** 代码提示框（补全弹层）那条线的收尾 + 一个真缺陷。
   **① 「选择声明」弹层**（IDEA `GotoDeclarationAction` 多目标时的 Choose Declaration）：
   上游形状核过一遍 —— 一个目标直接跳、多个才弹层（`GotoDeclarationOnlyHandler2.kt:60-76`），
@@ -1081,6 +1082,46 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **遗留**：`Ctrl+Alt+B`（实现）走的是引用面板那条路，IDEA 的 `GotoImplementationHandler` 是另一个
   「Choose Implementation」弹层（带后台 updater），未做；jar 里的类型 `definition` 仍空（JDT 不给位置，
   那一条在 LSP「解析外部」线上记着）。
+
+- [x] **已补（第七十八批）** 「选一个目标」的弹层收成**三个 goto 动作共用的一份**，
+  并把「转到实现 / 转到类型声明」改成上游的 goto 形状。
+  **① 组件通用化**：`ChooseTargetPopup.vue` → `TargetChooserPopup.vue`（`title` / `pinnable` 两个新 prop，
+  新增 `pin` 事件）。标题不再写死在弹层里：三个动作各取自己的资源串（`选择声明` / 见下）。
+  **② Ctrl+Alt+B（转到实现）与 Ctrl+Shift+B（转到类型声明）不再是"一律倒进引用面板"**：
+  上游是 goto 动作 —— 一个目标**直接跳**、多个才开弹层
+  （`platform/lang-impl/src/com/intellij/codeInsight/navigation/GotoTargetHandler.java:140-160`
+  的 `targets.length == 1 && finished` 分支；`.../actions/GotoTypeDeclarationHandler2.kt:52-62` 同一个形状），
+  零个的话实现那条给错误提示（`goto.implementation.notFound`）、类型声明那条**静默返回**
+  （`GotoTypeDeclarationHandler2.kt:47` 的 `if (result == null) return`）。
+  标题照 `CodeInsightBundle.properties:107`（"Choose Implementation of {0} ({1} found{2})"，`{2}` 只属于
+  后台搜索未完成的场景 —— LSP 一次给全，所以永远 finished）与 `:205`（"Choose Type"）。
+  实现那条的行**要排序**（`GotoTargetHandler.shouldSortTargets` → `getComparingObject`：名字/容器/位置），
+  声明那条不排（`PsiTargetNavigator` 保持服务端顺序）。
+  **③ 钉（`setCouldPin`）**：上游只有实现那条挂它（`GotoTargetHandler.java:238-246` → `FindUtil.showInUsageView`），
+  按钮长在弹层标题栏里（`AbstractPopup.java:501-508`），tooltip = `show.in.find.window.button.name.newui`
+  （"Open Results in Find Window"）。本仓落成 `pinTargetChooser()`：把这批地点填进引用面板并切过去，
+  面板名 = `{name} 的实现`（`goto.implementation.findUsages.title` = "Implementations of {0}"）。
+  **真机取证（CDP）**：`build/lsp_fake_server.exe --multi-implementation`（本批新增的开关）⇒
+  Ctrl+Alt+B 弹出「选择 Sample 的实现（找到 2 个）」，两行 `Sample (in src/Sample.java) 4:5` /
+  `target (in src/Helper.java) 5:9`（截图 `screenshots/choose-implementation-popup.png`）；
+  点标题栏的钉 ⇒ 弹层关、底部「对"Sample 的实现"的引用 2」列出这两条。
+  **未真机复跑的**：单目标直跳（判据是单测 + 与「选择声明」同一条形状，那条真机验过；
+  再跑一次探针要顶掉用户正在用的实例，见下）。
+  **本批踩的坑（规矩记在下面「探针注意」那一段）**：探针用的 `TaoCode.lsp.json` 写进了 `build/`
+  （用户正在用的 exe 目录），用户在自己的窗口里看到假服务器画的 inlay hint / hover（"代码被分割、提示是错的"）。
+  探针配置必须跟着探针走、用完立刻删；另外**同一时刻只能跑一个 TaoCode 实例**
+  （WebView2 用户数据目录是 `%LOCALAPPDATA%\TaoCode`，`native/main.cpp:1845`；第二个进程起不来），
+  所以探针必然顶掉用户那一个 —— 跑完要立刻把干净的那份重新拉起来。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1360/1360**（1357 → 1360，`tests/choose-target.test.mjs` 8 → 11 条） |
+| `npx vite build --emptyOutDir false` | exit 0，7.67s |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / 0 warning（只动假服务器） |
+| `ctest --output-on-failure -j4` | **35/35** |
+| 真 exe 取证 | 多目标弹层 + 钉（点击后引用面板 2 条）；单目标直跳只到单测 |
+| 收尾 | `taskkill` → 删 `build/TaoCode.lsp.json` → 无调试端口重启 exe，`lsp_fake_server` 无残留 |
 
 | 检查 | 结果 |
 |---|---|
@@ -1185,6 +1226,13 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **declaration→definition 退化链真机复验（2026-10-01）**：字段里的外部类型与 import 行**仍都空**（`available:false`）⇒ 加了 declaration 优先也没用，JDT 在这套工程上对**库类型**就是不给位置（源码附件只让 hover 带上了 javadoc）。IDEA 的等价物可考虑：用 hover 已能拿到的**全限定类型名**，在 `~/.gradle/caches`/`build/rfg` 的 `*-sources.jar` 里按路径反查并直接打开那个 `.java`（本仓已有「打开项目内文件」的通道，这一条要走产品决定，先记档）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
+  **探针配置不许写进 `build/`（2026-10-01 第七十八批的教训）**：为了验弹层，我把 `build/TaoCode.lsp.json`
+  指到了假服务器并留着 exe 继续跑，用户在自己的窗口里看到假服务器画的 inlay hint / hover —— 读起来就是
+  "代码被分割、提示是错的"。规矩：探针配置只跟探针副本一起存在、用完立刻删；`build/` 里的那份必须保持"不存在"。
+  另外**同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定为 `%LOCALAPPDATA%\TaoCode`，
+  `native/main.cpp:1845` 的 `CreateCoreWebView2EnvironmentWithOptions(nullptr, profile…)`；实测第二个进程报
+  "无法创建 WebView2 窗口"而退出）⇒ 做探针就是顶掉用户那一个，跑完立刻把干净的那份重新拉起来
+  （`taskkill //IM TaoCode.exe //F` → 确认 `ls build/*.json` 无命中、`tasklist | grep lsp_fake_server` 为 0 → 重启 exe）。
 
 
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
