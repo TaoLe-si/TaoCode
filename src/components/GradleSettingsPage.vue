@@ -93,6 +93,9 @@ function jdkLabel(entry: JdkInfo) { return `${entry.name || entry.version || 'JD
   <!-- 「Gradle 导入」开关：关掉时语言服务不跑 Buildship 导入，改由磁盘上的产物当类路径/源根
        （`java.import.gradle.enabled`）—— 没有可用导入的工程（依赖不在缓存里）靠它才有外部解析。 -->
   <label class="checkbox-row"><input type="checkbox" :checked="gradle?.enabled ?? true" :disabled="disabled" @change="patch({ enabled: ($event.target as HTMLInputElement).checked })" /><span>启用 Gradle 导入（关掉则用磁盘上的构建产物当类路径）</span></label>
+  <!-- 关掉导入时语言服务的 workspace folder 会收窄成已链接的子工程（native/lsp_config.cpp 的
+       workspace_folders）—— 那是 initialize 参数，改了要重开会话才生效，所以这里说清楚。 -->
+  <p class="field-hint">关掉导入时语言服务的 workspace folder 会收窄成**已链接的子工程**（只扫这些目录）：这一项要**重开项目**才完全生效。真机实测（根目录下堆着多个工程的布局）：工程数 6 → 1、服务端诊断 2100+ 批 → 5 批。</p>
   <!-- 「离线模式」＝ GradleSettings.isOfflineWork()（:118-131）→ 命令行加 --offline。 -->
   <label class="checkbox-row"><input type="checkbox" :checked="gradle?.offline ?? false" :disabled="disabled" @change="patch({ offline: ($event.target as HTMLInputElement).checked })" /><span>离线模式（<code>--offline</code>）</span></label>
   <p class="field-hint">同步与任务都用同一条命令拼装（<code>src/gradle.ts</code> 的 <code>gradleCommand</code>），固定带 <code>--console=plain</code>：rich console 会带控制字符与进度条，输出不可解析。</p>

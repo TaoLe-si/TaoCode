@@ -1086,9 +1086,12 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   打字 `tar` 把列表过滤到一条、Esc 先清过滤再按一次才关（两段式）；**对照组**（同一份配置去掉开关 ⇒
   definition 只回一个位置）：Ctrl+B **不弹任何弹层**、直接跳（截图 `screenshots/choose-target-single.png`）。
   原生侧多目标那条形状另有 ctest：`lsp_coding` 的「a multi-target definition keeps every location in the shaped list」。
-  **遗留**：`Ctrl+Alt+B`（实现）走的是引用面板那条路，IDEA 的 `GotoImplementationHandler` 是另一个
-  「Choose Implementation」弹层（带后台 updater），未做；jar 里的类型 `definition` 仍空（JDT 不给位置，
-  那一条在 LSP「解析外部」线上记着）。
+  **遗留（2026-10-02 更正：前半条已不成立）**：`Ctrl+Alt+B` 当时确实走引用面板，但**下一批（`ebb5a6a`）
+  就改成了上游的「选择实现」弹层**（0/1/N 三条分支 + 排序 + 钉 + 标题 `goto.implementation.chooserTitle`），
+  与 `GotoImplementationHandler.java:140-160` 的形状一致；两者唯一的差别是上游有一个**后台 updater**
+  在搜索未完成时显示 "… found so far" 并在只剩一个结果时自动跳 —— LSP 一次给全，所以这一步本仓没有对应物。
+  jar 里的类型 `definition` 仍空（JDT 不给位置）—— 那一条第七十九批起由客户端自己的 sources jar 通道
+  兜住（「快速定义」；`native/library_sources.cpp`）。
 
 - [x] **已补（第七十八批）** 「选一个目标」的弹层收成**三个 goto 动作共用的一份**，
   并把「转到实现 / 转到类型声明」改成上游的 goto 形状。
