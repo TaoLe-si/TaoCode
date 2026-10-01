@@ -107,7 +107,14 @@ export function createLspCompletion(deps: CompletionDeps) {
         // No validFor: every edit requests a fresh semantic result (also handles
         // CompletionList.isIncomplete without reusing an incomplete/stale list).
         options: result.items.filter(item => (item.raw as RawItem | undefined)?.insertTextFormat !== 2).map(item => ({
-          label: item.label, type: item.kind.toLowerCase(), detail: item.detail,
+          // LSP `filterText` 是**过滤键**、不一定是可见文本（别名/缩写就是靠它），而 CodeMirror 的
+          // 过滤走 `label` ⇒ 有 filterText 时把 label 设成它、可见文本交给 `displayLabel`；
+          // `completionMatch` 会把高亮范围按 displayLabel 里的偏移重算回来（那里记着这条约定）。
+          label: typeof (item.raw as (RawItem & { filterText?: unknown }) | undefined)?.filterText === 'string'
+            ? (item.raw as RawItem & { filterText: string }).filterText
+            : item.label,
+          displayLabel: item.label,
+          type: item.kind.toLowerCase(), detail: item.detail,
           info: async () => {
             try {
               if (!current()) return null
