@@ -260,3 +260,22 @@ test('三个入口都打开 Search Everywhere，而不是「查找操作」', ()
   // 对话框真的挂在外壳上。
   assert.match(shell, /<SearchEverywhereDialog :open="searchEverywhereOpen"/, '对话框没有渲染到外壳里')
 })
+
+// 符号供给者的**前置条件**：`lspReady` 必须真的会失效（2026-10-01 第七十八批的真机缺陷）。
+//
+// 症状：打开文件后，导航菜单里的「转到符号/转到声明」全灰、Search Everywhere 搜不出任何符号、
+// 「转到符号」对话框不弹 —— 切一次标签页就全好了。根因是 Vue 的代理陷阱：
+// `openFile` 把 push 之前的**原始 tab 对象**交给 `startLsp`，而 `startCompletionSession` 往它上面写
+// `lspRunning`；写原始对象不触发依赖，`lspReady`（computed）缓存着 false 不放，直到别的响应式变化
+// 把它撞醒。修法：`startLsp` 入口处换回 `groups` 里的响应式代理再写。
+test('startLsp 往响应式代理上写 lspRunning（写原始对象不触发 lspReady 失效）', () => {
+  const navigation = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lspNavigation.ts'), 'utf8')
+  assert.match(navigation,
+    /const live = \(\[\.\.\.groups\[0\]\.tabs, \.\.\.groups\[1\]\.tabs\] as Tab\[\]\)\.find\(item => item\.path === tab\.path\) \?\? tab/,
+    'startLsp 没有换回响应式代理：写原始 tab 对象不会让 lspReady 失效')
+  assert.match(navigation, /starts\.set\(live\.path, token\)/, '后续登记都要用代理那一份')
+  assert.match(navigation, /startCompletionSession\(live,/,
+    'startCompletionSession 必须拿到代理，否则 lspRunning 永远写不进响应式世界')
+  // 反向守卫：不能再用传进来的原始对象去跑会话（那样上面两条都会变成摆设）。
+  assert.doesNotMatch(navigation, /startCompletionSession\(tab,/, '还在往原始对象上跑会话')
+})

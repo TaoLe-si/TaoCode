@@ -32,7 +32,13 @@
 | 1 | 「布局」子菜单被插到**窗口菜单最顶上** | `src/menuUi.ts` | 锚点 id `window.searchEverywhere` **全仓不存在** → `findIndex` 得 −1、`+1` 变 0，"碰巧"插对。IDEA 的窗口菜单里本就没有 Search Everywhere（它在 `GoToMenu`，`PlatformActions.xml:604`）。按 `PlatformActions.xml:637-651` 的真实顺序改为**直接置顶**（`[...layoutMenuRows.value, ...windowMenuRows]`），删掉 findIndex + splice。顺带删掉 `windowMenu.ts` 顶部一条与已修正注释**并存**的旧注释 |
 | 2 | Search Everywhere 是**空壳** | `src/menus/navigateMenu.ts`、`src/keymap.ts`、主工具栏 | 「随处搜索」(Shift+Shift) 与「查找操作」(Ctrl+Shift+A) **都调 `openActionSearch`**；仓库无任何 tab/贡献者结构（IDEA 侧 146 类）。已做成真对话框：纯逻辑 `src/searchEverywhere.ts`、装配 `src/searchEverywhereHost.ts`、UI `src/components/SearchEverywhereDialog.vue`；tab 取自 `IdeBundle.properties` 的 `searcheverywhere.*.tab.name`（旧那套 Classes/Symbols/… 所属的 `ContributorDefinedTabsCustomizationStrategy.kt` 已 `@Deprecated`），只渲染有真实供给者的 **All / Project / Commands / Run Configurations** |
 
-**仍未做**：Search Everywhere 的 **LSP 符号/类供给者**（要按查询词异步问语言服务 + 防抖），以及 `IDE` / `Autocompletion` 两个 tab（还没有对应贡献者，按"没有真实消费链路的项不渲染"不放假控件）。见 `src/searchEverywhereHost.ts` 文件头。
+**LSP 符号供给者已经接上（2026-10-01 第七十八批复核，上一条"仍未做"是过期的）**：`src/searchEverywhereHost.ts`
+按查询词（≥2 字、120ms 防抖）发 `workspace/symbol`，`symbols` 供给者同时喂 All 与 Project tab，
+结果带行/列预览；关闭/切工作区/文件变化分别作废在途请求（`tests/search-everywhere.test.mjs` 逐条锁住）。
+**仍未做**：`IDE` / `Autocompletion` 两个 tab —— 二者在本仓都没有真实供给者：`IDE` 那个名字
+（`searcheverywhere.ide.search.tab.name`）在参考源码树里**只有资源串、没有任何代码用它**（grep 全树 0 命中，
+只有 grazie 的 i18n 测试数据），`Autocompletion` 是"搜索框里的查询命令补全"（`AutoCompletionProvider.java:40-100`
+的 `AutoCompletionCommand`），本仓的搜索框没有查询语言，所以按"没有真实消费链路的项不渲染"不放假控件。
 
 ## 缺口清单现状
 

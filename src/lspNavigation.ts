@@ -91,16 +91,22 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   let symbolTimer: number | undefined
   const starts = new Map<string, symbol>()
   async function startLsp(tab: Tab) {
+    // **必须往响应式代理上写**：`startCompletionSession` 会设置 `lspRunning`/`lspConfigured`，
+    // 而 tab 对象常常是"push 进 `groups[pane].tabs` 之前的原始对象"（`openFile` 就是这么传的），
+    // 往原始对象上写**不触发依赖** —— 读它的人（`lspReady` computed）值虽然对，却不会失效。
+    // 真机实测（第七十八批）：打开文件后 `lspReady` 一直停在 false —— 导航菜单里的符号/声明项全灰、
+    // Search Everywhere 的符号供给者一个请求都不发，切一次标签页才恢复。所以在入口处换回代理。
+    const live = ([...groups[0].tabs, ...groups[1].tabs] as Tab[]).find(item => item.path === tab.path) ?? tab
     const epoch = deps.workspaceEpoch()
-    const token = Symbol(tab.path)
-    starts.set(tab.path, token)
-    setLspDiagnostics(tab.path, [])
-    const current = () => deps.workspaceEpoch() === epoch && starts.get(tab.path) === token && hasTabPath(tab.path)
+    const token = Symbol(live.path)
+    starts.set(live.path, token)
+    setLspDiagnostics(live.path, [])
+    const current = () => deps.workspaceEpoch() === epoch && starts.get(live.path) === token && hasTabPath(live.path)
     // Not awaited: a Java file must open (and be editable) while JDT LS is still
     // importing the project. The tab flips `lspRunning` once initialization lands,
     // which re-enables code insight through the editor's own `lsp-enabled` prop.
-    void startCompletionSession(tab, { request, notify: deps.notify, current })
-      .then(() => { if (current() && tab.path === activePath.value) void refreshOutline(tab.path) })
+    void startCompletionSession(live, { request, notify: deps.notify, current })
+      .then(() => { if (current() && live.path === activePath.value) void refreshOutline(live.path) })
   }
   function lspOn(tab: Tab) {
     // IDEA PowerSaveMode: code insight is switched off entirely while it is on.
