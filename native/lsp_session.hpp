@@ -30,6 +30,12 @@ public:
         std::filesystem::path working_directory;
         Json settings = Json::object();
         Json initialization_options = Json::object();
+        // 非空 = **只**把这些目录（工作区相对路径）声明成 LSP 的 workspace folder，而不是工作区根。
+        // 用在"关掉 Gradle 导入、由我们自己的模型物化 Eclipse 工程"那条路上：JDT 的导入器会顺着
+        // workspace folder 找工程，声明根目录时它会把根下**每个** Eclipse 工程都导进来（真机：
+        // AE2 根目录下的 4 个没链接的同级工程，各带一个 `.project`，为此推 2100+ 批诊断、
+        // 语义请求被拖到超时）。声明成链接的子工程之后，那些同级目录根本不在扫描范围里。
+        std::vector<std::string> workspace_folders;
     };
     // Diagnostics ready for the UI: workspace-relative path + contract-shaped array.
     using DiagnosticsSink = std::function<void(std::string path, Json diagnostics)>;

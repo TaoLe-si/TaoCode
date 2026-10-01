@@ -1,5 +1,6 @@
 #include "lsp_config.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <utility>
 
@@ -88,6 +89,23 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         }
         servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), libraries,
                                                        excluded, sources);
+        // 关掉 Gradle 导入时，LSP 的 workspace folder **只声明链接的子工程**（源根/类路径兜底的第一段）：
+        // 声明工作区根会让 JDT 把根下每个带 `.project` 的目录都当工程导入（真机实测：6 个工程、
+        // 2100+ 批诊断、typeDefinition 超时）；`java.import.exclusions` 对那条导入路径不生效，
+        // `changeImportedProjects` 的移除档也停不下它们的编译（两条都实测过）。
+        if (!gradle.value("enabled", true)) {
+            std::vector<std::string> tops;
+            const auto push_top = [&tops](const std::vector<std::string>& list) {
+                for (const auto& entry : list) {
+                    const auto slash = entry.find_first_of("/\\");
+                    const auto top = slash == std::string::npos ? entry : entry.substr(0, slash);
+                    if (!top.empty() && std::find(tops.begin(), tops.end(), top) == tops.end()) tops.push_back(top);
+                }
+            };
+            push_top(sources);
+            push_top(libraries);
+            if (!tops.empty()) servers.at("java").workspace_folders = std::move(tops);
+        }
         // 把"实际发给语言服务的那份"记进诊断日志（`TAOCODE_LSP_TRACE` 只记方法名，不记 body）——
         // "外部的类解析不了"这类问题第一步就要看它：源根/类路径到底有没有、链接工程读没读到。
         taocode::diagnostics::event(local_data_root(), "INFO",

@@ -96,14 +96,21 @@ Host& Session::ensure(const std::string& language) {
     spec.executable = config->second.command;
     spec.arguments = config->second.arguments;
     spec.working_directory = config->second.working_directory;
-    const auto root_uri = root_.empty() ? Json(nullptr) : Json(to_uri(""));
+    const auto declared = config->second.workspace_folders;   // 空 = 用工作区根（见 ServerConfig 的注释）
+    const auto root_uri = declared.empty() ? (root_.empty() ? Json(nullptr) : Json(to_uri("")))
+                                          : Json(to_uri(declared.front()));
     auto initialization = config->second.initialization_options;
     initialization["settings"] = config->second.settings;
     host->set_configuration(config->second.settings);
     host->set_timeout(timeout_);
     const auto root_name = root_.filename().generic_u8string();
     Json folders = Json::array();
-    if (!root_.empty()) folders.push_back({{"uri", root_uri}, {"name", std::string(root_name.begin(), root_name.end())}});
+    if (!declared.empty()) {
+        for (const auto& relative : declared) {
+            const auto name = std::filesystem::path(relative).filename().generic_u8string();
+            folders.push_back({{"uri", to_uri(relative)}, {"name", std::string(name.begin(), name.end())}});
+        }
+    } else if (!root_.empty()) folders.push_back({{"uri", root_uri}, {"name", std::string(root_name.begin(), root_name.end())}});
     // 链接的子工程目录也算工作区文件夹（见 set_extra_roots 的注释）：JDT 只在这些文件夹里
     // 建"不可见 / 非托管"工程，源根落在文件夹之外就成了"non-project file"。
     for (const auto& extra : extra_roots_) {

@@ -1301,8 +1301,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   根因（同一次探针挖出来的）：那些同级目录里**存在 `.project` 文件**
   （`AE2VMAddon-1.10.2/.project` 的时间戳正是 JDT 自己导入时写的；`AE2-refs/.../.project` 更早），
   `EclipseProjectImporter` 每次启动都会把这些目录当 Eclipse 工程导入，排除模式对它不生效。
-  ⇒ 要真正收敛导入范围，得**只把链接的子工程声明成 workspace folder**（而不是工作区根）——
-  这是一处设计改动（`Session` 的 root 与 LSP 的 workspace folders 要分开），下一步再做。
+  ⇒ 于是按这条路修了：**只把链接的子工程声明成 LSP 的 workspace folder**（而不是工作区根）——
+  `ServerConfig::workspace_folders`（工作区相对路径），`resolve_servers` 在"关导入"时按源根/类路径
+  兜底的**第一段目录**派生，`lsp_host_bootstrap` 用它替掉默认的根 folder（`rootUri` 跟着走）。
+  **真机复验（清掉 JDT 工作区后重跑探针）**：`java.project.getAll` 只剩
+  `AE2VMAddon-1.7.10-gtnh/` **一个**工程（此前 6 个），服务端诊断从 **2100+ 批**降到 **5 批**，
+  hover 照旧解析出 `net.minecraftforge.common.config.Configuration` + javadoc，探针文件自己拿到
+  **5 条语义诊断**（此前是"non-project file，只有语法错"）。判据在 `lsp_config_test.cpp`
+  （关导入 → 只声明 mod-a；导入开着 → 不动 folder）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
   **探针配置不许写进 `build/`（2026-10-01 第七十八批的教训）**：为了验弹层，我把 `build/TaoCode.lsp.json`

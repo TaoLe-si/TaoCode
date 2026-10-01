@@ -95,6 +95,36 @@ int main() {
         check(read_explicit_servers(file).empty(), "坏 JSON 应当回空表");
     });
 
+    // 「只把链接的子工程声明成 workspace folder」——关掉 Gradle 导入时按源根/类路径的第一段派生。
+    // 判据的来由见 native/lsp_session.hpp 里 ServerConfig::workspace_folders 的注释（真机：声明
+    // 工作区根会让 JDT 把根下每个 `.project` 目录都导进来，2100+ 批诊断把语义请求拖到超时）。
+    run("关掉 Gradle 导入时，workspace folder 只声明链接的子工程（第一段目录）", [&] {
+        const auto dir = temp_directory();
+        write(dir / L"TaoCode.lsp.json", R"({"java": {"command": "java"}})");
+        const auto root = dir / L"proj";
+        std::filesystem::create_directories(root / L"mod-a" / L"src" / L"main" / L"java");
+        std::filesystem::create_directories(root / L"mod-a" / L"build" / L"rfg");
+        const taocode::Json settings{{"buildTools", taocode::Json{{"gradle",
+            taocode::Json{{"enabled", false}, {"linkedProjects", taocode::Json::array({"mod-a"})}}}}}};
+        const auto servers = taocode::lsp::resolve_servers(dir, root.string(), settings);
+        check(servers.contains("java"), "没有 java 服务器");
+        const auto& folders = servers.at("java").workspace_folders;
+        check(folders.size() == 1 && folders.front() == "mod-a", "应当只声明 mod-a，得到 " + std::to_string(folders.size()) + " 条");
+    });
+
+    run("Gradle 导入开着时不动 workspace folder（交给 Buildship 自己建工程）", [&] {
+        const auto dir = temp_directory();
+        write(dir / L"TaoCode.lsp.json", R"({"java": {"command": "java"}})");
+        const auto root = dir / L"proj2";
+        std::filesystem::create_directories(root / L"mod-a" / L"src" / L"main" / L"java");
+        const taocode::Json settings{{"buildTools", taocode::Json{{"gradle",
+            taocode::Json{{"enabled", true}, {"linkedProjects", taocode::Json::array({"mod-a"})}}}}}};
+        const auto servers = taocode::lsp::resolve_servers(dir, root.string(), settings);
+        check(servers.contains("java"), "没有 java 服务器");
+        check(servers.at("java").workspace_folders.empty(), "导入开着时不该替换 workspace folder");
+    });
+
+
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;
 }
