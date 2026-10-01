@@ -1133,8 +1133,13 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      **仍差一处**：`definition` 对 jar 里的类型给不出位置（`available:false`）—— 我们这边的
      `available` 语义是"有没有目标"（`unsupported()` 只在服务端显式声明 `false`/`null` 时才拦），
      所以是 JDT 在没有**源码附件**时不给库类型的定义位置。下一步（对齐 IDEA 的"反编译/附加源码"）：
-     把 `*-sources.jar` 按**前缀匹配**（如 `srg_patched_minecraft-sources.jar` ↔ `srg_merged_minecraft.jar`
-     这类不同名但同源的产物）配成 `sourcepath`，或接受当前行为并在文档里写明。
+     已按**共享词**配对（同名优先；否则取共享 4+ 字词最多的那个 —— `srg_patched_minecraft-sources.jar`
+     ↔ `srg_merged_minecraft.jar` 共享 `minecraft`）。真机复验：`hover` 现在连 **javadoc 一起回**
+     （`net.minecraftforge.common.config.Configuration` + "This class offers advanced configurations
+     capabilities…"）—— 源码附件确实生效了；但 **`definition` 仍空**（同一位置、同一门控下 hover 能过，
+     说明请求发出去了、是 JDT 回了空数组）。下一个探针：把 definition 打在**同一文件的 import 行**
+     （`import net.minecraftforge.common.config.Configuration;`）与本地符号上，区分"位置相关"与
+     "库类型一律不给"。
      产物说明：`.project`/`.classpath` 会写进**被链接的子工程目录**（这就是本功能的落点），
      已有同名文件时一字不动；不想要时删掉即可（下次启动会重建）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；

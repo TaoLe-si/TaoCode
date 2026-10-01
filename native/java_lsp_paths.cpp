@@ -1,6 +1,7 @@
 #include "java_lsp_paths.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <set>
 
@@ -217,12 +218,37 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
             else binaries.push_back(jar);
         }
     }
+    // 配对规则：① 同名优先（`x.jar` ↔ `x-sources.jar`）；② 否则按**共享词**配（取共享词最多的那个）——
+    // ForgeGradle 的反混淆产物名字对不上（`srg_patched_minecraft-sources.jar` 对应的是
+    // `srg_merged_minecraft.jar`、`mcp_patched_minecraft-sources.jar` 对应 `recompiled_minecraft-1.7.10.jar`），
+    // 但它们共享 `minecraft` 这个词。这种配对是**近似**（补丁版源码 vs 合并版字节码），
+    // 但比"完全没有源码附件 ⇒ 定义跳转给不出位置"强，且只在名字对不上时才用。
+    const auto tokens_of = [](const std::string& stem) {
+        std::vector<std::string> tokens;
+        std::string current;
+        for (const char ch : stem) {
+            if (std::isalnum(static_cast<unsigned char>(ch))) { current.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch)))); continue; }
+            if (current.size() >= 4) tokens.push_back(current);
+            current.clear();
+        }
+        if (current.size() >= 4) tokens.push_back(current);
+        return tokens;
+    };
     for (const auto& jar : binaries) {
         const auto stem = fs::path(from_utf8(jar)).stem().string();
         const std::string* match = nullptr;
+        int best_score = 0;
         for (const auto& source : sources) {
-            const auto source_stem = fs::path(from_utf8(source)).stem().string();
+            auto source_stem = fs::path(from_utf8(source)).stem().string();
             if (source_stem == stem + "-sources") { match = &source; break; }
+            const auto dash = source_stem.rfind("-sources");
+            if (dash != std::string::npos) source_stem = source_stem.substr(0, dash);
+            const auto source_tokens = tokens_of(source_stem);
+            const auto binary_tokens = tokens_of(stem);
+            int score = 0;
+            for (const auto& token : source_tokens)
+                if (std::find(binary_tokens.begin(), binary_tokens.end(), token) != binary_tokens.end()) ++score;
+            if (score > best_score) { best_score = score; match = &source; }
         }
         classpath_out << "  <classpathentry kind=" << quoted("lib") << " path=" << quoted(jar);
         if (match) classpath_out << " sourcepath=" << quoted(*match);

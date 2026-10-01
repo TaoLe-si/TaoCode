@@ -1093,6 +1093,7 @@ int main() {
         std::filesystem::create_directories(linked_dir / "src" / "main" / "java");
         {
             std::ofstream(linked_dir / "build" / "rfg" / "fake-1.7.10.jar").put('x');
+            std::ofstream(linked_dir / "build" / "rfg" / "srg_patched_minecraft-sources.jar").put('x');
         }
         const auto written = taocode::materialize_eclipse_project(
             linked_dir, {"AE2VMAddon-1.7.10-gtnh/src/main/java"},
@@ -1103,6 +1104,7 @@ int main() {
             const std::string body((std::istreambuf_iterator<char>(classpath)), std::istreambuf_iterator<char>());
             check(body.find("kind=\"src\" path=\"src/main/java\"") != std::string::npos, "源根要落成工程内相对路径");
             check(body.find("recompiled_minecraft-1.7.10.jar") != std::string::npos, "磁盘上的 jar 要落成 lib 条目");
+            check(body.find("sourcepath=") != std::string::npos, "源码 jar 要按共享词配成 sourcepath（补丁版源码 vs 合并版字节码）");
             check(body.find("JRE_CONTAINER") != std::string::npos, "JRE 容器要有");
         }
         check(taocode::materialize_eclipse_project(linked_dir, {"x"}, {}) == 0, "已有 .project/.classpath 时一字不动");
