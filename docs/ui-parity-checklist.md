@@ -1142,6 +1142,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      "库类型一律不给"。
      产物说明：`.project`/`.classpath` 会写进**被链接的子工程目录**（这就是本功能的落点），
      已有同名文件时一字不动；不想要时删掉即可（下次启动会重建）。
+  **三个 definition 探针的实际结果（2026-10-01）**：① import 行的外部类型 → 空；② 字段初始化里的同一类型 → 空；③ 本地类名 → **有位置**（`available:true` + `{path,line,character}`）⇒ definition 链路本身是通的，JDT 只是**对 jar 里的类型一律不给位置**。下一步：definition 之前先发 `textDocument/declaration`（JDT 有 `declarationProvider`；VS Code 就是 declaration → definition 退化），库里类型再退回 `typeDefinition`。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 
