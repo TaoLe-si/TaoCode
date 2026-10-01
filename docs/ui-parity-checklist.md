@@ -1120,6 +1120,60 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   （WebView2 用户数据目录是 `%LOCALAPPDATA%\TaoCode`，`native/main.cpp:1845`；第二个进程起不来），
   所以探针必然顶掉用户那一个 —— 跑完要立刻把干净的那份重新拉起来。
 
+- [x] **已补（第七十九批）** 一轮四件（用户要求"一轮做完"）：书签、Search Everywhere、快速定义、真机取证，
+  中间抓到一个**真缺陷**。
+
+  **① 书签 `AddAnotherBookmark`（更正第七十六批那条记错的遗留，`d28b99d`）**：入口早在 `539aacd`
+  就在书签面板的行右键菜单里（清单说"缺入口"是错的）；上游的挂点在**编辑器一侧**
+  （gutter 弹出菜单 `intellij.platform.bookmarks.xml:211-219`、标签/项目视图弹出菜单 `:222-227`），
+  而书签工具窗口的节点菜单（`Bookmarks.ToolWindow.PopupMenu`，`:158-177`）里根本没有它；
+  `AddAnotherBookmarkAction.update:16-19` 对**行**书签直接 `return false`。本批按这条启用规则
+  把那一行只留给文件书签；tab/项目视图/gutter 三处挂点仍待补（前两处的行数据在 App.vue 模板里、
+  贴着机检上限，要先拆菜单模块；gutter 弹出菜单本仓整体还没有）。
+
+  **② Search Everywhere 的 LSP 符号供给者：本来就有（更正 HANDOFF 的"仍未做"）**：
+  `src/searchEverywhereHost.ts` 按查询词（≥2 字、120ms 防抖）发 `workspace/symbol`，`symbols`
+  同时喂 All 与 Project tab，结果带行/列预览；`tests/search-everywhere.test.mjs` 逐条锁住
+  （关窗/切工作区/文件变化各自作废在途请求）。**真正没做的**是 `IDE`/`Autocompletion` 两个 tab：
+  `searcheverywhere.ide.search.tab.name` 在参考树里**只有资源串、没有任何代码用它**（grep 全树 0 命中），
+  `Autocompletion` 是搜索框的查询命令补全（`AutoCompletionProvider.java:40-100`），本仓的搜索框没有查询语言。
+
+  **③ 「快速定义」`QuickImplementations`（Ctrl+Shift+I，`$default.xml:162-164`）+ 库类型源码**：
+  探针在 AE2 工程上取到原始事实 —— JDT 的 hover 能解析库类型并带 javadoc，但
+  definition/declaration/typeDefinition 对**库里**的类型都不给位置；服务端同时很忙
+  （`java.project.getAll` 回报 6 个工程：链接的那个 + 4 个没链接的同级工程 + 一个 invisible project，
+  `java.import.exclusions` 发了也一样挡不住，它为此推了 2100+ 批诊断，typeDefinition 直接超时）。
+  ⇒ 等价物由客户端自己做：`native/library_sources.cpp` 把全限定名映射到工程里真实存在的
+  `*-sources.jar` 的 `a/b/C.java`，用系统 bsdtar 解到 profile 缓存并置只读（IDEA 的库源码编辑器同样只读），
+  桥接方法 `file.librarySource`；前端 `src/quickDefinition.ts` 做 hover→全限定名、候选逐级回退、
+  源码摘录，`QuickDefinitionPopup.vue` 画标题 + 行号 + 目标行高亮。行数上限的代价：main.cpp 到 2000 行硬顶，
+  把七条文件/系统只读查询拆成 `native/file_queries.cpp`（1974 行）；CodeEditor.vue 拆出
+  `chooseTargetHost.ts` / `declarationNavigation.ts` / `quickDefinitionHost.ts`（1193 行）。
+
+  **④ 真缺陷（本批真机取证抓到，`75b7849`）**：`lspReady` 这个 computed 长期停在 false ——
+  导航菜单里的符号/声明项全灰、Search Everywhere 的符号供给者一个请求都不发，**切一次标签页才恢复**。
+  根因是 Vue 的代理陷阱：`openFile` 把 push 之前的**原始 tab 对象**交给 `startLsp`，而
+  `startCompletionSession` 往它上面写 `lspRunning`/`lspConfigured`；写原始对象不触发依赖。
+  修法：`startLsp` 入口换回 `groups` 里的代理再写（判据在 `tests/search-everywhere.test.mjs`）。
+
+  **真机取证（`TAOCODE_DEBUG_PORT` + CDP，探针用完即删）**：① Ctrl+Shift+I 弹出
+  「快速定义 Sample」+ 目标行高亮（截图 `screenshots/quick-definition-popup.png`）；
+  ② Ctrl+Alt+B 在**单目标**下不弹任何弹层、直接把光标送到目标位置（后续请求的坐标从 (1,1) 变 (3,4)）；
+  ③ Search Everywhere 搜 "Sam" 出现 `Sam Sample.java:1 Symbol`（修 ④ 之前一行都没有）；
+  ④ 桥接直调 `file.librarySource{qualifier:"com.example.Greeter"}` 对真实的 deflate sources jar
+  回 `available:true` + 解出的路径（29ms）与内容。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1371/1371**（1360 → 1371：新增 `quick-definition` 9 条、`choose-target` +1、`search-everywhere` +1） |
+| `npx vite build --emptyOutDir false` | exit 0，10.71s |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / 0 warning |
+| `ctest --output-on-failure -j4` | **36/36**（35 → 36，新增 `library_sources`） |
+| 真 exe 取证 | 见 ①–④；四处都留有截图或原始回包 |
+| 探针收尾 | `taskkill` → 删 `build/TaoCode.lsp.json` 与探针夹具 → 无调试端口重启 exe、`lsp_fake_server` 无残留 |
+
+
 | 检查 | 结果 |
 |---|---|
 | `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
@@ -1231,6 +1285,15 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      已有同名文件时一字不动；不想要时删掉即可（下次启动会重建）。
   **三个 definition 探针的实际结果（2026-10-01）**：① import 行的外部类型 → 空；② 字段初始化里的同一类型 → 空；③ 本地类名 → **有位置**（`available:true` + `{path,line,character}`）⇒ definition 链路本身是通的，JDT 只是**对 jar 里的类型一律不给位置**。下一步：definition 之前先发 `textDocument/declaration`（JDT 有 `declarationProvider`；VS Code 就是 declaration → definition 退化），库里类型再退回 `typeDefinition`。
   **declaration→definition 退化链真机复验（2026-10-01）**：字段里的外部类型与 import 行**仍都空**（`available:false`）⇒ 加了 declaration 优先也没用，JDT 在这套工程上对**库类型**就是不给位置（源码附件只让 hover 带上了 javadoc）。IDEA 的等价物可考虑：用 hover 已能拿到的**全限定类型名**，在 `~/.gradle/caches`/`build/rfg` 的 `*-sources.jar` 里按路径反查并直接打开那个 `.java`（本仓已有「打开项目内文件」的通道，这一条要走产品决定，先记档）。
+    **2026-10-01 第七十九批的原始事实（`jdtls_probe` 带项目设置跑 AE2 根目录、导入关）**：
+  `java.project.getAll` 回报 **6 个工程**（`AE2-refs/AE2-1.16.5-src`、`AE2VMAddon-1.7.10-gtnh`、
+  `1.10.2`、`1.12.2-nova`、`1.15.2` + 一个 `jdt.ls-java-project`）⇒ JDT 把**没链接的同级工程也导入了**，
+  服务端为此推了 **2100+ 批**诊断，语义请求（typeDefinition）被拖到超时；
+  把 `java.import.exclusions` 也发一遍（改成两种模式都发）**没有改变结果** ⇒ 排除模式对这条导入器路径不起作用
+  （改动已回退，结论记在这里）。`java.project.sourcePaths` 在这份 JDT 里**不是命令**（-32601），
+  `java.project.getSettings` 报 "Index 0 out of bounds"（要参数）。hover 照旧能解析库类型 + javadoc，
+  而**库类型的定义位置**这一条不再等 JDT：本批起由客户端从 `*-sources.jar` 自己取（见第七十九批 ③，
+  `native/library_sources.cpp` + `file.librarySource`）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
   **探针配置不许写进 `build/`（2026-10-01 第七十八批的教训）**：为了验弹层，我把 `build/TaoCode.lsp.json`
