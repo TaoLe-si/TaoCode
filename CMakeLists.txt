@@ -27,7 +27,7 @@ endif()
 
 # window_state（全屏等窗口态）放在这个库里：它同样只依赖 Win32 + json，
 # 而且 workspace_test 要能直接测它（加在可执行目标上就链接不到）。
-add_library(taocode_workspace native/workspace.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp)
+add_library(taocode_workspace native/workspace.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
@@ -37,7 +37,7 @@ target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history 
 
 add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cpp
                            native/lsp_support.cpp native/lsp_capability_queries.cpp native/lsp_discovery.cpp
-                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp native/lsp_recover.cpp native/lsp_children.cpp native/lsp_navigation.cpp)
+                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp native/lsp_recover.cpp native/lsp_children.cpp native/lsp_navigation.cpp native/library_sources.cpp)
 # lsp_config 要把项目的 `java` 设置喂给 Java 服务器（补全偏好、sourceLevel…），
 # 那是 `java_lsp_settings`（native/projects.cpp）—— 依赖是单向的，不成环。
 target_link_libraries(taocode_lsp PUBLIC taocode_workspace taocode_projects)
@@ -237,6 +237,10 @@ add_test(NAME lsp_server_discovery COMMAND lsp_discovery_test)
 add_executable(lsp_config_test native/lsp_config_test.cpp)
 target_link_libraries(lsp_config_test PRIVATE taocode_lsp)
 add_test(NAME lsp_config_file COMMAND lsp_config_test)
+# 「库类型的源码」：全限定名 → *-sources.jar 里的 .java（JDT 对库类型不给 definition 位置的等价物）。
+add_executable(library_sources_test native/library_sources_test.cpp)
+target_link_libraries(library_sources_test PRIVATE taocode_lsp taocode_diagnostics)
+add_test(NAME library_sources COMMAND library_sources_test)
 # JDT LS 的启动规格（Equinox + IDE 自带 JRE，与项目 Java 版本无关）。
 add_executable(jdtls_test native/jdtls_test.cpp)
 target_link_libraries(jdtls_test PRIVATE taocode_lsp)

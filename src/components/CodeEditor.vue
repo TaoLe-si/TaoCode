@@ -29,7 +29,9 @@ import { createLspCompletion } from '../lspCompletion'
 import { completionUi } from '../completionUi'
 import { mergeCompletionResults } from '../completionMerge'
 import TargetChooserPopup from './TargetChooserPopup.vue'
-import { chooseTargetRows, loadTargetContents, type ChooseTargetRow, type TargetLocation } from '../chooseTarget'
+import QuickDefinitionPopup from './QuickDefinitionPopup.vue'; import { createQuickDefinitionHost } from '../quickDefinitionHost.ts'
+import { type ChooseTargetRow, type TargetLocation } from '../chooseTarget'; import { createChooseTargetHost } from '../chooseTargetHost'
+import { createDeclarationNavigation } from '../declarationNavigation'
 import { candidates as templateCandidates, expand as expandTemplateAt, defaultTemplateSettings, type PluginTemplateSource, type TemplateSettings } from '../templates'
 import { wrapSelection, type SurroundTemplate } from '../surround'
 import { applySemanticTokenEdits, decodeSemanticTokens, semanticTokenClass, type SemanticToken } from '../semanticTokens'
@@ -39,7 +41,7 @@ import { describeLink, linkAt, type DocumentLink, type DocumentLinkResult } from
 import { createDocumentLinks, linkField } from '../documentLinksExtension'
 import { createCodeLens } from '../codeLensExtension'
 import type { CodeLensResult } from '../codeLens'
-import { lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspDefinitionResult, type LspHighlightResult, type LspDiagnosticReport, type LspFoldingRange, type LspFoldingRangeResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult, type LspSemanticTokensResult } from '../bridge'
+import { lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspHighlightResult, type LspDiagnosticReport, type LspFoldingRange, type LspFoldingRangeResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult, type LspSemanticTokensResult } from '../bridge'
 
 const props = defineProps<{ content: string; path: string; language?: string; theme: Theme; active: boolean; settings: EditorSettings; templates: TemplateSettings; pluginTemplates?: PluginTemplateSource[]; lspEnabled: boolean; readOnly?: boolean; reveal?: { path: string; line: number } | null; breakpoints?: DapBreakpoint[]; debugLine?: number; bookmarks?: number[]; gutterIcons?: GutterIcon[]; blame?: BlameAnnotation[] }>()
 const emit = defineEmits<{
@@ -612,36 +614,41 @@ const hoverSource = hoverTooltip(async (hovered, pos) => {
     return { pos, create: () => { const dom = document.createElement('div'); dom.className = 'lsp-hover'; dom.textContent = contents; return { dom } } }
   } catch { return null }
 }, { hoverTime: 250, hideOnChange: true })
-async function revealDefinition(pos: number) {
+// 转到声明的解析链在 src/declarationNavigation.ts；这里只把"光标在哪、弹层锚点在哪"喂进去。
+const { revealDefinition: gotoDefinition } = createDeclarationNavigation({
+  enabled: () => props.lspEnabled,
+  path: () => props.path,
+  request: (method, params) => request(method, params),
+  openChooser: async (targets, at) => openChooseTargetHost(targets, at),
+  reveal: target => emit('reveal', target),
+})
+function revealDefinition(pos: number) {
   const editor = view
-  if (!editor || !props.lspEnabled) return
+  if (!editor) return
   const info = editor.state.doc.lineAt(pos)
-  try {
-    const result = await request<LspDefinitionResult>('lsp.request', { kind: 'definition', path: props.path, line: info.number - 1, character: pos - info.from })
-    const targets = result.available ? result.locations ?? [] : []
-    if (!targets.length || !view) return
-    // 多个目标 → 开「选择声明」弹层（`GotoDeclarationOnlyHandler2.kt:60-76` 的 MultipleTargets 分支）；
-    // 一个才直接跳（SingleTarget 分支）。行怎么来见 src/chooseTarget.ts。
-    if (targets.length > 1) { await openChooseTarget(targets, pos); return }
-    const target = targets[0]!
-    emit('reveal', { path: target.path, line: target.line, column: target.character + 1 })
-  } catch { /* 语言服务未就绪时不提示 */ }
+  const coords = editor.coordsAtPos(pos)
+  void gotoDefinition(info.number - 1, pos - info.from, { x: coords?.left, y: coords?.bottom })
 }
-// 「选择声明」弹层：目标文件的内容用来取声明点的名字（主文本），读不到就退到文件名。
-const chooseTarget = ref<{ rows: ChooseTargetRow[]; x?: number; y?: number } | null>(null)
-async function openChooseTarget(targets: TargetLocation[], pos: number) {
-  // 打开中的缓冲优先（就是本文件），其次问磁盘，心跳外的 jar 源码读不到就留空。
-  const contents = await loadTargetContents(targets,
-    path => (path === props.path ? view?.state.doc.toString() ?? props.content : null),
-    async path => (await request<{ content: string }>('file.read', { path })).content)
-  if (!view) return
-  const coords = view.coordsAtPos(pos)
-  chooseTarget.value = { rows: chooseTargetRows(targets, contents), x: coords?.left, y: coords?.bottom }
-}
+// 「选择声明」弹层：状态与行内容加载在 src/chooseTargetHost.ts。
+const { chooseTarget, open: openChooseTargetHost, close: closeChooseTarget } = createChooseTargetHost({
+  path: () => props.path,
+  buffer: () => view?.state.doc.toString() ?? props.content, readFile: async path => (await request<{ content: string }>('file.read', { path })).content,
+})
 function pickChooseTarget(row: ChooseTargetRow) {
-  chooseTarget.value = null
+  closeChooseTarget()
   emit('reveal', { path: row.path, line: row.line, column: row.character + 1 })
 }
+// 「快速定义」（QuickImplementations）：状态与解析链在 src/quickDefinitionHost.ts。
+const { quickDefinition, command: quickDefinitionCommand } = createQuickDefinitionHost({
+  enabled: () => props.lspEnabled,
+  path: () => props.path,
+  buffer: () => view?.state.doc.toString() ?? props.content,
+  coords: pos => view?.coordsAtPos(pos),
+  readFile: async path => (await request<{ content: string }>('file.read', { path })).content,
+  request: (method, params) => request(method, params),
+  librarySource: qualifier => request('file.librarySource', { qualifier }),
+  report: message => emit('error', message),
+})
 // IDEA's "last edit location" ring: the two lines the caret sat on when the buffer
 // last changed, so Ctrl+Shift+Backspace toggles between here and there.
 let editSpots: number[] = []
@@ -798,6 +805,8 @@ const editorActions: Record<string, Command> = {
   ...clipboardCommands(text => void copyToClipboard(text)), // IDEA EditorCopy/EditorCut：无选区时先选中整行（src/editorClipboard.ts）
   completion: startCompletion,
   definition: editor => { void revealDefinition(editor.state.selection.main.head); return true },
+  // 「快速定义」QuickImplementations（$default.xml:162-164 control shift I）：在原地看一眼定义。
+  quickDefinition: editor => quickDefinitionCommand(editor),
   'selection.grow': () => adjustSelection(true),
   'selection.shrink': () => adjustSelection(false),
   rename: emitSemantic('rename'),
@@ -853,10 +862,11 @@ function lspExtensions(): Extension[] {
     // Ctrl+Space 的 Basic 补全绑定也在那里（`$default.xml:732-734`），编辑器这里只提供 source。
     completionUi([mergeCompletion]),
     keymap.of([
-      // $default.xml: GotoDeclaration Ctrl+B (+ ctrl-click), RenameElement Shift+F6,
-      // FindUsages Alt+F7, ParameterInfo Ctrl+P; ReformatCode Ctrl+Alt+L;
-      // GotoImplementation Ctrl+Alt+B, Call/TypeHierarchy Ctrl+Alt+H / Ctrl+Shift+H.
+      // $default.xml: GotoDeclaration Ctrl+B (+ ctrl-click), RenameElement Shift+F6, FindUsages Alt+F7,
+      // ParameterInfo Ctrl+P, ReformatCode Ctrl+Alt+L, QuickImplementations Ctrl+Shift+I（:162-164）,
+      // GotoImplementation Ctrl+Alt+B, Call/TypeHierarchy Ctrl+Alt+H / Ctrl+Shift+H。
       { key: 'Ctrl-b', preventDefault: true, run: editor => { void revealDefinition(editor.state.selection.main.head); return true } },
+      { key: 'Ctrl-Shift-i', preventDefault: true, run: editor => quickDefinitionCommand(editor) },
       { key: 'Shift-f6', preventDefault: true, run: emitSemantic('rename') },
       { key: 'Alt-f7', preventDefault: true, run: emitSemantic('references') },
       { key: 'Alt-Enter', preventDefault: true, run: emitSemantic('codeAction') },
@@ -1175,5 +1185,8 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
   <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉。 -->
   <Teleport v-if="chooseTarget" to="body">
     <TargetChooserPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" title="选择声明" @pick="pickChooseTarget" @close="chooseTarget = null" />
+  </Teleport>
+  <Teleport v-if="quickDefinition" to="body">
+    <QuickDefinitionPopup :source="quickDefinition.source" :x="quickDefinition.x" :y="quickDefinition.y" @close="quickDefinition = null" />
   </Teleport>
 </template>

@@ -16,6 +16,8 @@ KEY = {
     'down': dict(key='ArrowDown', code='ArrowDown', windowsVirtualKeyCode=40, nativeVirtualKeyCode=40),
     'ctrl+alt+b': dict(modifiers=3, key='b', code='KeyB', windowsVirtualKeyCode=66, nativeVirtualKeyCode=66),
     'ctrl+shift+b': dict(modifiers=10, key='B', code='KeyB', windowsVirtualKeyCode=66, nativeVirtualKeyCode=66),
+    'ctrl+shift+i': dict(modifiers=10, key='I', code='KeyI', windowsVirtualKeyCode=73, nativeVirtualKeyCode=73),
+    'ctrl+shift+alt+n': dict(modifiers=11, key='N', code='KeyN', windowsVirtualKeyCode=78, nativeVirtualKeyCode=78),
 }
 
 with connect(ws_url, max_size=64 * 1024 * 1024) as ws:

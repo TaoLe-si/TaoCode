@@ -26,6 +26,9 @@ const bridge = read('src/bridge.ts')
 const main = read('native/main.cpp')
 const session = read('native/lsp_session.cpp')
 const codeActions = read('native/lsp_code_actions.cpp')
+// 2026-10-01：文件/系统侧的只读查询（七条）搬到了 native/file_queries.cpp（main.cpp 贴着 2000 行
+// 上限），分派用**方法名字符串**而不是哈希 case —— 这张清单也要扫那份。
+const fileQueries = read('native/file_queries.cpp')
 
 /** `export type X = 'a' | 'b'` 单行联合类型里的全部字面量。 */
 function unionMembers(source, name) {
@@ -34,9 +37,11 @@ function unionMembers(source, name) {
   return [...line[1].matchAll(/'([^']+)'/g)].map(match => match[1])
 }
 
-/** `switch (fnv1a(method))` 里的全部 case 标签（UDL 哈希 ⇒ 方法名原样保留在源码里）。 */
+/** `switch (fnv1a(method))` 里的全部 case 标签（UDL 哈希 ⇒ 方法名原样保留在源码里），
+ *  外加 native/file_queries.cpp 里那组 `method == "…"` 的分派。 */
 function nativeCases() {
   const labels = [...main.matchAll(/case "([^"]+)"_h:/g)].map(match => match[1])
+      .concat([...fileQueries.matchAll(/method == "([^"]+)"/g)].map(match => match[1]))
   assert.ok(labels.length > 50, `原生分派只解析出 ${labels.length} 个 case，正则可能已失效`)
   return labels
 }

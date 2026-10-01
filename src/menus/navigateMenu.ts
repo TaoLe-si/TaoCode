@@ -76,6 +76,9 @@ export function createNavigateMenuRows(ctx: NavigateContext): MenuRow[] {
     { id: 'navigate.rule0', rule: true },
     { id: 'navigate.declaration', title: '转到声明/定义', keys: 'Ctrl B', keywords: 'go to declaration definition 转到声明', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => ctx.runEditor('definition') },
     // IDEA Navigate: 类型声明 (GotoTypeDeclaration, Ctrl+Shift+B).
+    // $default.xml:162-164 `QuickImplementations` = control shift I（IDEA 的「快速定义」）——
+    // 在原地看一眼定义（库类型走 hover 的全限定名 + 工程里的 *-sources.jar）。
+    { id: 'navigate.quickDefinition', title: '快速定义', keys: 'Ctrl Shift I', keywords: 'quick definition quick implementations 快速定义', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => ctx.runEditor('quickDefinition') },
     { id: 'navigate.typeDeclaration', title: '转到类型声明', keys: 'Ctrl Shift B', keywords: 'goto type declaration 类型声明', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => ctx.runEditor('typeDeclaration') },
     { id: 'navigate.rule1', rule: true },
     // IDEA's "Jump to Line/Character" (Ctrl+L) opens the same line prompt as Go to

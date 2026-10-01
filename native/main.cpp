@@ -31,6 +31,8 @@
 #include "request_trace.hpp"
 #include "lsp_config.hpp"
 #include "jdtls.hpp"
+#include "library_sources.hpp"
+#include "file_queries.hpp"
 #include "runner.hpp"
 #include "run_host.hpp"
 #include "search.hpp"
@@ -813,6 +815,8 @@ struct App {
                 throw taocode::WorkspaceError("BUSY", "请先等待克隆完成或取消克隆。");
             Json result;
             if (auto it = routes.find(method); it != routes.end()) result = it->second(params);
+            // 文件/系统侧的只读查询（七条）在 native/file_queries.cpp —— main.cpp 贴着 2000 行上限。
+            else if (workspace && taocode::dispatch_file_query(method, params, *workspace, result)) {}
             else switch (fnv1a(method)) {
             case "app.state"_h: {
                 result = projects->state();
@@ -945,25 +949,11 @@ struct App {
                 announce_file_change("created", created);
                 break;
             }
-            case "file.readOnly"_h: {
-                result = workspace->set_read_only(params.at("path").get<std::string>(), params.value("readOnly", true));
-                break;
-            }
-            case "file.lineSeparators"_h: {
-                result = workspace->convert_line_separators(params.at("path").get<std::string>(), params.at("separator").get<std::string>(), params.at("content").get<std::string>(), params.at("expectedVersion").get<std::string>());
-                break;
-            }
-            case "file.readBinary"_h: {
-                result = workspace->read_binary(params.at("path").get<std::string>(),
-                    params.value("limit", std::size_t{1024 * 1024}));
-                break;
-            }
-            // Safe delete: "is anything still referring to this?" answered by a real
-            // workspace scan (file + line + preview), so the confirm dialog can show
-            // the same rows IDEA's Safe Delete dialog would.
-            case "file.usages"_h: {
-                result = workspace->usages_of(params.at("path").get<std::string>(),
-                    params.value("symbol", std::string()));
+            // 「库类型的源码」：JDT 对库类型不给 definition 位置（见 native/library_sources.hpp），
+            // 这一条由客户端从工程里的 *-sources.jar 取 `a.b.C` 对应的 .java。
+            case "file.librarySource"_h: {
+                result = taocode::library_source_json(taocode::find_library_source(
+                    fs::path(wide(current_root)), profile / L"library-sources", params.at("qualifier").get<std::string>()));
                 break;
             }
             case "file.rename"_h: {
@@ -981,22 +971,6 @@ struct App {
             }
             case "file.copy"_h: {
                 result = workspace->copy(params.at("from").get<std::string>(), params.at("to").get<std::string>());
-                break;
-            }
-            case "file.reveal"_h: {
-                result = workspace->reveal(params.at("path").get<std::string>());
-                break;
-            }
-            // RevealFileAction for absolute paths: the welcome screen has no workspace yet
-            // (welcomeScreen/projectActions/RevealProjectDirAction.kt:25-33).
-            case "shell.reveal"_h: {
-                result = taocode::reveal_absolute(params.at("path").get<std::string>());
-                break;
-            }
-            // LSP `documentLink.target` 与控制台输出里的 URL：交给系统默认处理器打开。
-            // `open_external` 会**拒绝没有协议前缀的字符串** —— 那是一个安全边界，见 workspace.cpp。
-            case "shell.openUrl"_h: {
-                result = taocode::open_external(params.at("url").get<std::string>());
                 break;
             }
             case "session.save"_h: {

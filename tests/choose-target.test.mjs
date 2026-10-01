@@ -118,14 +118,17 @@ test('钉按钮：只有实现那条有，点它把这批地点放进引用面�
 })
 
 test('单个目标直接跳，多个才开弹层（上游的两条分支）', () => {
-  assert.match(editor, /if \(targets\.length > 1\) \{ await openChooseTarget\(targets, pos\); return \}/,
+  // 解析链搬到了 src/declarationNavigation.ts（CodeEditor 贴着机检上限），两条分支在那里。
+  const navigation = read('src/declarationNavigation.ts')
+  assert.match(navigation, /if \(targets\.length > 1\) \{ await deps\.openChooser\(targets, at \?\? \{\}\); return \}/,
     '多目标必须走弹层，不能只取第一个')
-  assert.match(editor, /const target = targets\[0\]!\s*\n\s*emit\('reveal', \{ path: target\.path, line: target\.line, column: target\.character \+ 1 \}\)/,
+  assert.match(navigation, /deps\.reveal\(\{ path: target\.path, line: target\.line, column: target\.character \+ 1 \}\)/,
     '单目标保持直接跳，并把光标落在声明列上')
+  assert.match(editor, /const \{ revealDefinition: gotoDefinition \} = createDeclarationNavigation\(/, '编辑器只负责喂坐标')
 })
 
 test('弹层的每一行都带上位置，挑选后按行列跳转', () => {
-  assert.match(editor, /function pickChooseTarget\(row: ChooseTargetRow\) \{\s*\n\s*chooseTarget\.value = null\s*\n\s*emit\('reveal', \{ path: row\.path, line: row\.line, column: row\.character \+ 1 \}\)/,
+  assert.match(editor, /function pickChooseTarget\(row: ChooseTargetRow\) \{\s*\n\s*closeChooseTarget\(\)\s*\n\s*emit\('reveal', \{ path: row\.path, line: row\.line, column: row\.character \+ 1 \}\)/,
     '选择的结果必须回到 reveal 通道（导航历史/最近位置都挂在它上面）')
   assert.match(semantics, /function pickTarget\(row: ChooseTargetRow\) \{\s*\n\s*targetChooser\.value = null\s*\n\s*void revealLocation\(\{ path: row\.path, line: row\.line, column: row\.character \+ 1 \}\)/,
     '实现/类型那条同样按行列跳（同一套导航通道）')
