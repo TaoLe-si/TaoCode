@@ -1122,6 +1122,15 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
      ⇒ 下一步用**随发行那份 JDT 里现成的只读命令**把状态读出来（一次就能定位）：
      `java.project.getAll`（有哪些工程）、`java.project.sourcePaths`（我们的源根到底注册了没）、
      `java.project.getSettings`（JDT 自己看到的设置）。这三个都在这份 1.44.0 的命令表里。
+  9) **通了（2026-10-01 12:40）**：把"已算好的模型"物化成 **Eclipse 工程**（`.project` + `.classpath`）
+     交给 JDT 自带的 `EclipseProjectImporter`（`native/java_lsp_paths.cpp` 的
+     `materialize_eclipse_project`：源根用工程内相对路径、jar 用绝对路径、**已有配置不覆盖**），
+     启动日志出现"物化 Eclipse 工程 2 个文件"，随后探针里 **`hover` 回出了
+     `net.minecraftforge.common.config.Configuration`** —— 外部类型解析成功（此前一直是空串）。
+     仍差一处：**`definition` 仍回 `available:false`**（我们自己的能力门控；hover 已过同一套门控），
+     下一步查 `unsupported(language, "definition")` 那条判据为什么在这个工程上不成立。
+     产物说明：`.project`/`.classpath` 会写进**被链接的子工程目录**（这就是本功能的落点），
+     已有同名文件时一字不动；不想要时删掉即可（下次启动会重建）。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
 

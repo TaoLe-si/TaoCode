@@ -30,4 +30,17 @@ std::vector<std::string> import_exclusions(const std::filesystem::path& root, co
 /** 链接子工程里存在的源根（`src/main/java`、`src/test/java`、`src/main/resources`、`src`）。 */
 std::vector<std::string> default_source_paths(const std::filesystem::path& root, const Json& gradle);
 
+/**
+ * 把"已算好的模型"物化成 **Eclipse 工程**（`.project` + `.classpath`），交给 JDT LS 自带的
+ * `EclipseProjectImporter` 导入 —— 这是"IDEA 靠已导入的模型离线解析"在本仓的等价物：
+ * Gradle 导入在这类工程上跑不完（依赖不在缓存/要联网现做），而 JDT 对**非工程文件**只做语法检查
+ * （真机诊断原文 `… is a non-project file, only syntax errors are reported`）。
+ *
+ * 只在文件**不存在**时写（不覆盖用户自己的 Eclipse 配置），返回实际写的文件数（0 = 跳过）。
+ * 源根用工程内相对路径，jar 用绝对路径（`kind="lib"`）。jar 由 glob 前缀目录递归枚举，上限 400 条。
+ */
+int materialize_eclipse_project(const std::filesystem::path& project_dir,
+                               const std::vector<std::string>& source_paths,
+                               const std::vector<std::string>& library_globs);
+
 }  // namespace taocode

@@ -1088,6 +1088,24 @@ int main() {
         check(has_source("AE2VMAddon-1.7.10-gtnh/src/main/java") && has_source("AE2VMAddon-1.7.10-gtnh/src/test/java"),
               "链接的子工程的 main/test 源根都要在");
         check(taocode::default_source_paths(root, Json::object()).empty(), "没填 linkedProjects 时不猜源根");
+        // 物化 Eclipse 工程（关掉 Gradle 导入时交给 JDT 的 EclipseProjectImporter）：
+        // 源根用相对路径、jar 用绝对路径、已有配置不覆盖。
+        std::filesystem::create_directories(linked_dir / "src" / "main" / "java");
+        {
+            std::ofstream(linked_dir / "build" / "rfg" / "fake-1.7.10.jar").put('x');
+        }
+        const auto written = taocode::materialize_eclipse_project(
+            linked_dir, {"AE2VMAddon-1.7.10-gtnh/src/main/java"},
+            {"AE2VMAddon-1.7.10-gtnh/build/rfg/**/*.jar"});
+        check(written == 2, "第一次要给 .project 与 .classpath 两个文件");
+        {
+            std::ifstream classpath(linked_dir / ".classpath");
+            const std::string body((std::istreambuf_iterator<char>(classpath)), std::istreambuf_iterator<char>());
+            check(body.find("kind=\"src\" path=\"src/main/java\"") != std::string::npos, "源根要落成工程内相对路径");
+            check(body.find("recompiled_minecraft-1.7.10.jar") != std::string::npos, "磁盘上的 jar 要落成 lib 条目");
+            check(body.find("JRE_CONTAINER") != std::string::npos, "JRE 容器要有");
+        }
+        check(taocode::materialize_eclipse_project(linked_dir, {"x"}, {}) == 0, "已有 .project/.classpath 时一字不动");
         const auto excluded = [&exclusions](const char* pattern) {
             return std::find(exclusions.begin(), exclusions.end(), std::string(pattern)) != exclusions.end();
         };

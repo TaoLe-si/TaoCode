@@ -1,6 +1,7 @@
 #include "java_lsp_paths.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <set>
 
 #include "fsops.hpp"
@@ -121,6 +122,87 @@ std::vector<std::string> default_referenced_libraries(const fs::path& root, cons
         }
     }
     return globs;
+}
+
+namespace {
+
+// 收集某个 glob 前缀目录下所有 .jar 的绝对路径（glob 形如 `<sub>/build/rfg/**/*.jar`：
+// 取 `<sub>/build/rfg` 这一段作为起始目录，递归找 .jar）。
+std::vector<std::string> jars_under(const std::filesystem::path& root, const std::string& glob) {
+    std::vector<std::string> jars;
+    const auto prefix = glob.substr(0, glob.find("**"));
+    std::error_code code;
+    const auto base = root / from_utf8(prefix);
+    if (!std::filesystem::is_directory(base, code) || code) return jars;
+    for (std::filesystem::recursive_directory_iterator it(base, code), end; it != end && !code; it.increment(code)) {
+        if (!it->is_regular_file(code) || code) continue;
+        if (it->path().extension() != L".jar") continue;
+        if (jars.size() >= 400) break;
+        jars.push_back(utf8_path(it->path()));
+    }
+    std::sort(jars.begin(), jars.end());
+    return jars;
+}
+
+std::string xml_escape(const std::string& value) {
+    std::string out;
+    for (const char ch : value) {
+        switch (ch) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+int materialize_eclipse_project(const fs::path& project_dir, const std::vector<std::string>& source_paths,
+                               const std::vector<std::string>& library_globs) {
+    std::error_code code;
+    if (!fs::is_directory(project_dir, code) || code) return 0;
+    const auto project_file = project_dir / L".project";
+    const auto classpath_file = project_dir / L".classpath";
+    // 已有 Eclipse 配置就一字不动（用户自己的工程描述比我们猜的准）。
+    if (fs::exists(project_file, code) || fs::exists(classpath_file, code)) return 0;
+
+    const auto name = utf8_path(project_dir.filename());
+    const auto prefix = name + "/";
+    const std::string quote(1, '"');
+    const auto quoted = [&quote](const std::string& value) { return quote + value + quote; };
+
+    std::ofstream project_out(project_file, std::ios::binary);
+    if (!project_out) return 0;
+    project_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
+    project_out << "<projectDescription>" << std::endl;
+    project_out << "  <name>" << xml_escape(name) << "</name>" << std::endl;
+    project_out << "  <comment>由 TaoCode 生成：Gradle 导入不可用时的外部类路径与源根（见 native/java_lsp_paths.cpp）</comment>" << std::endl;
+    project_out << "  <buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec>" << std::endl;
+    project_out << "  <natures><nature>org.eclipse.jdt.core.javanature</nature></natures>" << std::endl;
+    project_out << "</projectDescription>" << std::endl;
+
+    std::ofstream classpath_out(classpath_file, std::ios::binary);
+    if (!classpath_out) return 1;
+    classpath_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
+    classpath_out << "<classpath>" << std::endl;
+    for (const auto& source : source_paths) {
+        const auto relative = source.rfind(prefix, 0) == 0 ? source.substr(prefix.size()) : source;
+        std::error_code exists_code;
+        if (!fs::is_directory(project_dir / from_utf8(relative), exists_code) || exists_code) continue;
+        classpath_out << "  <classpathentry kind=" << quoted("src") << " path=" << quoted(relative) << "/>" << std::endl;
+    }
+    classpath_out << "  <classpathentry kind=" << quoted("con") << " path=" << quoted("org.eclipse.jdt.launching.JRE_CONTAINER") << "/>" << std::endl;
+    for (const auto& glob : library_globs) {
+        if (glob.rfind(prefix, 0) != 0) continue;
+        for (const auto& jar : jars_under(project_dir, glob.substr(prefix.size())))
+            classpath_out << "  <classpathentry kind=" << quoted("lib") << " path=" << quoted(jar) << "/>" << std::endl;
+    }
+    classpath_out << "  <classpathentry kind=" << quoted("output") << " path=" << quoted("bin") << "/>" << std::endl;
+    classpath_out << "</classpath>" << std::endl;
+    return 2;
 }
 
 }  // namespace taocode

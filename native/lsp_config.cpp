@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "diagnostics.hpp"
+#include "fsops.hpp"
 #include "jdtls.hpp"
 #include "lsp_discovery.hpp"
 #include "projects.hpp"
@@ -68,6 +69,18 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         // 会不会被自己的排除模式挡掉，这一条在真机上还没排除干净（"non-project file" 那个诊断）。
         const auto excluded = gradle.value("enabled", true) ? import_exclusions(project_root, gradle)
                                                             : std::vector<std::string>();
+        // 关掉 Gradle 导入时，把"已算好的模型"物化成 Eclipse 工程交给 JDT 自带的
+        // EclipseProjectImporter（真机诊断：不这么做，源根在子工程里的文件永远只是
+        // "non-project file"，语义一律不解析）。只写缺失的文件，绝不覆盖既有配置。
+        int materialized = 0;
+        if (!gradle.value("enabled", true)) {
+            const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
+            if (linked.is_array())
+                for (const auto& entry : linked)
+                    if (entry.is_string())
+                        materialized += materialize_eclipse_project(project_root / from_utf8(entry.get<std::string>()),
+                                                                   sources, libraries);
+        }
         servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), libraries,
                                                        excluded, sources);
         // 把"实际发给语言服务的那份"记进诊断日志（`TAOCODE_LSP_TRACE` 只记方法名，不记 body）——
@@ -76,7 +89,8 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
             std::string("java lsp 配置：链接工程 ") + std::to_string(gradle.value("linkedProjects", Json::array()).size()) +
             " 个、源根 " + std::to_string(sources.size()) + " 条" + (sources.empty() ? std::string() : "（" + sources.front() + "）") +
             "、类路径兜底 " + std::to_string(libraries.size()) + " 条" + (libraries.empty() ? std::string() : "（" + libraries.front() + "）") +
-            "、导入 " + (gradle.value("enabled", true) ? "开" : "关"));
+            "、导入 " + (gradle.value("enabled", true) ? "开" : "关") +
+            (materialized ? "、物化 Eclipse 工程 " + std::to_string(materialized) + " 个文件" : ""));
     }
     return servers;
 }
