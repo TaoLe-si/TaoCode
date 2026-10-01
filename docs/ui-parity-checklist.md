@@ -1051,7 +1051,46 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 ---
 
 - [x] **已补（第七十六批）** 书签**列表**这条线：运行时 `src/bookmarkListActions.ts`（建/改名/删/把书签加进某张列表）、对话框 `src/components/BookmarkListDialog.vue`（上游三个对话框合一的形状）、面板段头的重命名/删除按钮、标题栏的「创建书签列表」「书签打开的标签页…」，以及齿轮的「删除多个书签前询问」（默认开）。真机取证：建「待办」→ 改名「待办2」→「书签打开的标签页…」把打开的标签页加成**文件书签**并落盘 → 删除时弹出上游那句「确定要删除 ''待办2'' 书签列表吗? 此操作无法撤消。」。
-- [ ] **待补（第七十六批遗留）** `AddAnotherBookmark`（把一条**已有**书签加到另一张列表）：运行时与对话框都就绪（`runWithChosenList` + `addBookmarkToNamedList` + select 模式），缺的是上游那个入口（书签节点右键菜单里的「添加另一书签…」）。
+- [x] **已补（第七十七批）** 代码提示框（补全弹层）那条线的收尾 + 一个真缺陷。
+  **① 「选择声明」弹层**（IDEA `GotoDeclarationAction` 多目标时的 Choose Declaration）：
+  上游形状核过一遍 —— 一个目标直接跳、多个才弹层（`GotoDeclarationOnlyHandler2.kt:60-76`），
+  标题 `CodeInsightBundle.properties:146`、一行三段与右对齐位置列照
+  `TargetPresentationMainRenderer.kt:30-44` / `TargetPresentationRenderer.kt:70-83`、
+  过滤名 = `presentableText + " " + containerName`（`targetPopup.kt:62-81`）。
+  本仓：`src/chooseTarget.ts`（行模型/速度搜索过滤/上下移动，纯函数 + 8 条单测）、
+  `src/components/ChooseTargetPopup.vue`（标题 + 图标 + 名字 + 灰的 `(in 文件)` + 右列 `行:列`；
+  ↑↓/Enter/Esc 两段式/打字即过滤）、`CodeEditor.vue` 的 `revealDefinition` 分成两条分支。
+  native 侧本来就把**全部**位置交出来了（`native/lsp_navigation.cpp`），此前是前端只取 `locations[0]`。
+  **② 更正上一批的「分组」**：`src/completionGroup.ts` 与其单测已删 —— 它编码的是"组间画分隔行"，
+  而普通补全没有这个东西（分隔条只长在默认关闭的分组贡献者那条路上，详见
+  `docs/completion-popup-spec.md` §三 1b）。
+  **③ 真机取证时抓到一个真缺陷并修（`native/lsp_config.cpp`）**：`read_explicit_servers` 里
+  `for (… : Json::parse(stream).items())` 的 JSON 是**子表达式**，range-for 只延长 `items()` 的生存期，
+  于是循环读的是已析构的内存 ⇒ **用户写的 `TaoCode.lsp.json` 一个条目都读不到**，宿主静默回退到
+  内置 JDT（症状：自定义服务器永远不启动、`definition` 回空）。改法是把 JSON 绑到具名对象；
+  新增 `native/lsp_config_test.cpp`（5 条：字段读全 / `_comment` 跳过 / 缺 command 丢弃 / 文件不存在 / 坏 JSON）
+  与 ctest `lsp_config_file` 锁住它。
+  **真机取证（`TAOCODE_DEBUG_PORT` + CDP，探针用完即删）**：exe 旁放一份把 java 指到
+  `lsp_fake_server.exe --multi-definition`（新增的假服务器开关，它 definition 回两个位置）的配置 ⇒
+  Ctrl+B 弹出「选择声明」，两行分别是 `Sample (in src/Sample.java) 2:1` 与 `target (in src/Helper.java) 5:9`
+  （截图 `screenshots/choose-target-popup.png`）；↑↓ 换选中项、Enter 跳到 `src/Helper.java` 第 5 行第 9 列
+  （截图 `screenshots/choose-target-jumped.png` + `choose-target-caret.png` 里光标正落在 `target` 词首）；
+  打字 `tar` 把列表过滤到一条、Esc 先清过滤再按一次才关（两段式）；**对照组**（同一份配置去掉开关 ⇒
+  definition 只回一个位置）：Ctrl+B **不弹任何弹层**、直接跳（截图 `screenshots/choose-target-single.png`）。
+  原生侧多目标那条形状另有 ctest：`lsp_coding` 的「a multi-target definition keeps every location in the shaped list」。
+  **遗留**：`Ctrl+Alt+B`（实现）走的是引用面板那条路，IDEA 的 `GotoImplementationHandler` 是另一个
+  「Choose Implementation」弹层（带后台 updater），未做；jar 里的类型 `definition` 仍空（JDT 不给位置，
+  那一条在 LSP「解析外部」线上记着）。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1357/1357**（1352 → 1357：新增 `tests/choose-target.test.mjs` 8 条、删掉 `completion-group` 3 条） |
+| `npx vite build --emptyOutDir false` | exit 0，11.47s |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / **0 warning**（顺手删掉 `lsp_fake_server.cpp` 里一行死变量 `no_moniker`，此前它一直在刷 C4189） |
+| `ctest --output-on-failure -j4` | **35/35**（34 → 35，新增 `lsp_config_file`） |
+| 真 exe 取证 | 见上（两条分支各一次，含速度搜索与两段式 Esc） |
+
 
 - [ ] **LSP「解析外部」这条线（进行中）** —— 目标是让 JDT 拿到外部类路径与源根，等价于 IDEA「已导入的模型」。
   已落地（`0a76a4d` / `a2a329d`）：`default_referenced_libraries`（`build/rfg/**/*.jar`、`build/libs/**`、`lib/**`

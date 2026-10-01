@@ -233,6 +233,10 @@ add_test(NAME jdk_detection COMMAND jdk_test)
 add_executable(lsp_discovery_test native/lsp_discovery_test.cpp)
 target_link_libraries(lsp_discovery_test PRIVATE taocode_lsp)
 add_test(NAME lsp_server_discovery COMMAND lsp_discovery_test)
+# TaoCode.lsp.json 的读取契约（用户自定义服务器的唯一入口；真机取证时正是这里静默失效）。
+add_executable(lsp_config_test native/lsp_config_test.cpp)
+target_link_libraries(lsp_config_test PRIVATE taocode_lsp)
+add_test(NAME lsp_config_file COMMAND lsp_config_test)
 # JDT LS 的启动规格（Equinox + IDE 自带 JRE，与项目 Java 版本无关）。
 add_executable(jdtls_test native/jdtls_test.cpp)
 target_link_libraries(jdtls_test PRIVATE taocode_lsp)

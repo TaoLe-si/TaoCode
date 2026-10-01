@@ -221,6 +221,48 @@ int main() {
         check(payload.at("items").size() == 7, "all seven items, got " + std::to_string(payload.at("items").size()));
     });
 
+    // 「转到声明」有多个目标时，客户端要开选择弹层（IDEA 的 Choose Declaration）—— 前提是
+    // 整形层把**每一个**位置都交出来（原来前端只取 locations[0]，第二个目标永远看不到）。
+    // 假服务器用 `--multi-definition` 回两条，另开一个会话跑，免得污染上面那条单目标的断言。
+    run("a multi-target definition keeps every location in the shaped list", [&] {
+        bool arrived = false;
+        std::mutex own_mutex;
+        std::condition_variable own_cv;
+        Session multi([&](std::string, Json) { std::lock_guard lock(own_mutex); arrived = true; own_cv.notify_all(); });
+        multi.set_root(fs::path(L"C:\\Users\\dev\\My Project"));
+        Session::ServerConfig multi_config;
+        multi_config.command = (self_directory() / L"lsp_fake_server.exe").native();
+        multi_config.arguments = {L"--multi-definition"};
+        std::map<std::string, Session::ServerConfig> multi_servers;
+        multi_servers["java"] = multi_config;
+        multi.configure(std::move(multi_servers));
+        check(multi.open(kDoc, "class Sample {\n    int counter;\n}\n").at("running") == true, "java server starts");
+        {
+            std::unique_lock lock(own_mutex);
+            check(own_cv.wait_for(lock, std::chrono::seconds(15), [&] { return arrived; }), "no diagnostics after didOpen");
+        }
+        bool done = false;
+        Json payload, failure;
+        multi.request("definition", kDoc, 1, 0, [&](Json result, Json error) {
+            std::lock_guard lock(own_mutex);
+            payload = std::move(result);
+            failure = std::move(error);
+            done = true;
+            own_cv.notify_all();
+        });
+        {
+            std::unique_lock lock(own_mutex);
+            check(own_cv.wait_for(lock, std::chrono::seconds(15), [&] { return done; }), "definition never replied");
+        }
+        check(failure.is_null(), "definition failed: " + describe(failure));
+        const auto& locations = payload.at("locations");
+        check(locations.is_array() && locations.size() == 2, "two locations, got " + describe(locations));
+        // 两条都要是**工作区相对**路径：第一条是打开的文件，第二条是同目录的 Helper.java。
+        check(locations[0].at("path") == kDoc, "first location is the opened file");
+        check(locations[1].at("path") == "src/Helper.java", "second location mapped to the sibling: " + describe(locations[1]));
+        check(locations[1].at("line") == 4 && locations[1].at("character") == 8, "second location keeps its 0-based position");
+    });
+
     run("completion is filtered by the identifier at the requested position", [&] {
         bool done = false;
         Json payload, failure;

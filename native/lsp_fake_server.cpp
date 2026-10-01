@@ -66,9 +66,6 @@ int main(int argc, char** argv) {
     flags.no_workspace_diagnostics =
         std::find(switches.begin(), switches.end(), std::string("--no-workspace-diagnostics")) != switches.end();
     // 关掉 monikerProvider：客户端不该发 moniker 请求。
-    const bool no_moniker =
-        std::find(switches.begin(), switches.end(), std::string("--no-moniker")) != switches.end();
-    // 关掉 codeLensProvider：客户端不该发 codeLens 请求。
     flags.no_moniker =
         std::find(switches.begin(), switches.end(), std::string("--no-moniker")) != switches.end();
     flags.no_code_lens =
@@ -86,6 +83,9 @@ int main(int argc, char** argv) {
     // 不声明 workspace.fileOperations：客户端就不该发 did*/willRename 文件操作通知。
     flags.no_file_operations =
         std::find(switches.begin(), switches.end(), std::string("--no-file-operations")) != switches.end();
+    // definition 回两个位置：多目标时客户端要弹「选择声明」（IDEA 的 Choose Declaration）。
+    flags.multi_definition =
+        std::find(switches.begin(), switches.end(), std::string("--multi-definition")) != switches.end();
     // --hang=<method>: that method is accepted and never answered, so the client's
     // request deadline is the only thing that can end the wait.
     for (const auto& option : switches)

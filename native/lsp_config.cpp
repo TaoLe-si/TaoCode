@@ -17,7 +17,12 @@ std::map<std::string, Session::ServerConfig> read_explicit_servers(const std::fi
     std::ifstream stream(file, std::ios::binary);
     if (!stream) return servers;
     try {
-        for (const auto& [language, entry] : Json::parse(stream).items()) {
+        // **必须绑到一个具名对象上**：`for (… : Json::parse(stream).items())` 里的 JSON 是子表达式，
+        // 它的生存期在初始化 range 的那个完整表达式结束时就到了，而 `items()` 只持有指向它的
+        // 迭代器 —— 于是循环读的是已经析构的内存（真机症状：文件明明写得对，宿主却一个条目都
+        // 读不到，静默回退到内置 JDT LS）。这一条由 native/lsp_config_test.cpp 锁住。
+        const Json document = Json::parse(stream);
+        for (const auto& [language, entry] : document.items()) {
             if (!entry.is_object()) continue;
             Session::ServerConfig config;
             config.command = wide(entry.value("command", std::string()));

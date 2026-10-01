@@ -47,6 +47,9 @@ struct Flags {
     bool no_workspace_diagnostics = false;
     bool stop_on_exception = false;
     bool bare_exception_info = false;
+    // --multi-definition：definition 回**两个**位置（本文件 + 同目录的 Helper.java）——
+    // 「转到声明」的多目标选择弹层（IDEA 的 Choose Declaration）用一个目标测不到。
+    bool multi_definition = false;
     std::string hang;                      // --hang=<method>：收到就不回答
     // --stall-stdin=<毫秒>：答完 initialize 之后**停止读 stdin** 这么久 —— 真实世界里
     // JDT LS 导入大工程时就是这样。用来验证客户端写文档不会把调用方堵在 WriteFile 上。

@@ -28,6 +28,8 @@ import { clearPullDiagnostics, setPullDiagnostics } from '../bridge'
 import { createLspCompletion } from '../lspCompletion'
 import { completionUi } from '../completionUi'
 import { mergeCompletionResults } from '../completionMerge'
+import ChooseTargetPopup from './ChooseTargetPopup.vue'
+import { chooseTargetRows, type ChooseTargetRow, type TargetLocation } from '../chooseTarget'
 import { candidates as templateCandidates, expand as expandTemplateAt, defaultTemplateSettings, type PluginTemplateSource, type TemplateSettings } from '../templates'
 import { wrapSelection, type SurroundTemplate } from '../surround'
 import { applySemanticTokenEdits, decodeSemanticTokens, semanticTokenClass, type SemanticToken } from '../semanticTokens'
@@ -43,7 +45,7 @@ const props = defineProps<{ content: string; path: string; language?: string; th
 const emit = defineEmits<{
   columnMode: [active: boolean]
   selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
-  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string] }>()
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number; column?: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
@@ -616,9 +618,32 @@ async function revealDefinition(pos: number) {
   const info = editor.state.doc.lineAt(pos)
   try {
     const result = await request<LspDefinitionResult>('lsp.request', { kind: 'definition', path: props.path, line: info.number - 1, character: pos - info.from })
-    const target = result.locations?.[0]
-    if (result.available && target) emit('reveal', { path: target.path, line: target.line })
+    const targets = result.available ? result.locations ?? [] : []
+    if (!targets.length || !view) return
+    // 多个目标 → 开「选择声明」弹层（`GotoDeclarationOnlyHandler2.kt:60-76` 的 MultipleTargets 分支）；
+    // 一个才直接跳（SingleTarget 分支）。行怎么来见 src/chooseTarget.ts。
+    if (targets.length > 1) { await openChooseTarget(targets, pos); return }
+    const target = targets[0]!
+    emit('reveal', { path: target.path, line: target.line, column: target.character + 1 })
   } catch { /* 语言服务未就绪时不提示 */ }
+}
+// 「选择声明」弹层：目标文件的内容用来取声明点的名字（主文本），读不到就退到文件名。
+const chooseTarget = ref<{ rows: ChooseTargetRow[]; x?: number; y?: number } | null>(null)
+async function openChooseTarget(targets: TargetLocation[], pos: number) {
+  const contents = new Map<string, string | null>()
+  for (const target of targets) {
+    if (contents.has(target.path)) continue
+    if (target.path === props.path) { contents.set(target.path, view?.state.doc.toString() ?? props.content); continue }
+    try { contents.set(target.path, (await request<{ content: string }>('file.read', { path: target.path })).content) }
+    catch { contents.set(target.path, null) }   // 工作区外的文件（jar 里的源码等）读不到
+  }
+  if (!view) return
+  const coords = view.coordsAtPos(pos)
+  chooseTarget.value = { rows: chooseTargetRows(targets, contents), x: coords?.left, y: coords?.bottom }
+}
+function pickChooseTarget(row: ChooseTargetRow) {
+  chooseTarget.value = null
+  emit('reveal', { path: row.path, line: row.line, column: row.character + 1 })
 }
 // IDEA's "last edit location" ring: the two lines the caret sat on when the buffer
 // last changed, so Ctrl+Shift+Backspace toggles between here and there.
@@ -1150,4 +1175,8 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
          coordinates are taken when it appears because any scroll dismisses it. -->
     <div v-if="errorHint" class="editor-hint" role="status" :style="errorHint.style">{{ errorHint.text }}</div>
   </div>
+  <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉。 -->
+  <Teleport v-if="chooseTarget" to="body">
+    <ChooseTargetPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" @pick="pickChooseTarget" @close="chooseTarget = null" />
+  </Teleport>
 </template>

@@ -6,6 +6,7 @@ namespace fake_server {
 
 void handle_request(const Flags& flags, const std::string& method, const Json& params, const Json& id) {
     const bool& incremental = flags.incremental;
+    const bool& multi_definition = flags.multi_definition;
     const bool& no_selection_range = flags.no_selection_range;
     const bool& no_folding_range = flags.no_folding_range;
     const bool& no_resolve = flags.no_resolve;
@@ -168,9 +169,18 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
                                {"result", {{"kind", "full"}, {"resultId", "fake-result-1"}, {"items", items}}}});
             }
         } else if (method == "textDocument/definition") {
-            write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json::array({
-                {{"uri", opened_uri.empty() ? std::string("file:///fake") : opened_uri},
-                 {"range", {{"start", {{"line", 1}, {"character", 0}}}, {"end", {{"line", 1}, {"character", 1}}}}}}})}});
+            const auto document = opened_uri.empty() ? std::string("file:///fake") : opened_uri;
+            const Json first = {{"uri", document},
+                                {"range", {{"start", {{"line", 1}, {"character", 0}}}, {"end", {{"line", 1}, {"character", 1}}}}}};
+            if (!multi_definition) {
+                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json::array({first})}});
+            } else {
+                // `--multi-definition`：第二个目标在同一目录的 Helper.java —— 客户端必须把
+                // **两条**都交给「选择声明」弹层（原来只取 locations[0]，第二条永远看不到）。
+                const Json second = {{"uri", sibling_of(document, "Helper.java")},
+                                     {"range", {{"start", {{"line", 4}, {"character", 8}}}, {"end", {{"line", 4}, {"character", 12}}}}}};
+                write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", Json::array({first, second})}});
+            }
         } else if (method == "textDocument/prepareRename") {
             // 规范里结果有三种形态：Range / {range, placeholder} / null。这里按请求位置区分：
             // character 99 = 此处不能改名（null），其余位置回 {range, placeholder}，两者都能测到。

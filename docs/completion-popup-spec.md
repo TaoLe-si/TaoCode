@@ -36,28 +36,48 @@
 
 ## 三、真正的差距（三件，按顺序）
 
-1. **排序与分组**（读源码后的结论）：排序不是写死在 arranger 里的，而是一条**可扩展的排序器链** ——
-   接口 `platform/analysis-impl/src/com/intellij/codeInsight/completion/CompletionLookupArranger.java:16,25`
+1. **排序**（✅ 已落地，`8a70e95` + `src/completionSort.ts`）：排序不是写死在 arranger 里的，而是一条
+   **可扩展的排序器链** —— 接口
+   `platform/analysis-impl/src/com/intellij/codeInsight/completion/CompletionLookupArranger.java:16,25`
    （`arrange` 收一个 `CompletionSorter`），实现是
    `platform/analysis-impl/src/com/intellij/codeInsight/completion/impl/CompletionSorterImpl.java:18`
    （`weighingFactory:28` 把 `LookupElementWeigher` 折成 `ClassifierFactory`，
-   `weighBefore:44` / `weighAfter:55` 往链里插档）；分组在 `BaseCompletionLookupArranger`（`LookupArranger` 那一路）。
-   **移植口径**：做一个纯函数 `sortCompletions()`，按 IDEA 默认链的档位依次比较
-   （相关性 → 大小写不敏感 → 长度 → 字母序；相关性档在 LSP 侧取 `sortText`，缺省退回 label），
-   在交给 CodeMirror 之前排好 —— 这样 CodeMirror 只负责画，不参与排序语义。每一档一个纯函数、各有单测。
-1b. **分组**（读源码后的结论）：分组不是另一个开关，而是**排序链的副产物** ——
-   `BaseCompletionLookupArranger.groupItemsBySorter:95` 把候选按 `MultiMap<CompletionSorterImpl, LookupElement>`
-   归堆（`:121`/`:402` 在堆与堆之间插分隔符，`:537-542` 也是"先分组再组内按相关性排"）。
-   ⇒ 移植口径：`groupCompletions()` 复用同一条排序链 —— **用它第一档能区分开的键当组键**
-   （LSP 侧就是 `sortText` 的"分组前缀"，没有 `sortText` 时整表一组），组内再用 `sortCompletions()`
-   的其余档排；弹层在组之间画分隔符（`completionUi.ts` 已有逐行渲染，加一行 separator 即可）。
-2. **`filterText` 契约**：LSP 的 `filterText` 是"过滤键、不一定要显示"；`src/completionPresentation.ts`
-   的 `completionMatch` 已经处理了"别名不等于可见文本时不高亮无关字符"（注释里写着），
-   但**过滤本身**仍要确认走的是 `filterText` 而不是 `label`（`src/lspCompletion.ts` 一线）。
-3. **跳转侧配套**：`GotoDeclarationAction` 的多目标 **Choose Target** 弹层
-   （上游 `platform/lang-impl/src/com/intellij/codeInsight/navigation/actions/GotoDeclarationAction.java`）
-   —— 现在多目标直接取第一个，要补"选哪个"的弹层，条目按「类型/成员/文件」分组并带图标。
-   这一条与刚补的 `declaration → definition` 退化链是同一个落点（`native/lsp_navigation.cpp`）。
+   `weighBefore:44` / `weighAfter:55` 往链里插档）。**LSP 这一路的真实档位**（后补的核对，
+   比第一版写得更准）：默认链在 `platform/analysis-impl/src/com/intellij/codeInsight/completion/BaseCompletionService.java:204-240`
+   （`PreferStartMatching` → 注册表里的各档 weigher → 收尾的 `priority`/`LiftShorterItemsClassifier`），
+   而 LSP 的 `sortText` 是**其中一档 weigher**，注册在
+   `platform/lsp-impl/resources/intellij.platform.lsp.impl.xml:86-88`
+   （`order="after priority, before prefix"`），实现
+   `platform/lsp-impl/src/impl/features/completion/LspCompletionWeigher.kt:30-36`。
+   本仓把它落成纯函数 `sortCompletions()`：预选 → `sortText`（缺省退回 label）→ 大小写不敏感 → 长度 → 字母序。
+1b. **分组：更正 —— 普通补全没有组间分隔行**（上一版这一条写错了，2026-10-01 复查删除）。
+   事实：`BaseCompletionLookupArranger.java` 里**没有任何** Separator（上一版写的"`:121`/`:402` 在堆与堆之间插分隔符"是错的，
+   那两处只是分组后按相关性排）。真正的分隔行（带标题的一条）只长在**分组贡献者**那条路上：
+   `GroupedCompletion` 服务开关默认关（`platform/analysis-impl/src/com/intellij/codeInsight/completion/group/GroupedCompletionImpl.kt:15-17`
+   读 `ide.completion.group.enabled`，默认 `false`），开着时 arranger 才换成
+   `GroupCompletionLookupArrangerImpl`（`platform/lang-impl/src/com/intellij/codeInsight/completion/CompletionProgressIndicator.java:208-209`），
+   它给每个组造一个 `SeparatorLookupElement`（`.../GroupCompletionLookupArrangerImpl.java:51-56`），
+   渲染成带标题的分隔条 `platform/lang-impl/src/com/intellij/codeInsight/lookup/impl/LookupCellRenderer.kt:357-376`；
+   而实现 `GroupedCompletionContributor` 的只有 postfix 模板与命令补全两类 —— Java/LSP 的普通补全一个都不沾。
+   ⇒ 本仓的落点就是"排序本来就是分组的全部"：`src/completionGroup.ts` 与其单测**已删**（它们编码的是一个不存在的 UI），
+   弹层不加分隔行。
+2. **`filterText` 契约**（✅ 已落地，`81d2c95`）：LSP 的 `filterText` 是"过滤键、不一定要显示"；
+   `src/lspCompletion.ts` 有它时把 `label` 设成它、可见文本交给 `displayLabel`（高亮范围由
+   `src/completionPresentation.ts` 的 `completionMatch` 搬回去）。
+3. **跳转侧配套：Choose Declaration**（✅ 已落地，见下）。上游**不是** `GotoDeclarationAction.java`
+   （本源码树里那个类已经改名/搬位置），多目标弹层在
+   `platform/lang-impl/src/com/intellij/codeInsight/navigation/actions/GotoDeclarationOnlyHandler2.kt:60-76`：
+   一个目标 → 直接跳；多个 → `buildTargetPopup` 开弹层，标题取
+   `platform/lang-api/resources/messages/CodeInsightBundle.properties:146`（"Choose Declaration"）。
+   一行三段照 `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationMainRenderer.kt:30-44`
+   （图标 + 主文本 + 灰的 `" ("+containerText+")"`，前后缀来自
+   `platform/core-api/src/com/intellij/navigation/LocationPresentation.java:26-27`）与右对齐的位置列
+   （`.../TargetPresentationRenderer.kt:70-83`）；过滤用的名字 = `presentableText + " " + containerText`
+   （`.../targetPopup.kt:62-81`）。**本仓落点**：`src/chooseTarget.ts`（行模型/过滤/移动，纯函数）、
+   `src/components/ChooseTargetPopup.vue`（弹层）、`CodeEditor.vue` 的 `revealDefinition` 两个分支；
+   三段取自 LSP 的真数据（声明点标识符 / 所在文件 / `行:列`），退化链写在该文件头。
+   这一条与 `declaration → definition` 退化链是同一个落点（`native/lsp_navigation.cpp`，它本来就回**全部**目标，
+   多出来的位置此前被前端丢掉）。
 
 **别破坏的两条既有契约**：`completionItem/resolve`（选中某项时才拉文档/自动导入，见
 `native/lsp_host_bootstrap.cpp` 的 `resolveSupport.properties` 声明）与上面的六段整形。
