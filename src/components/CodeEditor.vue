@@ -14,7 +14,7 @@ import { foldingRanges, lspFoldService } from '../editorFolding'
 import { createFoldingController } from '../editorFoldingController'
 import { defaultCodeFoldingSettings, FOLDING_SETTING_ROWS, kindOfSetting } from '../editorFoldingSettings'
 import { clipboardCommands, copyCutChannel } from '../editorClipboard'
-import { gutterIconsExtension, syncGutterIcons, type GutterIcon } from '../editorGutterIcons'
+import { gutterContextMenu, gutterIconsExtension, syncGutterIcons, type GutterIcon } from '../editorGutterIcons'
 import { blameAnnotationsExtension, syncBlameAnnotations } from '../editorBlameAnnotations'
 import type { BlameAnnotation } from '../blameAnnotations'
 import { debugLineExtension, syncDebugLine } from '../editorDebugLine'
@@ -47,7 +47,7 @@ const props = defineProps<{ content: string; path: string; language?: string; th
 const emit = defineEmits<{
   columnMode: [active: boolean]
   selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
-  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number; column?: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string] }>()
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number; column?: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string]; gutterMenu: [at: { line: number; x: number; y: number }] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
@@ -1073,6 +1073,8 @@ onMounted(() => {
         copyCutChannel(text => void copyToClipboard(text)),
         // 行内 gutter 图标层（IDEA `GutterIconRenderer`：错误/警告/断点/书签，可点击）
         gutterIconsExtension({ onClick: icon => emit('gutterIcon', icon), onMiddleClick: icon => emit('gutterIconMiddle', icon) }),
+        // 装订线上的右键（`EditorGutterPopupMenu`）：交给宿主弹菜单，见 src/gutterMenu.ts。
+        gutterContextMenu((line, x, y) => emit('gutterMenu', { line, x, y })),
         // EditorGutterLayout.createNewUILayout places annotation columns before line numbers.
         Prec.high(blameAnnotationsExtension()),
         documentLinks.extension,

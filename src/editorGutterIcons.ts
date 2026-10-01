@@ -4,8 +4,7 @@
 // 「拿到 renderer 列表 → 画出来 → 把点击交回动作」。图标的种类/外形/聚合规则在 src/gutterIcons.ts（纯逻辑、有单测）。
 //
 // 本模块只被 `CodeEditor.vue` 使用，**不被测试直接 import**（要 DOM），所以这里可以自由 import 同仓模块。
-import { GutterMarker, gutter } from '@codemirror/view'
-import type { EditorView } from '@codemirror/view'
+import { EditorView, GutterMarker, ViewPlugin, gutter } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import { RangeSet, StateEffect, StateField } from '@codemirror/state'
 import { gutterIconAppearance, type GutterIcon } from './gutterIcons'
@@ -73,6 +72,38 @@ export interface GutterIconsOptions {
 }
 
 /** gutter 扩展：按 `line` 分组渲染，点击用 dataset 里的行号/种类找回图标。 */
+/**
+ * 装订线上的右键 → 「装订线菜单」（IDEA 的 `EditorGutterPopupMenu`）。
+ *
+ * **挂在哪很关键**：`EditorView.domEventHandlers` 只注册在**内容**元素（`.cm-content`）上，
+ * 而装订线是它的兄弟节点 —— 挂在那里一条都收不到（真机实测：右键装订线没反应）。
+ * 所以这里用一个 `ViewPlugin` 把监听器挂在 `view.dom` 里的 `.cm-gutters` 上（捕获阶段），
+ * 装订线的每一列（行号、图标、追溯注解）都覆盖到。
+ *
+ * 收到事件后：把光标移到那一行（上游在装订线上右键会把光标带过去，后续动作如助记键以这行为准）、
+ * 交回宿主、并**吞掉这次事件** —— 不吞会继续冒泡到编辑器容器的右键处理，弹出的是编辑器菜单
+ * （上游也是两个菜单）。
+ */
+export function gutterContextMenu(onMenu: (line0: number, x: number, y: number) => void): Extension {
+  return ViewPlugin.fromClass(class {
+    private readonly element: HTMLElement | null
+    private readonly handler = (event: MouseEvent) => {
+      const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY })
+      if (pos === null) return
+      const line = this.view.state.doc.lineAt(pos)
+      this.view.dispatch({ selection: { anchor: line.from }, scrollIntoView: false })
+      onMenu(line.number - 1, event.clientX, event.clientY)
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    constructor(private readonly view: EditorView) {
+      this.element = view.dom.querySelector<HTMLElement>('.cm-gutters')
+      this.element?.addEventListener('contextmenu', this.handler, true)
+    }
+    destroy() { this.element?.removeEventListener('contextmenu', this.handler, true) }
+  })
+}
+
 export function gutterIconsExtension(options: GutterIconsOptions): Extension {
   const widget = gutter({
     class: 'cm-gutter-icons',

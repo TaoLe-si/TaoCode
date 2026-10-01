@@ -70,8 +70,7 @@ import { copyToClipboard } from './clipboard'
 import { createPasteActions } from './pasteActions'
 import { createGutterIconHost } from './gutterIconHost'
 import { createHelpActions } from './helpActions'
-import AboutDialog from './components/AboutDialog.vue'
-import SpecialPathsDialog from './components/SpecialPathsDialog.vue'
+import AboutDialog from './components/AboutDialog.vue'; import SpecialPathsDialog from './components/SpecialPathsDialog.vue'
 import { createHelpMenuRows, type HelpMenuContext } from './menus/helpMenu'
 import { createMacros } from './macroHost'
 import { recordTypingStep } from './macroHost'
@@ -84,6 +83,7 @@ import { createEditorSplits } from './editorSplits'
 import { createToolLayouts } from './toolLayouts'
 import { createNotifications } from './notifications'
 import { createEditorSideViews } from './editorSideViews'
+import { createStickyLines } from './stickyLines'; import { createGutterMenu } from './gutterMenu'
 import type { Place } from './lspNavigation'
 import { describeCopiedReference, primaryMoniker, referenceText, type MonikerResult } from './moniker'
 import type { WorkspaceDiagnosticsResult } from './bridge'
@@ -526,17 +526,8 @@ const invalidRenameName = computed(() => {
   return ''
 })
 const outline = ref<LspDocumentSymbol[]>([])
-// 粘性作用域行（IDEA `editor.stickyLines`）：从 documentSymbol（扁平列表）里找出**包含当前光标行**的符号，
-// 按 startLine 升序取最内层 N 条 —— 外层作用域在上，最内层贴近编辑区顶边。
-const stickyLines = computed(() => {
-  const limit = editorSettings.value.stickyLinesLimit
-  const line = active.value?.line ?? 1
-  if (!editorSettings.value.showStickyLines || limit <= 0 || !active.value) return []
-  return outline.value
-    .filter(symbol => symbol.startLine < line && line <= symbol.endLine)
-    .sort((left, right) => left.startLine - right.startLine)
-    .slice(-limit)
-})
+// 粘性作用域行（IDEA `editor.stickyLines`）的规则在 src/stickyLines.ts（纯函数，可单测）。
+const { stickyLines } = createStickyLines({ editorSettings, outline, currentLine: () => active.value?.line })
 const codeActions = ref<LspCodeAction[]>([])
 const actionPrompt = ref<{ path: string } | null>(null)
 // `SymbolEntry` / `CLASS_KINDS` 随符号搜索一起搬到 src/lspNavigation.ts（工作区符号索引的
@@ -1316,8 +1307,17 @@ const {
 const {
   bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic, confirmRewrite, dontAskRewrite, removeMnemonic,
   useProjectSettings, bookmarkSave,
-  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, addFileBookmarkToAnotherList, gutterBookmarks, toggleBookmarkAt, editBookmarkAt, descriptionPrompt, saveBookmarkDescription,
+  jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel, addFileBookmarkToAnotherList, clearMnemonicAt, gutterBookmarks, toggleBookmarkAt, editBookmarkAt, descriptionPrompt, saveBookmarkDescription,
 } = createBookmarkActions({ notify, isDesktop, menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation, editorContent: path => editorFor(path)?.text(), selection: path => editorFor(path)?.selectionText(), openPath: path => void openFile(path), updateBookmarkViewSettings: patch => { void saveBookmarksView(patch) } })
+
+// 装订线右键菜单（IDEA `EditorGutterPopupMenu`）：行模型与文案在 src/gutterMenu.ts，这里只注入动作。
+const { gutterMenu, gutterMenuRows, openGutterMenu, closeGutterMenu } = createGutterMenu({
+  editorSettings, bookmarks, bookmarkAt: (path, line) => bookmarks.value.find(entry => entry.path === path && entry.line === line),
+  toggleBookmark: (path, line) => toggleBookmarkAt(path, line), editDescription: (path, line) => editBookmarkAt(path, line),
+  chooseMnemonic: () => openMnemonicPrompt(), clearMnemonic: (path, line) => clearMnemonicAt(path, line),
+  patchSettings: patch => void saveSettingsPatch(patch), openSettings: page => void openSettings(page as never),
+  toggleFocusMode: () => toggleDistractionFreeMode(), focusModeOn: () => distractionFreeMode.value })
+
 
 // IDEA's Surround With popup: the same fuzzy finder the action list uses, over the
 // language-neutral templates in surround.ts.
@@ -2157,7 +2157,7 @@ onBeforeUnmount(() => {
                 <div v-for="symbol in stickyLines" :key="symbol.startLine" class="sticky-line">{{ symbol.name }}</div>
               </div>
               <BinaryViewer v-if="binaryView && pane === focusedPane" :path="binaryView.path" :data="binaryView.data" @close="closeBinary" @reveal="revealBinary" />
-              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :plugin-templates="pluginList" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @link="openDocumentLink" @code-lens="runCodeLensCommand" @template-chooser="openTemplateChooser" @paste="onEditorPaste" @typing="recordTypingStep" :gutter-icons="gutterIcons" :blame="blameOf(tab.path)" @gutter-icon="onGutterIcon" @gutter-icon-middle="onGutterIconMiddleClick" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" @contextmenu.prevent="openEditorPopup($event)" />
+              <CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" :key="`${workspaceEpoch}:${bufferEpoch}:${pane}:${tab.path}`" :ref="element => setEditorRef(pane, tab.path, element)" :content="tab.content" :path="tab.path" :language="associationOf(tab.path)" :theme="theme" :settings="editorSettings" :templates="projectSettings.templates" :plugin-templates="pluginList" :active="groups[pane].activePath === tab.path && focusedPane === pane" :lsp-enabled="lspOn(tab)" :reveal="pane === focusedPane && tab.path === reveal?.path ? reveal : null" :breakpoints="dapBreakpoints.get(tab.path) ?? []" :debug-line="currentDebugLine(tab.path)" :bookmarks="bookmarkLines[tab.path] ?? []" @change="onEditorChange(tab)" @cursor="(line, column) => { tab.line = line; tab.column = column }" @save="save(tab)" @error="notify($event, true)" @reveal="revealLocation" @semantic="onSemantic" @evaluate="requestEvaluate" @surround="openSurround" @breakpoint="line => toggleBreakpointAt(tab.path, line)" @link="openDocumentLink" @code-lens="runCodeLensCommand" @template-chooser="openTemplateChooser" @paste="onEditorPaste" @typing="recordTypingStep" :gutter-icons="gutterIcons" :blame="blameOf(tab.path)" @gutter-icon="onGutterIcon" @gutter-icon-middle="onGutterIconMiddleClick" @gutter-menu="at => openGutterMenu({ path: tab.path, line: at.line, x: at.x, y: at.y })" @column-mode="active => { if (pane === focusedPane && tab.path === activePath) columnMode = active }" @selection="info => { if (pane === focusedPane && tab.path === activePath) selectionInfo = info }" @cursors="count => { if (pane === focusedPane && tab.path === activePath) cursorCount = count }" @contextmenu.prevent="openEditorPopup($event)" />
               <MarkdownPreview v-if="markdownPreviewOn && markdownCapable && focusedPane === pane && groupActive(pane)?.path === activePath" class="md-split" :path="activePath" :content="markdownSource" @open="path => void openFile(path, false, { preview: true })" @error="message => notify(message, true)" />
               <!-- IDEA's empty editor: a right-aligned shortcut list plus the
                    drag-and-drop hint (verified on screen: 随处搜索 Shift Shift /
@@ -2412,7 +2412,7 @@ onBeforeUnmount(() => {
     </Teleport>
     <!-- Alt+F1 的目标列表（IDEA SelectInAction.java:62-72 `popup.showInBestPositionFor`）。 -->
     <Teleport v-if="anchorMenu" to="body"><ToolWindowAnchorMenu :anchor="anchorMenuAnchor" :x="anchorMenu.x" :y="anchorMenu.y" @move="moveAnchorTo($event)" @close="closeAnchorMenu()" /></Teleport>
-    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport> <Teleport v-if="targetChooser" to="body"><TargetChooserPopup :title="targetChooser.title" :rows="targetChooser.rows" :x="targetChooser.x" :y="targetChooser.y" :pinnable="targetChooser.pinnable" @pick="pickTarget($event)" @close="closeTargetChooser()" @pin="pinTargetChooser()" /></Teleport> <BookmarkListDialog v-if="listDialog" :ask-before-deleting="projectSettings.bookmarksView?.askBeforeDeletingLists ?? true" /><Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
+    <Teleport v-if="selectInOpen" to="body"><SelectInPopup :rows="selectInRows" :x="selectInAt?.x" :y="selectInAt?.y" @pick="pickSelectIn($event)" @close="closeSelectIn()" /></Teleport> <Teleport v-if="targetChooser" to="body"><TargetChooserPopup :title="targetChooser.title" :rows="targetChooser.rows" :x="targetChooser.x" :y="targetChooser.y" :pinnable="targetChooser.pinnable" @pick="pickTarget($event)" @close="closeTargetChooser()" @pin="pinTargetChooser()" /></Teleport> <EditorPopupMenu v-if="gutterMenu" :label="'装订线'" :rows="gutterMenuRows" :x="gutterMenu.x" :y="gutterMenu.y" @pick="(row) => { row.run?.(); closeGutterMenu() }" @close="closeGutterMenu()" /><BookmarkListDialog v-if="listDialog" :ask-before-deleting="projectSettings.bookmarksView?.askBeforeDeletingLists ?? true" /><Teleport v-if="editorPopup" to="body"><EditorPopupMenu :rows="editorPopupRows" :x="editorPopup.x" :y="editorPopup.y" @pick="pickEditorPopup($event)" @close="closeEditorPopup()" /></Teleport>
     <!-- Signature help popup: IDEA's parameter info panel with overload navigation -->
     <Teleport v-if="signaturePopup" to="body">
       <div class="signature-popup" :style="{ left: `${Math.min(signaturePopup.x, viewport.width - 500)}px`, top: `${Math.min(signaturePopup.y + 4, viewport.height - 200)}px` }" @pointerdown.stop @keydown.up.prevent="navigateSignature(-1)" @keydown.down.prevent="navigateSignature(1)" @keydown.esc.prevent="closeSignaturePopup()" tabindex="-1">

@@ -9,7 +9,7 @@
 // 因为再开一层浮层就得自己处理层叠与焦点）。
 import { onMounted, onUnmounted, ref } from 'vue'
 
-const props = defineProps<{ rows: any[]; x: number; y: number }>()
+const props = defineProps<{ rows: any[]; x: number; y: number; label?: string }>()
 const emit = defineEmits<{ (event: 'pick', row: any): void; (event: 'close'): void }>()
 
 const open = ref<string | null>(null)
@@ -28,7 +28,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tree-menu editor-popup-menu" role="menu" aria-label="编辑器" :style="{ left: `${x}px`, top: `${y}px` }" @contextmenu.prevent @pointerdown.stop>
+  <div class="tree-menu editor-popup-menu" role="menu" :aria-label="label ?? '编辑器'" :style="{ left: `${x}px`, top: `${y}px` }" @contextmenu.prevent @pointerdown.stop>
     <template v-for="row in rows" :key="row.id">
       <div v-if="row.rule" class="menu-rule" />
       <template v-else-if="row.children">
@@ -40,8 +40,8 @@ onUnmounted(() => {
           </button>
         </template>
       </template>
-      <button v-else type="button" role="menuitem" :disabled="!rowEnabled(row)" @click="emit('pick', row)">
-        {{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
+      <button v-else type="button" role="menuitem" :class="{ 'is-checked': row.checked?.() }" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @click="emit('pick', row)">
+        <span v-if="row.checked" class="menu-check" aria-hidden="true">{{ row.checked() ? '✓' : '' }}</span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
       </button>
     </template>
   </div>

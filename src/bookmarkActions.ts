@@ -206,6 +206,19 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     if (entry === undefined) return
     descriptionPrompt.value = { path, line, current: bookmarkDescription(entry) ?? '' }
   }
+  /**
+   * 「删除助记键」（上游 `DeleteBookmarkTypeAction`）：把这条书签的助记键去掉、书签留着。
+   * 与 `removeMnemonic` 的区别：那个作用于助记键选择器当前打开的那一条，这里作用于指定的 (path, line)。
+   */
+  function clearMnemonicAt(path: string, line: number) {
+    const entry = bookmarks.value.find(item => item.path === path && item.line === line)
+    if (entry === undefined || entry.mnemonic === undefined) return
+    bookmarks.value = bookmarks.value.map(item =>
+      item.path === path && item.line === line ? withoutMnemonic(item) : item)
+    persistBookmarks()
+    deps.notify(`已删除 ${path}:${line} 的助记键`)
+  }
+
   /** 保存描述（空串 = 清掉自定义描述，回到"用行原文"。上游 `setDescription` 写的是自定义描述）。 */
   function saveBookmarkDescription(value: string) {
     const at = descriptionPrompt.value
@@ -290,7 +303,7 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   return {
     bookmarks, sortedAll, bookmarkLines, mnemonicPrompt, rewriteAsk, placeAt, toggleBookmark, openMnemonicPrompt, pickMnemonic,
     confirmRewrite, dontAskRewrite, removeMnemonic, bookmarkMnemonicLabel, bookmarkFile, fileBookmarkLabel,
-    addFileBookmarkToAnotherList, goTo,
+    addFileBookmarkToAnotherList, clearMnemonicAt, goTo,
     gutterBookmarks, toggleBookmarkAt, descriptionPrompt, editBookmarkAt, saveBookmarkDescription,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,

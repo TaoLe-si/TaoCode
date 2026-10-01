@@ -1188,6 +1188,36 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **遗留**：gutter 弹出菜单（要有 gutter 上的一整套弹出菜单才能挂，单独立项）；上游
   `popup@BookmarkContextMenu` 里的助记键两条（本仓助记键在书签面板与编辑器动作里，未挂到 gutter）。
 
+- [x] **已补（第八十一批）** 装订线右键菜单（IDEA `EditorGutterPopupMenu`）—— 书签那三条的最后落点。
+  上游组逐条核过（`platform/platform-impl/resources/idea/PlatformActions.xml:1047-1054`）：使用软换行 /
+  配置软换行… / ⟨分隔⟩ / 专注模式 / ⟨分隔⟩ / 外观 ▸（`:1041-1046` = 显示行号 / 缩进参考线 / 粘性行）；
+  两处 add-to-group：`ShowGutterIconsSettings`（`LangActions.xml:163-165`，`anchor="last"`）与书签那组
+  `popup@BookmarkContextMenu`（`platform/bookmarks/resources/intellij.platform.bookmarks.xml:211-219`，
+  **在软换行之前**：AddAnotherBookmark / EditBookmark / ToggleBookmark / DeleteMnemonicFromBookmark /
+  ToggleBookmarkWithMnemonic —— 其中 AddAnotherBookmark 对**行**书签隐藏，装订线上点的就是行书签）。
+  本仓落点：`src/gutterMenu.ts`（行模型 + 状态，可单测）、`editorGutterIcons.gutterContextMenu`（把
+  `.cm-gutters` 上的右键转给宿主，并把光标带到那一行）、`App.vue` 用现成的 `EditorPopupMenu` 渲染。
+  行的可用性照状态：没有书签时只有「添加书签」，有书签才出现编辑描述 / 切换助记键…，有助记键才有
+  「删除助记键」；外观三项显示勾选态。
+  **踩到并记下的坑**：`EditorView.domEventHandlers` 只注册在**内容**元素（`.cm-content`）上，装订线是它的
+  兄弟节点 —— 第一版挂在那里，真机右键装订线**一点反应都没有**；改成 `ViewPlugin` 把监听器挂到
+  `view.dom.querySelector('.cm-gutters')`（捕获阶段）才通。判据里留了反向守卫（不许再用 domEventHandlers）。
+  **顺带**：粘性行的规则从 `App.vue` 抽成 `src/stickyLines.ts`（App 贴着行数上限；抽完还留出本批要用的行），
+  连带补了它的单测。
+  **真机取证**：右键第 3 行装订线 → 菜单 `添加书签 / 使用软换行 Ctrl Shift A / 配置软换行… / 进入专注模式 /
+  外观 / 装订线图标设置…`；点「添加书签」后重开 → `删除书签 / 编辑描述 / 切换助记键…` + 分隔 +
+  `使用软换行…`（截图 `screenshots/gutter-menu.png`，行首出现书签图标）。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1377/1377**（1372 → 1377：新增 `tests/gutter-menu.test.mjs` 5 条） |
+| `npx vite build --emptyOutDir false` | exit 0，11.60s |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / 0 warning |
+| `ctest --output-on-failure -j4` | **36/36** |
+| 真 exe 取证 | 见上（菜单两态 + 截图） |
+
+
 | 检查 | 结果 |
 |---|---|
 | `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
