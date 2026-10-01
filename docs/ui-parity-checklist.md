@@ -1294,6 +1294,15 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   `java.project.getSettings` 报 "Index 0 out of bounds"（要参数）。hover 照旧能解析库类型 + javadoc，
   而**库类型的定义位置**这一条不再等 JDT：本批起由客户端从 `*-sources.jar` 自己取（见第七十九批 ③，
   `native/library_sources.cpp` + `file.librarySource`）。
+  **2026-10-02 又一条（试过并回退）**：JDT 1.44 有 `java.project.changeImportedProjects`（形参是
+  `[新增, 移除, 变更]` 三个 URI 清单，在 `JDTDelegateCommandHandler` 字节码里逐字核对过），
+  客户端在 `java.project.import` 之后调它把不属于本工程的工程放进"移除"档 —— **不成立，已回退**：
+  真机实测移除后 `AE2-refs/AE2-1.16.5-src` 等仍在推编译诊断，`java.project.getAll` 也照旧列着它们。
+  根因（同一次探针挖出来的）：那些同级目录里**存在 `.project` 文件**
+  （`AE2VMAddon-1.10.2/.project` 的时间戳正是 JDT 自己导入时写的；`AE2-refs/.../.project` 更早），
+  `EclipseProjectImporter` 每次启动都会把这些目录当 Eclipse 工程导入，排除模式对它不生效。
+  ⇒ 要真正收敛导入范围，得**只把链接的子工程声明成 workspace folder**（而不是工作区根）——
+  这是一处设计改动（`Session` 的 root 与 LSP 的 workspace folders 要分开），下一步再做。
   探针注意：手写 `projects.json` 时**只加 `enabled`/`lastProject`**，跑完按备份还原、停掉 exe 与 java；
   调试端口别用 9410（那台机器上被别的服务占了，`/json/list` 会回一段 JWT 而不是 CDP 列表）。
   **探针配置不许写进 `build/`（2026-10-01 第七十八批的教训）**：为了验弹层，我把 `build/TaoCode.lsp.json`

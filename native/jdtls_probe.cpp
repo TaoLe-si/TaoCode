@@ -23,7 +23,9 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <functional>
 #include <mutex>
+#include <thread>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -105,6 +107,34 @@ int main() {
                   << " count=" << last_diagnostics.size() << '\n';
         cv.notify_all();
     });
+    // 让 bootstrap 走"有宿主线程"那条路（main.cpp 的形态）：否则它只补发 didOpen、**不**发
+    // `java.project.import` 那两步，工程收敛（prune_foreign_projects）就测不到。
+    // 必须用**另一条线程**执行（main.cpp 是那条语言服务线程）：就地跑会在读线程上做阻塞写，
+    // 服务器导入期间不读 stdin ⇒ 写堵住读线程 ⇒ 整个会话假死（第一版就是这么卡住的）。
+    std::mutex job_mutex;
+    std::condition_variable job_cv;
+    std::vector<std::function<void()>> jobs;
+    bool jobs_done = false;
+    std::thread job_worker([&] {
+        for (;;) {
+            std::function<void()> job;
+            {
+                std::unique_lock lock(job_mutex);
+                job_cv.wait(lock, [&] { return jobs_done || !jobs.empty(); });
+                if (jobs.empty()) return;
+                job = std::move(jobs.front());
+                jobs.erase(jobs.begin());
+            }
+            job();
+        }
+    });
+    session.set_owner_post([&](std::function<void()> job) {
+        {
+            std::lock_guard lock(job_mutex);
+            jobs.push_back(std::move(job));
+        }
+        job_cv.notify_one();
+    });
     const auto root = fs::path(root_dir);
     session.set_root(root);
 
@@ -184,6 +214,12 @@ int main() {
         std::cout << "PROBE hover=" << request("hover").substr(0, 400) << '\n';
     }
 
+    {
+        std::lock_guard lock(job_mutex);
+        jobs_done = true;
+    }
+    job_cv.notify_all();
+    if (job_worker.joinable()) job_worker.join();
     session.shutdown_all();
     return diagnostics_count > 0 ? 0 : 1;
 }
