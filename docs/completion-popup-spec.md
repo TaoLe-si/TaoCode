@@ -45,6 +45,12 @@
    **移植口径**：做一个纯函数 `sortCompletions()`，按 IDEA 默认链的档位依次比较
    （相关性 → 大小写不敏感 → 长度 → 字母序；相关性档在 LSP 侧取 `sortText`，缺省退回 label），
    在交给 CodeMirror 之前排好 —— 这样 CodeMirror 只负责画，不参与排序语义。每一档一个纯函数、各有单测。
+1b. **分组**（读源码后的结论）：分组不是另一个开关，而是**排序链的副产物** ——
+   `BaseCompletionLookupArranger.groupItemsBySorter:95` 把候选按 `MultiMap<CompletionSorterImpl, LookupElement>`
+   归堆（`:121`/`:402` 在堆与堆之间插分隔符，`:537-542` 也是"先分组再组内按相关性排"）。
+   ⇒ 移植口径：`groupCompletions()` 复用同一条排序链 —— **用它第一档能区分开的键当组键**
+   （LSP 侧就是 `sortText` 的"分组前缀"，没有 `sortText` 时整表一组），组内再用 `sortCompletions()`
+   的其余档排；弹层在组之间画分隔符（`completionUi.ts` 已有逐行渲染，加一行 separator 即可）。
 2. **`filterText` 契约**：LSP 的 `filterText` 是"过滤键、不一定要显示"；`src/completionPresentation.ts`
    的 `completionMatch` 已经处理了"别名不等于可见文本时不高亮无关字符"（注释里写着），
    但**过滤本身**仍要确认走的是 `filterText` 而不是 `label`（`src/lspCompletion.ts` 一线）。
