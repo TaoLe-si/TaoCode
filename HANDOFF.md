@@ -1,16 +1,25 @@
-# 交接说明（更新于 2026-09-27 晚）
+# 交接说明（顶部状态更新于 2026-10-02 凌晨；下面「本轮」段是 2026-09-27 的历史存档）
 
 ## 当前状态：全绿
 
 | 检查 | 结果 | 备注 |
 |---|---|---|
-| `npx vue-tsc --noEmit` | 0 错 | 2026-09-27 晚复跑 |
-| `npm test` | **769/769** | ⚠️ 旧版写 535，**已过期**；本轮新增 2 条回归用例 |
+| `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
+| `npm test` | **1371/1371** | 2026-10-02；最近一批新增 `quick-definition` 9 条、`choose-target` 11 条 |
 | `npx vite build` | ✓（需**手动**跑，再 `build-native-locked.bat` 同步到 `build/ui`） | 构建脚本只做 `cmake --build` + 拷 `dist`，**不含 vite** |
-| `scripts\build-native-locked.bat` | RC 0 / **0 warning** | native 侧无改动时只跑 `[1/1]` 拷贝步 |
-| `ctest` | **27/27** | ⚠️ 旧版写 17，**已过期**；`ctest.exe` 不在 PATH，要用 CMake 全路径 |
+| `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
+| `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
+| 真机取证 | **同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定 `%LOCALAPPDATA%\TaoCode`）；探针的 `build/TaoCode.lsp.json` 用完立刻删，别留在用户正在用的 exe 旁边 | 姿势与脚本见 `scripts/_cdp_step.py` |
 
-## 本轮（2026-09-27 晚）做了什么
+**最近这一段（第七十七～七十九批）的落点**：补全弹层的收尾（排序/分组更正/`filterText`/「选择声明」）、
+`Ctrl+Alt+B`「选择实现」弹层、**「快速定义」Ctrl+Shift+I + 库类型源码**（`native/library_sources.cpp` +
+桥接 `file.librarySource`）、以及两个真缺陷 —— ① `TaoCode.lsp.json` 因悬垂临时对象**从未被读到**；
+② `lspReady` 写在非响应式对象上导致符号菜单/随处搜索长期不亮（Vue 代理陷阱）。
+另外把 JDT 的 workspace folder 收窄成**已链接的子工程**（`ServerConfig::workspace_folders`），
+AE2 那种布局上工程数 6 → 1、诊断 2100+ 批 → 5 批。逐条明细在 `docs/ui-parity-checklist.md` 的
+第七十七～七十九批。
+
+## 本轮（2026-09-27 晚）做了什么 —— 历史存档
 
 1. **修掉一次没做完的改名**：`javaRun.*` 的产物目录从 `outputPath: string` 改成 `outputPaths: string[]`
    （`runtimeOutputPaths` 的设计，产物目录要跟着构建工具走），但只改了 `javaRun.ts` / `runTargets.ts`，
