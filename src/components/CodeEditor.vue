@@ -1178,17 +1178,17 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
 </script>
 
 <template>
+  <!-- 根必须唯一：App.vue 用 `v-show` 控制每个文件的显隐，多根 ⇒ 全部渲染 ⇒ 挤成一排假分屏。判据见 tests/sfc-single-root.test.mjs。 -->
   <!-- `rightMargin` 走 class 而不是 theme：CSS 在 src/style.css 里，免得这个文件（贴着机检上限）再涨。 -->
   <div ref="container" class="code-editor" :class="{ 'editor-right-margin': props.settings.rightMargin }">
-    <!-- IDEA anchors the hint above the caret line (HintManagerImpl.java:611 ABOVE); the
-         coordinates are taken when it appears because any scroll dismisses it. -->
+    <!-- IDEA anchors the hint above the caret line (HintManagerImpl.java:611 ABOVE); coordinates are taken when it appears because any scroll dismisses it. -->
     <div v-if="errorHint" class="editor-hint" role="status" :style="errorHint.style">{{ errorHint.text }}</div>
+    <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉；源位置不影响落点，所以能挪进根 div。 -->
+    <Teleport v-if="chooseTarget" to="body">
+      <TargetChooserPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" title="选择声明" @pick="pickChooseTarget" @close="chooseTarget = null" />
+    </Teleport>
+    <Teleport v-if="quickDefinition" to="body">
+      <QuickDefinitionPopup :source="quickDefinition.source" :x="quickDefinition.x" :y="quickDefinition.y" @close="quickDefinition = null" />
+    </Teleport>
   </div>
-  <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉。 -->
-  <Teleport v-if="chooseTarget" to="body">
-    <TargetChooserPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" title="选择声明" @pick="pickChooseTarget" @close="chooseTarget = null" />
-  </Teleport>
-  <Teleport v-if="quickDefinition" to="body">
-    <QuickDefinitionPopup :source="quickDefinition.source" :x="quickDefinition.x" :y="quickDefinition.y" @close="quickDefinition = null" />
-  </Teleport>
 </template>

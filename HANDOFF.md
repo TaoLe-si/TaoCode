@@ -5,7 +5,7 @@
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1460/1460** | 2026-10-02；最近一批新增 `tests/ui-motion.test.mjs` 11 条（前一批：`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
+| `npm test` | **1464/1464** | 2026-10-02；最近一批新增 `tests/sfc-single-root.test.mjs` 4 条（上一批：`ui-motion` 11 条（再前：`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
 | `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
@@ -127,6 +127,44 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
 **顺带删死 CSS**：`src/style.css` 里 13 条 `.blame-*` 全仓无消费者（annotate 没实现，`docs/inventory/vcs_scan.md` 记的是"未出现"），
 整块删除，1343 → 1329 行。因为是删除不是新增，模块大小门禁的帽子没被顶高。
 `App.vue` 这批净增 5 行，靠合并 import / 压注释 / 收空行**补回 5 行**，保持在 2737 上限不变。
+
+**第八十六批（CodeEditor 多根 ⇒ v-show 静默失效 ⇒ 一进项目满屏假分屏）**：
+用户在 AE2 项目上截图报错「一进项目怎么是多个窗口分屏」—— 7 个标签页，编辑区被横向切成 7 条，
+每条一套行号槽和滚动条。
+
+根因是**组件多根**。`CodeEditor.vue` 的模板原本是 `<div class="code-editor">` 加两个
+`<Teleport to="body">` 并列（3 个根），而 `App.vue` 用 `v-show` 控制每个打开文件的显隐。
+**Vue 3 的 `v-show` 要求单根**：多根时组件返回 fragment，指令挂到 fragment 的**锚点注释**上，
+`display: none` 写不出去 —— 编译期一声不吭，开发模式也只有一条 warning，淹没在几千行 console 里。
+运行时就是每个文件都渲染出来，而 `.editor-stage` 是 `display: flex`，于是横向平分宽度。
+同一个组件还带 `:ref`，多根时 `ref` 拿到的也是锚点而不是元素 —— 同一根因的第二个受害面。
+
+修法：两个 `<Teleport>` 挪进根 div。它们都 `to="body"`，**源位置不影响落点**，零代价。
+门禁 `tests/sfc-single-root.test.mjs`（4 条）只查**实际被 `v-show` / `ref` 用到**的组件：
+多根本身在 Vue 3 里合法，全仓还有 8 个多根组件（`GradleSettingsPage` 11 个根等）但都安全，
+一刀切要求单根会误伤它们。第 4 条先确认「样本非空」再谈判据 —— 照第八十五批的教训，
+那批的 `:hover` 门禁因为收集器恒空而永远绿。
+**反向验证**：把 Teleport 挪回去还原缺陷后 4 条全红，指名道姓
+`CodeEditor（3 个根）用在 App.vue 的 <CodeEditor>`；恢复后 4/4 绿。
+另扫两类漏网写法：多根组件有没有被 `ref` 引用（没有）、`<component :is>` 动态组件
+（5 处全是 lucide 图标，单根 SVG，也没带 v-show）。
+
+真机（`TAOCODE_DEBUG_PORT=9332`，AE2 项目）用**双击**逐个开 6 个文件（单击只选中不开文件）复刻场景：
+改后 `.code-editor` 实例 6 个（按设计全部挂载以保住光标/折叠/滚动状态），**可见 1 个**、
+宽度 702 = `.editor-stage` 全部宽度 702，底部横向滚动条只剩单段。
+顺带确认**真分屏没被修坏**：右键标签点「向右拆分（Split Right）」后量到 2 个 `.editor-pane`
+（538px / 160px）、`visibleEditors: 2`、两个编辑器宽度 `[538, 159]`，各带独立标签条 —— 正是 IDEA 的样子；
+再「取消所有拆分」回到 1 个。
+
+`CodeEditor.vue` 净增 1 行（根因注释），上限 1195 只许降不许升，所以从模板收回 2 行
+（`IDEA anchors the hint` 两行合一、`rightMargin` 与根因注释各压 1 行），最终 `wc -l` 1194，
+**帽子没有被顶高**。
+
+本批判决书：`docs/ui-parity-checklist.md` 第八十六批。
+
+**一条方法教训**：截图报的「多个窗口分屏」，从代码上完全看不出问题 —— 模板里 `v-show` 写得
+完全正确，`.editor-stage` 的 flex 也完全正确。**是 Vue 的多根 fragment 语义让两者同时失效**。
+所以「看着没道理」的现象要先怀疑框架语义，而不是先改 CSS。
 
 本批判决书：`docs/ui-parity-checklist.md` 第八十五批。
 真机（`TAOCODE_DEBUG_PORT=9331`）量到的判决点：正常态 `tc-spin / 1.1s / linear / infinite / opacity 1`，

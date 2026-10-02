@@ -1754,5 +1754,95 @@ scoped CSS 改写的是**选择器**、不是 `animation-name` 的查表，所�
 
 `App.vue` 这批净增 5 行（motion 配置 + `motion-v` 接令牌 + `RunningDot` 引入），通过把三处 import 合并到既有行、压掉一段注释、收掉一个空行**补回 5 行**，行数保持在门禁帽子 2737 上限不变 —— 帽子只许降不许升，所以新逻辑一律另起 `src/xxx.ts`。
 
+## 第八十六批验证记录（CodeEditor 多根 ⇒ v-show 静默失效 ⇒ 一进项目满屏假分屏）
+
+用户在 AE2 项目上截图报错：**一进项目怎么是多个窗口分屏**。截图里 7 个标签页，
+编辑区被横向切成 7 条，每条都有自己的行号槽和滚动条，底部横向滚动条上还有好几段滑块。
+
+### 一、根因：组件多根，`v-show` 打不出去
+
+`src/components/CodeEditor.vue` 的模板原本是 **3 个并列根**：
+
+```vue
+<div ref="container" class="code-editor" ...>  <!-- 错误提示层 -->
+</div>
+<Teleport v-if="chooseTarget" to="body"> ... </Teleport>
+<Teleport v-if="quickDefinition" to="body"> ... </Teleport>
+```
+
+而 `App.vue` 的编辑器区是这么写的：
+
+```vue
+<CodeEditor v-for="tab in groups[pane].tabs" v-show="groups[pane].activePath === tab.path" ... />
+```
+
+**Vue 3 的 `v-show` 要求组件是单根的。** 多根时组件返回的是 fragment，`v-show` 挂到 fragment 的
+**锚点注释节点**上，`display: none` 根本写不出去 —— 编译期一声不吭，**开发模式也只有一条
+`Runtime directive used on component with non-element root node` 的 warning**，在几千行 console 里
+根本不会有人注意到。运行时表现就是：每个打开的文件都渲染出来，而 `.editor-stage` 是
+`display: flex`，于是它们横向平分宽度 —— 7 个标签 = 7 个「分屏窗口」。
+
+同一个组件还带着 `:ref="element => setEditorRef(pane, tab.path, element)"`。多根组件的 `ref` 拿到的
+也是 fragment 锚点而不是元素，这是同一根因的第二个受害面。
+
+**修法**：把两个 `<Teleport>` 挪进 `.code-editor` 根 div 内部。它们都是 `to="body"`，
+**源位置不影响落点**，所以挪进去零代价，根节点也变成唯一的元素。
+
+### 二、门禁 `tests/sfc-single-root.test.mjs`（4 条）
+
+多根本身在 Vue 3 里**合法**（不用 `v-show` / `ref` 就没事），全仓一刀切要求单根会误伤 8 个
+本来就没事的组件（`App` 2 / `BuildToolsSettingsPage` 3 / `CodeFoldingSettingsPage` 4 /
+`GeneralRegistryToggles` 4 / `GradleSettingsPage` 11 / `ProjectViewSortSettings` 2 /
+`ToolWindowGear` 2 / `ToolWindowView` 10 / `VcsLogFilters` 2）。所以门禁只查**实际被用到的那两个指令**：
+
+| # | 判据 |
+|---|---|
+| 1 | 被 `v-show` 用到的组件都是单根 |
+| 2 | 被 `ref` 用到的组件都是单根 |
+| 3 | `CodeEditor` 显式是单根（点名判决，出错信息直接说清后果） |
+| 4 | 收集器本身是活的：多根清单非空，且没有一个被 `v-show` / `ref` 碰到 |
+
+第 4 条是照着第八十五批的教训加的 —— 那批的 `:hover` 门禁因为收集器恒空而**永远绿**。
+这里先确认「样本非空、断言没在空跑」，再谈判据本身。
+
+**反向验证**：把两个 `<Teleport>` 挪回与根 div 并列（即还原缺陷）后跑，4 条全红，
+第 1 条指名道姓：`CodeEditor（3 个根）用在 App.vue 的 <CodeEditor>`；恢复后 4/4 绿。
+
+顺带扫过两类可能漏网的写法：多根组件有没有被 `ref` 引用（没有），以及
+`<component :is>` 动态组件（5 处全是 lucide 图标，单根 SVG，也没带 `v-show`）。
+
+### 三、真机取证（`TAOCODE_DEBUG_PORT=9332`，AE2 项目）
+
+用**双击**（不是单击 —— 单击只选中，`<button class="tree-entry">` 的单击不开文件）逐个打开
+`buildBoth.bat` / `CHANGELOG.md` / `bump-version.ps1` / `.gitignore` / `.classpath` / `.project`，
+复刻出用户的 6 标签场景：
+
+| | 改前（用户截图） | 改后 |
+|---|---|---|
+| 标签数 | 7 | 6 |
+| `.code-editor` 实例数 | 7（全部可见） | 6（全部挂载，只有 1 个可见） |
+| 可见编辑器宽度 | 各占 ~1/7 | `702`，等于 `.editor-stage` 全部宽度 `702` |
+| 底部横向滚动条 | 多段滑块 | 单段 |
+
+**顺带确认真正的分屏没被修坏**：从标签右键菜单点「向右拆分（Split Right）」，
+量到 `2` 个 `.editor-pane`（`primary-pane` 538px / `secondary-pane pane-focused` 160px）、
+`visibleEditors: 2`、两个编辑器宽度 `[538, 159]` —— 各自独立的标签条和编辑器，正是 IDEA 的样子。
+再点「取消所有拆分」回到 `visibleEditors: 1` / `702`。
+
+注意「实例数 6 但可见 1」是**设计如此**，不是漏修：`v-show` 的本意就是保住每个文件编辑器的
+状态（光标、折叠、滚动位置、LSP 装饰），切标签时不重新挂载。`App.vue` 顶部那句注释
+「CodeEditor is v-show'd per open file」就是这个意思。
+
+### 四、判据
+
+全绿：`npm test` **1464/1464**（新增 `sfc-single-root` 4 条）、`vue-tsc --noEmit` 0 错、
+`vite build` 成功、native **36/36 ctest**、`build\TaoCode.exe` 重建成功。
+真机取证完已 `taskkill //IM TaoCode.exe //F`，`tasklist | grep -i taocode` 为空，
+`build/_p86*.js` 与截图全部删除。
+
+`CodeEditor.vue` 这次净增 1 行（根因注释），上限是 1195 且只许降不许升，所以从模板里收回 2 行：
+`IDEA anchors the hint...` 那两行合成一行（引用和理由都保留），根因注释压到 1 行，
+最终 `wc -l` 1194 / 门禁计 1195，**帽子没有被顶高**。
+
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
 - `tests/editor-folding.test.mjs` 的「套在外面的语法块按最内层往外排（enclosingAreas）」：2026-10-01 在整批跑到高负载时偶发失败一次，单跑与随后重跑整批都通过 —— 与本批改动无关（那批改的是补全），见到重跑即可。
