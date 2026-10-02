@@ -69,7 +69,7 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     "rightMargin",
     // showStickyLines / stickyLinesLimit：EditorSettingsExternalizable.java:93 `SHOW_STICKY_LINES = true`、
     //   :94 `STICKY_LINES_LIMIT = 5`；属性名 :1231 "showStickyLines" / :1233 "stickyLinesLimit"，
-    //   读出口 :509 areStickyLinesShown() 与 :547 stickyLineLimit()。设置行见
+    //   读出口 :508 areStickyLinesShown() 与 :546 getStickyLineLimit()。设置行见
     //   StickyLinesConfigurable.kt:7-20。本仓的层数默认取 3 而非上游的 5（见 docs/settings-parity.md:53），
     //   那是已登记的偏离，不在这一批改。
     "showStickyLines", "stickyLinesLimit",

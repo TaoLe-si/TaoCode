@@ -1497,7 +1497,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 ### 一、图标族：单一真源 `src/uiIcons.ts`
 
 上游依据（图标本身不是 IDEA 独有的，取上游的**尺寸档**而不是字形）：
-`platform/editor-ui-api/src/com/intellij/openapi/editor/EditorSettingsExternalizable.java:87-94`（`ARE_GUTTER_ICONS_SHOWN` 一族是编辑器侧图标）、
+`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:83-94`（`IS_RIGHT_MARGIN_SHOWN` 一族是编辑器侧显示开关）、
 `platform/platform-impl/src/com/intellij/ide/ui/AppearanceOptionsTopHitProvider.kt:33-42`（外观页那一组开关的排版度量）、
 `platform/platform-impl/src/com/intellij/ui/UiUtil.kt`（`JBUI.scale` 与 22/26px 那一档控件高度）。
 
