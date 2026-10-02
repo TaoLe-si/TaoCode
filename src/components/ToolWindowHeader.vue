@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import { headerAction } from '../toolWindowHeader'
+import { usePopupAnchor } from '../popupAnchor'
 import { iconSize } from '../uiIcons'
 
 // IDEA's ToolWindowHeader (platform/platform-impl/src/com/intellij/toolWindow/ToolWindowHeader.kt):
@@ -37,6 +38,16 @@ const emit = defineEmits<{
   pickExtra: [row: any]
 }>()
 const root = ref<HTMLElement>()
+const gear = ref<HTMLElement>()
+const menu = ref<HTMLElement>()
+// 这张菜单有 12 行（实测 372px 高、246px 宽），比标题栏本身还宽。原先靠 `.tool-menu` 的
+// `right: 8px` 贴右边，于是窄侧栏下它的左边缘落到 x = -14.5px，图标与"×"整列被裁掉
+// （用户 2026-10-03 截图）。改成 Teleport 到 body + 按实测尺寸夹取视口，口径同
+// `src/popupAnchor.ts`；锚点就是齿轮按钮自己（上游 `AbstractPopup` 也是按请求组件定位）。
+const { style: menuAt, refresh: refreshMenuAt } = usePopupAnchor(menu, () => {
+  const box = gear.value?.getBoundingClientRect()
+  return box ? { x: box.left, y: box.bottom } : null
+})
 
 // ToolWindowHeader.kt:212-256 — the gesture table lives in `src/toolWindowHeader.ts` so it can be
 // tested without a DOM; `shift+left` is a close click too (UIUtil.java:1843-1846), which is the only
@@ -67,7 +78,10 @@ function onAuxClick(event: MouseEvent) {
 // group, so a right click anywhere on the header opens the same menu the gear does.
 function toggleMenu() {
   if (headerAction({ kind: 'contextmenu' }) !== 'menu') return
-  emit('menu', !props.menuOpen)
+  const open = !props.menuOpen
+  emit('menu', open)
+  // 展开后量一次真实高度再决定落在按钮下方还是上方（`placeMenu` 的翻转顺序）。
+  if (open) void nextTick(refreshMenuAt)
 }
 function closeMenu() {
   if (props.menuOpen) emit('menu', false)
@@ -90,11 +104,14 @@ function focusHeader() {
   >
     <span class="tool-strip-title">{{ title }}</span>
     <button
-      type="button" class="icon-button" :aria-expanded="menuOpen" :aria-label="`${title} 选项`"
+      ref="gear" type="button" class="icon-button" :aria-expanded="menuOpen" :aria-label="`${title} 选项`"
       title="移动、最大化或隐藏此工具窗口" @click.stop="toggleMenu"
     ><MoreVertical :size="iconSize.control" />
     </button>
-    <div v-if="menuOpen" class="tool-menu" role="menu" :aria-label="`${title} 选项`" @click.stop @contextmenu.prevent>
+    <!-- Teleport 到 body：侧栏/右 dock 面板是 `overflow: hidden`，长在里面的菜单会被裁掉
+         （与 ToolWindowGear.vue / ToolWindowAnchorMenu.vue 同一个理由）。 -->
+    <Teleport to="body">
+    <div v-if="menuOpen" ref="menu" class="tool-menu tool-header-menu" role="menu" :style="menuAt" :aria-label="`${title} 选项`" @click.stop @contextmenu.prevent @keydown.esc.stop.prevent="closeMenu">
       <!-- The item order follows IDEA's ActiveToolwindowGroup (PlatformActions.xml:652-664):
            HideActiveWindow / HideSideWindows / HideBottomWindows / HideAllWindows … MaximizeToolWindow
            … DockToolWindow. TaoCode shows one window per side and its visibility flags are per side,
@@ -130,10 +147,15 @@ function focusHeader() {
         <ToolWindowGearRows :rows="extraRows" @pick="pickExtra" />
       </template>
     </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .tool-strip-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-strip-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* `.tool-menu` 默认是 `position: absolute; top: 100%; right: …` —— 那是给"长在面板里"的形态用的。
+   这张已经 Teleport 到 body，位置由 `usePopupAnchor` 按实测尺寸给，必须换成 fixed 并清掉
+   `right`，否则内联的 left 与样式表的 right 会把菜单同时拉向两边。 */
+.tool-header-menu { position: fixed; top: auto; right: auto; }
 </style>

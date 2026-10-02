@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { getProjectTreeState } from '../projectTreeState'
-import { ChevronRight, Folder, FileCode2, FileText, Package, NotebookPen } from 'lucide-vue-next'
+import { Archive, ChevronRight, Coffee, FileCode2, FileText, Folder, Package, NotebookPen } from 'lucide-vue-next'
+import { isSyntheticLibraryRow, SDK_ENTRY_PATH } from '../externalLibraries'
 import type { Entry } from '../bridge'
-import { createProjectTreeModel, type SyntheticNode } from '../projectTreeModel'
+import { createProjectTreeModel, type ProjectTreeRow, type SyntheticNode } from '../projectTreeModel'
 import type { ProjectTreeSortSettings } from '../projectTreeSort'
 import { treeClickOpensFile, treeOpenUsesPreviewTab, type ProjectViewBehavior } from '../projectViewBehavior'
 import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
@@ -47,6 +48,21 @@ const guideStyle = () => ({
 function bindRow(path: string, element: unknown) {
   if (element instanceof HTMLElement) model.elements.set(path, element)
   else model.elements.delete(path)
+}
+/**
+ * 行尾小字 = tooltip 那一行（IDEA 里是 TooltipProvider 挂在节点上的 `getTooltipText`）。
+ * 合成行要另算：外部库下面的 jar 与 SDK 内部 path 带着 NUL 前缀和 `lib:` 记号，直接显示
+ * 是一串控制字符加一条项目里根本不存在的路径。改成给人看的两种说法：
+ *   · jar → 相对项目的真实路径（照着能找回磁盘上那个文件）
+ *   · SDK → 版本 + 家目录（看得出用的是哪个 JDK）
+ * 上游对应 `NamedLibraryElementNode` 的 presentableName（`:84-90`）与
+ * `ExternalLibrariesNode.java:117-120` 给 SDK 行补的 TooltipProvider。
+ */
+function rowTitle(row: ProjectTreeRow): string {
+  if (row.synthetic) return row.synthetic.label
+  if (row.entry.path === SDK_ENTRY_PATH) return `JDK · ${row.entry.name}`
+  if (isSyntheticLibraryRow(row.entry.path)) return row.entry.path.slice(row.entry.path.indexOf(':') + 1)
+  return row.entry.path === '' ? props.workspaceKey ?? row.entry.name : row.entry.path
 }
 function activate(entry: Entry, event: MouseEvent) {
   model.select(entry.path, event)
@@ -155,7 +171,7 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           class="tree-entry" role="treeitem"
           :class="{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }"
           :style="[indentStyle(row.level), indentGuides ? guideStyle() : undefined, { '--tree-file-color': !row.synthetic && !row.entry.path.startsWith('\u0000') ? fileColor?.(row.entry.path, row.entry.kind === 'directory') ?? undefined : undefined }]"
-          :title="row.synthetic?.label ?? (row.entry.path === '' ? workspaceKey ?? row.entry.name : row.entry.path)"
+          :title="rowTitle(row)"
           :aria-level="row.level + 1"
           :aria-expanded="row.entry.kind === 'directory' ? expanded.has(row.entry.path) : undefined"
           :aria-selected="selection.has(row.entry.path)"
@@ -175,6 +191,12 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           <span v-else class="tree-spacer" />
           <Package v-if="row.synthetic?.icon === 'libraries'" :size="iconSize.toolbar" class="synthetic-icon" />
           <NotebookPen v-else-if="row.synthetic?.icon === 'scratches'" :size="iconSize.toolbar" class="synthetic-icon" />
+          <!-- 外部库的两类叶子各有各的图标，和普通文件图标分开 —— 上游 SDK 行是
+               `SdkType.getIcon()`（`NamedLibraryElementNode.java:52-59`），jar 根是它库自己的
+               文件图标（`:43-50`），都不跟工作区里的 .java/.ts 共用。Coffee 取 IDEA 里 JDK
+               那个"咖啡杯"的字面意思；Archive 表示打包产物，与容器那个 Package 区分开。 -->
+          <Coffee v-else-if="row.entry.path === SDK_ENTRY_PATH" :size="iconSize.toolbar" class="synthetic-icon" />
+          <Archive v-else-if="isSyntheticLibraryRow(row.entry.path)" :size="iconSize.toolbar" class="synthetic-icon" />
           <Folder v-else-if="row.entry.kind === 'directory'" :size="iconSize.toolbar" class="folder-icon" />
           <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(row.entry.name)" :size="iconSize.toolbar" class="code-icon" />
           <FileText v-else :size="iconSize.toolbar" class="muted" />

@@ -1,11 +1,11 @@
-# 交接说明（顶部状态更新于 2026-10-02 凌晨；下面「本轮」段是 2026-09-27 的历史存档）
+# 交接说明（顶部状态更新于 2026-10-03；下面「本轮」段是 2026-09-27 的历史存档）
 
 ## 当前状态：全绿
 
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1464/1464** | 2026-10-02；最近一批新增 `tests/sfc-single-root.test.mjs` 4 条（上一批：`ui-motion` 11 条（再前：`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
+| `npm test` | **1482/1482** | 2026-10-03；最近一批新增 `ui-text-selection` 5 条、`popup-anchor` 5 条、`external-libraries` 7 条（上一批：`sfc-single-root` 4 条、`ui-motion` 11 条、`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
 | `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
@@ -159,6 +159,46 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
 `CodeEditor.vue` 净增 1 行（根因注释），上限 1195 只许降不许升，所以从模板收回 2 行
 （`IDEA anchors the hint` 两行合一、`rightMargin` 与根因注释各压 1 行），最终 `wc -l` 1194，
 **帽子没有被顶高**。
+
+**第八十七批（外部库真内容 + 亮面顶栏改亮 + 弹层按实测尺寸落位 + 文字不可框选）**：
+桃在 2026-10-03 同一轮报了四件事 —— 「外部库现在是空的」「亮面模式下的上边栏颜色不合理」
+（并说「配色不需要严格对齐上游，按你的设计来」）、「左边超出范围，看不到了」、
+「所有文字部分都像浏览器一样能被框选出来」，外加带截图的「下边栏会把右键菜单遮挡住」。
+
+1. **外部库**：之前把 glob 字符串本身（`lib/**/*.jar`）当叶子显示。新模块 `src/externalLibraries.ts`
+   用 `buildHost.matchLibraryGlob` 真的展开成磁盘上的 jar，另起一行放项目 SDK。
+   上游依据是 `ExternalLibrariesNode.java`（容器无条件存在 `:49`、SDK 与库并列 `:109-116`、
+   **无名库摊平** `:101-104`）。`FileTree.vue` 补了 SDK 的 `Coffee` 图标与 `rowTitle()`
+   （合成行 tooltip 不再暴露 NUL 前缀）。
+   **顺手修掉一处错的引用**：老注释归给 `ProjectFileNodeImpl`，那个类在 `projectModel-impl` 里不存在。
+   ⚠ **AE2 的 glob 与磁盘对不上**（配 `lib/**`、实际是 `libs`），所以真机里只有 JDK 那一行。
+   没有偷偷放宽默认 glob（那会倒进 1383 个 `.gradle-custom/caches` 下的 jar）。
+
+2. **亮面顶栏**：`--m-night*` 改名 `--m-chrome*`，浅色主题下由深改亮。查证发现上游本来就有一份
+   `expUI_light_with_light_header.theme.json`（浅色主题 + 浅色顶栏，角色集与深顶栏那份逐项对应），
+   不是我们自创的。新增 `--m-chrome-run-fg`：`runningIconColor` 两份主题差很远（前景色 vs 白），
+   复用 `--header-fg` 会让亮面变成「深字压绿底」。暗面一行没改。
+   代价：`tests/popup-foreground.test.mjs` 里那条「拿浅色顶栏前景当浮层正文」的反例要重写 ——
+   亮面顶栏字已是深墨，误取不再致盲；改去盯**顶栏字自己过 AA** + 「浮层正文不许引用顶栏令牌」。
+
+3. **弹层**：四张菜单原来各写各的"猜高度"魔数（项目树 `-330`、标签页 `-260`、编辑器一行不夹、
+   工具窗口条靠 `right: 8px`）。新模块 `src/popupAnchor.ts` 的 `usePopupAnchor` 量一次真实尺寸，
+   交给 `placeMenu` 按 `AbstractPopup` 的顺序落位。`ToolWindowHeader.vue` 顺带 Teleport 到 body。
+   `App.vue` 用新组件 `AnchoredMenu.vue` 迁移项目树/标签页两张 —— **import 追加在第 26 行那条后面**，
+   开闭标签 1:1 换，所以 App.vue 仍是 2736（上限 2737）。
+   副作用：`ToolWindowHeader` 的菜单在 SSR 里进了 `context.teleports`，`tests/tool-window-header-move.test.mjs`
+   的辅助函数要把那份拼回来。
+
+4. **文字可选性**：`src/style.css` 顶部 `user-select: none` 全局 + 可复制面白名单（编辑器/输出/diff）。
+   **终端刻意不在白名单里**：xterm.js 用隐藏 textarea 驱动自己的选区，浏览器原生选区会打架
+   （同一个字选两遍）。`-webkit-user-select` 两个属性都要写，否则 WebView2 里整条失效。
+
+**两条工具性教训**：① **写源码时别让工具把 ` ` 当真 NUL 字节落进文件** —— 它会让 `git diff`
+与编辑器把文件当二进制，`.file`/Edit 还会报「Unsupported or binary text encoding」。`externalLibraries.ts`
+最后改用 `String.fromCharCode(0)` 并在注释里解释原因，`tests/external-libraries.test.mjs` 里有一条
+钉住「这个文件里不能有控制字符」。② **`.mjs` 测试不是 TS**：`.find(...)!` 这种非空断言会直接语法错。
+
+本批判决书：`docs/ui-parity-checklist.md` 第八十七批。
 
 本批判决书：`docs/ui-parity-checklist.md` 第八十六批。
 

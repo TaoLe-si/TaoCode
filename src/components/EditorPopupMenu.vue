@@ -7,15 +7,26 @@
 // 交互与项目树右键菜单同一套（容器 class 也复用 `.tree-menu`）：点外面 / Esc 关闭，
 // `popup="true"` 的组是一个可展开的子段（上游是嵌套 popup，本仓浮层里用行内展开，
 // 因为再开一层浮层就得自己处理层叠与焦点）。
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Check } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
+import { usePopupAnchor } from '../popupAnchor'
 
 const props = defineProps<{ rows: any[]; x: number; y: number; label?: string }>()
 const emit = defineEmits<{ (event: 'pick', row: any): void; (event: 'close'): void }>()
 
+const box = ref<HTMLElement>()
+// 位置交给 `usePopupAnchor` 按**实测尺寸**夹取（口径见 src/popupAnchor.ts）：这张菜单的行数不定，
+// 展开子段后还会再长一截。原来 `left/top` 直接照抄坐标，于是 11 行的菜单（实测 419px 高）
+// 从光标一路铺到窗口下沿以外，最后几行落进下边栏底下 —— 看着像"下边栏把菜单挡住了"。
+const { style: anchor, refresh } = usePopupAnchor(box, () => ({ x: props.x, y: props.y }))
+
 const open = ref<string | null>(null)
-function toggle(id: string) { open.value = open.value === id ? null : id }
+function toggle(id: string) {
+  open.value = open.value === id ? null : id
+  // 子段是就地展开的（上游是嵌套 popup），高度变了要重新夹一次。
+  if (open.value) void nextTick(refresh)
+}
 function rowEnabled(row: any): boolean { return row.enabled ? row.enabled() : true }
 function onPointerDown(event: PointerEvent) { if (!(event.target as Element).closest('.editor-popup-menu')) emit('close') }
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape') emit('close') }
@@ -30,7 +41,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tree-menu editor-popup-menu" role="menu" :aria-label="label ?? '编辑器'" :style="{ left: `${x}px`, top: `${y}px` }" @contextmenu.prevent @pointerdown.stop>
+  <div ref="box" class="tree-menu editor-popup-menu" role="menu" :aria-label="label ?? '编辑器'" :style="anchor" @contextmenu.prevent @pointerdown.stop>
     <template v-for="row in rows" :key="row.id">
       <div v-if="row.rule" class="menu-rule" />
       <template v-else-if="row.children">

@@ -1846,3 +1846,167 @@ scoped CSS 改写的是**选择器**、不是 `animation-name` 的查表，所�
 
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
 - `tests/editor-folding.test.mjs` 的「套在外面的语法块按最内层往外排（enclosingAreas）」：2026-10-01 在整批跑到高负载时偶发失败一次，单跑与随后重跑整批都通过 —— 与本批改动无关（那批改的是补全），见到重跑即可。
+
+## 第八十七批验证记录（外部库显示真实 jar + JDK；亮面顶栏改亮；弹层按实测尺寸落位；文字不可框选）
+
+四条都是桃在 2026-10-03 同一轮里报的：①「外部库现在是空的，什么都没有」；
+②「亮面模式下的上边栏颜色不合理」+「配色不需要严格对齐上游，按你的设计来」；
+③「左边超出范围，看不到了」（工具窗口条的 ⋮ 菜单被侧栏裁掉）；
+④「所有文字部分都像浏览器一样能被框选出来，禁止这种操作」；
+外加一条带截图的「下边栏会把右键菜单遮挡住」（编辑器右键菜单压住输出面板）。
+
+### 一、外部库：之前是一行 glob 字符串，现在是真 jar + 一行 JDK
+
+上游 `platform/lang-impl/.../nodes/ExternalLibrariesNode.java` 的结构先抄清楚：
+
+| 事实 | 出处 |
+|---|---|
+| 容器无条件挂上，与模块同级 | `ProjectViewProjectNode.java:89` |
+| 没有空状态占位（无库项目下就是光秃秃一行） | `ProjectViewPaneTest.kt:47-56` |
+| 子节点四类：库 / SDK / 插件 SyntheticLibrary / EP 节点 | `ExternalLibrariesNode.java:80-141` |
+| SDK 与库**并列**，都用 `NamedLibraryElementNode`，只是 SDK 换 `SdkType.getIcon()` | `NamedLibraryElementNode.java:32,52-59` |
+| **库无名时根直接摊平挂容器下**，不建中间节点 | `ExternalLibrariesNode.java:101-104` |
+| 子节点不再排序，按字母序 | `ProjectViewNode.java:287` |
+
+之前那版把 glob 字符串本身（`lib/**/*.jar`）当叶子显示 —— 既不是 jar 也不是库名，点不开也读不懂。
+本仓没有「库」这个实体（只有 glob），所以按上游「无名库摊平」那条走：**命中的 jar 各自是叶子**，
+**项目 SDK 另起一行**。新模块 `src/externalLibraries.ts`（81 行）：
+
+- `matchedJars(files, patterns)` —— 用 `buildHost.matchLibraryGlob`（IDEA `PathMatcher` 语义：`/**` 跨目录、
+  单星不跨、大小写不敏感）真的展开成磁盘上存在的 jar，按路径排序；
+- `externalLibraryEntries(...)` —— **SDK 在前、jar 在后**。SDK 标签取 `name` → `JDK <version>` →
+  家目录末段（口径同 `OrderEntry.getPresentableName`）；
+- 全部报 `kind:'file'`：这些 path 带「不落到磁盘」前缀，报成目录会让 `FileTree` 去展开一个查不到的东西。
+
+`FileTree.vue` 补了两处：SDK 行一个 `Coffee` 图标、jar 行一个 `Archive`（与容器的 `Package` 区分开，
+对应上游 SDK 用 `SdkType.getIcon()` 而非文件图标），以及 `rowTitle()` —— 合成行的 tooltip 不再暴露
+内部的 NUL 前缀与 `lib:` 记号，SDK 行显示 `JDK · 1.8`、jar 行显示可找回的相对路径。
+
+**顺手修掉一处错的引用**：老注释把容器节点归给 `ProjectFileNodeImpl`。`platform/projectModel-impl`
+里**没有这个类**，真实的是 lang-impl 的 `ExternalLibrariesNode`，已改。
+
+#### 一个数据事实，不是缺陷
+
+AE2 项目的 `referencedLibraries` 配的是 `lib/**/*.jar`，而磁盘上的目录叫 `libs` —— **glob 命中 0 个文件**。
+真机上确认过：该项目 `workspace.files` 返回 27042 个文件、其中 1383 个 jar，但全在
+`.gradle-custom/caches/...` 下，没有一个在 `lib/`。所以真机截图里「外部库」下只有 JDK 那一行。
+这是配置写错了，**没有**偷偷把默认 glob 放宽成 `**/*.jar` —— 那会把 1383 个缓存 jar 全倒进树里。
+要出 jar 行，把设置里的 glob 改成 `libs/**/*.jar` 即可。
+
+### 二、亮面顶栏：`--m-night*` → `--m-chrome*`，浅色主题下由深改亮
+
+原先浅色主题的顶栏是**夜面**（`--m-night: #16202f`），跟的是上游 `expUI_light.theme.json`
+（`MainToolbar.background = Gray2 #27282E`）。桃的判断是「不合理」，并明确说配色不必死扣上游。
+
+查证结果支持改：上游本来就带一份**浅色主题 + 浅色顶栏**的官方主题
+`platform/platform-resources/src/themes/expUI/expUI_light_with_light_header.theme.json`
+（`parentTheme = ExperimentalLight`），**角色集与深顶栏那份逐项对应**，只换值：
+
+| 角色 | 深顶栏（`expUI_light`） | 浅顶栏（`expUI_light_with_light_header`） |
+|---|---|---|
+| `MainToolbar.background` | Gray2 `#27282E` | Gray13 |
+| `MainToolbar.foreground` | Gray12 | Gray1 `#000000` |
+| `MainToolbar.inactiveBackground` | Gray3 | Gray12 |
+| `MainToolbar.separatorColor` | Gray4 | Gray11 |
+| `RunWidget.runningBackground` | `#599E5E` | Green5 |
+| `RunWidget.runningIconColor` | Gray12（= 前景） | **Gray14（= 白压绿）** |
+| `RunWidget.hover/pressedBackground` | `#00000019` / `#00000028` | `#00000022` / `#00000028` |
+
+于是亮面这一档改跟**浅顶栏**那份，暗面照旧。新值（`src/tokens.css`）：
+
+```
+--m-chrome: #f8fafc            --m-chrome-fg: #2f3a4e       --m-chrome-run: #2e8a5a
+--m-chrome-inactive: #f1f4f8   --m-chrome-hover: #e3e9f2    --m-chrome-run-fg: #ffffff
+                               --m-chrome-line: #d6dde8
+```
+
+`--m-chrome-run-fg` 是**新增的一个键**：`runningIconColor` 两份主题差得很远（前景色 vs 白），
+复用 `--header-fg` 会让亮面变成「深字压绿底」。
+
+这一族从 `--m-night*` 改名 `--m-chrome*` —— 亮面下它不再「夜」，叫 night 就是个谎；
+`tests/header-color-tokens.test.mjs` 里有一条 `doesNotMatch(/--m-night/)` 盯着残留。
+角色→键的对应一条没动（两行同色、失焦换色、RunWidget 自带一对叠色），只是**值**换了哪一份。
+
+状态色也顺势改口径：`FilenameToolbarWidgetAction.kt:67-70` 那个 `isDarkToolbar()` 分支本来就是
+为深顶栏准备的，亮顶栏主题下退回同名 key —— 亮面 `--m-chrome-accent/success/error` 直接引用
+`--m-accent/success/error`，暗面仍是「另一面」。
+
+`tests/popup-foreground.test.mjs` 里那条「拿浅色顶栏前景当浮层正文」的反例按新事实重写：
+亮面顶栏字已是深墨，误取顶栏字色不再致盲；这条防线改去盯**顶栏字自己也要过 AA**
+（文件名弹层那几行就印在浮层那类浅底上），并加了一条「浮层正文不许引用顶栏那组令牌」的结构断言。
+
+### 三、弹层：四张菜单从「猜高度」改成「量尺寸」
+
+之前四张弹层各写各的夹取，全是按行数猜的魔数：项目树 `viewport.height - 330`、标签页 `- 260`、
+编辑器**一行都不夹**、工具窗口条靠 `.tool-menu { right: 8px }` 贴右边。两次实测都翻了车：
+
+| 现场 | 实测 | 后果 |
+|---|---|---|
+| 工具窗口条 ⋮ 菜单 | 372 高 × 246 宽，锚在 239px 宽的侧栏里靠 right 贴边 | 左边缘 `x = -14.5`，图标与「×」整列被裁 |
+| 编辑器右键菜单 | 11 行、419 高，光标 `y=300`、视口高 603 | 底边落到 719，**超窗 116px**，最后两行压在输出面板底下 |
+
+新模块 `src/popupAnchor.ts`（57 行）`usePopupAnchor(el, anchor)`：先按锚点落位，`nextTick` 后
+量一次 `getBoundingClientRect()`，把真实尺寸交给 `placeMenu` 按 `AbstractPopup` 的顺序
+（原位 → 翻到另一侧 → 夹进视口）重算。四张都接上了：
+
+- `EditorPopupMenu.vue` —— 接 `usePopupAnchor`，子段展开后 `nextTick` 再夹一次（高度变了）；
+- `ToolWindowHeader.vue` —— **Teleport 到 body**（侧栏 `overflow:hidden` 会裁）+
+  锚在齿轮按钮自己；配套本地规则 `.tool-header-menu { position: fixed; top: auto; right: auto; }`
+  压掉 `.tool-menu` 的 `absolute + right`（否则内联 `left` 与样式表 `right` 会把菜单同时拉向两边），
+  并把 `@keydown.esc` 直接挂到 Teleport 出去的节点上（Esc 不会再冒泡回标题栏）；
+- `src/components/AnchoredMenu.vue`（新）—— `.tree-menu` 外壳，`App.vue` 的项目树与标签页两张菜单改用它。
+
+`App.vue` 一行没多（2736，上限卡死 2737）：`AnchoredMenu` 的 import 是**追加在第 26 行那条 import 后面**的，
+开闭标签 1:1 换掉。
+
+`tests/tool-window-header-move.test.mjs` 的 SSR 辅助函数跟着改：Teleport 的内容在 SSR 里进
+`context.teleports`，主输出只留一对注释标记，所以行文本断言要把那份拼回来（断言的仍是渲染出来的那张菜单）。
+
+### 四、文字可选性：`user-select: none` 全局 + 可复制面白名单
+
+桃：「所有文字部分都像浏览器一样能被框选出来，禁止这种操作」。
+
+方向照上游：IDEA 是 Swing，`BasicTextUI.update()` 只给真正可编辑/可复制的文本组件装 Highlighter，
+控件上的字（菜单项、树行、标签页、标题栏、状态栏）**不可选中**。所以 `src/style.css` 顶部：
+整体关掉，再把白名单逐个开回来 —— 白名单的依据是上游「哪里有『复制』动作」：
+编辑器（`EditorActionUtil` 的 copy）、控制台/输出、diff。
+
+**终端刻意不在白名单里**：xterm.js 用自己的隐藏 textarea（`_helper_textarea`，走 `textarea` 那档）
+驱动选区，浏览器原生选区会和它打架 —— 同一个字被选两遍、复制出来是双份。上游 TerminalWidget 同理
+只暴露它自己的复制动作。（第一版误把 `.xterm` 加进白名单，已改。）
+
+`-webkit-user-select` 与 `user-select` 两个属性都写了 —— WebView2 只认带前缀的那个时会整条失效。
+
+### 五、真机取证（`TAOCODE_DEBUG_PORT=9333`，AE2 项目，浅色主题）
+
+| 判据 | 实测 |
+|---|---|
+| 顶栏亮面（`data-theme=light`） | `bg rgb(241,244,248)` / `fg rgb(47,58,78)` / `border rgb(214,221,232)`（截图同步） |
+| 失焦换色 | `data-window-active=inactive` ⇒ 取 `--m-chrome-inactive`，符合预期 |
+| 外部库容器 | 展开后一行 `1.8`，`title="JDK · 1.8"`，图标 `lucide-coffee-icon`，缩进 27px |
+| jar 行 | 0 行 —— glob 写的是 `lib/**` 而磁盘上是 `libs`（见上文「数据事实」） |
+| 编辑器右键菜单 @ `y=300` | `11 行 / 187×419`，落位 `y=4`、`bottom=423`、视口高 603 ⇒ `insideViewport: true`（改前底边 719） |
+| 工具窗口条 ⋮ 菜单 | `12 行 / 246×372`，`x=203`，`insideViewport: true`；`parentElement = BODY`（Teleport 生效），右缘 449 比侧栏右缘 240 溢出 209px —— 与 IDEA 一致，菜单就该盖出去，但**不能被裁**（改前左缘 `-14.5`） |
+| 三击选文字 · 顶栏文件名 / 顶栏控件 / 树行 / 标签页 / 状态栏 | 五处 `getSelection().toString()` 全为空，锚点不动 |
+| 三击选文字 · 编辑器 / 输出面板 | 分别选中整行，原生选区非空 ⇒ 白名单仍然有效 |
+| 各面 `user-select` 计算值 | `.topbar`/`.tree-entry`/`.statusbar`/`.menu-button`/`.xterm` 全 `none`；`.cm-content`/`.output-lines` 全 `text` |
+
+### 六、判据
+
+全绿：`npm test` **1482/1482**（新增 `ui-text-selection` 5 条、`popup-anchor` 5 条、`external-libraries` 7 条）、
+`vue-tsc --noEmit` 0 错、`vite build` 成功、native **36/36 ctest**、`build\TaoCode.exe` 重建成功。
+真机取证完已 `taskkill //IM TaoCode.exe //F`，`tasklist | grep -i taocode` 为空，
+`build/_p87*` 探针与截图全部删除。
+
+四个尺寸门禁都没被顶高：`App.vue` 2736 / 上限 2737、`FileTree.vue` 217（原 195，上限 900，未注册）。
+新增逻辑全部落在新模块（`popupAnchor.ts` 57 行、`externalLibraries.ts` 81 行、`AnchoredMenu.vue`）。
+
+### 七、留给下一批
+
+- **AE2 的 `referencedLibraries` glob 与磁盘目录对不上**（`lib/**` vs `libs`）。等桃确认该改哪一边
+  —— 改设置里的 glob，还是让 `matchedJars` 在 glob 命中 0 个时提示一句。都还没做。
+- `usePopupAnchor` 在**组件已挂载、锚点 prop 变化**时不会重新落位（只在 setup 与展开子段后刷新）。
+  现在四个用法都被 `v-if` 包着，每次开闭都是新挂载，所以碰不到；谁要是把它挪到常驻组件里，
+  得先补一个 `watch`。`tests/popup-anchor.test.mjs` 里那条「量完再夹」已经写了 `nextTick` 与
+  0 尺寸跳过两个前提，但没钉这个。
+- 状态栏组件菜单那条 `openStatusMenu` 仍在自己算位置（`src/notifications.ts`），没接 `usePopupAnchor`。

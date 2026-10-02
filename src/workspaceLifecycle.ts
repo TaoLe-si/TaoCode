@@ -13,6 +13,8 @@ import { importFoldState } from './editorFoldingState'
 import { cloneProgress, defaultGeneralSettings, defaultProjectSettings, isDesktop, normalizeEditorSettings, request,
          type AppState, type Entry, type PluginList, type ProjectForm, type ProjectSettings, type Workspace } from './bridge'
 import type { SyntheticNode } from './components/FileTree.vue'
+import { availableJdks } from './buildHost'
+import { externalLibraryEntries } from './externalLibraries'
 import { errorMessage } from './errors'
 import type { Tab } from './editorTab'
 
@@ -143,25 +145,43 @@ async function activateWorkspace(result: Workspace) {
   await refreshSyntheticNodes()
   void offerSessionRestore()
 }
-// IDEA's Project view keeps two synthetic nodes below the module (ProjectFileNodeImpl):
-// "External Libraries" and "Scratches and Consoles". TaoCode has no SDK index, so the
-// libraries node lists the configured JAR globs as leaf entries; scratches is the real
-// scratch/ folder. Both stay empty when the folder/globs do not exist.
+// IDEA's Project view keeps two synthetic nodes below the module: "External Libraries"
+// and "Scratches and Consoles". 上游是 `ExternalLibrariesNode`
+// (`platform/lang-impl/.../nodes/ExternalLibrariesNode.java:49`，由
+// `ProjectViewProjectNode.java:89` 无条件挂上) 与 scratch 目录。
+//
+// 外部库的行由 `src/externalLibraries.ts` 算：把 `referencedLibraries` 的 glob 真的展开成
+// 磁盘上存在的 jar，再加一行项目 SDK —— 口径与为什么这么排都写在那儿。scratches 仍然是
+// 真实的 scratch/ 文件夹。
 const syntheticNodes = ref<SyntheticNode[]>([])
 async function refreshSyntheticNodes() {
-  // IDEA's Project view "External Libraries" shows glob strings as leaves (they
-  // do not exist on disk to expand), so the synthetic rows must report kind:'file'
-  // to stop FileTree from recursively listing them. The "Scratches and Consoles"
-  // list under the scratch/ folder keeps the real entries; the leading "scratch/"
-  // prefix is added by workspace.list itself, not here.
-  const nodes: SyntheticNode[] = [{ path: '\u0000libraries', label: '外部库', icon: 'libraries', entries: [] }]
-  for (const glob of projectSettings.value.java.referencedLibraries)
-    nodes[0]!.entries.push({ name: glob, path: `\u0000lib:${glob}`, kind: 'file' })
+  // 容器节点本身**无条件存在**，即使一行子节点都没有（上游 `getChildren()` 返空列表就完事，
+  // 没有空状态占位；`ProjectViewPaneTest.kt:47-56` 就是这么断言的）。
+  const libraries: SyntheticNode = { path: '\u0000libraries', label: '外部库', icon: 'libraries', entries: [] }
+  try {
+    const [files, jdk] = await Promise.all([
+      request<{ files: string[] }>('workspace.files').then(result => result.files, () => [] as string[]),
+      projectJdkForTree(),
+    ])
+    // jar 与 SDK 都是**叶子**：它们不对应工作区里的真实路径（`\u0000` 前缀就是"不落到磁盘"），
+    // 所以必须报 kind:'file'，否则 FileTree 会去 workspace.list 展开一个不存在的目录。
+    libraries.entries = externalLibraryEntries({
+      files, patterns: projectSettings.value.java.referencedLibraries, jdk,
+    })
+  } catch { /* 老宿主没有 workspace.files：容器留着，只是空的 */ }
+  const nodes: SyntheticNode[] = [libraries]
   try {
     const scratches = await request<Entry[]>('workspace.list', { path: 'scratch' })
     nodes.push({ path: '\u0000scratches', label: '临时文件与控制台', icon: 'scratches', entries: scratches.map(item => ({ ...item, path: item.path })) })
   } catch { /* scratch/ may not exist yet */ }
   syntheticNodes.value = nodes
+}
+/** 树里显示的 SDK：口径与构建那条链一致（配置优先，否则用机器上探测到的），见 `src/buildHost.ts`。 */
+async function projectJdkForTree(): Promise<{ name: string; version: string; home: string } | null> {
+  const configured = projectSettings.value.java.jdkHome?.trim() ?? ''
+  const jdks = await availableJdks()
+  if (configured) return jdks.find(entry => entry.home.toLowerCase() === configured.toLowerCase()) ?? { home: configured, version: '', name: '' }
+  return jdks[0] ?? null
 }
 async function openWorkspace(path?: string) {
   menu.value = null

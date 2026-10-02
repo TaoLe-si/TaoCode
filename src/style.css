@@ -3,6 +3,22 @@
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--editor); color: var(--text); font-family: var(--font-ui); font-size: 12px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+/* 文字选择：IDEA 是 Swing —— 控件上的字（菜单项、树行、标签页、标题栏、状态栏）**不可选中**，
+   只有真正承载内容的文本面可选可复制。浏览器反过来，默认整页都能拖选，于是按住鼠标扫过
+   工具条/树/状态栏会拉出一片蓝色选区，点一下还容易把它当"选不中文字"误操作。
+   做法与上游 `BasicTextUI.update()` / `LabelUI`（Swing 只给可编辑/文本组件装 Highlighter）
+   同一个方向：整体关掉，再把**可复制的文本面**逐个开回来。
+   上游依据：文本区只有编辑器、控制台/终端、diff 这几处有「复制」动作
+   （`EditorActionUtil` 的 copy、`ConsoleView`/`ConsoleHistory` 的 copy、
+   `DiffContents` 的 copy），它们才是白名单；判据见 tests/ui-text-selection.test.mjs。 */
+html, body, #app { -webkit-user-select: none; user-select: none; }
+/* 白名单：可复制面。`-webkit-user-select` 一起写是因为 WebView2 两个属性都要认。
+   **终端不在白名单里**：xterm 自己用隐藏 textarea（`_helper_textarea`，走上面 `textarea` 那档）
+   驱动选区，浏览器原生选区会和它打架（同一个字被选两遍），上游 TerminalWidget 同理只暴露
+   它自己的复制动作。 */
+.cm-editor, .cm-content, .output-lines, .run-log,
+.diff-body, .diff-sides, .diff-clipboard-dialog, .quick-definition-code, .problem-msg,
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
 /* Compact mode (IDEA AppearanceConfigurable "UI elements take up less screen space"):
    control heights, panel headings and tab strips shrink. Only density variables are
    touched, so layout rules never fork. */
@@ -58,14 +74,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
    先让 `ProjectWindowCustomizerService.paint(...)` 画渐变，画了就不填底色、没画才 `fillRect(background)`；
    而渐变本身是半透明叠加（`src/appearance.ts:17-29` 用的是同一批 RecentProjectIconHelper 颜色 + alpha 后缀）。
    所以必须 `background-color` + `background-image` 分开写：用 `background: var(--project-tint, …)` 这种
-   "二选一"的写法会让带项目色时底色变成 transparent，深色顶栏上浅色文字直接看不见。 */
+   "二选一"的写法会让带项目色时底色变成 transparent，顶栏自己的字色会跟项目色撞掉。 */
 .topbar { flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; background-color: var(--header-bg); background-image: var(--project-tint, none); border-bottom: 1px solid var(--header-line); color: var(--header-fg); z-index: 10; }
-/* 窗口失焦时顶栏换色：`mainToolbarBackground(isActive)`（JBUI.java:564-572）—— 浅色主题用
-   Gray3（expUI_light.theme.json:762），深色主题没有该键、回退到激活色本身（见 tokens.css 的注释）。
+/* 窗口失焦时顶栏换色：`mainToolbarBackground(isActive)`（JBUI.java:564-572）—— 浅顶栏那份用
+   Gray12（比 Gray13 淡，失焦往后退；expUI_light_with_light_header.theme.json MainToolbar）。
+   深色主题没有该键、回退到激活色本身（JBUI.java:570），所以暗面失焦不变色。
    激活态由 src/appearanceActions.ts 写在根节点的 data-window-active 上。 */
 html[data-window-active='inactive'] .topbar { background-color: var(--header-bg-inactive); }
-/* 顶栏里的控件住在深色面上，字色/悬停色不能沿用面板那套浅色令牌：
-   Icon.hoverBackground 与 pressedBackground 都是 Gray3（expUI_light.theme.json:766-767）。 */
+/* 顶栏里的控件一律走顶栏那一组令牌，不沿用面板那套：字色 = --header-fg（上游 foreground
+   Gray1），悬停底色 = --header-hover（Icon.hoverBackground / pressedBackground 这一对，
+   两份主题都只给一个值）。控件是"图标 + 文字"，字色跟着顶栏前景走才不会在两层面上打架。 */
 .topbar .menu-button, .topbar .header-widget, .topbar .icon-button { color: var(--header-fg); }
 .topbar .menu-button:hover, .topbar .menu-button[aria-expanded=true],
 .topbar .header-widget:hover, .topbar .icon-button:hover:not(:disabled) { background: var(--header-hover); color: var(--header-fg); }
@@ -155,11 +173,13 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .header-widget > span { overflow: hidden; text-overflow: ellipsis; }
 .header-widget-count { color: var(--accent); }
 .header-run { display: inline-flex; align-items: center; }
-/* 运行 widget 的图标**不上色**：`RunWidget.iconColor = Gray12`（expUI_light.theme.json:1095，
-   深色主题同值 :1064），也就是与顶栏前景同一个颜色；只有「正在运行」那一格换成绿底
-   （:1096 runningBackground），且图标仍然是 Gray12（:1097 runningIconColor）。
+/* 运行 widget 的图标**不上色**：`RunWidget.iconColor`（expUI_light.theme.json:1095 是 Gray12 =
+   前景色；浅顶栏那份是 Gray6 = 弱字色，所以我们跟的是 `.header-widget` 那档 --secondary）——
+   不额外上色；只有「正在运行」那一格换成绿底（:1096 runningBackground），**且图标单独换色**：
+   深顶栏那份 runningIconColor = Gray12（= 前景，:1065），浅顶栏那份 = Gray14（= 白，压在 Green5 上）。
+   两个值差得远，所以多给一个 `--header-run-fg` 由两套主题各自给值，而不是复用 --header-fg。
    原先写的「播放=绿字、运行中=红字」两个都不在上游的模型里。 */
-.run-button.running { background: var(--header-run-bg); color: var(--header-fg); }
+.run-button.running { background: var(--header-run-bg); color: var(--header-run-fg); }
 /* 这一族的悬停/按下用的是 RunWidget 自己的那两个叠色（:1098-1099，两套主题字面量相同），
    不是 MainToolbar.Icon 的 Gray3。 */
 .header-run .header-widget:hover { background: var(--header-run-hover); }

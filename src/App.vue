@@ -23,7 +23,7 @@ import RunConfigurationsDialog from './components/RunConfigurationsDialog.vue'
 import ToolWindowView, { type ToolWindowViewContext } from './components/ToolWindowView.vue'
 import SearchEverywhereDialog from './components/SearchEverywhereDialog.vue'
 import SelectInPopup from './components/SelectInPopup.vue'; import TargetChooserPopup from './components/TargetChooserPopup.vue'
-import ToolWindowAnchorMenu from './components/ToolWindowAnchorMenu.vue'; import EditorPopupMenu from './components/EditorPopupMenu.vue'; import ToolWindowGear from './components/ToolWindowGear.vue'
+import ToolWindowAnchorMenu from './components/ToolWindowAnchorMenu.vue'; import EditorPopupMenu from './components/EditorPopupMenu.vue'; import ToolWindowGear from './components/ToolWindowGear.vue'; import AnchoredMenu from './components/AnchoredMenu.vue'
 import ToolStripe from './components/ToolStripe.vue'
 import { createSearchEverywhereHost } from './searchEverywhereHost'
 import { createFileColorHost } from './fileColorsHost'
@@ -2438,7 +2438,7 @@ onBeforeUnmount(() => {
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="最近文件" @keydown="trapFocus"><div class="palette-input"><FileCode2 :size="iconSize.action" /><input ref="recentInput" v-model="recentQuery" placeholder="最近打开的文件…（回车打开第一个）" aria-label="最近文件" @keydown.enter="recentFiltered[0] && openRecent(recentFiltered[0]!)" /><button class="icon-button" title="关闭最近文件" aria-label="关闭最近文件" @click="recentPrompt = false"><X :size="iconSize.action" /></button></div><div class="palette-results"><button v-for="path in recentFiltered" :key="path" @click="openRecent(path)"><FileCode2 :size="iconSize.toolbar" /><span>{{ path }}</span><ArrowRight :size="iconSize.control" /></button><p v-if="!recentFiltered.length" class="palette-empty">暂无最近文件记录。</p></div></section>
     </div>
     <div v-if="treeMenu" class="tree-menu-backdrop" @pointerdown="treeMenu = null; treeSubmenu = null" @contextmenu.prevent="treeMenu = null; treeSubmenu = null">
-      <div class="tree-menu" :style="{ left: `${Math.min(treeMenu.x, viewport.width - 216)}px`, top: `${Math.min(treeMenu.y, viewport.height - 330)}px` }" @pointerdown.stop>
+      <AnchoredMenu :x="treeMenu.x" :y="treeMenu.y" @pointerdown.stop>
         <!-- IDEA ProjectViewPopupMenu order: WeighingNewGroup, AssociateWithFileType |
              CutCopyPasteGroup, EditSource | FindUsages, FindInPath, ReplaceInPath |
              RenameElement | ModifyGroup ($Delete) | SplitRevealGroup, VersionControlsGroup,
@@ -2483,10 +2483,10 @@ onBeforeUnmount(() => {
         <button v-if="isDesktop" :disabled="!workspace" @click="openInTerminal()">在终端中打开</button><button v-if="isDesktop" @click="revealInExplorer()">在资源管理器中显示</button>
         <div class="menu-rule" />
         <button @click="treeMenu = null; refreshTree()">刷新目录</button>
-      </div>
+      </AnchoredMenu>
     </div>
     <div v-if="tabMenu" class="tree-menu-backdrop" @pointerdown="tabMenu = null" @contextmenu.prevent="tabMenu = null">
-      <div class="tree-menu" :style="{ left: `${Math.min(tabMenu.x, viewport.width - 210)}px`, top: `${Math.min(tabMenu.y, viewport.height - 260)}px` }" @pointerdown.stop>
+      <AnchoredMenu :x="tabMenu.x" :y="tabMenu.y" @pointerdown.stop>
         <template v-for="menu in [tabMenu]" :key="menu.path">
           <!-- IDEA's EditorTabPopupMenu order: Close group | Copy Paths | split rows | Pin / Keep / Configure；
                书签那三条（ToggleBookmark / EditBookmark / AddAnotherBookmark 的相对顺序）来自挂在
@@ -2531,7 +2531,7 @@ onBeforeUnmount(() => {
           <button :disabled="!findTab(menu.path)?.preview" @click="const tab = findTab(menu.path); if (tab) keepTabOpen(tab); tabMenu = null">保持打开</button>
           <button @click="tabMenu = null; void openSettings('editor.preferences.tabs')">配置编辑器标签页…</button>
         </template>
-      </div>
+      </AnchoredMenu>
     </div>
     <div v-if="nameDialog" class="modal-backdrop" @click.self="nameDialog = null">
       <section class="help-dialog rename-dialog" role="dialog" aria-modal="true" :aria-label="nameDialogTitle" @keydown="trapFocus">

@@ -11,10 +11,15 @@ import { loadSfc } from './vue-sfc-loader.mjs'
 const { component } = loadSfc('src/components/ToolWindowHeader.vue')
 
 async function menu(anchor, extraRows = []) {
+  const context = {}
   const html = await renderToString(createSSRApp({
     render: () => h(component, { id: 'files', title: '项目', anchor, maximized: false, menuOpen: true, extraRows }),
-  }))
-  return html
+  }), context)
+  // 批次 87-C 起这张菜单 Teleport 到 body —— 它比标题栏本身还宽，长在 `overflow: hidden` 的
+  // 侧栏里会被裁掉（实测左边缘落到 x = -14.5，图标与"×"整列不见）。SSR 把 Teleport 的内容放进
+  // `context.teleports`，主输出里只留一对注释标记，所以行文本断言要把那份拼回来 ——
+  // 断言的仍然是**渲染出来的那张菜单**，只是换了读取位置。
+  return html + Object.values(context.teleports ?? {}).join('')
 }
 const rows = html => [...html.matchAll(/>(移动到[^<]*)</g)].map(m => m[1].trim())
 

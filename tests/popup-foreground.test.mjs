@@ -75,8 +75,15 @@ test('浮层前景/禁用前景两档都有，且禁用档用的是上游字面�
     const paired = contrast(value('m-pop-fg', theme), value('m-elevated', theme))
     assert.ok(paired >= 4.5, `第 ${theme ? '暗' : '亮'} 档浮层正文压在 --elevated 上只有 ${paired.toFixed(2)}`)
   }
-  // 反例：拿浅色的 header 前景当浮层正文（就是这次的 bug）。
-  assert.ok(contrast(value('m-night-fg', 0), value('m-pop-bg', 0)) < 2, '浅色顶栏字色落在浮层底上本该不可读')
+  // 反例（这次的 bug）：浮层正文曾经取**浅色顶栏**的前景，落在浮层底上几乎看不见。
+  // 批次 87-B 把亮面顶栏改成亮底深字之后，"误取顶栏字色"这一类错不再致盲；反过来这条防线
+  // 换了个方向去盯**顶栏字自己**：它也要过 AA —— 文件名弹层那几行就印在浮层那类浅底上。
+  for (const theme of [0, 1]) {
+    assert.ok(contrast(value('m-chrome-fg', theme), value('m-pop-bg', theme)) >= 4.5,
+      `第 ${theme ? '暗' : '亮'} 档顶栏字压在浮层底上只有 ${contrast(value('m-chrome-fg', theme), value('m-pop-bg', theme)).toFixed(2)}`)
+  }
+  // 且结构上仍要隔开：浮层正文不许引用顶栏那组令牌，将来顶栏改色也不会连带把浮层正文带走。
+  assert.doesNotMatch(tokens, /--popup-foreground: var\(--(?:header|m-chrome)/, '浮层正文不许取顶栏那组令牌')
 })
 
 test('禁用行有显式颜色，不靠浏览器对 disabled 按钮的默认淡化', () => {
