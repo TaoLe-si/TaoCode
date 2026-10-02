@@ -1,6 +1,6 @@
 # actions 机检结果
 
-枚举 317 个类；TaoCode 文本里出现过名字的 10 个，**从未出现 307 个**。
+枚举 317 个类；TaoCode 文本里出现过名字的 25 个，**从未出现 292 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -12,8 +12,8 @@
 | `ActionGroup` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionGroup.java` | 提到过 |
 | `ActionManager` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionManager.java` | 提到过 |
 | `ActionPopupMenu` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionPopupMenu.java` | 未出现 |
-| `ActionToolbar` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbar.java` | 未出现 |
-| `ActionToolbarListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbarListener.java` | 未出现 |
+| `ActionToolbar` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbar.java` | 提到过 |
+| `ActionToolbarListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbarListener.java` | 提到过 |
 | `ActionUiKind` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUiKind.kt` | 未出现 |
 | `ActionUpdateThread` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThread.java` | 未出现 |
 | `ActionUpdateThreadAware` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThreadAware.java` | 未出现 |
@@ -58,7 +58,7 @@
 | `SimpleDataContext` | `platform/ide-core-impl/src/com/intellij/openapi/actionSystem/impl/SimpleDataContext.java` | 未出现 |
 | `ActionPlaces` | `platform/ide-core/src/com/intellij/openapi/actionSystem/ActionPlaces.java` | 提到过 |
 | `ActionWithDelegate` | `platform/ide-core/src/com/intellij/openapi/actionSystem/ActionWithDelegate.java` | 未出现 |
-| `IdeActions` | `platform/ide-core/src/com/intellij/openapi/actionSystem/IdeActions.java` | 未出现 |
+| `IdeActions` | `platform/ide-core/src/com/intellij/openapi/actionSystem/IdeActions.java` | 提到过 |
 | `PlatformCoreDataKeys` | `platform/ide-core/src/com/intellij/openapi/actionSystem/PlatformCoreDataKeys.java` | 未出现 |
 | `SeparatorAction` | `platform/ide-core/src/com/intellij/openapi/actionSystem/SeparatorAction.java` | 未出现 |
 | `AutoCompletionCommand` | `platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionCommand.java` | 未出现 |
@@ -90,12 +90,12 @@
 | `AbstractGotoSEContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AbstractGotoSEContributor.kt` | 未出现 |
 | `ActionSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ActionSearchEverywhereContributor.kt` | 未出现 |
 | `ActionsEqualityProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ActionsEqualityProvider.java` | 未出现 |
-| `AutoCompletionProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionProvider.java` | 未出现 |
+| `AutoCompletionProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionProvider.java` | 提到过 |
 | `CalculatorSEContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CalculatorSEContributor.kt` | 未出现 |
 | `CheckBoxSearchEverywhereToggleAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CheckBoxSearchEverywhereToggleAction.java` | 未出现 |
 | `ClassSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt` | 未出现 |
 | `ClassSearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt` | 未出现 |
-| `ContributorDefinedTabsCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ContributorDefinedTabsCustomizationStrategy.kt` | 未出现 |
+| `ContributorDefinedTabsCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ContributorDefinedTabsCustomizationStrategy.kt` | 提到过 |
 | `CorrectionWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CorrectionWrapper.kt` | 未出现 |
 | `FileSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FileSearchEverywhereContributor.kt` | 未出现 |
 | `FixedTabsListCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FixedTabsListCustomizationStrategy.kt` | 未出现 |
@@ -147,14 +147,14 @@
 | `SearchEverywhereHeader` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereHeader.java` | 未出现 |
 | `SearchEverywhereLanguage` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereLanguage.kt` | 未出现 |
 | `SearchEverywhereManager` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereManager.java` | 未出现 |
-| `SearchEverywhereManagerImpl` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereManagerImpl.java` | 未出现 |
+| `SearchEverywhereManagerImpl` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereManagerImpl.java` | 提到过 |
 | `SearchEverywhereMixedListInfo` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMixedListInfo.kt` | 未出现 |
 | `SearchEverywhereMlContributorReplacement` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlContributorReplacement.kt` | 未出现 |
 | `SearchEverywhereMlService` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlService.kt` | 未出现 |
 | `SearchEverywhereMlTabsCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlTabsCustomizationStrategy.kt` | 未出现 |
 | `SearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereNavigationHandler.kt` | 未出现 |
 | `SearchEverywherePopupInstance` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePopupInstance.kt` | 未出现 |
-| `SearchEverywherePreview` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreview.kt` | 未出现 |
+| `SearchEverywherePreview` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreview.kt` | 提到过 |
 | `SearchEverywherePreviewFetcher` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewFetcher.kt` | 未出现 |
 | `SearchEverywherePreviewGenerator` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewGenerator.kt` | 未出现 |
 | `SearchEverywherePreviewPrimaryUsageFinder` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewPrimaryUsageFinder.kt` | 未出现 |
@@ -178,7 +178,7 @@
 | `ThrottlingListenerWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ThrottlingListenerWrapper.java` | 未出现 |
 | `TopHitSEContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/TopHitSEContributor.java` | 未出现 |
 | `TrivialElementsEqualityProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/TrivialElementsEqualityProvider.java` | 未出现 |
-| `Utils` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/Utils.kt` | 未出现 |
+| `Utils` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/Utils.kt` | 提到过 |
 | `WaitForContributorsListenerWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/WaitForContributorsListenerWrapper.java` | 未出现 |
 | `ActionExtendedInfo` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/footer/ActionExtendedInfo.kt` | 未出现 |
 | `ExtendedInfoImpl` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/footer/ExtendedInfoImpl.kt` | 未出现 |
@@ -228,7 +228,7 @@
 | `DataConstants` | `platform/platform-api/src/com/intellij/openapi/actionSystem/DataConstants.java` | 未出现 |
 | `DecorativeElement` | `platform/platform-api/src/com/intellij/openapi/actionSystem/DecorativeElement.kt` | 未出现 |
 | `DefaultActionGroup` | `platform/platform-api/src/com/intellij/openapi/actionSystem/DefaultActionGroup.java` | 提到过 |
-| `DefaultCompactActionGroup` | `platform/platform-api/src/com/intellij/openapi/actionSystem/DefaultCompactActionGroup.java` | 未出现 |
+| `DefaultCompactActionGroup` | `platform/platform-api/src/com/intellij/openapi/actionSystem/DefaultCompactActionGroup.java` | 提到过 |
 | `EmptyAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/EmptyAction.java` | 未出现 |
 | `EmptyActionGroup` | `platform/platform-api/src/com/intellij/openapi/actionSystem/EmptyActionGroup.java` | 未出现 |
 | `KeyboardGestureAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/KeyboardGestureAction.java` | 未出现 |
@@ -236,10 +236,10 @@
 | `MacOtherAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/MacOtherAction.java` | 未出现 |
 | `MouseShortcut` | `platform/platform-api/src/com/intellij/openapi/actionSystem/MouseShortcut.java` | 未出现 |
 | `PerformWithDocumentsCommitted` | `platform/platform-api/src/com/intellij/openapi/actionSystem/PerformWithDocumentsCommitted.java` | 未出现 |
-| `PlatformDataKeys` | `platform/platform-api/src/com/intellij/openapi/actionSystem/PlatformDataKeys.java` | 未出现 |
+| `PlatformDataKeys` | `platform/platform-api/src/com/intellij/openapi/actionSystem/PlatformDataKeys.java` | 提到过 |
 | `PopupAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/PopupAction.java` | 未出现 |
 | `PressureShortcut` | `platform/platform-api/src/com/intellij/openapi/actionSystem/PressureShortcut.java` | 未出现 |
-| `Separator` | `platform/platform-api/src/com/intellij/openapi/actionSystem/Separator.java` | 未出现 |
+| `Separator` | `platform/platform-api/src/com/intellij/openapi/actionSystem/Separator.java` | 提到过 |
 | `ToggleAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ToggleAction.java` | 提到过 |
 | `ToggleOptionAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ToggleOptionAction.java` | 未出现 |
 | `Toggleable` | `platform/platform-api/src/com/intellij/openapi/actionSystem/Toggleable.java` | 提到过 |
@@ -247,7 +247,7 @@
 | `ActionCopiedShortcutsTracker` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionCopiedShortcutsTracker.kt` | 未出现 |
 | `ActionManagerEx` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionManagerEx.kt` | 未出现 |
 | `ActionPopupMenuListener` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionPopupMenuListener.java` | 未出现 |
-| `ActionUtil` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionUtil.kt` | 未出现 |
+| `ActionUtil` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionUtil.kt` | 提到过 |
 | `CheckboxAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/CheckboxAction.java` | 未出现 |
 | `ComboBoxAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ComboBoxAction.java` | 未出现 |
 | `DefaultCustomComponentAction` | `platform/platform-api/src/com/intellij/openapi/actionSystem/ex/DefaultCustomComponentAction.java` | 未出现 |
@@ -265,7 +265,7 @@
 | `QuickListsManager` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/QuickListsManager.kt` | 未出现 |
 | `ToolbarLabelAction` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/ToolbarLabelAction.java` | 未出现 |
 | `AbbreviationManagerImpl` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/AbbreviationManagerImpl.java` | 未出现 |
-| `ActionButton` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButton.java` | 未出现 |
+| `ActionButton` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButton.java` | 提到过 |
 | `ActionButtonUtil` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButtonUtil.kt` | 未出现 |
 | `ActionButtonWithText` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButtonWithText.java` | 未出现 |
 | `ActionConfigurationCustomizer` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionConfigurationCustomizer.kt` | 未出现 |
@@ -275,7 +275,7 @@
 | `ActionManagerRegistration` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerRegistration.kt` | 未出现 |
 | `ActionManagerState` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerState.kt` | 未出现 |
 | `ActionManagerXmlSupport` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerXmlSupport.kt` | 未出现 |
-| `ActionMenu` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenu.kt` | 未出现 |
+| `ActionMenu` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenu.kt` | 提到过 |
 | `ActionMenuItem` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenuItem.kt` | 未出现 |
 | `ActionPluginRegistrar` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionPluginRegistrar.kt` | 未出现 |
 | `ActionPopupMenuImpl` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionPopupMenuImpl.java` | 未出现 |
@@ -310,7 +310,7 @@
 | `StubItem` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/StubItem.java` | 未出现 |
 | `ToolbarUpdater` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ToolbarUpdater.kt` | 未出现 |
 | `ToolbarUtils` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ToolbarUtils.kt` | 未出现 |
-| `Utils` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/Utils.kt` | 未出现 |
+| `Utils` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/Utils.kt` | 提到过 |
 | `WeakTimerListener` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/WeakTimerListener.java` | 未出现 |
 | `Win10ActionButtonLook` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/Win10ActionButtonLook.java` | 未出现 |
 | `ActionRef` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/actionholder/ActionRef.kt` | 未出现 |

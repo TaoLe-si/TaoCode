@@ -1,6 +1,6 @@
 # vcs 机检结果
 
-枚举 1783 个类；TaoCode 文本里出现过名字的 53 个，**从未出现 1730 个**。
+枚举 1783 个类；TaoCode 文本里出现过名字的 83 个，**从未出现 1700 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -168,7 +168,7 @@
 | `ChangelistBuilder` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/ChangelistBuilder.java` | 未出现 |
 | `ChangesUtil` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/ChangesUtil.java` | 未出现 |
 | `ChangesViewRefresher` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/ChangesViewRefresher.java` | 未出现 |
-| `CommitExecutor` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/CommitExecutor.java` | 未出现 |
+| `CommitExecutor` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/CommitExecutor.java` | 提到过 |
 | `CommitExecutorWithRichDescription` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/CommitExecutorWithRichDescription.java` | 未出现 |
 | `CommitResultHandler` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/CommitResultHandler.java` | 未出现 |
 | `CommitSession` | `platform/vcs-api/src/com/intellij/openapi/vcs/changes/CommitSession.java` | 未出现 |
@@ -300,7 +300,7 @@
 | `VcsKey` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/VcsKey.kt` | 未出现 |
 | `ByteBackedContentRevision` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/ByteBackedContentRevision.java` | 未出现 |
 | `Change` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/Change.java` | 提到过 |
-| `CommitContext` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/CommitContext.kt` | 未出现 |
+| `CommitContext` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/CommitContext.kt` | 提到过 |
 | `ContentRevision` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/ContentRevision.java` | 未出现 |
 | `RelativePathCalculator` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/changes/patch/RelativePathCalculator.java` | 未出现 |
 | `LongRevisionNumber` | `platform/vcs-api/vcs-api-core/src/com/intellij/openapi/vcs/history/LongRevisionNumber.java` | 未出现 |
@@ -352,7 +352,7 @@
 | `LocalChangesListView` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/LocalChangesListView.java` | 未出现 |
 | `ChangesGrouppingActions` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/actions/ChangesGrouppingActions.kt` | 未出现 |
 | `SelectInChangesViewAction` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/actions/SelectInChangesViewAction.kt` | 未出现 |
-| `ShowOnDoubleClickToggleAction` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/actions/ShowOnDoubleClickToggleAction.kt` | 未出现 |
+| `ShowOnDoubleClickToggleAction` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/actions/ShowOnDoubleClickToggleAction.kt` | 提到过 |
 | `IssueLinkRenderer` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/issueLinks/IssueLinkRenderer.java` | 未出现 |
 | `BackgroundRefresher` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/BackgroundRefresher.kt` | 未出现 |
 | `BaseChangesGroupingPolicy` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/BaseChangesGroupingPolicy.kt` | 未出现 |
@@ -385,7 +385,7 @@
 | `ChangesGroupingSupport` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesGroupingSupport.kt` | 未出现 |
 | `ChangesListView` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesListView.java` | 未出现 |
 | `ChangesListViewDiffableSelectionUtil` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesListViewDiffableSelectionUtil.kt` | 未出现 |
-| `ChangesTree` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesTree.java` | 未出现 |
+| `ChangesTree` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesTree.java` | 提到过 |
 | `ChangesTreeCellRenderer` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesTreeCellRenderer.kt` | 未出现 |
 | `ChangesTreeDnDSupport` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesTreeDnDSupport.java` | 未出现 |
 | `ChangesTreeFileDragBean` | `platform/vcs-impl/shared/src/com/intellij/openapi/vcs/changes/ui/ChangesTreeFileDragBean.kt` | 未出现 |
@@ -485,7 +485,7 @@
 | `MergeSourceAvailableMarkerGutter` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/MergeSourceAvailableMarkerGutter.java` | 未出现 |
 | `SelectAndCompareWithSelectedRevisionAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/SelectAndCompareWithSelectedRevisionAction.java` | 未出现 |
 | `SelectedBlockHistoryAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/SelectedBlockHistoryAction.java` | 未出现 |
-| `ShortNameType` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShortNameType.kt` | 未出现 |
+| `ShortNameType` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShortNameType.kt` | 提到过 |
 | `ShowAnnotateOperationsPopup` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowAnnotateOperationsPopup.java` | 未出现 |
 | `ShowAnnotationColorsAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowAnnotationColorsAction.java` | 未出现 |
 | `ShowBaseRevisionAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowBaseRevisionAction.java` | 未出现 |
@@ -494,7 +494,7 @@
 | `ShowDiffFromAnnotation` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowDiffFromAnnotation.java` | 未出现 |
 | `ShowHideAspectAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowHideAspectAction.java` | 未出现 |
 | `ShowMessageHistoryAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowMessageHistoryAction.kt` | 未出现 |
-| `ShowShortenNames` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowShortenNames.java` | 未出现 |
+| `ShowShortenNames` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/ShowShortenNames.java` | 提到过 |
 | `SwitchAnnotationSourceAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/SwitchAnnotationSourceAction.java` | 未出现 |
 | `TabbedShowHistoryAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/TabbedShowHistoryAction.kt` | 未出现 |
 | `TabbedShowHistoryForRevisionAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/TabbedShowHistoryForRevisionAction.java` | 未出现 |
@@ -510,7 +510,7 @@
 | `VcsPreviewPanel` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsPreviewPanel.java` | 未出现 |
 | `VcsQuickActionsToolbarPopup` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsQuickActionsToolbarPopup.kt` | 未出现 |
 | `VcsQuickListPopupAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsQuickListPopupAction.java` | 未出现 |
-| `VcsToolbarLabelAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsToolbarLabelAction.java` | 未出现 |
+| `VcsToolbarLabelAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsToolbarLabelAction.java` | 提到过 |
 | `VcsTopHitProvider` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/VcsTopHitProvider.java` | 未出现 |
 | `AbstractCommitChangesAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/commit/AbstractCommitChangesAction.kt` | 未出现 |
 | `CheckinActionUtil` | `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/commit/CheckinActionUtil.kt` | 未出现 |
@@ -544,7 +544,7 @@
 | `ChangesViewEditorDiffPreview` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewEditorDiffPreview.kt` | 未出现 |
 | `ChangesViewEx` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewEx.kt` | 未出现 |
 | `ChangesViewI` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewI.java` | 未出现 |
-| `ChangesViewManager` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewManager.kt` | 未出现 |
+| `ChangesViewManager` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewManager.kt` | 提到过 |
 | `ChangesViewWorkflowManager` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewWorkflowManager.kt` | 未出现 |
 | `ChangesViewWorkflowManagerImpl` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ChangesViewWorkflowManagerImpl.kt` | 未出现 |
 | `CompositeFilePathHolder` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/CompositeFilePathHolder.java` | 未出现 |
@@ -578,7 +578,7 @@
 | `RemoteRevisionsNumbersCache` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/RemoteRevisionsNumbersCache.java` | 未出现 |
 | `RemoteRevisionsStateCache` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/RemoteRevisionsStateCache.java` | 未出现 |
 | `RunnableBackgroundableWrapper` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/RunnableBackgroundableWrapper.java` | 未出现 |
-| `SelectInChangesViewTarget` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/SelectInChangesViewTarget.java` | 未出现 |
+| `SelectInChangesViewTarget` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/SelectInChangesViewTarget.java` | 提到过 |
 | `ShowDiffInEditorTooltipInstaller` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ShowDiffInEditorTooltipInstaller.kt` | 未出现 |
 | `ShowEditorDiffPreviewActionProvider` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ShowEditorDiffPreviewActionProvider.kt` | 未出现 |
 | `SimpleContentRevision` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/SimpleContentRevision.java` | 未出现 |
@@ -924,7 +924,7 @@
 | `SimpleAsyncChangesBrowser` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/SimpleAsyncChangesBrowser.java` | 未出现 |
 | `SimpleChangesBrowser` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/SimpleChangesBrowser.java` | 未出现 |
 | `SplitterWithSecondHideable` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/SplitterWithSecondHideable.java` | 未出现 |
-| `TreeActionsToolbarPanel` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/TreeActionsToolbarPanel.java` | 未出现 |
+| `TreeActionsToolbarPanel` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/TreeActionsToolbarPanel.java` | 提到过 |
 | `TreeHandlerDiffRequestProcessor` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/TreeHandlerDiffRequestProcessor.kt` | 未出现 |
 | `UiUtils` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/UiUtils.kt` | 未出现 |
 | `VcsToolWindowEmptyState` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/VcsToolWindowEmptyState.kt` | 未出现 |
@@ -935,7 +935,7 @@
 | `ChangesFilterer` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/browser/ChangesFilterer.kt` | 未出现 |
 | `FilterableChangesBrowser` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/browser/FilterableChangesBrowser.java` | 未出现 |
 | `LoadingChangesPanel` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/browser/LoadingChangesPanel.java` | 未出现 |
-| `vcsToolWindowFactories` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/vcsToolWindowFactories.kt` | 未出现 |
+| `vcsToolWindowFactories` | `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/ui/vcsToolWindowFactories.kt` | 提到过 |
 | `CheckinHandlerUtil` | `platform/vcs-impl/src/com/intellij/openapi/vcs/checkin/CheckinHandlerUtil.java` | 未出现 |
 | `MultipleChangeListsCheckFactory` | `platform/vcs-impl/src/com/intellij/openapi/vcs/checkin/MultipleChangeListsCheckFactory.kt` | 未出现 |
 | `StepIntersection` | `platform/vcs-impl/src/com/intellij/openapi/vcs/checkin/StepIntersection.java` | 未出现 |
@@ -1000,7 +1000,7 @@
 | `AnnotateRevisionAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/AnnotateRevisionAction.java` | 未出现 |
 | `CompareRevisionsAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CompareRevisionsAction.java` | 未出现 |
 | `CopyCommitSubjectAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CopyCommitSubjectAction.java` | 未出现 |
-| `CopyRevisionNumberAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CopyRevisionNumberAction.java` | 未出现 |
+| `CopyRevisionNumberAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CopyRevisionNumberAction.java` | 提到过 |
 | `CreatePatchFromDirectoryAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/CreatePatchFromDirectoryAction.java` | 未出现 |
 | `FileHistoryGetVersionActionProvider` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/FileHistoryGetVersionActionProvider.java` | 未出现 |
 | `GetVersionAction` | `platform/vcs-impl/src/com/intellij/openapi/vcs/history/actions/GetVersionAction.java` | 未出现 |
@@ -1145,10 +1145,10 @@
 | `VcsVirtualFolder` | `platform/vcs-impl/src/com/intellij/openapi/vcs/vfs/VcsVirtualFolder.java` | 未出现 |
 | `AbstractCommitMessagePolicy` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitMessagePolicy.kt` | 提到过 |
 | `AbstractCommitWorkflow` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitWorkflow.kt` | 未出现 |
-| `AbstractCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitWorkflowHandler.kt` | 未出现 |
+| `AbstractCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitWorkflowHandler.kt` | 提到过 |
 | `AbstractCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/AbstractCommitter.kt` | 未出现 |
 | `AmendCommitAware` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitAware.kt` | 未出现 |
-| `AmendCommitHandlerImpl` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitHandlerImpl.kt` | 未出现 |
+| `AmendCommitHandlerImpl` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitHandlerImpl.kt` | 提到过 |
 | `AmendCommitModeDropDownLink` | `platform/vcs-impl/src/com/intellij/vcs/commit/AmendCommitModeDropDownLink.kt` | 提到过 |
 | `ChangeListClassifierProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangeListClassifierProvider.kt` | 未出现 |
 | `ChangesViewCommitMessagePolicy` | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitMessagePolicy.kt` | 未出现 |
@@ -1161,7 +1161,7 @@
 | `CommitActionsPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitActionsPanel.kt` | 提到过 |
 | `CommitAuthorComponent` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitAuthorComponent.kt` | 提到过 |
 | `CommitChecks` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecks.kt` | 未出现 |
-| `CommitChecksProgressIndicator` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt` | 未出现 |
+| `CommitChecksProgressIndicator` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt` | 提到过 |
 | `CommitChecksProgressIndicatorTooltip` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicatorTooltip.kt` | 未出现 |
 | `CommitExceptionWithActions` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitExceptionWithActions.kt` | 提到过 |
 | `CommitInputBorder` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitInputBorder.kt` | 未出现 |
@@ -1188,15 +1188,15 @@
 | `NullCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/NullCommitWorkflowHandler.kt` | 未出现 |
 | `PartialCommitInclusionModel` | `platform/vcs-impl/src/com/intellij/vcs/commit/PartialCommitInclusionModel.kt` | 未出现 |
 | `PostCommitChecksHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/PostCommitChecksHandler.kt` | 未出现 |
-| `RunCommitChecksExecutor` | `platform/vcs-impl/src/com/intellij/vcs/commit/RunCommitChecksExecutor.kt` | 未出现 |
-| `SaveCommittingDocumentsVetoer` | `platform/vcs-impl/src/com/intellij/vcs/commit/SaveCommittingDocumentsVetoer.kt` | 未出现 |
+| `RunCommitChecksExecutor` | `platform/vcs-impl/src/com/intellij/vcs/commit/RunCommitChecksExecutor.kt` | 提到过 |
+| `SaveCommittingDocumentsVetoer` | `platform/vcs-impl/src/com/intellij/vcs/commit/SaveCommittingDocumentsVetoer.kt` | 提到过 |
 | `ShowNotificationCommitResultHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/ShowNotificationCommitResultHandler.kt` | 提到过 |
 | `SingleChangeListCommitMessagePolicy` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitMessagePolicy.kt` | 未出现 |
 | `SingleChangeListCommitWorkflow` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflow.kt` | 未出现 |
 | `SingleChangeListCommitWorkflowHandler` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowHandler.kt` | 未出现 |
 | `SingleChangeListCommitWorkflowUi` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitWorkflowUi.kt` | 未出现 |
 | `SingleChangeListCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/SingleChangeListCommitter.kt` | 未出现 |
-| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | 未出现 |
+| `ToggleAmendCommitModeAction` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitModeAction.kt` | 提到过 |
 | `ToggleAmendCommitOption` | `platform/vcs-impl/src/com/intellij/vcs/commit/ToggleAmendCommitOption.kt` | 提到过 |
 | `VcsCommitter` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsCommitter.kt` | 未出现 |
 | `VcsPathsToRefreshProvider` | `platform/vcs-impl/src/com/intellij/vcs/commit/VcsPathsToRefreshProvider.kt` | 未出现 |
@@ -1406,7 +1406,7 @@
 | `UpdatableIntToIntMapTest` | `platform/vcs-log/graph/test/com/intellij/vcs/log/graph/utils/UpdatableIntToIntMapTest.java` | 未出现 |
 | `VcsLogIcons` | `platform/vcs-log/impl/gen/com/intellij/vcs/log/impl/VcsLogIcons.java` | 未出现 |
 | `BaseSingleTaskController` | `platform/vcs-log/impl/src/com/intellij/vcs/log/BaseSingleTaskController.kt` | 未出现 |
-| `VcsLogBundle` | `platform/vcs-log/impl/src/com/intellij/vcs/log/VcsLogBundle.java` | 未出现 |
+| `VcsLogBundle` | `platform/vcs-log/impl/src/com/intellij/vcs/log/VcsLogBundle.java` | 提到过 |
 | `VcsLogStandardColors` | `platform/vcs-log/impl/src/com/intellij/vcs/log/VcsLogStandardColors.java` | 未出现 |
 | `AbstractDataGetter` | `platform/vcs-log/impl/src/com/intellij/vcs/log/data/AbstractDataGetter.kt` | 未出现 |
 | `CommitDetailsGetter` | `platform/vcs-log/impl/src/com/intellij/vcs/log/data/CommitDetailsGetter.kt` | 未出现 |
@@ -1496,7 +1496,7 @@
 | `VcsLogFileHistoryUiProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/history/VcsLogFileHistoryUiProvider.kt` | 未出现 |
 | `VcsLogFileRevision` | `platform/vcs-log/impl/src/com/intellij/vcs/log/history/VcsLogFileRevision.java` | 未出现 |
 | `CannotAddVcsLogWindowException` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/CannotAddVcsLogWindowException.java` | 未出现 |
-| `CommonUiProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/CommonUiProperties.java` | 未出现 |
+| `CommonUiProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/CommonUiProperties.java` | 提到过 |
 | `CustomVcsLogUiFactoryProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/CustomVcsLogUiFactoryProvider.java` | 未出现 |
 | `DetachedHeadRefGroup` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/DetachedHeadRefGroup.kt` | 未出现 |
 | `HeavyAwareListener` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/HeavyAwareListener.kt` | 未出现 |
@@ -1527,7 +1527,7 @@
 | `VcsLogErrorHandler` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogErrorHandler.java` | 未出现 |
 | `VcsLogIndexer` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogIndexer.java` | 未出现 |
 | `VcsLogManager` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogManager.kt` | 未出现 |
-| `VcsLogNavigationUtil` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogNavigationUtil.kt` | 未出现 |
+| `VcsLogNavigationUtil` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogNavigationUtil.kt` | 提到过 |
 | `VcsLogObjectsFactoryImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogObjectsFactoryImpl.java` | 未出现 |
 | `VcsLogProjectTabsProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogProjectTabsProperties.kt` | 未出现 |
 | `VcsLogSharedSettings` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogSharedSettings.java` | 未出现 |
@@ -1536,7 +1536,7 @@
 | `VcsLogTabsManager` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogTabsManager.kt` | 未出现 |
 | `VcsLogTabsProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogTabsProperties.java` | 未出现 |
 | `VcsLogTabsUtil` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogTabsUtil.kt` | 未出现 |
-| `VcsLogUiProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogUiProperties.kt` | 未出现 |
+| `VcsLogUiProperties` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogUiProperties.kt` | 提到过 |
 | `VcsLogUiPropertiesImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogUiPropertiesImpl.kt` | 未出现 |
 | `VcsProjectLog` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsProjectLog.kt` | 未出现 |
 | `VcsProjectLogBase` | `platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsProjectLogBase.kt` | 未出现 |
@@ -1572,7 +1572,7 @@
 | `VcsLogUiEx` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/VcsLogUiEx.java` | 未出现 |
 | `VcsLogUiImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/VcsLogUiImpl.java` | 未出现 |
 | `AlignLabelsAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/AlignLabelsAction.java` | 未出现 |
-| `BooleanPropertyToggleAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/BooleanPropertyToggleAction.java` | 未出现 |
+| `BooleanPropertyToggleAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/BooleanPropertyToggleAction.java` | 提到过 |
 | `ChangeDiffPreviewLocationActions` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ChangeDiffPreviewLocationActions.kt` | 未出现 |
 | `CollapseGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseGraphAction.java` | 未出现 |
 | `CollapseOrExpandGraphAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/CollapseOrExpandGraphAction.java` | 未出现 |
@@ -1584,8 +1584,8 @@
 | `FocusTextFilterAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/FocusTextFilterAction.java` | 未出现 |
 | `GoToHashOrRefAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToHashOrRefAction.java` | 未出现 |
 | `GoToHashOrRefPopup` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToHashOrRefPopup.java` | 未出现 |
-| `GoToParentOrChildAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToParentOrChildAction.kt` | 未出现 |
-| `HighlightersActionGroup` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/HighlightersActionGroup.java` | 未出现 |
+| `GoToParentOrChildAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/GoToParentOrChildAction.kt` | 提到过 |
+| `HighlightersActionGroup` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/HighlightersActionGroup.java` | 提到过 |
 | `IndexDiagnosticActions` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/IndexDiagnosticActions.kt` | 未出现 |
 | `InvalidateVcsLogCaches` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/InvalidateVcsLogCaches.kt` | 未出现 |
 | `OpenAnotherLogTabAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/OpenAnotherLogTabAction.java` | 未出现 |
@@ -1600,7 +1600,7 @@
 | `ShowDiffPreviewAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowDiffPreviewAction.java` | 未出现 |
 | `ShowLongEdgesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowLongEdgesAction.java` | 未出现 |
 | `ShowOnlyAffectedChangesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowOnlyAffectedChangesAction.java` | 未出现 |
-| `ShowRootsColumnAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowRootsColumnAction.java` | 未出现 |
+| `ShowRootsColumnAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowRootsColumnAction.java` | 提到过 |
 | `ShowStandaloneDiffFromLogActionProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowStandaloneDiffFromLogActionProvider.kt` | 未出现 |
 | `ShowTagNamesAction` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/ShowTagNamesAction.java` | 未出现 |
 | `TextFieldWithProgress` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/actions/TextFieldWithProgress.java` | 未出现 |
@@ -1662,7 +1662,7 @@
 | `CommitPresentationUtil` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/CommitPresentationUtil.java` | 未出现 |
 | `ComponentQuickActionProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/ComponentQuickActionProvider.kt` | 未出现 |
 | `FrameDiffPreview` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/FrameDiffPreview.kt` | 未出现 |
-| `MainFrame` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/MainFrame.java` | 未出现 |
+| `MainFrame` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/MainFrame.java` | 提到过 |
 | `ProgressStripe` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/ProgressStripe.kt` | 未出现 |
 | `VcsCommitExternalStatusPresentation` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/VcsCommitExternalStatusPresentation.kt` | 未出现 |
 | `VcsCommitExternalStatusProvider` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/frame/VcsCommitExternalStatusProvider.kt` | 未出现 |
@@ -1709,7 +1709,7 @@
 | `VcsLogCellRenderer` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogCellRenderer.kt` | 未出现 |
 | `VcsLogCommitList` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogCommitList.kt` | 未出现 |
 | `VcsLogCommitSelectionUtils` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogCommitSelectionUtils.kt` | 未出现 |
-| `VcsLogGraphTable` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogGraphTable.java` | 未出现 |
+| `VcsLogGraphTable` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogGraphTable.java` | 提到过 |
 | `VcsLogGraphTableLinkPreviewSupport` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogGraphTableLinkPreviewSupport.kt` | 未出现 |
 | `VcsLogGraphTableUtil` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogGraphTableUtil.kt` | 未出现 |
 | `VcsLogIconCellRenderer` | `platform/vcs-log/impl/src/com/intellij/vcs/log/ui/table/VcsLogIconCellRenderer.kt` | 未出现 |
@@ -1755,7 +1755,7 @@
 | `VcsLogBranchFilterImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogBranchFilterImpl.java` | 未出现 |
 | `VcsLogDateFilterImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogDateFilterImpl.java` | 未出现 |
 | `VcsLogFilterCollectionImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogFilterCollectionImpl.java` | 未出现 |
-| `VcsLogFilters` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogFilters.kt` | 未出现 |
+| `VcsLogFilters` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogFilters.kt` | 提到过 |
 | `VcsLogHashFilterImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogHashFilterImpl.java` | 未出现 |
 | `VcsLogParentFilterImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogParentFilterImpl.kt` | 未出现 |
 | `VcsLogRangeFilterImpl` | `platform/vcs-log/impl/src/com/intellij/vcs/log/visible/filters/VcsLogRangeFilterImpl.kt` | 未出现 |
@@ -1785,7 +1785,7 @@
 | `IterateCommitsWithPrefixTest` | `platform/vcs-log/impl/test/com/intellij/vcs/log/util/IterateCommitsWithPrefixTest.kt` | 未出现 |
 | `VcsUserUtilTest` | `platform/vcs-log/impl/test/com/intellij/vcs/log/util/VcsUserUtilTest.kt` | 未出现 |
 | `VcsLogFiltererTest` | `platform/vcs-log/impl/test/com/intellij/vcs/log/visible/VcsLogFiltererTest.kt` | 未出现 |
-| `Executor` | `platform/vcs-tests/src/com/intellij/openapi/vcs/Executor.java` | 未出现 |
+| `Executor` | `platform/vcs-tests/src/com/intellij/openapi/vcs/Executor.java` | 提到过 |
 | `ExecutorContext` | `platform/vcs-tests/src/com/intellij/openapi/vcs/ExecutorContext.kt` | 未出现 |
 | `TestVcsNotifier` | `platform/vcs-tests/src/com/intellij/openapi/vcs/TestVcsNotifier.java` | 未出现 |
 | `VcsTestUtil` | `platform/vcs-tests/src/com/intellij/openapi/vcs/VcsTestUtil.java` | 未出现 |

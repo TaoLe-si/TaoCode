@@ -1,6 +1,6 @@
 # ui 机检结果
 
-枚举 1397 个类；TaoCode 文本里出现过名字的 85 个，**从未出现 1312 个**。
+枚举 1397 个类；TaoCode 文本里出现过名字的 139 个，**从未出现 1258 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -64,9 +64,9 @@
 | `MergingUpdateQueue` | `platform/ide-core/src/com/intellij/util/ui/update/MergingUpdateQueue.kt` | 未出现 |
 | `UiNotifyConnector` | `platform/ide-core/src/com/intellij/util/ui/update/UiNotifyConnector.kt` | 未出现 |
 | `Update` | `platform/ide-core/src/com/intellij/util/ui/update/Update.kt` | 提到过 |
-| `FileColorManager` | `platform/lang-api/src/com/intellij/ui/FileColorManager.java` | 未出现 |
+| `FileColorManager` | `platform/lang-api/src/com/intellij/ui/FileColorManager.java` | 提到过 |
 | `DetailView` | `platform/lang-api/src/com/intellij/ui/popup/util/DetailView.java` | 未出现 |
-| `ItemWrapper` | `platform/lang-api/src/com/intellij/ui/popup/util/ItemWrapper.java` | 未出现 |
+| `ItemWrapper` | `platform/lang-api/src/com/intellij/ui/popup/util/ItemWrapper.java` | 提到过 |
 | `SplitterItem` | `platform/lang-api/src/com/intellij/ui/popup/util/SplitterItem.java` | 未出现 |
 | `AsyncImageIcon` | `platform/lang-impl/src/com/intellij/ui/AsyncImageIcon.kt` | 未出现 |
 | `ColorLineMarkerProvider` | `platform/lang-impl/src/com/intellij/ui/ColorLineMarkerProvider.java` | 未出现 |
@@ -89,20 +89,20 @@
 | `package-info` | `platform/lang-impl/src/com/intellij/ui/debugger/package-info.java` | 未出现 |
 | `NotLookupOrSearchCondition` | `platform/lang-impl/src/com/intellij/ui/popup/NotLookupOrSearchCondition.java` | 未出现 |
 | `PopupPositionManager` | `platform/lang-impl/src/com/intellij/ui/popup/PopupPositionManager.java` | 未出现 |
-| `PopupUpdateProcessor` | `platform/lang-impl/src/com/intellij/ui/popup/PopupUpdateProcessor.java` | 未出现 |
-| `DetailController` | `platform/lang-impl/src/com/intellij/ui/popup/util/DetailController.java` | 未出现 |
+| `PopupUpdateProcessor` | `platform/lang-impl/src/com/intellij/ui/popup/PopupUpdateProcessor.java` | 提到过 |
+| `DetailController` | `platform/lang-impl/src/com/intellij/ui/popup/util/DetailController.java` | 提到过 |
 | `DetailViewImpl` | `platform/lang-impl/src/com/intellij/ui/popup/util/DetailViewImpl.java` | 未出现 |
 | `ItemWrapperListRenderer` | `platform/lang-impl/src/com/intellij/ui/popup/util/ItemWrapperListRenderer.java` | 未出现 |
 | `MasterController` | `platform/lang-impl/src/com/intellij/ui/popup/util/MasterController.java` | 未出现 |
 | `DescriptorPreview` | `platform/lang-impl/src/com/intellij/ui/preview/DescriptorPreview.kt` | 未出现 |
 | `ColorButtonBase` | `platform/lang-impl/src/com/intellij/ui/tabs/ColorButtonBase.java` | 未出现 |
 | `ColorSelectionComponent` | `platform/lang-impl/src/com/intellij/ui/tabs/ColorSelectionComponent.java` | 未出现 |
-| `EditorTabColorProviderImpl` | `platform/lang-impl/src/com/intellij/ui/tabs/EditorTabColorProviderImpl.java` | 未出现 |
-| `FileColorConfiguration` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorConfiguration.java` | 未出现 |
-| `FileColorManagerImpl` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorManagerImpl.java` | 未出现 |
-| `FileColorModelStorageManager` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorModelStorageManager.kt` | 未出现 |
+| `EditorTabColorProviderImpl` | `platform/lang-impl/src/com/intellij/ui/tabs/EditorTabColorProviderImpl.java` | 提到过 |
+| `FileColorConfiguration` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorConfiguration.java` | 提到过 |
+| `FileColorManagerImpl` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorManagerImpl.java` | 提到过 |
+| `FileColorModelStorageManager` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorModelStorageManager.kt` | 提到过 |
 | `FileColorsConfigurable` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorsConfigurable.kt` | 提到过 |
-| `FileColorsModel` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorsModel.java` | 未出现 |
+| `FileColorsModel` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorsModel.java` | 提到过 |
 | `FileColorsOptionsTopHitProvider` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorsOptionsTopHitProvider.java` | 未出现 |
 | `FileColorsUsagesCollector` | `platform/lang-impl/src/com/intellij/ui/tabs/FileColorsUsagesCollector.kt` | 未出现 |
 | `Advertiser` | `platform/lang-impl/src/com/intellij/util/ui/Advertiser.java` | 未出现 |
@@ -121,7 +121,7 @@
 | `AnActionButton` | `platform/platform-api/src/com/intellij/ui/AnActionButton.java` | 未出现 |
 | `AnActionButtonRunnable` | `platform/platform-api/src/com/intellij/ui/AnActionButtonRunnable.java` | 未出现 |
 | `AnActionButtonUpdater` | `platform/platform-api/src/com/intellij/ui/AnActionButtonUpdater.java` | 未出现 |
-| `AutoScrollFromSourceHandler` | `platform/platform-api/src/com/intellij/ui/AutoScrollFromSourceHandler.java` | 未出现 |
+| `AutoScrollFromSourceHandler` | `platform/platform-api/src/com/intellij/ui/AutoScrollFromSourceHandler.java` | 提到过 |
 | `AutoScrollToSourceHandler` | `platform/platform-api/src/com/intellij/ui/AutoScrollToSourceHandler.kt` | 未出现 |
 | `AutoScrollToSourceTaskManager` | `platform/platform-api/src/com/intellij/ui/AutoScrollToSourceTaskManager.kt` | 未出现 |
 | `BrowserHyperlinkListener` | `platform/platform-api/src/com/intellij/ui/BrowserHyperlinkListener.java` | 未出现 |
@@ -188,7 +188,7 @@
 | `InlineBanner` | `platform/platform-api/src/com/intellij/ui/InlineBanner.kt` | 未出现 |
 | `InlineBannerBase` | `platform/platform-api/src/com/intellij/ui/InlineBannerBase.kt` | 未出现 |
 | `InplaceAddEditRemovePanel` | `platform/platform-api/src/com/intellij/ui/InplaceAddEditRemovePanel.java` | 未出现 |
-| `InplaceButton` | `platform/platform-api/src/com/intellij/ui/InplaceButton.java` | 未出现 |
+| `InplaceButton` | `platform/platform-api/src/com/intellij/ui/InplaceButton.java` | 提到过 |
 | `InsertPathAction` | `platform/platform-api/src/com/intellij/ui/InsertPathAction.java` | 未出现 |
 | `IslandsState` | `platform/platform-api/src/com/intellij/ui/IslandsState.kt` | 未出现 |
 | `JBCardLayout` | `platform/platform-api/src/com/intellij/ui/JBCardLayout.java` | 未出现 |
@@ -217,7 +217,7 @@
 | `PathTextClipping` | `platform/platform-api/src/com/intellij/ui/PathTextClipping.kt` | 未出现 |
 | `PathsChooserComponent` | `platform/platform-api/src/com/intellij/ui/PathsChooserComponent.java` | 未出现 |
 | `PlainInlineBanner` | `platform/platform-api/src/com/intellij/ui/PlainInlineBanner.kt` | 未出现 |
-| `PopupHandler` | `platform/platform-api/src/com/intellij/ui/PopupHandler.java` | 未出现 |
+| `PopupHandler` | `platform/platform-api/src/com/intellij/ui/PopupHandler.java` | 提到过 |
 | `PopupMenuListenerAdapter` | `platform/platform-api/src/com/intellij/ui/PopupMenuListenerAdapter.java` | 未出现 |
 | `PortField` | `platform/platform-api/src/com/intellij/ui/PortField.java` | 未出现 |
 | `RawCommandLineEditor` | `platform/platform-api/src/com/intellij/ui/RawCommandLineEditor.java` | 未出现 |
@@ -278,7 +278,7 @@
 | `JBLoadingPanel` | `platform/platform-api/src/com/intellij/ui/components/JBLoadingPanel.kt` | 未出现 |
 | `JBLoadingPanelListener` | `platform/platform-api/src/com/intellij/ui/components/JBLoadingPanelListener.java` | 未出现 |
 | `JBMenu` | `platform/platform-api/src/com/intellij/ui/components/JBMenu.java` | 未出现 |
-| `JBOptionButton` | `platform/platform-api/src/com/intellij/ui/components/JBOptionButton.kt` | 未出现 |
+| `JBOptionButton` | `platform/platform-api/src/com/intellij/ui/components/JBOptionButton.kt` | 提到过 |
 | `JBPanelWithEmptyText` | `platform/platform-api/src/com/intellij/ui/components/JBPanelWithEmptyText.java` | 提到过 |
 | `JBPasswordField` | `platform/platform-api/src/com/intellij/ui/components/JBPasswordField.java` | 未出现 |
 | `JBRadioButton` | `platform/platform-api/src/com/intellij/ui/components/JBRadioButton.java` | 未出现 |
@@ -338,13 +338,13 @@
 | `BackgroundRoundedPanel` | `platform/platform-api/src/com/intellij/ui/components/panels/BackgroundRoundedPanel.kt` | 未出现 |
 | `FlowLayoutWrapper` | `platform/platform-api/src/com/intellij/ui/components/panels/FlowLayoutWrapper.java` | 未出现 |
 | `HorizontalBox` | `platform/platform-api/src/com/intellij/ui/components/panels/HorizontalBox.java` | 未出现 |
-| `HorizontalLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/HorizontalLayout.kt` | 未出现 |
+| `HorizontalLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/HorizontalLayout.kt` | 提到过 |
 | `LayoutUtil` | `platform/platform-api/src/com/intellij/ui/components/panels/LayoutUtil.kt` | 未出现 |
 | `ListLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/ListLayout.kt` | 未出现 |
 | `NonOpaquePanel` | `platform/platform-api/src/com/intellij/ui/components/panels/NonOpaquePanel.java` | 未出现 |
 | `OpaquePanel` | `platform/platform-api/src/com/intellij/ui/components/panels/OpaquePanel.java` | 未出现 |
 | `OpaqueWrapper` | `platform/platform-api/src/com/intellij/ui/components/panels/OpaqueWrapper.java` | 未出现 |
-| `RowGridLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/RowGridLayout.kt` | 未出现 |
+| `RowGridLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/RowGridLayout.kt` | 提到过 |
 | `ValidatingComponent` | `platform/platform-api/src/com/intellij/ui/components/panels/ValidatingComponent.java` | 未出现 |
 | `VerticalBox` | `platform/platform-api/src/com/intellij/ui/components/panels/VerticalBox.java` | 未出现 |
 | `VerticalLayout` | `platform/platform-api/src/com/intellij/ui/components/panels/VerticalLayout.java` | 未出现 |
@@ -389,7 +389,7 @@
 | `GridLayout` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/GridLayout.kt` | 未出现 |
 | `GridLayoutComponentProperty` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/GridLayoutComponentProperty.kt` | 未出现 |
 | `UnscaledGaps` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/UnscaledGaps.kt` | 未出现 |
-| `UnscaledGapsX` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/UnscaledGapsX.kt` | 未出现 |
+| `UnscaledGapsX` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/UnscaledGapsX.kt` | 提到过 |
 | `UnscaledGapsY` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/UnscaledGapsY.kt` | 未出现 |
 | `RowBuilder` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/builders/RowBuilder.kt` | 未出现 |
 | `RowsGridBuilder` | `platform/platform-api/src/com/intellij/ui/dsl/gridLayout/builders/RowsGridBuilder.kt` | 未出现 |
@@ -484,7 +484,7 @@
 | `TabsListener` | `platform/platform-api/src/com/intellij/ui/tabs/TabsListener.java` | 提到过 |
 | `TabsUtil` | `platform/platform-api/src/com/intellij/ui/tabs/TabsUtil.java` | 提到过 |
 | `UiDecorator` | `platform/platform-api/src/com/intellij/ui/tabs/UiDecorator.kt` | 未出现 |
-| `ActionButton` | `platform/platform-api/src/com/intellij/ui/tabs/impl/ActionButton.java` | 未出现 |
+| `ActionButton` | `platform/platform-api/src/com/intellij/ui/tabs/impl/ActionButton.java` | 提到过 |
 | `ActionPanel` | `platform/platform-api/src/com/intellij/ui/tabs/impl/ActionPanel.java` | 提到过 |
 | `DefaultEditorTabsPainter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/DefaultEditorTabsPainter.java` | 未出现 |
 | `DefaultTabPainterAdapter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/DefaultTabPainterAdapter.kt` | 未出现 |
@@ -493,7 +493,7 @@
 | `JBDefaultTabsBorder` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBDefaultTabsBorder.kt` | 未出现 |
 | `JBEditorTabPainter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBEditorTabPainter.kt` | 未出现 |
 | `JBEditorTabs` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBEditorTabs.kt` | 未出现 |
-| `JBEditorTabsBorder` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBEditorTabsBorder.kt` | 未出现 |
+| `JBEditorTabsBorder` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBEditorTabsBorder.kt` | 提到过 |
 | `JBEditorTabsPainter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBEditorTabsPainter.java` | 未出现 |
 | `JBTabsImpl` | `platform/platform-api/src/com/intellij/ui/tabs/impl/JBTabsImpl.kt` | 提到过 |
 | `LayoutPassInfo` | `platform/platform-api/src/com/intellij/ui/tabs/impl/LayoutPassInfo.java` | 未出现 |
@@ -506,21 +506,21 @@
 | `TabSideSplitter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/TabSideSplitter.java` | 未出现 |
 | `ToolWindowTabPainter` | `platform/platform-api/src/com/intellij/ui/tabs/impl/ToolWindowTabPainter.kt` | 未出现 |
 | `UIThemeCustomization` | `platform/platform-api/src/com/intellij/ui/tabs/impl/UIThemeCustomization.kt` | 未出现 |
-| `CompressibleMultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/CompressibleMultiRowLayout.kt` | 未出现 |
+| `CompressibleMultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/CompressibleMultiRowLayout.kt` | 提到过 |
 | `CompressibleTabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/CompressibleTabsRow.kt` | 未出现 |
-| `MultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/MultiRowLayout.kt` | 未出现 |
-| `MultiRowPassInfo` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/MultiRowPassInfo.kt` | 未出现 |
-| `ScrollableMultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/ScrollableMultiRowLayout.kt` | 未出现 |
+| `MultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/MultiRowLayout.kt` | 提到过 |
+| `MultiRowPassInfo` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/MultiRowPassInfo.kt` | 提到过 |
+| `ScrollableMultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/ScrollableMultiRowLayout.kt` | 提到过 |
 | `ScrollableTabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/ScrollableTabsRow.kt` | 未出现 |
-| `SimpleTabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/SimpleTabsRow.kt` | 未出现 |
-| `TabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/TabsRow.kt` | 未出现 |
+| `SimpleTabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/SimpleTabsRow.kt` | 提到过 |
+| `TabsRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/TabsRow.kt` | 提到过 |
 | `WrapMultiRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/multiRow/WrapMultiRowLayout.kt` | 提到过 |
 | `ScrollableSingleRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/singleRow/ScrollableSingleRowLayout.java` | 提到过 |
 | `SingleRowLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/singleRow/SingleRowLayout.java` | 提到过 |
 | `SingleRowLayoutStrategy` | `platform/platform-api/src/com/intellij/ui/tabs/impl/singleRow/SingleRowLayoutStrategy.java` | 提到过 |
 | `SingleRowPassInfo` | `platform/platform-api/src/com/intellij/ui/tabs/impl/singleRow/SingleRowPassInfo.java` | 未出现 |
 | `WindowTabsLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/singleRow/WindowTabsLayout.java` | 未出现 |
-| `TableLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/table/TableLayout.java` | 未出现 |
+| `TableLayout` | `platform/platform-api/src/com/intellij/ui/tabs/impl/table/TableLayout.java` | 提到过 |
 | `TablePassInfo` | `platform/platform-api/src/com/intellij/ui/tabs/impl/table/TablePassInfo.java` | 未出现 |
 | `TableRow` | `platform/platform-api/src/com/intellij/ui/tabs/impl/table/TableRow.java` | 未出现 |
 | `TabTheme` | `platform/platform-api/src/com/intellij/ui/tabs/impl/themes/TabTheme.kt` | 未出现 |
@@ -712,11 +712,11 @@
 | `SimpleEditorCustomization` | `platform/platform-impl/src/com/intellij/ui/SimpleEditorCustomization.java` | 未出现 |
 | `SlideComponent` | `platform/platform-impl/src/com/intellij/ui/SlideComponent.java` | 未出现 |
 | `SoftWrapsEditorCustomization` | `platform/platform-impl/src/com/intellij/ui/SoftWrapsEditorCustomization.java` | 未出现 |
-| `SpeedSearchBase` | `platform/platform-impl/src/com/intellij/ui/SpeedSearchBase.java` | 未出现 |
-| `SpeedSearchComparator` | `platform/platform-impl/src/com/intellij/ui/SpeedSearchComparator.java` | 未出现 |
+| `SpeedSearchBase` | `platform/platform-impl/src/com/intellij/ui/SpeedSearchBase.java` | 提到过 |
+| `SpeedSearchComparator` | `platform/platform-impl/src/com/intellij/ui/SpeedSearchComparator.java` | 提到过 |
 | `SpeedSearchObjectWithWeight` | `platform/platform-impl/src/com/intellij/ui/SpeedSearchObjectWithWeight.java` | 未出现 |
 | `StateRestoringCheckBox` | `platform/platform-impl/src/com/intellij/ui/StateRestoringCheckBox.java` | 未出现 |
-| `StatusPanel` | `platform/platform-impl/src/com/intellij/ui/StatusPanel.java` | 未出现 |
+| `StatusPanel` | `platform/platform-impl/src/com/intellij/ui/StatusPanel.java` | 提到过 |
 | `StrikeoutLabel` | `platform/platform-impl/src/com/intellij/ui/StrikeoutLabel.java` | 未出现 |
 | `SuitableFontProviderImpl` | `platform/platform-impl/src/com/intellij/ui/SuitableFontProviderImpl.java` | 未出现 |
 | `SwingActionDelegate` | `platform/platform-impl/src/com/intellij/ui/SwingActionDelegate.java` | 未出现 |
@@ -724,7 +724,7 @@
 | `SystemNotificationsImpl` | `platform/platform-impl/src/com/intellij/ui/SystemNotificationsImpl.java` | 未出现 |
 | `SystemTrayNotifications` | `platform/platform-impl/src/com/intellij/ui/SystemTrayNotifications.java` | 未出现 |
 | `TabbedPane` | `platform/platform-impl/src/com/intellij/ui/TabbedPane.java` | 提到过 |
-| `TabbedPaneImpl` | `platform/platform-impl/src/com/intellij/ui/TabbedPaneImpl.java` | 未出现 |
+| `TabbedPaneImpl` | `platform/platform-impl/src/com/intellij/ui/TabbedPaneImpl.java` | 提到过 |
 | `TabbedPaneWrapper` | `platform/platform-impl/src/com/intellij/ui/TabbedPaneWrapper.java` | 未出现 |
 | `TableActions` | `platform/platform-impl/src/com/intellij/ui/TableActions.java` | 未出现 |
 | `TableColumnAnimator` | `platform/platform-impl/src/com/intellij/ui/TableColumnAnimator.java` | 未出现 |
@@ -745,7 +745,7 @@
 | `TreeActions` | `platform/platform-impl/src/com/intellij/ui/TreeActions.java` | 未出现 |
 | `TreeExpandCollapse` | `platform/platform-impl/src/com/intellij/ui/TreeExpandCollapse.java` | 未出现 |
 | `TreeExpandableItemsHandler` | `platform/platform-impl/src/com/intellij/ui/TreeExpandableItemsHandler.java` | 未出现 |
-| `TreeSpeedSearch` | `platform/platform-impl/src/com/intellij/ui/TreeSpeedSearch.java` | 未出现 |
+| `TreeSpeedSearch` | `platform/platform-impl/src/com/intellij/ui/TreeSpeedSearch.java` | 提到过 |
 | `TreeSpeedSearchInsideCollapsedNodes` | `platform/platform-impl/src/com/intellij/ui/TreeSpeedSearchInsideCollapsedNodes.java` | 未出现 |
 | `TreeTableSpeedSearch` | `platform/platform-impl/src/com/intellij/ui/TreeTableSpeedSearch.java` | 未出现 |
 | `TreeUIHelperImpl` | `platform/platform-impl/src/com/intellij/ui/TreeUIHelperImpl.java` | 未出现 |
@@ -770,7 +770,7 @@
 | `FloatingToolbarCustomizer` | `platform/platform-impl/src/com/intellij/ui/codeFloatingToolbar/FloatingToolbarCustomizer.kt` | 未出现 |
 | `FloatingToolbarTabActions` | `platform/platform-impl/src/com/intellij/ui/codeFloatingToolbar/FloatingToolbarTabActions.kt` | 未出现 |
 | `RefactorDropdownActionGroup` | `platform/platform-impl/src/com/intellij/ui/codeFloatingToolbar/RefactorDropdownActionGroup.kt` | 未出现 |
-| `AlphaSliderComponent` | `platform/platform-impl/src/com/intellij/ui/colorpicker/AlphaSliderComponent.kt` | 未出现 |
+| `AlphaSliderComponent` | `platform/platform-impl/src/com/intellij/ui/colorpicker/AlphaSliderComponent.kt` | 提到过 |
 | `ColorAdjustPanel` | `platform/platform-impl/src/com/intellij/ui/colorpicker/ColorAdjustPanel.kt` | 未出现 |
 | `ColorIndicator` | `platform/platform-impl/src/com/intellij/ui/colorpicker/ColorIndicator.kt` | 未出现 |
 | `ColorPickerBuilder` | `platform/platform-impl/src/com/intellij/ui/colorpicker/ColorPickerBuilder.kt` | 未出现 |
@@ -790,8 +790,8 @@
 | `RecentColorsPalette` | `platform/platform-impl/src/com/intellij/ui/colorpicker/RecentColorsPalette.kt` | 未出现 |
 | `SaturationBrightnessComponent` | `platform/platform-impl/src/com/intellij/ui/colorpicker/SaturationBrightnessComponent.kt` | 未出现 |
 | `SliderComponent` | `platform/platform-impl/src/com/intellij/ui/colorpicker/SliderComponent.kt` | 未出现 |
-| `Utils` | `platform/platform-impl/src/com/intellij/ui/colorpicker/Utils.kt` | 未出现 |
-| `BasicOptionButtonUI` | `platform/platform-impl/src/com/intellij/ui/components/BasicOptionButtonUI.kt` | 未出现 |
+| `Utils` | `platform/platform-impl/src/com/intellij/ui/colorpicker/Utils.kt` | 提到过 |
+| `BasicOptionButtonUI` | `platform/platform-impl/src/com/intellij/ui/components/BasicOptionButtonUI.kt` | 提到过 |
 | `DefaultLinkButtonUI` | `platform/platform-impl/src/com/intellij/ui/components/DefaultLinkButtonUI.kt` | 未出现 |
 | `DisclosureButton` | `platform/platform-impl/src/com/intellij/ui/components/DisclosureButton.kt` | 未出现 |
 | `GradientViewport` | `platform/platform-impl/src/com/intellij/ui/components/GradientViewport.java` | 未出现 |
@@ -823,7 +823,7 @@
 | `TabbedContentImpl` | `platform/platform-impl/src/com/intellij/ui/content/impl/TabbedContentImpl.java` | 未出现 |
 | `ToolWindowContentPostProcessor` | `platform/platform-impl/src/com/intellij/ui/content/impl/ToolWindowContentPostProcessor.kt` | 未出现 |
 | `PinToolwindowTabAction` | `platform/platform-impl/src/com/intellij/ui/content/tabs/PinToolwindowTabAction.java` | 提到过 |
-| `TabbedContentAction` | `platform/platform-impl/src/com/intellij/ui/content/tabs/TabbedContentAction.java` | 未出现 |
+| `TabbedContentAction` | `platform/platform-impl/src/com/intellij/ui/content/tabs/TabbedContentAction.java` | 提到过 |
 | `DockManagerImpl` | `platform/platform-impl/src/com/intellij/ui/docking/impl/DockManagerImpl.kt` | 未出现 |
 | `DockWindow` | `platform/platform-impl/src/com/intellij/ui/docking/impl/DockWindow.kt` | 未出现 |
 | `DialogDragImageView` | `platform/platform-impl/src/com/intellij/ui/drag/DialogDragImageView.kt` | 未出现 |
@@ -881,9 +881,9 @@
 | `MigLayout` | `platform/platform-impl/src/com/intellij/ui/layout/migLayout/patched/MigLayout.kt` | 未出现 |
 | `SwingComponentWrapper` | `platform/platform-impl/src/com/intellij/ui/layout/migLayout/patched/SwingComponentWrapper.kt` | 未出现 |
 | `SwingContainerWrapper` | `platform/platform-impl/src/com/intellij/ui/layout/migLayout/patched/SwingContainerWrapper.kt` | 未出现 |
-| `TargetPresentationMainRenderer` | `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationMainRenderer.kt` | 未出现 |
-| `TargetPresentationRenderer` | `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationRenderer.kt` | 未出现 |
-| `targetPopup` | `platform/platform-impl/src/com/intellij/ui/list/targetPopup.kt` | 未出现 |
+| `TargetPresentationMainRenderer` | `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationMainRenderer.kt` | 提到过 |
+| `TargetPresentationRenderer` | `platform/platform-impl/src/com/intellij/ui/list/TargetPresentationRenderer.kt` | 提到过 |
+| `targetPopup` | `platform/platform-impl/src/com/intellij/ui/list/targetPopup.kt` | 提到过 |
 | `MacColorSpaceLoader` | `platform/platform-impl/src/com/intellij/ui/mac/MacColorSpaceLoader.java` | 未出现 |
 | `MacDockDelegate` | `platform/platform-impl/src/com/intellij/ui/mac/MacDockDelegate.kt` | 未出现 |
 | `MacDockMenuActions` | `platform/platform-impl/src/com/intellij/ui/mac/MacDockMenuActions.kt` | 未出现 |
@@ -897,7 +897,7 @@
 | `MacWinTabsHandlerV2` | `platform/platform-impl/src/com/intellij/ui/mac/MacWinTabsHandlerV2.java` | 未出现 |
 | `MacWindowPreferences` | `platform/platform-impl/src/com/intellij/ui/mac/MacWindowPreferences.kt` | 未出现 |
 | `MergeAllWindowsAction` | `platform/platform-impl/src/com/intellij/ui/mac/MergeAllWindowsAction.java` | 未出现 |
-| `WindowTabsComponent` | `platform/platform-impl/src/com/intellij/ui/mac/WindowTabsComponent.java` | 未出现 |
+| `WindowTabsComponent` | `platform/platform-impl/src/com/intellij/ui/mac/WindowTabsComponent.java` | 提到过 |
 | `Menu` | `platform/platform-impl/src/com/intellij/ui/mac/screenmenu/Menu.java` | 提到过 |
 | `MenuBar` | `platform/platform-impl/src/com/intellij/ui/mac/screenmenu/MenuBar.java` | 未出现 |
 | `MenuItem` | `platform/platform-impl/src/com/intellij/ui/mac/screenmenu/MenuItem.java` | 未出现 |
@@ -953,9 +953,9 @@
 | `IdeaMenuUI` | `platform/platform-impl/src/com/intellij/ui/plaf/beg/IdeaMenuUI.java` | 未出现 |
 | `AbstractPopup` | `platform/platform-impl/src/com/intellij/ui/popup/AbstractPopup.java` | 提到过 |
 | `ActionGroupPopupActivity` | `platform/platform-impl/src/com/intellij/ui/popup/ActionGroupPopupActivity.kt` | 未出现 |
-| `ActionPopupOptions` | `platform/platform-impl/src/com/intellij/ui/popup/ActionPopupOptions.kt` | 未出现 |
-| `ActionPopupStep` | `platform/platform-impl/src/com/intellij/ui/popup/ActionPopupStep.java` | 未出现 |
-| `ActionStepBuilder` | `platform/platform-impl/src/com/intellij/ui/popup/ActionStepBuilder.java` | 未出现 |
+| `ActionPopupOptions` | `platform/platform-impl/src/com/intellij/ui/popup/ActionPopupOptions.kt` | 提到过 |
+| `ActionPopupStep` | `platform/platform-impl/src/com/intellij/ui/popup/ActionPopupStep.java` | 提到过 |
+| `ActionStepBuilder` | `platform/platform-impl/src/com/intellij/ui/popup/ActionStepBuilder.java` | 提到过 |
 | `BackendRenderedPopup` | `platform/platform-impl/src/com/intellij/ui/popup/BackendRenderedPopup.kt` | 未出现 |
 | `BalloonPopupBuilderImpl` | `platform/platform-impl/src/com/intellij/ui/popup/BalloonPopupBuilderImpl.java` | 未出现 |
 | `ClosableByLeftArrow` | `platform/platform-impl/src/com/intellij/ui/popup/ClosableByLeftArrow.java` | 未出现 |
@@ -966,18 +966,18 @@
 | `MovablePopup` | `platform/platform-impl/src/com/intellij/ui/popup/MovablePopup.java` | 未出现 |
 | `NextStepHandler` | `platform/platform-impl/src/com/intellij/ui/popup/NextStepHandler.java` | 未出现 |
 | `NotificationPopup` | `platform/platform-impl/src/com/intellij/ui/popup/NotificationPopup.java` | 未出现 |
-| `NumericMnemonicItem` | `platform/platform-impl/src/com/intellij/ui/popup/NumericMnemonicItem.java` | 未出现 |
+| `NumericMnemonicItem` | `platform/platform-impl/src/com/intellij/ui/popup/NumericMnemonicItem.java` | 提到过 |
 | `PopupAlignableComponent` | `platform/platform-impl/src/com/intellij/ui/popup/PopupAlignableComponent.kt` | 未出现 |
 | `PopupComponent` | `platform/platform-impl/src/com/intellij/ui/popup/PopupComponent.java` | 未出现 |
 | `PopupComponentFactory` | `platform/platform-impl/src/com/intellij/ui/popup/PopupComponentFactory.kt` | 未出现 |
 | `PopupDispatcher` | `platform/platform-impl/src/com/intellij/ui/popup/PopupDispatcher.java` | 未出现 |
-| `PopupFactoryImpl` | `platform/platform-impl/src/com/intellij/ui/popup/PopupFactoryImpl.java` | 未出现 |
+| `PopupFactoryImpl` | `platform/platform-impl/src/com/intellij/ui/popup/PopupFactoryImpl.java` | 提到过 |
 | `PopupListAdapter` | `platform/platform-impl/src/com/intellij/ui/popup/PopupListAdapter.java` | 未出现 |
 | `PopupTableAdapter` | `platform/platform-impl/src/com/intellij/ui/popup/PopupTableAdapter.java` | 未出现 |
 | `PopupTreeAdapter` | `platform/platform-impl/src/com/intellij/ui/popup/PopupTreeAdapter.java` | 未出现 |
 | `StackingPopupDispatcherImpl` | `platform/platform-impl/src/com/intellij/ui/popup/StackingPopupDispatcherImpl.java` | 未出现 |
 | `StateActionGroupPopup` | `platform/platform-impl/src/com/intellij/ui/popup/StateActionGroupPopup.kt` | 未出现 |
-| `WizardPopup` | `platform/platform-impl/src/com/intellij/ui/popup/WizardPopup.java` | 未出现 |
+| `WizardPopup` | `platform/platform-impl/src/com/intellij/ui/popup/WizardPopup.java` | 提到过 |
 | `AsyncPopupStep` | `platform/platform-impl/src/com/intellij/ui/popup/async/AsyncPopupStep.kt` | 未出现 |
 | `AsyncPopupWaiter` | `platform/platform-impl/src/com/intellij/ui/popup/async/AsyncPopupWaiter.kt` | 未出现 |
 | `package-info` | `platform/platform-impl/src/com/intellij/ui/popup/async/package-info.java` | 未出现 |
@@ -985,13 +985,13 @@
 | `FilterableListPopupStep` | `platform/platform-impl/src/com/intellij/ui/popup/list/FilterableListPopupStep.kt` | 未出现 |
 | `IconListPopupRenderer` | `platform/platform-impl/src/com/intellij/ui/popup/list/IconListPopupRenderer.java` | 未出现 |
 | `InlineActionsUtil` | `platform/platform-impl/src/com/intellij/ui/popup/list/InlineActionsUtil.kt` | 未出现 |
-| `ListPopupImpl` | `platform/platform-impl/src/com/intellij/ui/popup/list/ListPopupImpl.java` | 未出现 |
+| `ListPopupImpl` | `platform/platform-impl/src/com/intellij/ui/popup/list/ListPopupImpl.java` | 提到过 |
 | `ListPopupModel` | `platform/platform-impl/src/com/intellij/ui/popup/list/ListPopupModel.java` | 未出现 |
 | `ListPopupWrapper` | `platform/platform-impl/src/com/intellij/ui/popup/list/ListPopupWrapper.kt` | 未出现 |
 | `NonActionsPopupInlineSupport` | `platform/platform-impl/src/com/intellij/ui/popup/list/NonActionsPopupInlineSupport.kt` | 未出现 |
-| `PopupInlineActionsSupport` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupInlineActionsSupport.kt` | 未出现 |
-| `PopupInlineActionsSupportImpl` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupInlineActionsSupportImpl.kt` | 未出现 |
-| `PopupListElementRenderer` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupListElementRenderer.java` | 未出现 |
+| `PopupInlineActionsSupport` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupInlineActionsSupport.kt` | 提到过 |
+| `PopupInlineActionsSupportImpl` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupInlineActionsSupportImpl.kt` | 提到过 |
+| `PopupListElementRenderer` | `platform/platform-impl/src/com/intellij/ui/popup/list/PopupListElementRenderer.java` | 提到过 |
 | `MockConfirmation` | `platform/platform-impl/src/com/intellij/ui/popup/mock/MockConfirmation.java` | 未出现 |
 | `package-info` | `platform/platform-impl/src/com/intellij/ui/popup/mock/package-info.java` | 未出现 |
 | `TreePopupImpl` | `platform/platform-impl/src/com/intellij/ui/popup/tree/TreePopupImpl.java` | 未出现 |
@@ -1113,7 +1113,7 @@
 | `IconTestUtil` | `platform/testFramework/src/com/intellij/ui/IconTestUtil.java` | 未出现 |
 | `RenameDialogInterceptor` | `platform/testFramework/src/com/intellij/ui/RenameDialogInterceptor.java` | 未出现 |
 | `TreeTestUtil` | `platform/testFramework/src/com/intellij/ui/tree/TreeTestUtil.java` | 未出现 |
-| `ColorHexUtil` | `platform/util/src/com/intellij/ui/ColorHexUtil.java` | 未出现 |
+| `ColorHexUtil` | `platform/util/src/com/intellij/ui/ColorHexUtil.java` | 提到过 |
 | `IconManager` | `platform/util/src/com/intellij/ui/IconManager.kt` | 未出现 |
 | `NewUiValue` | `platform/util/src/com/intellij/ui/NewUiValue.java` | 未出现 |
 | `PlatformIcons` | `platform/util/src/com/intellij/ui/PlatformIcons.kt` | 未出现 |
@@ -1144,7 +1144,7 @@
 | `ClientProperty` | `platform/util/ui/src/com/intellij/ui/ClientProperty.java` | 未出现 |
 | `CollapsiblePanel` | `platform/util/ui/src/com/intellij/ui/CollapsiblePanel.java` | 未出现 |
 | `CollapsingListener` | `platform/util/ui/src/com/intellij/ui/CollapsingListener.java` | 未出现 |
-| `CollectionComboBoxModel` | `platform/util/ui/src/com/intellij/ui/CollectionComboBoxModel.java` | 未出现 |
+| `CollectionComboBoxModel` | `platform/util/ui/src/com/intellij/ui/CollectionComboBoxModel.java` | 提到过 |
 | `CollectionListModel` | `platform/util/ui/src/com/intellij/ui/CollectionListModel.java` | 未出现 |
 | `Color16` | `platform/util/ui/src/com/intellij/ui/Color16.kt` | 未出现 |
 | `ColorMixture` | `platform/util/ui/src/com/intellij/ui/ColorMixture.kt` | 未出现 |
@@ -1162,10 +1162,10 @@
 | `Gradient` | `platform/util/ui/src/com/intellij/ui/Gradient.java` | 未出现 |
 | `Graphics2DDelegate` | `platform/util/ui/src/com/intellij/ui/Graphics2DDelegate.java` | 未出现 |
 | `Graphics2DLog` | `platform/util/ui/src/com/intellij/ui/Graphics2DLog.java` | 未出现 |
-| `Gray` | `platform/util/ui/src/com/intellij/ui/Gray.java` | 未出现 |
+| `Gray` | `platform/util/ui/src/com/intellij/ui/Gray.java` | 提到过 |
 | `HyperlinkAdapter` | `platform/util/ui/src/com/intellij/ui/HyperlinkAdapter.java` | 未出现 |
 | `JBAutoScroller` | `platform/util/ui/src/com/intellij/ui/JBAutoScroller.java` | 未出现 |
-| `JBColor` | `platform/util/ui/src/com/intellij/ui/JBColor.java` | 未出现 |
+| `JBColor` | `platform/util/ui/src/com/intellij/ui/JBColor.java` | 提到过 |
 | `JBGradientPaint` | `platform/util/ui/src/com/intellij/ui/JBGradientPaint.java` | 未出现 |
 | `JreHiDpiUtil` | `platform/util/ui/src/com/intellij/ui/JreHiDpiUtil.kt` | 未出现 |
 | `LightColors` | `platform/util/ui/src/com/intellij/ui/LightColors.java` | 提到过 |
@@ -1245,7 +1245,7 @@
 | `RenderingUtil` | `platform/util/ui/src/com/intellij/ui/render/RenderingUtil.java` | 未出现 |
 | `AbstractScaleContextAware` | `platform/util/ui/src/com/intellij/ui/scale/AbstractScaleContextAware.java` | 未出现 |
 | `DerivedScaleType` | `platform/util/ui/src/com/intellij/ui/scale/DerivedScaleType.java` | 未出现 |
-| `JBUIScale` | `platform/util/ui/src/com/intellij/ui/scale/JBUIScale.kt` | 未出现 |
+| `JBUIScale` | `platform/util/ui/src/com/intellij/ui/scale/JBUIScale.kt` | 提到过 |
 | `Scale` | `platform/util/ui/src/com/intellij/ui/scale/Scale.kt` | 提到过 |
 | `ScaleContext` | `platform/util/ui/src/com/intellij/ui/scale/ScaleContext.kt` | 未出现 |
 | `ScaleContextAware` | `platform/util/ui/src/com/intellij/ui/scale/ScaleContextAware.java` | 未出现 |
@@ -1312,7 +1312,7 @@
 | `JBRectangle` | `platform/util/ui/src/com/intellij/util/ui/JBRectangle.java` | 未出现 |
 | `JBScalableIcon` | `platform/util/ui/src/com/intellij/util/ui/JBScalableIcon.java` | 未出现 |
 | `JBSwingUtilities` | `platform/util/ui/src/com/intellij/util/ui/JBSwingUtilities.java` | 未出现 |
-| `JBUI` | `platform/util/ui/src/com/intellij/util/ui/JBUI.java` | 未出现 |
+| `JBUI` | `platform/util/ui/src/com/intellij/util/ui/JBUI.java` | 提到过 |
 | `JBValue` | `platform/util/ui/src/com/intellij/util/ui/JBValue.java` | 未出现 |
 | `JLabelUtil` | `platform/util/ui/src/com/intellij/util/ui/JLabelUtil.kt` | 未出现 |
 | `Layers` | `platform/util/ui/src/com/intellij/util/ui/Layers.java` | 提到过 |

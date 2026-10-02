@@ -1090,7 +1090,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
           key === 'autoSaveFiles' || key === 'autoSaveIfInactive' || key === 'isUseSafeWrite' ||
           key === 'confirmExit' || key === 'isShowWelcomeScreen' || key === 'confirmOpenNewProject2' ||
           key === 'processCloseConfirmation' || key === 'inactiveTimeout' || key === 'supportScreenReaders' ||
-          key === 'autoShowProcessPopup' || key === 'foldConsoleLines' || key === 'foldExceptions' || key === 'diffContextLines' || key === 'externalTools' || key === 'showStickyLines' || key === 'stickyLinesLimit'
+          key === 'autoShowProcessPopup' || key === 'fuzzyFileSearch' || key === 'foldConsoleLines' || key === 'foldExceptions' || key === 'diffContextLines' || key === 'externalTools' || key === 'showStickyLines' || key === 'stickyLinesLimit'
         if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
         if (key === 'inactiveTimeout') {
           // UINumericRange(15, 1, 300): values outside the range snap to the bounds.

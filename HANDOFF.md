@@ -5,7 +5,7 @@
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1371/1371** | 2026-10-02；最近一批新增 `quick-definition` 9 条、`choose-target` 11 条 |
+| `npm test` | **1399/1399** | 2026-10-02；最近一批新增 `tests/b6-verdict.test.mjs` 7 条（`fuzzy-match` 9 条、`search-everywhere` 20 条） |
 | `npx vite build` | ✓（需**手动**跑，再 `build-native-locked.bat` 同步到 `build/ui`） | 构建脚本只做 `cmake --build` + 拷 `dist`，**不含 vite** |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
@@ -18,6 +18,23 @@
 另外把 JDT 的 workspace folder 收窄成**已链接的子工程**（`ServerConfig::workspace_folders`），
 AE2 那种布局上工程数 6 → 1、诊断 2100+ 批 → 5 批。逐条明细在 `docs/ui-parity-checklist.md` 的
 第七十七～七十九批。
+
+**再往后三批（第八十～八十二批）**：**第八十批**补齐文件书签的三条菜单挂点（标签页右键 / 项目视图 /
+「添加另一书签…」），并修掉「面板没打开时点了没反应」——那个列表对话框原本挂在 `BookmarksPanel.vue` 里，
+而面板是条件渲染的，现已提到外壳 `App.vue`。**第八十一批**补 gutter（装订线）右键菜单
+（`src/gutterMenu.ts`）；踩到的坑记在清单里：`EditorView.domEventHandlers` 只挂在 `.cm-content` 上，
+装订线是它的兄弟节点，必须用 `ViewPlugin` 自己往 `.cm-gutters` 挂（捕获阶段）。
+**第八十二批**做了 Search Everywhere 文件来源的 **Smith-Waterman 模糊匹配**
+（`src/fuzzyMatch.ts`，含 `fuzzyMatchPath` 的 0.7 阈值回退），并接上排序权重、高亮与一个
+**默认关闭**的开关 `fuzzyFileSearch`（上游 `search.everywhere.fuzzy.files.enabled` 默认 false）。
+那个开关暴露了一个**只有真机能发现的跨语言缺陷**：`settingsModel.ts` 与 `bridge.ts` 都有这个键，
+**native 侧的 `GENERAL_SETTING_KEYS` 漏了**，`validate_general_patch` 于是判 `INVALID_SETTINGS` ——
+界面能勾、永远存不下来。两侧补齐 + 加了守卫（ctest 与 `tests/b6-verdict.test.mjs` 各一条）。
+**教训**：新加一个设置必须 native 两侧（`settings_schema.hpp` 的键表 + `settings_schema.cpp` 的默认值）
+同时登记，TypeScript 判据查不出这一层。同批还交了两份判决材料：
+`scripts/verdict_signals.py`（逐类机械信号）与 `docs/inventory/verdict-actions.md`
+（`actions` 域 **317 类逐条判决**：`[x]` 12 / `[~]` 36 / `[ ]` 6 / `[-]` 263），
+门控 `tests/b6-verdict.test.mjs` 会在覆盖面、引用真实性、四档计数、四个上游常量任一处漂移时失败。
 
 ## 本轮（2026-09-27 晚）做了什么 —— 历史存档
 

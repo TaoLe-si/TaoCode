@@ -11,8 +11,10 @@ import { ArrowRight, Search, X } from 'lucide-vue-next'
 import SearchEverywherePreview from './SearchEverywherePreview.vue'
 import { clampPopupLocation, parsePopupBounds, serializePopupBounds, type PopupBounds } from '../popupBounds'
 import {
+  SEARCH_EVERYWHERE_LIMIT,
   SEARCH_EVERYWHERE_TABS,
   cycleSearchEverywhereTab,
+  fuzzyTitleFragments,
   moveSearchEverywhereIndex,
   searchEverywhereResults,
   searchEverywhereSourceLabel,
@@ -20,11 +22,27 @@ import {
   type SearchEverywhereTab,
 } from '../searchEverywhere'
 
+/** 把一段文本按 [start,end) 区间切成普通段与高亮段，模板里直接 v-for 渲染。 */
+function highlightParts(text: string, fragments: readonly [number, number][]) {
+  if (!fragments.length) return [{ text, hit: false }]
+  const parts: { text: string; hit: boolean }[] = []
+  let cursor = 0
+  for (const [start, end] of fragments) {
+    if (start > cursor) parts.push({ text: text.slice(cursor, start), hit: false })
+    parts.push({ text: text.slice(start, end), hit: true })
+    cursor = end
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor), hit: false })
+  return parts
+}
+
 const props = defineProps<{
   open: boolean
   items: SearchEverywhereItem[]
   /** 查询词变化时交给宿主：符号供给者要据此异步问语言服务（带防抖，在宿主那边）。 */
   onQuery?: (query: string) => void
+  /** 文件来源是否改用 Smith-Waterman 模糊匹配（注册表键 search.everywhere.fuzzy.files.enabled，默认 false）。 */
+  fuzzyFiles?: boolean
 }>()
 const emit = defineEmits<{ close: [] }>()
 
@@ -33,7 +51,9 @@ const tab = ref<SearchEverywhereTab>('all')
 const index = ref(0)
 const input = ref<HTMLInputElement | null>(null)
 
-const results = computed(() => searchEverywhereResults(props.items, query.value, tab.value))
+const results = computed(() => searchEverywhereResults(props.items, query.value, tab.value, SEARCH_EVERYWHERE_LIMIT, props.fuzzyFiles))
+// 每行的模糊命中高亮区间（上游 SeFuzzyFileSearchItem 的 withPresentableTextMatchedRanges）。
+const fragmentCache = computed(() => results.value.map(item => fuzzyTitleFragments(item, query.value, props.fuzzyFiles)))
 // SePopupContentPane 的 tab model 不依赖当前查询结果；零结果也保留切换入口。
 const tabs = SEARCH_EVERYWHERE_TABS
 const selected = computed(() => results.value[index.value])
@@ -193,7 +213,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           @click="choose(entry)"
           @pointerenter="index = position"
         >
-          <span class="se-title">{{ entry.title }}</span>
+          <span class="se-title"><template v-for="(part, partIndex) in highlightParts(entry.title, fragmentCache[position] ?? [])" :key="partIndex"><mark v-if="part.hit" class="se-hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="entry.subtitle" class="se-subtitle">{{ entry.subtitle }}</span>
           <span class="action-group">{{ searchEverywhereSourceLabel(entry.source) }}</span>
           <ArrowRight :size="14" />
@@ -230,5 +250,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
 .se-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; font: inherit; color: inherit; padding: 6px 10px; cursor: pointer; }
 .se-row.highlighted { background: var(--hover); }
 .se-title { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 模糊命中的字符（上游 presentation 的 matched ranges）：只换底色，不改字重，行高不变。 */
+.se-hit { background: var(--accent-soft, rgba(70, 130, 255, .28)); color: inherit; border-radius: 2px; padding: 0; }
 .se-subtitle { flex: 1 1 auto; min-width: 0; font-size: 12px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

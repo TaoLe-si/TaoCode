@@ -1,6 +1,6 @@
 # editor 机检结果
 
-枚举 2551 个类；TaoCode 文本里出现过名字的 75 个，**从未出现 2476 个**。
+枚举 2551 个类；TaoCode 文本里出现过名字的 125 个，**从未出现 2426 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -504,7 +504,7 @@
 | `BackendClosureFolding` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/BackendClosureFolding.java` | 未出现 |
 | `CommentFoldingUtil` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/CommentFoldingUtil.java` | 未出现 |
 | `JavaBackendFoldings` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaBackendFoldings.java` | 未出现 |
-| `JavaCodeFoldingSettingsBase` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaCodeFoldingSettingsBase.java` | 未出现 |
+| `JavaCodeFoldingSettingsBase` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaCodeFoldingSettingsBase.java` | 提到过 |
 | `JavaFoldingBuilderBase` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaFoldingBuilderBase.java` | 未出现 |
 | `JavaFoldingUtil` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaFoldingUtil.java` | 未出现 |
 | `JavaFrontendFoldings` | `java/java-psi-impl/src/com/intellij/codeInsight/folding/impl/JavaFrontendFoldings.java` | 未出现 |
@@ -687,7 +687,7 @@
 | `CodeStyleCachedValueProvider` | `platform/code-style-impl/src/com/intellij/application/options/codeStyle/cache/CodeStyleCachedValueProvider.kt` | 未出现 |
 | `CodeStyleCachingServiceImpl` | `platform/code-style-impl/src/com/intellij/application/options/codeStyle/cache/CodeStyleCachingServiceImpl.java` | 未出现 |
 | `TooFrequentCodeStyleComputationWatcher` | `platform/code-style-impl/src/com/intellij/application/options/codeStyle/cache/TooFrequentCodeStyleComputationWatcher.kt` | 未出现 |
-| `CodeFoldingSettings` | `platform/core-api/src/com/intellij/codeInsight/folding/CodeFoldingSettings.java` | 未出现 |
+| `CodeFoldingSettings` | `platform/core-api/src/com/intellij/codeInsight/folding/CodeFoldingSettings.java` | 提到过 |
 | `DocumentWindow` | `platform/core-api/src/com/intellij/injected/editor/DocumentWindow.java` | 未出现 |
 | `InjectionEditService` | `platform/core-api/src/com/intellij/injected/editor/InjectionEditService.java` | 未出现 |
 | `VirtualFileDelegate` | `platform/core-api/src/com/intellij/injected/editor/VirtualFileDelegate.java` | 未出现 |
@@ -696,10 +696,10 @@
 | `DefaultLanguageHighlighterColors` | `platform/core-api/src/com/intellij/openapi/editor/DefaultLanguageHighlighterColors.java` | 提到过 |
 | `Document` | `platform/core-api/src/com/intellij/openapi/editor/Document.java` | 提到过 |
 | `DocumentRunnable` | `platform/core-api/src/com/intellij/openapi/editor/DocumentRunnable.java` | 未出现 |
-| `FoldingGroup` | `platform/core-api/src/com/intellij/openapi/editor/FoldingGroup.java` | 未出现 |
+| `FoldingGroup` | `platform/core-api/src/com/intellij/openapi/editor/FoldingGroup.java` | 提到过 |
 | `HighlighterColors` | `platform/core-api/src/com/intellij/openapi/editor/HighlighterColors.java` | 未出现 |
 | `ModNavigator` | `platform/core-api/src/com/intellij/openapi/editor/ModNavigator.java` | 未出现 |
-| `RangeMarker` | `platform/core-api/src/com/intellij/openapi/editor/RangeMarker.java` | 未出现 |
+| `RangeMarker` | `platform/core-api/src/com/intellij/openapi/editor/RangeMarker.java` | 提到过 |
 | `ReadOnlyFragmentModificationException` | `platform/core-api/src/com/intellij/openapi/editor/ReadOnlyFragmentModificationException.java` | 未出现 |
 | `ReadOnlyModificationException` | `platform/core-api/src/com/intellij/openapi/editor/ReadOnlyModificationException.java` | 未出现 |
 | `SmartStripTrailingSpacesFilter` | `platform/core-api/src/com/intellij/openapi/editor/SmartStripTrailingSpacesFilter.java` | 未出现 |
@@ -719,7 +719,7 @@
 | `package-info` | `platform/core-api/src/com/intellij/openapi/editor/elf/package-info.java` | 未出现 |
 | `BulkAwareDocumentListener` | `platform/core-api/src/com/intellij/openapi/editor/event/BulkAwareDocumentListener.java` | 未出现 |
 | `DocumentAdapter` | `platform/core-api/src/com/intellij/openapi/editor/event/DocumentAdapter.java` | 未出现 |
-| `DocumentEvent` | `platform/core-api/src/com/intellij/openapi/editor/event/DocumentEvent.java` | 未出现 |
+| `DocumentEvent` | `platform/core-api/src/com/intellij/openapi/editor/event/DocumentEvent.java` | 提到过 |
 | `DocumentListener` | `platform/core-api/src/com/intellij/openapi/editor/event/DocumentListener.java` | 未出现 |
 | `PrioritizedDocumentListener` | `platform/core-api/src/com/intellij/openapi/editor/ex/PrioritizedDocumentListener.java` | 未出现 |
 | `AttributesFlyweight` | `platform/core-api/src/com/intellij/openapi/editor/markup/AttributesFlyweight.java` | 未出现 |
@@ -872,7 +872,7 @@
 | `EditorSettings` | `platform/editor-ui-api/src/com/intellij/openapi/editor/EditorSettings.java` | 提到过 |
 | `EditorThreading` | `platform/editor-ui-api/src/com/intellij/openapi/editor/EditorThreading.kt` | 未出现 |
 | `EmptyCustomWrapModel` | `platform/editor-ui-api/src/com/intellij/openapi/editor/EmptyCustomWrapModel.kt` | 未出现 |
-| `FoldRegion` | `platform/editor-ui-api/src/com/intellij/openapi/editor/FoldRegion.java` | 未出现 |
+| `FoldRegion` | `platform/editor-ui-api/src/com/intellij/openapi/editor/FoldRegion.java` | 提到过 |
 | `FoldingModel` | `platform/editor-ui-api/src/com/intellij/openapi/editor/FoldingModel.java` | 未出现 |
 | `GutterMarkPreprocessor` | `platform/editor-ui-api/src/com/intellij/openapi/editor/GutterMarkPreprocessor.java` | 未出现 |
 | `GutterMarkWrapper` | `platform/editor-ui-api/src/com/intellij/openapi/editor/GutterMarkWrapper.java` | 未出现 |
@@ -955,12 +955,12 @@
 | `SeparatorPlacement` | `platform/editor-ui-api/src/com/intellij/openapi/editor/markup/SeparatorPlacement.java` | 未出现 |
 | `LocalEditorSupportBean` | `platform/editor-ui-api/src/com/intellij/openapi/editor/rd/LocalEditorSupportBean.kt` | 未出现 |
 | `localEditorSupport` | `platform/editor-ui-api/src/com/intellij/openapi/editor/rd/localEditorSupport.kt` | 未出现 |
-| `EditorFontsConstants` | `platform/editor-ui-ex/src/com/intellij/application/options/EditorFontsConstants.java` | 未出现 |
+| `EditorFontsConstants` | `platform/editor-ui-ex/src/com/intellij/application/options/EditorFontsConstants.java` | 提到过 |
 | `CodeFoldingSettingsImpl` | `platform/editor-ui-ex/src/com/intellij/codeInsight/folding/CodeFoldingSettingsImpl.java` | 未出现 |
 | `AbstractConvertLineSeparatorsAction` | `platform/editor-ui-ex/src/com/intellij/codeStyle/AbstractConvertLineSeparatorsAction.java` | 未出现 |
 | `MarkupModelWindow` | `platform/editor-ui-ex/src/com/intellij/injected/editor/MarkupModelWindow.java` | 未出现 |
 | `DefaultColorSchemesManager` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/ex/DefaultColorSchemesManager.kt` | 未出现 |
-| `AbstractColorsScheme` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/impl/AbstractColorsScheme.java` | 未出现 |
+| `AbstractColorsScheme` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/impl/AbstractColorsScheme.java` | 提到过 |
 | `AppConsoleFontOptions` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/impl/AppConsoleFontOptions.java` | 未出现 |
 | `AppEditorFontOptions` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/impl/AppEditorFontOptions.java` | 未出现 |
 | `AppFontOptions` | `platform/editor-ui-ex/src/com/intellij/openapi/editor/colors/impl/AppFontOptions.java` | 未出现 |
@@ -1016,49 +1016,49 @@
 | `TodoItemCreator` | `platform/editor-ui-ex/src/com/intellij/psi/impl/search/TodoItemCreator.java` | 未出现 |
 | `TerminalChangeFontSizeAction` | `platform/execution-impl/src/com/intellij/openapi/editor/actions/TerminalChangeFontSizeAction.kt` | 未出现 |
 | `TerminalResetFontSizeAction` | `platform/execution-impl/src/com/intellij/openapi/editor/actions/TerminalResetFontSizeAction.kt` | 未出现 |
-| `CodeFoldingManager` | `platform/foldings/src/com/intellij/codeInsight/folding/CodeFoldingManager.java` | 未出现 |
+| `CodeFoldingManager` | `platform/foldings/src/com/intellij/codeInsight/folding/CodeFoldingManager.java` | 提到过 |
 | `AbstractElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/AbstractElementSignatureProvider.java` | 未出现 |
-| `CodeFoldingManagerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingManagerImpl.java` | 未出现 |
-| `CodeFoldingNecromancer` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancer.kt` | 未出现 |
-| `CodeFoldingNecromancy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancy.kt` | 未出现 |
-| `CodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPass.java` | 未出现 |
-| `CodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPassFactory.java` | 未出现 |
-| `CodeFoldingZombie` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingZombie.kt` | 未出现 |
+| `CodeFoldingManagerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingManagerImpl.java` | 提到过 |
+| `CodeFoldingNecromancer` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancer.kt` | 提到过 |
+| `CodeFoldingNecromancy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancy.kt` | 提到过 |
+| `CodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPass.java` | 提到过 |
+| `CodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPassFactory.java` | 提到过 |
+| `CodeFoldingZombie` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingZombie.kt` | 提到过 |
 | `CollapseBlockHandlerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseBlockHandlerImpl.java` | 未出现 |
 | `CollapseExpandDocCommentsHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseExpandDocCommentsHandler.java` | 未出现 |
-| `CollapseSelectionHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseSelectionHandler.java` | 未出现 |
-| `DocumentFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java` | 未出现 |
-| `EditorFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfo.java` | 未出现 |
-| `EditorFoldingInfoWindow` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfoWindow.java` | 未出现 |
-| `ElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/ElementSignatureProvider.java` | 未出现 |
-| `FoldLimb` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldLimb.kt` | 未出现 |
-| `FoldingHintMouseMotionListener` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintMouseMotionListener.java` | 未出现 |
-| `FoldingHintPostStartupActivity` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintPostStartupActivity.kt` | 未出现 |
-| `FoldingPolicy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingPolicy.java` | 未出现 |
-| `FoldingUpdate` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingUpdate.java` | 未出现 |
+| `CollapseSelectionHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseSelectionHandler.java` | 提到过 |
+| `DocumentFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java` | 提到过 |
+| `EditorFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfo.java` | 提到过 |
+| `EditorFoldingInfoWindow` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfoWindow.java` | 提到过 |
+| `ElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/ElementSignatureProvider.java` | 提到过 |
+| `FoldLimb` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldLimb.kt` | 提到过 |
+| `FoldingHintMouseMotionListener` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintMouseMotionListener.java` | 提到过 |
+| `FoldingHintPostStartupActivity` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintPostStartupActivity.kt` | 提到过 |
+| `FoldingPolicy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingPolicy.java` | 提到过 |
+| `FoldingUpdate` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingUpdate.java` | 提到过 |
 | `GenericElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/GenericElementSignatureProvider.java` | 未出现 |
 | `InjectedCodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPass.java` | 未出现 |
 | `InjectedCodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPassFactory.java` | 未出现 |
 | `OffsetsElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/OffsetsElementSignatureProvider.java` | 未出现 |
 | `PsiNamesElementSignatureProvider` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/PsiNamesElementSignatureProvider.java` | 未出现 |
-| `UpdateFoldRegionsOperation` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/UpdateFoldRegionsOperation.java` | 未出现 |
-| `BaseExpandToLevelAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseExpandToLevelAction.java` | 未出现 |
-| `BaseFoldingHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseFoldingHandler.java` | 未出现 |
-| `CollapseAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseAllRegionsAction.java` | 未出现 |
-| `CollapseBlockAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseBlockAction.java` | 未出现 |
+| `UpdateFoldRegionsOperation` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/UpdateFoldRegionsOperation.java` | 提到过 |
+| `BaseExpandToLevelAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseExpandToLevelAction.java` | 提到过 |
+| `BaseFoldingHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/BaseFoldingHandler.java` | 提到过 |
+| `CollapseAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseAllRegionsAction.java` | 提到过 |
+| `CollapseBlockAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseBlockAction.java` | 提到过 |
 | `CollapseDocCommentsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseDocCommentsAction.java` | 未出现 |
-| `CollapseRegionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseRegionAction.java` | 未出现 |
+| `CollapseRegionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseRegionAction.java` | 提到过 |
 | `CollapseRegionRecursivelyAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseRegionRecursivelyAction.java` | 未出现 |
 | `CollapseSelectionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/CollapseSelectionAction.java` | 未出现 |
-| `ExpandAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllRegionsAction.java` | 未出现 |
+| `ExpandAllRegionsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllRegionsAction.java` | 提到过 |
 | `ExpandAllToLevel1Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel1Action.java` | 未出现 |
 | `ExpandAllToLevel2Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel2Action.java` | 未出现 |
 | `ExpandAllToLevel3Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel3Action.java` | 未出现 |
 | `ExpandAllToLevel4Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel4Action.java` | 未出现 |
 | `ExpandAllToLevel5Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandAllToLevel5Action.java` | 未出现 |
-| `ExpandCollapseToggleAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandCollapseToggleAction.kt` | 未出现 |
-| `ExpandDocCommentsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandDocCommentsAction.java` | 未出现 |
-| `ExpandRegionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandRegionAction.java` | 未出现 |
+| `ExpandCollapseToggleAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandCollapseToggleAction.kt` | 提到过 |
+| `ExpandDocCommentsAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandDocCommentsAction.java` | 提到过 |
+| `ExpandRegionAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandRegionAction.java` | 提到过 |
 | `ExpandRegionRecursivelyAction` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandRegionRecursivelyAction.java` | 未出现 |
 | `ExpandToLevel1Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel1Action.java` | 未出现 |
 | `ExpandToLevel2Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel2Action.java` | 未出现 |
@@ -1133,7 +1133,7 @@
 | `DefaultHighlightingSettingProvider` | `platform/lang-api/src/com/intellij/codeInsight/daemon/impl/analysis/DefaultHighlightingSettingProvider.java` | 未出现 |
 | `FileHighlightingSetting` | `platform/lang-api/src/com/intellij/codeInsight/daemon/impl/analysis/FileHighlightingSetting.java` | 未出现 |
 | `FileHighlightingSettingListener` | `platform/lang-api/src/com/intellij/codeInsight/daemon/impl/analysis/FileHighlightingSettingListener.java` | 未出现 |
-| `CollapseBlockHandler` | `platform/lang-api/src/com/intellij/codeInsight/folding/CollapseBlockHandler.java` | 未出现 |
+| `CollapseBlockHandler` | `platform/lang-api/src/com/intellij/codeInsight/folding/CollapseBlockHandler.java` | 提到过 |
 | `DeclarationRangeHandler` | `platform/lang-api/src/com/intellij/codeInsight/hint/DeclarationRangeHandler.java` | 未出现 |
 | `DefaultImplementationTextSelectioner` | `platform/lang-api/src/com/intellij/codeInsight/hint/DefaultImplementationTextSelectioner.java` | 未出现 |
 | `ImplementationTextProcessor` | `platform/lang-api/src/com/intellij/codeInsight/hint/ImplementationTextProcessor.java` | 未出现 |
@@ -1294,7 +1294,7 @@
 | `AutoImportOptionsConfigurable` | `platform/lang-impl/src/com/intellij/application/options/editor/AutoImportOptionsConfigurable.kt` | 提到过 |
 | `AutoImportOptionsProvider` | `platform/lang-impl/src/com/intellij/application/options/editor/AutoImportOptionsProvider.java` | 未出现 |
 | `AutoImportOptionsProviderEP` | `platform/lang-impl/src/com/intellij/application/options/editor/AutoImportOptionsProviderEP.java` | 未出现 |
-| `BaseCodeFoldingOptionsProvider` | `platform/lang-impl/src/com/intellij/application/options/editor/BaseCodeFoldingOptionsProvider.kt` | 未出现 |
+| `BaseCodeFoldingOptionsProvider` | `platform/lang-impl/src/com/intellij/application/options/editor/BaseCodeFoldingOptionsProvider.kt` | 提到过 |
 | `CodeFoldingConfigurable` | `platform/lang-impl/src/com/intellij/application/options/editor/CodeFoldingConfigurable.kt` | 提到过 |
 | `CodeFoldingOptionsProvider` | `platform/lang-impl/src/com/intellij/application/options/editor/CodeFoldingOptionsProvider.java` | 未出现 |
 | `CodeFoldingOptionsProviderEP` | `platform/lang-impl/src/com/intellij/application/options/editor/CodeFoldingOptionsProviderEP.java` | 未出现 |
@@ -1474,10 +1474,10 @@
 | `ElementLocationUtil` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ElementLocationUtil.java` | 未出现 |
 | `ExternalParameterInfoChangesProvider` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ExternalParameterInfoChangesProvider.java` | 未出现 |
 | `ImplementationPopupManager` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationPopupManager.kt` | 未出现 |
-| `ImplementationViewComponent` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewComponent.java` | 未出现 |
+| `ImplementationViewComponent` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewComponent.java` | 提到过 |
 | `ImplementationViewDocumentFactory` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewDocumentFactory.kt` | 未出现 |
 | `ImplementationViewElement` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewElement.kt` | 未出现 |
-| `ImplementationViewSession` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewSession.kt` | 未出现 |
+| `ImplementationViewSession` | `platform/lang-impl/src/com/intellij/codeInsight/hint/ImplementationViewSession.kt` | 提到过 |
 | `InspectionDescriptionLinkHandler` | `platform/lang-impl/src/com/intellij/codeInsight/hint/InspectionDescriptionLinkHandler.java` | 未出现 |
 | `NavigationLinkHandler` | `platform/lang-impl/src/com/intellij/codeInsight/hint/NavigationLinkHandler.java` | 未出现 |
 | `NextParameterAfterCompletionHandler` | `platform/lang-impl/src/com/intellij/codeInsight/hint/NextParameterAfterCompletionHandler.java` | 未出现 |
@@ -1501,7 +1501,7 @@
 | `QuickPreviewAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/QuickPreviewAction.java` | 未出现 |
 | `ShowContainerInfoAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowContainerInfoAction.java` | 未出现 |
 | `ShowExpressionTypeAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowExpressionTypeAction.java` | 未出现 |
-| `ShowImplementationsAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowImplementationsAction.java` | 未出现 |
+| `ShowImplementationsAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowImplementationsAction.java` | 提到过 |
 | `ShowParameterInfoAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowParameterInfoAction.java` | 未出现 |
 | `ShowRelatedElementsActionBase` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowRelatedElementsActionBase.java` | 未出现 |
 | `ShowTypeDefinitionAction` | `platform/lang-impl/src/com/intellij/codeInsight/hint/actions/ShowTypeDefinitionAction.kt` | 未出现 |
@@ -1702,7 +1702,7 @@
 | `DoNotShowInspectionCancellationTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/daemon/DoNotShowInspectionCancellationTest.kt` | 未出现 |
 | `ErrorCountStorageTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/daemon/ErrorCountStorageTest.kt` | 未出现 |
 | `IdentifierHighlightingWholeFileLeafTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/daemon/impl/IdentifierHighlightingWholeFileLeafTest.kt` | 未出现 |
-| `FoldingUtilTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/folding/impl/FoldingUtilTest.java` | 未出现 |
+| `FoldingUtilTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/folding/impl/FoldingUtilTest.java` | 提到过 |
 | `LiveTemplateDynamicTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/template/LiveTemplateDynamicTest.kt` | 未出现 |
 | `RegExMacroTest` | `platform/lang-impl/testSources/com/intellij/codeInsight/template/macro/RegExMacroTest.java` | 未出现 |
 | `CodeInsightContextSwitcherTest` | `platform/lang-impl/testSources/com/intellij/openapi/editor/impl/multiverse/CodeInsightContextSwitcherTest.kt` | 未出现 |
@@ -1744,7 +1744,7 @@
 | `TextComponentEditor` | `platform/platform-api/src/com/intellij/openapi/editor/textarea/TextComponentEditor.java` | 未出现 |
 | `OptionsContainingConfigurable` | `platform/platform-impl/src/com/intellij/application/options/OptionsContainingConfigurable.java` | 未出现 |
 | `SchemesToImportPopup` | `platform/platform-impl/src/com/intellij/application/options/SchemesToImportPopup.java` | 未出现 |
-| `AbstractFontOptionsPanel` | `platform/platform-impl/src/com/intellij/application/options/colors/AbstractFontOptionsPanel.java` | 未出现 |
+| `AbstractFontOptionsPanel` | `platform/platform-impl/src/com/intellij/application/options/colors/AbstractFontOptionsPanel.java` | 提到过 |
 | `ColorAndFontDescription` | `platform/platform-impl/src/com/intellij/application/options/colors/ColorAndFontDescription.java` | 未出现 |
 | `ColorAndFontDescriptionPanel` | `platform/platform-impl/src/com/intellij/application/options/colors/ColorAndFontDescriptionPanel.kt` | 未出现 |
 | `ColorAndFontOptions` | `platform/platform-impl/src/com/intellij/application/options/colors/ColorAndFontOptions.java` | 提到过 |
@@ -1793,7 +1793,7 @@
 | `EditorTabsConfigurable` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsConfigurable.kt` | 提到过 |
 | `EditorTabsConfigurableEP` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsConfigurableEP.java` | 未出现 |
 | `EditorTabsOptionsCustomSection` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsOptionsCustomSection.java` | 未出现 |
-| `EditorTabsOptionsModel` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsOptionsModel.kt` | 未出现 |
+| `EditorTabsOptionsModel` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsOptionsModel.kt` | 提到过 |
 | `EditorTabsOptionsTopHitProvider` | `platform/platform-impl/src/com/intellij/application/options/editor/EditorTabsOptionsTopHitProvider.kt` | 未出现 |
 | `AppConsoleFontConfigurable` | `platform/platform-impl/src/com/intellij/application/options/editor/fonts/AppConsoleFontConfigurable.java` | 未出现 |
 | `AppEditorFontConfigurable` | `platform/platform-impl/src/com/intellij/application/options/editor/fonts/AppEditorFontConfigurable.java` | 未出现 |
@@ -1824,7 +1824,7 @@
 | `SimpleSchemesPanel` | `platform/platform-impl/src/com/intellij/application/options/schemes/SimpleSchemesPanel.java` | 未出现 |
 | `HintRenderer` | `platform/platform-impl/src/com/intellij/codeInsight/daemon/impl/HintRenderer.kt` | 未出现 |
 | `HintUtil` | `platform/platform-impl/src/com/intellij/codeInsight/daemon/impl/HintUtil.kt` | 未出现 |
-| `FoldingUtil` | `platform/platform-impl/src/com/intellij/codeInsight/folding/impl/FoldingUtil.java` | 未出现 |
+| `FoldingUtil` | `platform/platform-impl/src/com/intellij/codeInsight/folding/impl/FoldingUtil.java` | 提到过 |
 | `ClientHintManager` | `platform/platform-impl/src/com/intellij/codeInsight/hint/ClientHintManager.java` | 未出现 |
 | `CodeFragmentPopup` | `platform/platform-impl/src/com/intellij/codeInsight/hint/CodeFragmentPopup.kt` | 未出现 |
 | `DocumentFragmentTooltipRenderer` | `platform/platform-impl/src/com/intellij/codeInsight/hint/DocumentFragmentTooltipRenderer.java` | 未出现 |
@@ -1870,7 +1870,7 @@
 | `BackwardParagraphAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/BackwardParagraphAction.java` | 未出现 |
 | `BackwardParagraphWithSelectionAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/BackwardParagraphWithSelectionAction.java` | 未出现 |
 | `BasePasteHandler` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/BasePasteHandler.java` | 提到过 |
-| `ChangeEditorFontSizeAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/ChangeEditorFontSizeAction.java` | 未出现 |
+| `ChangeEditorFontSizeAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/ChangeEditorFontSizeAction.java` | 提到过 |
 | `ChangeEditorFontSizeStrategy` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/ChangeEditorFontSizeStrategy.kt` | 未出现 |
 | `CloneCaretAbove` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretAbove.java` | 未出现 |
 | `CloneCaretActionHandler` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretActionHandler.java` | 未出现 |
@@ -2074,7 +2074,7 @@
 | `EditorFragmentRenderer` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorFragmentRenderer.java` | 未出现 |
 | `EditorGutterColor` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorGutterColor.java` | 未出现 |
 | `EditorGutterComponentImpl` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorGutterComponentImpl.java` | 提到过 |
-| `EditorGutterLayout` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorGutterLayout.java` | 未出现 |
+| `EditorGutterLayout` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorGutterLayout.java` | 提到过 |
 | `EditorGutterListener` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorGutterListener.java` | 未出现 |
 | `EditorHeaderComponent` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorHeaderComponent.java` | 未出现 |
 | `EditorHeaderPanel` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/EditorHeaderPanel.java` | 未出现 |
@@ -2215,7 +2215,7 @@
 | `IncrementalCacheUpdateEvent` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/softwrap/mapping/IncrementalCacheUpdateEvent.java` | 未出现 |
 | `SoftWrapApplianceManager` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/softwrap/mapping/SoftWrapApplianceManager.java` | 未出现 |
 | `SoftWrapParsingListener` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/softwrap/mapping/SoftWrapParsingListener.java` | 未出现 |
-| `StickyLine` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/StickyLine.kt` | 未出现 |
+| `StickyLine` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/StickyLine.kt` | 提到过 |
 | `StickyLinesCollector` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/StickyLinesCollector.kt` | 未出现 |
 | `StickyLinesLanguageSupport` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/StickyLinesLanguageSupport.kt` | 未出现 |
 | `StickyLinesManager` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/StickyLinesManager.kt` | 未出现 |
@@ -2310,7 +2310,7 @@
 | `FingerprintedZombieImpl` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/FingerprintedZombieImpl.kt` | 未出现 |
 | `GraveImpl` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/GraveImpl.kt` | 未出现 |
 | `LimbedZombie` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/LimbedZombie.kt` | 未出现 |
-| `Necromancer` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/Necromancer.kt` | 未出现 |
+| `Necromancer` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/Necromancer.kt` | 提到过 |
 | `NecromancerRecipe` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/NecromancerRecipe.kt` | 未出现 |
 | `Necropolis` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/Necropolis.kt` | 未出现 |
 | `NecropolisDestroyer` | `platform/platform-impl/src/com/intellij/openapi/editor/impl/zombie/NecropolisDestroyer.kt` | 未出现 |
@@ -2373,8 +2373,8 @@
 | `PathMacrosImpl` | `platform/projectModel-impl/src/com/intellij/application/options/PathMacrosImpl.kt` | 未出现 |
 | `ReplacePathToMacroMap` | `platform/projectModel-impl/src/com/intellij/application/options/ReplacePathToMacroMap.java` | 未出现 |
 | `ActionHint` | `platform/testFramework/src/com/intellij/codeInsight/daemon/quickFix/ActionHint.java` | 未出现 |
-| `AbstractFoldingPolicyTest` | `platform/testFramework/src/com/intellij/codeInsight/folding/impl/AbstractFoldingPolicyTest.java` | 未出现 |
-| `AbstractPsiNamesElementSignatureProviderTest` | `platform/testFramework/src/com/intellij/codeInsight/folding/impl/AbstractPsiNamesElementSignatureProviderTest.java` | 未出现 |
+| `AbstractFoldingPolicyTest` | `platform/testFramework/src/com/intellij/codeInsight/folding/impl/AbstractFoldingPolicyTest.java` | 提到过 |
+| `AbstractPsiNamesElementSignatureProviderTest` | `platform/testFramework/src/com/intellij/codeInsight/folding/impl/AbstractPsiNamesElementSignatureProviderTest.java` | 提到过 |
 | `MoveStatementUpDownTestBase` | `platform/testFramework/src/com/intellij/openapi/editor/actions/MoveStatementUpDownTestBase.java` | 未出现 |
 | `editorColorScheme` | `platform/testFramework/src/com/intellij/openapi/editor/colors/editorColorScheme.kt` | 未出现 |
 | `VcsSilentChangeVetoer` | `platform/vcs-impl/src/com/intellij/codeInsight/daemon/VcsSilentChangeVetoer.kt` | 未出现 |

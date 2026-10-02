@@ -108,6 +108,9 @@ export interface GeneralSettingsState {
   inactiveTimeout: number                // SAVE_FILES_AFTER_IDLE_SEC = UINumericRange(15, 1, 300)
   supportScreenReaders: boolean          // GeneralSettingsState.supportScreenReaders (kt:265), getter :179-186
   autoShowProcessPopup: boolean          // ide.windowSystem.autoShowProcessPopup (registry.properties:209-210，默认 false)
+  // search.everywhere.fuzzy.files.enabled（SeFuzzyFileSearchProviderFactory.kt:28-31，默认 false）：
+  // 打开后「随处搜索」的文件来源改用 Smith-Waterman 本地对齐（src/fuzzyMatch.ts）。
+  fuzzyFileSearch: boolean
   // ConsoleConfigurable（`Console`）：控制台行折叠规则 —— 要折叠的行 + 不折叠的例外（各为字符串列表）。
   foldConsoleLines: string[]; foldExceptions: string[]
   // ToolConfigurable（`preferences.externalTools`）：应用级的外部命令收藏（名称 + 命令）。
@@ -138,6 +141,7 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   inactiveTimeout: 15,
   supportScreenReaders: false,
   autoShowProcessPopup: false,
+  fuzzyFileSearch: false,
   foldConsoleLines: [],
   foldExceptions: [],
   externalTools: [],

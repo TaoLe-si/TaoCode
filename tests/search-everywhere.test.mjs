@@ -11,10 +11,12 @@ import ts from 'typescript'
 import * as vue from 'vue'
 
 import {
+  FUZZY_FILES_ENABLED_DEFAULT,
   SEARCH_EVERYWHERE_LIMIT,
   SEARCH_EVERYWHERE_TABS,
   availableSearchEverywhereTabs,
   cycleSearchEverywhereTab,
+  fuzzyTitleFragments,
   moveSearchEverywhereIndex,
   searchEverywhereResults,
   searchEverywhereSourceLabel,
@@ -227,6 +229,69 @@ for (const transition of ['close/reopen', 'workspace replacement']) {
     assert.deepEqual(h.symbols(), ['current'])
   })
 }
+
+// ── 模糊文件匹配（Smith-Waterman）那一档 ────────────────────────────────────
+//
+// 上游：`SmithWatermanAlgorithm` + `SmithWatermanMatcher`（文件名优先，弱命中退到整条路径），
+// 由 `SeFuzzyFileSearchProvider` 消费；那个 provider 由注册表键
+// `search.everywhere.fuzzy.files.enabled` 门控，**默认 false**
+// （`SeFuzzyFileSearchProviderFactory.kt:28-31`）。所以默认档必须与移植前逐字一致。
+const fuzzyFile = (id, path) => item(id, path.split('/').pop(), 'project', { subtitle: path, keywords: path, fuzzyPath: path })
+
+test('默认档不启用模糊匹配（上游注册表键默认 false），行为与移植前一致', () => {
+  assert.equal(FUZZY_FILES_ENABLED_DEFAULT, false)
+  // `gcf` 命中 GotoClassFile 的文件名，但按旧的 rankCommands 语义不命中 DemoClass / Main。
+  const list = [fuzzyFile('gcf', 'src/GotoClassFile.kt'), fuzzyFile('main', 'src/demo/Main.java')]
+  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'project').map(each => each.id), ['gcf'])
+})
+
+test('启用后文件走 Smith-Waterman：驼峰缩写能命中，路径片段也能命中', () => {
+  const list = [fuzzyFile('gcf', 'src/GotoClassFile.kt'), fuzzyFile('main', 'src/demo/Main.java')]
+  assert.deepEqual(searchEverywhereResults(list, 'gcf', 'project', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['gcf'])
+  // 搜路径片段 `src/main`：文件名 `Main.java` 上对不上，退到整条路径才命中。
+  assert.deepEqual(searchEverywhereResults(list, 'srcmain', 'project', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id), ['main'])
+})
+
+test('弱命中按 minScore 阈值丢掉（search.everywhere.fuzzy.files.min.score=6500）', () => {
+  // `nothing` 只在路径里捞到 `i`+`n` 两个字符：分数为正但归一分 0.24，进不了结果。
+  const list = [fuzzyFile('app', 'src/main/App.kt')]
+  assert.deepEqual(searchEverywhereResults(list, 'nothing', 'project', SEARCH_EVERYWHERE_LIMIT, true), [])
+})
+
+test('启用模糊后文件与动作仍能放进同一个列表排序（两档换算到 0..10000 同一条数轴）', () => {
+  const list = [fuzzyFile('app', 'src/main/App.kt'), item('cmd', 'App', 'commands')]
+  const hits = searchEverywhereResults(list, 'app', 'all', SEARCH_EVERYWHERE_LIMIT, true).map(each => each.id)
+  assert.equal(hits.length, 2, '两边都命中，都该出现')
+  // 动作标题整段命中且在开头 → 词首权重 10000；模糊文件最高 9999（MAX_FUZZY_WEIGHT）——
+  // 上游特意把模糊那档压在词首命中之下，所以这里动作排前面。
+  assert.deepEqual(hits, ['cmd', 'app'])
+})
+
+test('命中字符高亮：升序下标并成连续段，且只在文件名那一档画（上游 indicesToFragments）', () => {
+  const file = fuzzyFile('gcf', 'src/GotoClassFile.kt')
+  assert.deepEqual(fuzzyTitleFragments(file, 'gcf', true), [[0, 1], [4, 5], [9, 10]])
+  // 退到整条路径的那一档：下标落在 subtitle 上，标题里不画。
+  assert.deepEqual(fuzzyTitleFragments(fuzzyFile('main', 'src/demo/Main.java'), 'srcmain', true), [])
+  // 默认关闭时一律不画。
+  assert.deepEqual(fuzzyTitleFragments(file, 'gcf', false), [])
+})
+
+// 接线守卫：三处都不能掉链子 —— 宿主填 fuzzyPath、外壳传开关、对话框把开关交给打分函数。
+test('模糊匹配的接线三处都在', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const host = readFileSync(join(root, 'src', 'searchEverywhereHost.ts'), 'utf8')
+  assert.match(host, /id: `file:\$\{path\}`[\s\S]{0,300}?fuzzyPath: path/, '文件项没有填 fuzzyPath，模糊匹配永远拿不到整条路径')
+  const shell = shellSource()
+  assert.match(shell, /<SearchEverywhereDialog[^>]*:fuzzy-files="generalSettings\.fuzzyFileSearch"/, '外壳没有把设置开关传给对话框')
+  const dialog = readFileSync(join(root, 'src', 'components', 'SearchEverywhereDialog.vue'), 'utf8')
+  assert.match(dialog, /searchEverywhereResults\(props\.items, query\.value, tab\.value, SEARCH_EVERYWHERE_LIMIT, props\.fuzzyFiles\)/,
+    '对话框没有把开关交给打分函数')
+  assert.match(dialog, /fuzzyTitleFragments\(item, query\.value, props\.fuzzyFiles\)/, '对话框没有按命中下标画高亮')
+  const toggles = readFileSync(join(root, 'src', 'components', 'GeneralRegistryToggles.vue'), 'utf8')
+  assert.match(toggles, /v-model="general\.fuzzyFileSearch"/, '设置页没有这个开关（注册表键的落点）')
+  const settings = readFileSync(join(root, 'src', 'components', 'SettingsDialog.vue'), 'utf8')
+  assert.match(settings, /<GeneralRegistryToggles :general="general" \/>/, '「常规」页没有挂上那两个注册表键开关')
+})
 
 test('来源副标签', () => {
   assert.equal(searchEverywhereSourceLabel('project'), 'File')

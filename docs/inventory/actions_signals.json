@@ -1,0 +1,3723 @@
+{
+ "counts": {
+  "total": 317,
+  "unreadable": 0,
+  "test": 12,
+  "swing": 74,
+  "platform": 6,
+  "in_code": 3,
+  "in_comment_only": 18,
+  "never": 296
+ },
+ "rows": [
+  {
+   "name": "DataKeys",
+   "path": "java/openapi/src/com/intellij/openapi/actionSystem/DataKeys.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShortcutProvider",
+   "path": "platform/analysis-api/src/com/intellij/openapi/actionSystem/ShortcutProvider.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionClassMetaData",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionClassMetaData.java",
+   "lines": 96,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionGroup",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionGroup.java",
+   "lines": 166,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionManager",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionManager.java",
+   "lines": 147,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionPopupMenu",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionPopupMenu.java",
+   "lines": 60,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionToolbar",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbar.java",
+   "lines": 224,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionToolbarListener",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbarListener.java",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUiKind",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUiKind.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUpdateThread",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThread.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUpdateThreadAware",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThreadAware.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnAction",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/AnAction.java",
+   "lines": 584,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "AnActionEvent",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/AnActionEvent.java",
+   "lines": 392,
+   "read": true,
+   "swing": [
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionEventVisitor",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/AnActionEventVisitor.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionResult",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/AnActionResult.kt",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CommonDataKeys",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/CommonDataKeys.java",
+   "lines": 134,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CustomShortcutSet",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/CustomShortcutSet.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CustomizedDataContext",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/CustomizedDataContext.java",
+   "lines": 113,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DataContextWrapper",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/DataContextWrapper.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DynamicActionGroup",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/DynamicActionGroup.java",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExperimentalIcons",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ExperimentalIcons.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InjectedDataKeys",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/InjectedDataKeys.java",
+   "lines": 59,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeepPopupOnPerform",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/KeepPopupOnPerform.java",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeyboardShortcut",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/KeyboardShortcut.java",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeableActions",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/MergeableActions.kt",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OverridingAction",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/OverridingAction.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Presentation",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/Presentation.java",
+   "lines": 813,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "RightAlignedToolbarAction",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/RightAlignedToolbarAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Shortcut",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/Shortcut.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShortcutSet",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ShortcutSet.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TimerListener",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/TimerListener.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UpdateInBackground",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/UpdateInBackground.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UpdateSession",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/UpdateSession.java",
+   "lines": 63,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionListener",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/AnActionListener.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "CustomComponentAction",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/CustomComponentAction.java",
+   "lines": 61,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MainMenuPresentationAware",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/MainMenuPresentationAware.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionRemoteBehavior",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/remoting/ActionRemoteBehavior.kt",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionRemoteBehaviorCustomizer",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/remoting/ActionRemoteBehaviorCustomizer.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionRemotePermissionRequirements",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/remoting/ActionRemotePermissionRequirements.kt",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionWithMergeId",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/remoting/ActionWithMergeId.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutoLayoutStrategy",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/AutoLayoutStrategy.kt",
+   "lines": 166,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompressingLayoutStrategy",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/CompressingLayoutStrategy.kt",
+   "lines": 244,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NoWrapLayoutStrategy",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/NoWrapLayoutStrategy.kt",
+   "lines": 90,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RightActionsAdjusterStrategyWrapper",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/RightActionsAdjusterStrategyWrapper.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarLayoutStrategy",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/ToolbarLayoutStrategy.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarLayoutUtil",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/ToolbarLayoutUtil.kt",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WrapLayoutStrategy",
+   "path": "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/WrapLayoutStrategy.kt",
+   "lines": 174,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutionDataKeys",
+   "path": "platform/execution/src/com/intellij/openapi/actionSystem/ExecutionDataKeys.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DependentTransientComponent",
+   "path": "platform/ide-core-impl/src/com/intellij/openapi/actionSystem/DependentTransientComponent.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDataContext",
+   "path": "platform/ide-core-impl/src/com/intellij/openapi/actionSystem/impl/SimpleDataContext.java",
+   "lines": 114,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPlaces",
+   "path": "platform/ide-core/src/com/intellij/openapi/actionSystem/ActionPlaces.java",
+   "lines": 311,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionWithDelegate",
+   "path": "platform/ide-core/src/com/intellij/openapi/actionSystem/ActionWithDelegate.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IdeActions",
+   "path": "platform/ide-core/src/com/intellij/openapi/actionSystem/IdeActions.java",
+   "lines": 365,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "PlatformCoreDataKeys",
+   "path": "platform/ide-core/src/com/intellij/openapi/actionSystem/PlatformCoreDataKeys.java",
+   "lines": 112,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SeparatorAction",
+   "path": "platform/ide-core/src/com/intellij/openapi/actionSystem/SeparatorAction.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutoCompletionCommand",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionCommand.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutoCompletionContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionContributor.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ContributorSearchResult",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/ContributorSearchResult.java",
+   "lines": 70,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EssentialContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/EssentialContributor.java",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExtendedInfo",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/ExtendedInfo.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FoundItemDescriptor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/FoundItemDescriptor.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PossibleSlowContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/PossibleSlowContributor.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereCommandInfo",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereCommandInfo.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributor.java",
+   "lines": 265,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereContributorFactory",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributorFactory.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereEssentialContributorMarker",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereEssentialContributorMarker.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereExtendedInfoProvider",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereExtendedInfoProvider.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePresentationProvider",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePresentationProvider.java",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereSpellCheckResult",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereSpellCheckResult.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereSpellingCorrector",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereSpellingCorrector.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereToggleAction",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereToggleAction.java",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchFieldActionsContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchFieldActionsContributor.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SemanticSearchEverywhereContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SemanticSearchEverywhereContributor.kt",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TabsCustomizationStrategy",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/TabsCustomizationStrategy.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WeightedSearchEverywhereContributor",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/WeightedSearchEverywhereContributor.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoteSearchEverywhereConverter",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/remote/RemoteSearchEverywhereConverter.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoteSearchEverywhereConverterSupplier",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/remote/RemoteSearchEverywhereConverterSupplier.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoteSearchEverywherePresentation",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/remote/RemoteSearchEverywherePresentation.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereRemoteSupportService",
+   "path": "platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/remote/SearchEverywhereRemoteSupportService.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangDataKeys",
+   "path": "platform/lang-core/src/com/intellij/openapi/actionSystem/LangDataKeys.java",
+   "lines": 82,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AbstractEqualityProvider.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractGotoSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AbstractGotoSEContributor.kt",
+   "lines": 565,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionSearchEverywhereContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ActionSearchEverywhereContributor.kt",
+   "lines": 307,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionsEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ActionsEqualityProvider.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutoCompletionProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionProvider.java",
+   "lines": 144,
+   "read": true,
+   "swing": [
+    "JList",
+    "JBUIScale",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CalculatorSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CalculatorSEContributor.kt",
+   "lines": 318,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CheckBoxSearchEverywhereToggleAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CheckBoxSearchEverywhereToggleAction.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ClassSearchEverywhereContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt",
+   "lines": 113,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ClassSearchEverywhereNavigationHandler",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt",
+   "lines": 124,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ContributorDefinedTabsCustomizationStrategy",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ContributorDefinedTabsCustomizationStrategy.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "CorrectionWrapper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CorrectionWrapper.kt",
+   "lines": 89,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileSearchEverywhereContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FileSearchEverywhereContributor.kt",
+   "lines": 213,
+   "read": true,
+   "swing": [
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FixedTabsListCustomizationStrategy",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FixedTabsListCustomizationStrategy.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "GotoContributorsAvailabilityApi",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/GotoContributorsAvailabilityApi.kt",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "GotoContributorsAvailabilityService",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/GotoContributorsAvailabilityService.kt",
+   "lines": 93,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HintHelper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/HintHelper.kt",
+   "lines": 154,
+   "read": true,
+   "swing": [
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HistoryIterator",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/HistoryIterator.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeableElement",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/MergeableElement.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixedListFactory",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/MixedListFactory.java",
+   "lines": 93,
+   "read": true,
+   "swing": [
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixedResultsSearcher",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/MixedResultsSearcher.java",
+   "lines": 527,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixedSearchListModel",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/MixedSearchListModel.java",
+   "lines": 225,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithSearchEverywhereManagerFactory",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/MonolithSearchEverywhereManagerFactory.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NonIndexableFilesSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/NonIndexableFilesSEContributor.kt",
+   "lines": 585,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NonIndexableProductBehaviorService",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/NonIndexableProductBehaviorService.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OptionEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/OptionEqualityProvider.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PSIPresentationBgRendererWrapper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PSIPresentationBgRendererWrapper.java",
+   "lines": 502,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PersistentSearchEverywhereContributorFilter",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PersistentSearchEverywhereContributorFilter.java",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PossibleInternalCommandsContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PossibleInternalCommandsContributor.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PreviewAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewAction.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PreviewExperiment",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewExperiment.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PreviewListener",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewListener.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PromoAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PromoAction.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiElementsEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PsiElementsEqualityProvider.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiItemWithSimilarity",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PsiItemWithSimilarity.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RecentFilesSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/RecentFilesSEContributor.java",
+   "lines": 118,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunConfigurationsSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/RunConfigurationsSEContributor.java",
+   "lines": 292,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SEHeaderActionListener",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SEHeaderActionListener.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SEListSelectionTracker",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SEListSelectionTracker.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SENewUIHeaderView",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SENewUIHeaderView.kt",
+   "lines": 54,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SEResultsEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SEResultsEqualityProvider.kt",
+   "lines": 96,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SEResultsListFactory",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SEResultsListFactory.java",
+   "lines": 209,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JList",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SESearcher",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SESearcher.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SETabSwitcherListener",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SETabSwitcherListener.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ScopeChooserAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeChooserAction.java",
+   "lines": 215,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ScopeSupporting",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeSupporting.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchAdapter",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchAdapter.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEventsBuffer",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEventsBuffer.kt",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereActions",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereActions.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereContributorModule",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributorModule.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereContributorValidationRule",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributorValidationRule.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereContributorWrapper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributorWrapper.kt",
+   "lines": 8,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereCoroutineScopeService",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereCoroutineScopeService.kt",
+   "lines": 8,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereDataUtils",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereDataUtils.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereEmptyTextProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereEmptyTextProvider.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereFeature",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFeature.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereFiltersAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFiltersAction.java",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereFiltersStatisticsCollector",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFiltersStatisticsCollector.java",
+   "lines": 93,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereFoundElementInfo",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFoundElementInfo.java",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereHeader",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereHeader.java",
+   "lines": 570,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereLanguage",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereLanguage.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereManager",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereManager.java",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereManagerImpl",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereManagerImpl.java",
+   "lines": 495,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "SearchEverywhereMixedListInfo",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMixedListInfo.kt",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereMlContributorReplacement",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlContributorReplacement.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereMlService",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlService.kt",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereMlTabsCustomizationStrategy",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereMlTabsCustomizationStrategy.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereNavigationHandler",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereNavigationHandler.kt",
+   "lines": 252,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePopupInstance",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePopupInstance.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePreview",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreview.kt",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePreviewFetcher",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewFetcher.kt",
+   "lines": 117,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePreviewGenerator",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewGenerator.kt",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywherePreviewPrimaryUsageFinder",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewPrimaryUsageFinder.kt",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereRemoteSupportServiceImpl",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereRemoteSupportServiceImpl.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereReorderingService",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereReorderingService.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereResultsNotifier",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereResultsNotifier.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereTabsShortcutsUtils",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereTabsShortcutsUtils.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereToolbarField",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereToolbarField.kt",
+   "lines": 87,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereUI",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereUI.java",
+   "lines": 2074,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereWarmupActivity",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereWarmupActivity.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchHistoryList",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchHistoryList.kt",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchListModel",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchListModel.java",
+   "lines": 124,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchListener",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchListener.java",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchListenerEx",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchListenerEx.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchProcessLogger",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchProcessLogger.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchRestartReason",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchRestartReason.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SlowContributorDetector",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SlowContributorDetector.kt",
+   "lines": 126,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitSearchAdapter",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SplitSearchAdapter.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitSearchListener",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SplitSearchListener.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SymbolSearchEverywhereContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SymbolSearchEverywhereContributor.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThrottlingListenerWrapper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ThrottlingListenerWrapper.java",
+   "lines": 105,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TopHitSEContributor",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/TopHitSEContributor.java",
+   "lines": 316,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrivialElementsEqualityProvider",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/TrivialElementsEqualityProvider.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Utils",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/Utils.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "WaitForContributorsListenerWrapper",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/WaitForContributorsListenerWrapper.java",
+   "lines": 211,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionExtendedInfo",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/footer/ActionExtendedInfo.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExtendedInfoImpl",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/footer/ExtendedInfoImpl.kt",
+   "lines": 234,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SEHistoryManager",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/footer/SEHistoryManager.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AlignmentMatrix",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/fuzzyMatching/AlignmentMatrix.kt",
+   "lines": 133,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ScoringParameters",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/fuzzyMatching/ScoringParameters.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SmithWatermanAlgorithm",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/fuzzyMatching/SmithWatermanAlgorithm.kt",
+   "lines": 192,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Presentations",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/remote/Presentations.kt",
+   "lines": 84,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ResultsGraph",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/setesting/ResultsGraph.kt",
+   "lines": 159,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SETester",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/setesting/SETester.kt",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SETestingPanel",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/setesting/SETestingPanel.kt",
+   "lines": 186,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TestSearchEverywhereAction",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/setesting/TestSearchEverywhereAction.kt",
+   "lines": 64,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/setesting/package-info.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereUsageTriggerCollector",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/statistics/SearchEverywhereUsageTriggerCollector.java",
+   "lines": 165,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchFieldStatisticsCollector",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/statistics/SearchFieldStatisticsCollector.java",
+   "lines": 147,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchPerformanceTracker",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/statistics/SearchPerformanceTracker.kt",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchingProcessStatisticsCollector",
+   "path": "platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/statistics/SearchingProcessStatisticsCollector.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CalculatorSEContributorTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/CalculatorSEContributorTest.kt",
+   "lines": 123,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HeaderTabsTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/HeaderTabsTest.kt",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixingMultiThreadSearchTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/MixingMultiThreadSearchTest.kt",
+   "lines": 283,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NonIndexableFilesSEContributorTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/NonIndexableFilesSEContributorTest.kt",
+   "lines": 579,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PSIPresentationBgRendererWrapperTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/PSIPresentationBgRendererWrapperTest.kt",
+   "lines": 68,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PathFromRootResolverTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/PathFromRootResolverTest.kt",
+   "lines": 102,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SETestUtil",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/SETestUtil.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchBufferedListenersTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/SearchBufferedListenersTest.kt",
+   "lines": 399,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereNavigationHandlerTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/SearchEverywhereNavigationHandlerTest.kt",
+   "lines": 97,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchEverywhereToolbarFieldsTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/SearchEverywhereToolbarFieldsTest.kt",
+   "lines": 94,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchModelTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/SearchModelTest.java",
+   "lines": 135,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchContributorTest",
+   "path": "platform/lang-impl/testSources/com/intellij/ide/actions/searcheverywhere/TextSearchContributorTest.kt",
+   "lines": 59,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbbreviationManager",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/AbbreviationManager.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionButtonComponent",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionButtonComponent.java",
+   "lines": 53,
+   "read": true,
+   "swing": [
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionGroupStub",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionGroupStub.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionGroupWrapper",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionGroupWrapper.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionId",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionId.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionInGroup",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionInGroup.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPromoter",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionPromoter.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionStub",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionStub.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionToolbarPosition",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionToolbarPosition.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionWrapperUtil",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ActionWrapperUtil.kt",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionHolder",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/AnActionHolder.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionWrapper",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/AnActionWrapper.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Anchor",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/Anchor.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "CheckedActionGroup",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/CheckedActionGroup.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CommonShortcuts",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/CommonShortcuts.java",
+   "lines": 164,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompositeShortcutSet",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/CompositeShortcutSet.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Constraints",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/Constraints.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DataConstants",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/DataConstants.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DecorativeElement",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/DecorativeElement.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultActionGroup",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/DefaultActionGroup.java",
+   "lines": 622,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "DefaultCompactActionGroup",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/DefaultCompactActionGroup.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "EmptyAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/EmptyAction.java",
+   "lines": 87,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EmptyActionGroup",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/EmptyActionGroup.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeyboardGestureAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/KeyboardGestureAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeyboardModifierGestureShortcut",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/KeyboardModifierGestureShortcut.java",
+   "lines": 94,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MacOtherAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/MacOtherAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MouseShortcut",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/MouseShortcut.java",
+   "lines": 119,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PerformWithDocumentsCommitted",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/PerformWithDocumentsCommitted.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PlatformDataKeys",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/PlatformDataKeys.java",
+   "lines": 114,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "PopupAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/PopupAction.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PressureShortcut",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/PressureShortcut.java",
+   "lines": 63,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Separator",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/Separator.java",
+   "lines": 70,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ToggleAction.java",
+   "lines": 94,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ToggleOptionAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ToggleOptionAction.java",
+   "lines": 104,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Toggleable",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/Toggleable.java",
+   "lines": 84,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionContextElement",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionContextElement.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionCopiedShortcutsTracker",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionCopiedShortcutsTracker.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionManagerEx",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionManagerEx.kt",
+   "lines": 147,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPopupMenuListener",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionPopupMenuListener.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUtil",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ActionUtil.kt",
+   "lines": 803,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CheckboxAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/CheckboxAction.java",
+   "lines": 97,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComboBoxAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ComboBoxAction.java",
+   "lines": 427,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultCustomComponentAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/DefaultCustomComponentAction.java",
+   "lines": 30,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreeStateCheckboxAction",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/ThreeStateCheckboxAction.java",
+   "lines": 83,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TooltipDescriptionProvider",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/TooltipDescriptionProvider.java",
+   "lines": 9,
+   "read": true,
+   "swing": [
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TooltipLinkProvider",
+   "path": "platform/platform-api/src/com/intellij/openapi/actionSystem/ex/TooltipLinkProvider.java",
+   "lines": 32,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionGroupUtil",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ActionGroupUtil.java",
+   "lines": 88,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUpdaterInterceptor",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ActionUpdaterInterceptor.kt",
+   "lines": 112,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AnActionExtensionProvider",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/AnActionExtensionProvider.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExtendableAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ExtendableAction.java",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RegistryToggleAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/RegistryToggleAction.java",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitButtonAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/SplitButtonAction.java",
+   "lines": 345,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionButtonLook",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/ActionButtonLook.java",
+   "lines": 199,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "QuickList",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/QuickList.java",
+   "lines": 140,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "QuickListsManager",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/QuickListsManager.kt",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarLabelAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/ex/ToolbarLabelAction.java",
+   "lines": 114,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbbreviationManagerImpl",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/AbbreviationManagerImpl.java",
+   "lines": 163,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionButton",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButton.java",
+   "lines": 858,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionButtonUtil",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButtonUtil.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionButtonWithText",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionButtonWithText.java",
+   "lines": 333,
+   "read": true,
+   "swing": [
+    "paintComponent",
+    "SwingUtilities",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionConfigurationCustomizer",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionConfigurationCustomizer.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionExecutionSupport",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionExecutionSupport.kt",
+   "lines": 176,
+   "read": true,
+   "swing": [
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionGroupStub",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionGroupStub.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionManagerImpl",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerImpl.kt",
+   "lines": 810,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionManagerRegistration",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerRegistration.kt",
+   "lines": 710,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionManagerState",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerState.kt",
+   "lines": 268,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionManagerXmlSupport",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionManagerXmlSupport.kt",
+   "lines": 446,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionMenu",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenu.kt",
+   "lines": 725,
+   "read": true,
+   "swing": [
+    "JBPopup",
+    "SwingUtilities",
+    "JBColor"
+   ],
+   "platform": [
+    "OSX"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ActionMenuItem",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionMenuItem.kt",
+   "lines": 292,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPluginRegistrar",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionPluginRegistrar.kt",
+   "lines": 1269,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPopupMenuImpl",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionPopupMenuImpl.java",
+   "lines": 221,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionPresentationDecorator",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionPresentationDecorator.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionToolbarImpl",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionToolbarImpl.kt",
+   "lines": 1850,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionToolbarPresentationFactory",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionToolbarPresentationFactory.java",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUpdater",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionUpdater.kt",
+   "lines": 1005,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionUpdaterInterceptorImpl",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActionUpdaterInterceptorImpl.kt",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActualActionUiKind",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ActualActionUiKind.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AsyncDataContext",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/AsyncDataContext.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutoPopupSupportingListener",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/AutoPopupSupportingListener.java",
+   "lines": 45,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BundledQuickListsProvider",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/BundledQuickListsProvider.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChameleonAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ChameleonAction.java",
+   "lines": 89,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CoreActionsPrelude",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/CoreActionsPrelude.kt",
+   "lines": 104,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DynamicActionConfigurationCustomizer",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/DynamicActionConfigurationCustomizer.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FieldInplaceActionButtonLook",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/FieldInplaceActionButtonLook.java",
+   "lines": 73,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FloatingToolbar",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/FloatingToolbar.kt",
+   "lines": 362,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FusAwareAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/FusAwareAction.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IdeaActionButtonLook",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/IdeaActionButtonLook.java",
+   "lines": 53,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeymapShortcutOperation",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/KeymapShortcutOperation.kt",
+   "lines": 172,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MacGestureAdapter",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/MacGestureAdapter.java",
+   "lines": 140,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MenuCancelledControlFlowException",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/MenuCancelledControlFlowException.kt",
+   "lines": 8,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MenuItemPresentationFactory",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/MenuItemPresentationFactory.java",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MoreActionGroup",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/MoreActionGroup.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MouseGestureManager",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/MouseGestureManager.java",
+   "lines": 69,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PoppedIcon",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/PoppedIcon.java",
+   "lines": 51,
+   "read": true,
+   "swing": [
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PopupShowingTimeTracker",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/PopupShowingTimeTracker.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PreCachedDataContext",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/PreCachedDataContext.kt",
+   "lines": 756,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PresentationFactory",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/PresentationFactory.java",
+   "lines": 105,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ProxyShortcutSet",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ProxyShortcutSet.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SafeIdeView",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/SafeIdeView.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StubItem",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/StubItem.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarUpdater",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ToolbarUpdater.kt",
+   "lines": 183,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SwingUtilities",
+    "ActionButton"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarUtils",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/ToolbarUtils.kt",
+   "lines": 65,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Utils",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/Utils.kt",
+   "lines": 1557,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "WeakTimerListener",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/WeakTimerListener.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Win10ActionButtonLook",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/Win10ActionButtonLook.java",
+   "lines": 61,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionRef",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/actionholder/ActionRef.kt",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PillBorder",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/PillBorder.java",
+   "lines": 53,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SegmentedActionToolbarComponent",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/SegmentedActionToolbarComponent.kt",
+   "lines": 237,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SegmentedBarActionComponent",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/SegmentedBarActionComponent.kt",
+   "lines": 63,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SegmentedBarPainter",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/SegmentedBarPainter.kt",
+   "lines": 202,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "Graphics2D"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SegmentedCustomAction",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/SegmentedCustomAction.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [
+    "paintComponent",
+    "Graphics2D",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToolbarActionsUpdatedListener",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/ToolbarActionsUpdatedListener.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/impl/segmentedActionBar/package-info.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActionSystemScope",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/util/ActionSystemScope.kt",
+   "lines": 7,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/platform-impl/src/com/intellij/openapi/actionSystem/util/package-info.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  }
+ ]
+}

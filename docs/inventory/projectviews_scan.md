@@ -1,6 +1,6 @@
 # projectviews 机检结果
 
-枚举 755 个类；TaoCode 文本里出现过名字的 41 个，**从未出现 714 个**。
+枚举 755 个类；TaoCode 文本里出现过名字的 59 个，**从未出现 696 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -60,10 +60,10 @@
 | `VisibilityComparator` | `java/java-structure-view/src/com/intellij/ide/structureView/impl/java/VisibilityComparator.java` | 未出现 |
 | `VisibilitySorter` | `java/java-structure-view/src/com/intellij/ide/structureView/impl/java/VisibilitySorter.java` | 未出现 |
 | `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | 提到过 |
-| `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | 未出现 |
-| `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | 未出现 |
-| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | 未出现 |
-| `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | 未出现 |
+| `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | 提到过 |
+| `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | 提到过 |
+| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | 提到过 |
+| `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | 提到过 |
 | `CommandDescriptor` | `platform/core-impl/src/com/intellij/openapi/command/impl/CommandDescriptor.java` | 未出现 |
 | `CommandIdentity` | `platform/core-impl/src/com/intellij/openapi/command/impl/CommandIdentity.java` | 未出现 |
 | `CommandListeners` | `platform/core-impl/src/com/intellij/openapi/command/impl/CommandListeners.java` | 未出现 |
@@ -73,12 +73,12 @@
 | `RootsProvider` | `platform/editor-ui-api/src/com/intellij/ide/projectView/RootsProvider.java` | 未出现 |
 | `SettingsProvider` | `platform/editor-ui-api/src/com/intellij/ide/projectView/SettingsProvider.java` | 未出现 |
 | `TreeStructureProvider` | `platform/editor-ui-api/src/com/intellij/ide/projectView/TreeStructureProvider.java` | 未出现 |
-| `ViewSettings` | `platform/editor-ui-api/src/com/intellij/ide/projectView/ViewSettings.java` | 未出现 |
+| `ViewSettings` | `platform/editor-ui-api/src/com/intellij/ide/projectView/ViewSettings.java` | 提到过 |
 | `FileEditorPositionListener` | `platform/editor-ui-api/src/com/intellij/ide/structureView/FileEditorPositionListener.java` | 未出现 |
 | `ModelListener` | `platform/editor-ui-api/src/com/intellij/ide/structureView/ModelListener.java` | 未出现 |
 | `SearchableTextProvider` | `platform/editor-ui-api/src/com/intellij/ide/structureView/SearchableTextProvider.java` | 未出现 |
 | `ShortTextProvider` | `platform/editor-ui-api/src/com/intellij/ide/structureView/ShortTextProvider.java` | 未出现 |
-| `StructureView` | `platform/editor-ui-api/src/com/intellij/ide/structureView/StructureView.java` | 未出现 |
+| `StructureView` | `platform/editor-ui-api/src/com/intellij/ide/structureView/StructureView.java` | 提到过 |
 | `StructureViewBuilder` | `platform/editor-ui-api/src/com/intellij/ide/structureView/StructureViewBuilder.kt` | 未出现 |
 | `StructureViewBuilderProvider` | `platform/editor-ui-api/src/com/intellij/ide/structureView/StructureViewBuilderProvider.java` | 未出现 |
 | `StructureViewClickEvent` | `platform/editor-ui-api/src/com/intellij/ide/structureView/StructureViewClickEvent.kt` | 未出现 |
@@ -100,7 +100,7 @@
 | `DoNotAskManager` | `platform/ide-core/src/com/intellij/notification/DoNotAskManager.kt` | 未出现 |
 | `EventLogCategory` | `platform/ide-core/src/com/intellij/notification/EventLogCategory.java` | 未出现 |
 | `Notification` | `platform/ide-core/src/com/intellij/notification/Notification.java` | 提到过 |
-| `NotificationAction` | `platform/ide-core/src/com/intellij/notification/NotificationAction.java` | 未出现 |
+| `NotificationAction` | `platform/ide-core/src/com/intellij/notification/NotificationAction.java` | 提到过 |
 | `NotificationAnnouncingMode` | `platform/ide-core/src/com/intellij/notification/NotificationAnnouncingMode.kt` | 未出现 |
 | `NotificationDisplayType` | `platform/ide-core/src/com/intellij/notification/NotificationDisplayType.java` | 未出现 |
 | `NotificationGroup` | `platform/ide-core/src/com/intellij/notification/NotificationGroup.kt` | 未出现 |
@@ -125,8 +125,8 @@
 | `HelpID` | `platform/lang-impl/src/com/intellij/ide/projectView/HelpID.java` | 未出现 |
 | `ProjectView` | `platform/lang-impl/src/com/intellij/ide/projectView/ProjectView.java` | 提到过 |
 | `ProjectViewNodeDecorator` | `platform/lang-impl/src/com/intellij/ide/projectView/ProjectViewNodeDecorator.kt` | 未出现 |
-| `ProjectViewSettings` | `platform/lang-impl/src/com/intellij/ide/projectView/ProjectViewSettings.java` | 未出现 |
-| `ExpandRecursivelyAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/ExpandRecursivelyAction.kt` | 提到过 |
+| `ProjectViewSettings` | `platform/lang-impl/src/com/intellij/ide/projectView/ProjectViewSettings.java` | 提到过 |
+| `ExpandRecursivelyAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/ExpandRecursivelyAction.kt` | 未出现 |
 | `ImportModuleFromImlFileAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/ImportModuleFromImlFileAction.java` | 未出现 |
 | `LoadUnloadModulesAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/LoadUnloadModulesAction.kt` | 未出现 |
 | `MarkAsContentRootAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/MarkAsContentRootAction.kt` | 未出现 |
@@ -146,7 +146,7 @@
 | `UnmarkRootAction` | `platform/lang-impl/src/com/intellij/ide/projectView/actions/UnmarkRootAction.java` | 未出现 |
 | `AbstractProjectTreeStructure` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectTreeStructure.java` | 未出现 |
 | `AbstractProjectViewPane` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectViewPane.java` | 未出现 |
-| `AbstractProjectViewPaneWithAsyncSupport` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectViewPaneWithAsyncSupport.java` | 未出现 |
+| `AbstractProjectViewPaneWithAsyncSupport` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractProjectViewPaneWithAsyncSupport.java` | 提到过 |
 | `AbstractUrlLoaderImpl` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AbstractUrlLoaderImpl.java` | 未出现 |
 | `AsyncProjectViewSupport` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AsyncProjectViewSupport.java` | 未出现 |
 | `AttachableProjectViewPane` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/AttachableProjectViewPane.java` | 未出现 |
@@ -160,7 +160,7 @@
 | `DirectoryUrl` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/DirectoryUrl.java` | 未出现 |
 | `FileNestingBuilder` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/FileNestingBuilder.java` | 未出现 |
 | `FileNestingInProjectViewDialog` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/FileNestingInProjectViewDialog.java` | 未出现 |
-| `GroupByTypeComparator` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/GroupByTypeComparator.java` | 未出现 |
+| `GroupByTypeComparator` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/GroupByTypeComparator.java` | 提到过 |
 | `IdeViewForProjectViewPane` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/IdeViewForProjectViewPane.java` | 未出现 |
 | `LibraryModuleGroupUrl` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/LibraryModuleGroupUrl.java` | 未出现 |
 | `ModuleGroup` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ModuleGroup.java` | 未出现 |
@@ -199,7 +199,7 @@
 | `ProjectViewPreloadMode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewPreloadMode.kt` | 未出现 |
 | `ProjectViewPsiTreeChangeListener` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewPsiTreeChangeListener.java` | 未出现 |
 | `ProjectViewRenderer` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewRenderer.kt` | 未出现 |
-| `ProjectViewSharedSettings` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewSharedSettings.kt` | 未出现 |
+| `ProjectViewSharedSettings` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewSharedSettings.kt` | 提到过 |
 | `ProjectViewState` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewState.kt` | 未出现 |
 | `ProjectViewToolWindowFactory` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewToolWindowFactory.kt` | 未出现 |
 | `ProjectViewTree` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/ProjectViewTree.java` | 未出现 |
@@ -236,8 +236,8 @@
 | `ProjectViewNodeExtensions` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/ProjectViewNodeExtensions.kt` | 未出现 |
 | `ProjectViewProjectNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/ProjectViewProjectNode.java` | 未出现 |
 | `ProjectViewUnloadedModuleNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/ProjectViewUnloadedModuleNode.java` | 未出现 |
-| `PsiDirectoryNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiDirectoryNode.java` | 未出现 |
-| `PsiFileNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiFileNode.kt` | 未出现 |
+| `PsiDirectoryNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiDirectoryNode.java` | 提到过 |
+| `PsiFileNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiFileNode.kt` | 提到过 |
 | `PsiFileSystemItemFilter` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiFileSystemItemFilter.java` | 未出现 |
 | `PsiTreeAnchorizer` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/PsiTreeAnchorizer.java` | 未出现 |
 | `StructureViewModuleNode` | `platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/StructureViewModuleNode.java` | 未出现 |
@@ -293,7 +293,7 @@
 | `ChangeRevision` | `platform/lvcs-impl/src/com/intellij/history/core/revisions/ChangeRevision.java` | 未出现 |
 | `CurrentRevision` | `platform/lvcs-impl/src/com/intellij/history/core/revisions/CurrentRevision.java` | 未出现 |
 | `Difference` | `platform/lvcs-impl/src/com/intellij/history/core/revisions/Difference.java` | 未出现 |
-| `Revision` | `platform/lvcs-impl/src/com/intellij/history/core/revisions/Revision.java` | 未出现 |
+| `Revision` | `platform/lvcs-impl/src/com/intellij/history/core/revisions/Revision.java` | 提到过 |
 | `DirectoryEntry` | `platform/lvcs-impl/src/com/intellij/history/core/tree/DirectoryEntry.java` | 未出现 |
 | `Entry` | `platform/lvcs-impl/src/com/intellij/history/core/tree/Entry.java` | 提到过 |
 | `FileEntry` | `platform/lvcs-impl/src/com/intellij/history/core/tree/FileEntry.java` | 未出现 |
@@ -315,7 +315,7 @@
 | `LocalHistoryGroup` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/LocalHistoryGroup.java` | 未出现 |
 | `PutLabelAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/PutLabelAction.java` | 未出现 |
 | `RecentChangesAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/RecentChangesAction.java` | 未出现 |
-| `ShowHistoryAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/ShowHistoryAction.java` | 未出现 |
+| `ShowHistoryAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/ShowHistoryAction.java` | 提到过 |
 | `ShowLocalHistoryUtil` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/ShowLocalHistoryUtil.kt` | 未出现 |
 | `ShowProjectHistoryAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/ShowProjectHistoryAction.kt` | 未出现 |
 | `ShowSelectionHistoryAction` | `platform/lvcs-impl/src/com/intellij/history/integration/ui/actions/ShowSelectionHistoryAction.java` | 未出现 |
@@ -371,7 +371,7 @@
 | `EntryDiffContent` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/diff/EntryDiffContent.kt` | 未出现 |
 | `PresentableFileDifference` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/diff/PresentableFileDifference.kt` | 未出现 |
 | `SelectionDiffRequestProducer` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/diff/SelectionDiffRequestProducer.kt` | 未出现 |
-| `Revert` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/operations/Revert.kt` | 未出现 |
+| `Revert` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/operations/Revert.kt` | 提到过 |
 | `package-info` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/package-info.java` | 未出现 |
 | `ActivityViewApplicationSettings` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/settings/ActivityViewApplicationSettings.kt` | 未出现 |
 | `LocalHistoryCounter` | `platform/lvcs-impl/src/com/intellij/platform/lvcs/impl/statistics/LocalHistoryCounter.kt` | 未出现 |
@@ -428,7 +428,7 @@
 | `LogModel` | `platform/platform-impl/src/com/intellij/notification/LogModel.java` | 未出现 |
 | `NotificationsLogController` | `platform/platform-impl/src/com/intellij/notification/NotificationsLogController.kt` | 未出现 |
 | `SingletonNotificationManager` | `platform/platform-impl/src/com/intellij/notification/SingletonNotificationManager.kt` | 未出现 |
-| `ApplicationNotificationsModel` | `platform/platform-impl/src/com/intellij/notification/impl/ApplicationNotificationsModel.kt` | 未出现 |
+| `ApplicationNotificationsModel` | `platform/platform-impl/src/com/intellij/notification/impl/ApplicationNotificationsModel.kt` | 提到过 |
 | `DoNotAskManagerImpl` | `platform/platform-impl/src/com/intellij/notification/impl/DoNotAskManagerImpl.kt` | 未出现 |
 | `DoNotAskSettings` | `platform/platform-impl/src/com/intellij/notification/impl/DoNotAskSettings.kt` | 未出现 |
 | `LocalNotificationRouter` | `platform/platform-impl/src/com/intellij/notification/impl/LocalNotificationRouter.kt` | 未出现 |
@@ -470,7 +470,7 @@
 | `StickyButton` | `platform/platform-impl/src/com/intellij/notification/impl/ui/StickyButton.java` | 未出现 |
 | `StickyButtonUI` | `platform/platform-impl/src/com/intellij/notification/impl/ui/StickyButtonUI.java` | 未出现 |
 | `IdeNotificationArea` | `platform/platform-impl/src/com/intellij/notification/impl/widget/IdeNotificationArea.java` | 未出现 |
-| `NotificationWidgetFactory` | `platform/platform-impl/src/com/intellij/notification/impl/widget/NotificationWidgetFactory.java` | 未出现 |
+| `NotificationWidgetFactory` | `platform/platform-impl/src/com/intellij/notification/impl/widget/NotificationWidgetFactory.java` | 提到过 |
 | `package-info` | `platform/platform-impl/src/com/intellij/notification/impl/widget/package-info.java` | 未出现 |
 | `CannotUndoReportDialog` | `platform/platform-impl/src/com/intellij/openapi/command/impl/CannotUndoReportDialog.kt` | 未出现 |
 | `CommandBuilder` | `platform/platform-impl/src/com/intellij/openapi/command/impl/CommandBuilder.java` | 未出现 |
@@ -566,7 +566,7 @@
 | `WelcomePopupAction` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomePopupAction.java` | 未出现 |
 | `WelcomeScreenActionsUtil` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenActionsUtil.java` | 未出现 |
 | `WelcomeScreenComponentFactory` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenComponentFactory.java` | 提到过 |
-| `WelcomeScreenDefaultCustomization` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenDefaultCustomization.java` | 未出现 |
+| `WelcomeScreenDefaultCustomization` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenDefaultCustomization.java` | 提到过 |
 | `WelcomeScreenEventCollector` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenEventCollector.kt` | 未出现 |
 | `WelcomeScreenEventCollectorDebuggerExtensions` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenEventCollectorDebuggerExtensions.kt` | 未出现 |
 | `WelcomeScreenFocusManager` | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenFocusManager.java` | 未出现 |

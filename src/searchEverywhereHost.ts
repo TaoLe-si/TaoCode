@@ -145,6 +145,8 @@ export function createSearchEverywhereHost(deps: SearchEverywhereHostDeps) {
       subtitle: path,
       // 路径本身当关键词：搜 "demo/Main" 要能命中 "src/demo/Main.java"。
       keywords: path,
+      // 模糊匹配那档比的是整条路径（上游 matchWithPath 拿 file.path）。
+      fuzzyPath: path,
       source: 'project' as const,
       preview: previewFile(path),
       open: () => { void openFile(path) },

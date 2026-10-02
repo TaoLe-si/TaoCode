@@ -22,6 +22,7 @@ import BuildToolsSettingsPage from './BuildToolsSettingsPage.vue'
 import GradleSettingsPage from './GradleSettingsPage.vue'
 import ScopesSettingsPage from './ScopesSettingsPage.vue'
 import FileColorsSettingsPage from './FileColorsSettingsPage.vue'
+import GeneralRegistryToggles from './GeneralRegistryToggles.vue'
 import { createSettingsDraftActions, createSettingsDraftPages, type SettingsDraft } from '../settingsDraft'
 import { createGeneralSettingsTextModels } from '../generalSettingsTextModels'
 import TodoPatternsPage from './TodoPatternsPage.vue'
@@ -1256,10 +1257,8 @@ defineExpose({ handleEscape })
             <p :id="`${id}-idle-timeout-hint`" class="field-hint" :class="{ 'validation-error': !validGeneral }">空闲自动保存的超时范围是 1–300 秒（GeneralSettings.SAVE_FILES_AFTER_IDLE_SEC，默认 15）。</p>
             <label class="checkbox-row"><input v-model="general.autoSaveFiles" type="checkbox" /><span>切换到其他应用或内置终端时保存文件</span></label>
             <label class="checkbox-row"><input v-model="general.isUseSafeWrite" type="checkbox" /><span>保存前备份文件</span></label>
-            <!-- IDEA 用注册表键 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，默认
-                 false），没有设置页入口；TaoCode 没有注册表对话框，按全量移植要求升格为持久化设置。 -->
-            <label class="checkbox-row"><input v-model="general.autoShowProcessPopup" type="checkbox" aria-describedby="general-autoshow-hint" /><span>有进程开始时自动弹出进度面板</span></label>
-            <p id="general-autoshow-hint" class="field-hint restore-hint">对应 IDEA 的 ide.windowSystem.autoShowProcessPopup：Git、克隆或构建/运行开始时自动打开后台任务列表。</p>
+            <!-- 上游只用注册表键、没有设置页入口的那两项（见该组件头）。 -->
+            <GeneralRegistryToggles :general="general" />
           </fieldset>
           <h4 class="settings-group-title">同步外部更改：</h4>
           <fieldset class="settings-fields" :disabled="busy">

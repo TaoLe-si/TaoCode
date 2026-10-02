@@ -155,7 +155,10 @@ Json general_defaults_impl() {
                 // IDEA 2023+ 默认显示粘性行；一次最多 3 层作用域。
                 {"showStickyLines", true}, {"stickyLinesLimit", 3},
                 // 默认没有任何外部工具。
-                {"externalTools", Json::array()}};
+                {"externalTools", Json::array()},
+                // SeFuzzyFileSearchProviderFactory.kt:28-31：`Registry.is("search.everywhere.fuzzy.files.enabled", false)`
+                // —— 随处的文件供给者默认不走 Smith-Waterman，所以默认 false（勾上后才启用）。
+                {"fuzzyFileSearch", false}};
 }
 
 void validate_general_patch(const Json& patch) {

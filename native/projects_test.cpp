@@ -230,6 +230,14 @@ int main() {
             check(Json::parse(get(file)).at("general") == updated, "General settings must actually reach disk");
             check(ProjectStore(file).update_general(Json({{"confirmOpenNewProject2", Json(nullptr)}})).at("confirmOpenNewProject2").is_null(),
                   "confirmOpenNewProject2 accepts null (OPEN_PROJECT_ASK default)");
+            // SeFuzzyFileSearchProviderFactory.kt:28-31 — the fuzzy file provider is registry-gated
+            // and defaults to false. The key must also be in GENERAL_SETTING_KEYS, otherwise applying
+            // the toggle fails with INVALID_SETTINGS and the setting can never be turned on.
+            check(defaults.at("fuzzyFileSearch") == false,
+                  "Fuzzy file search defaults to off (search.everywhere.fuzzy.files.enabled=false)");
+            check(store.update_general({{"fuzzyFileSearch", true}}).at("fuzzyFileSearch") == true
+                  && ProjectStore(file).update_general({{"fuzzyFileSearch", false}}).at("fuzzyFileSearch") == false,
+                  "fuzzyFileSearch is an accepted key that round-trips through disk");
             const Json bad[] = {
                 {{"unknown", true}},
                 {{"confirmExit", "yes"}},
@@ -237,6 +245,7 @@ int main() {
                 {{"confirmOpenNewProject2", 3}},
                 {{"inactiveTimeout", "15"}},
                 {{"defaultProjectDirectory", std::string(513, 'x')}},
+                {{"fuzzyFileSearch", "yes"}},
             };
             for (const auto& patch : bad) expect_error("INVALID_SETTINGS", [&] { store.update_general(patch); });
             // A state file without "general" (older build) still loads and gains the key on first save.

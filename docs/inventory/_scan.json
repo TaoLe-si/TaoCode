@@ -1,7 +1,7 @@
 {
  "editor": {
   "total": 2551,
-  "mentioned": 75,
+  "mentioned": 125,
   "unmentioned_sample": [
    "java/idea-ui/src/com/intellij/codeInsight/daemon/impl/AndroidSdkSourcesMismatchSuppressor.kt",
    "java/idea-ui/src/com/intellij/codeInsight/daemon/impl/AttachSourcesNotificationProvider.java",
@@ -47,7 +47,7 @@
  },
  "toolwindow": {
   "total": 350,
-  "mentioned": 64,
+  "mentioned": 132,
   "unmentioned_sample": [
    "platform/core-impl/src/com/intellij/openapi/wm/ex/ProgressIndicatorEx.java",
    "platform/ide-core-impl/src/com/intellij/openapi/wm/impl/FloatingDecoratorMarker.java",
@@ -55,18 +55,12 @@
    "platform/ide-core/src/com/intellij/openapi/wm/IdeFocusManager.java",
    "platform/ide-core/src/com/intellij/openapi/wm/IdeFrame.java",
    "platform/ide-core/src/com/intellij/openapi/wm/PassThroughIdeFocusManager.java",
-   "platform/ide-core/src/com/intellij/openapi/wm/StatusBar.kt",
-   "platform/ide-core/src/com/intellij/openapi/wm/StatusBarInfo.java",
-   "platform/ide-core/src/com/intellij/openapi/wm/StatusBarListener.java",
-   "platform/ide-core/src/com/intellij/openapi/wm/StatusBarWidget.kt",
    "platform/ide-core/src/com/intellij/openapi/wm/ToolWindowType.java",
    "platform/ide-core/src/com/intellij/openapi/wm/WidgetPresentation.kt",
    "platform/ide-core/src/com/intellij/openapi/wm/ideFocusUtil.kt",
    "platform/lang-impl/src/com/intellij/openapi/wm/impl/AbstractTraverseWindowAction.java",
    "platform/lang-impl/src/com/intellij/openapi/wm/impl/ProjectWindowActionGroup.kt",
    "platform/lang-impl/src/com/intellij/openapi/wm/impl/WindowDressing.kt",
-   "platform/lang-impl/src/com/intellij/openapi/wm/impl/status/InspectionProfileWidgetFactory.java",
-   "platform/lang-impl/src/com/intellij/openapi/wm/impl/status/TogglePopupHintsPanel.java",
    "platform/lang-impl/testSources/com/intellij/openapi/wm/ex/ProjectFrameCapabilitiesServiceTest.kt",
    "platform/lang-impl/testSources/com/intellij/openapi/wm/impl/ProjectWindowActionGroupTest.kt",
    "platform/lang-impl/testSources/com/intellij/toolWindow/HideAllToolWindowsTest.kt",
@@ -86,14 +80,20 @@
    "platform/platform-api/src/com/intellij/openapi/wm/InteractiveCourseData.kt",
    "platform/platform-api/src/com/intellij/openapi/wm/InteractiveCourseFactory.kt",
    "platform/platform-api/src/com/intellij/openapi/wm/LightEditFrame.java",
-   "platform/platform-api/src/com/intellij/openapi/wm/RegisterToolWindowTask.kt",
    "platform/platform-api/src/com/intellij/openapi/wm/StartPagePromoter.kt",
-   "platform/platform-api/src/com/intellij/openapi/wm/StatusBarWidgetProvider.java"
+   "platform/platform-api/src/com/intellij/openapi/wm/WeakFocusStackManager.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeFrameProvider.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeScreenCustomization.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeScreenLeftPanel.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeScreenProvider.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeScreenTab.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/WelcomeTabFactory.java",
+   "platform/platform-api/src/com/intellij/openapi/wm/ex/AbstractDelegatingToRootTraversalPolicy.java"
   ]
  },
  "vcs": {
   "total": 1783,
-  "mentioned": 53,
+  "mentioned": 83,
   "unmentioned_sample": [
    "java/vcs/src/com/intellij/openapi/vcs/contentAnnotation/VcsContentAnnotationExceptionFilter.java",
    "java/vcs/src/com/intellij/openapi/vcs/contentAnnotation/VcsContentAnnotationExceptionFilterFactory.java",
@@ -139,14 +139,12 @@
  },
  "actions": {
   "total": 317,
-  "mentioned": 10,
+  "mentioned": 25,
   "unmentioned_sample": [
    "java/openapi/src/com/intellij/openapi/actionSystem/DataKeys.java",
    "platform/analysis-api/src/com/intellij/openapi/actionSystem/ShortcutProvider.java",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionClassMetaData.java",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionPopupMenu.java",
-   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbar.java",
-   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionToolbarListener.java",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUiKind.kt",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThread.java",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ActionUpdateThreadAware.java",
@@ -180,12 +178,14 @@
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/CompressingLayoutStrategy.kt",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/NoWrapLayoutStrategy.kt",
    "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/RightActionsAdjusterStrategyWrapper.kt",
-   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/ToolbarLayoutStrategy.java"
+   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/ToolbarLayoutStrategy.java",
+   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/ToolbarLayoutUtil.kt",
+   "platform/editor-ui-api/src/com/intellij/openapi/actionSystem/toolbarLayout/WrapLayoutStrategy.kt"
   ]
  },
  "settings-run": {
   "total": 3247,
-  "mentioned": 116,
+  "mentioned": 131,
   "unmentioned_sample": [
    "java/execution/impl/src/com/intellij/execution/AlternativeJrePathConverter.java",
    "java/execution/impl/src/com/intellij/execution/AlternativeSdkRootsProvider.java",
@@ -231,7 +231,7 @@
  },
  "projectviews": {
   "total": 755,
-  "mentioned": 41,
+  "mentioned": 59,
   "unmentioned_sample": [
    "java/idea-ui/src/com/intellij/ide/projectView/actions/CreateLibraryFromFilesDialog.java",
    "java/idea-ui/src/com/intellij/ide/projectView/actions/MarkLibraryRootAction.java",
@@ -277,7 +277,7 @@
  },
  "ui": {
   "total": 1397,
-  "mentioned": 85,
+  "mentioned": 139,
   "unmentioned_sample": [
    "java/idea-ui/src/com/intellij/util/ui/classpath/ChooseLibrariesDialogBase.java",
    "java/idea-ui/src/com/intellij/util/ui/classpath/ChooseLibrariesFromTablesDialog.java",

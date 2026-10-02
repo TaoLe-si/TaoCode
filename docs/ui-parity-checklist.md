@@ -1208,6 +1208,56 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   外观 / 装订线图标设置…`；点「添加书签」后重开 → `删除书签 / 编辑描述 / 切换助记键…` + 分隔 +
   `使用软换行…`（截图 `screenshots/gutter-menu.png`，行首出现书签图标）。
 
+- [x] **已补（第八十二批）** Search Everywhere 文件来源的 Smith-Waterman 模糊匹配，
+  外加**一个只有真机能暴露的跨语言缺陷**。
+  **① 移植对齐算法本身**（上游 `platform/searchEverywhere/backend/src/…/filesFuzzy/`）：
+  `src/fuzzyMatch.ts` 落 `ScoringParameters`（`ScoringParameters.kt:18-60`，
+  firstChar 8 / consecutive 6 / camelCase 7 / separator 8 / match 16 / gap −1 / mismatch 0）、
+  `AlignmentMatrix`（`AlignmentMatrix.kt:50-56`，回溯取命中下标）与
+  `SmithWatermanAlgorithm`（`SmithWatermanAlgorithm.kt:116-154` 打分、`:175-186` 归一化）。
+  关键语义照抄：**Smith-Waterman 是局部对齐**，所以非子序列的 pattern 也可能拿到正分，
+  上游不是用"null 判掉"而是用**归一阈值**过滤（`passesFuzzyThreshold`，
+  `fuzzyWeight(normalized) >= 6500`，`SeFuzzyFileSearchProvider.kt:141`）。
+  **② 两档权重放在同一个数轴上比**：`MAX_FUZZY_WEIGHT = 9999`
+  （`SeFuzzyFileSearchItem.kt:38`，`:65` 就是 `(normalizedScore * MAX_FUZZY_WEIGHT).toInt()`）是上游特意选的"刚好压在词首命中之下"的值，
+  对上 `PreferStartMatchMatcherWrapper.START_MATCH_WEIGHT = 10000` ——
+  于是"文件结果永远排在模糊结果之上"这条上游注释是**算出来的**，不是硬编码优先级。
+  **③ 路径回退分支**照 `SmithWatermanMatcher.matchWithPath:58-70`：
+  先只匹配文件名，`normalizedScore > 0.7` 就用它，否则退到匹配整条路径。
+  **④ 开关默认关**：上游 `search.everywhere.fuzzy.files.enabled` 默认 **false**
+  （`SeFuzzyFileSearchProviderFactory.kt:29` 的 `Registry.is(…, false)`）——
+  本仓同处理，把注册表键升格成 `fuzzyFileSearch` 持久化设置（`GeneralRegistryToggles.vue`）。
+  **真缺陷（已修）**：前端 `settingsModel.ts` 定义了 `fuzzyFileSearch`、`bridge.ts` 也把它列进
+  `settings.general.update` 的白名单，但 **native 侧的键表漏了它** ——
+  `GENERAL_SETTING_KEYS`（`native/settings_schema.hpp`）与 `general_defaults_impl`
+  （`native/settings_schema.cpp`）都没有这一条，于是 `validate_general_patch` 判 `INVALID_SETTINGS`，
+  开关在界面上能勾、**永远存不下来**。TypeScript 侧的判据查不出来（它只看源码串），
+  是去读落盘的 `projects.json` 才发现 `general` 里 `fuzzyFileSearch = None`。两侧补齐后加了
+  ctest 守卫（默认 false + 能落盘往返 + 类型不对要报错），并在 `tests/b6-verdict.test.mjs` 里
+  加了一条"新设置必须 native 两侧同时登记"的边界守卫。
+  **真机取证（`TAOCODE_DEBUG_PORT` + CDP）**：开关打上 → 搜 `bkp` 出
+  `bookmark-probe.ts` 且命中字符 b/k/p 高亮；关掉 → 同样的查询结果里**高亮消失**；
+  再打开 → 高亮回来，且重开设置对话框仍是勾上的（`projects.json` 里 `true`）。
+  路径回退那一档单独验：搜 `spb` 在关时 **0 条**、开时 **16 条**（`bookmark-probe.ts` 排第一）——
+  正是"文件名不够强命中、退到整条路径"这条分支。
+  **判决书**：`docs/inventory/verdict-actions.md`（`actions` 域 317 类逐条判决，`[x]` 12 /
+  `[~]` 36 / `[ ]` 6 / `[-]` 263），门控在 `tests/b6-verdict.test.mjs`（覆盖面从扫描件重新推导，
+  不信判决表自己写的行数；`[x]`/`[~]` 行的每个 `src/`·`native/` 引用都要在磁盘上存在；
+  12 个上游测试类必须判 `[-]`；四档计数自洽；§A-2 那四个常量不许漂移）。
+  扫描器本身也补了：`scripts/verdict_signals.py` + `docs/inventory/actions_signals.{md,json}`
+  （逐类的行数/Swing 标记/平台标记/是否测试类）。
+  **口径修正**：上一轮记的引用 `SeFuzzyFileSearchProviderFactory.kt:31-33` 是错的，
+  `if (!Registry.is(…))` 实际在 **:29**（区间应为 **28-31**），已按文件改正 6 处。
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
+| `npm test` | **1399/1399**（1392 → 1399：新增 `tests/b6-verdict.test.mjs` 7 条） |
+| `npx vite build --emptyOutDir false` | exit 0 |
+| 原生构建 `build-native-locked.bat` | RC 0，0 error / 0 warning |
+| `ctest --output-on-failure -j4` | **36/36**（`projects_test` 的 `update_general` 多了三条断言） |
+| 真 exe 取证 | 开关 true→false→true 落盘；`bkp` 高亮三字；`spb` 路径档 0→16 条 |
+
 | 检查 | 结果 |
 |---|---|
 | `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |

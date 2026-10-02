@@ -69,7 +69,11 @@ inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     "showStickyLines", "stickyLinesLimit",
     // ToolConfigurable（`preferences.externalTools`，lang-impl/.../tools/ToolConfigurable.java）：
     // 外部工具 —— 应用级的命令收藏（名称 + 命令），可从菜单直接运行。
-    "externalTools"
+    "externalTools",
+    // SeFuzzyFileSearchProviderFactory.kt:28-31：注册表键 `search.everywhere.fuzzy.files.enabled`
+    // 默认 false。同 autoShowProcessPopup 的处理 —— 上游只有注册表键、没有设置页入口，
+    // TaoCode 没有注册表对话框，所以把它升格为持久化开关。
+    "fuzzyFileSearch"
 };
 
 

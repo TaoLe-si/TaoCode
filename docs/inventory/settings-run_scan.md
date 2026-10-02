@@ -1,6 +1,6 @@
 # settings-run 机检结果
 
-枚举 3247 个类；TaoCode 文本里出现过名字的 116 个，**从未出现 3131 个**。
+枚举 3247 个类；TaoCode 文本里出现过名字的 131 个，**从未出现 3116 个**。
 
 > 「提到过」只说明名字在 TaoCode 里出现过（可能是文档里的判定记录），不等于已移植；「未出现」= 该源码类从未被对照过。
 
@@ -230,12 +230,12 @@
 | `AffectedTestsInChangeListPainter` | `java/vcs/src/com/intellij/execution/testDiscovery/AffectedTestsInChangeListPainter.java` | 未出现 |
 | `TestDiscoveryVcsHelperImpl` | `java/vcs/src/com/intellij/execution/testDiscovery/TestDiscoveryVcsHelperImpl.kt` | 未出现 |
 | `ShowAffectedTestsAction` | `java/vcs/src/com/intellij/execution/testDiscovery/actions/ShowAffectedTestsAction.java` | 未出现 |
-| `FindBundle` | `platform/analysis-impl/src/com/intellij/find/FindBundle.java` | 未出现 |
+| `FindBundle` | `platform/analysis-impl/src/com/intellij/find/FindBundle.java` | 提到过 |
 | `FindSettings` | `platform/analysis-impl/src/com/intellij/find/FindSettings.java` | 未出现 |
-| `FindUsagesSettings` | `platform/analysis-impl/src/com/intellij/find/FindUsagesSettings.java` | 未出现 |
+| `FindUsagesSettings` | `platform/analysis-impl/src/com/intellij/find/FindUsagesSettings.java` | 提到过 |
 | `FindUsagesHandlerBase` | `platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesHandlerBase.java` | 未出现 |
 | `FindUsagesHelper` | `platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesHelper.java` | 未出现 |
-| `FindUsagesOptions` | `platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesOptions.java` | 未出现 |
+| `FindUsagesOptions` | `platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesOptions.java` | 提到过 |
 | `PersistentFindUsagesOptions` | `platform/analysis-impl/src/com/intellij/find/findUsages/PersistentFindUsagesOptions.java` | 未出现 |
 | `TextOccurrenceReference` | `platform/analysis-impl/src/com/intellij/find/findUsages/TextOccurrenceReference.java` | 未出现 |
 | `FindInProjectSettingsBase` | `platform/analysis-impl/src/com/intellij/find/impl/FindInProjectSettingsBase.java` | 未出现 |
@@ -534,7 +534,7 @@
 | `PrevNextFileIterable` | `platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextFileIterable.kt` | 未出现 |
 | `SimpleDiffPanel` | `platform/diff-impl/src/com/intellij/diff/tools/util/SimpleDiffPanel.java` | 未出现 |
 | `SoftHardCacheMap` | `platform/diff-impl/src/com/intellij/diff/tools/util/SoftHardCacheMap.java` | 未出现 |
-| `StatusPanel` | `platform/diff-impl/src/com/intellij/diff/tools/util/StatusPanel.java` | 未出现 |
+| `StatusPanel` | `platform/diff-impl/src/com/intellij/diff/tools/util/StatusPanel.java` | 提到过 |
 | `SyncScrollSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/SyncScrollSupport.java` | 未出现 |
 | `ThreeDiffSplitter` | `platform/diff-impl/src/com/intellij/diff/tools/util/ThreeDiffSplitter.java` | 未出现 |
 | `TransferableFileEditorStateSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/TransferableFileEditorStateSupport.java` | 未出现 |
@@ -1036,7 +1036,7 @@
 | `ExecutionTarget` | `platform/execution/src/com/intellij/execution/ExecutionTarget.java` | 未出现 |
 | `ExecutionTargetListener` | `platform/execution/src/com/intellij/execution/ExecutionTargetListener.java` | 未出现 |
 | `ExecutionTargetManager` | `platform/execution/src/com/intellij/execution/ExecutionTargetManager.java` | 未出现 |
-| `Executor` | `platform/execution/src/com/intellij/execution/Executor.java` | 未出现 |
+| `Executor` | `platform/execution/src/com/intellij/execution/Executor.java` | 提到过 |
 | `ExecutorRegistry` | `platform/execution/src/com/intellij/execution/ExecutorRegistry.java` | 未出现 |
 | `InlineResumeCreator` | `platform/execution/src/com/intellij/execution/InlineResumeCreator.kt` | 未出现 |
 | `Location` | `platform/execution/src/com/intellij/execution/Location.java` | 提到过 |
@@ -1203,7 +1203,7 @@
 | `PlaceInGrid` | `platform/execution/src/com/intellij/execution/ui/layout/PlaceInGrid.java` | 未出现 |
 | `AbstractWslDistribution` | `platform/execution/src/com/intellij/execution/wsl/AbstractWslDistribution.kt` | 未出现 |
 | `WSLCommandLineOptions` | `platform/execution/src/com/intellij/execution/wsl/WSLCommandLineOptions.java` | 未出现 |
-| `ProcessTerminatedListener` | `platform/ide-core/src/com/intellij/execution/process/ProcessTerminatedListener.java` | 未出现 |
+| `ProcessTerminatedListener` | `platform/ide-core/src/com/intellij/execution/process/ProcessTerminatedListener.java` | 提到过 |
 | `ConsoleViewContentType` | `platform/ide-core/src/com/intellij/execution/ui/ConsoleViewContentType.java` | 未出现 |
 | `FragmentedSettings` | `platform/ide-core/src/com/intellij/execution/ui/FragmentedSettings.kt` | 未出现 |
 | `SettingsEditorFragmentType` | `platform/ide-core/src/com/intellij/execution/ui/SettingsEditorFragmentType.java` | 未出现 |
@@ -1390,7 +1390,7 @@
 | `FindAllAction` | `platform/lang-impl/src/com/intellij/find/FindAllAction.java` | 未出现 |
 | `FindReplaceActionButton` | `platform/lang-impl/src/com/intellij/find/FindReplaceActionButton.kt` | 未出现 |
 | `FindUsagesCollector` | `platform/lang-impl/src/com/intellij/find/FindUsagesCollector.kt` | 未出现 |
-| `FindUtil` | `platform/lang-impl/src/com/intellij/find/FindUtil.java` | 未出现 |
+| `FindUtil` | `platform/lang-impl/src/com/intellij/find/FindUtil.java` | 提到过 |
 | `SearchReplaceComponent` | `platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java` | 未出现 |
 | `SearchSession` | `platform/lang-impl/src/com/intellij/find/SearchSession.java` | 未出现 |
 | `SearchTextArea` | `platform/lang-impl/src/com/intellij/find/SearchTextArea.java` | 未出现 |
@@ -1420,7 +1420,7 @@
 | `UsageNavigation` | `platform/lang-impl/src/com/intellij/find/actions/UsageNavigation.kt` | 未出现 |
 | `UsageOptionsDialog` | `platform/lang-impl/src/com/intellij/find/actions/UsageOptionsDialog.kt` | 未出现 |
 | `compositeActiveComponentPanel` | `platform/lang-impl/src/com/intellij/find/actions/compositeActiveComponentPanel.kt` | 未出现 |
-| `findUsages` | `platform/lang-impl/src/com/intellij/find/actions/findUsages.kt` | 未出现 |
+| `findUsages` | `platform/lang-impl/src/com/intellij/find/actions/findUsages.kt` | 提到过 |
 | `resolver` | `platform/lang-impl/src/com/intellij/find/actions/resolver.kt` | 提到过 |
 | `AddOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/AddOccurrenceAction.java` | 未出现 |
 | `ContextAwareShortcutProvider` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ContextAwareShortcutProvider.java` | 未出现 |
@@ -1450,7 +1450,7 @@
 | `ToggleRegex` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleRegex.java` | 未出现 |
 | `ToggleScrollToResultsDuringTypingAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleScrollToResultsDuringTypingAction.kt` | 未出现 |
 | `ToggleWholeWordsOnlyAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleWholeWordsOnlyAction.java` | 未出现 |
-| `Utils` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Utils.java` | 未出现 |
+| `Utils` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Utils.java` | 提到过 |
 | `VariantsCompletionAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/VariantsCompletionAction.java` | 未出现 |
 | `FindInProjectManager` | `platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectManager.java` | 未出现 |
 | `FindInProjectScopeService` | `platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectScopeService.kt` | 未出现 |
@@ -1462,7 +1462,7 @@
 | `FindUsagesHandler` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandler.java` | 未出现 |
 | `FindUsagesHandlerFactory` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandlerFactory.java` | 未出现 |
 | `FindUsagesHandlerUi` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandlerUi.java` | 未出现 |
-| `FindUsagesManager` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesManager.java` | 未出现 |
+| `FindUsagesManager` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesManager.java` | 提到过 |
 | `FindUsagesStatisticsCollector` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesStatisticsCollector.kt` | 未出现 |
 | `FindUsagesUtil` | `platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesUtil.java` | 未出现 |
 | `FusAwareFindUsagesOptions` | `platform/lang-impl/src/com/intellij/find/findUsages/FusAwareFindUsagesOptions.java` | 未出现 |
@@ -1817,7 +1817,7 @@
 | `DarculaTableSelectedCellHighlightBorder` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/DarculaTableSelectedCellHighlightBorder.java` | 未出现 |
 | `DarculaUIUtil` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/DarculaUIUtil.java` | 未出现 |
 | `AbstractButtonLayout` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/AbstractButtonLayout.java` | 未出现 |
-| `AbstractToolbarComboUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/AbstractToolbarComboUI.kt` | 未出现 |
+| `AbstractToolbarComboUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/AbstractToolbarComboUI.kt` | 提到过 |
 | `ComboBoxButtonUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ComboBoxButtonUI.java` | 未出现 |
 | `DarculaButtonBorder` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/DarculaButtonBorder.kt` | 未出现 |
 | `DarculaButtonPainter` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/DarculaButtonPainter.java` | 未出现 |
@@ -1869,7 +1869,7 @@
 | `OnboardingDialogButtons` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/OnboardingDialogButtons.kt` | 未出现 |
 | `TextFieldWithPopupHandlerUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/TextFieldWithPopupHandlerUI.java` | 提到过 |
 | `ToolbarComboButtonUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ToolbarComboButtonUI.kt` | 未出现 |
-| `ToolbarComboWidgetUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ToolbarComboWidgetUI.java` | 未出现 |
+| `ToolbarComboWidgetUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ToolbarComboWidgetUI.java` | 提到过 |
 | `ToolbarComboWidgetUiSizes` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ToolbarComboWidgetUiSizes.kt` | 未出现 |
 | `ToolbarSplitButtonUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/darcula/ui/ToolbarSplitButtonUI.kt` | 未出现 |
 | `IdeaPopupMenuUI` | `platform/platform-impl/src/com/intellij/ide/ui/laf/intellij/IdeaPopupMenuUI.java` | 未出现 |
@@ -2243,7 +2243,7 @@
 | `Range` | `platform/util/diff/src/com/intellij/diff/util/Range.kt` | 提到过 |
 | `Side` | `platform/util/diff/src/com/intellij/diff/util/Side.kt` | 提到过 |
 | `ThreeSide` | `platform/util/diff/src/com/intellij/diff/util/ThreeSide.kt` | 未出现 |
-| `CommandLineUtil` | `platform/util/src/com/intellij/execution/CommandLineUtil.java` | 未出现 |
+| `CommandLineUtil` | `platform/util/src/com/intellij/execution/CommandLineUtil.java` | 提到过 |
 | `CommandLineWrapperUtil` | `platform/util/src/com/intellij/execution/CommandLineWrapperUtil.java` | 未出现 |
 | `Platform` | `platform/util/src/com/intellij/execution/Platform.java` | 未出现 |
 | `TaskExecutor` | `platform/util/src/com/intellij/execution/TaskExecutor.java` | 未出现 |
@@ -2255,11 +2255,11 @@
 | `NopProcessHandler` | `platform/util/src/com/intellij/execution/process/NopProcessHandler.java` | 未出现 |
 | `ProcessAdapter` | `platform/util/src/com/intellij/execution/process/ProcessAdapter.java` | 未出现 |
 | `ProcessEvent` | `platform/util/src/com/intellij/execution/process/ProcessEvent.java` | 未出现 |
-| `ProcessHandler` | `platform/util/src/com/intellij/execution/process/ProcessHandler.java` | 未出现 |
+| `ProcessHandler` | `platform/util/src/com/intellij/execution/process/ProcessHandler.java` | 提到过 |
 | `ProcessIOExecutorService` | `platform/util/src/com/intellij/execution/process/ProcessIOExecutorService.java` | 未出现 |
 | `ProcessListener` | `platform/util/src/com/intellij/execution/process/ProcessListener.java` | 未出现 |
 | `ProcessOutputType` | `platform/util/src/com/intellij/execution/process/ProcessOutputType.java` | 未出现 |
-| `ProcessOutputTypes` | `platform/util/src/com/intellij/execution/process/ProcessOutputTypes.java` | 未出现 |
+| `ProcessOutputTypes` | `platform/util/src/com/intellij/execution/process/ProcessOutputTypes.java` | 提到过 |
 | `ProcessWaitFor` | `platform/util/src/com/intellij/execution/process/ProcessWaitFor.java` | 未出现 |
 | `UnixProcessManager` | `platform/util/src/com/intellij/execution/process/UnixProcessManager.java` | 未出现 |
 | `WinProcessManager` | `platform/util/src/com/intellij/execution/process/WinProcessManager.java` | 未出现 |
