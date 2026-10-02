@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
 .terminal-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--editor); }
 .terminal-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); }
 .terminal-tabs { flex: 1; min-width: 0; display: flex; gap: var(--space-1); overflow-x: auto; }
-.terminal-tab { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; padding: 3px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--elevated); color: var(--secondary); font: 12px var(--font-mono); }
+.terminal-tab { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; padding: 3px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--elevated); color: var(--secondary); font: 12px var(--font-mono); transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
 .terminal-tab:hover { background: var(--hover); }
 .terminal-tab.selected { background: var(--selected); color: var(--text); border-color: var(--line-strong); }
 .terminal-tab.exited { opacity: 0.75; }

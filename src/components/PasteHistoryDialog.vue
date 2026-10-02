@@ -100,7 +100,7 @@ function onKeydown(event: KeyboardEvent) {
 <style scoped>
 .paste-index { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: pre; flex-shrink: 0; }
 .paste-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
-.paste-remove { display: inline-flex; align-items: center; color: var(--text-dim); padding: 0 4px; }
+.paste-remove { display: inline-flex; align-items: center; color: var(--text-dim); padding: 0 4px; transition: color var(--dur-1) var(--ease); }
 .paste-remove:hover { color: var(--error); }
 .paste-actions { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line-strong); }
 .paste-actions .small-muted { flex: 1; }

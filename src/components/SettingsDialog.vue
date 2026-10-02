@@ -1301,7 +1301,7 @@ defineExpose({ handleEscape })
 /* SearchTextField's leading history affordance (:119-124): the field's leading area is clickable
    when there is history, and the popup is aligned underneath the field (:459). */
 .settings-search-icon { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: inherit; }
-.settings-search-icon.has-history { cursor: pointer; }
+.settings-search-icon.has-history { cursor: pointer; transition: color var(--dur-1) var(--ease); }
 .settings-search-icon.has-history:hover, .settings-search-icon.has-history:focus-visible { color: var(--text); }
 .settings-history-popup { position: fixed; z-index: 30; display: flex; flex-direction: column; max-width: 320px; padding: 2px; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); box-shadow: var(--popup-shadow); }
 .settings-history-item { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1373,7 +1373,7 @@ defineExpose({ handleEscape })
 .advanced-row:last-child { border-bottom: 0; }
 .advanced-group { color: var(--muted); }
 .advanced-key { color: var(--bright); overflow-wrap: anywhere; }
-.advanced-value { width: 100%; min-width: 0; padding: 1px 4px; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: inherit; }
+.advanced-value { width: 100%; min-width: 0; padding: 1px 4px; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: inherit; transition: border-color var(--dur-1) var(--ease); }
 .advanced-value:hover { border-color: var(--line); }
 .advanced-value:focus { border-color: var(--accent); background: var(--editor); outline: none; }
 .advanced-value.invalid { border-color: var(--warning); color: var(--warning); }

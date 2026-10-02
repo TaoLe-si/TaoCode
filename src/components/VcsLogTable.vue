@@ -87,7 +87,7 @@ defineExpose({ focusHash })
 
 <style scoped>
 .log-table { flex: 1; min-height: 0; overflow: auto; }
-.log-row { display: flex; align-items: center; height: 26px; min-width: 580px; gap: 8px; padding-right: 8px; font-size: 11px; white-space: nowrap; cursor: default; }
+.log-row { display: flex; align-items: center; height: 26px; min-width: 580px; gap: 8px; padding-right: 8px; font-size: 11px; white-space: nowrap; cursor: default; transition: background-color var(--dur-1) var(--ease); }
 .log-row:hover { background: var(--hover); }
 .log-row.selected { background: var(--selection); }
 .log-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }

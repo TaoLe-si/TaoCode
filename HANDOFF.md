@@ -5,7 +5,7 @@
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1449/1449** | 2026-10-02；最近一批新增 `tests/ui-icons.test.mjs` 16 条 + `tests/settings-keys-parity.test.mjs` 5 条 + `tests/menu-placement.test.mjs` 8 条（前一批：`diff-align` 13 条、`b7-verdict` 8 条） |
+| `npm test` | **1460/1460** | 2026-10-02；最近一批新增 `tests/ui-motion.test.mjs` 11 条（前一批：`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
 | `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
@@ -90,6 +90,50 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
 ③ **判据要能真的红**：新写的 settings 门控第一遍是绿的，我用 `
 ` 去删 `"showStatusBar",`，
 而源文件是 LF，字符串**根本没删掉** —— 一次"假绿"验证。加了"替换后必须变化"的断言才真红（2 条失败）。
+
+**第八十五批（动效全面核实）**：上一批把"图标"那一维扫干净了，这批补**动效**那一维，同样外加两处文本字形当图标。
+
+① **省电模式把循环动画变成了频闪**。降级原是 `animation-duration: .001ms !important` —— 对 `transition` 没问题（一次性，0 瞬间完成），
+但配 `infinite` 是**每 0.001ms 重启一帧**、每秒上千帧，比转起来更晃，也和"省电"正好相反。`.status-spin` / `.gradle-spin` /
+`.plugin-spin` 三个都是 `infinite`，所以一开省电就是三个频闪灯。改成 `animation: none !important` + 给三个转圈补静态替身
+`opacity: .45`（和上游 `JBAnimator` 暂停同口径）。
+
+② **`--ease` 用在循环动效上是错的**。`cubic-bezier(.16, 1, .3, 1)` 首段极慢：入场浮层要的就是这种起步轻，
+但转圈要**角速度恒定**，套上去看起来是"顿一下再转"。新单列一档 `--ease-linear`（注释写清它只有一个消费者）。
+`DebugPanel` 的 `debug-progress-slide` 仍是 `--ease` 且**不该动** —— 它是扫掠不是旋转，运动学本来不同，
+所以门禁只校验"keyframes 函数体里含 `rotate(`"的那几处。三份逐字重复的 `@keyframes` 合成全局一份 `tc-spin`。
+
+③ **motion-v 那一侧与令牌脱节**。`motion-v` 读不到 CSS 变量，`App.vue` 只能手抄 `0.1` / `0.16` / `[0.16, 1, 0.3, 1]`，
+改 `tokens.css` 不会跟着动。新增 `src/motionTokens.ts` 做运行时令牌桥（`getComputedStyle` + 正则解析 `cubic-bezier`），
+并留一组 fallback；**门禁专门比对 fallback 和 `tokens.css` 一致**，影子副本不许漂。
+
+④ **把 `●` 这个字符换掉**。它当"正在运行"记号有三层问题：实心点大小由**字体**决定、和旁边退出码数字同色读起来就是"又一个数字"、
+且早该被 `FORBIDDEN_ICON_GLYPHS` 拦住。换成 `src/components/RunningDot.vue`（lucide `Circle` + `fill="currentColor"` + `--accent`），
+**不用转圈** —— 那是"不确定进度"才有的信号，"进程还活着"是确定状态，静态点才对。顺带补了 `RunConsole` 里 `<button>` 的
+`display: inline-flex`（第八十四批那三处 UA 陷阱的同款，不补的话点会沉到 11px 标题文字下面）。
+
+**门禁 `tests/ui-motion.test.mjs`（11 条）自己踩了四个坑**，最危险的是第四个：
+① 令牌正则把 `tokens.css` **注释里**的示例值一起收了 → 解析前先剥 `/* */`；
+② 匀速档判据把 `debug-progress-slide` 误认成循环 → 只校验含 `rotate(` 的 keyframes；
+③ `m[1].endsWith('ms')` 作用在**数字串**上，恒为假 → 判 `m[2] === 'ms'`；
+④ `value.type !== 6` 里的 `6` 是 **attribute** 节点的 type，而 `value` 是**属性值**节点（type 2 = TEXT），
+于是 `buttonClasses` 恒为空、**门禁永远绿** → 改判 `typeof value.content !== 'string'`。
+前三个是"写错"，第四个是"失效"—— 失效的最危险，因为它看起来一直是绿的。
+`:hover` 那条门禁第一版靠类名里有没有 `button` 字样猜，误报 39 处；改用 `@vue/compiler-dom` 走真实模板后收敛到 6 处真缺，全补上。
+
+**一条补充教训**：门禁写完先过、再**人工核对它到底在不在干活**。批次八十二/八十四各出现过一次"假绿"，
+这批第四次 —— 只不过这次假绿的不是自己写的新门禁，而是 `:hover` 那条收集器恒空。
+
+**顺带删死 CSS**：`src/style.css` 里 13 条 `.blame-*` 全仓无消费者（annotate 没实现，`docs/inventory/vcs_scan.md` 记的是"未出现"），
+整块删除，1343 → 1329 行。因为是删除不是新增，模块大小门禁的帽子没被顶高。
+`App.vue` 这批净增 5 行，靠合并 import / 压注释 / 收空行**补回 5 行**，保持在 2737 上限不变。
+
+本批判决书：`docs/ui-parity-checklist.md` 第八十五批。
+真机（`TAOCODE_DEBUG_PORT=9331`）量到的判决点：正常态 `tc-spin / 1.1s / linear / infinite / opacity 1`，
+切 `data-motion=reduced` 后同一元素 `animation-name: none / duration 0s / opacity .45`（**频闪消失**），去掉属性又复原；
+遍历 CSSOM 中含 `rotate(` 的 keyframes 集合恰为 `["tc-spin"]`；`.run-tab > button` / `.running-dot` 等六条新规则确实进了产物；
+全树 `.count-badge` / `.run-tab-badge` 含 `●` 的文本子节点为 `[]`。
+取证完已 `taskkill //PID 26848 //F`，`tasklist | grep -i taocode` 为空，探针与截图已删（`build/` 是 gitignored 的）。
 
 本批判决书：`docs/ui-parity-checklist.md` 第八十四批（1490-1636 行）。
 已知偏离：`docs/settings-parity.md:53` 记的 `stickyLinesLimit` 默认 3 vs 上游

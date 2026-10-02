@@ -203,7 +203,7 @@ function toggleLanguage(language: string) {
 .lt-search { flex: 1; min-width: 0; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 12px; }
 .lt-scope { min-height: var(--ctrl-height-lg); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--secondary); font-size: 11px; }
 .lt-list { flex: 1; min-height: 120px; max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
-.lt-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-1) 0 var(--space-2); border-bottom: 1px solid var(--line); }
+.lt-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-1) 0 var(--space-2); border-bottom: 1px solid var(--line); transition: background-color var(--dur-1) var(--ease); }
 .lt-row:last-child { border-bottom: 0; }
 .lt-row:hover { background: var(--hover); }
 .lt-check { display: flex; align-items: center; }

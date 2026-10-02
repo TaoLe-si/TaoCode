@@ -13,6 +13,7 @@ import { X } from 'lucide-vue-next'
 import type { RunInstanceRecord } from '../runInstances.ts'
 import type { RunIssue } from '../buildOutput.ts'
 import { iconSize } from '../uiIcons'
+import RunningDot from './RunningDot.vue'
 
 /** 控制台里的一行（已由宿主折叠/识别过：见 `src/consoleFold.ts` 与 `src/buildOutput.ts`）。 */
 export interface RunConsoleLine {
@@ -42,9 +43,8 @@ function title(instance: RunInstanceRecord, index: number): string {
 }
 
 /** 标签右侧的状态：在跑是实心点，结束显示退出码。 */
-function badge(instance: RunInstanceRecord): string {
-  if (instance.running) return '●'
-  return instance.exit === null ? '' : `exit ${instance.exit}`
+function exitLabel(instance: RunInstanceRecord): string {
+  return instance.running || instance.exit === null ? '' : `exit ${instance.exit}`
 }
 
 const anyRunning = computed(() => props.instances.some(instance => instance.running))
@@ -58,7 +58,8 @@ const anyRunning = computed(() => props.instances.some(instance => instance.runn
       <div v-for="(instance, index) in instances" :key="instance.id" class="run-tab" :class="{ selected: instance.id === active }">
         <button role="tab" :aria-selected="instance.id === active" :title="`${title(instance, index)}${instance.running ? '（正在运行）' : ''}`" @click="emit('select', instance.id)">
           <span class="run-tab-title">{{ title(instance, index) }}</span>
-          <span v-if="badge(instance)" class="run-tab-badge">{{ badge(instance) }}</span>
+          <RunningDot v-if="instance.running" />
+          <span v-if="exitLabel(instance)" class="run-tab-badge">{{ exitLabel(instance) }}</span>
         </button>
         <button v-if="instance.running" class="run-tab-close" :aria-label="`停止 ${title(instance, index)}`" :title="`停止 ${title(instance, index)}`" @click="emit('stop', instance.id)"><X :size="iconSize.inline" /></button>
       </div>
@@ -85,10 +86,13 @@ const anyRunning = computed(() => props.instances.some(instance => instance.runn
 .run-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px 4px 0; border-bottom: 1px solid var(--line); }
 .run-tab { display: inline-flex; align-items: center; border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius-xs) var(--radius-xs) 0 0; }
 .run-tab.selected { border-color: var(--line); background: var(--panel); }
-.run-tab > button { border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+/* `display: inline-flex` 是补的 —— 这是 `<button>`，UA 默认 inline-block，align-items / gap 全都失效
+   （同款陷阱见 src/style.css:135 的说明与第八十四批的记录）。不补的话 RunningDot 会按基线
+   沉到 11px 的标题文字下面，而不是与它居中对齐。gap 收在这里，.run-tab-badge 的 margin-left 就多余了。 */
+.run-tab > button { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
 .run-tab.selected > button { color: var(--bright); }
-.run-tab-title { padding: 3px 6px; display: inline-block; }
-.run-tab-badge { margin-left: 4px; font-size: 10px; opacity: .8; }
+.run-tab-title { padding: 3px 6px; }
+.run-tab-badge { font-size: 10px; opacity: .8; }
 .run-tab-close { padding: 3px 4px; line-height: 0; }
 .run-log { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-3); font: 12px/1.6 var(--font-mono); }
 .run-line { white-space: pre-wrap; overflow-wrap: anywhere; }

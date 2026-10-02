@@ -712,7 +712,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .list-hint { margin: 0 0 var(--space-1); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 11px; line-height: 1.7; }
 .recent-list { margin: 0; padding: 0; }
 .recent-group { margin-bottom: var(--space-1); }
-.recent-group-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); border-radius: var(--radius-xs); color: var(--muted); font-size: 11px; cursor: pointer; }
+.recent-group-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); border-radius: var(--radius-xs); color: var(--muted); font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .recent-group-head:hover { background: var(--hover); color: var(--secondary); }
 .recent-group-head:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .recent-group-head svg { transition: transform var(--dur-1) var(--ease); }

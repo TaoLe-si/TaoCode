@@ -40,7 +40,7 @@ button:disabled { cursor: default; opacity: .4; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 ::selection { background: var(--selection); color: var(--bright); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: var(--scrollbar); border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; transition: background-color var(--dur-1) var(--ease); }
 ::-webkit-scrollbar-thumb:hover { background: var(--secondary); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 .ide-shell { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -367,7 +367,9 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .explorer-footer { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; margin: var(--space-2) var(--space-3) var(--space-1); font-size: 11px; color: var(--secondary); }
 .explorer-footer > svg { flex-shrink: 0; }
 .tree-note { flex-shrink: 0; padding: 0 13px 10px; font-size: 10px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
-.resize-handle { flex: 0 0 4px; align-self: stretch; position: relative; z-index: 2; background: var(--panel); touch-action: none; user-select: none; }
+/* 拖拽手柄：hover 的高亮要过渡，但**拖动过程中不能有延迟**。这条 transition 挂在元素本身上，
+   拖的时候背景已经是 --accent（hover 状态），transition 无事可做，所以两边都满足。 */
+.resize-handle { flex: 0 0 4px; align-self: stretch; position: relative; z-index: 2; background: var(--panel); touch-action: none; user-select: none; transition: background-color var(--dur-1) var(--ease); }
 .resize-explorer, .resize-trace { width: 4px; cursor: col-resize; }
 .resize-output { height: 4px; cursor: row-resize; }
 .resize-handle:hover, .resize-handle:focus-visible { background: var(--accent); }
@@ -384,7 +386,8 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .pane-focused > .editor-tabs { background: var(--rail); box-shadow: inset 0 -2px 0 var(--accent); }
 /* Preview tabs (opened from the tree, replaceable) show their title in italics. */
 .file-tab.preview .tab-select span { font-style: italic; }
-.split-divider { flex: 0 0 4px; align-self: stretch; position: relative; z-index: 2; background: var(--panel); touch-action: none; user-select: none; }
+/* 同 .resize-handle：hover 过渡、拖动无延迟。 */
+.split-divider { flex: 0 0 4px; align-self: stretch; position: relative; z-index: 2; background: var(--panel); touch-action: none; user-select: none; transition: background-color var(--dur-1) var(--ease); }
 .resize-split-h { cursor: col-resize; }
 .resize-split-v { cursor: row-resize; height: 4px; }
 .split-divider:hover, .split-divider:focus-visible { background: var(--accent); }
@@ -476,7 +479,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .output-tab-closeable { height: 100%; display: inline-flex; align-items: center; gap: 2px; }
 .output-tab-closeable > button:first-child { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .output-tab-closeable > button:first-child.selected { color: var(--text); border-bottom-color: var(--accent); }
-.output-tab-close, .output-tab-pin { width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); opacity: 0; }
+.output-tab-close, .output-tab-pin { width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); opacity: 0; transition: opacity var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .output-tab-closeable:hover .output-tab-close, .output-tab-closeable:hover .output-tab-pin,
 .output-tab-close:focus-visible, .output-tab-pin:focus-visible { opacity: 1; }
 .output-tab-pin.pinned { opacity: 1; color: var(--accent); }
@@ -572,7 +575,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-section { margin: 4px 0; }
 .sc-section h3 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-1) var(--space-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .sc-count { color: var(--secondary); font-weight: 400; }
-.sc-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) 0 var(--space-3); }
+.sc-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) 0 var(--space-3); transition: background-color var(--dur-1) var(--ease); }
 .sc-row:hover { background: var(--hover); }
 .sc-file { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); background: none; border: 0; color: var(--text); padding: var(--space-1) 0; cursor: pointer; text-align: left; }
 .sc-status { width: 14px; flex-shrink: 0; color: var(--accent); font: 11px var(--font-mono); }
@@ -707,8 +710,13 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-progress { position: relative; display: inline-flex; align-items: center; }
 .status-progress-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-ui); white-space: nowrap; }
 .status-progress-toggle:hover { background: var(--hover); color: var(--bright); }
-.status-spin { animation: status-spin var(--dur-spin) linear infinite; }
-@keyframes status-spin { to { transform: rotate(360deg); } }
+/* 三个转圈（状态栏 / Gradle / 插件）本来各自抄了一份**逐字节相同**的 keyframes。收成一份：
+   类名保留（模板里三处的 `:class` 各不相同，动它会牵到各自的模板），keyframes 只有这一处。
+   缓动统一走 `--ease-linear` —— 循环要的是角速度恒定，套 `--ease` 会"顿一下再转"。
+   GradlePanel / PluginDialog 的 scoped 样式按名字引用这里的全局 keyframes 是安全的：
+   scoped 只改选择器，`animation-name` 的查找始终是文档级的。 */
+.status-spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
+@keyframes tc-spin { to { transform: rotate(360deg); } }
 .status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
 .status-progress-row strong { color: var(--text); font-size: 11px; font-weight: 600; }
@@ -750,7 +758,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-notices.has-error { color: var(--error) !important; }
 .status-position { font-variant-numeric: tabular-nums; }
 /* Power save mode stops animations the same way IDEA's JBAnimator pause does. */
-html[data-motion='reduced'] *, html[data-motion='reduced'] *::before, html[data-motion='reduced'] *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+html[data-motion='reduced'] *, html[data-motion='reduced'] *::before, html[data-motion='reduced'] *::after { animation: none !important; transition: none !important; }
+/* 上面这条以前写的是 `animation-duration: .001ms` —— 对**单次**动效确实等价于瞬时，
+   但仓库里有三个 `infinite` 的转圈（.status-spin / .gradle-spin / .plugin-spin）：
+   周期压到 1 微秒等于每秒几千帧地闪，比转着还晃，省电反而更费眼。停下来才是省电。
+   停下来之后要补一个静态替身，否则一个完整圆环静立在原地，读作"卡住了"而不是"暂停了" ——
+   降不透明度即可（上游 JBAnimator 暂停时同样是变淡的 SpinnerAnimation）。
+   DebugPanel 的 indeterminate 进度条自己有一份静态替身（DebugPanel.vue:781）。 */
+html[data-motion='reduced'] .status-spin,
+html[data-motion='reduced'] .gradle-spin,
+html[data-motion='reduced'] .plugin-spin { opacity: .45; }
 /* IDEA 'Use contrast scrollbars' + colour-vision filter + custom UI font size. */
 html[data-scrollbars='contrast'] * { scrollbar-color: var(--bright) var(--panel); }
 html[data-scrollbars='contrast'] ::-webkit-scrollbar { width: 14px; height: 14px; }
@@ -971,7 +988,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .manage-recents-search { width: 100%; padding: 8px var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--editor); color: var(--bright); font: 13px var(--font-brand); }
 .manage-recents-search:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
 .manage-recents-list { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--editor); }
-.manage-recents-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--line); cursor: pointer; color: var(--secondary); }
+.manage-recents-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--line); cursor: pointer; color: var(--secondary); transition: background-color var(--dur-1) var(--ease); }
 .manage-recents-row:last-child { border-bottom: none; }
 .manage-recents-row.is-selected { background: var(--selected); color: var(--bright); }
 .manage-recents-row:hover { background: var(--hover); }
@@ -1134,21 +1151,6 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .fh-detail-head { margin: 0 0 var(--space-1); color: var(--muted); font-size: 11px; }
 .fh-patch { flex: 1; min-height: 0; max-height: 300px; overflow: auto; margin: 0; padding: var(--space-2); background: var(--editor); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--secondary); font: 11px/1.6 var(--font-mono); white-space: pre; }
 
-/* Git 追溯（annotate） */
-.blame-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.blame-head { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); padding: 3px 14px; border-bottom: 1px solid var(--line); background: var(--rail); }
-.blame-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); font: 11px var(--font-mono); }
-.blame-hint { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 11px; }
-.blame-rows { flex: 1; min-height: 0; overflow: auto; }
-.blame-row { display: grid; grid-template-columns: 72px 110px 42px minmax(0, 1fr); align-items: baseline; gap: var(--space-2); width: 100%; padding: 1px 14px; border: 0; border-top: 1px solid transparent; background: transparent; color: var(--text); text-align: left; font: 12px/1.6 var(--font-mono); }
-.blame-row:hover { background: var(--hover); }
-.blame-new-commit { border-top-color: var(--line); }
-.blame-sha { color: var(--accent); font: 11px var(--font-mono); }
-.blame-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); font-size: 11px; }
-.blame-num { color: var(--muted); text-align: right; font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
-.blame-text { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-.blame-empty { margin: 0; padding: 14px var(--space-3); color: var(--muted); font-size: 12px; }
-
 /* 调用层次与类型层次共用的列表 */
 .call-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .call-head { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); padding: 3px 14px; border-bottom: 1px solid var(--line); background: var(--rail); }
@@ -1157,7 +1159,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .call-direction > button { padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 11px; }
 .call-direction > button.selected { background: var(--selected); color: var(--bright); }
 .call-rows { flex: 1; min-height: 0; overflow: auto; padding: var(--space-1) 0; }
-.call-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) 0 14px; }
+.call-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) 0 14px; transition: background-color var(--dur-1) var(--ease); }
 .call-row:hover { background: var(--hover); }
 .call-jump { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; flex: 1; padding: 3px 0; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 12px; }
 .call-name { font-family: var(--font-mono); color: var(--bright); }
@@ -1252,7 +1254,7 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .settings-filter-error { background: var(--search-field-error); border-color: var(--error); }
 .settings-filter-error input, .settings-filter-error input::placeholder { color: var(--text); }
 .settings-search-hint { margin: calc(var(--space-2) * -1) 0 var(--space-2); padding: 0 var(--space-1); color: var(--muted); font-size: 10px; line-height: 1.6; }
-.settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px 4px; }
+.settings-crumbs[tabindex] { cursor: default; border-radius: var(--radius-xs); padding: 1px 4px; transition: background-color var(--dur-1) var(--ease); }
 .settings-crumbs[tabindex]:hover, .settings-crumbs[tabindex]:focus-visible { background: var(--hover); outline: none; }
 .settings-crumb-menu { position: fixed; z-index: 30; min-width: 150px; color: var(--popup-foreground); box-shadow: var(--popup-shadow); background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); }
 .settings-crumb-backdrop { position: fixed; inset: 0; z-index: 20; }

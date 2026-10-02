@@ -244,7 +244,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
 /* `--tc-border` / `--tc-hover` 不是 tokens.css 里的名字：这两个弹层一直退化成中性灰 rgba，
    深色主题下 hover 几乎看不见。改回真令牌 --line / --hover。 */
 .se-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-.se-tab { background: none; border: 0; border-radius: 4px; padding: 3px 10px; font: inherit; color: inherit; cursor: pointer; opacity: .7; }
+.se-tab { background: none; border: 0; border-radius: 4px; padding: 3px 10px; font: inherit; color: inherit; cursor: pointer; opacity: .7; transition: opacity var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
 .se-tab:hover { opacity: 1; background: var(--hover); }
 .se-tab.active { opacity: 1; font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }
 .se-hint { margin-left: auto; font-size: 11px; opacity: .55; }

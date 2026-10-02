@@ -159,4 +159,5 @@ export const FORBIDDEN_ICON_GLYPHS: ReadonlyArray<{ glyph: string; use: string }
   { glyph: '▾', use: '展开箭头 → lucide `ChevronDown`（`.tree-chevron`，见 `FileTree.vue:172`）' },
   { glyph: '▸', use: '折叠箭头 → lucide `ChevronRight`（同 `FileTree.vue:172`）' },
   { glyph: '×', use: '关闭记号 → lucide `X`（`DiffView.vue:49` 的既有写法）' },
+  { glyph: '●', use: '"正在运行"记号 → `src/components/RunningDot.vue`（lucide `Circle` 填色 + `--accent`）。字体里的实心点大小由**字体**决定、换字体就变，而且和旁边的数字同色，读起来就是"又一个数字"' },
 ]

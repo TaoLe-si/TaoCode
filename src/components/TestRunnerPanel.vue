@@ -151,7 +151,7 @@ watch(() => props.activePath, () => refreshFile())
 .testrun-toolbar { display: flex; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .testrun-error { margin: 0; padding: var(--space-1) var(--space-3); color: var(--error); font-size: 11px; }
 .testrun-list { flex: 1; min-height: 0; overflow: auto; }
-.testrun-row { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-3); font-size: 12px; }
+.testrun-row { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-3); font-size: 12px; transition: background-color var(--dur-1) var(--ease); }
 .testrun-row:hover { background: var(--hover); }
 .testrun-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: 0; color: var(--text); font-size: 12px; }
 .testrun-meta { color: var(--muted); font-size: 10px; }

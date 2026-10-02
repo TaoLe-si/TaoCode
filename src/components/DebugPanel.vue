@@ -730,7 +730,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 .debug-frame-wrap > .debug-frame { flex: 1; min-width: 0; }
 .debug-frame-wrap:hover .debug-set { opacity: 1; }
 .debug-row-wrap > .debug-row { flex: 1; min-width: 0; }
-.debug-row-wrap .debug-set, .debug-row .debug-set { opacity: 0; }
+.debug-row-wrap .debug-set, .debug-row .debug-set { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
 .debug-row-wrap:hover .debug-set, .debug-row:hover .debug-set { opacity: 1; }
 .debug-row-editing { gap: var(--space-1); padding-right: var(--space-1); }
 .debug-edit-input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; }
@@ -776,7 +776,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 .debug-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
 /* Indeterminate: the adapter has not said how far along it is, so the bar slides
    instead of showing a fabricated 0% or 100%. */
-.debug-progress-track.indeterminate::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: var(--radius-pill); background: var(--accent); animation: debug-progress-slide var(--dur-spin) ease-in-out infinite; }
+.debug-progress-track.indeterminate::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: var(--radius-pill); background: var(--accent); animation: debug-progress-slide var(--dur-spin) var(--ease) infinite; }
 @keyframes debug-progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .debug-progress-track.indeterminate::after { animation: none; width: 100%; opacity: .5; } }
 .debug-collapse { display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; text-transform: inherit; letter-spacing: inherit; }
@@ -787,7 +787,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
    rest of the panel stays reachable. */
 .debug-list { max-height: 160px; overflow: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .debug-list:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.debug-list-row { display: flex; align-items: baseline; gap: var(--space-2); padding: 1px var(--space-3); font: 11px/1.6 var(--font-mono); }
+.debug-list-row { display: flex; align-items: baseline; gap: var(--space-2); padding: 1px var(--space-3); font: 11px/1.6 var(--font-mono); transition: background-color var(--dur-1) var(--ease); }
 .debug-list-row:hover { background: var(--hover); }
 .debug-list-path { margin-left: auto; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debug-break-chip.unverified { border-style: dashed; color: var(--muted); }

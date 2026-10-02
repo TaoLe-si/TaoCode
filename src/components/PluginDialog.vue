@@ -280,8 +280,8 @@ function clearQuery() {
 .plugin-install { flex-shrink: 0; }
 .plugin-detail-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .plugin-danger { color: var(--warning); }
-.spin { animation: plugin-spin var(--dur-spin) linear infinite; }
-@keyframes plugin-spin { to { transform: rotate(360deg); } }
+/* keyframes 收在全局的 `tc-spin`（src/style.css，与状态栏/Gradle 共用一份，见那里的说明）。 */
+.spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
 @media (max-width: 760px) {
   .plugin-body { grid-template-columns: minmax(0, 1fr); max-height: none; }
 }

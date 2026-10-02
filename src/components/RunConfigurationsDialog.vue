@@ -316,7 +316,7 @@ function save() {
 .rc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: 11px; }
 .rc-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px; border-top: 1px solid var(--line); }
-.rc-add { position: relative; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: var(--radius-xs); }
+.rc-add { position: relative; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: var(--radius-xs); transition: background-color var(--dur-1) var(--ease); }
 .rc-add:hover { background: var(--hover); }
 .rc-add-menu { position: absolute; left: 0; bottom: 100%; z-index: 20; display: none; flex-direction: column; min-width: 140px; padding: 2px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .rc-add:hover .rc-add-menu, .rc-add:focus-within .rc-add-menu { display: flex; }

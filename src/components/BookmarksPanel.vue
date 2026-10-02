@@ -235,7 +235,7 @@ function onKeydown(event: KeyboardEvent) {
 .bookmark-group-name { color: var(--bright); }
 .bookmark-group-folder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
 .bookmark-group-count { color: var(--muted); font-size: 10px; }
-.bookmark-row { display: flex; align-items: center; gap: 2px; padding: 0 var(--space-1) 0 0; }
+.bookmark-row { display: flex; align-items: center; gap: 2px; padding: 0 var(--space-1) 0 0; transition: background-color var(--dur-1) var(--ease); }
 .bookmark-row:hover { background: var(--hover); }
 .bookmark-selected { background: var(--selected); }
 .bookmark-jump { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 3px 0 3px var(--space-3); border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }

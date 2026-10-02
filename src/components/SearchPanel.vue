@@ -464,7 +464,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 .fs-file-replace:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-file-replace:disabled { color: var(--muted); opacity: .5; }
 .fs-matches { display: flex; flex-direction: column; padding: 0 0 var(--space-1); }
-.fs-match { display: flex; flex-direction: column; min-width: 0; padding: 1px var(--space-2) 1px var(--space-3); }
+.fs-match { display: flex; flex-direction: column; min-width: 0; padding: 1px var(--space-2) 1px var(--space-3); transition: background-color var(--dur-1) var(--ease); }
 .fs-match:hover { background: var(--hover); }
 .fs-match.current { background: var(--selected); }
 .fs-match.skipped { opacity: .5; }

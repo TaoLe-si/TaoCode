@@ -1634,5 +1634,125 @@ general 那份只为不破坏已存盘的旧 state。
 `docs/settings-parity.md:53` 记的 `stickyLinesLimit` 默认 3 与上游 `EditorSettingsExternalizable.java:94` 的 5 有出入 ——
 这批只把 native 默认补成 3 与前端对齐，**偏离本身没有改**，留到动粘性行那一批时一起判。
 
+## 第八十五批验证记录（动效全面核实：省电模式频闪、循环缓动档、motion-v 与令牌脱节、文本字形当图标、hover 过渡补齐）
+
+本批只做**动效**这一维，外加上一批没扫干净的两处文本字形当图标。仍然是「实现 + 测试 + 真机取证 + 文档 + 提交」一条龙。
+
+### 一、四个真缺陷
+
+#### 1. 省电模式把循环动画变成了频闪（最严重）
+
+原 `src/style.css` 的降级是：
+
+```css
+html[data-motion='reduced'] * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+```
+
+`transition-duration: .001ms` 是对的（一次性属性，0 瞬间完成）。但 `animation-duration: .001ms` 配 `infinite` 是**每 0.001ms 重启一帧** —— 每秒上千帧的频闪，比转起来更晃，也和「省电」的意图正好相反。`.status-spin` / `.gradle-spin` / `.plugin-spin` 三个都是 `infinite`，所以这条规则一开就把三个转圈全变成频闪灯。
+
+改成把动画**停掉**并给静态替身（和上游 `JBAnimator` 暂停的口径一致）：
+
+```css
+html[data-motion='reduced'] *, html[data-motion='reduced'] *::before, html[data-motion='reduced'] *::after { animation: none !important; transition: none !important; }
+html[data-motion='reduced'] .status-spin,
+html[data-motion='reduced'] .gradle-spin,
+html[data-motion='reduced'] .plugin-spin { opacity: .45; }
+```
+
+`animation: none` 会把 `animation-name` 整个置空，`opacity: .45` 之后接手 —— 三个转圈停在半透的静态一帧上，用户仍看得出「在动」，但不耗 CPU。
+
+#### 2. 循环动效用错了缓动档
+
+`--ease` 是 `cubic-bezier(.16, 1, .3, 1)`，首段极慢 —— 这对「入场浮层」是对的（起步轻、收尾稳），对**循环转圈**是错的：转圈的角速度要恒定，套这条曲线看起来是「顿一下再转」。三个转圈当时都用的 `var(--ease)`。
+
+新加一档匀速（`src/tokens.css`），并写清它**只有一个消费者**：
+
+```css
+/* 匀速档：只有一个消费者 —— 循环转圈（.status-spin / .gradle-spin / .plugin-spin）。 */
+--ease-linear: linear;
+```
+
+**注意**：`DebugPanel.vue` 的 `debug-progress-slide` 仍然是 `--ease` 且**不该动** —— 它是不定进度条的扫掠（sweep），不是匀角速度旋转，两者的运动学本来就不同。门禁因此只校验「`@keyframes` 函数体里含 `rotate(`」的那几处。
+
+#### 3. 三份一模一样的 keyframes 收成一份
+
+`.status-spin` / `.gradle-spin` / `.spin`（PluginDialog）三处的 `@keyframes` 都是 `to { transform: rotate(360deg); }`，逐字重复。合并为全局的 `tc-spin`，各组件的 scoped 样式只引用名字：
+
+```css
+.status-spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
+@keyframes tc-spin { to { transform: rotate(360deg); } }
+```
+
+scoped CSS 改写的是**选择器**、不是 `animation-name` 的查表，所以组件里引用全局 keyframes 是安全的（真机已验证，见第三节）。
+
+#### 4. motion-v 那一侧的时长/缓动与令牌脱节
+
+`App.vue` 的浮层动效走 `motion-v`，而 `motion-v` 读不到 CSS 变量，所以那里是**手抄**的 `0.1` / `0.16` / `[0.16, 1, 0.3, 1]`。改 `tokens.css` 不会跟着动，浮层动效会悄悄和全仓其它动效分叉。
+
+新增 `src/motionTokens.ts` 做运行时令牌桥（`getComputedStyle` 读回 CSS 变量并把 `ms`/`s` 归一到 motion-v 要的秒，同时正则解析 `cubic-bezier(...)` 四个数），并带一组 fallback 常量。**fallback 必须和 `tokens.css` 一致**，所以门禁里有一条专门比对两边的值 —— 这样即使 `getComputedStyle` 在测试环境读不到，影子副本也不会漂。
+
+进场用 `--dur-2`、离场用 `--dur-1`（离场快一档是有意的：退场该利落，入场该铺垫）。
+
+### 二、图标那一维：把 `●` 换掉
+
+`RunConsole.vue` 的实例标签和 `App.vue` 的运行 tab 徽标都拿 `●` 这个**字符**当「正在运行」的记号。问题有三层：
+
+1. 实心点大小由**字体**决定，换字体就变，不同分辨率下粗细不一；
+2. 颜色和旁边的退出码数字同色（`--muted`），读起来就是「又一个数字」，而不是一个状态记号；
+3. 门禁 `tests/ui-icons.test.mjs` 的 `FORBIDDEN_ICON_GLYPHS` 早就该拦住它，只是当时漏了这一条。
+
+换成 `src/components/RunningDot.vue`：lucide `Circle` + `:stroke-width="0"` + `fill="currentColor"`，颜色 `var(--accent)`、尺寸 `iconSize.chip`、10px 一档。**没有**用转圈 —— 那是「不确定进度」才该有的信号；「这个进程还活着」是确定状态，静态点才是对的。
+
+顺带修 `RunConsole.vue` 踩到的第八十四批同款 UA 陷阱：标签里的那个 `<button>` 是 UA 默认 `inline-block`，`align-items` / `gap` 全都失效，`RunningDot` 会按基线沉到 11px 标题文字下面。补上 `display: inline-flex; align-items: center; gap: 4px`（真机实测：补之前 `display: inline-block` / `align-items: normal` / `gap: normal` / `padding: 1px 6px`）。
+
+### 三、门禁 `tests/ui-motion.test.mjs`（11 条）
+
+| # | 判据 |
+|---|---|
+| 1 | 动效时长只有五档，且都在 `tokens.css` 里 |
+| 2 | 匀速档单列一档，且只有循环动效（keyframes 含 `rotate(`）才用 |
+| 3 | CSS 里不出现裸时长 |
+| 4 | 不出现裸缓动关键字 |
+| 5 | 不用 `transition: all` |
+| 6 | 省电模式把动画**停掉**（要 `animation: none`，拒 `animation-duration: .001ms`，且三个转圈都要有静态替身） |
+| 7 | `prefers-reduced-motion` 的全局降级存在 |
+| 8 | 每个 `@keyframes` 要么被引用、要么被删 |
+| 9 | interactive 的 `:hover` 改了背景/颜色/透明度就必须有 `transition` |
+| 10 | motion-v 的时长与缓动从令牌读 |
+| 11 | `motionTokens.ts` 的 fallback 常量与 `tokens.css` 一致 |
+
+第 9 条先拿正则收 `<button class=...>`，**误报了 39 处**（其中 32 处是真 `<button>`，也就是说它一开始是靠类名里出现 `button` 字样猜的）。改用 `@vue/compiler-sfc` + `@vue/compiler-dom` 的 `parseDom` 走真实模板，收集实际 `<button>` 的类名后收敛到 6 处真缺，全补上了。
+
+这 6 处补的过渡覆盖到 `BookmarksPanel` / `TemplateSettingsPage` / `TerminalPanel` / `TestRunnerPanel` / `VcsLogTable` / `SearchEverywhereDialog` / `SettingsDialog` / `TodoPanel` / `WelcomePage` / `RunConfigurationsDialog` / `SearchPanel` / `PasteHistoryDialog` / `DebugPanel` / `style.css` 的滚动条 / 拖拽把手 / 分栏线。
+
+**这个门禁自己踩了四个坑**（都是写完先过、再人工核对才抓出来的，记下来免得重犯）：
+
+1. **令牌解析被注释里的值污染** —— 令牌正则把 `tokens.css` 注释里的示例 `--dur-3: 220ms` 一起收了。修法：解析前先剥 `/* */`。
+2. **匀速档判据扫到了扫掠** —— 拿 `var(--dur-spin)` 找使用点时把 `debug-progress-slide` 也算成「循环」。修法：只校验函数体里含 `rotate(` 的 keyframes。
+3. **单位判据写错** —— `m[1].endsWith('ms')` 作用在已捕获的**数字串**上，恒为假。修法：判 `m[2] === 'ms'`（单位是第 3 个捕获组）。
+4. **`:hover` 门禁的收集器恒为空** —— `value.type !== 6` 这个判断里，`6` 是 **attribute** 节点的 type，而这里的 `value` 是**属性值**节点（type 2 = TEXT），所以 `buttonClasses` 永远是空集，门禁**永远绿**。修法：`typeof value.content !== 'string'`。另配两个子修：后代选择器（`.recent-row:hover .row-menu-button`）要靠**不 trim** 的 `after` 里的空格识别；复合类名要逐个类判。
+
+前三个修完是「门禁写错」，第四个是「门禁失效」—— 失效的那个最危险，因为它看起来一直是绿的。
+
+### 四、真机取证（`build\TaoCode.exe`，`TAOCODE_DEBUG_PORT=9331`）
+
+- **令牌真的流到了运行时**：`getComputedStyle(document.documentElement)` → `--dur-1: .12s`、`--dur-2: .18s`、`--ease-linear: linear`。
+- **转圈的运行时取值**：临时挂一个 `.status-spin` 量到 `animation-name: tc-spin` / `1.1s` / `linear` / `infinite` / `opacity: 1`。
+- **省电模式（第一、二节那两个缺陷的判决点）**：`document.documentElement.dataset.motion = 'reduced'` 后同一个元素变成 `animation-name: none` / `duration: 0s` / `opacity: 0.45` —— **频闪消失**；去掉属性后又回到 `tc-spin / 1.1s / linear / infinite`。
+- **keyframes 已合并且只此一份**：遍历所有 `CSSRule.KEYFRAMES_RULE`、只取函数体含 `rotate(` 的，得到的集合是 `["tc-spin"]`（改前是三个同名的重复定义）。
+- **新规则确实打包进了产物**：CSSOM 里能查到 `.run-tab > button`、`.run-tab-badge`、`.running-dot`、`.status-spin`、`.gradle-spin`、`.spin` 六条（scoped 的 `[data-v-xxx]` 后缀忽略后比对）。
+- **文本字形已清零**：全树扫 `.count-badge` / `.run-tab-badge` 的直接文本子节点，含 `●` 的为 `[]`。
+- 图标按钮实测 `display: flex` / `padding: 0`（第八十四批那条 UA 补丁在产物里仍然生效），状态栏整条高 25.67px、可见。
+
+### 五、顺带删掉的死 CSS
+
+`src/style.css` 里 13 条 `.blame-*`（`.blame-panel` … `.blame-empty`）全仓没有任何消费者 —— annotate 根本没实现（`docs/inventory/vcs_scan.md` 里记的是「未出现」）。它除了占位，还正好被新加的 `:hover` 过渡门禁撞上。整块删除，`style.css` 1343 → 1329 行，删除边界核过（`.fh-patch` 之后紧接「调用层次与类型层次共用的列表」注释）。因为是删除不是新增，模块大小门禁的帽子没有被顶高。
+
+### 六、判据
+
+全绿：`npm test` **1460/1460**（新增 `ui-motion` 11 条）、`vue-tsc --noEmit` 0 错、`vite build` 成功、native **36/36 ctest**、`build\TaoCode.exe` 重建成功。真机取证完已 `taskkill //PID 26848 //F`，`tasklist | grep -i taocode` 为空，`build/_probe_*.js` / `build/*.lsp.json` 全部删除（`build/` 是 gitignored 的，截图与探针都不入库）。
+
+`App.vue` 这批净增 5 行（motion 配置 + `motion-v` 接令牌 + `RunningDot` 引入），通过把三处 import 合并到既有行、压掉一段注释、收掉一个空行**补回 5 行**，行数保持在门禁帽子 2737 上限不变 —— 帽子只许降不许升，所以新逻辑一律另起 `src/xxx.ts`。
+
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
 - `tests/editor-folding.test.mjs` 的「套在外面的语法块按最内层往外排（enclosingAreas）」：2026-10-01 在整批跑到高负载时偶发失败一次，单跑与随后重跑整批都通过 —— 与本批改动无关（那批改的是补全），见到重跑即可。

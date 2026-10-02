@@ -306,8 +306,8 @@ function dependencySuffix(dependency: GradleDependency): string {
 .gradle-elapsed { margin-left: auto; color: var(--bright); font: 11px/1.7 var(--font-mono); }
 .gradle-tail { border-bottom: 1px solid var(--line); }
 .gradle-tail-body { margin: 0; padding: 0 var(--space-3) var(--space-2); color: var(--muted); font: 10px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.gradle-spin { animation: gradle-spin var(--dur-spin) linear infinite; }
-@keyframes gradle-spin { to { transform: rotate(360deg); } }
+/* keyframes 收在全局的 `tc-spin`（src/style.css，与状态栏那处共用一份，见那里的说明）。 */
+.gradle-spin { animation: tc-spin var(--dur-spin) var(--ease-linear) infinite; }
 .gradle-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
 .gradle-section { padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
 .gradle-section h4 { margin: 0; padding: 0 var(--space-3) var(--space-1); color: var(--bright); font-size: 11px; font-weight: 600; }

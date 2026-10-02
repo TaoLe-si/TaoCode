@@ -41,6 +41,10 @@
      拿来做循环会快到看不清在转。 */
   --dur-spin: 1.1s;
   --ease: cubic-bezier(.16, 1, .3, 1);
+  /* 匀速档：只有一个消费者 —— 循环转圈（.status-spin / .gradle-spin / .plugin-spin）。
+     拿 --ease 去驱动循环是错的：cubic-bezier(.16,1,.3,1) 首段极慢，转起来是"顿一下再转"，
+     而转圈要的是角速度恒定。所以单列一档，免得各处写裸的 `linear` 关键字。 */
+  --ease-linear: linear;
   --menu-row-height: 28px;
   --chrome-height: 40px;
   /* 顶栏的**内缩与组间距**。每一条都是上游的一个常量，不是估值：

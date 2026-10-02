@@ -230,7 +230,7 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
 .todo-body { display: flex; flex: 1; min-height: 0; }
 .todo-toolbar { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; padding: var(--space-1) 2px; border-right: 1px solid var(--line); background: var(--rail); }
 .todo-toolbar .icon-button.toggled { color: var(--bright); background: var(--selected); }
-.todo-filter-button { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-xs); color: var(--secondary); cursor: pointer; }
+.todo-filter-button { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-xs); color: var(--secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
 .todo-filter-button:hover { background: var(--hover); color: var(--bright); }
 .todo-filter-button select { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: inherit; }
 .todo-groupby { position: relative; }
