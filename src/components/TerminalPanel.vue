@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { BridgeError, isDesktop, subscribeTerm, subscribeTermExit, term } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
 const emit = defineEmits<{ focusTerminal: [] }>()
@@ -259,18 +260,18 @@ onBeforeUnmount(() => {
       <div class="terminal-tabs">
         <div v-for="pane in panes" :key="pane.id" class="terminal-tab" :class="{ selected: selected === pane, exited: pane.exited }">
           <button class="terminal-select" :title="`${pane.label}（双击重命名）`" @click="select(pane)" @dblclick.stop="beginRename(pane)">
-            <SquareTerminal :size="12" /><span>{{ pane.label }}</span><Columns2 v-if="isSplit(pane)" :size="12" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
+            <SquareTerminal :size="iconSize.dense" /><span>{{ pane.label }}</span><Columns2 v-if="isSplit(pane)" :size="iconSize.dense" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
           </button>
-          <button v-if="pane.exited" class="icon-button" title="重启该终端" :aria-label="`重启 ${pane.label}`" @click="restart(pane)"><RotateCw :size="12" /></button>
-          <button class="icon-button" :aria-label="`关闭 ${pane.label}`" @click="close(pane)"><X :size="12" /></button>
+          <button v-if="pane.exited" class="icon-button" title="重启该终端" :aria-label="`重启 ${pane.label}`" @click="restart(pane)"><RotateCw :size="iconSize.dense" /></button>
+          <button class="icon-button" title="关闭终端" :aria-label="`关闭 ${pane.label}`" @click="close(pane)"><X :size="iconSize.dense" /></button>
         </div>
       </div>
       <input v-if="renaming" ref="renameInput" v-model="renameText" class="terminal-rename" aria-label="终端名称" maxlength="40" @keydown.enter.prevent="commitRename" @keydown.esc.stop.prevent="renaming = null" @blur="commitRename" />
-      <button class="icon-button" title="重命名当前终端" aria-label="重命名当前终端" :disabled="!selected" @click="selected && beginRename(selected)"><Pencil :size="13" /></button>
-      <button class="icon-button" :class="{ active: searchOpen }" title="在终端中查找" aria-label="在终端中查找" :disabled="!selected" @click="toggleSearch"><Search :size="14" /></button>
-      <button class="icon-button" title="回收已退出的终端" aria-label="回收已退出的终端" :disabled="!isDesktop || !panes.length" @click="reapExited"><RotateCw :size="13" /></button>
-      <button class="icon-button" title="分屏：在右侧再开一个终端" aria-label="分屏终端" :disabled="!isDesktop || busy || !selected" @click="split"><Columns2 :size="14" /></button>
-      <button class="icon-button" title="新建终端" aria-label="新建终端" :disabled="!isDesktop || busy" @click="spawn()"><Plus :size="14" /></button>
+      <button class="icon-button" title="重命名当前终端" aria-label="重命名当前终端" :disabled="!selected" @click="selected && beginRename(selected)"><Pencil :size="iconSize.menu" /></button>
+      <button class="icon-button" :class="{ active: searchOpen }" title="在终端中查找" aria-label="在终端中查找" :disabled="!selected" @click="toggleSearch"><Search :size="iconSize.control" /></button>
+      <button class="icon-button" title="回收已退出的终端" aria-label="回收已退出的终端" :disabled="!isDesktop || !panes.length" @click="reapExited"><RotateCw :size="iconSize.menu" /></button>
+      <button class="icon-button" title="分屏：在右侧再开一个终端" aria-label="分屏终端" :disabled="!isDesktop || busy || !selected" @click="split"><Columns2 :size="iconSize.control" /></button>
+      <button class="icon-button" title="新建终端" aria-label="新建终端" :disabled="!isDesktop || busy" @click="spawn()"><Plus :size="iconSize.control" /></button>
     </div>
     <div v-if="searchOpen" class="terminal-search">
       <input ref="searchInput" v-model="searchText" class="terminal-search-input" aria-label="终端查找内容" placeholder="在终端缓冲区中查找" @keydown.enter.prevent="runSearch(true)" @keydown.esc.stop.prevent="toggleSearch" />

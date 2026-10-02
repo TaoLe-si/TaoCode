@@ -11,6 +11,7 @@
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import { BOOKMARK_MNEMONICS, type Bookmark } from '../bookmarks'
+import { iconSize } from '../uiIcons'
 
 /** 选择器的状态：正在给哪个位置贴助记键、它当前是什么、描述是什么。 */
 export interface MnemonicPromptState { path: string; line: number; current?: string; description?: string }
@@ -70,7 +71,7 @@ function stateOf(key: string) {
       </div>
       <div v-else class="mnemonic-foot">
         <button v-if="prompt.current !== undefined" class="subtle-button" @click="emit('remove')">移除助记键</button>
-        <button class="icon-button" aria-label="关闭助记键选择" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭助记键选择" aria-label="关闭助记键选择" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
     </section>
   </div>

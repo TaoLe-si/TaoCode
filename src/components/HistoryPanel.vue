@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { History as HistoryIcon, RotateCcw } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
 import { isDesktop, request, type DiffRow, type HistoryDiff, type HistoryDiffSides, type HistoryEntry, type HistoryList } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ path: string; ready: boolean }>()
 const emit = defineEmits<{ revert: [entry: HistoryEntry] }>()
@@ -73,7 +74,7 @@ watch(() => [props.path, props.ready], () => void load(), { immediate: true })
 
 <template>
   <div class="hist-panel">
-    <div class="panel-heading"><span><HistoryIcon :size="14" />本地历史</span><span class="heading-count">{{ entries.length }}</span></div>
+    <div class="panel-heading"><span><HistoryIcon :size="iconSize.control" />本地历史</span><span class="heading-count">{{ entries.length }}</span></div>
     <p v-if="!path" class="hist-empty">选择一个文件查看其本地历史。</p>
     <p v-else-if="!isDesktop || !ready" class="hist-empty">浏览器预览没有本地历史，请在桌面端使用。</p>
     <p v-if="error" class="hist-error">{{ error }}</p>
@@ -85,7 +86,7 @@ watch(() => [props.path, props.ready], () => void load(), { immediate: true })
           <button v-for="entry in entries" :key="entry.id" class="hist-item" role="listitem" :class="{ selected: selected?.id === entry.id }" :aria-current="selected?.id === entry.id ? 'true' : undefined" @click="select(entry)">{{ label(entry) }}</button>
         </div>
         <div class="hist-actions">
-          <button class="subtle-button" :disabled="!selected" title="把当前文件回滚到所选版本（会作为新版本保存）" @click="selected && emit('revert', selected)"><RotateCcw :size="13" />回滚此版本</button>
+          <button class="subtle-button" :disabled="!selected" title="把当前文件回滚到所选版本（会作为新版本保存）" @click="selected && emit('revert', selected)"><RotateCcw :size="iconSize.menu" />回滚此版本</button>
         </div>
         <p v-if="diffLoading" class="hist-empty">正在读取所选版本的差异…</p>
         <DiffView v-else-if="diffRows.length || diff" :path="props.path" :subtitle="diffHeader" :rows="diffRows" :unified="diff" :truncated="diffTruncated" />

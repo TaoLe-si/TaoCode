@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronRight, Plus, Minus } from 'lucide-vue-next'
 import type { NamedScopeSetting } from '../bridge'
 import { FILE_COLOR_NAMES, fileColorCss, isFileColorName, type FileColorSetting } from '../fileColors'
 import ColorChooserDialog from './ColorChooserDialog.vue'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   fileColors: FileColorSetting[]
@@ -119,13 +120,13 @@ defineExpose({ dirty, getDraft })
     </fieldset>
     <fieldset class="color-configurations" :disabled="busy || !root">
       <div class="color-toolbar" role="toolbar" aria-label="文件颜色">
-        <button ref="addButton" type="button" title="添加" aria-label="添加" :disabled="!scopes.length" :aria-expanded="adding" @click="adding = !adding; addingScope = ''"><Plus :size="16" /></button>
-        <button type="button" title="删除" aria-label="删除" :disabled="selected < 0" @click="remove"><Minus :size="16" /></button>
-        <button type="button" title="上移" aria-label="上移" :disabled="!canMove(-1)" @click="move(-1)"><ArrowUp :size="16" /></button>
-        <button type="button" title="下移" aria-label="下移" :disabled="!canMove(1)" @click="move(1)"><ArrowDown :size="16" /></button>
+        <button ref="addButton" type="button" title="添加" aria-label="添加" :disabled="!scopes.length" :aria-expanded="adding" @click="adding = !adding; addingScope = ''"><Plus :size="iconSize.action" /></button>
+        <button type="button" title="删除" aria-label="删除" :disabled="selected < 0" @click="remove"><Minus :size="iconSize.action" /></button>
+        <button type="button" title="上移" aria-label="上移" :disabled="!canMove(-1)" @click="move(-1)"><ArrowUp :size="iconSize.action" /></button>
+        <button type="button" title="下移" aria-label="下移" :disabled="!canMove(1)" @click="move(1)"><ArrowDown :size="iconSize.action" /></button>
         <div v-if="adding" class="color-popup">
           <div class="scope-choices">
-            <button v-for="scope in scopes" :key="scope.name" type="button" @click="addingScope = scope.name">{{ scope.name }}<ChevronRight :size="12" /></button>
+            <button v-for="scope in scopes" :key="scope.name" type="button" @click="addingScope = scope.name">{{ scope.name }}<ChevronRight :size="iconSize.dense" /></button>
           </div>
           <div v-if="addingScope" class="color-choices">
             <button v-for="color in FILE_COLOR_NAMES" :key="color" type="button" :style="{ background: fileColorCss(color) ?? undefined }" @click="add(addingScope, color)">{{ color }}</button>

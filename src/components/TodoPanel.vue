@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, ChevronRight, Eye, FileCode2, Filter, Folder, Group, ListChecks, LocateFixed, RefreshCw } from 'lucide-vue-next'
 import { isDesktop, request, type DocumentData, type SearchMatch, type SearchResult, type TodoPattern } from '../bridge'
 import { buildTodoTree, flattenTodoRows, orderedItems, packageIds, type TodoItem, type TodoNode } from '../todoTree'
+import { iconSize } from '../uiIcons'
 
 // IDEA's Todo tool window (platform/todo TodoPanel): a vertical toolbar with the
 // occurrence walker, the marker filter, auto-scroll from source, expand/collapse, the
@@ -149,28 +150,28 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
 <template>
   <div class="todo-panel">
     <div class="panel-heading">
-      <span><ListChecks :size="14" />任务 (TODO)</span>
-      <div class="heading-actions"><span class="heading-count">{{ filtered.length }}</span><button class="icon-button" title="重新扫描" aria-label="重新扫描" :disabled="!root || running" @click="scan"><RefreshCw :size="14" /></button></div>
+      <span><ListChecks :size="iconSize.control" />任务 (TODO)</span>
+      <div class="heading-actions"><span class="heading-count">{{ filtered.length }}</span><button class="icon-button" title="重新扫描" aria-label="重新扫描" :disabled="!root || running" @click="scan"><RefreshCw :size="iconSize.control" /></button></div>
     </div>
     <div class="todo-body">
       <div class="todo-toolbar" role="toolbar" aria-orientation="vertical" aria-label="任务视图工具栏">
-        <button class="icon-button" title="上一个出现位置" aria-label="上一个出现位置" :disabled="!occurrences.length" @click="step(-1)"><ArrowUp :size="14" /></button>
-        <button class="icon-button" title="下一个出现位置" aria-label="下一个出现位置" :disabled="!occurrences.length" @click="step(1)"><ArrowDown :size="14" /></button>
+        <button class="icon-button" title="上一个出现位置" aria-label="上一个出现位置" :disabled="!occurrences.length" @click="step(-1)"><ArrowUp :size="iconSize.control" /></button>
+        <button class="icon-button" title="下一个出现位置" aria-label="下一个出现位置" :disabled="!occurrences.length" @click="step(1)"><ArrowDown :size="iconSize.control" /></button>
         <label class="todo-filter-button" title="按标记过滤" :aria-label="`当前标记过滤：${filterPattern || '全部'}`">
-          <Filter :size="14" />
+          <Filter :size="iconSize.control" />
           <select v-model="filterPattern" aria-label="标记过滤"><option value="">全部</option><option v-for="pattern in patterns" :key="pattern.pattern" :value="pattern.pattern">{{ pattern.description || pattern.pattern }}</option></select>
         </label>
-        <button class="icon-button" :class="{ toggled: autoScroll }" :aria-pressed="autoScroll" title="自动滚动到源码位置" aria-label="自动滚动到源码位置" @click="autoScroll = !autoScroll"><LocateFixed :size="14" /></button>
-        <button class="icon-button" title="展开全部" aria-label="展开全部" @click="expandAll"><ChevronsDown :size="14" /></button>
-        <button class="icon-button" title="折叠全部" aria-label="折叠全部" @click="collapseAll"><ChevronsUp :size="14" /></button>
+        <button class="icon-button" :class="{ toggled: autoScroll }" :aria-pressed="autoScroll" title="自动滚动到源码位置" aria-label="自动滚动到源码位置" @click="autoScroll = !autoScroll"><LocateFixed :size="iconSize.control" /></button>
+        <button class="icon-button" title="展开全部" aria-label="展开全部" @click="expandAll"><ChevronsDown :size="iconSize.control" /></button>
+        <button class="icon-button" title="折叠全部" aria-label="折叠全部" @click="collapseAll"><ChevronsUp :size="iconSize.control" /></button>
         <div class="todo-groupby">
-          <button class="icon-button" :class="{ toggled: groupByOpen }" aria-haspopup="true" :aria-expanded="groupByOpen" title="分组方式" aria-label="分组方式" @click="groupByOpen = !groupByOpen"><Group :size="14" /></button>
+          <button class="icon-button" :class="{ toggled: groupByOpen }" aria-haspopup="true" :aria-expanded="groupByOpen" title="分组方式" aria-label="分组方式" @click="groupByOpen = !groupByOpen"><Group :size="iconSize.control" /></button>
           <div v-if="groupByOpen" class="groupby-popup" role="group" aria-label="分组方式">
             <label><input v-model="showPackages" type="checkbox" /><span>按包（目录）分组</span></label>
             <label :class="{ disabled: !showPackages }"><input v-model="flattenPackages" type="checkbox" :disabled="!showPackages" /><span>扁平化包</span></label>
           </div>
         </div>
-        <button class="icon-button" :class="{ toggled: showPreview }" :aria-pressed="showPreview" title="预览" aria-label="预览" @click="showPreview = !showPreview"><Eye :size="14" /></button>
+        <button class="icon-button" :class="{ toggled: showPreview }" :aria-pressed="showPreview" title="预览" aria-label="预览" @click="showPreview = !showPreview"><Eye :size="iconSize.control" /></button>
       </div>
       <div class="todo-stack">
         <p v-if="!isDesktop" class="todo-note">浏览器预览不能扫描工作区，请在桌面端使用。</p>
@@ -199,10 +200,10 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
                 :style="{ paddingLeft: `${6 + row.depth * 14}px` }" :aria-expanded="row.expanded"
                 @click="togglePackage(row.node)" @keydown.enter.prevent="togglePackage(row.node)"
               >
-                <ChevronRight :size="12" class="tree-chevron" :class="{ expanded: row.expanded }" /><Folder :size="12" class="folder-icon" /><span class="todo-node-label">{{ row.node.label }}</span>
+                <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: row.expanded }" /><Folder :size="iconSize.dense" class="folder-icon" /><span class="todo-node-label">{{ row.node.label }}</span>
               </button>
               <div v-else class="todo-node file" :style="{ paddingLeft: `${6 + (row.depth + 1) * 14}px` }">
-                <FileCode2 :size="12" /><span class="todo-node-label">{{ row.node.label }}</span><span class="todo-node-count">{{ row.node.items.length }}</span>
+                <FileCode2 :size="iconSize.dense" /><span class="todo-node-label">{{ row.node.label }}</span><span class="todo-node-count">{{ row.node.items.length }}</span>
               </div>
             </template>
           </template>

@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { Minus, Plus, X } from 'lucide-vue-next'
 import type { JavaProjectSettings, ProjectSettings } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 // Mirrors intellij-community's Project Structure dialog:
 // java/idea-ui/src/com/intellij/openapi/roots/ui/configuration/
@@ -189,18 +190,18 @@ function save() {
             <span class="ps-root-icon" :class="{ 'ps-root-test': isTestRoot(source) }" aria-hidden="true" />
             <span>{{ source }}</span>
             <span class="ps-root-type">{{ isTestRoot(source) ? '测试' : '源代码' }}</span>
-            <button type="button" class="icon-button" :aria-label="`移除 ${source}`" @click="dropSourceRoot(index)"><Minus :size="13" /></button>
+            <button type="button" class="icon-button" title="移除源" :aria-label="`移除 ${source}`" @click="dropSourceRoot(index)"><Minus :size="iconSize.menu" /></button>
           </div>
           <p v-if="!java.sourcePaths.length" class="ps-empty-line">没有源码目录。点“添加内容根”选择项目内目录。</p>
         </div>
         <div class="ps-toolbar">
-          <button type="button" class="subtle-button" @click="addSourceRoot"><Plus :size="13" /> 添加内容根…</button>
+          <button type="button" class="subtle-button" @click="addSourceRoot"><Plus :size="iconSize.menu" /> 添加内容根…</button>
         </div>
         <div v-if="sourcePopup" class="ps-popup" role="dialog" aria-label="新目录类型">
           <input ref="sourceInput" v-model="sourceDraft" class="ps-grow" placeholder="项目内路径，例如 src/main/java" spellcheck="false" aria-label="新目录路径" @keydown.enter.prevent="applySourceRoot('sources')" @keydown.esc.prevent="sourcePopup = false" />
           <button type="button" class="subtle-button" @click="applySourceRoot('sources')">源代码根</button>
           <button type="button" class="subtle-button" @click="applySourceRoot('tests')">测试根</button>
-          <button type="button" class="icon-button" aria-label="取消" @click="sourcePopup = false"><X :size="14" /></button>
+          <button type="button" class="icon-button" title="取消" aria-label="取消" @click="sourcePopup = false"><X :size="iconSize.control" /></button>
         </div>
       </fieldset>
 
@@ -209,17 +210,17 @@ function save() {
         <div class="ps-tree" role="list" aria-label="依赖 JAR">
           <div v-for="(library, index) in java.referencedLibraries" :key="library" class="ps-tree-node" role="listitem">
             <span>{{ library }}</span>
-            <button type="button" class="icon-button" :aria-label="`移除 ${library}`" @click="dropLibrary(index)"><Minus :size="13" /></button>
+            <button type="button" class="icon-button" title="移除库" :aria-label="`移除 ${library}`" @click="dropLibrary(index)"><Minus :size="iconSize.menu" /></button>
           </div>
           <p v-if="!java.referencedLibraries.length" class="ps-empty-line">没有依赖条目。</p>
         </div>
         <div class="ps-toolbar">
-          <button type="button" class="subtle-button" @click="addLibrary"><Plus :size="13" /> 添加路径或通配符…</button>
+          <button type="button" class="subtle-button" @click="addLibrary"><Plus :size="iconSize.menu" /> 添加路径或通配符…</button>
         </div>
         <div v-if="libraryPopup" class="ps-popup" role="dialog" aria-label="添加依赖">
           <input ref="libraryInput" v-model="libraryDraft" class="ps-grow" placeholder="lib/**/*.jar" spellcheck="false" aria-label="依赖路径或通配符" @keydown.enter.prevent="applyLibrary" @keydown.esc.prevent="libraryPopup = false" />
           <button type="button" class="subtle-button" @click="applyLibrary">确定</button>
-          <button type="button" class="icon-button" aria-label="取消" @click="libraryPopup = false"><X :size="14" /></button>
+          <button type="button" class="icon-button" title="取消" aria-label="取消" @click="libraryPopup = false"><X :size="iconSize.control" /></button>
         </div>
       </fieldset>
 

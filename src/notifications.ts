@@ -7,8 +7,9 @@
 // （`IdeStatusBarImpl.kt:313-323,863-872,952-962`），左右键在可见且启用的组件间走并两端环绕，
 // Escape 回到进入前的组件；规则在 src/statusBarNav.ts，本模块只做 DOM 与注册。
 // 两者同处是因为「通知中心」本身就是状态栏里的一个组件，它们的开关状态（`noticeOpen` / `statusMenu`）互相牵制。
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { focusActiveEditor } from './editorFocus.ts'
+import { placeMenu } from './menuPlacement.ts'
 import { pushNotice, upsertNotice, type NoticeAction, type NoticeEntry } from './notices.ts'
 import { clearNoticeStatus, setNoticeStatus } from './statusBarText.ts'
 import { focusableWidgets, navigateWidget, resolveRestoreTarget, shouldFocusFirstWidget, type NavDirection } from './statusBarNav.ts'
@@ -141,6 +142,18 @@ function openStatusMenu(event: MouseEvent) {
   // Never hijack the menu while a status chip has its own action menu open.
   event.preventDefault()
   statusMenu.value = { x: event.clientX, y: event.clientY }
+  // 状态栏贴着窗口**底边**，而组件菜单有 16 行（约 480px 高）。原样拿 clientY 定位的话菜单
+  // 80% 掉到视口外，只剩标题那半条看得见（真机截图 build/ui-statusbar-menu.png 就是这样）。
+  // 渲染完量一次真实尺寸再夹回来 —— 翻转/夹取的口径见 src/menuPlacement.ts。
+  void nextTick(() => {
+    const current = statusMenu.value
+    const el = document.querySelector<HTMLElement>('.status-widget-menu')
+    if (!current || !el) return
+    const box = el.getBoundingClientRect()
+    const placed = placeMenu({ ...current, width: box.width, height: box.height,
+      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+    if (placed.x !== current.x || placed.y !== current.y) statusMenu.value = placed
+  })
 }
 function clearNotices() { noticeLog.value = []; noticeOpen.value = false; clearNoticeStatus() }
 // WindowMenu › Notifications（`PlatformActions.xml:726-728`）：CloseFirstNotification 关掉

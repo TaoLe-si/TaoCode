@@ -34,6 +34,7 @@ import { computed, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Copy, FolderPlus, Minus, Plus, Save, X } from 'lucide-vue-next'
 import type { RunConfig } from '../bridge'
 import { RUN_CONFIG_TYPES as TYPES, buildRunConfigTree, formatRunArguments, parseRunArguments, nodeKey, uniqueRunConfigName, validateFolderName } from '../runConfigTree'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   configs: RunConfig[]
@@ -167,7 +168,7 @@ function save() {
     <section class="help-dialog run-configs-dialog" role="dialog" aria-modal="true" aria-label="运行/调试配置">
       <header class="run-configs-head">
         <h2>运行/调试配置</h2>
-        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="16" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <!-- IDEA 的 splitter（RunConfigurable.kt:563-575）：左树带右边框，右面板 padding 15,5,0,15。 -->
       <div class="rc-body">
@@ -182,8 +183,8 @@ function save() {
                 :class="{ 'is-selected': selected === nodeKey('type', node.id) }"
                 @click="pickNode(nodeKey('type', node.id))"
               >
-                <button type="button" class="rc-caret" :title="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
-                  <ChevronRight v-if="collapsed.has(nodeKey('type', node.id))" :size="12" /><ChevronDown v-else :size="12" />
+                <button type="button" class="rc-caret" :title="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" :aria-label="collapsed.has(nodeKey('type', node.id)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('type', node.id))">
+                  <ChevronRight v-if="collapsed.has(nodeKey('type', node.id))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                 </button>
                 <span>{{ node.label }}</span>
               </div>
@@ -197,10 +198,10 @@ function save() {
                     :class="{ 'is-selected': selected === nodeKey('folder', node.id, group.name) }"
                     @click="pickNode(nodeKey('folder', node.id, group.name))"
                   >
-                    <button type="button" class="rc-caret" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
-                      <ChevronRight v-if="collapsed.has(nodeKey('folder', node.id, group.name))" :size="12" /><ChevronDown v-else :size="12" />
+                    <button type="button" class="rc-caret" :title="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" :aria-label="collapsed.has(nodeKey('folder', node.id, group.name)) ? '展开' : '折叠'" @click.stop="toggleNode(nodeKey('folder', node.id, group.name))">
+                      <ChevronRight v-if="collapsed.has(nodeKey('folder', node.id, group.name))" :size="iconSize.dense" /><ChevronDown v-else :size="iconSize.dense" />
                     </button>
-                    <FolderPlus :size="12" aria-hidden="true" />
+                    <FolderPlus :size="iconSize.dense" aria-hidden="true" />
                     <span>{{ group.name }}</span>
                   </div>
                   <ul v-if="!collapsed.has(nodeKey('folder', node.id, group.name))" class="rc-children">
@@ -225,15 +226,15 @@ function save() {
           <!-- RunConfigurable 的树工具条：添加 / 删除 / 复制 / 保存配置 / 新建文件夹 -->
           <div class="rc-toolbar" role="toolbar" aria-label="运行配置工具条">
             <div class="rc-add">
-              <Plus :size="14" aria-hidden="true" /><span>添加</span>
+              <Plus :size="iconSize.control" aria-hidden="true" /><span>添加</span>
               <div class="rc-add-menu">
                 <button v-for="entry in TYPES" :key="entry.id" type="button" :disabled="busy" @click="addConfig(entry.id)">{{ entry.label }}</button>
               </div>
             </div>
-            <button type="button" class="icon-button" title="删除配置" aria-label="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="15" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="复制配置" aria-label="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="14" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="保存配置" aria-label="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="14" aria-hidden="true" /></button>
-            <button type="button" class="icon-button" title="新建文件夹" aria-label="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="14" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" title="删除配置" aria-label="删除配置" :disabled="busy || !selectedConfigName" @click="emit('remove', selectedConfigName)"><Minus :size="iconSize.toolbar" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" title="复制配置" aria-label="复制配置" :disabled="busy || !selectedConfigName" @click="copyConfig"><Copy :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" title="保存配置" aria-label="保存配置" :disabled="busy || !form.name.trim()" @click="save"><Save :size="iconSize.control" aria-hidden="true" /></button>
+            <button type="button" class="icon-button" title="新建文件夹" aria-label="新建文件夹" :disabled="busy" @click="createFolder"><FolderPlus :size="iconSize.control" aria-hidden="true" /></button>
           </div>
         </div>
 
@@ -265,7 +266,7 @@ function save() {
                  展开状态持久化；标签用 before.launch.panel.title） -->
             <div class="rc-before">
               <button type="button" class="rc-before-head" :aria-expanded="beforeOpen" @click="toggleBefore">
-                <ChevronDown v-if="beforeOpen" :size="13" /><ChevronRight v-else :size="13" />
+                <ChevronDown v-if="beforeOpen" :size="iconSize.menu" /><ChevronRight v-else :size="iconSize.menu" />
                 <span>启动前</span>
                 <span class="rc-before-count">{{ (form.beforeLaunch ?? []).length }} 步</span>
               </button>

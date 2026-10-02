@@ -20,6 +20,7 @@ import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import ProjectStructurePane from './ProjectStructurePane.vue'
 import type { Entry, JavaProjectSettings, ProjectSettings } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   settings: ProjectSettings | null
@@ -60,7 +61,7 @@ function confirm() { if (apply()) emit('close') }
     <section class="help-dialog ps-dialog" role="dialog" aria-modal="true" aria-label="项目结构">
       <header class="ps-dialog-head">
         <h2>项目结构</h2>
-        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="16" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <div class="ps-dialog-body">
         <!-- IDEA 的 SidePanel：左侧分类，右侧详情。 -->
@@ -112,7 +113,9 @@ function confirm() { if (apply()) emit('close') }
 .ps-dialog-head h2 { flex: 1; margin: 0; }
 .ps-dialog-body { display: grid; grid-template-columns: minmax(0, 170px) minmax(0, 1fr); min-height: 380px; max-height: 62vh; }
 .ps-side { display: flex; flex-direction: column; gap: 2px; padding: 4px; border-right: 1px solid var(--line); overflow: auto; }
-.ps-side-item { justify-content: flex-start; text-align: left; padding: 4px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 12px; }
+/* `display: flex` 是补的：这是 `<button>`，UA 默认 inline-block，`justify-content` 在上面是
+   空操作（与 `.tool-menu-item` style.css:318 同款，由 ui-icons 门禁一并盯住）。 */
+.ps-side-item { display: flex; align-items: center; justify-content: flex-start; text-align: left; padding: 4px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 12px; }
 .ps-side-item:hover { background: var(--hover); }
 .ps-side-item.active { background: var(--selected); color: var(--bright); font-weight: 600; }
 .ps-side-note { margin: auto 0 0; padding: var(--space-2); color: var(--muted); font-size: 10px; line-height: 1.5; }

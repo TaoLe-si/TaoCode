@@ -18,6 +18,8 @@ new Function('require', 'exports', js)(name => {
   if (name === '../filenameWidget') return require('../src/filenameWidget.ts')
   // 工具栏的键盘判据（第三十九批加的 import）——与上面那条同一个路子。
   if (name === '../mainToolbarFocus.ts') return require('../src/mainToolbarFocus.ts')
+  // 图标尺寸梯子（第八十五批）：模板里的 `:size="iconSize.<role>"` 要真模块才转得出值。
+  if (name === '../uiIcons') return require('../src/uiIcons.ts')
   return require(name)
 }, exports)
 const MainToolbar = exports.default

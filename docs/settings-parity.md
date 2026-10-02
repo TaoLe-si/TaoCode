@@ -50,7 +50,7 @@
 
 | 16 | `editor.reader.mode` | `ReaderModeConfigurableProvider`（声明于 `platform/lang-impl/resources/intellij.platform.lang.impl.xml`） | `[ ]` |
 
-| 17 | `editor.stickyLines` | `StickyLinesConfigurable.kt:7-20` | `[x]` **宿主能力已补并可用**：设置 `showStickyLines`（默认 true）+ `stickyLinesLimit`（默认 3，0..10 校验）→ 编辑器顶边叠加**粘性作用域行层**（`stickyLines` computed 从 LSP `documentSymbol` 里取包含当前光标行的符号链，按 startLine 升序取最内层 N 条）+ `.sticky-lines` 样式 + 设置页「编辑器 › 粘性行」（注册 parentId="preferences.editor"） |
+| 17 | `editor.stickyLines` | `StickyLinesConfigurable.kt:7-20` | `[x]` **宿主能力已补并可用**：设置 `showStickyLines`（默认 true）+ `stickyLinesLimit`（默认 **3**，0..10 校验；**与上游有出入**：EditorSettingsExternalizable.java:94 `STICKY_LINES_LIMIT = 5`，2026-10-02 第八十四批只把 native 端默认补成 3 与前端对齐，偏离本身留到动粘性行时判）→ 编辑器顶边叠加**粘性作用域行层**（`stickyLines` computed 从 LSP `documentSymbol` 里取包含当前光标行的符号链，按 startLine 升序取最内层 N 条）+ `.sticky-lines` 样式 + 设置页「编辑器 › 粘性行」（注册 parentId="preferences.editor"） |
 
 | 18 | `fileTemplates` | `AllFileTemplatesConfigurable$Provider`（声明于 `platform/lang-impl/resources/intellij.platform.lang.impl.xml`） | `[ ]` |
 

@@ -8,6 +8,7 @@ import type { ProjectTreeSortSettings } from '../projectTreeSort'
 import { treeClickOpensFile, treeOpenUsesPreviewTab, type ProjectViewBehavior } from '../projectViewBehavior'
 import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
 import SpeedSearchBar from './SpeedSearchBar.vue'
+import { iconSize } from '../uiIcons'
 
 export type { SyntheticNode } from '../projectTreeModel'
 const props = defineProps<{
@@ -169,14 +170,14 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           @keyup.space.prevent
         >
           <span v-if="row.entry.kind === 'directory'" class="tree-expander" @click.stop="toggleChevron(row.entry)" @dblclick.stop>
-            <ChevronRight :size="12" class="tree-chevron" :class="{ expanded: expanded.has(row.entry.path) }" />
+            <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: expanded.has(row.entry.path) }" />
           </span>
           <span v-else class="tree-spacer" />
-          <Package v-if="row.synthetic?.icon === 'libraries'" :size="15" class="synthetic-icon" />
-          <NotebookPen v-else-if="row.synthetic?.icon === 'scratches'" :size="15" class="synthetic-icon" />
-          <Folder v-else-if="row.entry.kind === 'directory'" :size="15" class="folder-icon" />
-          <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(row.entry.name)" :size="15" class="code-icon" />
-          <FileText v-else :size="15" class="muted" />
+          <Package v-if="row.synthetic?.icon === 'libraries'" :size="iconSize.toolbar" class="synthetic-icon" />
+          <NotebookPen v-else-if="row.synthetic?.icon === 'scratches'" :size="iconSize.toolbar" class="synthetic-icon" />
+          <Folder v-else-if="row.entry.kind === 'directory'" :size="iconSize.toolbar" class="folder-icon" />
+          <FileCode2 v-else-if="/\.(java|kt|cpp|hpp|c|h|ts|js|vue)$/.test(row.entry.name)" :size="iconSize.toolbar" class="code-icon" />
+          <FileText v-else :size="iconSize.toolbar" class="muted" />
           <span class="tree-name">{{ row.entry.name }}</span><span v-if="loading.has(row.entry.path)">…</span>
         </button>
         <div v-if="expanded.has(row.entry.path) && (row.synthetic ? row.synthetic.entries.length === 0 : row.entry.path === '' && projectName !== undefined && !depth ? entries.length === 0 : model.children.get(row.entry.path)?.length === 0)" class="empty-folder" :style="indentStyle(row.level + 1)">{{ row.synthetic ? '（空）' : '空目录' }}</div>

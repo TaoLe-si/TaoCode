@@ -5,6 +5,7 @@
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import type { DiffRow } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ path: string; subtitle?: string; rows: DiffRow[]; unified: string; truncated?: boolean; closable?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -46,7 +47,7 @@ function parts(cell: DiffRow['left'], marks?: [number, number][]) {
         <button :class="{ selected: mode === 'sides' }" @click="mode = 'sides'">并排</button>
         <button :class="{ selected: mode === 'unified' }" @click="mode = 'unified'">统一</button>
       </div>
-      <button v-if="closable" class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="16" /></button>
+      <button v-if="closable" class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="iconSize.action" /></button>
     </div>
     <p v-if="truncated" class="diff-note">差异行数超过上限，后续部分未显示。</p>
     <div v-if="rows.length && mode === 'sides'" class="diff-sides">

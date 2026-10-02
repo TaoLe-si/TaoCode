@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { File, Folder } from 'lucide-vue-next'
 import type { VcsLogChangeNode } from '../vcsLogChanges'
+import { iconSize } from '../uiIcons'
 defineProps<{ nodes: VcsLogChangeNode[]; selected?: string }>()
 const emit = defineEmits<{ select: [path: string] }>()
 </script>
@@ -8,11 +9,11 @@ const emit = defineEmits<{ select: [path: string] }>()
   <ul class="nodes">
     <li v-for="node in nodes" :key="node.path">
       <details v-if="!node.change" open>
-        <summary><Folder :size="13" />{{ node.name }}</summary>
+        <summary><Folder :size="iconSize.menu" />{{ node.name }}</summary>
         <VcsLogChangeTree :nodes="node.children" :selected="selected" @select="emit('select', $event)" />
       </details>
       <button v-else class="file" :class="{ selected: selected === node.path }" :aria-pressed="selected === node.path" :title="node.change.previousPath ? `${node.change.previousPath} → ${node.path}` : node.path" @click="emit('select', node.path)">
-        <File :size="13" /><span class="name">{{ node.name }}</span><span class="status">{{ node.change.status }}</span>
+        <File :size="iconSize.menu" /><span class="name">{{ node.name }}</span><span class="status">{{ node.change.status }}</span>
       </button>
     </li>
   </ul>

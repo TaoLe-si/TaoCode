@@ -26,13 +26,20 @@
   --radius-md: 7px;
   --radius-lg: 9px;
   --radius-pill: 999px;
+  /* 反馈类动效只有两档，这是够的：hover/按下这类**用户已经等过**的微交互走 --dur-1，
+     状态切换（箭头翻转、浮层进出、面板入场）走 --dur-2。原来还有一档 --dur-3: 220ms，
+     全仓没有任何地方用它 —— 与其留一个永远不被消费的档位，不如把这一条明确写在这里：
+     新增动效时如果第三档真的出现，再连同出处一起加进来。 */
   --dur-1: 120ms;
   --dur-2: 180ms;
-  --dur-3: 220ms;
   /* 子菜单展开（IDEA 的 LAF 弹出动画 160ms 量级）与主题水纹（跨屏一圈，长程）。
      这两个是**独立于控件反馈**的动效，各给一个名字，免得在各处写死数值。 */
   --dur-submenu: 160ms;
   --dur-theme-reveal: 560ms;
+  /* 加载转圈：唯一一个**循环**动效，周期 1.1s（≈ 545rpm，比常见的 1s 稍慢一点，
+     少一分廉价感）。它不能套 --dur-1/--dur-2 —— 那两档是单次反馈的时长，
+     拿来做循环会快到看不清在转。 */
+  --dur-spin: 1.1s;
   --ease: cubic-bezier(.16, 1, .3, 1);
   --menu-row-height: 28px;
   --chrome-height: 40px;
@@ -78,6 +85,24 @@
      图标 20 = JBUI.java:1286 `MainToolbar.Button.iconSize` 与 :1334 `StripeToolbar.Button.iconSize`。 */
   --toolbar-btn-size: 30px;
   --toolbar-icon-size: 20px;
+  /* 图标尺寸阶梯 —— 这里只有**角色名**，数字的出处逐条写在 `src/uiIcons.ts` 的 `ICON_SIZE`
+     上（每个像素值都跟一条上游 file:line），两处由 `tests/ui-icons.test.mjs` 守住同步。
+     模板里不再写 `:size="14"`，一律 `:size="iconSize.menu"`；样式里写 `var(--icon-size-*)`。
+     为什么要有这一层：曾有 327 处 `:size` 硬编码横跨 16 个值，同一个 `X`（关闭）用了 8 种
+     （10/11/12/13/14/15/16/18），而且 `style.css` 里给顶栏图标写的那条 `width: 20px` 覆盖了
+     模板的 SVG 属性 —— 源码写着 14、实际渲染 20。尺寸从"到处都是数字"收回到"一处定义、
+     按角色取"，两种写法永远对得上。 */
+  --icon-size-chip: 10px;
+  --icon-size-inline: 11px;
+  --icon-size-dense: 12px;
+  --icon-size-menu: 13px;
+  --icon-size-control: 14px;
+  --icon-size-checkbox: 14px;
+  --icon-size-toolbar: 15px;
+  --icon-size-action: 16px;
+  --icon-size-rail: 20px;
+  --icon-size-artwork: 24px;
+  --icon-size-hero: 28px;
   /* hover 圆角 = `MainToolbar.Button.arc` 默认 12（JBUI.java:1420），由
      HeaderToolbarButtonLook.kt:58-59 getButtonArc() 消费（与上面两项同一个按钮 Look）。 */
   --toolbar-btn-arc: 12px;

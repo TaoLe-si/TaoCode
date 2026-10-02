@@ -17,6 +17,7 @@ import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
 import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
+import { iconSize } from '../uiIcons'
 
 export interface PanelList { name: string; isDefault: boolean; entries: BookmarkEntry[] }
 const props = defineProps<{ entries: BookmarkEntry[]; activePath: string; settings: BookmarksViewSettings; lists?: PanelList[] }>()
@@ -115,34 +116,34 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <div class="bookmark-panel">
     <div class="panel-heading">
-      <span><Bookmark :size="14" />书签</span>
+      <span><Bookmark :size="iconSize.control" />书签</span>
       <span class="heading-count">{{ entries.length }}</span>
       <!-- 齿轮：IDEA 把它放在工具窗口标题栏（ToolWindowHeader 的 ShowOptionsAction → 该窗口自己的
            gearProducer）。TaoCode 的面板标题行就是该窗口的标题区，所以齿轮放这里。 -->
-      <button class="icon-button" title="创建书签列表…" aria-label="创建书签列表" @click.stop="openCreateListDialog()"><Plus :size="14" /></button>
-      <button class="icon-button" title="书签打开的标签页…" aria-label="书签打开的标签页" @click.stop="emit('bookmarkTabs')"><BookMarked :size="14" /></button>
-      <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="书签视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="14" /></button>
+      <button class="icon-button" title="创建书签列表…" aria-label="创建书签列表" @click.stop="openCreateListDialog()"><Plus :size="iconSize.control" /></button>
+      <button class="icon-button" title="书签打开的标签页…" aria-label="书签打开的标签页" @click.stop="emit('bookmarkTabs')"><BookMarked :size="iconSize.control" /></button>
+      <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="书签视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="iconSize.control" /></button>
       <div v-if="gearOpen" class="bookmark-gear" role="menu" aria-label="书签视图选项">
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.groupLineBookmarks" @click="toggle({ groupLineBookmarks: !settings.groupLineBookmarks })">
-          <span class="gear-check"><ListTree :size="13" /></span><span>按文件分组行书签</span><span v-if="settings.groupLineBookmarks" class="gear-on"><Check :size="12" /></span>
+          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>按文件分组行书签</span><span v-if="settings.groupLineBookmarks" class="gear-on"><Check :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="!settings.rewriteBookmarkType" @click="toggle({ rewriteBookmarkType: !settings.rewriteBookmarkType })">
-          <span class="gear-check"><ListTree :size="13" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><Check :size="12" /></span>
+          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>重写助记键之前询问</span><span v-if="!settings.rewriteBookmarkType" class="gear-on"><Check :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.askBeforeDeletingLists" @click="toggle({ askBeforeDeletingLists: !settings.askBeforeDeletingLists })">
-          <span class="gear-check"><ListTree :size="13" /></span><span>删除多个书签前询问</span><span v-if="settings.askBeforeDeletingLists" class="gear-on"><Check :size="12" /></span>
+          <span class="gear-check"><ListTree :size="iconSize.menu" /></span><span>删除多个书签前询问</span><span v-if="settings.askBeforeDeletingLists" class="gear-on"><Check :size="iconSize.dense" /></span>
         </button>
         <div class="gear-rule" role="separator" />
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollToSource" @click="toggle({ autoscrollToSource: !settings.autoscrollToSource })">
-          <span class="gear-check" /><span>自动滚动到源代码</span><span v-if="settings.autoscrollToSource" class="gear-on"><Check :size="12" /></span>
+          <span class="gear-check" /><span>自动滚动到源代码</span><span v-if="settings.autoscrollToSource" class="gear-on"><Check :size="iconSize.dense" /></span>
         </button>
         <button type="button" role="menuitemcheckbox" :aria-checked="settings.autoscrollFromSource" @click="toggle({ autoscrollFromSource: !settings.autoscrollFromSource })">
-          <span class="gear-check" /><span>从源代码自动滚动</span><span v-if="settings.autoscrollFromSource" class="gear-on"><Check :size="12" /></span>
+          <span class="gear-check" /><span>从源代码自动滚动</span><span v-if="settings.autoscrollFromSource" class="gear-on"><Check :size="iconSize.dense" /></span>
         </button>
       </div>
     </div>
     <div v-if="!entries.length" class="bookmark-empty">
-      <Bookmark :size="24" />
+      <Bookmark :size="iconSize.artwork" />
       <p>还没有书签</p>
       <span>F11 标记当前行；Ctrl+F11 贴 0-9 编号，之后在任意位置按 Ctrl+编号 跳回。</span>
       <button class="subtle-button" @click="emit('assign')">为当前行编号</button>
@@ -152,8 +153,8 @@ function onKeydown(event: KeyboardEvent) {
       <div v-if="section.name" class="bookmark-list-head" role="presentation">
         <span class="bookmark-list-name">{{ section.name }}</span>
         <span v-if="section.isDefault" class="bookmark-list-default" title="新书签会自动添加到这个列表">默认</span>
-        <button v-if="section.name && !section.isDefault" class="icon-button" title="重命名书签列表…" :aria-label="`重命名书签列表 ${section.name}`" @click="listDialog = { mode: 'rename', name: section.name }"><Pencil :size="12" /></button>
-        <button v-if="section.name && !section.isDefault" class="icon-button" title="删除书签列表" :aria-label="`删除书签列表 ${section.name}`" @click="askDeleteList(section.name)"><X :size="13" /></button>
+        <button v-if="section.name && !section.isDefault" class="icon-button" title="重命名书签列表…" :aria-label="`重命名书签列表 ${section.name}`" @click="listDialog = { mode: 'rename', name: section.name }"><Pencil :size="iconSize.dense" /></button>
+        <button v-if="section.name && !section.isDefault" class="icon-button" title="删除书签列表" :aria-label="`删除书签列表 ${section.name}`" @click="askDeleteList(section.name)"><X :size="iconSize.menu" /></button>
         <span v-else class="bookmark-list-count">{{ section.entries.length }}</span>
       </div>
       <template v-for="group in groupBookmarks(section.entries, props.settings.groupLineBookmarks)" :key="(section.name || 'all') + ':' + (group.path || 'flat')">
@@ -163,7 +164,7 @@ function onKeydown(event: KeyboardEvent) {
           <span v-else class="bookmark-group-name">{{ group.path.split('/').pop() }}</span>
           <span class="bookmark-group-folder">{{ folderOf(group.path) }}</span>
           <span v-if="fileBookmarks.get(group.path)?.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic }}</span>
-          <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="13" /></button>
+          <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="iconSize.menu" /></button>
           <span v-else class="bookmark-group-count">{{ group.entries.length }}</span>
         </div>
         <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }" @contextmenu.prevent.stop="openRowMenu($event, entry)">
@@ -189,7 +190,7 @@ function onKeydown(event: KeyboardEvent) {
                  那个 JLabel = 树的 accessory），所以它在行尾而不是行首。 -->
             <span v-if="entry.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${entry.mnemonic} 跳转`">{{ entry.mnemonic }}</span>
           </button>
-          <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="13" /></button>
+          <button class="icon-button" title="移除书签" :aria-label="`移除书签 ${entry.path} 第 ${entry.line} 行`" @click="emit('remove', entry)"><X :size="iconSize.menu" /></button>
         </div>
       </template>
       </template>

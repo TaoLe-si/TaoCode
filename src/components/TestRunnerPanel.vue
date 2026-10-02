@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { FlaskConical, Play, RefreshCw, RotateCcw } from 'lucide-vue-next'
+import { CircleCheck, CircleX, Minus } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 import { isDesktop, request, runState, type Entry } from '../bridge'
 import { discover, FailedSet, parseResultLine, rerunCommand, type TestResult } from '../testRunner'
 
@@ -118,18 +120,18 @@ watch(() => props.activePath, () => refreshFile())
 <template>
   <div class="testrun-panel">
     <div class="panel-heading">
-      <span><FlaskConical :size="14" />测试</span>
+      <span><FlaskConical :size="iconSize.control" />测试</span>
       <div class="heading-actions">
         <span v-if="summary.passed || summary.failed || summary.skipped" class="heading-count">
           {{ summary.passed }} 过 / {{ summary.failed }} 败<template v-if="summary.skipped"> / {{ summary.skipped }} 跳</template>
         </span>
-        <button class="icon-button" title="重新发现测试" aria-label="重新发现测试" @click="refreshProject"><RefreshCw :size="14" /></button>
+        <button class="icon-button" title="重新发现测试" aria-label="重新发现测试" @click="refreshProject"><RefreshCw :size="iconSize.control" /></button>
       </div>
     </div>
     <div class="testrun-toolbar">
-      <button class="subtle-button" :disabled="running || !tests.length" title="运行全部（IDEA: Rerun All）" @click="runAll"><Play :size="13" />全部</button>
-      <button class="subtle-button" :disabled="running || !selected.size" title="只跑勾选的测试" @click="runSelected"><Play :size="13" />所选</button>
-      <button class="subtle-button" :disabled="running || !failed.size" title="只重跑失败的测试（IDEA: Rerun Failed）" @click="rerunFailed"><RotateCcw :size="13" />失败 ({{ failed.size }})</button>
+      <button class="subtle-button" :disabled="running || !tests.length" title="运行全部（IDEA: Rerun All）" @click="runAll"><Play :size="iconSize.menu" />全部</button>
+      <button class="subtle-button" :disabled="running || !selected.size" title="只跑勾选的测试" @click="runSelected"><Play :size="iconSize.menu" />所选</button>
+      <button class="subtle-button" :disabled="running || !failed.size" title="只重跑失败的测试（IDEA: Rerun Failed）" @click="rerunFailed"><RotateCcw :size="iconSize.menu" />失败 ({{ failed.size }})</button>
     </div>
     <p v-if="error" class="testrun-error">{{ error }}</p>
     <div class="testrun-list" role="list">
@@ -138,7 +140,7 @@ watch(() => props.activePath, () => refreshFile())
         <input type="checkbox" :checked="selected.has(row.id)" :aria-label="`选择 ${row.name}`" @change="toggle(row.id)" />
         <button class="testrun-name" :title="`${row.path}:${row.line}`" @click="jump(row)">{{ row.name }}</button>
         <span class="testrun-meta">{{ row.framework }}</span>
-        <span class="testrun-outcome" :class="outcomeOf(row.id)">{{ outcomeOf(row.id) === 'passed' ? '✓' : outcomeOf(row.id) === 'failed' ? '✗' : outcomeOf(row.id) === 'skipped' ? '–' : '' }}</span>
+        <span class="testrun-outcome" :class="outcomeOf(row.id)"><CircleCheck v-if="outcomeOf(row.id) === 'passed'" :size="iconSize.menu" aria-hidden="true" /><CircleX v-else-if="outcomeOf(row.id) === 'failed'" :size="iconSize.menu" aria-hidden="true" /><Minus v-else-if="outcomeOf(row.id) === 'skipped'" :size="iconSize.menu" aria-hidden="true" /></span>
       </div>
     </div>
   </div>
@@ -153,7 +155,9 @@ watch(() => props.activePath, () => refreshFile())
 .testrun-row:hover { background: var(--hover); }
 .testrun-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; background: none; border: 0; color: var(--text); font-size: 12px; }
 .testrun-meta { color: var(--muted); font-size: 10px; }
-.testrun-outcome { width: 14px; text-align: center; }
+/* 通过/失败/跳过的记号（第八十五批由 ✗ 文本字形换成 lucide CircleX/CircleCheck/CircleMinus）。
+   槽位改成 inline-flex 居中盒，否则 svg 会按基线排在 14px 盒的下面。 */
+.testrun-outcome { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; }
 .testrun-outcome.passed { color: var(--success); }
 .testrun-outcome.failed { color: var(--error); }
 .testrun-outcome.skipped { color: var(--muted); }

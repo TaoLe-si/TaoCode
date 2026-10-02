@@ -12,6 +12,7 @@ import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
 import type { RunInstanceRecord } from '../runInstances.ts'
 import type { RunIssue } from '../buildOutput.ts'
+import { iconSize } from '../uiIcons'
 
 /** 控制台里的一行（已由宿主折叠/识别过：见 `src/consoleFold.ts` 与 `src/buildOutput.ts`）。 */
 export interface RunConsoleLine {
@@ -59,7 +60,7 @@ const anyRunning = computed(() => props.instances.some(instance => instance.runn
           <span class="run-tab-title">{{ title(instance, index) }}</span>
           <span v-if="badge(instance)" class="run-tab-badge">{{ badge(instance) }}</span>
         </button>
-        <button v-if="instance.running" class="run-tab-close" :aria-label="`停止 ${title(instance, index)}`" :title="`停止 ${title(instance, index)}`" @click="emit('stop', instance.id)"><X :size="11" /></button>
+        <button v-if="instance.running" class="run-tab-close" :aria-label="`停止 ${title(instance, index)}`" :title="`停止 ${title(instance, index)}`" @click="emit('stop', instance.id)"><X :size="iconSize.inline" /></button>
       </div>
     </div>
     <!-- IDEA's build console: recognised compiler diagnostics are clickable and

@@ -111,8 +111,8 @@ onBeforeUnmount(() => { dialog.value?.close(); if (previousFocus?.isConnected) p
       <div class="hex-row"><label>Hex<input ref="hexInput" v-model="hex" spellcheck="false" :aria-invalid="!normalized" /></label></div>
       <div class="picker-row"><canvas ref="canvas" width="230" height="230" aria-label="色轮" @mousedown="pickWheel" /></div>
       <label class="brightness">亮度<input type="range" min="0" max="100" :value="hsb[2]" @input="setHsb(2, $event)" /></label>
-      <div class="swatches" aria-label="预设颜色"><button v-for="name in FILE_COLOR_NAMES" :key="name" type="button" :title="name" :style="{ background: FILE_COLOR_HEX[name][dark ? 'dark' : 'light'] }" @click="setRgb(FILE_COLOR_HEX[name][dark ? 'dark' : 'light'])" /></div>
-      <div class="recent" v-if="readRecentColors().length"><button v-for="color in readRecentColors()" :key="color" type="button" :title="color" :style="{ background: color }" @click="selectRecent(color)" /></div>
+      <div class="swatches" aria-label="预设颜色"><button v-for="name in FILE_COLOR_NAMES" :key="name" type="button" :title="`${dark ? '深色' : '浅色'}主题下使用 ${name}`" :aria-label="`${dark ? '深色' : '浅色'}主题下使用 ${name}`" :style="{ background: FILE_COLOR_HEX[name][dark ? 'dark' : 'light'] }" @click="setRgb(FILE_COLOR_HEX[name][dark ? 'dark' : 'light'])" /></div>
+      <div class="recent" v-if="readRecentColors().length"><button v-for="color in readRecentColors()" :key="color" type="button" :title="`最近使用 ${color}`" :aria-label="`最近使用 ${color}`" :style="{ background: color }" @click="selectRecent(color)" /></div>
       <label v-if="enableOpacity" class="alpha">Alpha<input type="range" min="0" max="255" :value="alpha" @input="setAlpha" /></label>
       <p>{{ enableOpacity ? 'RGB / RGBA 十六进制。' : 'RGB 十六进制；输入 Alpha 时按不透明 RGB 保存。' }}</p><p v-if="!normalized" class="error">请输入有效颜色。</p>
       <footer><button type="button" @click="close">取消</button><button type="submit" :disabled="!normalized">确定</button></footer>

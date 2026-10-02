@@ -8,6 +8,8 @@
 // `popup="true"` 的组是一个可展开的子段（上游是嵌套 popup，本仓浮层里用行内展开，
 // 因为再开一层浮层就得自己处理层叠与焦点）。
 import { onMounted, onUnmounted, ref } from 'vue'
+import { Check } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ rows: any[]; x: number; y: number; label?: string }>()
 const emit = defineEmits<{ (event: 'pick', row: any): void; (event: 'close'): void }>()
@@ -41,7 +43,7 @@ onUnmounted(() => {
         </template>
       </template>
       <button v-else type="button" role="menuitem" :class="{ 'is-checked': row.checked?.() }" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @click="emit('pick', row)">
-        <span v-if="row.checked" class="menu-check" aria-hidden="true">{{ row.checked() ? '✓' : '' }}</span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
+        <span v-if="row.checked" class="menu-check" aria-hidden="true"><Check :size="iconSize.menu" /></span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
       </button>
     </template>
   </div>

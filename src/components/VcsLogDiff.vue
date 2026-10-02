@@ -2,6 +2,8 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { request, type GitCommitChange, type GitCommitFileDiff } from '../bridge'
 import DiffView from './DiffView.vue'
+import { X } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 const props = defineProps<{ root: string; change: GitCommitChange | null }>()
 const emit = defineEmits<{ close: [] }>()
 const result = ref<GitCommitFileDiff | null>(null)
@@ -31,7 +33,7 @@ onBeforeUnmount(() => { token++ })
       :subtitle="`${result.beforeRevision.slice(0, 8) || '空'} → ${result.afterRevision.slice(0, 8) || '空'}`"
       :rows="result.sides.rows" :unified="result.patch" :truncated="result.sides.truncated" closable @close="emit('close')" />
     <template v-else>
-      <header><span>{{ change?.path }}</span><button class="icon-button" aria-label="关闭差异" @click="emit('close')">×</button></header>
+      <header><span>{{ change?.path }}</span><button class="icon-button" title="关闭" aria-label="关闭差异" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button></header>
       <p v-if="loading" role="status">正在加载提交文件差异…</p>
       <p v-else-if="error" role="alert">{{ error }}</p>
       <p v-else-if="result?.status === 'binary'">二进制文件，无法显示文本差异。</p>

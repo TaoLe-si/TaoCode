@@ -6,6 +6,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { MoreHorizontal } from 'lucide-vue-next'
 import { entryPointHasActions, visibleEntryPointItems, type TabEntryPointItem } from '../tabEntryPoint'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ items: TabEntryPointItem[] }>()
 const open = ref(false)
@@ -47,7 +48,7 @@ onUnmounted(() => {
       class="icon-button" :aria-expanded="open" aria-haspopup="menu"
       title="更多标签操作" aria-label="更多标签操作" @click.stop="toggle"
     >
-      <MoreHorizontal :size="15" />
+      <MoreHorizontal :size="iconSize.toolbar" />
     </button>
     <Teleport to="body">
       <div

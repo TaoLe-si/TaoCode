@@ -145,7 +145,10 @@ test('内容组渲染：函数标题、快捷键与不可用的行各自到位',
   assert.ok(html.includes('关闭所有标签页'), '普通行')
   assert.ok(html.includes('合并标签页'), 'title 是函数时要调用它')
   assert.ok(html.includes('<kbd>Ctrl Shift F4</kbd>'), '组行成员要把快捷键带上（标题栏那几条靠这个对齐）')
-  assert.match(html, /is-child[^>]*>\s*关闭当前标签页/, '组行成员缩进一档')
+  const child = html.match(/<button[^>]*is-child[\s\S]*?<\/button>/)
+  assert.ok(child, '组行成员缩进一档（is-child 才是缩进的载体，不是文字前面多几个空格）')
+  assert.ok(child[0].includes('关闭当前标签页'), '组行成员是那条带快捷键的行')
+  assert.ok(child[0].includes('menu-item-icon'), '成员行与普通行走同一个 14px 槽，两种行字首才对得齐')
   const disabled = await renderToString(createSSRApp({
     render: () => h(gearRows, { rows: [{ id: 'x', title: '关闭所有标签页', enabled: () => false, run: () => {} }] }),
   }))

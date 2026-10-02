@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { templatePattern, customPattern, templates as builtinLive, postfixTemplates as builtinPostfix, type CustomTemplate, type TemplateSettings } from '../templates'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ settings: TemplateSettings; language: string; busy: boolean }>()
 const emit = defineEmits<{ change: [settings: TemplateSettings] }>()
@@ -146,7 +147,7 @@ function toggleLanguage(language: string) {
       <select v-model="scope" class="lt-scope" aria-label="模板语言范围">
         <option value="all">所有语言</option><option v-for="name in ['java', 'cpp', 'typescript', 'other']" :key="name" :value="name">{{ name }}</option>
       </select>
-      <button class="subtle-button" :disabled="busy || settings.customs.length >= 100" @click="startCreate"><Plus :size="13" />新建模板</button>
+      <button class="subtle-button" :disabled="busy || settings.customs.length >= 100" @click="startCreate"><Plus :size="iconSize.menu" />新建模板</button>
     </div>
     <div class="lt-list" role="list" aria-label="实时模板列表">
       <div v-for="row in shown" :key="row.pattern" class="lt-row" :class="{ 'lt-off': row.disabled }" role="listitem">
@@ -163,8 +164,8 @@ function toggleLanguage(language: string) {
           <span class="lt-desc">{{ row.description }}</span>
           <span class="lt-detail">{{ row.detail }}</span>
         </span>
-        <button v-if="row.custom" :disabled="busy" class="icon-button" title="编辑自定义模板" aria-label="编辑模板" @click="startEdit(row)"><Pencil :size="13" /></button>
-        <button v-if="row.custom" :disabled="busy" class="icon-button" title="删除自定义模板" aria-label="删除模板" @click="remove(row)"><Trash2 :size="13" /></button>
+        <button v-if="row.custom" :disabled="busy" class="icon-button" title="编辑自定义模板" aria-label="编辑模板" @click="startEdit(row)"><Pencil :size="iconSize.menu" /></button>
+        <button v-if="row.custom" :disabled="busy" class="icon-button" title="删除自定义模板" aria-label="删除模板" @click="remove(row)"><Trash2 :size="iconSize.menu" /></button>
       </div>
       <p v-if="!shown.length" class="lt-empty">没有匹配的模板。</p>
     </div>

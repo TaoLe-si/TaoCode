@@ -5,8 +5,8 @@
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1420/1420** | 2026-10-02；最近一批新增 `tests/diff-align.test.mjs` 13 条 + `tests/b7-verdict.test.mjs` 8 条（前一批：`b6-verdict` 7 条、`fuzzy-match` 9 条、`search-everywhere` 20 条） |
-| `npx vite build` | ✓（需**手动**跑，再 `build-native-locked.bat` 同步到 `build/ui`） | 构建脚本只做 `cmake --build` + 拷 `dist`，**不含 vite** |
+| `npm test` | **1449/1449** | 2026-10-02；最近一批新增 `tests/ui-icons.test.mjs` 16 条 + `tests/settings-keys-parity.test.mjs` 5 条 + `tests/menu-placement.test.mjs` 8 条（前一批：`diff-align` 13 条、`b7-verdict` 8 条） |
+| `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
 | 真机取证 | **同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定 `%LOCALAPPDATA%\TaoCode`）；探针的 `build/TaoCode.lsp.json` 用完立刻删，别留在用户正在用的 exe 旁边 | 姿势与脚本见 `scripts/_cdp_step.py` |
@@ -55,6 +55,46 @@ AE2 那种布局上工程数 6 → 1、诊断 2100+ 批 → 5 批。逐条明细
 `textDocument/references`，`src/treeActions.ts:99-113`）。
 **门控的价值当场兑现**：`tests/b7-verdict.test.mjs` 第一遍就抓到 **18 条 `[~]` 写了"本仓没有"
 却没落到任何文件**，逐条补完本仓落点才通过。
+
+**第八十四批（UI + 图标全面核实）**：题目是"核实所有 UI，包括图标，统一设计模式、图标与文字搭配合理、
+动效符合现代审美"。挖出来的不是配色或字号，而是两个更底层的东西。
+
+① **`<button>` 的三处 UA 默认让一批菜单行排版静默失效**（Chromium/WebView2）。① `button { padding: 1px 6px }`
+把固定尺寸的图标盒子挤扁；② `<button>` 默认 `display: inline-block`，`justify-content`/`gap`/`align-items`
+**全部失效**；③ `<button>` 默认 `text-align: center`，让 `flex: 1` 的标题**各自居中**、看着像没左对齐
+（盒子左边其实是对齐的）。前两条几何量不出来，只有截图能看出来。同时把图标收成**单一真源**
+`src/uiIcons.ts`：11 个角色（chip 10 / inline 11 / dense 12 / menu 13 / control 14 / checkbox 14 /
+toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`，约 40 个 SFC 统一取用。
+**口径不变**：配色是我们的（`src/tokens.css`），几何是源码的。
+
+② **整条状态栏在真机上从不渲染**。前端默认 `showStatusBar: true`、`v-if` 也写了，就是不出现。根因在 native：
+`EDITOR_SETTING_KEYS`（`native/settings_schema.hpp`）**同时**充当 `validate_editor_patch` 的 `known_keys`
+白名单**和** `prune_unknown` 的剪枝表（`native/project_settings_state.cpp:41`），而迁移循环
+（`:47-49`）只从 `editor_defaults_impl()` 回填 —— 于是漏掉的键被前端**整个删掉**、回到 `undefined`、在 `v-if` 里为假。
+更狠的是 `src/App.vue:676` 的 `saveSettingsPatch` 发的是**整个** `editorSettings` 对象，
+所以**少一个键，整次 `settings.update` 都会被拒**。补了 5 个键（`showStatusBar` / `rightMargin` /
+`showStickyLines` / `stickyLinesLimit` / `diffContextLines`），每个都带上游 `file:line`；顺带给
+`stickyLinesLimit`、`diffContextLines` 加上数值域校验。状态栏一露面，又炸出两个被它挡了许久的缺陷：
+「全部显示」那行没有前置图标槽（`textIndent` 5 vs 35）、以及状态栏组件菜单（16 行 ≈ 480px）贴底边**整块掉出视口**。
+后者新起 `src/menuPlacement.ts`（纯函数，口径＝上游 `AbstractPopup`：原位 → 翻到锚点另一侧 → 夹取），
+`openStatusMenu` 渲染完 `nextTick` 量一次真实尺寸再夹。
+
+**三条教训**：
+① **"新加一个设置必须 native 两侧（键表 + 默认值）同时登记"这条教训在第八十二批就写过一遍，第八十四批又踩了**。
+所以这次不再靠人记：门控 `tests/settings-keys-parity.test.mjs`（5 条）双向查
+"前端键 ⇄ native 白名单 ⇄ native 默认值 ⇄ 桥接编辑器白名单"，任一侧漂移即红。
+**第一版只有单向（前端⇒native），如果那 5 个键再漏一次它会永远绿** —— 补了反向那条才作数。
+② **先量再判**：这批的三个布局缺陷没有一个是从代码上看出来的，全是截图 + CDP 量尺寸才发现的。
+反过来也有一条：改完 UI 发现"改动没生效"，先比对 `build/ui/index.html` 的 script hash 和 `dist/` 的 mtime，
+**别先怀疑 WebView2 缓存**（我删了 `EBWebView/{Cache,Code Cache,GPUCache}` 也没用，真因是 `build/ui` 压根没同步）。
+③ **判据要能真的红**：新写的 settings 门控第一遍是绿的，我用 `
+` 去删 `"showStatusBar",`，
+而源文件是 LF，字符串**根本没删掉** —— 一次"假绿"验证。加了"替换后必须变化"的断言才真红（2 条失败）。
+
+本批判决书：`docs/ui-parity-checklist.md` 第八十四批（1490-1636 行）。
+已知偏离：`docs/settings-parity.md:53` 记的 `stickyLinesLimit` 默认 3 vs 上游
+`EditorSettingsExternalizable.java:94` 的 5 —— 这批只把 native 默认补成 3 与前端对齐，**偏离本身没改**，
+留到动粘性行那一批判。
 
 ## 本轮（2026-09-27 晚）做了什么 —— 历史存档
 

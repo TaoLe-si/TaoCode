@@ -12,6 +12,9 @@ import { loadSfc } from './vue-sfc-loader.mjs'
 const { component: toolStripe } = loadSfc('src/components/ToolStripe.vue')
 
 const require = createRequire(import.meta.url)
+// 模板里 `:size="iconSize.<role>"` 是 setup 绑定；片段渲染只喂了手搓的 state，
+// 少了这个绑定模板就会去读 undefined.xxx（第八十五批加图标尺寸梯子时踩到）。
+const { iconSize } = require('../src/uiIcons.ts')
 const { descriptor } = parseSfc(readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8'))
 function classIs(node, name) {
   return node.type === 1 && node.props.some(p => p.type === 6 && p.name === 'class' && p.value?.content.split(' ').includes(name))
@@ -28,7 +31,7 @@ async function renderPart(className, state) {
   const js = ts.transpileModule(result.code, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   const exports = {}
   new Function('require', 'exports', js)(require, exports)
-  const app = createSSRApp({ setup: () => state, render: exports.render })
+  const app = createSSRApp({ setup: () => ({ iconSize, ...state }), render: exports.render })
   app.config.warnHandler = message => { if (!message.startsWith('Failed to resolve component:')) throw new Error(message) }
   return parse(await renderToString(app))
 }

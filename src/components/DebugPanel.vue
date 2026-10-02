@@ -9,6 +9,7 @@ import {
   type DapBreakpoint, type DapExceptionFilter, type DapExceptionInfo as DapException, type DapFrame, type DapScope, type DapThread, type DapVariable,
 } from '../bridge'
 import { exceptionBreakModeLabel, exceptionHeadline, exceptionValueExpression, flattenCauseChain, showsExceptionNode } from '../exceptionInfo'
+import { iconSize } from '../uiIcons'
 import { completionSuggestions, completionTypeLabel, type DapCompletionItem } from '../debugCompletions'
 
 const props = defineProps<{ activePath: string; ready: boolean; evaluateRequest?: { text: string; nonce: number } | null; program?: string; cwd?: string; adapterKind?: string }>()
@@ -469,7 +470,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 
 <template>
   <div class="debug-panel">
-    <div class="panel-heading"><span><Bug :size="14" />调试</span></div>
+    <div class="panel-heading"><span><Bug :size="iconSize.control" />调试</span></div>
 
     <div class="debug-config">
       <p class="debug-field"><span>kind</span><strong>{{ kind }}</strong></p>
@@ -477,9 +478,9 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
       <p class="debug-field"><span>cwd</span><strong>{{ cwd }}</strong></p>
       <p class="debug-hint">这些值来自「运行」面板的当前配置，改配置即生效（避免两处各存一份）。</p>
       <div class="debug-config-buttons">
-        <button class="debug-btn primary" :disabled="!ready || busy || running" title="启动调试会话（command 取自 TaoCode.dap.json 对应 kind）" @click="start"><Bug :size="13" />启动</button>
+        <button class="debug-btn primary" :disabled="!ready || busy || running" title="启动调试会话（command 取自 TaoCode.dap.json 对应 kind）" @click="start"><Bug :size="iconSize.menu" />启动</button>
         <!-- IDEA's Attach to Process: the same handshake with the `attach` request. -->
-        <button class="debug-btn" :disabled="!ready || busy || running" title="附加到正在运行的进程（进程 PID 或管道名）" @click="attach"><Crosshair :size="13" />附加</button>
+        <button class="debug-btn" :disabled="!ready || busy || running" title="附加到正在运行的进程（进程 PID 或管道名）" @click="attach"><Crosshair :size="iconSize.menu" />附加</button>
       </div>
       <label class="debug-field"><span>附加到</span><input v-model="attachId" class="debug-input" aria-label="要附加的进程 PID 或管道名" placeholder="PID（如 4242）或 pipeName" spellcheck="false" @keydown.enter.prevent="attach" /></label>
     </div>
@@ -493,14 +494,14 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
     </div>
 
     <div class="debug-toolbar">
-      <button class="debug-btn" :disabled="!stopped || busy" title="继续 (F9)" @click="step('continue')"><Play :size="13" />继续</button>
-      <button class="debug-btn" :disabled="!running || stopped || busy" title="暂停" @click="step('pause')"><Pause :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳过 (F8)" @click="step('next')"><StepForward :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步进入 (F7)" @click="step('stepIn')"><ChevronDown :size="13" /></button>
-      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳出 (Shift+F8)" @click="step('stepOut')"><ChevronRight :size="13" /></button>
-      <button class="debug-btn" :disabled="!running || busy" title="重新运行 (Ctrl+F5)" @click="restart"><RefreshCw :size="13" /></button>
-      <button class="debug-btn" :disabled="!running || busy" title="停止" @click="stop"><Square :size="13" /></button>
-      <button class="debug-btn" :disabled="!running || busy" title="断开调试器（保留被调试进程）" @click="disconnect"><X :size="13" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="继续 (F9)" @click="step('continue')"><Play :size="iconSize.menu" />继续</button>
+      <button class="debug-btn" :disabled="!running || stopped || busy" title="暂停" aria-label="暂停" @click="step('pause')"><Pause :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳过 (F8)" aria-label="单步跳过" @click="step('next')"><StepForward :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步进入 (F7)" aria-label="单步进入" @click="step('stepIn')"><ChevronDown :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!stopped || busy" title="单步跳出 (Shift+F8)" aria-label="单步跳出" @click="step('stepOut')"><ChevronRight :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!running || busy" title="重新运行 (Ctrl+F5)" aria-label="重新运行" @click="restart"><RefreshCw :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!running || busy" title="停止" aria-label="停止" @click="stop"><Square :size="iconSize.menu" /></button>
+      <button class="debug-btn" :disabled="!running || busy" title="断开调试器（保留被调试进程）" aria-label="断开调试器" @click="disconnect"><X :size="iconSize.menu" /></button>
     </div>
 
     <p v-if="error" class="debug-error">{{ error }}</p>
@@ -520,7 +521,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
         :style="{ paddingLeft: `${12 + row.depth * 14}px` }" :aria-level="row.depth + 1"
         :aria-expanded="row.expandable ? row.expanded : undefined" @click="toggleExprRow(row)"
       >
-        <span class="debug-expander">{{ row.expandable ? (row.expanded ? '▾' : '▸') : '' }}</span>
+        <span class="debug-expander"><ChevronDown v-if="row.expandable && row.expanded" :size="iconSize.dense" aria-hidden="true" /><ChevronRight v-else-if="row.expandable" :size="iconSize.dense" aria-hidden="true" /></span>
         <span class="debug-name">{{ row.name }}</span>
         <span class="debug-value">{{ row.value }}</span>
         <span class="debug-type">{{ row.type }}</span>
@@ -565,7 +566,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
       <span v-for="point in activeBreaks" :key="point.line" class="debug-break-chip" :class="{ unverified: point.verified === false }"
             :title="point.verified === false ? `第 ${point.line} 行：调试器未验证（可能被移到别的行）` : undefined">
         {{ point.line }}<span v-if="point.condition" class="debug-break-cond" :title="`条件：${point.condition}`">?</span>
-        <button class="chip-x" :aria-label="`移除断点 ${point.line}`" @click="syncBreak(activeBreaks.filter(other => other.line !== point.line))"><X :size="10" /></button>
+        <button class="chip-x" title="移除此断点" :aria-label="`移除断点 ${point.line}`" @click="syncBreak(activeBreaks.filter(other => other.line !== point.line))"><X :size="iconSize.chip" /></button>
         <input class="debug-break-condition" type="text" :value="point.condition ?? ''" :aria-label="`第 ${point.line} 行断点条件`" placeholder="条件" spellcheck="false" @keydown.enter.prevent="setCondition(point.line, ($event.target as HTMLInputElement).value)" @change="setCondition(point.line, ($event.target as HTMLInputElement).value)" />
       </span>
     </div>
@@ -587,7 +588,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
           <span class="debug-frame-name">{{ frame.name }}</span>
           <span class="debug-frame-loc">{{ frame.path ? frame.path.split('/').pop() + ':' : '' }}{{ frame.line }}</span>
         </button>
-        <button class="icon-button debug-set" :disabled="busy" title="丢弃帧：回到这一帧重新执行" aria-label="丢弃帧" @click="dropFrame(frame)"><RefreshCw :size="12" /></button>
+        <button class="icon-button debug-set" :disabled="busy" title="丢弃帧：回到这一帧重新执行" aria-label="丢弃帧" @click="dropFrame(frame)"><RefreshCw :size="iconSize.dense" /></button>
       </div>
       <div v-if="!frames.length" class="debug-empty">{{ frameHint }}</div>
     </div>
@@ -595,7 +596,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
     <div class="debug-section-title">监视（Watches）</div>
     <div class="debug-watches">
       <div v-for="watch in watches" :key="watch.text" class="debug-row">
-        <button class="chip-x" :aria-label="`移除监视 ${watch.text}`" @click="removeWatch(watch.text)"><X :size="10" /></button>
+        <button class="chip-x" title="移除监视" :aria-label="`移除监视 ${watch.text}`" @click="removeWatch(watch.text)"><X :size="iconSize.chip" /></button>
         <span class="debug-name">{{ watch.text }}</span>
         <!-- IDEA Watches 的「Set Value…」：DAP `setExpression`（表达式 + 新值）。 -->
         <template v-if="editing?.kind === 'watch' && editing.key === watch.text">
@@ -604,7 +605,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
         </template>
         <template v-else>
           <span class="debug-value">{{ watch.value || '—' }}</span>
-          <button class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${watch.text} 的值`" :aria-label="`设置 ${watch.text} 的值`" @click="beginEdit('watch', watch.text, watch.value)"><PenLine :size="12" /></button>
+          <button class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${watch.text} 的值`" :aria-label="`设置 ${watch.text} 的值`" @click="beginEdit('watch', watch.text, watch.value)"><PenLine :size="iconSize.dense" /></button>
         </template>
       </div>
       <div class="debug-watch-add">
@@ -618,7 +619,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
          （`getUiIndex() != 0` 时那个方法返回空列表）。 -->
     <div v-if="exceptionVisible" class="debug-exception" role="group" aria-label="异常">
       <div class="debug-exception-head">
-        <Bug :size="12" />
+        <Bug :size="iconSize.dense" />
         <span class="debug-exception-title">{{ exceptionHeadlineText }}</span>
         <span v-if="activeException?.breakMode" class="small-muted">{{ exceptionBreakModeLabel(activeException.breakMode) }}</span>
       </div>
@@ -648,12 +649,12 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
             :style="{ paddingLeft: `${12 + row.depth * 14}px` }" :aria-level="row.depth + 1"
             :aria-expanded="row.expandable ? row.expanded : undefined" @click="toggleRow(row)"
           >
-            <span class="debug-expander">{{ row.expandable ? (row.expanded ? '▾' : '▸') : '' }}</span>
+            <span class="debug-expander"><ChevronDown v-if="row.expandable && row.expanded" :size="iconSize.dense" aria-hidden="true" /><ChevronRight v-else-if="row.expandable" :size="iconSize.dense" aria-hidden="true" /></span>
             <span class="debug-name">{{ row.name }}</span>
             <span class="debug-value">{{ row.value }}</span>
             <span class="debug-type">{{ row.type }}</span>
           </button>
-          <button v-if="row.state === 'value'" class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${row.name} 的值`" :aria-label="`设置 ${row.name} 的值`" @click="beginEdit('var', row.key, row.value)"><PenLine :size="12" /></button>
+          <button v-if="row.state === 'value'" class="icon-button debug-set" :disabled="!dapState.paused" :title="`设置 ${row.name} 的值`" :aria-label="`设置 ${row.name} 的值`" @click="beginEdit('var', row.key, row.value)"><PenLine :size="iconSize.dense" /></button>
         </template>
       </div>
       <div v-if="!varRows.length" class="debug-empty">{{ varsHint }}</div>
@@ -662,7 +663,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
     <template v-if="dapModules.length">
       <div class="debug-section-title">
         <button class="debug-collapse" :aria-expanded="modulesOpen" @click="modulesOpen = !modulesOpen">
-          <span class="debug-expander">{{ modulesOpen ? '▾' : '▸' }}</span>模块 · {{ dapModules.length }}
+          <span class="debug-expander"><ChevronDown v-if="modulesOpen" :size="iconSize.dense" aria-hidden="true" /><ChevronRight v-else :size="iconSize.dense" aria-hidden="true" /></span>模块 · {{ dapModules.length }}
         </button>
       </div>
       <div v-if="modulesOpen" class="debug-list" role="list" aria-label="已加载模块" tabindex="0">
@@ -677,7 +678,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
     <template v-if="dapLoadedSources.length">
       <div class="debug-section-title">
         <button class="debug-collapse" :aria-expanded="sourcesOpen" @click="sourcesOpen = !sourcesOpen">
-          <span class="debug-expander">{{ sourcesOpen ? '▾' : '▸' }}</span>已加载源文件 · {{ dapLoadedSources.length }}
+          <span class="debug-expander"><ChevronDown v-if="sourcesOpen" :size="iconSize.dense" aria-hidden="true" /><ChevronRight v-else :size="iconSize.dense" aria-hidden="true" /></span>已加载源文件 · {{ dapLoadedSources.length }}
         </button>
       </div>
       <div v-if="sourcesOpen" class="debug-list" role="list" aria-label="已加载源文件" tabindex="0">
@@ -744,7 +745,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 .debug-row[aria-expanded] { cursor: pointer; }
 .debug-row-muted { color: var(--muted); }
 .debug-row-muted .debug-name { color: var(--muted); }
-.debug-expander { width: 10px; flex-shrink: 0; color: var(--muted); }
+.debug-expander { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; color: var(--muted); }
 .debug-name { color: var(--syntax-keyword); flex-shrink: 0; }
 .debug-value { color: var(--syntax-string); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debug-type { margin-left: auto; color: var(--muted); flex-shrink: 0; }
@@ -775,7 +776,7 @@ watch(() => dapConsole.length, async () => { await nextTick(); if (consoleBox.va
 .debug-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
 /* Indeterminate: the adapter has not said how far along it is, so the bar slides
    instead of showing a fabricated 0% or 100%. */
-.debug-progress-track.indeterminate::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: var(--radius-pill); background: var(--accent); animation: debug-progress-slide 1.1s ease-in-out infinite; }
+.debug-progress-track.indeterminate::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: var(--radius-pill); background: var(--accent); animation: debug-progress-slide var(--dur-spin) ease-in-out infinite; }
 @keyframes debug-progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .debug-progress-track.indeterminate::after { animation: none; width: 100%; opacity: .5; } }
 .debug-collapse { display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; text-transform: inherit; letter-spacing: inherit; }

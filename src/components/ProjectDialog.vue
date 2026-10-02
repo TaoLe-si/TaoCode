@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { FolderOpen, GitBranch, X } from 'lucide-vue-next'
 import type { ProjectForm } from '../bridge'
 import { projectDestination, projectNameError, projectParentError, projectPathTooLong } from '../projectPath.ts'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   mode: 'create' | 'clone'
@@ -126,7 +127,7 @@ onBeforeUnmount(() => {
   >
     <header class="dialog-header">
       <h2 :id="`${id}-title`" class="dialog-title">{{ mode === 'create' ? '新建项目' : '克隆仓库' }}</h2>
-      <button type="button" class="icon-button" :disabled="locked" aria-label="关闭项目对话框" :title="locked ? '请等待操作结束，克隆可通过下方按钮取消' : '关闭（Esc）'" @click="close"><X :size="18" aria-hidden="true" /></button>
+      <button type="button" class="icon-button" :disabled="locked" aria-label="关闭项目对话框" :title="locked ? '请等待操作结束，克隆可通过下方按钮取消' : '关闭（Esc）'" @click="close"><X :size="iconSize.action" aria-hidden="true" /></button>
     </header>
     <form :id="`${id}-form`" ref="formElement" class="project-form" :aria-busy="locked" @submit.prevent="submit">
       <p :id="`${id}-description`" class="dialog-description">{{ mode === 'create' ? '选择位置与模板，在本地创建项目文件夹。' : '将 Git 仓库克隆到指定的本地文件夹。' }}</p>
@@ -150,7 +151,7 @@ onBeforeUnmount(() => {
           <label :for="`${id}-parent`">父目录</label>
           <div class="directory-input">
             <input :id="`${id}-parent`" :value="form.parent" type="text" required autocomplete="off" spellcheck="false" :aria-invalid="Boolean(parentError)" :aria-describedby="parentError ? `${id}-parent-error` : undefined" placeholder="选择或输入父目录的完整路径" @input="updateField('parent', ($event.target as HTMLInputElement).value)" />
-            <button type="button" class="subtle-button browse-button" :disabled="!isDesktop || locked" :title="isDesktop ? '选择父目录' : '浏览磁盘目录仅在桌面端可用'" @click="emit('browse')"><FolderOpen :size="15" aria-hidden="true" />浏览…</button>
+            <button type="button" class="subtle-button browse-button" :disabled="!isDesktop || locked" :title="isDesktop ? '选择父目录' : '浏览磁盘目录仅在桌面端可用'" @click="emit('browse')"><FolderOpen :size="iconSize.toolbar" aria-hidden="true" />浏览…</button>
           </div>
           <p v-if="parentError" :id="`${id}-parent-error`" class="field-error" role="alert">{{ parentError }}</p>
         </div>
@@ -180,7 +181,7 @@ onBeforeUnmount(() => {
         <p v-if="pathTooLong" class="field-error" role="alert">{{ pathTooLong }}</p>
       </div>
       <section v-if="mode === 'clone'" class="clone-progress" :aria-labelledby="`${id}-progress-title`">
-        <div class="progress-heading"><h3 :id="`${id}-progress-title`"><GitBranch :size="14" aria-hidden="true" />克隆输出</h3><span role="status">{{ cancelling ? '正在请求取消…' : busy ? '克隆中…' : '' }}</span></div>
+        <div class="progress-heading"><h3 :id="`${id}-progress-title`"><GitBranch :size="iconSize.control" aria-hidden="true" />克隆输出</h3><span role="status">{{ cancelling ? '正在请求取消…' : busy ? '克隆中…' : '' }}</span></div>
         <div ref="progressLog" class="progress-log" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Git 克隆日志" tabindex="0" @scroll="trackProgressScroll">
           <div v-for="(line, index) in progress" :key="index" class="progress-line">{{ line }}</div>
           <p v-if="!progress.length" class="log-empty">{{ busy ? '等待 Git 输出…' : '提交克隆后，实际 Git 输出会显示在这里。' }}</p>

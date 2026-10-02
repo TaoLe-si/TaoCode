@@ -11,9 +11,10 @@ html[data-density='compact'] { --ctrl-height-sm: 20px; --ctrl-height: 24px; --ct
    move to the left, exactly like a Swing menu without icons. */
 html[data-menu-icons='off'] .menu-item-icon { display: none; }
 html[data-menu-icons='off'] .dropdown > .menu-item { padding-left: var(--space-4); }
-/* The same option applies to every menu surface, not just the top menu bar. */
+/* The same option applies to every menu surface, not just the top menu bar.
+   `.tool-menu-item` 一度也在这里（`> svg:first-child`），但齿轮弹层与锚点菜单的行现在统一
+   走 `.menu-item-icon` 槽，由上面那条 `display: none` 收起 —— 这条选择器已无匹配对象。 */
 html[data-menu-icons='off'] .row-menu-item > svg:first-child,
-html[data-menu-icons='off'] .tool-menu-item > svg:first-child,
 html[data-menu-icons='off'] .context-menu-item > svg:first-child { display: none; }
 /* IDEA "Show tool window names": the stripe buttons carry the window name under the
    icon. The rail **width** is not a constant any more — it is the per-side custom width the
@@ -86,7 +87,15 @@ html[data-main-menu='merged'] .topbar-menubar-row { min-height: 0; }
 html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-row-inset); }
 .brand { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-2); font-family: var(--font-brand); font-size: 15px; letter-spacing: .3px; color: var(--bright); }
 .menubar { display: flex; flex-shrink: 0; gap: 2px; }
-.menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: 28px; color: var(--secondary); border-radius: var(--radius-xs); }
+/* `text-align: left` 放在**菜单按钮基类**上，而不是每家行族各写一遍（`.dropdown > .menu-item`、
+   `.project-widget-row`、`.filename-row`、`.stripe-popup-row`、`.tree-menu > button`、
+   `.settings-tab`、`.navigation-item`、`.welcome-options-item` 都各写了一次）。
+   理由是 UA 默认：`<button>` 的 `text-align` 是 center，而行里的标题 span 常常是 `flex: 1`
+   （`.menu-item-title`/`.recent-menu-name`，:128）—— 盒子的左沿对得整整齐齐，字形却在盒子里
+   居中，真机上一列菜单行看着是「每条各自居中」而不是一张左对齐的表。量
+   `getBoundingClientRect().left` 看不出来，只有截图能看出来，所以把它压到基类上一次解决。
+   内容宽度的按钮（顶栏菜单、设置标签）本来就是自身宽度，左对齐与居中等价，不会被这条改坏。 */
+.menu-button { background: transparent; border: 0; padding: var(--space-1) var(--space-2); min-height: 28px; color: var(--secondary); border-radius: var(--radius-xs); text-align: left; }
 .menu-button:hover, .menu-button[aria-expanded=true] { color: var(--bright); background: var(--hover); }
 .menu-anchor { position: relative; }
 .dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; width: max-content; min-width: 244px; max-width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 80px); overflow: auto; z-index: 20; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); padding: var(--space-1); color: var(--popup-foreground); box-shadow: var(--popup-shadow); transform-origin: top left; }
@@ -156,6 +165,10 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .header-run .header-widget:hover { background: var(--header-run-hover); }
 .header-run .header-widget:active:not(:disabled) { background: var(--header-run-pressed); }
 .run-caret { padding: 2px 3px; font-size: 10px; }
+/* 运行配置名后面的下拉箭头：原来是行内 `▾` 文本，继承上面的 font-size:10px ——
+   一个 10px 的字体符号。换成 lucide 描边图标后必须自己定宽，否则 flex 盒里它会
+   跟着字体行高走，箭头与文字基线对不齐。 */
+.run-caret-glyph { flex-shrink: 0; color: var(--muted); align-self: center; }
 /* IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
    the project name with a chevron, whose popup lists the open projects and then the recent
    ones (ProjectConceptBundle.properties:22-23) with the project path and its branch. */
@@ -169,7 +182,9 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .project-widget-title { color: var(--bright); font-size: 12px; }
 .project-widget-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
 .project-widget-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
-.project-widget-caret { transition: transform .15s ease; }
+/* 项目 widget 的下拉箭头翻转：与其它 caret（`.tree-chevron`）同一档反馈时长，
+   原来写死 .15s 不走令牌，于是这一处比树展开快 30ms —— 肉眼能看出两处不同步。 */
+.project-widget-caret { transition: transform var(--dur-1) var(--ease); }
 .project-widget-caret.open { transform: rotate(180deg); }
 /* 中段（文件名 widget）的定位基准 = **整条工具栏宽度的中线**，不是「左右两组之间」。
    上游 HorizontalLayout.kt:143 `var centerX = (width - center.width) / 2` 以整条宽度居中，
@@ -223,11 +238,15 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 /* 工具栏图标统一 20px = JBUI.java:1286 `MainToolbar.Button.iconSize`（New UI 的
    HeaderToolbarButtonLook.kt:56 消费该值）。组件里曾逐个写死 14 / 17 px，整行图标大小不一 ——
    这里按上游统一。`.topbar` 之外的图标（面板、对话框）不受影响。 */
-.topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); }
+.topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); flex-shrink: 0; }
 /* 停止/运行态的实心方块是状态指示而非主图标；下拉箭头同理 —— 保持小一号，
    放在统一规则之后以覆盖它。 */
-.topbar .run-button > svg, .topbar .stop-button > svg { width: 14px; height: 14px; }
+.topbar .run-button > svg, .topbar .stop-button > svg { width: var(--icon-size-control); height: var(--icon-size-control); flex-shrink: 0; }
 .topbar .project-widget-caret, .topbar-menubar-row .project-widget-caret { width: 12px; height: 12px; }
+/* 运行配置名后面的下拉箭头也归"小一号"这一档 —— 它是 `header-widget` 的直接子 svg，
+   会被上面 :232 那条统一规则捞去 20px，和旁边 11px 的配置名不成比例（这个箭头原来是
+   行内 `▾` 文本，所以一直没进过这条规则；换成图标之后必须显式豁免）。 */
+.topbar .run-caret-glyph { width: 12px; height: 12px; }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .theme-toggle { color: var(--text); }
 .preview-banner { min-height: 29px; flex-shrink: 0; padding: var(--space-1) var(--space-3); display: flex; align-items: center; gap: var(--space-2); background: var(--warning-bg); border-bottom: 1px solid var(--line); color: var(--warning); font-size: 11px; }
@@ -261,8 +280,16 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .stripe-popup-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; justify-content: flex-start; text-align: left; }
 .stripe-popup-key { margin-left: auto; color: var(--muted); font: 11px var(--font-mono); }
 .stripe-popup-backdrop { position: fixed; inset: 0; z-index: 59; }
-.activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
-.activity-button > svg { width: 20px; height: 20px; stroke-width: 1.7; }
+/* padding: 0 不是多余的 —— WebView2 的 UA 默认给 button `padding: 1px 6px`，30px 的盒
+   被吃掉 12px 只剩 18px 内容宽，svg 又是 flex 项（默认 flex-shrink: 1），于是真机里活动条
+   图标渲染成 18×20 而不是 20×20（CDP 取证：svg width 算出 18px，height 20px）。
+   `flex-shrink: 0` 是同一件事的第二道保险 —— 尺寸不能被兄弟节点挤掉。 */
+.activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
+/* 活动条的图标：20px 盒（--toolbar-icon-size，与 JBUI.java:1297/:1313/:1337 三个入口
+   一致）。stroke 跟全仓其它 lucide 图标一样是 2 —— 原来这里写死 1.7，20px 配 1.7 换算
+   是 0.085em，而其余图标（13px 配 lucide 默认 2）是 0.154em，轨道上的笔画细了近一倍，
+   两边不像同一套图标。 */
+.activity-button > svg { width: 20px; height: 20px; flex-shrink: 0; stroke-width: 2; }
 .activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
 .activity-button:hover { color: var(--text); background: var(--hover); }
 .activity-button.active { color: var(--accent); background: var(--selected); }
@@ -288,9 +315,27 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    所以必须 Teleport 出来；浮层的**外观不另立配方** —— 直接复用 `.dropdown`（浮层族，
    自带前景色/边框/圆角/阴影都走 --popup-* 令牌），与其它菜单眼里的规格完全一致。 */
 .tab-entry-point { display: inline-flex; align-items: center; }
-.tool-menu-item { justify-content: flex-start; gap: var(--space-2); }
-/* 齿轮菜单里"组行"的成员（上游 ResizeActionGroup 那一层）：缩进一档，与项目树子项同度量。 */
-.tool-menu-item.is-child { padding-left: 26px; font-size: 12px; }
+/* 齿轮弹层的行。这里原来只写了 `justify-content` / `gap` 而**没有 `display: flex`** ——
+   `<button>` 默认是 inline-block，那两条声明整条失效，于是图标和文字之间**零间距**，
+   贴在了一起（`.stripe-popup-row`/`VcsLog.vue` 的 `.presentation-row`/`WelcomePage.vue` 的
+   `.navigation-item` 都显式写了 `display: flex`，只有这里漏了）。
+   补上之后，图标走 `.menu-item-icon` 的 14px 槽，文字走 `.menu-item-title`，
+   两种行（带图标的 `ToolWindowHeader.vue:102-124`、不带图标的 `ToolWindowGearRows.vue:21-29`）
+   在同一个弹层里字首才对得齐。
+
+   `text-align: left` 也是同一处补的：`<button>` 的 UA 默认是 center，而 `.menu-item-title`
+   是 `flex: 1`（style.css:128），撑满整行 —— 于是文字在**槽右边那块 198px 里居中**，
+   行与行虽然盒子的左沿齐了，肉眼看着仍然是"每条各自居中"。全仓其它行族
+   （`.dropdown > .menu-item`:94、`.project-widget-row`:172、`.filename-row`:222、
+   `.stripe-popup-row`:272、`.tree-menu > button`:1010、`.settings-tab`、`.navigation-item`）
+   一律显式写了这一条，只有这里漏了。 */
+.tool-menu-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2); text-align: left; }
+/* 齿轮菜单里"组行"的成员（上游 ResizeActionGroup 那一层）：缩进一档，与项目树子项同度量。
+   成员行自己也有 14px 图标槽（`ToolWindowGearRows.vue`），所以这里只再让开 --space-1：
+   子行字首 = 菜单 padding 4 + 4 + 槽 14 + gap 8 = 30，比父行字首（4 + 14 + 8 = 26）深一档。
+   早先这里是 26px，那是**替一个不存在的槽**让路（成员行当时只有裸文字），槽补上后必须收窄，
+   否则子行会比父行深出整整一个槽宽。 */
+.tool-menu-item.is-child { padding-left: var(--space-1); font-size: 12px; }
 .tool-menu-item:disabled { opacity: .5; }
 .panel-heading { height: var(--panel-heading-h); min-height: var(--panel-heading-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-3); color: var(--secondary); font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .panel-heading > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -363,7 +408,7 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .tab-select { display: flex; height: 100%; align-items: center; gap: var(--space-2); background: transparent; border: 0; color: var(--secondary); padding: 0 10px 0 14px; font-size: 12px; white-space: nowrap; }
 .file-tab.selected .tab-select { color: var(--bright); }
 .tab-select > svg { color: var(--accent); flex-shrink: 0; }
-.tab-close { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; height: 24px; width: 24px; border-radius: var(--radius-xs); color: var(--muted); }
+.tab-close { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; padding: 0; height: 24px; width: 24px; border-radius: var(--radius-xs); color: var(--muted); }
 .tab-close:hover { color: var(--bright); background: var(--hover); }
 .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--warning-bg); }
 .tab-toolbar { margin-left: auto; position: sticky; right: 0; display: flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 0 6px; background: var(--rail); border-left: 1px solid var(--line); }
@@ -406,10 +451,8 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    above the caret line, dismissed by the next key, a text change or a scroll. */
 .editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }
 .welcome-screen { margin: auto; width: 100%; max-width: 520px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; }
-.welcome-symbol { display: inline-flex; margin-bottom: 8px; color: var(--muted); padding: 0; }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .back-to-projects { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-4); color: var(--muted); }
-.welcome-symbol > svg { width: 28px; height: 28px; }
 .eyebrow { font: 10px var(--font-brand); letter-spacing: 1.1px; color: var(--muted); }
 .welcome-screen h1 { margin: 10px 0 12px; font-weight: 500; color: var(--bright); font-size: clamp(20px, 2vw, 24px); line-height: 1.4; letter-spacing: .2px; }
 .welcome-screen h1 > span { color: var(--secondary); }
@@ -503,13 +546,13 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-check-failures-icon { flex: 0 0 auto; margin-top: 2px; color: var(--warning); }
 .sc-check-failures-text { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
 /* RerunCommitChecksAction (CommitProgressPanel.kt:492-521) — the icon-only button on that row. */
-.sc-rerun-checks { flex: 0 0 auto; width: 18px; height: 18px; }
+.sc-rerun-checks { flex: 0 0 auto; width: 18px; height: 18px; padding: 0; }
 /* CommitAuthorComponent (vcs/commit/CommitAuthorComponent.kt:124-137): the inactive "By"
    label followed by the short author name. The row only exists while an author is set (:73-77). */
 .sc-author { display: flex; align-items: center; gap: 5px; padding: 0 var(--space-3) var(--space-1); font-size: 11px; }
 .sc-author-label { color: var(--muted); }
 .sc-author-link { color: var(--accent); font-size: 11px; }
-.sc-author-x { width: 18px; height: 18px; }
+.sc-author-x { width: 18px; height: 18px; padding: 0; }
 /* GitCommitOptionsUi warning outline (JComponent.outline = "warning", :210-211) + balloon text. */
 .sc-author-warning { margin: 0; padding: 0 var(--space-3) var(--space-2); color: var(--warning); font-size: 11px; line-height: 1.5; }
 /* GitCommitOptionsUi.buildLayout (:136-140) `row(commit.author)` — the two halves of the
@@ -620,7 +663,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .choose-target-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0; padding: 2px 10px 4px; color: var(--popup-foreground); }
 /* 上游 `setCouldPin` 的钉按钮长在标题栏里（`AbstractPopup.java:501-508` 的 InplaceButton），
    tooltip 取 `show.in.find.window.button.name.newui`。 */
-.choose-target-pin { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--secondary); cursor: default; }
+.choose-target-pin { display: inline-flex; align-items: center; justify-content: center; padding: 0; width: 20px; height: 20px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--secondary); cursor: default; }
 .choose-target-pin:hover { background: var(--hover); color: var(--bright); }
 .choose-target-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--popup-row-h); margin: 0 var(--popup-selection-inset); padding: 2px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: start; cursor: default; }
 .choose-target-row.is-selected { background: var(--popup-selection); }
@@ -640,7 +683,9 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .quick-definition-line { display: block; padding: 0 10px; white-space: pre; }
 .quick-definition-line.is-target { background: var(--completion-selection); }
 .quick-definition-number { display: inline-block; width: 3.5ch; margin-right: 8px; color: var(--muted); text-align: right; user-select: none; }
-.status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); }
+/* `text-align: left` 与 `.tool-menu-item`（:318）同一个理由：`<button>` 的 UA 默认是 center，
+   而标题 span 是 `flex: 1`，居中会让每行看着各自居中而不是一张左对齐的表。 */
+.status-toolwindows-row { display: flex; align-items: center; gap: var(--space-2); text-align: left; }
 .status-toolwindows-group { display: block; margin: 4px 0 2px; padding: 0 8px; color: var(--muted); font-size: 10px; text-transform: none; }
 .status-toolwindows-name { flex: 1; text-align: left; }
 .status-toolwindows-key { color: var(--secondary); font: 400 10px/1 var(--font-mono); }
@@ -662,7 +707,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-progress { position: relative; display: inline-flex; align-items: center; }
 .status-progress-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-ui); white-space: nowrap; }
 .status-progress-toggle:hover { background: var(--hover); color: var(--bright); }
-.status-spin { animation: status-spin 1.1s linear infinite; }
+.status-spin { animation: status-spin var(--dur-spin) linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .status-progress-list { position: absolute; bottom: 100%; left: 0; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); min-width: 280px; max-width: 380px; margin-bottom: 4px; padding: var(--space-2); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
 .status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
@@ -690,9 +735,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-column { color: var(--accent) !important; background: var(--accent-soft); border-radius: var(--radius-xs); padding: 0 4px; }
 /* IDEA PowerSaveStatusWidgetFactory: the icon that flags power save mode. */
 /* IDEA IdeStatusBarImpl/ViewStatusBarWidgetsGroup: right-click lists the widgets. */
-.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+/* `max-height`/`overflow-y` 是兜底：正常情况下菜单翻到锚点上方就完整可见了（位置由
+   src/menuPlacement.ts 夹），只有窗口极矮、菜单比视口还高时才需要它自己滚动。
+   不写这两条时那种情况下菜单仍然整块溢出视口，而且没有滚动条可救。 */
+.status-widget-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 190px; max-height: calc(100vh - 8px); overflow-y: auto; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
 .status-widget-title { padding: var(--space-1) var(--space-2); color: var(--muted); font-size: 11px; }
-.status-widget-item { justify-content: flex-start; gap: var(--space-2); width: 100%; }
+/* 这里原来只有 `justify-content` / `gap` / `width`，**没有 `display: flex`** ——
+   `<button>` 默认 inline-block，那两条声明整条失效（与 `.tool-menu-item` 在 :311 踩的是同一个坑，
+   这次由 ui-icons 门禁的 text-align 那条一起盯住了）。补上 flex 之后勾记号槽与标题才排得开；
+   `text-align: left` 同理 —— UA 默认 center 会把 `flex: 1` 之外的裸文字行居中。 */
+.status-widget-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2); width: 100%; text-align: left; }
 .status-widget-backdrop { position: fixed; inset: 0; z-index: 55; }
 .status-notices { color: var(--secondary) !important; }
 .status-notices.has-error { color: var(--error) !important; }
@@ -904,7 +956,6 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 @media (max-height: 600px) {
   .trace-list { flex: 0 0 auto; min-height: 0; overflow: visible; }
   .welcome-screen { padding: 16px 20px; }
-  .welcome-symbol { margin-bottom: 10px; }
   .welcome-screen h1 { margin: 8px 0; }
   .welcome-shortcuts { margin-top: 12px; }
   .welcome-boundary { margin-top: 14px; padding-top: 10px; }
@@ -983,6 +1034,11 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .tree-menu > button { text-align: left; background: transparent; border: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; }
 .tree-menu > button:hover { background: var(--hover); color: var(--bright); }
 .tree-menu .menu-danger { color: var(--error); }
+/* 编辑器右键浮层的勾选列（`EditorPopupMenu.vue` 用，它没有自己的 <style>，所以规则在这）。
+   此前 `.menu-check` **一条 CSS 都没有** —— 是个纯行内 span，勾选列的宽度随内容变，
+   同一菜单里勾选行与普通行的字首对不齐。给 14px 固定槽，与 `.menu-item-icon`（:126）
+   同度量，于是两种浮层的勾选列也落在同一个位置。 */
+.menu-check { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; color: var(--secondary); }
 .menu-danger-solid { border-color: var(--error); color: var(--error); }
 .menu-danger-solid:hover:not(:disabled) { background: var(--error); color: var(--bright); }
 

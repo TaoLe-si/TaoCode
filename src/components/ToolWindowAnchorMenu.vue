@@ -6,6 +6,7 @@
 // 没有这个入口，「移动到底部」是单向的。
 import { onMounted, onUnmounted } from 'vue'
 import { PanelBottom, PanelLeft, PanelRight } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ anchor: string; x: number; y: number }>()
 const emit = defineEmits<{ (event: 'move', side: 'left' | 'right' | 'bottom'): void; (event: 'close'): void }>()
@@ -32,7 +33,9 @@ onUnmounted(() => {
   <div class="tool-menu tool-anchor-menu" role="menu" aria-label="移动到" :style="{ left: `${x}px`, top: `${y}px` }" @contextmenu.prevent>
     <button v-for="item in sides" :key="item.side" type="button" class="menu-button tool-menu-item" role="menuitem"
             :disabled="anchor === item.side" @click="emit('move', item.side)">
-      <component :is="item.icon" :size="13" aria-hidden="true" />{{ item.label }}
+      <!-- 同一个 14px 图标槽（`.menu-item-icon`），与齿轮弹层里 `ToolWindowHeader.vue` 的
+           移动到左/右/底三行对齐 —— 两个弹层是同一条 ResizeActionGroup 的两种入口。 -->
+      <span class="menu-item-icon"><component :is="item.icon" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ item.label }}</span>
     </button>
   </div>
 </template>

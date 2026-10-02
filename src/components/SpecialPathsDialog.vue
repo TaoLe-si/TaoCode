@@ -4,6 +4,7 @@
 // 清单由宿主给出（native/diagnostics.cpp 的 `special_paths`），不存在的目录标注出来（不隐藏，IDEA 同样列出）。
 import { ChevronRight, FolderOpen, X } from 'lucide-vue-next'
 import type { SpecialPath } from '../helpActions'
+import { iconSize } from '../uiIcons'
 
 defineProps<{ paths: readonly SpecialPath[] }>()
 const emit = defineEmits<{
@@ -17,14 +18,14 @@ const emit = defineEmits<{
     <section class="command-palette special-paths-dialog" role="dialog" aria-modal="true" aria-label="浏览特殊目录">
       <div class="palette-input">
         <span class="special-heading">浏览特殊目录</span>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="palette-results">
         <button v-for="entry in paths" :key="entry.id" @click="emit('pick', { path: entry.path })">
-          <FolderOpen :size="15" :class="{ missing: !entry.exists }" />
+          <FolderOpen :size="iconSize.toolbar" :class="{ missing: !entry.exists }" />
           <span class="special-main"><strong>{{ entry.label }}</strong><span class="special-path">{{ entry.path }}</span></span>
           <span v-if="!entry.exists" class="special-flag">不存在</span>
-          <ChevronRight :size="14" />
+          <ChevronRight :size="iconSize.control" />
         </button>
         <p v-if="!paths.length" class="palette-empty">没有可显示的目录。</p>
       </div>

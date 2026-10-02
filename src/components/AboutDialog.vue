@@ -3,6 +3,7 @@
 // 数据来自宿主 `app.info`（native/main.cpp 的 `app.info` 路由 + native/diagnostics.cpp）。
 import { X } from 'lucide-vue-next'
 import type { AppInfo } from '../helpActions'
+import { iconSize } from '../uiIcons'
 
 defineProps<{ info: AppInfo | null }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
@@ -17,7 +18,7 @@ const entryScript = document.querySelector<HTMLScriptElement>('script[src]')?.sr
     <section class="command-palette about-dialog" role="dialog" aria-modal="true" aria-label="关于 TaoCode">
       <div class="palette-input">
         <span class="about-heading">关于 TaoCode</span>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <dl class="about-list">
         <dt>版本</dt><dd>{{ info?.version ?? '—' }}</dd>

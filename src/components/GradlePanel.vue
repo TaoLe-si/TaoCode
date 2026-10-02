@@ -23,6 +23,7 @@ import {
   type GradleDetection, type GradleSyncResult, type GradleTaskNode,
 } from '../gradle.ts'
 
+import { iconSize } from '../uiIcons'
 const props = defineProps<{
   detection: GradleDetection | null
   detectionError: string
@@ -156,26 +157,26 @@ function dependencySuffix(dependency: GradleDependency): string {
 <template>
   <div class="gradle-panel" @keydown="onKeydown">
     <div class="panel-heading" :title="`已链接的 Gradle 工程目录：${linkedProjects.join('、') || '（无）'}`">
-      <span><Boxes :size="14" />Gradle</span>
+      <span><Boxes :size="iconSize.control" />Gradle</span>
       <span v-if="syncedAt" class="heading-count">{{ syncedAt }}</span>
     </div>
 
     <!-- 工具条：顺序照 ExternalSystemActions.xml:138-151。 -->
     <div class="gradle-toolbar" role="group" aria-label="Gradle 工具条">
-      <button class="subtle-button" :disabled="!ready || gradleSync.running" :title="gradleSync.running ? '任务进行中' : '同步 Gradle 项目（RefreshAllProjects）'" @click="emit('sync')"><RefreshCw :size="13" />同步</button>
-      <button v-if="gradleSync.running" class="subtle-button" title="取消（会杀掉子进程树）" @click="emit('cancel')"><Square :size="13" />取消</button>
+      <button class="subtle-button" :disabled="!ready || gradleSync.running" :title="gradleSync.running ? '任务进行中' : '同步 Gradle 项目（RefreshAllProjects）'" @click="emit('sync')"><RefreshCw :size="iconSize.menu" />同步</button>
+      <button v-if="gradleSync.running" class="subtle-button" title="取消（会杀掉子进程树）" @click="emit('cancel')"><Square :size="iconSize.menu" />取消</button>
       <!-- AttachProjectPanel（ExternalSystemActions.xml:120-122）里的 `ExternalSystem.DetachProject`。
            文案照 bundle：`action.detach.external.project.text=Unlink {0} Project`
            （platform/external-system-api/resources/messages/ExternalSystemBundle.properties:67，
            {0} = 外部系统的可读名，Gradle 那边就是 "Gradle"）。 -->
-      <button class="subtle-button" :disabled="!ready || gradleSync.running" title="取消链接 Gradle 项目" @click="emit('unlink')"><Unlink :size="13" />取消链接</button>
+      <button class="subtle-button" :disabled="!ready || gradleSync.running" title="取消链接 Gradle 项目" @click="emit('unlink')"><Unlink :size="iconSize.menu" />取消链接</button>
       <span class="gradle-separator" aria-hidden="true" />
-      <button class="icon-button" title="全部展开" aria-label="全部展开" @click="expandAll"><ChevronsUpDown :size="14" /></button>
-      <button class="icon-button" title="全部折叠" aria-label="全部折叠" @click="collapseAll"><ChevronsDownUp :size="14" /></button>
+      <button class="icon-button" title="全部展开" aria-label="全部展开" @click="expandAll"><ChevronsUpDown :size="iconSize.control" /></button>
+      <button class="icon-button" title="全部折叠" aria-label="全部折叠" @click="collapseAll"><ChevronsDownUp :size="iconSize.control" /></button>
       <span class="gradle-separator" aria-hidden="true" />
       <!-- ShowSettingsGroup（:24-27）：公共设置 = build.tools 页，Gradle = 系统自己的页。 -->
       <div class="gradle-settings">
-        <button class="icon-button" aria-label="设置" title="设置" :aria-expanded="settingsMenu" @click.stop="settingsMenu = !settingsMenu"><Settings :size="14" /></button>
+        <button class="icon-button" aria-label="设置" title="设置" :aria-expanded="settingsMenu" @click.stop="settingsMenu = !settingsMenu"><Settings :size="iconSize.control" /></button>
         <div v-if="settingsMenu" class="gradle-menu gradle-settings-menu" role="menu" aria-label="设置">
           <button class="gradle-menu-item" role="menuitem" @click="settingsMenu = false; emit('openSettings', BUILD_TOOLS_GROUP_ID)">公共设置</button>
           <button class="gradle-menu-item" role="menuitem" @click="settingsMenu = false; emit('openSettings', GRADLE_CONFIGURABLE_ID)">Gradle</button>
@@ -200,14 +201,14 @@ function dependencySuffix(dependency: GradleDependency): string {
       </p>
 
       <p v-if="gradleSync.running" class="gradle-running">
-        <RefreshCw :size="12" class="gradle-spin" />正在跑：<code>{{ gradleSync.command }}</code>
+        <RefreshCw :size="iconSize.dense" class="gradle-spin" />正在跑：<code>{{ gradleSync.command }}</code>
         <span class="gradle-elapsed" aria-live="polite">已 {{ syncSeconds }} 秒</span>
       </p>
       <p v-else-if="syncNote" class="gradle-note" :class="{ 'is-error': Boolean(result.error) }">{{ syncNote }}</p>
       <!-- 输出尾部：跑的时候证明它没卡住，失败后这里就是原始证据（IDEA 的 Build 窗口同理是给输出的）。 -->
       <div v-if="outputTail.length" class="gradle-tail" :aria-label="gradleSync.running ? '同步输出（最新）' : '失败输出（最新）'">
         <button class="gradle-group-toggle" :aria-expanded="tailOpen" @click="tailOpen = !tailOpen">
-          <component :is="tailOpen ? ChevronDown : ChevronRight" :size="12" />{{ gradleSync.running ? '同步输出' : '失败输出' }}
+          <component :is="tailOpen ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ gradleSync.running ? '同步输出' : '失败输出' }}
         </button>
         <pre v-if="tailOpen" class="gradle-tail-body">{{ outputTail.join('\n') }}</pre>
       </div>
@@ -218,7 +219,7 @@ function dependencySuffix(dependency: GradleDependency): string {
           <p v-if="!result.projects.length" class="gradle-empty-inline">{{ gradleSync.running ? '同步中…工程结构要等这一次跑完。' : '还没有同步过；点「同步」拉取工程结构。' }}</p>
           <ul v-else class="gradle-list" role="tree" aria-label="Gradle 工程">
             <li v-for="project in result.projects" :key="project.path" role="treeitem" :aria-level="project.depth + 1" :style="{ paddingLeft: `${project.depth * 12}px` }" @contextmenu.stop="openMenu($event, 'project')">
-              <Wrench :size="11" class="gradle-icon" /><span class="gradle-node">{{ project.name }}</span><span class="gradle-path">{{ project.path }}</span>
+              <Wrench :size="iconSize.inline" class="gradle-icon" /><span class="gradle-node">{{ project.name }}</span><span class="gradle-path">{{ project.path }}</span>
             </li>
           </ul>
         </section>
@@ -228,7 +229,7 @@ function dependencySuffix(dependency: GradleDependency): string {
           <p v-if="!result.tasks.length" class="gradle-empty-inline">{{ gradleSync.running ? '同步中…任务表要等这一次跑完。' : '还没有同步过；同步后这里按 Gradle 自己的分组列出任务。' }}</p>
           <div v-for="group in taskGroups" :key="group.group" class="gradle-group">
             <button class="gradle-group-toggle" :aria-expanded="expandedGroups.has(group.group)" @click="toggleGroup(group.group)">
-              <component :is="expandedGroups.has(group.group) ? ChevronDown : ChevronRight" :size="12" />{{ group.group }}
+              <component :is="expandedGroups.has(group.group) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ group.group }}
               <span class="gradle-path">{{ group.tasks.length }}</span>
             </button>
             <ul v-if="expandedGroups.has(group.group)" class="gradle-list" role="tree" :aria-label="group.group">
@@ -243,7 +244,7 @@ function dependencySuffix(dependency: GradleDependency): string {
         <!-- IDEA 的 `Dependencies` 节点：名字是字面量，展开时才构建。 -->
         <section class="gradle-section">
           <button class="gradle-group-toggle" :aria-expanded="dependenciesOpen" @click="toggleDependencies">
-            <component :is="dependenciesOpen ? ChevronDown : ChevronRight" :size="12" />{{ GRADLE_DEPENDENCIES_NODE_NAME }}
+            <component :is="dependenciesOpen ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ GRADLE_DEPENDENCIES_NODE_NAME }}
             <span v-if="dependencies.length" class="gradle-path">{{ dependencies.length }}</span>
           </button>
           <template v-if="dependenciesOpen">
@@ -255,14 +256,14 @@ function dependencySuffix(dependency: GradleDependency): string {
               <p class="gradle-group-title">{{ group.project }}</p>
               <div v-for="scope in group.scopes" :key="`${group.project}:${scope.configuration}`" class="gradle-scope">
                 <button class="gradle-group-toggle" :aria-expanded="expandedScopes.has(`${group.project}:${scope.configuration}`)" @click="toggleScope(`${group.project}:${scope.configuration}`)">
-                  <component :is="expandedScopes.has(`${group.project}:${scope.configuration}`) ? ChevronDown : ChevronRight" :size="12" />{{ scope.configuration }}
+                  <component :is="expandedScopes.has(`${group.project}:${scope.configuration}`) ? ChevronDown : ChevronRight" :size="iconSize.dense" />{{ scope.configuration }}
                   <span v-if="scope.unresolved" class="gradle-warn">(n)</span>
                   <span class="gradle-desc">{{ scope.description }}</span>
                 </button>
                 <ul v-if="expandedScopes.has(`${group.project}:${scope.configuration}`)" class="gradle-list" role="tree" :aria-label="scope.configuration">
                   <li v-if="scope.empty" role="treeitem" class="gradle-empty-inline">No dependencies</li>
                   <li v-for="(dependency, index) in scope.dependencies" :key="`${dependency.name}:${index}`" role="treeitem" :style="{ paddingLeft: `${dependency.depth * 14}px` }">
-                    <FileCode2 :size="11" class="gradle-icon" /><span class="gradle-node">{{ dependency.name }}</span>
+                    <FileCode2 :size="iconSize.inline" class="gradle-icon" /><span class="gradle-node">{{ dependency.name }}</span>
                     <span v-if="dependencySuffix(dependency)" class="gradle-desc">{{ dependencySuffix(dependency) }}</span>
                   </li>
                 </ul>
@@ -305,7 +306,7 @@ function dependencySuffix(dependency: GradleDependency): string {
 .gradle-elapsed { margin-left: auto; color: var(--bright); font: 11px/1.7 var(--font-mono); }
 .gradle-tail { border-bottom: 1px solid var(--line); }
 .gradle-tail-body { margin: 0; padding: 0 var(--space-3) var(--space-2); color: var(--muted); font: 10px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.gradle-spin { animation: gradle-spin 1.2s linear infinite; }
+.gradle-spin { animation: gradle-spin var(--dur-spin) linear infinite; }
 @keyframes gradle-spin { to { transform: rotate(360deg); } }
 .gradle-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
 .gradle-section { padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }

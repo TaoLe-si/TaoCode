@@ -127,6 +127,14 @@ void validate_editor_patch(const Json& patch) {
             // IdeScaleTransformer: the same bounds IDEA's editable combo enforces.
             if (!value.is_number_integer() || value < 50 || value > 400)
                 fail("INVALID_SETTINGS", "uiZoomPercent must be an integer from 50 through 400.");
+        } else if (it.key() == "stickyLinesLimit") {
+            // 与 general 档的同名键同一套界（:179）：0..10 层，0 = 完全不叠。
+            if (!value.is_number_integer() || value.get<int>() < 0 || value.get<int>() > 10)
+                fail("INVALID_SETTINGS", "stickyLinesLimit must be an integer between 0 and 10.");
+        } else if (it.key() == "diffContextLines") {
+            // 与 general 档的同名键同一套界（:182）：1..100 行。
+            if (!value.is_number_integer() || value.get<int>() < 1 || value.get<int>() > 100)
+                fail("INVALID_SETTINGS", "diffContextLines must be an integer between 1 and 100.");
         } else if (!value.is_boolean()) {
             fail("INVALID_SETTINGS", "Editor flags must be JSON booleans.");
         }
@@ -285,7 +293,20 @@ Json editor_defaults_impl() {
             // 高级设置 `editor.maximize.on.double.click`（intellij.platform.ide.impl.xml:1511 default="true"）。
             {"maximizeEditorOnTabDoubleClick", true},
             // UISettingsState.kt:127 showPinnedTabsInASeparateRow（默认 false）。
-            {"pinnedTabsInSeparateRow", false}};
+            {"pinnedTabsInSeparateRow", false},
+            // 这五个键以前**只在前端**存在（src/settingsModel.ts:149），native 的白名单里漏了它们，
+            // 于是 prune_unknown（project_settings_state.cpp:41）把它们从 projects.json 剪掉，
+            // 前端拿回的 editorSettings 里 showStatusBar 是 undefined —— 状态栏整条不渲染
+            // （src/App.vue:2316 的 v-if）。白名单补在 settings_schema.hpp:53 之后，注释里有逐条出处。
+            // UISettingsState.kt:113 `var showStatusBar: Boolean by property(true)`。
+            {"showStatusBar", true},
+            // EditorSettingsExternalizable.java:83 `IS_RIGHT_MARGIN_SHOWN = true`。
+            {"rightMargin", true},
+            // EditorSettingsExternalizable.java:93-94 `SHOW_STICKY_LINES = true` / `STICKY_LINES_LIMIT = 5`。
+            // 层数默认取 3 而非上游的 5 —— 已登记的偏离（docs/settings-parity.md:53），不在这一批里改。
+            {"showStickyLines", true}, {"stickyLinesLimit", 3},
+            // diff.base 的 settings.context.lines（DiffSettingsConfigurable.kt:30-58），默认与 git 一致。
+            {"diffContextLines", 3}};
 }
 
 // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发 todo/fixme 两条（已核对源码），

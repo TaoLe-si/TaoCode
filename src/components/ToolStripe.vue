@@ -19,6 +19,7 @@ import { computed, onUnmounted, ref } from 'vue'
 import { Check, MoreHorizontal } from 'lucide-vue-next'
 import { startStripeResize, stripeRailWidth, stripeWidthLimits, type StripeSide } from '../stripeResize'
 import type { ToolWindowId } from '../toolWindowMeta'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   side: StripeSide
@@ -172,7 +173,7 @@ onUnmounted(() => {
           @click="emit('activate', id)" @contextmenu.prevent.stop="emit('menu', id, $event)"
           @dragstart="emit('dragStart', id, $event)" @dragover="emit('dragOver', id, $event)"
           @drop="emit('drop', id, $event)" @dragend="emit('dragEnd')"
-        ><component :is="icons[id]" :size="21" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
+        ><component :is="icons[id]" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
       </template>
       <span v-if="dropAtEnd" class="stripe-drop-marker" aria-hidden="true" />
       <!-- 「更多」（`MoreSquareStripeButton`）：位置在上条纹之后、拆分按钮之前。 -->
@@ -180,7 +181,7 @@ onUnmounted(() => {
         v-if="moreVisible" ref="moreButton" class="activity-button stripe-more" :class="{ active: moreOpen }"
         :title="moreTitle" :aria-label="moreLabel" :aria-expanded="moreOpen"
         @click.stop="toggleMore()" @contextmenu.prevent="toggleMoveTo"
-      ><MoreHorizontal :size="18" /></button>
+      ><MoreHorizontal /></button>
     </div>
     <span v-if="side === 'right'" class="stripe-drop-hint" aria-hidden="true" />
     <!-- 宽度的分隔线（`ResizeStripeManager` 的 `mySplitter`）：只有名称开着时才挂（`:89-102`）。 -->
@@ -194,7 +195,7 @@ onUnmounted(() => {
     <Teleport v-if="moreOpen || moveOpen || namesOpen" to="body">
       <div v-if="moreOpen" class="stripe-popup stripe-popup-more" role="menu" :aria-label="moreTitle" :style="{ left: `${at.left}px`, top: `${at.top}px` }">
         <button v-for="id in moreIds" :key="id" class="menu-button stripe-popup-row" role="menuitem" @click="pickMore(id)">
-          <span class="menu-item-icon"><component :is="icons[id]" :size="13" /></span>
+          <span class="menu-item-icon"><component :is="icons[id]" :size="iconSize.menu" /></span>
           <span class="menu-item-title">{{ labels[id] }}</span>
           <span v-if="mnemonicOf(id)" class="stripe-popup-key">Alt+{{ mnemonicOf(id) }}</span>
         </button>
@@ -207,7 +208,7 @@ onUnmounted(() => {
       <!-- `ToolWindowShowNamesAction`（`ActionsBundle.properties:2813` = 显示工具窗口名称）。 -->
       <div v-if="namesOpen" class="stripe-popup" role="menu" aria-label="显示工具窗口名称" :style="{ left: `${at.left}px`, top: `${at.top}px` }">
         <button class="menu-button stripe-popup-row" role="menuitemcheckbox" :aria-checked="showNames" @click="closePopups(); emit('toggleNames')">
-          <span class="menu-item-icon"><Check v-if="showNames" :size="13" /></span>
+          <span class="menu-item-icon"><Check v-if="showNames" :size="iconSize.menu" /></span>
           <span class="menu-item-title">显示工具窗口名称</span>
         </button>
       </div>

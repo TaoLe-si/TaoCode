@@ -14,6 +14,7 @@ import { nextTick, onUnmounted, ref } from 'vue'
 import { MoreVertical } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import type { MenuRow } from '../menus/types'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ rows: MenuRow[]; label?: string }>()
 const emit = defineEmits<{ pick: [row: MenuRow] }>()
@@ -51,7 +52,7 @@ function pick(row: MenuRow) {
 <template>
   <span v-if="rows.length" class="tool-gear">
     <button type="button" class="icon-button" :aria-expanded="open" :aria-label="label ?? '工具窗口选项'"
-            :title="label ?? '工具窗口选项'" @click.stop="toggle($event)"><MoreVertical :size="14" /></button>
+            :title="label ?? '工具窗口选项'" @click.stop="toggle($event)"><MoreVertical :size="iconSize.control" /></button>
   </span>
   <Teleport v-if="open" to="body">
     <div class="tool-menu tool-gear-menu" role="menu" :aria-label="label ?? '工具窗口选项'"

@@ -14,6 +14,7 @@
 import { computed, ref, watch } from 'vue'
 import { FolderOpen, X } from 'lucide-vue-next'
 import { EXPORT_SCOPES, type ExportScope, type ExportToHtmlDraft } from '../htmlExport.ts'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   /** 初始选择（来自项目设置 `exportToHtml`，对应 `reset()`）。 */
@@ -80,7 +81,7 @@ function submit() {
     <section class="command-palette export-html-dialog" role="dialog" aria-modal="true" aria-label="导出到 HTML">
       <div class="palette-input">
         <span class="export-heading">导出到 HTML</span>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="export-body">
         <div class="export-scopes" role="radiogroup" aria-label="导出范围">
@@ -93,7 +94,7 @@ function submit() {
         <label class="field-row"><span>输出目录</span>
           <input :value="outputDirectory" :disabled="busy" placeholder="例如 D:\\export（绝对路径）" aria-label="输出目录" @input="outputDirectory = ($event.target as HTMLInputElement).value" />
         </label>
-        <div class="export-row"><button class="subtle-button" :disabled="busy" @click="emit('browse', outputDirectory)"><FolderOpen :size="13" />浏览…</button></div>
+        <div class="export-row"><button class="subtle-button" :disabled="busy" @click="emit('browse', outputDirectory)"><FolderOpen :size="iconSize.menu" />浏览…</button></div>
 
         <h4 class="settings-group-title">选项</h4>
         <label class="checkbox-row"><input v-model="printLineNumbers" type="checkbox" /><span>显示行号</span></label>

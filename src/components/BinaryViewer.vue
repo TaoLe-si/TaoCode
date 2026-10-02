@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Download, FolderOpen, X } from 'lucide-vue-next'
 import type { BinaryView } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ path: string; data: BinaryView }>()
 const emit = defineEmits<{ close: []; reveal: [] }>()
@@ -69,9 +70,9 @@ function saveAs() {
       <span class="binary-size">{{ data.size.toLocaleString() }} 字节</span>
       <span v-if="data.truncated" class="binary-truncated">已截断预览</span>
       <div class="binary-actions">
-        <button class="icon-button" title="在文件管理器中显示" aria-label="在文件管理器中显示" @click="emit('reveal')"><FolderOpen :size="14" /></button>
-        <button class="icon-button" title="另存为…" aria-label="另存为" @click="saveAs"><Download :size="14" /></button>
-        <button class="icon-button" title="关闭" aria-label="关闭二进制查看" @click="emit('close')"><X :size="14" /></button>
+        <button class="icon-button" title="在文件管理器中显示" aria-label="在文件管理器中显示" @click="emit('reveal')"><FolderOpen :size="iconSize.control" /></button>
+        <button class="icon-button" title="另存为…" aria-label="另存为" @click="saveAs"><Download :size="iconSize.control" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭二进制查看" @click="emit('close')"><X :size="iconSize.control" /></button>
       </div>
     </div>
     <div v-if="isImage" class="binary-image">

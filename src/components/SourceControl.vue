@@ -27,6 +27,7 @@ import {
   type CommitMessageProblem,
 } from '../commitMessageInspection'
 import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStatus, type TodoPattern } from '../bridge'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   root: string
@@ -642,14 +643,14 @@ watch(() => [props.root, props.active] as const, () => {
 <template>
   <div class="sc-panel">
     <div class="sc-header">
-      <GitBranch :size="14" />
+      <GitBranch :size="iconSize.control" />
       <select class="sc-branch" :value="status.head" :disabled="busy || !branches.length" aria-label="当前分支" @change="checkout(($event.target as HTMLSelectElement).value)">
         <option v-if="status.head" :value="status.head">{{ status.head }}</option>
         <option v-for="branch in branches.filter(name => name !== status.head)" :key="branch" :value="branch">{{ branch }}</option>
       </select>
-      <button class="icon-button" title="刷新" aria-label="刷新 Git 状态" :disabled="loading || busy" @click="load"><RefreshCw :size="14" /></button>
+      <button class="icon-button" title="刷新" aria-label="刷新 Git 状态" :disabled="loading || busy" @click="load"><RefreshCw :size="iconSize.control" /></button>
     </div>
-    <div v-if="!status.available" class="sc-empty"><CircleSlash :size="22" /><p>未找到 Git</p><span>安装 Git 并加入 PATH 后可使用版本控制。</span></div>
+    <div v-if="!status.available" class="sc-empty"><CircleSlash :size="iconSize.artwork" /><p>未找到 Git</p><span>安装 Git 并加入 PATH 后可使用版本控制。</span></div>
     <template v-else>
       <div class="sc-commit">
         <textarea ref="messageBox" v-model="message" rows="3" :placeholder="COMMIT_MESSAGE_PLACEHOLDER" aria-label="提交消息" :disabled="busy" @keydown.ctrl.enter.prevent="commit" @keydown.ctrl.shift.enter.prevent="commitAndPush" @keydown.alt.l.prevent="reformatMessage" />
@@ -677,21 +678,21 @@ watch(() => [props.root, props.active] as const, () => {
              `createCollapseAllAction(true)`，ChangesTree.java:725-744；头部工具栏 = TreeActionsToolbarPanel:53-54）。
              可见性 = `MyTreeExpander.isExpandAllVisible()`（:752-762）：分组不是 NONE、或模型不是平铺时才有这一对。
              文案取 `ActionsBundle`：`action.ExpandAll.text` = 全部展开、`action.CollapseAll.text` = **全部收起**。 -->
-        <button class="sc-tool" :disabled="busy || !hasGroups" :title="EXPAND_ALL_TEXT" aria-label="全部展开" @click="changesCollapsed = false"><ChevronsUpDown :size="13" />{{ EXPAND_ALL_TEXT }}</button>
-        <button class="sc-tool" :disabled="busy || !hasGroups" :title="COLLAPSE_ALL_TEXT" aria-label="全部收起" @click="changesCollapsed = true"><ChevronsDownUp :size="13" />{{ COLLAPSE_ALL_TEXT }}</button>
+        <button class="sc-tool" :disabled="busy || !hasGroups" :title="EXPAND_ALL_TEXT" aria-label="全部展开" @click="changesCollapsed = false"><ChevronsUpDown :size="iconSize.menu" />{{ EXPAND_ALL_TEXT }}</button>
+        <button class="sc-tool" :disabled="busy || !hasGroups" :title="COLLAPSE_ALL_TEXT" aria-label="全部收起" @click="changesCollapsed = true"><ChevronsDownUp :size="iconSize.menu" />{{ COLLAPSE_ALL_TEXT }}</button>
       </div>
       <div class="sc-toolbar">
         <!-- `ChangesView.CommitToolbar`（VcsActions.xml:405-408）= `Vcs.ToggleAmendCommitMode` + `Vcs.MessageActionGroup`，
              挂在 `CommitStatusPanel` 的左侧 ⇒ 与提交图例**同一行**（NonModalCommitPanel.kt:104-107）。
              非模态面板的消息区自己不带工具条（CommitMessage.kt 的 showToolbar=false）。 -->
         <label class="sc-amend" :title="AMEND_TOOLTIP"><input v-model="amend" type="checkbox" :disabled="busy" /><span>{{ AMEND_CHECKBOX_TEXT }}</span></label>
-        <button class="icon-button" :class="{ on: messageHistoryOpen }" :title="MESSAGE_HISTORY_DESCRIPTION" :aria-expanded="messageHistoryOpen" :aria-label="MESSAGE_HISTORY_TEXT" :disabled="busy || loading" @click="toggleMessageHistory"><Clock :size="13" /></button>
+        <button class="icon-button" :class="{ on: messageHistoryOpen }" :title="MESSAGE_HISTORY_DESCRIPTION" :aria-expanded="messageHistoryOpen" :aria-label="MESSAGE_HISTORY_TEXT" :disabled="busy || loading" @click="toggleMessageHistory"><Clock :size="iconSize.menu" /></button>
         <!-- 上游本地变更工具窗口那一行是 `VcsToolbarActions`（VcsActions.xml:416-425 + dvcs-impl 的
              `Vcs.Push` :80-85）：更新项目 / 提交 / 切换提交界面 / 推送 / 比较同版本 / 文件历史 / 回滚。
              本仓这一行只放我们真有的那两个（更新项目、推送）；获取/变基/储藏/取出储藏在上游都不在这一行
              （它们在 Git 菜单与日志窗口那一族），所以留在 Git 菜单里、不在这里重复一份。 -->
-        <button class="sc-tool" :disabled="busy" title="更新项目（Ctrl+T）" @click="updateProject"><Download :size="13" />更新项目<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
-        <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="13" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
+        <button class="sc-tool" :disabled="busy" title="更新项目（Ctrl+T）" @click="updateProject"><Download :size="iconSize.menu" />更新项目<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
+        <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="iconSize.menu" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
       </div>
       <p v-if="error" class="sc-error" role="alert">{{ error }}</p>
       <p v-else-if="extrasError" class="sc-warning" role="status">{{ extrasError }}</p>
@@ -700,19 +701,19 @@ watch(() => [props.root, props.active] as const, () => {
           <h3>已暂存 <span class="sc-count">{{ staged.length }}</span></h3>
           <div v-for="change in staged" v-show="!changesCollapsed" :key="'s' + change.path" class="sc-row">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.indexStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
-            <button class="icon-button" title="取消暂存" aria-label="取消暂存" :disabled="busy" @click="unstage(change.path)"><Minus :size="14" /></button>
+            <button class="icon-button" title="取消暂存" aria-label="取消暂存" :disabled="busy" @click="unstage(change.path)"><Minus :size="iconSize.control" /></button>
           </div>
         </section>
         <section v-if="unstaged.length" class="sc-section">
           <h3>更改 <span class="sc-count">{{ unstaged.length }}</span></h3>
           <div v-for="change in unstaged" v-show="!changesCollapsed" :key="'u' + change.path" class="sc-row">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.untracked ? '?' : change.workStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
-            <button v-if="!change.untracked" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="14" /></button>
-            <button v-if="change.untracked" class="icon-button" title="加入 .gitignore" aria-label="加入 .gitignore" :disabled="busy" @click="ignore(change.path)"><Ban :size="13" /></button>
-            <button class="icon-button" title="暂存" aria-label="暂存" :disabled="busy" @click="stage(change.path)"><Plus :size="14" /></button>
+            <button v-if="!change.untracked" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="iconSize.control" /></button>
+            <button v-if="change.untracked" class="icon-button" title="加入 .gitignore" aria-label="加入 .gitignore" :disabled="busy" @click="ignore(change.path)"><Ban :size="iconSize.menu" /></button>
+            <button class="icon-button" title="暂存" aria-label="暂存" :disabled="busy" @click="stage(change.path)"><Plus :size="iconSize.control" /></button>
           </div>
         </section>
-        <div v-if="!changes.length" class="sc-empty"><Check :size="22" /><p>工作区干净</p><span>没有需要提交的更改。</span></div>
+        <div v-if="!changes.length" class="sc-empty"><Check :size="iconSize.artwork" /><p>工作区干净</p><span>没有需要提交的更改。</span></div>
         <section v-if="compareTo" class="sc-section">
           <h3>与 {{ compareTo }} 的比较 <span class="sc-count">{{ compared.length }}</span></h3>
           <div v-for="file in compared" :key="'c' + file.path" class="sc-row">
@@ -727,11 +728,11 @@ watch(() => [props.root, props.active] as const, () => {
            button (:492-521, `AllIcons.General.InlineRefresh`, tooltip.rerun.commit.checks). The row
            is hidden until a check actually reports a failure (:430 `isVisible = false`). -->
       <div v-if="checksFailures.length" class="sc-check-failures" role="status" aria-label="提交检查失败">
-        <TriangleAlert :size="13" class="sc-check-failures-icon" />
+        <TriangleAlert :size="iconSize.menu" class="sc-check-failures-icon" />
         <span class="sc-check-failures-text">{{ failuresRowText(checksFailures) }}</span>
         <button class="icon-button sc-rerun-checks" :disabled="busy || checksBusy" :title="RERUN_CHECKS_TOOLTIP"
                 :aria-label="RERUN_CHECKS_TOOLTIP" @click="runCommitChecks">
-          <RefreshCw :size="12" :class="{ 'status-spin': checksBusy }" />
+          <RefreshCw :size="iconSize.dense" :class="{ 'status-spin': checksBusy }" />
         </button>
       </div>
       <!-- IDEA's CommitAuthorComponent: "By <author>" above the commit actions, shown only
@@ -739,11 +740,11 @@ watch(() => [props.root, props.active] as const, () => {
       <div v-if="authorOverride" class="sc-author">
         <span class="sc-author-label">By</span>
         <span class="sc-author-link" :title="fullName(effectiveAuthor)">{{ shortName(effectiveAuthor) }}</span>
-        <button class="icon-button sc-author-x" title="移除作者覆盖（Remove）" aria-label="移除作者覆盖" @click="clearAuthorOverride"><X :size="12" /></button>
+        <button class="icon-button sc-author-x" title="移除作者覆盖（Remove）" aria-label="移除作者覆盖" @click="clearAuthorOverride"><X :size="iconSize.dense" /></button>
       </div>
       <div class="sc-actions">
         <button class="primary-button sc-commit-button" :disabled="busy" :title="`${commitButtonLabel}（Ctrl+Enter）`" @click="commit">{{ commitButtonLabel }}</button>
-        <button class="sc-tool sc-options-button" :class="{ on: optionsOpen }" :aria-expanded="optionsOpen" title="提交选项" aria-label="提交选项" @click.stop="openOptions"><Settings :size="13" /></button>
+        <button class="sc-tool sc-options-button" :class="{ on: optionsOpen }" :aria-expanded="optionsOpen" title="提交选项" aria-label="提交选项" @click.stop="openOptions"><Settings :size="iconSize.menu" /></button>
         <button class="sc-tool sc-push-button" :disabled="busy" title="提交并推送（Ctrl+Shift+Enter）" @click="commitAndPush">提交并推送(P)<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>
       </div>
       <!-- IDEA's CommitOptionsPanel (:62-95) stacks the options in titled groups: one per VCS
@@ -779,8 +780,8 @@ watch(() => [props.root, props.active] as const, () => {
         <!-- IDEA's commit viewer: each hunk of the diff is selectable and the
              toolbar stages/unstages exactly the picked hunks. -->
         <div v-if="diff.hunks?.hunks.length" class="sc-hunks">
-          <button class="sc-tool" :disabled="busy" title="把勾选的改动块暂存（git apply --cached）" @click="applyHunks(false)"><Plus :size="12" />暂存所选块</button>
-          <button class="sc-tool" :disabled="busy" title="把勾选的已暂存块退回工作区（reverse apply）" @click="applyHunks(true)"><Minus :size="12" />取消暂存所选块</button>
+          <button class="sc-tool" :disabled="busy" title="把勾选的改动块暂存（git apply --cached）" @click="applyHunks(false)"><Plus :size="iconSize.dense" />暂存所选块</button>
+          <button class="sc-tool" :disabled="busy" title="把勾选的已暂存块退回工作区（reverse apply）" @click="applyHunks(true)"><Minus :size="iconSize.dense" />取消暂存所选块</button>
           <span class="sc-hunk-hint">{{ diff.staged ? '已暂存差异' : '工作区差异' }} · {{ diff.hunks.hunks.length }} 块</span>
         </div>
         <p v-if="hunkError" class="sc-warning sc-hunk-error" role="status">{{ hunkError }}</p>

@@ -1487,5 +1487,152 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   （`taskkill //IM TaoCode.exe //F` → 确认 `ls build/*.json` 无命中、`tasklist | grep lsp_fake_server` 为 0 → 重启 exe）。
 
 
+## 第八十四批验证记录（图标族单一真源 + 菜单行「图标 + 文字」排版三处 UA 默认陷阱 + 状态栏整条不渲染的根因）
+
+这一批的题目是"核实所有 UI，包括图标"，做下来挖出的**不是**配色或字号问题，而是两个更底层的：
+一个是 **WebView2/Chromium 的 `<button>` UA 默认**让一批菜单行的图标与文字排版静默失效（几何量不出来，只有截图能看出来）；
+另一个是 **native 的设置键白名单漏了 5 个键**，导致**整条状态栏在真机上从不渲染** —— 而它藏得很深，因为前端单测用的
+是 `defaultEditorSettings`（值是对的），只有真机截图能看出来"下面少一条"。
+
+### 一、图标族：单一真源 `src/uiIcons.ts`
+
+上游依据（图标本身不是 IDEA 独有的，取上游的**尺寸档**而不是字形）：
+`platform/editor-ui-api/src/com/intellij/openapi/editor/EditorSettingsExternalizable.java:87-94`（`ARE_GUTTER_ICONS_SHOWN` 一族是编辑器侧图标）、
+`platform/platform-impl/src/com/intellij/ide/ui/AppearanceOptionsTopHitProvider.kt:33-42`（外观页那一组开关的排版度量）、
+`platform/platform-impl/src/com/intellij/ui/UiUtil.kt`（`JBUI.scale` 与 22/26px 那一档控件高度）。
+
+实现：`src/uiIcons.ts` 把 **11 个图标角色**（chip 10 / inline 11 / dense 12 / menu 13 / control 14 / checkbox 14 / toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28）
+与 `ICON_STROKE = 2` 收成单一真源，配套加进 `src/tokens.css` 的令牌层。
+判据：**"配色是我们的，几何是源码的"** —— 尺寸/描边按上游度量，颜色仍走 `--m-*` 调色板。
+
+同批清掉的：
+- 文本字形 `✓` `×` `▾` `▸` `✗` 换成 lucide 组件（原来是裸字符，与周围 2px 描边的图标不是一个视觉族）。
+- 被 CSS 覆盖掉的死 `:size` 属性与死选择器 `.welcome-symbol`。
+- 10 处真实缺口的 icon-only 控件补 `title` / `aria-label`（有控件但没有可访问名称）。
+- 动效收敛：剩余 5 处裸时长换成 `--dur-1/2/submenu/theme-reveal/spin` + `--ease`。
+
+### 二、`<button>` 的三个 UA 默认（本批最花时间的一类）
+
+这三个坑的共同点：**几何量测（`getBoundingClientRect`）完全正常，只有截图能看出不对**。
+
+1. **`padding: 1px 6px`** —— 挤掉定尺的图标盒。修法是 `padding: 0` + svg `flex-shrink: 0`。
+2. **`display: inline-block`** —— 让 `justify-content` / `gap` / `align-items` **整条失效**。
+   本批前前后后在三个地方各踩一次：`.tool-menu-item`（`style.css:332`）、`.status-widget-item`（`style.css:744`）、
+   `.row-menu-item`（`WelcomePage.vue:750`）/ `.empty-more-item` / `.ps-side-item`（`ProjectStructureDialog.vue:118`）。
+3. **`text-align: center`** —— 行里的标题 span 常常是 `flex: 1`，盒子的**左沿**对得整整齐齐，
+   字形却在盒子里居中，真机上一排菜单行看着是「每条各自居中」而不是一张左对齐的表。
+
+第 2、3 条都改在**基类**上而不是每家行族各写一遍 —— `.menu-button`（`style.css:98`）带 `text-align: left`，
+内容宽度的按钮（顶栏菜单、设置标签）本来就是自身宽度，左对齐与居中等价，不会被这条改坏。
+
+**齿轮菜单的图标槽统一**（同一个 `ResizeActionGroup` 的三个入口，三处以前只有两处有槽）：
+`ToolWindowHeader.vue`（头部 ⋮）/ `ToolWindowGearRows.vue`（底边 dock 的齿轮）/ `ToolWindowAnchorMenu.vue`（锚点右键）。
+带图标与不带图标的行走**同一个 14px 的 `.menu-item-icon` 槽**（不带图标的**留空槽**而不是不放），
+这样字首才对得齐。子行 `is-child` 的缩进由 `26px` 收窄成 `var(--space-1)` ——
+早先那个 26px 是**替一个不存在的槽**让路（成员行当时只有裸文字），槽补上后必须收窄，
+否则子行会比父行深出整整一个槽宽。
+
+### 三、状态栏整条不渲染（本批最重的缺陷）
+
+`App.vue:2316` 的 `v-if="workspace && !chromeHidden && editorSettings.showStatusBar"` 三个条件都成立，
+但真机上 `document.querySelector('footer')` 恒为 `null`。逐层挖下去：
+
+- `defaultEditorSettings.showStatusBar` 是 `true`（`src/settingsModel.ts:149`）；
+- `localStorage` / `sessions/*.json` / `projects.json` 里**都没有** `showStatusBar` 这个键；
+- 设置页 94 个 checkbox 里搜不到"状态栏"（没有 UI 出口）；
+- 顺着 `src/App.vue:676` 的 `saveSettingsPatch`（发的是 `{ ...editorSettings.value, ...patch }`，**整本账**）
+  查到 native `validate_editor_patch`（`native/settings_schema.cpp:57`）第一行
+  `known_keys(patch, EDITOR_SETTING_KEYS, "INVALID_SETTINGS")` —— 而 `EDITOR_SETTING_KEYS`
+  （`native/settings_schema.hpp`）里**没有** `showStatusBar`，也没有 `rightMargin` / `showStickyLines` /
+  `stickyLinesLimit` / `diffContextLines` 这五个键。
+
+漏一个键的后果有两层，都不是"少存一项"能盖过去的：
+① `prune_unknown`（`native/project_settings_state.cpp:41`）在读盘时把它们从 `projects.json` 里剪掉；
+② 补洞循环（同文件 `:47-49`）只按 `editor_defaults_impl()` 补，所以补不回来。
+前端拿回的对象里 `showStatusBar` 直接是 `undefined` → falsy → **整条状态栏消失**。
+
+修法（逐条出处写在 `native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS` 注释里）：
+
+| 键 | 上游出处 | native 默认 |
+|---|---|---|
+| `showStatusBar` | `UISettingsState.kt:113` `var showStatusBar: Boolean by property(true)`；消费点 `ProjectFrameHelper.kt:329` | `true` |
+| `rightMargin` | `EditorSettingsExternalizable.java:83` `IS_RIGHT_MARGIN_SHOWN = true`；属性名 `:1221` | `true` |
+| `showStickyLines` | `EditorSettingsExternalizable.java:93` `SHOW_STICKY_LINES = true`；属性名 `:1231` | `true` |
+| `stickyLinesLimit` | `EditorSettingsExternalizable.java:94` `STICKY_LINES_LIMIT = 5` | `3`（已登记偏离，见 `docs/settings-parity.md:53`） |
+| `diffContextLines` | `DiffSettingsConfigurable.kt:30-58` `settings.context.lines` | `3` |
+
+同时补上 `validate_editor_patch` 的数值校验（`stickyLinesLimit` 0..10 / `diffContextLines` 1..100，与 general 档同界）、
+设置页外观页的「状态栏」行（上游 `AppearanceOptionsTopHitProvider.kt:33` `cdShowStatusBar`，
+`groupName = viewOptionGroupName` —— 可搜索落点就在外观选项组），
+以及 `v-if` 补上 `&& !editorSettings.presentationMode`（上游 `ProjectFrameHelper.kt:329` 串的就是这两个条件）。
+
+`diffContextLines` 在 general 键表里也有一份（`settings_schema.cpp:154`），但**唯一写它的是编辑器设置页**
+（`SettingsDialog.vue:1133` 绑的是编辑器那本账），**唯一的读口也是编辑器那本账**
+（`toolViewContext.ts:123` → `SourceControl.vue:553-554` 拼 `git diff -U<n>`）⇒ 权威副本在编辑器档，
+general 那份只为不破坏已存盘的旧 state。
+
+### 四、状态栏一露面就暴露的两个新缺陷
+
+状态栏之前**从来没渲染过**，所以它身上的问题一次都没被看见过。一露面就掉出两个：
+
+1. **「全部显示」行没有前导槽** —— 15 个勾选行都有 14px 的槽，它没有，字首落在 `indent 5` 而不是 `35`。
+   与齿轮菜单同一个道理，补一个空槽。
+2. **组件菜单整块溢出视口** —— 菜单锚在**窗口最底边**，16 行约 480px 高，
+   `openStatusMenu`（`src/notifications.ts:140`）却把 `clientX/clientY` 原样写进 `style.left/top`，
+   截图里只看得见标题那半条。新增 **`src/menuPlacement.ts`**：`placeMenu` 照上游 `AbstractPopup` 的顺序
+   **原位 → 放不下翻到锚点另一侧 → 两侧都放不下才夹进视口**（直接 `min(y, maxY)` 会把菜单压在锚点上方一大截，
+   视觉上是"菜单飘到了别处"）；CSS 再加 `max-height: calc(100vh - 8px)` + `overflow-y: auto` 兜住"菜单比视口还高"。
+
+### 五、真机取证（CDP，`TAOCODE_DEBUG_PORT=9334` + `scripts/_cdp_step.py`）
+
+重建 `build/TaoCode.exe` 后逐项量测，**没有一项是"看着差不多"**：
+
+- **状态栏本体**：`footer.statusbar` 存在、高 **26px**、`display: flex`、6 个状态 chip、
+  `aria-label="状态栏"`、`getBoundingClientRect().bottom === window.innerHeight`（贴着视口底边）。
+- **工具窗口弹层（8 行）**：每行 `display:flex` / `gap:8px` / `align-items:center` / `text-align:left`，
+  `svg` **13×13、`stroke-width: 2px`**，图标到文字 **8px**，字首**全部一致**，无溢出。
+- **组件菜单（16 行）**：修完之后 `indents: [35]`（单一值）/ `slots: ['14']` / `iconToText: [8]` /
+  `textAlign: ['left']` / `display: ['flex']` —— 修之前是 `indents: [5, 35]`。
+- **齿轮弹层（6 行）**：父行字首 = 菜单左边 +35，`is-child` 子行 = +31（正好一个 4px 缩进档）。
+- **组件菜单可见性**：`top 90 / bottom 581 / height 491 / viewportH 603` ⇒ `fullyVisible: true`、不滚动。
+- 截图：`build/ui-menu-fixed.png`（齿轮菜单左对齐列表）、`build/ui-statusbar.png`（状态栏本体）、
+  `build/ui-statusbar-menu.png`（组件菜单翻到锚点上方，16 行字首齐平）。`build/` 是 gitignored 的，截图不入库。
+
+### 六、门禁（`tests/ui-icons.test.mjs` 16 条 + `tests/settings-keys-parity.test.mjs` 5 条 + `tests/menu-placement.test.mjs` 8 条）
+
+`tests/settings-keys-parity.test.mjs` 是这批最有价值的一条门禁，它把"前端键 ↔ native 键"钉死：
+
+1. `defaultEditorSettings` 的每个键都在 `EDITOR_SETTING_KEYS` 里（漏一个 = 整条 UI 静默消失）。
+2. 每个键在 `editor_defaults_impl()` 里都有默认值（否则老 state 迁移后仍是 `undefined`）。
+3. 白名单里的键也必须都被前端认（前端发整本账，多一个就让**每一次**保存都失败）。
+4. `bridge.ts` 的 `settings.update` 编辑器档白名单与 native 一致。
+5. `showStatusBar` 默认必须是 `true`（状态栏是默认可见的界面，不是可选装饰）。
+
+**每一条新门禁都做过负向验证**：把修复回退、确认门禁变红、再恢复。
+第一条做过两轮 —— 第一轮的"回退"脚本因为文件是 LF 而 `\r\n` 替换没生效，门禁假绿，第二次换成正则才真的验到。
+
+`tests/ui-icons.test.mjs` 的 16 条里有两条是这批新写的、且都是**按元素判**而不是按规则判的
+（CSS 会把 `display` 与 `gap`/`text-align` 拆成两条写，修饰类 `.is-child`/`.todo-row`/`.debug-row-editing`
+又是靠同元素上的基类拿到容器的 —— 门禁也得按这个口径）：
+
+- **写了 `gap`/`justify-content` 的类必须真的是 flex 容器**（`inline-block` 上这两条整条失效）。
+  这条当场逮到 11 处真实违规：`.ps-side-item`、`.row-menu-item`、`.empty-more-item`。
+- **带图标槽的菜单行必须 `text-align: left`**（`button` 的 UA 默认是 `center`）。
+
+这两条门禁的收集器都被返工过两次，两个失效方向都踩到了：
+① 正则 `<button[^>]*class="([^"]+)"` 在**属性值里含 `>`** 时会静默漏收
+（例如 `ToolWindowHeader.vue` 的 `@click="emit('move', 'left'); focusHeader()"`）—— 改用 `@vue/compiler-dom`
+的 `parseDom` + `walk` + `NodeTypes`；② 祖先条件限定的 scoped 规则（`VcsLog.vue:213` 的 `.log-menu .menu-button`）
+被当成全局对齐，会把门禁**撑成永远绿** —— 改成按选择器的**最右主题复合选择器**计数。
+
+### 七、判据
+
+全绿：`npm test` **1449/1449**、`vue-tsc --noEmit` 0 错、`vite build` 成功、native **36/36 ctest**、
+`build\TaoCode.exe` 重建成功。真机取证完已 `taskkill //IM TaoCode.exe //F`，`tasklist | grep -i taocode` 为空，
+`build/_probe_*.js` / `build/TaoCode.lsp.json` 全部删除（`build/` 是 gitignored 的，截图与探针都不入库）。
+
+`docs/settings-parity.md:53` 记的 `stickyLinesLimit` 默认 3 与上游 `EditorSettingsExternalizable.java:94` 的 5 有出入 ——
+这批只把 native 默认补成 3 与前端对齐，**偏离本身没有改**，留到动粘性行那一批时一起判。
+
 - `git_clone_lifecycle`（原生 ctest）：2026-10-01 在**整批跑**时偶发失败**两次**（两次都紧跟在一次完整前端构建/真机取证之后），单跑 10/10、随后重跑整批 34/34 —— 与并发/资源占用有关，与本批改动无关。见到就重跑一次，别当缺陷改代码。
 - `tests/editor-folding.test.mjs` 的「套在外面的语法块按最内层往外排（enclosingAreas）」：2026-10-01 在整批跑到高负载时偶发失败一次，单跑与随后重跑整批都通过 —— 与本批改动无关（那批改的是补全），见到重跑即可。

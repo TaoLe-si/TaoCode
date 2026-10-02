@@ -17,7 +17,8 @@ import NoticeList from './NoticeList.vue'
 import FileTree from './FileTree.vue'
 import ProjectViewSortSettings from './ProjectViewSortSettings.vue'
 import type { getProjectTreeState } from '../projectTreeState'
-import { ChevronsDownUp, ChevronsUpDown, Crosshair, Settings2 } from 'lucide-vue-next'
+import { Check, ChevronsDownUp, ChevronsUpDown, Crosshair, Settings2 } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 
 export interface ToolWindowViewContext {
   root: string
@@ -192,10 +193,10 @@ const props = defineProps<{
       <div class="heading-actions">
         <!-- PlatformActions.xml:1178-1184 order. Registry defaults replace
              ExpandAll with ExpandRecursively; hidden bulk action stays callable. -->
-        <button class="icon-button" title="在项目视图中选择 (Alt+F1)" aria-label="在项目视图中选择当前文件" :disabled="!ctx.workspace || !ctx.activePath" @click="ctx.onSelectInProjectView()"><Crosshair :size="15" /></button>
-        <button class="icon-button" title="递归展开所选目录" aria-label="递归展开所选目录" :disabled="!ctx.canExpandRecursively()" @click="ctx.onExpandRecursively()"><ChevronsUpDown :size="15" /></button>
-        <button class="icon-button" title="全部折叠" aria-label="全部折叠" :disabled="!ctx.workspace" @click="ctx.onFoldAll()"><ChevronsDownUp :size="15" /></button>
-        <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="15" /></button>
+        <button class="icon-button" title="在项目视图中选择 (Alt+F1)" aria-label="在项目视图中选择当前文件" :disabled="!ctx.workspace || !ctx.activePath" @click="ctx.onSelectInProjectView()"><Crosshair :size="iconSize.toolbar" /></button>
+        <button class="icon-button" title="递归展开所选目录" aria-label="递归展开所选目录" :disabled="!ctx.canExpandRecursively()" @click="ctx.onExpandRecursively()"><ChevronsUpDown :size="iconSize.toolbar" /></button>
+        <button class="icon-button" title="全部折叠" aria-label="全部折叠" :disabled="!ctx.workspace" @click="ctx.onFoldAll()"><ChevronsDownUp :size="iconSize.toolbar" /></button>
+        <button class="icon-button" :aria-expanded="gearOpen" aria-haspopup="menu" title="视图选项" aria-label="视图选项" @click.stop="gearOpen = !gearOpen"><Settings2 :size="iconSize.toolbar" /></button>
       </div>
       <!-- 齿轮菜单（ProjectView 的 Tree Appearance 组） -->
       <div v-if="gearOpen" class="dropdown view-gear-menu" role="menu" aria-label="视图选项" @click.stop @keydown.esc.stop.prevent="gearOpen = false">
@@ -203,15 +204,15 @@ const props = defineProps<{
              这一组是**项目视图自己的**齿轮项（`ProjectViewImpl.java:1169` 的 additionalGearActions），
              顺序照源码：Behavior 组在最前，然后才是排序与外观。 -->
         <div class="menu-section-label" role="presentation">行为</div>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollToSource" @click="ctx.projectTreeState.update({ autoscrollToSource: !ctx.projectTreeState.state.autoscrollToSource })"><span class="menu-item-icon"><span v-if="ctx.projectTreeState.state.autoscrollToSource">✓</span></span><span class="menu-item-title">单击打开文件</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollFromSource" @click="ctx.projectTreeState.update({ autoscrollFromSource: !ctx.projectTreeState.state.autoscrollFromSource })"><span class="menu-item-icon"><span v-if="ctx.projectTreeState.state.autoscrollFromSource">✓</span></span><span class="menu-item-title">始终选择打开的文件</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.openInPreviewTab" @click="ctx.projectTreeState.update({ openInPreviewTab: !ctx.projectTreeState.state.openInPreviewTab })"><span class="menu-item-icon"><span v-if="ctx.projectTreeState.state.openInPreviewTab">✓</span></span><span class="menu-item-title">用预览标签打开</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollToSource" @click="ctx.projectTreeState.update({ autoscrollToSource: !ctx.projectTreeState.state.autoscrollToSource })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.autoscrollToSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击打开文件</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.autoscrollFromSource" @click="ctx.projectTreeState.update({ autoscrollFromSource: !ctx.projectTreeState.state.autoscrollFromSource })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.autoscrollFromSource" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">始终选择打开的文件</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.projectTreeState.state.openInPreviewTab" @click="ctx.projectTreeState.update({ openInPreviewTab: !ctx.projectTreeState.state.openInPreviewTab })"><span class="menu-item-icon"><Check v-if="ctx.projectTreeState.state.openInPreviewTab" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">用预览标签打开</span></button>
         <div class="menu-rule" role="separator" />
         <ProjectViewSortSettings :settings="ctx.projectTreeState.state" :persistence-error="ctx.projectTreeState.status.persistenceError" @update="ctx.projectTreeState.update" />
         <div class="menu-rule" role="separator" />
         <div class="menu-section-label" role="presentation">树外观</div>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.compactIndents" @click="ctx.onToggleCompactIndents()"><span class="menu-item-icon"><span v-if="ctx.compactIndents">✓</span></span><span class="menu-item-title">紧凑缩进</span></button>
-        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.expandWithSingleClick" @click="ctx.onToggleExpandWithSingleClick()"><span class="menu-item-icon"><span v-if="ctx.expandWithSingleClick">✓</span></span><span class="menu-item-title">单击展开目录</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.compactIndents" @click="ctx.onToggleCompactIndents()"><span class="menu-item-icon"><Check v-if="ctx.compactIndents" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">紧凑缩进</span></button>
+        <button class="menu-item" role="menuitemcheckbox" :aria-checked="ctx.expandWithSingleClick" @click="ctx.onToggleExpandWithSingleClick()"><span class="menu-item-icon"><Check v-if="ctx.expandWithSingleClick" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">单击展开目录</span></button>
       </div>
       <div v-if="gearOpen" class="view-gear-backdrop" @click="gearOpen = false" />
     </div>

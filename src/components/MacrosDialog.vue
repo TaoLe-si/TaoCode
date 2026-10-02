@@ -6,6 +6,7 @@
 import { computed, ref } from 'vue'
 import { Play, Trash2, X } from 'lucide-vue-next'
 import { ANONYMOUS_MACRO_LABEL, actionStepCount, macroDisplayName, type Macro } from '../macros'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ macros: readonly Macro[]; playing: boolean }>()
 const emit = defineEmits<{
@@ -52,7 +53,7 @@ function commitRename() {
     <section class="command-palette macros-dialog" role="dialog" aria-modal="true" aria-label="编辑宏">
       <div class="palette-input">
         <span class="macros-heading">编辑宏</span>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="macros-body">
         <div class="macros-list" role="listbox" aria-label="宏列表">
@@ -69,9 +70,9 @@ function commitRename() {
         <div class="macros-detail">
           <template v-if="current">
             <div class="macros-actions">
-              <button class="subtle-button" :disabled="playing" @click="emit('play', { name: current.name })"><Play :size="13" />回放</button>
+              <button class="subtle-button" :disabled="playing" @click="emit('play', { name: current.name })"><Play :size="iconSize.menu" />回放</button>
               <button class="subtle-button" @click="startRename()">重命名…</button>
-              <button class="subtle-button" @click="emit('remove', { name: current.name })"><Trash2 :size="13" />删除宏</button>
+              <button class="subtle-button" @click="emit('remove', { name: current.name })"><Trash2 :size="iconSize.menu" />删除宏</button>
             </div>
             <div v-if="renaming" class="macros-rename">
               <input v-model="draft" type="text" aria-label="新的宏名" @keydown.enter.prevent="commitRename()" @keydown.esc.prevent="renaming = false" />
@@ -82,7 +83,7 @@ function commitRename() {
               <li v-for="(step, index) in current.steps" :key="`${index}:${step.kind}`">
                 <span class="macros-step-kind">{{ step.kind === 'action' ? '动作' : step.kind === 'typing' ? '输入' : '按键' }}</span>
                 <span class="macros-step-text">{{ stepLabel(step) }}</span>
-                <button class="icon-button" :aria-label="`删除第 ${index + 1} 步`" title="删除这一步" @click="emit('removeStep', { name: current.name, index })"><Trash2 :size="13" /></button>
+                <button class="icon-button" :aria-label="`删除第 ${index + 1} 步`" title="删除这一步" @click="emit('removeStep', { name: current.name, index })"><Trash2 :size="iconSize.menu" /></button>
               </li>
             </ol>
             <p v-if="!current.steps.length" class="palette-empty">这个宏没有步骤。</p>

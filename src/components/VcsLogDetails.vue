@@ -2,6 +2,7 @@
 import { Copy, GitPullRequestArrow } from 'lucide-vue-next'
 import type { GitFullCommit, GitCommitDetails } from '../bridge'
 import { logDate } from '../vcsLogGraph'
+import { iconSize } from '../uiIcons'
 defineProps<{ commit: GitFullCommit | null; details: GitCommitDetails | null; busy: boolean; loading?: boolean; error?: string }>()
 const emit = defineEmits<{ copy: []; cherryPick: []; navigate: [hash: string] }>()
 </script>
@@ -9,8 +10,8 @@ const emit = defineEmits<{ copy: []; cherryPick: []; navigate: [hash: string] }>
   <section class="detail" aria-label="提交详情">
     <template v-if="commit">
       <header><span>{{ commit.shortHash }}</span>
-        <button class="icon-button" title="复制完整哈希" aria-label="复制完整哈希" @click="emit('copy')"><Copy :size="13" /></button>
-        <button class="icon-button" :disabled="busy" title="摘取该提交到当前分支（cherry-pick）" aria-label="摘取提交" @click="emit('cherryPick')"><GitPullRequestArrow :size="13" /></button>
+        <button class="icon-button" title="复制完整哈希" aria-label="复制完整哈希" @click="emit('copy')"><Copy :size="iconSize.menu" /></button>
+        <button class="icon-button" :disabled="busy" title="摘取该提交到当前分支（cherry-pick）" aria-label="摘取提交" @click="emit('cherryPick')"><GitPullRequestArrow :size="iconSize.menu" /></button>
       </header>
       <p v-if="loading" role="status">正在加载详情…</p>
       <p v-if="error" role="alert">{{ error }}</p>

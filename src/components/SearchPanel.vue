@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from 'lucide-vue-next'
 import { isDesktop, request, type NamedScopeSetting, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
 import { compileScopeText, scopeLookup, scopeMatches, type ScopeContext, type ScopeSet } from '../scopes'
+import { iconSize } from '../uiIcons'
 
 // `scopes` / `moduleName` 来自项目设置：IDEA 的 Find in Path 对话框带一个 ScopeChooserCombo
 // （`FindPopupScopeUIImpl.java:59,137`），选中哪个作用域就只在那个范围里找。
@@ -325,10 +326,10 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 <template>
   <div class="fs-panel">
     <div class="fs-heading">
-      <span><Search :size="13" />全局搜索</span>
+      <span><Search :size="iconSize.menu" />全局搜索</span>
       <div class="heading-actions">
-        <button class="icon-button" :title="filtersOpen ? '收起筛选' : '筛选'" aria-label="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="14" /></button>
-        <button class="icon-button" title="清空" aria-label="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="14" /></button>
+        <button class="icon-button" :title="filtersOpen ? '收起筛选' : '筛选'" aria-label="切换文件筛选" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><SlidersHorizontal :size="iconSize.control" /></button>
+        <button class="icon-button" title="清空" aria-label="清空搜索" :disabled="!query && !replacement && !total" @click="reset"><X :size="iconSize.control" /></button>
       </div>
     </div>
 
@@ -340,7 +341,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
           <button class="fs-toggle" :class="{ on: regex }" title="正则表达式" aria-label="正则表达式" :aria-pressed="regex" @click="regex = !regex">.*</button>
           <button class="fs-toggle" :class="{ on: wholeWord }" title="全词匹配" aria-label="全词匹配" :aria-pressed="wholeWord" @click="wholeWord = !wholeWord">词</button>
         </div>
-        <button class="icon-button" title="搜索 (Enter)" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="14" /></button>
+        <button class="icon-button" title="搜索 (Enter)" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
       </div>
       <div v-if="filtersOpen" class="fs-filters">
         <label class="fs-filter"><span>包含</span><input v-model="include" type="text" placeholder="*.cpp 或 src/**" aria-label="仅搜索这些文件" spellcheck="false" /></label>
@@ -375,8 +376,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         <section v-for="group in groups" :key="group.path" class="fs-group">
           <div class="fs-group-head">
             <button class="fs-file" :aria-expanded="!collapsed.has(group.path)" :title="group.path" @click="toggleGroup(group.path)">
-              <ChevronRight v-if="collapsed.has(group.path)" :size="13" />
-              <ChevronDown v-else :size="13" />
+              <ChevronRight v-if="collapsed.has(group.path)" :size="iconSize.menu" />
+              <ChevronDown v-else :size="iconSize.menu" />
               <span class="fs-file-path">{{ group.path }}</span>
               <span class="fs-file-count">{{ group.matches.length }}</span>
             </button>

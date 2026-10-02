@@ -8,6 +8,7 @@ import { clampEditorFontSize, MAX_EDITOR_FONT_SIZE, MIN_EDITOR_FONT_SIZE } from 
 import { request, type EditorSettings, type RecentProject } from '../bridge'
 import type { Theme } from '../appearance'
 import NoticeList from './NoticeList.vue'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   projects: RecentProject[]
@@ -421,20 +422,20 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
       <p class="sidebar-note">{{ isDesktop ? '本地项目' : '浏览器 · 内存预览' }}</p>
       <nav class="welcome-navigation" aria-label="欢迎页导航">
         <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'projects' }" :aria-current="page === 'projects' ? 'page' : undefined" @click="page = 'projects'">
-          <FolderOpen :size="17" aria-hidden="true" />项目
+          <FolderOpen :size="iconSize.action" aria-hidden="true" />项目
         </button>
         <button type="button" class="menu-button navigation-item" :class="{ selected: page === 'customize' }" :aria-current="page === 'customize' ? 'page' : undefined" @click="page = 'customize'">
-          <Palette :size="17" aria-hidden="true" />自定义
+          <Palette :size="iconSize.action" aria-hidden="true" />自定义
         </button>
         <button
           type="button" class="menu-button navigation-item" :disabled="busy || !isDesktop"
           :title="isDesktop ? '管理本机插件' : '浏览器预览不能读取本机插件目录'" @click="emit('plugins')"
         >
-          <Plug :size="17" aria-hidden="true" />插件
+          <Plug :size="iconSize.action" aria-hidden="true" />插件
           <span v-if="pluginCount" class="nav-badge" :title="`${pluginCount} 个已安装插件`">{{ pluginCount }}</span>
         </button>
         <button type="button" class="menu-button navigation-item" :disabled="busy" @click="emit('help')">
-          <CircleHelp :size="17" aria-hidden="true" />关于
+          <CircleHelp :size="iconSize.action" aria-hidden="true" />关于
         </button>
       </nav>
       <!-- IDEA TabbedWelcomeScreen.createQuickAccessPanel: BorderLayout.SOUTH of the left
@@ -447,7 +448,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           aria-haspopup="menu" :aria-expanded="optionsOpen" :disabled="busy"
           @click.stop="optionsOpen = !optionsOpen"
         >
-          <Settings :size="16" aria-hidden="true" />
+          <Settings :size="iconSize.action" aria-hidden="true" />
         </button>
         <div v-if="optionsOpen" class="welcome-options" role="menu" aria-label="选项">
           <!-- PlatformActions.xml:994-1005 order: ShowSettings, CheckForUpdate, About | EditCustomProperties,
@@ -471,8 +472,8 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
         <section class="customize-group">
           <h2>主题</h2>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="17" aria-hidden="true" /><span>月之亮面</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="17" aria-hidden="true" /><span>月之暗面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>月之亮面</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>月之暗面</span></button>
           </div>
         </section>
         <section class="customize-group">
@@ -500,23 +501,23 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <h1 :id="`${id}-title`">项目</h1>
           <div class="project-actions" aria-label="项目操作">
             <button type="button" class="primary-button" :disabled="busy" @click="emit('create')">
-              <FolderPlus :size="16" aria-hidden="true" />新建项目
+              <FolderPlus :size="iconSize.action" aria-hidden="true" />新建项目
             </button>
             <button type="button" class="subtle-button action-button" :disabled="busy" @click="emit('open')">
-              <FolderOpen :size="16" aria-hidden="true" />{{ isDesktop ? '打开项目' : '打开内存示例' }}
+              <FolderOpen :size="iconSize.action" aria-hidden="true" />{{ isDesktop ? '打开项目' : '打开内存示例' }}
             </button>
             <button
               type="button" class="subtle-button action-button" :disabled="busy"
               :aria-describedby="!gitAvailable ? `${id}-git-note` : undefined" @click="emit('clone')"
             >
-              <GitBranch :size="16" aria-hidden="true" />克隆仓库
+              <GitBranch :size="iconSize.action" aria-hidden="true" />克隆仓库
             </button>
             <button
               v-if="selectedPaths.size > 1" type="button" class="subtle-button action-button"
               :disabled="busy" :title="`仅移除选中的 ${selectedPaths.size} 项记录`"
               @click="confirmForget(selectedProjects)"
             >
-              <X :size="16" aria-hidden="true" />移除所选 {{ selectedPaths.size }} 项
+              <X :size="iconSize.action" aria-hidden="true" />移除所选 {{ selectedPaths.size }} 项
             </button>
           </div>
         </header>
@@ -532,13 +533,13 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <div class="recent-heading">
             <h2 :id="`${id}-recent-title`">{{ isDesktop ? '近期项目' : '当前会话项目（内存）' }}</h2>
             <button type="button" class="icon-button" :disabled="busy" title="刷新项目列表" aria-label="刷新项目列表" @click="emit('refresh')">
-              <RefreshCw :size="15" aria-hidden="true" />
+              <RefreshCw :size="iconSize.toolbar" aria-hidden="true" />
             </button>
           </div>
           <div class="project-search">
-            <Search :size="16" aria-hidden="true" />
+            <Search :size="iconSize.action" aria-hidden="true" />
             <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称、路径或分组搜索" placeholder="搜索项目名称、路径或分组" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
-            <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="15" aria-hidden="true" /></button>
+            <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
           </div>
           <p class="list-status" role="status">{{ copyNote || (busy ? '正在处理项目操作…' : query.trim() ? `找到 ${filteredProjects.length} 个项目` : `${projects.length} 个项目`) }}</p>
 
@@ -549,7 +550,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
           <div v-if="filteredProjects.length" class="recent-list">
             <section v-for="group in groupedProjects" :key="group.name" class="recent-group">
               <header v-if="groupingActive" class="recent-group-head" tabindex="0" role="button" :aria-expanded="!groupCollapsed.has(group.name)" :aria-label="`${group.name}，${group.projects.length} 个项目，左右方向键折叠展开`" @keydown="onGroupKeydown(group.name, $event)" @click="toggleGroupCollapsed(group.name)">
-                <ChevronDown :size="13" :class="{ collapsed: groupCollapsed.has(group.name) }" aria-hidden="true" />
+                <ChevronDown :size="iconSize.menu" :class="{ collapsed: groupCollapsed.has(group.name) }" aria-hidden="true" />
                 <span class="recent-group-name">{{ group.name }}</span>
                 <span class="recent-group-count">{{ group.projects.length }}</span>
               </header>
@@ -564,7 +565,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <span class="project-details">
                   <span class="project-title"><strong>{{ project.name }}</strong><span v-if="!isDesktop" class="memory-tag">内存示例</span></span>
                   <span class="project-path" :title="project.path">{{ project.path }}</span>
-                  <span v-if="branchOf(project.path)" class="project-branch"><GitBranch :size="11" aria-hidden="true" />{{ branchOf(project.path) }}</span>
+                  <span v-if="branchOf(project.path)" class="project-branch"><GitBranch :size="iconSize.inline" aria-hidden="true" />{{ branchOf(project.path) }}</span>
                   <span class="project-date">最近打开：<time>{{ openedDate(project.lastOpened) }}</time></span>
                 </span>
               </button>
@@ -576,14 +577,14 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                   type="button" class="icon-button row-menu-button" :disabled="busy"
                   :aria-label="`打开 ${project.name} 的操作菜单`" :aria-expanded="menuPath === project.path" :title="project.available ? '更多操作' : '更多操作（路径不可用，可仅从列表移除）'"
                   @click.stop="toggleMenu(project.path)"
-                ><Settings v-if="project.available" :size="14" aria-hidden="true" /><X v-else :size="15" aria-hidden="true" /></button>
+                ><Settings v-if="project.available" :size="iconSize.control" aria-hidden="true" /><X v-else :size="iconSize.toolbar" aria-hidden="true" /></button>
               </div>
               <div v-if="menuPath === project.path" class="row-menu" role="menu" :aria-label="`${project.name} 的操作`">
                 <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy || !project.available" @click="openProject(project)">
-                  <FolderOpen :size="14" aria-hidden="true" />打开项目
+                  <FolderOpen :size="iconSize.control" aria-hidden="true" />打开项目
                 </button>
                 <button type="button" class="menu-button row-menu-item" role="menuitem" title="把项目路径复制到剪贴板" @click="copyProjectPath(project)">
-                  <Copy :size="14" aria-hidden="true" />复制路径
+                  <Copy :size="iconSize.control" aria-hidden="true" />复制路径
                 </button>
                 <!-- RevealFileAction.getActionName() = `action.RevealIn.name.other` ("Show in {0}")
                      with the file manager name (`IdeBundle.properties:3209` `action.explorer.text`
@@ -593,14 +594,14 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                   type="button" class="menu-button row-menu-item" role="menuitem" :disabled="!isDesktop" :title="isDesktop ? '在资源管理器中打开项目所在目录并选中它' : '浏览器预览无法打开资源管理器'"
                   @click="revealProjectDir(project)"
                 >
-                  <FolderSearch :size="14" aria-hidden="true" />在资源管理器中显示
+                  <FolderSearch :size="iconSize.control" aria-hidden="true" />在资源管理器中显示
                 </button>
                 <button v-if="groupingActive" type="button" class="menu-button row-menu-item" role="menuitem" @click="moveToGroup(project, '未分组')">移出分组</button>
                 <button v-for="group in groups" :key="group.name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === group.name" @click="moveToGroup(project, group.name)">移入「{{ group.name }}」</button>
                 <button type="button" class="menu-button row-menu-item" role="menuitem" @click="createGroupWith(project)">新建分组并移入…</button>
                 <div class="menu-rule" role="separator" />
                 <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="forgetSingle(project)">
-                  <X :size="14" aria-hidden="true" />仅从列表移除
+                  <X :size="iconSize.control" aria-hidden="true" />仅从列表移除
                 </button>
               </div>
             </li>
@@ -608,23 +609,23 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
             </section>
           </div>
           <div v-else-if="query.trim()" class="project-empty">
-            <Search :size="28" aria-hidden="true" />
+            <Search :size="iconSize.hero" aria-hidden="true" />
             <h3>没有匹配的项目</h3>
             <p>试试其他名称或路径，或清空搜索查看全部项目。</p>
             <button type="button" class="subtle-button" @click="clearSearch">清空搜索</button>
           </div>
           <div v-else class="project-empty">
-            <FolderOpen :size="30" aria-hidden="true" />
+            <FolderOpen :size="iconSize.hero" aria-hidden="true" />
             <h3>{{ isDesktop ? '还没有近期项目' : '尚未打开内存示例' }}</h3>
             <p>{{ isDesktop ? '点击“打开项目”选择已有文件夹，或点击“新建项目”创建 Java 项目或空项目。' : '点击“打开内存示例”体验编辑。真实的打开、新建和克隆需要在桌面端操作。' }}</p>
             <!-- IDEA EmptyStateProjectsPanel starts with a vertical group of quick actions
                  plus a "More" drop-down instead of a single hint line. -->
             <div class="empty-actions" role="group" aria-label="快捷开始">
-              <button type="button" class="primary-button empty-action" :disabled="busy" @click="emit('create')"><FolderPlus :size="15" aria-hidden="true" />新建项目</button>
-              <button type="button" class="subtle-button empty-action" :disabled="busy" @click="emit('open')"><FolderOpen :size="15" aria-hidden="true" />打开</button>
-              <button type="button" class="subtle-button empty-action" :disabled="busy || !gitAvailable" :title="gitAvailable ? '从远程仓库克隆' : '安装 Git 后可用'" @click="emit('clone')"><GitBranch :size="15" aria-hidden="true" />从 VCS 获取</button>
+              <button type="button" class="primary-button empty-action" :disabled="busy" @click="emit('create')"><FolderPlus :size="iconSize.toolbar" aria-hidden="true" />新建项目</button>
+              <button type="button" class="subtle-button empty-action" :disabled="busy" @click="emit('open')"><FolderOpen :size="iconSize.toolbar" aria-hidden="true" />打开</button>
+              <button type="button" class="subtle-button empty-action" :disabled="busy || !gitAvailable" :title="gitAvailable ? '从远程仓库克隆' : '安装 Git 后可用'" @click="emit('clone')"><GitBranch :size="iconSize.toolbar" aria-hidden="true" />从 VCS 获取</button>
               <div class="empty-more">
-                <button type="button" class="subtle-button empty-action" :aria-expanded="moreOpen" aria-haspopup="menu" @click="moreOpen = !moreOpen">更多<ChevronDown :size="13" aria-hidden="true" /></button>
+                <button type="button" class="subtle-button empty-action" :aria-expanded="moreOpen" aria-haspopup="menu" @click="moreOpen = !moreOpen">更多<ChevronDown :size="iconSize.menu" aria-hidden="true" /></button>
                 <div v-if="moreOpen" class="empty-more-menu" role="menu">
                   <button type="button" class="menu-button empty-more-item" role="menuitem" :disabled="busy" @click="moreOpen = false; emit('settings')">设置…</button>
                   <button type="button" class="menu-button empty-more-item" role="menuitem" :disabled="busy || !isDesktop" @click="moreOpen = false; emit('plugins')">插件…</button>
@@ -644,7 +645,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
               type="button" class="subtle-button welcome-notice-button" :aria-expanded="notificationsOpen"
               aria-haspopup="dialog" :title="noticeTitle(notices)" :aria-label="noticeTitle(notices)"
               @click="notificationsOpen = !notificationsOpen"
-            ><BellDot :size="15" aria-hidden="true" />{{ noticeButtonText(notices.length) }}</button>
+            ><BellDot :size="iconSize.toolbar" aria-hidden="true" />{{ noticeButtonText(notices.length) }}</button>
             <NoticeList
               v-if="notificationsOpen" :entries="notices" :live="screenReaderLive"
               @clear="emit('clearNotices')" @close="notificationsOpen = false"
@@ -740,10 +741,13 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .memory-tag { flex-shrink: 0; color: var(--warning); font-size: 10px; }
 .recent-row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); flex-shrink: 0; }
 /* IDEA shows the row's ⋮ only while the pointer (or keyboard focus) is on the row. */
-.row-menu-button { opacity: 0; transition: opacity .1s ease; }
+.row-menu-button { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
 .recent-row:hover .row-menu-button, .recent-row:focus-within .row-menu-button, .recent-row.menu-open .row-menu-button { opacity: 1; }
 .row-menu { position: absolute; top: 100%; right: var(--space-2); z-index: 30; display: flex; flex-direction: column; min-width: 160px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
-.row-menu-item { justify-content: flex-start; gap: var(--space-2); }
+/* `display: flex` 是补的：这是 `<button>`，UA 默认 inline-block，`justify-content` / `gap`
+   在上面全是空操作（与 `.tool-menu-item` style.css:318、`.status-widget-item`:734 同款）。
+   由 ui-icons 门禁的"写了 gap 必须是 flex"那条一并盯住。 */
+.row-menu-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2); }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .missing-tag { padding: 2px var(--space-1); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 10px; }
 /* Source: IconUtil.desaturate in RecentProjectIconHelper when isProjectValid=false.
@@ -754,7 +758,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .empty-action { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 168px; justify-content: flex-start; }
 .empty-more { position: relative; display: flex; flex-direction: column; align-items: center; }
 .empty-more-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; min-width: 150px; margin-top: 4px; padding: 4px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); }
-.empty-more-item { justify-content: flex-start; width: 100%; }
+.empty-more-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; }
 .project-empty h3 { margin: var(--space-3) 0 var(--space-2); font-size: 15px; color: var(--text); font-weight: 500; }
 .project-empty p { max-width: 430px; margin: 0 auto var(--space-4); line-height: 1.8; overflow-wrap: anywhere; }
 @media (max-width: 760px) {

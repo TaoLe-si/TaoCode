@@ -28,6 +28,7 @@ import {
   compileScopeText, excludeFrom, includeInto, scopeLookup, scopeMatches, scopeText, type ScopeContext, type ScopeSet,
 } from '../scopes'
 
+import { iconSize } from '../uiIcons'
 const props = defineProps<{
   /** null = 没有打开项目（整页只读）。 */
   scopes: NamedScopeSetting[] | null
@@ -308,8 +309,9 @@ function reset() {
 }
 defineExpose({ dirty, getDraft })
 </script>
-
 <template>
+
+
   <section class="scope-page">
     <p v-if="!root" class="field-hint">先打开一个项目才能编辑作用域：作用域随项目保存。</p>
     <p v-else-if="filesNote" class="field-hint">{{ filesNote }}</p>
@@ -318,13 +320,13 @@ defineExpose({ dirty, getDraft })
       <div class="scope-master">
         <!-- ScopeChooserConfigurable.createActions（:92-109）：添加（本地/共享）· 删除 · 复制 · 另存为 · 上移 · 下移 -->
         <div class="scope-actions">
-          <button type="button" :disabled="!root" title="添加本地作用域" @click="addScope(false)"><Plus :size="14" />本地</button>
-          <button type="button" :disabled="!root" title="添加共享作用域（随 .idea 提交）" @click="addScope(true)"><Plus :size="14" />共享</button>
-          <button type="button" :disabled="!current" title="删除" @click="removeScope()"><Trash2 :size="14" /></button>
-          <button type="button" :disabled="!current" title="复制" @click="copyScope()"><Copy :size="14" /></button>
-          <button type="button" :disabled="!current" title="另存为另一个持有者" @click="saveAs()"><Save :size="14" /></button>
-          <button type="button" :disabled="selected <= 0" title="上移" @click="move(-1)"><ArrowUp :size="14" /></button>
-          <button type="button" :disabled="selected >= draft.length - 1" title="下移" @click="move(1)"><ArrowDown :size="14" /></button>
+          <button type="button" :disabled="!root" title="添加本地作用域" @click="addScope(false)"><Plus :size="iconSize.control" />本地</button>
+          <button type="button" :disabled="!root" title="添加共享作用域（随 .idea 提交）" @click="addScope(true)"><Plus :size="iconSize.control" />共享</button>
+          <button type="button" :disabled="!current" title="删除" aria-label="删除作用域" @click="removeScope()"><Trash2 :size="iconSize.control" /></button>
+          <button type="button" :disabled="!current" title="复制" aria-label="复制作用域" @click="copyScope()"><Copy :size="iconSize.control" /></button>
+          <button type="button" :disabled="!current" title="另存为另一个持有者" aria-label="另存为另一个持有者" @click="saveAs()"><Save :size="iconSize.control" /></button>
+          <button type="button" :disabled="selected <= 0" title="上移" aria-label="上移" @click="move(-1)"><ArrowUp :size="iconSize.control" /></button>
+          <button type="button" :disabled="selected >= draft.length - 1" title="下移" aria-label="下移" @click="move(1)"><ArrowDown :size="iconSize.control" /></button>
         </div>
         <ul class="scope-list" aria-label="作用域列表">
           <li v-for="(entry, index) in draft" :key="index" :class="{ active: index === selected }">
@@ -355,7 +357,7 @@ defineExpose({ dirty, getDraft })
             <span>通过 VCS 共享</span>
           </label>
           <p class="field-hint">
-            <CircleHelp :size="13" aria-hidden="true" />
+            <CircleHelp :size="iconSize.menu" aria-hidden="true" />
             共享作用域保存在 <code>.idea</code> 目录里，可以随版本控制分享给其他人；本地作用域只存在本机。
           </p>
 
@@ -400,13 +402,13 @@ defineExpose({ dirty, getDraft })
                 @click="pick(row.node, $event)"
                 @dblclick="toggle(row.node)"
               >
-                <button v-if="row.node.directory" type="button" class="scope-caret" :title="open.has(row.node.path) ? '折叠' : '展开'" @click.stop="toggle(row.node)">
-                  <ChevronDown v-if="open.has(row.node.path)" :size="12" />
-                  <ChevronRight v-else :size="12" />
+                <button v-if="row.node.directory" type="button" class="scope-caret" :title="`${open.has(row.node.path) ? '折叠' : '展开'} ${row.node.name}`" :aria-label="`${open.has(row.node.path) ? '折叠' : '展开'} ${row.node.name}`" @click.stop="toggle(row.node)">
+                  <ChevronDown v-if="open.has(row.node.path)" :size="iconSize.dense" />
+                  <ChevronRight v-else :size="iconSize.dense" />
                 </button>
                 <span v-else class="scope-caret" />
-                <Folder v-if="row.node.directory" :size="13" />
-                <FileText v-else :size="13" />
+                <Folder v-if="row.node.directory" :size="iconSize.menu" />
+                <FileText v-else :size="iconSize.menu" />
                 <span>{{ row.node.name }}</span>
               </div>
               <p v-if="!visible.length" class="field-hint">没有可显示的文件。</p>
@@ -435,7 +437,6 @@ defineExpose({ dirty, getDraft })
     </div>
   </section>
 </template>
-
 <style scoped>
 .scope-page { display: flex; flex-direction: column; gap: 8px; }
 .scope-split { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.6fr); gap: 12px; align-items: start; }

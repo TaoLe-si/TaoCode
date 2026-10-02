@@ -15,6 +15,7 @@ import { computed, ref, watch } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import { EDITOR_LANGUAGES } from '../bridge'
 import { associationsFromRows, rowsFromAssociations, validExtension, validateFileAssociations } from '../fileTypes'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ associations: Record<string, string> | null; busy: boolean }>()
 const emit = defineEmits<{ save: [associations: Record<string, string>] }>()
@@ -72,12 +73,12 @@ function save() {
           <select v-model="row.language" :aria-label="`第 ${index + 1} 个扩展名的语言`">
             <option v-for="language in EDITOR_LANGUAGES" :key="language" :value="language">{{ LANGUAGE_LABELS[language] }}</option>
           </select>
-          <button type="button" class="icon-button ft-center" :aria-label="`删除第 ${index + 1} 条关联`" @click="drop(index)"><Trash2 :size="13" /></button>
+          <button type="button" class="icon-button ft-center" title="删除此关联" :aria-label="`删除第 ${index + 1} 条关联`" @click="drop(index)"><Trash2 :size="iconSize.menu" /></button>
         </div>
         <p v-if="!rows.length" class="ft-empty">没有关联，全部按扩展名与内容自动识别。</p>
       </div>
       <div class="ft-actions">
-        <button type="button" class="subtle-button" :disabled="busy" @click="add"><Plus :size="13" /> 添加关联</button>
+        <button type="button" class="subtle-button" :disabled="busy" @click="add"><Plus :size="iconSize.menu" /> 添加关联</button>
         <button type="button" class="primary-button" :disabled="busy || !dirty" @click="save">保存关联</button>
         <button type="button" class="subtle-button" :disabled="busy || !dirty" @click="fillFrom(props.associations)">还原</button>
         <span class="ft-note">{{ note || (dirty ? '有未保存的改动' : '已与项目同步') }}</span>

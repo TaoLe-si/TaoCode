@@ -51,6 +51,35 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // FileColorManagerImpl.java:75-106: all switches default true.
     // Both local and shared color lists are project-owned (FileColorModelStorageManager.kt:27-38).
     "fileColorsEnabled", "fileColorsForTabs", "fileColorsForProjectView",
+    // 下面五个键前端早就认（src/bridge.ts:1123 的 settings.update 编辑器档 + src/settingsModel.ts:149
+    // 的 defaultEditorSettings），但本白名单漏了它们。漏一个键不是"少存一项"那么轻：
+    // `validate_editor_patch` 第一行就是 `known_keys(patch, EDITOR_SETTING_KEYS)`，而前端每次保存发的是
+    // **整个** editorSettings 对象（src/App.vue:676 `{ ...editorSettings.value, ...patch }`），
+    // 于是整次 settings.update 会被拒；更狠的是 `prune_unknown`（native/project_settings_state.cpp:41）
+    // 把它们从 projects.json 里剪掉，前端拿回的对象里 `showStatusBar` 直接是 undefined ——
+    // 状态栏（src/App.vue:2316 的 v-if）整条不渲染。判据见 tests/settings-keys-parity.test.mjs。
+    //
+    // showStatusBar：UISettingsState.kt:113 `var showStatusBar: Boolean by property(true)`；
+    //   唯一的消费点是 ProjectFrameHelper.kt:329 `statusBar.isVisible = uiSettings.showStatusBar &&
+    //   !uiSettings.presentationMode`（注意上游还串了 presentationMode，本仓的 v-if 只判前半个条件）。
+    "showStatusBar",
+    // rightMargin：EditorSettingsExternalizable.java:83 `public boolean IS_RIGHT_MARGIN_SHOWN = true;`，
+    //   属性名见同文件 :1221 `PROP_IS_RIGHT_MARGIN_SHOWN = "isRightMarginShown"`。设置行是
+    //   EditorAppearanceConfigurable.kt:48 myCbRightMargin（编辑器 › 外观 › 右边距）。
+    "rightMargin",
+    // showStickyLines / stickyLinesLimit：EditorSettingsExternalizable.java:93 `SHOW_STICKY_LINES = true`、
+    //   :94 `STICKY_LINES_LIMIT = 5`；属性名 :1231 "showStickyLines" / :1233 "stickyLinesLimit"，
+    //   读出口 :509 areStickyLinesShown() 与 :547 stickyLineLimit()。设置行见
+    //   StickyLinesConfigurable.kt:7-20。本仓的层数默认取 3 而非上游的 5（见 docs/settings-parity.md:53），
+    //   那是已登记的偏离，不在这一批改。
+    "showStickyLines", "stickyLinesLimit",
+    // diffContextLines：`diff.base`（DiffSettingsConfigurable.kt:30-58）的 settings.context.lines。
+    //   它在 general 键表里也有一份（settings_schema.cpp:154），但**唯一写它的是编辑器设置页**
+    //   （SettingsDialog.vue:1133 `v-model.number="settings.diffContextLines"` 绑的是编辑器那本账），
+    //   唯一的读口也是编辑器那本账（toolViewContext.ts:123 `editorSettings.value.diffContextLines`
+    //   → SourceControl.vue:553-554 拼 `git diff -U<n>`）。所以权威副本在编辑器档，
+    //   general 那份留着是为了不破坏已存盘的旧 state，不是因为它在用。
+    "diffContextLines",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {

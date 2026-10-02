@@ -22,6 +22,7 @@ import {
   type SearchEverywhereTab,
 } from '../searchEverywhere'
 
+import { iconSize } from '../uiIcons'
 /** 把一段文本按 [start,end) 区间切成普通段与高亮段，模板里直接 v-for 渲染。 */
 function highlightParts(text: string, fragments: readonly [number, number][]) {
   if (!fragments.length) return [{ text, hit: false }]
@@ -175,7 +176,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
   <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
     <section ref="popupEl" class="command-palette search-everywhere" :class="{ 'with-preview': showPreview && selected?.preview, 'is-placed': placed }" :style="popupStyle" role="dialog" aria-modal="true" aria-label="随处搜索" @keydown.esc.stop="emit('close')" @pointerup="storeBounds">
       <div class="palette-input se-drag-handle" @pointerdown="startMove" @pointermove="movePopup" @pointerup="stopMove" @pointercancel="stopMove" @lostpointercapture="stopMove">
-        <Search :size="18" />
+        <Search :size="iconSize.action" />
         <input
           ref="input"
           v-model="query"
@@ -186,7 +187,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           @keydown.tab.prevent="cycle($event.shiftKey ? -1 : 1)"
           @keydown.enter.prevent="chooseSelected()"
         />
-        <button class="icon-button" aria-label="关闭随处搜索" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭随处搜索" aria-label="关闭随处搜索" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="se-tabs" role="tablist">
         <button
@@ -216,7 +217,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           <span class="se-title"><template v-for="(part, partIndex) in highlightParts(entry.title, fragmentCache[position] ?? [])" :key="partIndex"><mark v-if="part.hit" class="se-hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="entry.subtitle" class="se-subtitle">{{ entry.subtitle }}</span>
           <span class="action-group">{{ searchEverywhereSourceLabel(entry.source) }}</span>
-          <ArrowRight :size="14" />
+          <ArrowRight :size="iconSize.control" />
         </button>
         <p v-if="!results.length" class="palette-empty">没有匹配的结果。</p>
       </div>

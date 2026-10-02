@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import type { TodoPattern } from '../bridge'
 import { MAX_TODO_PATTERNS, duplicateTodoPatterns, validateTodoPatterns } from '../todoPatterns'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ patterns: TodoPattern[] | null; busy: boolean }>()
 const emit = defineEmits<{ save: [patterns: TodoPattern[]] }>()
@@ -72,12 +73,12 @@ function save() {
           <label class="tp-center">
             <input v-model="entry.caseSensitive" type="checkbox" :aria-label="`第 ${index + 1} 条区分大小写`" />
           </label>
-          <button type="button" class="icon-button tp-center" :aria-label="`删除第 ${index + 1} 条标记`" @click="drop(index)"><Trash2 :size="13" /></button>
+          <button type="button" class="icon-button tp-center" title="删除此标记" :aria-label="`删除第 ${index + 1} 条标记`" @click="drop(index)"><Trash2 :size="iconSize.menu" /></button>
         </div>
         <p v-if="!draft.length" class="tp-empty">没有标记。</p>
       </div>
       <div class="tp-actions">
-        <button type="button" class="subtle-button" :disabled="busy || draft.length >= MAX_TODO_PATTERNS" @click="add"><Plus :size="13" /> 添加标记</button>
+        <button type="button" class="subtle-button" :disabled="busy || draft.length >= MAX_TODO_PATTERNS" @click="add"><Plus :size="iconSize.menu" /> 添加标记</button>
         <button type="button" class="primary-button" :disabled="busy || !dirty" @click="save">保存 TODO 模式</button>
         <button type="button" class="subtle-button" :disabled="busy || !dirty" @click="fillFrom(props.patterns)">还原</button>
         <span class="tp-note">{{ note || (dirty ? '有未保存的改动' : '已与项目同步') }}</span>

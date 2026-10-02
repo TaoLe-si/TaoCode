@@ -34,6 +34,7 @@ import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '.
 // 这里只剩两处需要类型：emit 的载荷形状与传给 Gradle 页的检测结果。
 import type { BuildToolsSettings, GradleDetection } from '../gradle'
 import type { Theme } from '../appearance'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   settings: EditorSettings
@@ -605,7 +606,7 @@ defineExpose({ handleEscape })
   >
     <header class="dialog-header">
       <h2 :id="`${id}-title`" class="dialog-title">设置</h2>
-      <button type="button" class="icon-button" :disabled="busy" :title="busy ? '正在保存，请稍候' : '关闭（Esc）'" aria-label="关闭设置" @click="close"><X :size="18" aria-hidden="true" /></button>
+      <button type="button" class="icon-button" :disabled="busy" :title="busy ? '正在保存，请稍候' : '关闭（Esc）'" aria-label="关闭设置" @click="close"><X :size="iconSize.action" aria-hidden="true" /></button>
     </header>
     <div class="settings-layout">
       <nav class="settings-navigation" role="tablist" aria-label="设置分类" aria-orientation="vertical" @keydown="navigateTabs">
@@ -616,13 +617,13 @@ defineExpose({ handleEscape })
             type="button" class="settings-search-icon" :class="{ 'has-history': searchHistory.length > 0 }"
             :title="searchHistory.length ? `${SEARCH_HISTORY_LABEL}（Alt+↓）` : '搜索设置'" :aria-label="searchHistory.length ? SEARCH_HISTORY_LABEL : '搜索'"
             aria-haspopup="listbox" :aria-expanded="historyOpen" @click.prevent="onSearchIconClick"
-          ><Search :size="14" aria-hidden="true" /></button>
+          ><Search :size="iconSize.control" aria-hidden="true" /></button>
           <input
             ref="searchInput" v-model="query" type="search" placeholder="搜索设置" autocomplete="off" spellcheck="false"
             title="查找 (Ctrl+F)" aria-describedby="settings-search-hint" @mousedown="onSearchPointerDown" @keydown.enter.prevent="onSearchEnter"
             @blur="recordSearchHistory()" @keydown.alt.down.prevent="openHistory()" @keydown.alt.up.prevent="stepSearchHistory('prev')"
           />
-          <button v-if="query" type="button" class="icon-button" title="清空搜索（Esc）" aria-label="清空搜索" @click="clearSearch"><X :size="12" aria-hidden="true" /></button>
+          <button v-if="query" type="button" class="icon-button" title="清空搜索（Esc）" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.dense" aria-hidden="true" /></button>
         </label>
         <div v-if="historyOpen" class="settings-crumb-backdrop" @click="closeHistory()" @contextmenu.prevent="closeHistory()" />
         <div
@@ -647,7 +648,7 @@ defineExpose({ handleEscape })
               type="button" class="menu-button settings-tab" role="tab" :aria-selected="section === node.key"
               :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
               @click="select(node.key)"
-            ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+            ><component :is="node.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
           </template>
           <!-- 搜索结果：父节点本身不是页面，所以只列匹配到的叶子，按层级缩进 -->
           <button
@@ -656,7 +657,7 @@ defineExpose({ handleEscape })
             role="tab" :aria-selected="section === node.key"
             :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
             @click="select(node.key)"
-          ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+          ><component :is="node.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
           <p v-if="!visibleNodes.length" class="settings-empty">没有匹配的设置项。</p>
         </template>
         <template v-else>
@@ -666,7 +667,7 @@ defineExpose({ handleEscape })
               :aria-expanded="expanded.has(group.key)" :tabindex="-1"
               @click="toggleGroup(group.key)"
             >
-              <ChevronDown :size="13" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(group.key) }" aria-hidden="true" />
+              <ChevronDown :size="iconSize.menu" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(group.key) }" aria-hidden="true" />
               <span>{{ group.label }}</span>
               <span v-if="groupHasNewBadge(group.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" />
             </button>
@@ -678,7 +679,7 @@ defineExpose({ handleEscape })
                 type="button" class="menu-button settings-tab settings-child" role="tab" :aria-selected="section === node.key"
                 :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
                 @click="select(node.key)"
-              ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+              ><component :is="node.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
             </template>
           </template>
           <template v-for="node in nodes.filter(item => !item.parent)" :key="node.key">
@@ -687,21 +688,21 @@ defineExpose({ handleEscape })
               v-if="node.expandOnly" type="button" class="menu-button settings-tab settings-group"
               :aria-expanded="expanded.has(node.key)" :tabindex="-1" @click="toggleGroup(node.key)"
             >
-              <ChevronDown :size="13" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(node.key) }" aria-hidden="true" />
+              <ChevronDown :size="iconSize.menu" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(node.key) }" aria-hidden="true" />
               <span>{{ node.label }}</span>
             </button>
             <button
               v-else :id="`${id}-tab-${node.key}`" type="button" class="menu-button settings-tab" role="tab" :aria-selected="section === node.key"
               :aria-controls="`${id}-panel-${node.key}`" :tabindex="section === node.key ? 0 : -1"
               @click="select(node.key)"
-            ><component :is="node.icon" :size="16" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+            ><component :is="node.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ node.label }}</span><span v-if="pageHasNewBadge(node.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
             <template v-if="!node.expandOnly || expanded.has(node.key)">
               <template v-for="child in nodes.filter(item => item.parent === node.key)" :key="child.key">
                 <button
                   v-if="child.expandOnly" type="button" class="menu-button settings-tab settings-group settings-child"
                   :aria-expanded="expanded.has(child.key)" :tabindex="-1" @click="toggleGroup(child.key)"
                 >
-                  <ChevronDown :size="13" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(child.key) }" aria-hidden="true" />
+                  <ChevronDown :size="iconSize.menu" class="settings-caret" :class="{ 'settings-caret-closed': !expanded.has(child.key) }" aria-hidden="true" />
                   <span>{{ child.label }}</span>
                 </button>
                 <template v-else>
@@ -709,13 +710,13 @@ defineExpose({ handleEscape })
                     :id="`${id}-tab-${child.key}`" type="button" class="menu-button settings-tab settings-child" role="tab" :aria-selected="section === child.key"
                     :aria-controls="`${id}-panel-${child.key}`" :tabindex="section === child.key ? 0 : -1"
                     @click="select(child.key)"
-                  ><component :is="child.icon" :size="16" aria-hidden="true" /><span>{{ child.label }}</span><span v-if="pageHasNewBadge(child.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+                  ><component :is="child.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ child.label }}</span><span v-if="pageHasNewBadge(child.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
                   <button
                     v-for="grand in nodes.filter(item => item.parent === child.key)" :id="`${id}-tab-${grand.key}`" :key="grand.key"
                     type="button" class="menu-button settings-tab settings-grandchild" role="tab" :aria-selected="section === grand.key"
                     :aria-controls="`${id}-panel-${grand.key}`" :tabindex="section === grand.key ? 0 : -1"
                     @click="select(grand.key)"
-                  ><component :is="grand.icon" :size="16" aria-hidden="true" /><span>{{ grand.label }}</span><span v-if="pageHasNewBadge(grand.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
+                  ><component :is="grand.icon" :size="iconSize.action" aria-hidden="true" /><span>{{ grand.label }}</span><span v-if="pageHasNewBadge(grand.key)" class="settings-new-dot" role="img" :aria-label="NEW_BADGE_TEXT" :title="NEW_BADGE_TEXT" /></button>
                 </template>
               </template>
             </template>
@@ -724,13 +725,13 @@ defineExpose({ handleEscape })
       </nav>
       <div class="settings-content" :class="{ 'settings-spotlight-on': spotlightActive }">
         <div class="settings-breadcrumb">
-          <button type="button" class="icon-button" :disabled="!history.length" title="后退" aria-label="后退" @click="goBack"><ChevronLeft :size="16" aria-hidden="true" /></button>
-          <button type="button" class="icon-button" :disabled="!future.length" title="前进" aria-label="前进" @click="goForward"><ChevronRight :size="16" aria-hidden="true" /></button>
+          <button type="button" class="icon-button" :disabled="!history.length" title="后退" aria-label="后退" @click="goBack"><ChevronLeft :size="iconSize.action" aria-hidden="true" /></button>
+          <button type="button" class="icon-button" :disabled="!future.length" title="前进" aria-label="前进" @click="goForward"><ChevronRight :size="iconSize.action" aria-hidden="true" /></button>
           <span
             class="settings-crumbs" role="button" tabindex="0" title="右键或 Shift+F10 复制设置路径"
             @contextmenu.prevent="openCrumbMenu" @keydown.shift.f10.prevent="openCrumbMenu" @keydown.contextmenu.prevent="openCrumbMenu"
           >
-            <template v-if="groupLabel"><span class="crumb-group">{{ groups.find(group => group.key === groupLabel)?.label }}</span><ChevronRight :size="11" class="crumb-sep" aria-hidden="true" /></template>
+            <template v-if="groupLabel"><span class="crumb-group">{{ groups.find(group => group.key === groupLabel)?.label }}</span><ChevronRight :size="iconSize.inline" class="crumb-sep" aria-hidden="true" /></template>
             <span class="crumb-current">{{ currentLabel }}</span>
           </span>
           <button
@@ -741,15 +742,12 @@ defineExpose({ handleEscape })
         </div>
         <div v-if="crumbMenu" class="settings-crumb-backdrop" @click="crumbMenu = null" @contextmenu.prevent="crumbMenu = null" />
         <div v-if="error" class="notice error settings-error" role="alert"><span>{{ error }}</span></div>
-        <section
-          v-show="section === 'preferences.lookFeel'" :id="`${id}-panel-appearance`" class="settings-panel" data-page="appearance"
-          role="tabpanel" :aria-labelledby="`${id}-tab-appearance`"
-        >
+        <section v-show="section === 'preferences.lookFeel'" :id="`${id}-panel-appearance`" class="settings-panel" data-page="appearance" role="tabpanel" :aria-labelledby="`${id}-tab-appearance`">
           <h3>外观</h3>
           <p class="section-description">主题立即生效；缩放与紧凑模式随“应用”保存并立即作用于整个界面。</p>
           <div class="theme-options" role="group" aria-label="主题">
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="19" aria-hidden="true" /><span>月之亮面</span><span class="theme-state">{{ theme === 'light' ? '当前主题' : '切换到月之亮面' }}</span></button>
-            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="19" aria-hidden="true" /><span>月之暗面</span><span class="theme-state">{{ theme === 'dark' ? '当前主题' : '切换到月之暗面' }}</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'light'" @click="emit('theme', 'light', $event)"><Sun :size="iconSize.action" aria-hidden="true" /><span>月之亮面</span><span class="theme-state">{{ theme === 'light' ? '当前主题' : '切换到月之亮面' }}</span></button>
+            <button type="button" class="subtle-button theme-option" :aria-pressed="theme === 'dark'" @click="emit('theme', 'dark', $event)"><Moon :size="iconSize.action" aria-hidden="true" /><span>月之暗面</span><span class="theme-state">{{ theme === 'dark' ? '当前主题' : '切换到月之暗面' }}</span></button>
           </div>
           <fieldset class="settings-fields" :disabled="busy" aria-label="缩放与界面密度">
             <div class="input-row">
@@ -766,6 +764,11 @@ defineExpose({ handleEscape })
             <p :id="`${id}-compact-hint`" class="field-hint restore-hint">界面元素占用更少的屏幕空间（控件高度、标签条与标题栏更矮）。</p>
             <label class="checkbox-row"><input v-model="editor.fullPathsInWindowHeader" type="checkbox" :aria-describedby="`${id}-fullpath-hint`" /><span>在窗口标题中始终显示完整路径</span></label>
             <p :id="`${id}-fullpath-hint`" class="field-hint restore-hint">窗口标题显示项目根目录而不是仅文件夹名，便于区分同名的两个项目。</p>
+            <!-- 「状态栏」这一行以前不存在：`showStatusBar` 又被 native 的键白名单漏掉
+                 （native/settings_schema.hpp 的 EDITOR_SETTING_KEYS 注释有前后），于是两头都没出口。
+                 上游出处：AppearanceOptionsTopHitProvider.kt:33 `cdShowStatusBar`，groupName = viewOptionGroupName。 -->
+            <label class="checkbox-row"><input v-model="editor.showStatusBar" type="checkbox" :aria-describedby="`${id}-statusbar-hint`" /><span>状态栏</span></label>
+            <p :id="`${id}-statusbar-hint`" class="field-hint restore-hint">在窗口底部显示状态栏（分支、位置、缩进、编码等，右键可逐项增删组件）。</p>
           </fieldset>
           <h4 class="settings-group-title">辅助功能与字体</h4>
           <fieldset class="settings-fields" :disabled="busy">
@@ -1271,7 +1274,7 @@ defineExpose({ handleEscape })
       </div>
     </div>
     <footer class="dialog-footer">
-      <span class="settings-hint"><CircleHelp :size="14" aria-hidden="true" /><span>项目级设置（实时模板、TODO、文件类型、作用域、VCS 日志）只应用于当前项目，随项目保存；项目结构改在「文件 › 项目结构…」对话框里（IDEA 同样如此）。</span></span>
+      <span class="settings-hint"><CircleHelp :size="iconSize.control" aria-hidden="true" /><span>项目级设置（实时模板、TODO、文件类型、作用域、VCS 日志）只应用于当前项目，随项目保存；项目结构改在「文件 › 项目结构…」对话框里（IDEA 同样如此）。</span></span>
       <span class="save-status" role="status">{{ copyNote || (busy ? '正在保存，请稍候…' : section === 'preferences.lookFeel' ? '主题即时生效' : section === 'editing.templates' ? '模板改动即时保存到本项目' : PROJECT_SCOPED_PAGES.has(section) ? '本页改动需保存后才写入项目' : dirty ? '有未应用的修改' : '已应用') }}</span>
       <div class="footer-actions">
         <button type="button" class="subtle-button" :disabled="busy || !dirty" title="应用 (Alt+A)" @click="applyAll()">应用(A)</button>
@@ -1311,7 +1314,7 @@ defineExpose({ handleEscape })
 .settings-group { color: var(--text); font-weight: 600; }
 .settings-child { margin-left: var(--space-5); }
 .settings-grandchild { margin-left: calc(var(--space-5) * 2); }
-.settings-caret { transition: transform .12s ease; }
+.settings-caret { transition: transform var(--dur-1) var(--ease); }
 .settings-caret-closed { transform: rotate(-90deg); }
 .settings-empty { margin: var(--space-2); color: var(--muted); font-size: 11px; }
 /* IDEA's right-aligned new-options marker (SettingsTreeView.java:791 `setRightIcon(NEW_BADGE_DOT)`,

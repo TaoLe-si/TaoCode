@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import { headerAction } from '../toolWindowHeader'
+import { iconSize } from '../uiIcons'
 
 // IDEA's ToolWindowHeader (platform/platform-impl/src/com/intellij/toolWindow/ToolWindowHeader.kt):
 // a title bar that renders the tool window title on the left and an action toolbar on the right,
@@ -91,7 +92,7 @@ function focusHeader() {
     <button
       type="button" class="icon-button" :aria-expanded="menuOpen" :aria-label="`${title} 选项`"
       title="移动、最大化或隐藏此工具窗口" @click.stop="toggleMenu"
-    ><MoreVertical :size="14" />
+    ><MoreVertical :size="iconSize.control" />
     </button>
     <div v-if="menuOpen" class="tool-menu" role="menu" :aria-label="`${title} 选项`" @click.stop @contextmenu.prevent>
       <!-- The item order follows IDEA's ActiveToolwindowGroup (PlatformActions.xml:652-664):
@@ -100,7 +101,7 @@ function focusHeader() {
            so the four hide actions collapse into one operation here — a single 隐藏 entry rather than
            four items that all do the same thing. The text is UIBundle `tool.window.hide.action.name`. -->
       <button type="button" class="menu-button tool-menu-item" role="menuitem" title="隐藏此工具窗口" @click="emit('hide'); focusHeader()">
-        <X :size="13" aria-hidden="true" />隐藏
+        <span class="menu-item-icon"><X :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">隐藏</span>
       </button>
       <div class="menu-rule" role="separator" />
       <!-- MaximizeToolWindowAction.java:26/59-62 — Toggleable, so the label flips with the state. -->
@@ -109,19 +110,18 @@ function focusHeader() {
         :aria-checked="maximized" :title="maximized ? '恢复工具窗口大小' : '让工具窗口占满整个窗口宽度'"
         @click="emit('maximize'); focusHeader()"
       >
-        <Minimize2 v-if="maximized" :size="13" aria-hidden="true" />
-        <Maximize2 v-else :size="13" aria-hidden="true" />
-        {{ maximized ? '恢复工具窗口大小' : '最大化工具窗口' }}
+        <span class="menu-item-icon"><Minimize2 v-if="maximized" :size="iconSize.menu" aria-hidden="true" /><Maximize2 v-else :size="iconSize.menu" aria-hidden="true" /></span>
+        <span class="menu-item-title">{{ maximized ? '恢复工具窗口大小' : '最大化工具窗口' }}</span>
       </button>
       <div class="menu-rule" role="separator" />
       <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'left'" @click="emit('move', 'left'); focusHeader()">
-        <PanelLeft :size="13" aria-hidden="true" />移动到左侧
+        <span class="menu-item-icon"><PanelLeft :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">移动到左侧</span>
       </button>
       <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'right'" @click="emit('move', 'right'); focusHeader()">
-        <PanelRight :size="13" aria-hidden="true" />移动到右侧
+        <span class="menu-item-icon"><PanelRight :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">移动到右侧</span>
       </button>
       <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'bottom'" @click="emit('move', 'bottom'); focusHeader()">
-        <PanelBottom :size="13" aria-hidden="true" />移动到底部
+        <span class="menu-item-icon"><PanelBottom :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">移动到底部</span>
       </button>
       <!-- 工具窗口自己的那一组（上游 GearActionGroup :857-891）：行、标题、快捷键与可用性都取自主菜单
            动作索引；渲染器与底部 dock 的齿轮共用同一个 ToolWindowGearRows，两处不再各抄一份。 -->

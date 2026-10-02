@@ -14,6 +14,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowRight, ClipboardPaste, Trash2, X } from 'lucide-vue-next'
 import { clipboardDigitIndex, clipboardPreview, clipboardRowPrefix, type ClipboardEntry } from '../clipboard'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ entries: ClipboardEntry[] }>()
 const emit = defineEmits<{
@@ -70,9 +71,9 @@ function onKeydown(event: KeyboardEvent) {
   <div class="modal-backdrop" @click.self="emit('close')">
     <section class="command-palette" role="dialog" aria-modal="true" aria-label="从历史粘贴">
       <div class="palette-input">
-        <ClipboardPaste :size="18" />
+        <ClipboardPaste :size="iconSize.action" />
         <input ref="filter" v-model="query" placeholder="筛选剪贴板历史…（回车粘贴，Delete 删除）" aria-label="筛选剪贴板历史" @keydown="onKeydown" />
-        <button class="icon-button" aria-label="关闭" @click="emit('close')"><X :size="16" /></button>
+        <button class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" /></button>
       </div>
       <div class="palette-results">
         <button
@@ -82,8 +83,8 @@ function onKeydown(event: KeyboardEvent) {
         >
           <span class="paste-index">{{ clipboardRowPrefix(position, rows.length) }}</span>
           <span class="paste-text">{{ row.label }}</span>
-          <span class="paste-remove" role="button" :aria-label="`删除第 ${position + 1} 项`" title="删除这一项" @click.stop="remove(row.index)"><Trash2 :size="13" /></span>
-          <ArrowRight v-if="position === cursor" :size="14" />
+          <span class="paste-remove" role="button" :aria-label="`删除第 ${position + 1} 项`" title="删除这一项" @click.stop="remove(row.index)"><Trash2 :size="iconSize.menu" /></span>
+          <ArrowRight v-if="position === cursor" :size="iconSize.control" />
         </button>
         <p v-if="!rows.length" class="palette-empty">剪贴板历史为空。</p>
       </div>

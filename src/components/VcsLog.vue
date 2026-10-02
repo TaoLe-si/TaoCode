@@ -15,6 +15,7 @@ import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
 import { logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
 import { logDate } from '../vcsLogGraph'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
 // 「标签名称」是**项目设置**（`vcsLog.showTagNames`），写回走宿主；其余行是本窗口自己的排布。
@@ -151,22 +152,22 @@ async function jump(hash: string) {
       <template #first>
         <div class="vcslog-toolbar" role="toolbar" aria-label="日志过滤与显示">
           <VcsLogFilters :query="query" @apply="applyQuery" />
-          <button class="icon-button" title="后退" aria-label="日志导航后退" :disabled="!canBack" @click="history('back')"><ArrowLeft :size="14" /></button>
-          <button class="icon-button" title="前进" aria-label="日志导航前进" :disabled="!canForward" @click="history('forward')"><ArrowRight :size="14" /></button>
+          <button class="icon-button" title="后退" aria-label="日志导航后退" :disabled="!canBack" @click="history('back')"><ArrowLeft :size="iconSize.control" /></button>
+          <button class="icon-button" title="前进" aria-label="日志导航前进" :disabled="!canForward" @click="history('forward')"><ArrowRight :size="iconSize.control" /></button>
           <span class="count" :title="`已加载 ${commits.length} 条提交`">{{ commits.length }}{{ hasMore ? '+' : '' }}</span>
-          <button class="icon-button" title="刷新" aria-label="刷新提交历史" :disabled="!isDesktop || !root || loading" @click="load()"><RefreshCw :size="14" /></button>
-          <button class="icon-button" title="显示提交详情" aria-label="显示提交详情" :aria-pressed="showDetails" @click="toggleDetails"><PanelRight :size="14" /></button>
+          <button class="icon-button" title="刷新" aria-label="刷新提交历史" :disabled="!isDesktop || !root || loading" @click="load()"><RefreshCw :size="iconSize.control" /></button>
+          <button class="icon-button" title="显示提交详情" aria-label="显示提交详情" :aria-pressed="showDetails" @click="toggleDetails"><PanelRight :size="iconSize.control" /></button>
           <!-- 上游 `Vcs.Log.PresentationSettings`（日志工具条右角、icon=GroupBy）——本仓放同一个位置。 -->
           <details class="filter presentation" @toggle="gearOpen = ($event.target as HTMLDetailsElement).open">
-            <summary :title="`${LOG_VIEW_OPTIONS_TITLE}（配置日志的表示）`" :aria-label="LOG_VIEW_OPTIONS_TITLE"><Settings2 :size="14" /></summary>
+            <summary :title="`${LOG_VIEW_OPTIONS_TITLE}（配置日志的表示）`" :aria-label="LOG_VIEW_OPTIONS_TITLE"><Settings2 :size="iconSize.control" /></summary>
             <form class="popup" @submit.prevent>
               <template v-for="row in presentationRows" :key="row.id">
                 <span v-if="row.group" class="group-title" role="presentation">{{ row.title }}</span>
                 <button v-for="child in row.children ?? []" :key="child.id" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="child.checked" @click="pickPresentation(child)">
-                  <span class="menu-item-icon"><Check v-if="child.checked" :size="13" /></span><span>{{ child.title }}</span>
+                  <span class="menu-item-icon"><Check v-if="child.checked" :size="iconSize.menu" /></span><span>{{ child.title }}</span>
                 </button>
                 <button v-if="!row.group" type="button" class="menu-button presentation-row" role="menuitemcheckbox" :aria-checked="row.checked" @click="pickPresentation(row)">
-                  <span class="menu-item-icon"><Check v-if="row.checked" :size="13" /></span><span>{{ row.title }}</span>
+                  <span class="menu-item-icon"><Check v-if="row.checked" :size="iconSize.menu" /></span><span>{{ row.title }}</span>
                 </button>
               </template>
             </form>

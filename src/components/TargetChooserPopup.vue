@@ -15,6 +15,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FileCode2, Pin } from 'lucide-vue-next'
 import { filterChooseTargets, moveChooseTarget, type ChooseTargetRow } from '../chooseTarget'
 import { popupCancelKeyAction } from '../popupCancel'
+import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ title: string; rows: ChooseTargetRow[]; x?: number; y?: number; pinnable?: boolean }>()
 const emit = defineEmits<{ (event: 'pick', row: ChooseTargetRow): void; (event: 'close'): void; (event: 'pin'): void }>()
@@ -66,12 +67,12 @@ onUnmounted(() => window.removeEventListener('pointerdown', onPointerDown, true)
 <template>
   <div ref="list" class="choose-target" role="listbox" :aria-label="title" tabindex="-1" :style="anchor" @keydown.stop="onKeydown">
     <p class="choose-target-title"><span>{{ title }}</span>
-      <button v-if="pinnable" type="button" class="choose-target-pin" title="在查找窗口中打开结果" aria-label="在查找窗口中打开结果" @click="emit('pin')"><Pin :size="12" /></button>
+      <button v-if="pinnable" type="button" class="choose-target-pin" title="在查找窗口中打开结果" aria-label="在查找窗口中打开结果" @click="emit('pin')"><Pin :size="iconSize.dense" /></button>
     </p>
     <p v-if="filter" class="choose-target-filter">{{ filter }}</p>
     <button v-for="(row, index) in visible" :key="row.id" class="choose-target-row" :class="{ 'is-selected': visible[selected]?.id === row.id }"
             role="option" :aria-selected="visible[selected]?.id === row.id" @click="pick(row)" @mouseenter="selected = index">
-      <FileCode2 :size="13" class="choose-target-icon" aria-hidden="true" />
+      <FileCode2 :size="iconSize.menu" class="choose-target-icon" aria-hidden="true" />
       <span class="choose-target-name">{{ row.name }}</span>
       <span v-if="row.container" class="choose-target-container"> (in {{ row.container }})</span>
       <span class="choose-target-position">{{ row.position }}</span>

@@ -11,6 +11,8 @@
 // 动作与原生命令的对应在 src/branchPopup.ts 里（纯数据，可测）；组件只负责渲染与派发。
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronRight, GitBranch, Plus, Trash2, X } from 'lucide-vue-next'
+import { Check } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
 import { BRANCH_ROW_ACTIONS, BRANCH_TOP_ACTIONS, filterBranches, sortBranches, validateBranchName } from '../branchPopup'
 import { popupCancelKeyAction } from '../popupCancel'
 
@@ -74,9 +76,9 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <div class="branch-popup" role="dialog" aria-modal="false" aria-label="Git 分支" @keydown="onKeydown">
     <div class="bp-search">
-      <GitBranch :size="14" aria-hidden="true" />
+      <GitBranch :size="iconSize.control" aria-hidden="true" />
       <input ref="searchInput" v-model="query" placeholder="搜索分支…" aria-label="搜索分支" spellcheck="false" />
-      <button type="button" class="icon-button" title="关闭" aria-label="关闭分支弹窗" @click="emit('close')"><X :size="14" /></button>
+      <button type="button" class="icon-button" title="关闭" aria-label="关闭分支弹窗" @click="emit('close')"><X :size="iconSize.control" /></button>
     </div>
 
     <div class="bp-input">
@@ -87,7 +89,7 @@ function onKeydown(event: KeyboardEvent) {
 
     <div class="bp-list" role="listbox" aria-label="分支列表">
       <p v-if="current" class="bp-current" role="option" :aria-selected="true">
-        <span class="bp-check" aria-hidden="true">✓</span>
+        <span class="bp-check" aria-hidden="true"><Check :size="iconSize.menu" /></span>
         <span class="bp-name">{{ current }}</span>
         <span class="bp-tag">当前</span>
       </p>
@@ -95,7 +97,7 @@ function onKeydown(event: KeyboardEvent) {
         <span class="bp-check" aria-hidden="true" />
         <span class="bp-name">{{ branch }}</span>
         <span class="bp-actions">
-          <button type="button" class="icon-button" :aria-expanded="expanded === branch" :title="`${branch} 的动作`" :aria-label="`${branch} 的动作`" @click.stop="expanded = expanded === branch ? '' : branch"><ChevronRight :size="12" /></button>
+          <button type="button" class="icon-button" :aria-expanded="expanded === branch" :title="`${branch} 的动作`" :aria-label="`${branch} 的动作`" @click.stop="expanded = expanded === branch ? '' : branch"><ChevronRight :size="iconSize.dense" /></button>
         </span>
       </button>
       <p v-if="!visible.length" class="bp-empty">没有匹配的分支。</p>
@@ -105,7 +107,7 @@ function onKeydown(event: KeyboardEvent) {
     <div v-if="expanded" class="bp-menu" role="menu" :aria-label="`${expanded} 的分支动作`">
       <p class="bp-menu-title">{{ expanded }}</p>
       <button v-for="action in BRANCH_ROW_ACTIONS" :key="action.id" type="button" role="menuitem" :disabled="busy" :title="action.ideaAction" @click="run(action.id, expanded)">
-        <Trash2 v-if="action.id === 'delete'" :size="13" /><Plus v-else :size="13" /><span>{{ action.title }}</span>
+        <Trash2 v-if="action.id === 'delete'" :size="iconSize.menu" /><Plus v-else :size="iconSize.menu" /><span>{{ action.title }}</span>
       </button>
     </div>
   </div>
@@ -121,7 +123,9 @@ function onKeydown(event: KeyboardEvent) {
 .bp-list { display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .bp-current, .bp-row { display: flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; }
 .bp-row:hover { background: var(--hover); }
-.bp-check { width: 12px; flex-shrink: 0; color: var(--accent); }
+/* 勾选槽与菜单行图标同度量（14px，见 style.css:126 的 .menu-item-icon），
+   原来 12px 是留给 12px 字体字形 ✓ 的，换成 13px 描边图标后要跟着让开。 */
+.bp-check { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; color: var(--accent); }
 .bp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-tag { color: var(--muted); font-size: 10px; }
 .bp-actions { display: flex; }

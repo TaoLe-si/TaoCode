@@ -19,6 +19,7 @@ import {
   type SupportedSearchOption,
 } from '../pluginGroups'
 
+import { iconSize } from '../uiIcons'
 const props = defineProps<{
   plugins: PluginInfo[]
   /** 正在安装的条目（安装源的名字）；解压完才解析出清单，所以这期间只有名字。 */
@@ -107,15 +108,15 @@ function clearQuery() {
       <header class="plugin-head">
         <h2 id="plugin-title">插件</h2>
         <button type="button" class="subtle-button plugin-install" title="安装一个插件包（.zip / .jar，内含 plugin.json）" :disabled="busy" @click="emit('install')">
-          <FileArchive :size="14" aria-hidden="true" />从磁盘安装…
+          <FileArchive :size="iconSize.control" aria-hidden="true" />从磁盘安装…
         </button>
         <button type="button" class="icon-button" title="从一个含 plugin.json 的目录安装" aria-label="从目录安装插件" :disabled="busy" @click="emit('installDirectory')">
-          <FolderPlus :size="15" aria-hidden="true" />
+          <FolderPlus :size="iconSize.toolbar" aria-hidden="true" />
         </button>
         <button type="button" class="icon-button" title="重新读取插件目录" aria-label="刷新插件列表" :disabled="busy" @click="emit('refresh')">
-          <RefreshCw :size="15" aria-hidden="true" />
+          <RefreshCw :size="iconSize.toolbar" aria-hidden="true" />
         </button>
-        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="16" aria-hidden="true" /></button>
+        <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
       <p class="plugin-hint">
         插件目录：用户配置目录下的 <code>plugins</code>。一个插件是一个含 <code>plugin.json</code> 的子目录（也可以直接装 <code>.zip</code> 插件包）；
@@ -124,9 +125,9 @@ function clearQuery() {
 
       <div class="plugin-toolbar">
         <label class="plugin-search">
-          <Search :size="14" aria-hidden="true" />
+          <Search :size="iconSize.control" aria-hidden="true" />
           <input ref="searchRef" v-model="query" type="search" placeholder="搜索插件，或输入 /enabled、/disabled、/invalid 过滤" aria-label="搜索插件" />
-          <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearQuery"><X :size="13" aria-hidden="true" /></button>
+          <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearQuery"><X :size="iconSize.menu" aria-hidden="true" /></button>
         </label>
         <button type="button" class="subtle-button plugin-sort" :class="{ on: !sortByName }" :aria-pressed="!sortByName" @click="sortByName = !sortByName">
           {{ sortByName ? '按名称排序' : '按目录顺序' }}
@@ -173,7 +174,7 @@ function clearQuery() {
                 </li>
                 <li v-for="label in group.pending" :key="`pending-${label}`">
                   <div class="plugin-row is-pending" aria-busy="true">
-                    <span class="plugin-avatar plugin-avatar-pending" aria-hidden="true"><Loader2 :size="14" class="spin" /></span>
+                    <span class="plugin-avatar plugin-avatar-pending" aria-hidden="true"><Loader2 :size="iconSize.control" class="spin" /></span>
                     <span class="plugin-main">
                       <span class="plugin-name">{{ label }}</span>
                       <span class="plugin-desc">正在安装…</span>
@@ -210,7 +211,7 @@ function clearQuery() {
           </section>
           <div class="plugin-detail-actions">
             <button v-if="confirmId !== selected.id" type="button" class="subtle-button plugin-danger" :disabled="busy" @click="confirmId = selected.id">
-              <Trash2 :size="13" aria-hidden="true" />卸载…
+              <Trash2 :size="iconSize.menu" aria-hidden="true" />卸载…
             </button>
             <template v-else>
               <button type="button" class="primary-button menu-danger-solid" :disabled="busy" @click="confirmId = ''; emit('uninstall', selected.id)">
@@ -279,7 +280,7 @@ function clearQuery() {
 .plugin-install { flex-shrink: 0; }
 .plugin-detail-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .plugin-danger { color: var(--warning); }
-.spin { animation: plugin-spin 1s linear infinite; }
+.spin { animation: plugin-spin var(--dur-spin) linear infinite; }
 @keyframes plugin-spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {
   .plugin-body { grid-template-columns: minmax(0, 1fr); max-height: none; }
