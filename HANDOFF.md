@@ -5,7 +5,7 @@
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1399/1399** | 2026-10-02；最近一批新增 `tests/b6-verdict.test.mjs` 7 条（`fuzzy-match` 9 条、`search-everywhere` 20 条） |
+| `npm test` | **1420/1420** | 2026-10-02；最近一批新增 `tests/diff-align.test.mjs` 13 条 + `tests/b7-verdict.test.mjs` 8 条（前一批：`b6-verdict` 7 条、`fuzzy-match` 9 条、`search-everywhere` 20 条） |
 | `npx vite build` | ✓（需**手动**跑，再 `build-native-locked.bat` 同步到 `build/ui`） | 构建脚本只做 `cmake --build` + 拷 `dist`，**不含 vite** |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
@@ -35,6 +35,26 @@ AE2 那种布局上工程数 6 → 1、诊断 2100+ 批 → 5 批。逐条明细
 `scripts/verdict_signals.py`（逐类机械信号）与 `docs/inventory/verdict-actions.md`
 （`actions` 域 **317 类逐条判决**：`[x]` 12 / `[~]` 36 / `[ ]` 6 / `[-]` 263），
 门控 `tests/b6-verdict.test.mjs` 会在覆盖面、引用真实性、四档计数、四个上游常量任一处漂移时失败。
+
+**第八十三批（find + diff 域）**：判决 `docs/inventory/verdict-find-diff.md`
+（**630 类逐条判决**：`[x]` 11 / `[~]` 40 / `[ ]` 498 / `[-]` 81），门控 `tests/b7-verdict.test.mjs` 8 条。
+同批修掉一处**量出来的**性能缺陷：`src/diffText.ts` 的行级对齐原来开 (m+1)×(n+1) 的完整 DP 表，
+而它跑在 UI 线程上（剪贴板对比 `src/vcsActions.ts:122`、保存冲突预览 `src/editorFileOps.ts:54`），
+实测 10000×10000 行是 **1414 ms / 773 MB**；换成上游同款 **Myers O(ND) 线性空间**
+（`src/diffAlign.ts`，`Diff.kt` + `MyersLCS.kt` + `Enumerator.kt`）后是 **10 ms / 0.5 MB**。
+`computeLCS` 保留原名与 `{from,to}` 形状，三个调用点一行没动。
+**两条教训**：
+① **LCS 不唯一，判据不能写成"输出与 DP 完全一致"**。`tests/diff-align.test.mjs` 判的是两条可判性质 ——
+公共段长度等于 DP 最优值、输出是合法公共子序列；再配 **4000 组随机用例**（极小字母表制造大量重复行）。
+第一版 3182/4000，查下来算法没错（失败用例里长度都等于最优），是**装配顺序**：前后缀一起推、
+前缀落到了列表末尾 —— 这类 bug 只有靠 oracle 才能抓到。
+② **`verdict_signals.py` 的 `in_code` 是类名子串匹配**，`Range`/`Side`/`LinkAction`/`impl`
+都会命中，不能当判决用；而 `in_comment_only` 里的 `FindUsagesManager`/`FindUsagesOptions` 之类
+是因为本仓**注释里引用了上游行号**才命中的 —— 引用 ≠ 实现。本批正是靠逐个开源码，
+把 8 条本来判 `[ ]` 的类（查找用法那一片）改判 `[~]`，它们在本仓**是有的**（走 LSP
+`textDocument/references`，`src/treeActions.ts:99-113`）。
+**门控的价值当场兑现**：`tests/b7-verdict.test.mjs` 第一遍就抓到 **18 条 `[~]` 写了"本仓没有"
+却没落到任何文件**，逐条补完本仓落点才通过。
 
 ## 本轮（2026-09-27 晚）做了什么 —— 历史存档
 

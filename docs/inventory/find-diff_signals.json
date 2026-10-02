@@ -1,0 +1,7389 @@
+{
+ "counts": {
+  "total": 630,
+  "unreadable": 0,
+  "test": 13,
+  "swing": 158,
+  "platform": 10,
+  "in_code": 6,
+  "in_comment_only": 11,
+  "never": 613
+ },
+ "rows": [
+  {
+   "name": "JavaClassFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaClassFindUsagesOptions.java",
+   "lines": 114,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesHelper",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaFindUsagesHelper.java",
+   "lines": 512,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaFindUsagesOptions.java",
+   "lines": 92,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaMethodFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaMethodFindUsagesOptions.java",
+   "lines": 119,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaPackageFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaPackageFindUsagesOptions.java",
+   "lines": 87,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaThrowFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaThrowFindUsagesOptions.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaVariableFindUsagesOptions",
+   "path": "java/java-analysis-impl/src/com/intellij/find/findUsages/JavaVariableFindUsagesOptions.java",
+   "lines": 92,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaDiffIgnoredRangeProvider",
+   "path": "java/java-impl/src/com/intellij/diff/lang/JavaDiffIgnoredRangeProvider.java",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindClassUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/FindClassUsagesDialog.java",
+   "lines": 138,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindMethodUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/FindMethodUsagesDialog.java",
+   "lines": 163,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPackageUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/FindPackageUsagesDialog.java",
+   "lines": 80,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindThrowUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/FindThrowUsagesDialog.java",
+   "lines": 107,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindVariableUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/FindVariableUsagesDialog.java",
+   "lines": 106,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "GroupByPackageAction",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/GroupByPackageAction.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesCollector",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/JavaFindUsagesCollector.kt",
+   "lines": 116,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesDialog",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/JavaFindUsagesDialog.java",
+   "lines": 108,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesHandler",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/JavaFindUsagesHandler.java",
+   "lines": 273,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaFindUsagesHandlerFactory",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/JavaFindUsagesHandlerFactory.java",
+   "lines": 72,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaUsageTargetProvider",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/JavaUsageTargetProvider.java",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaSimilarityComplexExpressionFeaturesExtractor",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/similarity/JavaSimilarityComplexExpressionFeaturesExtractor.java",
+   "lines": 145,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaSimilarityFeaturesExtractor",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/similarity/JavaSimilarityFeaturesExtractor.java",
+   "lines": 431,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JavaUsageSimilarityFeaturesProvider",
+   "path": "java/java-impl/src/com/intellij/find/findUsages/similarity/JavaUsageSimilarityFeaturesProvider.java",
+   "lines": 88,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindBundle",
+   "path": "platform/analysis-impl/src/com/intellij/find/FindBundle.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "FindSettings",
+   "path": "platform/analysis-impl/src/com/intellij/find/FindSettings.java",
+   "lines": 117,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesSettings",
+   "path": "platform/analysis-impl/src/com/intellij/find/FindUsagesSettings.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "FindUsagesHandlerBase",
+   "path": "platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesHandlerBase.java",
+   "lines": 161,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesHelper",
+   "path": "platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesHelper.java",
+   "lines": 165,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesOptions",
+   "path": "platform/analysis-impl/src/com/intellij/find/findUsages/FindUsagesOptions.java",
+   "lines": 105,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "PersistentFindUsagesOptions",
+   "path": "platform/analysis-impl/src/com/intellij/find/findUsages/PersistentFindUsagesOptions.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextOccurrenceReference",
+   "path": "platform/analysis-impl/src/com/intellij/find/findUsages/TextOccurrenceReference.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectSettingsBase",
+   "path": "platform/analysis-impl/src/com/intellij/find/impl/FindInProjectSettingsBase.java",
+   "lines": 129,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindSettingsBase",
+   "path": "platform/analysis-impl/src/com/intellij/find/impl/FindSettingsBase.java",
+   "lines": 336,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindSettingsImpl",
+   "path": "platform/analysis-impl/src/com/intellij/find/impl/FindSettingsImpl.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesSettingsImpl",
+   "path": "platform/analysis-impl/src/com/intellij/find/impl/FindUsagesSettingsImpl.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffApplicationSettings",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffApplicationSettings.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentFactory",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffContentFactory.java",
+   "lines": 128,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContext",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffContext.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffDialogHints",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffDialogHints.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTitleCustomizer",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffEditorTitleCustomizer.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffExtension",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffExtension.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffManager",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffManager.java",
+   "lines": 70,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffManagerEx",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffManagerEx.java",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestFactory",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffRequestFactory.java",
+   "lines": 177,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestPanel",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffRequestPanel.java",
+   "lines": 45,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffTool",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffTool.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffToolType",
+   "path": "platform/diff-api/src/com/intellij/diff/DiffToolType.kt",
+   "lines": 8,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorDiffViewer",
+   "path": "platform/diff-api/src/com/intellij/diff/EditorDiffViewer.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FocusableContext",
+   "path": "platform/diff-api/src/com/intellij/diff/FocusableContext.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrameDiffTool",
+   "path": "platform/diff-api/src/com/intellij/diff/FrameDiffTool.java",
+   "lines": 85,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InvalidDiffRequestException",
+   "path": "platform/diff-api/src/com/intellij/diff/InvalidDiffRequestException.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SuppressiveDiffTool",
+   "path": "platform/diff-api/src/com/intellij/diff/SuppressiveDiffTool.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestChain",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/DiffRequestChain.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestChainBase",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/DiffRequestChainBase.java",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProducer",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/DiffRequestProducer.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProducerException",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/DiffRequestProducerException.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestSelectionChain",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/DiffRequestSelectionChain.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffRequestChain",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/SimpleDiffRequestChain.java",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffRequestProducer",
+   "path": "platform/diff-api/src/com/intellij/diff/chains/SimpleDiffRequestProducer.java",
+   "lines": 65,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComparisonManager",
+   "path": "platform/diff-api/src/com/intellij/diff/comparison/ComparisonManager.java",
+   "lines": 124,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InnerFragmentsPolicy",
+   "path": "platform/diff-api/src/com/intellij/diff/comparison/InnerFragmentsPolicy.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContent",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/DiffContent.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentBase",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/DiffContentBase.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirectoryContent",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/DirectoryContent.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DocumentContent",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/DocumentContent.java",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EmptyContent",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/EmptyContent.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileContent",
+   "path": "platform/diff-api/src/com/intellij/diff/contents/FileContent.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BinaryMergeRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/BinaryMergeRequest.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ConflictType",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/ConflictType.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeCallback",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeCallback.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeContext",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeContext.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeRequest.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRequestHandler",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeRequestHandler.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRequestProducer",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeRequestProducer.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeResult",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeResult.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeTool",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/MergeTool.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextMergeRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/TextMergeRequest.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideMergeRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/ThreesideMergeRequest.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AutomaticExternalMergeTool",
+   "path": "platform/diff-api/src/com/intellij/diff/merge/external/AutomaticExternalMergeTool.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComponentDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/ComponentDiffRequest.java",
+   "lines": 12,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ContentDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/ContentDiffRequest.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/DiffRequest.java",
+   "lines": 65,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ErrorDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/ErrorDiffRequest.java",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MessageDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/MessageDiffRequest.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NoDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/NoDiffRequest.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ProxySimpleDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/ProxySimpleDiffRequest.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffRequest",
+   "path": "platform/diff-api/src/com/intellij/diff/requests/SimpleDiffRequest.java",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AssignmentTracker",
+   "path": "platform/diff-api/src/com/intellij/diff/util/AssignmentTracker.kt",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffNotificationProvider",
+   "path": "platform/diff-api/src/com/intellij/diff/util/DiffNotificationProvider.java",
+   "lines": 13,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffUserDataKeys",
+   "path": "platform/diff-api/src/com/intellij/diff/util/DiffUserDataKeys.java",
+   "lines": 149,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineCol",
+   "path": "platform/diff-api/src/com/intellij/diff/util/LineCol.java",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineRange",
+   "path": "platform/diff-api/src/com/intellij/diff/util/LineRange.java",
+   "lines": 58,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffActionPromoter",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffActionPromoter.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentFactoryEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffContentFactoryEx.java",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentFactoryImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffContentFactoryImpl.java",
+   "lines": 945,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContextEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffContextEx.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLightVirtualFileWritingAccessProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffLightVirtualFileWritingAccessProvider.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffManagerImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffManagerImpl.kt",
+   "lines": 152,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffNotificationIdsHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffNotificationIdsHolder.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestFactoryImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffRequestFactoryImpl.java",
+   "lines": 480,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffViewerEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/DiffViewerEx.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AllLinesIterator",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/AllLinesIterator.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BaseShowDiffAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/BaseShowDiffAction.java",
+   "lines": 92,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BufferedLineIterator",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/BufferedLineIterator.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompareClipboardWithSelectionAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/CompareClipboardWithSelectionAction.java",
+   "lines": 136,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompareFileWithEditorAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/CompareFileWithEditorAction.java",
+   "lines": 90,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompareFilesAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/CompareFilesAction.java",
+   "lines": 188,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffReaderModeMatcher",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/DiffReaderModeMatcher.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DocumentFragmentContent",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/DocumentFragmentContent.java",
+   "lines": 181,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DocumentsSynchronizer",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/DocumentsSynchronizer.java",
+   "lines": 103,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ImmutableDocumentFragmentContent",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/ImmutableDocumentFragmentContent.java",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ProxyUndoRedoAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/ProxyUndoRedoAction.java",
+   "lines": 76,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowBlankDiffWindowAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/ShowBlankDiffWindowAction.kt",
+   "lines": 500,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowDiffAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/ShowDiffAction.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowStandaloneDiffAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/ShowStandaloneDiffAction.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffToggleAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/CombinedDiffToggleAction.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffDifferenceNavigationAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffDifferenceNavigationAction.kt",
+   "lines": 118,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFileNavigationAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffFileNavigationAction.kt",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffNextDifferenceAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffNextDifferenceAction.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffNextFileAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffNextFileAction.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffPreviousDifferenceAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffPreviousDifferenceAction.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffPreviousFileAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffPreviousFileAction.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffUiDataRule",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/DiffUiDataRule.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FocusOppositePaneAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/FocusOppositePaneAction.java",
+   "lines": 39,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "GoToChangePopupBuilder",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/GoToChangePopupBuilder.kt",
+   "lines": 98,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LinkAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/LinkAction.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "MutableDiffRequestChain",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/MutableDiffRequestChain.kt",
+   "lines": 235,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NextDifferenceAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/NextDifferenceAction.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OpenDiffInEditorAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/OpenDiffInEditorAction.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OpenInEditorAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/OpenInEditorAction.kt",
+   "lines": 101,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OpenInEditorWithMouseAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/OpenInEditorWithMouseAction.java",
+   "lines": 136,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SetEditorSettingsAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/SetEditorSettingsAction.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SetEditorSettingsActionGroup",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/SetEditorSettingsActionGroup.kt",
+   "lines": 312,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleDiffAligningModeAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/actions/impl/ToggleDiffAligningModeAction.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffApplication",
+   "path": "platform/diff-impl/src/com/intellij/diff/applications/DiffApplication.kt",
+   "lines": 113,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffApplicationBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/applications/DiffApplicationBase.java",
+   "lines": 137,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeApplication",
+   "path": "platform/diff-impl/src/com/intellij/diff/applications/MergeApplication.kt",
+   "lines": 99,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffAudioCues",
+   "path": "platform/diff-impl/src/com/intellij/diff/audioCues/DiffAudioCues.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffChangeAudioCueDetector",
+   "path": "platform/diff-impl/src/com/intellij/diff/audioCues/DiffChangeAudioCueDetector.kt",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AsyncDiffRequestChain",
+   "path": "platform/diff-impl/src/com/intellij/diff/chains/AsyncDiffRequestChain.java",
+   "lines": 109,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ByLine",
+   "path": "platform/diff-impl/src/com/intellij/diff/comparison/ByLine.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ByWord",
+   "path": "platform/diff-impl/src/com/intellij/diff/comparison/ByWord.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComparisonManagerImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/comparison/ComparisonManagerImpl.java",
+   "lines": 794,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffIterableUtilEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/comparison/DiffIterableUtilEx.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IndicatorCancellationChecker",
+   "path": "platform/diff-impl/src/com/intellij/diff/comparison/IndicatorCancellationChecker.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirectoryContentImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/contents/DirectoryContentImpl.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DocumentContentBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/contents/DocumentContentBase.java",
+   "lines": 95,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DocumentContentImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/contents/DocumentContentImpl.java",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileContentImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/contents/FileContentImpl.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileDocumentContentImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/contents/FileDocumentContentImpl.java",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChainDiffVirtualFile",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/ChainDiffVirtualFile.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultDiffFileEditorCustomizer",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DefaultDiffFileEditorCustomizer.kt",
+   "lines": 97,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentVirtualFile",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffContentVirtualFile.kt",
+   "lines": 8,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorEscapeAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorEscapeAction.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTabFilesManager",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorTabFilesManager.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTabFilesManagerImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorTabFilesManagerImpl.kt",
+   "lines": 160,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTabFilesUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorTabFilesUtil.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTabTitleProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorTabTitleProvider.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorViewerFileEditor",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffEditorViewerFileEditor.kt",
+   "lines": 105,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFileEditorBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffFileEditorBase.kt",
+   "lines": 72,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFileEditorProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffFileEditorProvider.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFileIconProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffFileIconProvider.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFileType",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffFileType.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProcessorEditorCustomizer",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffRequestProcessorEditorCustomizer.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffVirtualFile",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffVirtualFile.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffVirtualFileBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/DiffVirtualFileBase.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffVirtualFile",
+   "path": "platform/diff-impl/src/com/intellij/diff/editor/SimpleDiffVirtualFile.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendDiffExtension",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/FrontendDiffExtension.kt",
+   "lines": 177,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendDiffUserDataKeyDescriptor",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/FrontendDiffUserDataKeyDescriptor.kt",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendDiffActualStateHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/impl/FrontendDiffActualStateHolder.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendSideBySideDiffMapping",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/impl/FrontendSideBySideDiffMapping.kt",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendUnifiedDiffSegmentMapping",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/impl/FrontendUnifiedDiffSegmentMapping.kt",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LocalFrontendDiffExtensionBridge",
+   "path": "platform/diff-impl/src/com/intellij/diff/frontend/impl/LocalFrontendDiffExtensionBridge.kt",
+   "lines": 249,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CacheDiffRequestChainProcessor",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/CacheDiffRequestChainProcessor.java",
+   "lines": 116,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CacheDiffRequestProcessor",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/CacheDiffRequestProcessor.java",
+   "lines": 238,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContextOnDataHolders",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffContextOnDataHolders.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorTitleDetails",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffEditorTitleDetails.kt",
+   "lines": 89,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffEditorViewer.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestPanelImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffRequestPanelImpl.java",
+   "lines": 112,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JDialog"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProcessor",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffRequestProcessor.java",
+   "lines": 1659,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProcessorEditorState",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffRequestProcessorEditorState.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRequestProcessorListener",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffRequestProcessorListener.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffSettingsHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffSettingsHolder.kt",
+   "lines": 132,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffToolSubstitutor",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffToolSubstitutor.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffViewerWrapper",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffViewerWrapper.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffWindow",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffWindow.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffWindowBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/DiffWindowBase.java",
+   "lines": 116,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileAssignmentTracker",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/FileAssignmentTracker.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffHeaderToolbarPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/DiffHeaderToolbarPanel.kt",
+   "lines": 198,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffHeaderToolbarUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/DiffHeaderToolbarUtil.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffToolChooser",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/DiffToolChooser.kt",
+   "lines": 85,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FilePathDiffTitleCustomizer",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/FilePathDiffTitleCustomizer.kt",
+   "lines": 112,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NoShrinkToolbarLayoutStrategy",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/NoShrinkToolbarLayoutStrategy.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/diff-impl/src/com/intellij/diff/impl/ui/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffIgnoredRangeProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/lang/DiffIgnoredRangeProvider.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLangSpecificProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/lang/DiffLangSpecificProvider.kt",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLanguage",
+   "path": "platform/diff-impl/src/com/intellij/diff/lang/DiffLanguage.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangDiffIgnoredRangeProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/lang/LangDiffIgnoredRangeProvider.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ApplyNonConflictsAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BinaryMergeTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/BinaryMergeTool.java",
+   "lines": 136,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChangeReferenceProcessor",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/ChangeReferenceProcessor.kt",
+   "lines": 140,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ErrorMergeTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/ErrorMergeTool.java",
+   "lines": 78,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IterativeResolveData",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/IterativeResolveData.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangSpecificMergeConflictResolver",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/LangSpecificMergeConflictResolver.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangSpecificMergeConflictResolverWrapper",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/LangSpecificMergeConflictResolverWrapper.kt",
+   "lines": 133,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangSpecificMergeContext",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/LangSpecificMergeContext.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MagicResolvedConflictsAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MagicResolvedConflictsAction.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeConflictModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeConflictModel.kt",
+   "lines": 552,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeContextEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeContextEx.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeDiffBuilder",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeDiffBuilder.kt",
+   "lines": 152,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeImportUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeImportUtil.kt",
+   "lines": 161,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeModelBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeModelBase.kt",
+   "lines": 402,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRequestProcessor",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeRequestProcessor.java",
+   "lines": 579,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeStatisticsAggregator",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeStatisticsAggregator.kt",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeThreesideLineStatusMarkerRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideLineStatusMarkerRenderer.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeThreesideViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewer.java",
+   "lines": 1263,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBColor",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeThreesideViewerActions",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewerActions.kt",
+   "lines": 222,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeUtil.java",
+   "lines": 187,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeWindow",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MergeWindow.java",
+   "lines": 144,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MessageMergeViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/MessageMergeViewer.java",
+   "lines": 62,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NavigateToChangeMarkerAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/NavigateToChangeMarkerAction.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RevertConflictResolutionAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/RevertConflictResolutionAction.kt",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowDiffWithBaseAction",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/ShowDiffWithBaseAction.kt",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextMergeChange",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/TextMergeChange.kt",
+   "lines": 128,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextMergeTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/TextMergeTool.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextMergeViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/TextMergeViewer.kt",
+   "lines": 127,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideMergeHighlighters",
+   "path": "platform/diff-impl/src/com/intellij/diff/merge/ThreesideMergeHighlighters.kt",
+   "lines": 158,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BinaryMergeRequestImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/requests/BinaryMergeRequestImpl.java",
+   "lines": 129,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LoadingDiffRequest",
+   "path": "platform/diff-impl/src/com/intellij/diff/requests/LoadingDiffRequest.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OperationCanceledDiffRequest",
+   "path": "platform/diff-impl/src/com/intellij/diff/requests/OperationCanceledDiffRequest.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextMergeRequestImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/requests/TextMergeRequestImpl.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnknownFileTypeDiffRequest",
+   "path": "platform/diff-impl/src/com/intellij/diff/requests/UnknownFileTypeDiffRequest.java",
+   "lines": 54,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffSettingsConfigurable",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/DiffSettingsConfigurable.kt",
+   "lines": 73,
+   "read": true,
+   "swing": [
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffSettingsProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/DiffSettingsProvider.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalDiffSettingsConfigurable",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/ExternalDiffSettingsConfigurable.kt",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalToolsModels",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/ExternalToolsModels.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalToolsTablePanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/ExternalToolsTablePanel.kt",
+   "lines": 208,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JTable",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalToolsTreePanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/settings/ExternalToolsTreePanel.kt",
+   "lines": 550,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JList",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffUsagesCollector",
+   "path": "platform/diff-impl/src/com/intellij/diff/statistics/DiffUsagesCollector.kt",
+   "lines": 113,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeStatisticsCollector",
+   "path": "platform/diff-impl/src/com/intellij/diff/statistics/MergeStatisticsCollector.kt",
+   "lines": 337,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ErrorDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/ErrorDiffTool.java",
+   "lines": 175,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BinaryDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/binary/BinaryDiffTool.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OnesideBinaryDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/binary/OnesideBinaryDiffViewer.java",
+   "lines": 99,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideBinaryDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/binary/ThreesideBinaryDiffViewer.java",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideBinaryDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/binary/TwosideBinaryDiffViewer.java",
+   "lines": 286,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BlockState",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/BlockState.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffActionPromoter",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffActionPromoter.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffActions",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffActions.kt",
+   "lines": 268,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffBlocks",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffBlocks.kt",
+   "lines": 345,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffBlocksPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffBlocksPanel.kt",
+   "lines": 188,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffCaretNavigation",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffCaretNavigation.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffComponentProcessorImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffComponentProcessorImpl.kt",
+   "lines": 303,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffContainerPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffContainerPanel.kt",
+   "lines": 172,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "JPanel",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffEditorHandlers",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffEditorHandlers.kt",
+   "lines": 142,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffKeys",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffKeys.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffLoadingBlock",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffLoadingBlock.kt",
+   "lines": 38,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffMainToolbar",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffMainToolbar.kt",
+   "lines": 301,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffMainUI",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffMainUI.kt",
+   "lines": 367,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffModel.kt",
+   "lines": 184,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffNavigation",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffNavigation.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffRegistry",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffRegistry.kt",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffSelectablePanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffSelectablePanel.kt",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffTool.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffUI",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffUI.kt",
+   "lines": 54,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffViewer.kt",
+   "lines": 984,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffVirtualFile",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/CombinedDiffVirtualFile.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffSearch",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/combined/search/CombinedDiffSearch.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/dir/DirDiffTool.java",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/dir/DirDiffViewer.java",
+   "lines": 183,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalDiffSettings",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/external/ExternalDiffSettings.kt",
+   "lines": 179,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/external/ExternalDiffTool.kt",
+   "lines": 254,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalDiffToolUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/external/ExternalDiffToolUtil.java",
+   "lines": 732,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExternalMergeTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/external/ExternalMergeTool.kt",
+   "lines": 57,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HighlightRange",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/HighlightRange.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineNumberConvertor",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/LineNumberConvertor.java",
+   "lines": 335,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffChange",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffChange.java",
+   "lines": 81,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffChangeUi",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffChangeUi.java",
+   "lines": 148,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffHighlightersData",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffHighlightersData.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffModel.java",
+   "lines": 123,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffPanel.java",
+   "lines": 92,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffTool.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffViewer.java",
+   "lines": 1771,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedEditorHighlighter",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedEditorHighlighter.java",
+   "lines": 268,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedEditorRangeHighlighter",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedEditorRangeHighlighter.java",
+   "lines": 116,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedFoldingModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFoldingModel.java",
+   "lines": 93,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnifiedFragmentBuilder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFragmentBuilder.kt",
+   "lines": 186,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BinaryEditorHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/holders/BinaryEditorHolder.java",
+   "lines": 179,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/holders/EditorHolder.java",
+   "lines": 19,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorHolderFactory",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/holders/EditorHolderFactory.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextEditorHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/holders/TextEditorHolder.java",
+   "lines": 114,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IntentionDiffUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/intentions/IntentionDiffUtil.kt",
+   "lines": 141,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AlignedDiffModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/AlignedDiffModel.kt",
+   "lines": 541,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffViewerHighlighters",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/DiffViewerHighlighters.kt",
+   "lines": 143,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffChange",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffChange.java",
+   "lines": 111,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffChangeUi",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffChangeUi.java",
+   "lines": 235,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffChangesHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffChangesHolder.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffModel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffModel.java",
+   "lines": 129,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffTool",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffTool.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffViewer.java",
+   "lines": 1012,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffViewerHighlighters",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffViewerHighlighters.kt",
+   "lines": 102,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleOnesideDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleOnesideDiffViewer.java",
+   "lines": 247,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleThreesideDiffChange",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleThreesideDiffChange.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleThreesideDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleThreesideDiffViewer.java",
+   "lines": 487,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideDiffChangeBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/ThreesideDiffChangeBase.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideTextDiffViewerEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/simple/ThreesideTextDiffViewerEx.java",
+   "lines": 515,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BaseSyncScrollable",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/BaseSyncScrollable.java",
+   "lines": 103,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CrossFilePrevNextDifferenceIterableSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/CrossFilePrevNextDifferenceIterableSupport.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffChangedRangeProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/DiffChangedRangeProvider.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffDataKeys",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/DiffDataKeys.java",
+   "lines": 57,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffNotifications",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/DiffNotifications.kt",
+   "lines": 91,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffSplitter",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/DiffSplitter.java",
+   "lines": 189,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffTitleHandler",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/DiffTitleHandler.kt",
+   "lines": 136,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EmptyUnifiedLineFoldingRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/EmptyUnifiedLineFoldingRenderer.java",
+   "lines": 36,
+   "read": true,
+   "swing": [
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FocusTrackerSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/FocusTrackerSupport.java",
+   "lines": 133,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FoldingModelSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/FoldingModelSupport.java",
+   "lines": 1274,
+   "read": true,
+   "swing": [
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeyboardModifierListener",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/KeyboardModifierListener.java",
+   "lines": 107,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PrevNextDifferenceIterable",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextDifferenceIterable.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PrevNextDifferenceIterableBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextDifferenceIterableBase.java",
+   "lines": 122,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PrevNextFileIterable",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextFileIterable.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/SimpleDiffPanel.java",
+   "lines": 68,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SoftHardCacheMap",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/SoftHardCacheMap.java",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StatusPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/StatusPanel.java",
+   "lines": 71,
+   "read": true,
+   "swing": [
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "SyncScrollSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/SyncScrollSupport.java",
+   "lines": 545,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreeDiffSplitter",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/ThreeDiffSplitter.java",
+   "lines": 209,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TransferableFileEditorStateSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/TransferableFileEditorStateSupport.java",
+   "lines": 258,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffPanelBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffPanelBase.java",
+   "lines": 128,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffViewerBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffViewerBase.java",
+   "lines": 300,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffViewerListener",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffViewerListener.java",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HighlightPolicy",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/HighlightPolicy.java",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HighlightingLevel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/HighlightingLevel.java",
+   "lines": 60,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IgnorePolicy",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/IgnorePolicy.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InitialScrollPositionSupport",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/InitialScrollPositionSupport.java",
+   "lines": 345,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ListenerDiffViewerBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/ListenerDiffViewerBase.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffSettingsHolder",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/TextDiffSettingsHolder.kt",
+   "lines": 245,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffViewerUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/base/TextDiffViewerUtil.java",
+   "lines": 636,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreadcrumbsPlacement",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/breadcrumbs/BreadcrumbsPlacement.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffBreadcrumbsPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/breadcrumbs/DiffBreadcrumbsPanel.java",
+   "lines": 116,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleDiffBreadcrumbsPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/breadcrumbs/SimpleDiffBreadcrumbsPanel.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentLayoutPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/DiffContentLayoutPanel.java",
+   "lines": 150,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffContentPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/DiffContentPanel.java",
+   "lines": 53,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OnesideContentPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/OnesideContentPanel.java",
+   "lines": 48,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OnesideDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/OnesideDiffViewer.java",
+   "lines": 147,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OnesideTextDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/OnesideTextDiffViewer.java",
+   "lines": 213,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideContentPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/ThreesideContentPanel.java",
+   "lines": 99,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/ThreesideDiffViewer.java",
+   "lines": 251,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreesideTextDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/ThreesideTextDiffViewer.java",
+   "lines": 415,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideContentPanel",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/TwosideContentPanel.java",
+   "lines": 94,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/TwosideDiffViewer.java",
+   "lines": 179,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideTextDiffViewer",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/side/TwosideTextDiffViewer.java",
+   "lines": 393,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FineMergeLineFragment",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/FineMergeLineFragment.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FineMergeLineFragmentImpl",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/FineMergeLineFragmentImpl.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineOffsetsDocumentWrapper",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/LineOffsetsDocumentWrapper.java",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineOffsetsUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/LineOffsetsUtil.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeInnerDifferences",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/MergeInnerDifferences.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleTextDiffProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/SimpleTextDiffProvider.java",
+   "lines": 149,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimpleThreesideTextDiffProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/SimpleThreesideTextDiffProvider.java",
+   "lines": 123,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SmartTextDiffProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/SmartTextDiffProvider.java",
+   "lines": 265,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/TextDiffProvider.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffProviderBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/TextDiffProviderBase.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideTextDiffProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/TwosideTextDiffProvider.java",
+   "lines": 63,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TwosideTextDiffProviderBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/tools/util/text/TwosideTextDiffProviderBase.java",
+   "lines": 93,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BlankDiffWindowUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/BlankDiffWindowUtil.kt",
+   "lines": 95,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CombinedDiffToggle",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/CombinedDiffToggle.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffBalloons",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffBalloons.kt",
+   "lines": 92,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffDividerDrawUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffDividerDrawUtil.java",
+   "lines": 574,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffDrawUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffDrawUtil.java",
+   "lines": 957,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "JBColor",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEditorHighlighterUpdater",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffEditorHighlighterUpdater.java",
+   "lines": 101,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffEmptyHighlighterRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffEmptyHighlighterRenderer.java",
+   "lines": 45,
+   "read": true,
+   "swing": [
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffGutterOperation",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffGutterOperation.java",
+   "lines": 103,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffGutterRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffGutterRenderer.java",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffGutterRendererMergeableRendererProvider",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffGutterRendererMergeableRendererProvider.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLineMarkerRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffLineMarkerRenderer.kt",
+   "lines": 117,
+   "read": true,
+   "swing": [
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLineNumberConverter",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffLineNumberConverter.java",
+   "lines": 59,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffLineSeparatorRenderer",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffLineSeparatorRenderer.java",
+   "lines": 380,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffPlaces",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffPlaces.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffTaskQueue",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffTaskQueue.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffUserDataKeysEx",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffUserDataKeysEx.java",
+   "lines": 144,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffUtil",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/DiffUtil.java",
+   "lines": 2016,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileEditorBase",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/FileEditorBase.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InvisibleWrapper",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/InvisibleWrapper.java",
+   "lines": 51,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SyncHeightComponent",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/SyncHeightComponent.java",
+   "lines": 123,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffType",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/TextDiffType.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextDiffTypeFactory",
+   "path": "platform/diff-impl/src/com/intellij/diff/util/TextDiffTypeFactory.java",
+   "lines": 97,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindModel",
+   "path": "platform/indexing-api/src/com/intellij/find/FindModel.kt",
+   "lines": 822,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindModelExtension",
+   "path": "platform/indexing-api/src/com/intellij/find/FindModelExtension.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchService",
+   "path": "platform/indexing-api/src/com/intellij/find/TextSearchService.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrigramIndex",
+   "path": "platform/indexing-impl/src/com/intellij/find/ngrams/TrigramIndex.java",
+   "lines": 154,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrigramIndexFilter",
+   "path": "platform/indexing-impl/src/com/intellij/find/ngrams/TrigramIndexFilter.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrigramIndexRegistryValueListener",
+   "path": "platform/indexing-impl/src/com/intellij/find/ngrams/TrigramIndexRegistryValueListener.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrigramTextSearchService",
+   "path": "platform/indexing-impl/src/com/intellij/find/ngrams/TrigramTextSearchService.java",
+   "lines": 81,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchInBackgroundOption",
+   "path": "platform/lang-api/src/com/intellij/find/SearchInBackgroundOption.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorSearchSession",
+   "path": "platform/lang-impl/src/com/intellij/find/EditorSearchSession.java",
+   "lines": 834,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JButton",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindAllAction",
+   "path": "platform/lang-impl/src/com/intellij/find/FindAllAction.java",
+   "lines": 88,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindReplaceActionButton",
+   "path": "platform/lang-impl/src/com/intellij/find/FindReplaceActionButton.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [
+    "JButton",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesCollector",
+   "path": "platform/lang-impl/src/com/intellij/find/FindUsagesCollector.kt",
+   "lines": 210,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUtil",
+   "path": "platform/lang-impl/src/com/intellij/find/FindUtil.java",
+   "lines": 1105,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "SearchReplaceComponent",
+   "path": "platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java",
+   "lines": 1172,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "paintComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchSession",
+   "path": "platform/lang-impl/src/com/intellij/find/SearchSession.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTextArea",
+   "path": "platform/lang-impl/src/com/intellij/find/SearchTextArea.java",
+   "lines": 513,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JBColor"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ActivateFindToolWindowAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ActivateFindToolWindowAction.kt",
+   "lines": 130,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CompositeActiveComponent",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/CompositeActiveComponent.java",
+   "lines": 33,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInPathAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/FindInPathAction.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindSelectionInPathAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/FindSelectionInPathAction.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/FindUsagesAction.java",
+   "lines": 114,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "FindUsagesInFileAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/FindUsagesInFileAction.java",
+   "lines": 132,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PingEDT",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/PingEDT.java",
+   "lines": 94,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ReplaceInPathAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ReplaceInPathAction.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchOptionsService",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/SearchOptionsService.kt",
+   "lines": 122,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTarget2UsageTarget",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/SearchTarget2UsageTarget.kt",
+   "lines": 95,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTargetVariantsDataRule",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/SearchTargetVariantsDataRule.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTargetsDataRule",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/SearchTargetsDataRule.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowSearchHistoryAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowSearchHistoryAction.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowTargetUsagesActionHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowTargetUsagesActionHandler.kt",
+   "lines": 98,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesAction",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesAction.java",
+   "lines": 1873,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JTable"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesActionHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesActionHandler.java",
+   "lines": 91,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesHeader",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesHeader.kt",
+   "lines": 158,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JLabel",
+    "JBUIScale"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesManager",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesManager.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesParameters",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesParameters.java",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesPopupData",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesPopupData.kt",
+   "lines": 68,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JTable"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesTable",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesTable.java",
+   "lines": 396,
+   "read": true,
+   "swing": [
+    "JTable"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowUsagesTableCellRenderer",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/ShowUsagesTableCellRenderer.java",
+   "lines": 501,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D",
+    "JTable"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageListCellRenderer",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/UsageListCellRenderer.java",
+   "lines": 55,
+   "read": true,
+   "swing": [
+    "JList",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageNavigation",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/UsageNavigation.kt",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageOptionsDialog",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/UsageOptionsDialog.kt",
+   "lines": 134,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "compositeActiveComponentPanel",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/compositeActiveComponentPanel.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "findUsages",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/findUsages.kt",
+   "lines": 88,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "resolver",
+   "path": "platform/lang-impl/src/com/intellij/find/actions/resolver.kt",
+   "lines": 80,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AddOccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/AddOccurrenceAction.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ContextAwareShortcutProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ContextAwareShortcutProvider.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorHeaderSetSearchContextAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderSetSearchContextAction.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorHeaderToggleAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderToggleAction.java",
+   "lines": 77,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Embeddable",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/Embeddable.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "NextOccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/NextOccurrenceAction.java",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/OccurrenceAction.java",
+   "lines": 57,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PrevNextOccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevNextOccurrenceAction.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PrevOccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevOccurrenceAction.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoveOccurrenceAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/RemoveOccurrenceAction.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RestorePreviousSettingsAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/RestorePreviousSettingsAction.java",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SelectAllAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/SelectAllAction.java",
+   "lines": 65,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowFilterPopupGroup",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ShowFilterPopupGroup.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StatusTextAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/StatusTextAction.java",
+   "lines": 61,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SwitchToFind",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToFind.java",
+   "lines": 68,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SwitchToReplace",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToReplace.java",
+   "lines": 53,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleAnywhereAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleAnywhereAction.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleExceptCommentsAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAction.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleExceptCommentsAndLiteralsAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAndLiteralsAction.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleExceptLiteralsAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptLiteralsAction.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleFindInSelectionAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleFindInSelectionAction.java",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleInCommentsAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInCommentsAction.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleInLiteralsOnlyAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInLiteralsOnlyAction.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleMatchCase",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleMatchCase.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TogglePreserveCaseAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/TogglePreserveCaseAction.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleRegex",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleRegex.java",
+   "lines": 42,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleScrollToResultsDuringTypingAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleScrollToResultsDuringTypingAction.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleWholeWordsOnlyAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleWholeWordsOnlyAction.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Utils",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/Utils.java",
+   "lines": 103,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "VariantsCompletionAction",
+   "path": "platform/lang-impl/src/com/intellij/find/editorHeaderActions/VariantsCompletionAction.java",
+   "lines": 92,
+   "read": true,
+   "swing": [
+    "paintComponent",
+    "JList",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectManager",
+   "path": "platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectManager.java",
+   "lines": 128,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectScopeService",
+   "path": "platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectScopeService.kt",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractFindUsagesDialog",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/AbstractFindUsagesDialog.java",
+   "lines": 363,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CommonFindUsagesDialog",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/CommonFindUsagesDialog.java",
+   "lines": 111,
+   "read": true,
+   "swing": [
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CustomUsageSearcher",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/CustomUsageSearcher.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultFindUsagesHandlerFactory",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/DefaultFindUsagesHandlerFactory.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultUsageTargetProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/DefaultUsageTargetProvider.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandler.java",
+   "lines": 118,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesHandlerFactory",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandlerFactory.java",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesHandlerUi",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesHandlerUi.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesManager",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesManager.java",
+   "lines": 763,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "FindUsagesStatisticsCollector",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesStatisticsCollector.kt",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUsagesUtil",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FindUsagesUtil.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FusAwareFindUsagesOptions",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/FusAwareFindUsagesOptions.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LastSearchData",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/LastSearchData.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageHistory",
+   "path": "platform/lang-impl/src/com/intellij/find/findUsages/UsageHistory.java",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CommentsAndLiteralsSearcher",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/CommentsAndLiteralsSearcher.java",
+   "lines": 531,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultDirectorySearchEngine",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/DefaultDirectorySearchEngine.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EelDirectorySearchEngine",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/EelDirectorySearchEngine.kt",
+   "lines": 125,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EelSearchEdges",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/EelSearchEdges.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FileAndLineTextRenderer",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FileAndLineTextRenderer.java",
+   "lines": 48,
+   "read": true,
+   "swing": [
+    "JList",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindAndReplaceExecutor",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindAndReplaceExecutor.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindAndReplaceService",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindAndReplaceService.kt",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindExceptCommentsOrLiteralsData",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindExceptCommentsOrLiteralsData.java",
+   "lines": 130,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInDirectoryScopeProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInDirectoryScopeProvider.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInFilesLanguage",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInFilesLanguage.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectExtension",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInProjectExtension.kt",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectRecents",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInProjectRecents.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectTask",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInProjectTask.java",
+   "lines": 752,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectUtil",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindInProjectUtil.java",
+   "lines": 701,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindKey",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindKey.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindManagerBase",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindManagerBase.java",
+   "lines": 351,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindManagerImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindManagerImpl.java",
+   "lines": 415,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupDirectoryChooser",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupDirectoryChooser.java",
+   "lines": 208,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupHeader",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupHeader.kt",
+   "lines": 143,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JLabel",
+    "JButton"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupPanel",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java",
+   "lines": 2399,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D",
+    "JBPopup"
+   ],
+   "platform": [
+    "CustomFrameDecoration"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupResultsAutoloadHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupResultsAutoloadHandler.kt",
+   "lines": 616,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupScopeUI",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUI.kt",
+   "lines": 82,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupScopeUIImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIImpl.java",
+   "lines": 302,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "FindPopupScopeUIProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIProvider.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupScopeUIProviderImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIProviderImpl.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupSearchState",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindPopupSearchState.kt",
+   "lines": 158,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindResultImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindResultImpl.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindResultUsageInfo",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindResultUsageInfo.java",
+   "lines": 132,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUI",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindUI.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindUIHelper",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/FindUIHelper.java",
+   "lines": 192,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HelpID",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/HelpID.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IdeLanguageCustomizationApi",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/IdeLanguageCustomizationApi.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IdeLanguageCustomizationApiImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/IdeLanguageCustomizationApiImpl.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JComboboxAction",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/JComboboxAction.kt",
+   "lines": 138,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LangFindSettingsImpl",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/LangFindSettingsImpl.kt",
+   "lines": 68,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PreserveCaseUtil",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/PreserveCaseUtil.java",
+   "lines": 199,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RegExHelpPopup",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/RegExHelpPopup.java",
+   "lines": 127,
+   "read": true,
+   "swing": [
+    "JBPopup",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RegExReplacementBuilder",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/RegExReplacementBuilder.java",
+   "lines": 275,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RevealingSpaceComboboxEditor",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/RevealingSpaceComboboxEditor.java",
+   "lines": 35,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowRecentFindUsagesAction",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/ShowRecentFindUsagesAction.java",
+   "lines": 89,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowRecentFindUsagesGroup",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/ShowRecentFindUsagesGroup.java",
+   "lines": 82,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchContributor",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/TextSearchContributor.kt",
+   "lines": 338,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchListAgnosticRenderer",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/TextSearchListAgnosticRenderer.java",
+   "lines": 128,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchRenderer",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/TextSearchRenderer.java",
+   "lines": 25,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextSearchRightActionAction",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/TextSearchRightActionAction.kt",
+   "lines": 76,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsagePresentationProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/UsagePresentationProvider.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WelcomeScreenFindInProjectExtension",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/WelcomeScreenFindInProjectExtension.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WelcomeScreenFindScope",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/WelcomeScreenFindScope.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorLivePreviewPresentation",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/EditorLivePreviewPresentation.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditorSearchAreaProvider",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/EditorSearchAreaProvider.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LivePreview",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreview.java",
+   "lines": 623,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LivePreviewController",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewController.java",
+   "lines": 329,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LivePreviewPresentation",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewPresentation.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchResults",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/SearchResults.java",
+   "lines": 1083,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SelectionManager",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/livePreview/SelectionManager.java",
+   "lines": 109,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "uiModel",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/uiModel.kt",
+   "lines": 102,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "usageAdapters",
+   "path": "platform/lang-impl/src/com/intellij/find/impl/usageAdapters.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ReplaceInProjectManager",
+   "path": "platform/lang-impl/src/com/intellij/find/replaceInProject/ReplaceInProjectManager.java",
+   "lines": 580,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DynamicUsage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/DynamicUsage.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EmptyUsageHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/EmptyUsageHandler.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiUsage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/PsiUsage.kt",
+   "lines": 68,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ReadWriteUsage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/ReadWriteUsage.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTarget",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/SearchTarget.kt",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Usage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/Usage.kt",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageAccess",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/UsageAccess.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageHandler",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/UsageHandler.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageOptions",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/UsageOptions.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageSearchParameters",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/UsageSearchParameters.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageSearcher",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/UsageSearcher.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/api/package-info.java",
+   "lines": 4,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AllSearchOptions",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/AllSearchOptions.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PlainTextUsage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/PlainTextUsage.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Psi2ReadWriteAccessUsageInfo2UsageAdapter",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/Psi2ReadWriteAccessUsageInfo2UsageAdapter.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Psi2UsageInfo2UsageAdapter",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/Psi2UsageInfo2UsageAdapter.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiUsage2UsageInfo",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/PsiUsage2UsageInfo.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextUsage",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/TextUsage.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "impl",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/impl.kt",
+   "lines": 142,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/impl/package-info.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTargetSymbol",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/symbol/SearchTargetSymbol.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SymbolSearchTargetFactory",
+   "path": "platform/lang-impl/src/com/intellij/find/usages/symbol/SymbolSearchTargetFactory.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractFindInEditorTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/AbstractFindInEditorTest.java",
+   "lines": 120,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInEditorFunctionalTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/FindInEditorFunctionalTest.java",
+   "lines": 317,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInEditorMultiCaretTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/FindInEditorMultiCaretTest.java",
+   "lines": 157,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInEditorPerformanceTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/FindInEditorPerformanceTest.java",
+   "lines": 121,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInEditorTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/FindInEditorTest.java",
+   "lines": 363,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchInNonIndexableTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/SearchInNonIndexableTest.kt",
+   "lines": 212,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchTargetTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/SearchTargetTest.kt",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TestSearchTarget",
+   "path": "platform/lang-impl/testSources/com/intellij/find/TestSearchTarget.kt",
+   "lines": 132,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirectorySearchEngineTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/impl/DirectorySearchEngineTest.kt",
+   "lines": 197,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EelDirectorySearchEngineTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/impl/EelDirectorySearchEngineTest.kt",
+   "lines": 391,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EelSearchTestFakes",
+   "path": "platform/lang-impl/testSources/com/intellij/find/impl/EelSearchTestFakes.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindPopupSearchStateTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/impl/FindPopupSearchStateTest.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SearchResultsChunkingTest",
+   "path": "platform/lang-impl/testSources/com/intellij/find/impl/livePreview/SearchResultsChunkingTest.java",
+   "lines": 327,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": true,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DirectorySearchEngine",
+   "path": "platform/refactoring/src/com/intellij/find/DirectorySearchEngine.kt",
+   "lines": 96,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectSearchEngine",
+   "path": "platform/refactoring/src/com/intellij/find/FindInProjectSearchEngine.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindInProjectSettings",
+   "path": "platform/refactoring/src/com/intellij/find/FindInProjectSettings.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindManager",
+   "path": "platform/refactoring/src/com/intellij/find/FindManager.java",
+   "lines": 282,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindModelListener",
+   "path": "platform/refactoring/src/com/intellij/find/FindModelListener.java",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindResult",
+   "path": "platform/refactoring/src/com/intellij/find/FindResult.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiElement2UsageTargetAdapter",
+   "path": "platform/refactoring/src/com/intellij/find/findUsages/PsiElement2UsageTargetAdapter.java",
+   "lines": 272,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FindManagerTestUtils",
+   "path": "platform/testFramework/src/com/intellij/find/FindManagerTestUtils.java",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExportClusteringResultActionLink",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/ExportClusteringResultActionLink.java",
+   "lines": 169,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ImportClusteringResultActionLink",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/ImportClusteringResultActionLink.java",
+   "lines": 96,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MostCommonUsagePatternsComponent",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/MostCommonUsagePatternsComponent.kt",
+   "lines": 382,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MostCommonUsagesToolbar",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/MostCommonUsagesToolbar.java",
+   "lines": 42,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimilarUsagesComponent",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/SimilarUsagesComponent.java",
+   "lines": 121,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SimilarUsagesToolbar",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/SimilarUsagesToolbar.java",
+   "lines": 49,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SnippetRenderingData",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/SnippetRenderingData.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsageCodeSnippetComponent",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/UsageCodeSnippetComponent.java",
+   "lines": 125,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UsagePreviewComponent",
+   "path": "platform/usageView-impl/src/com/intellij/find/findUsages/similarity/UsagePreviewComponent.kt",
+   "lines": 102,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SilhouetteScore",
+   "path": "platform/usageView/src/com/intellij/find/findUsages/similarity/SilhouetteScore.java",
+   "lines": 80,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ByCharRt",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ByCharRt.kt",
+   "lines": 292,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ByLineRt",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ByLineRt.kt",
+   "lines": 457,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ByWordRt",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ByWordRt.kt",
+   "lines": 1149,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CancellationChecker",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/CancellationChecker.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChangeCorrector",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ChangeCorrector.kt",
+   "lines": 128,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CharacterUtils",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/CharacterUtils.kt",
+   "lines": 196,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "x11"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChunkOptimizer",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt",
+   "lines": 263,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComparisonMergeUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ComparisonMergeUtil.kt",
+   "lines": 190,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComparisonPolicy",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ComparisonPolicy.kt",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ComparisonUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/ComparisonUtil.kt",
+   "lines": 109,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffTooBigException",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/DiffTooBigException.kt",
+   "lines": 7,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineFragmentSplitter",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/LineFragmentSplitter.kt",
+   "lines": 169,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeResolveUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/MergeResolveUtil.kt",
+   "lines": 269,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrimUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/TrimUtil.kt",
+   "lines": 584,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ChangeDiffIterableBase",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/ChangeDiffIterableBase.kt",
+   "lines": 94,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffChangeDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffChangeDiffIterable.kt",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFragmentsDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffFragmentsDiffIterable.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterable.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffIterableUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffIterableUtil.kt",
+   "lines": 349,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExpandedDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/ExpandedDiffIterable.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FairDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/FairDiffIterable.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FairDiffIterableWrapper",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/FairDiffIterableWrapper.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InvertedDiffIterableWrapper",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/InvertedDiffIterableWrapper.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RangesDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/RangesDiffIterable.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SubiterableDiffIterable",
+   "path": "platform/util/diff/src/com/intellij/diff/comparison/iterables/SubiterableDiffIterable.kt",
+   "lines": 76,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFragment",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/DiffFragment.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffFragmentImpl",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/DiffFragmentImpl.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineFragment",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/LineFragment.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineFragmentImpl",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/LineFragmentImpl.kt",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeLineFragment",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/MergeLineFragment.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeLineFragmentImpl",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/MergeLineFragmentImpl.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeWordFragment",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/MergeWordFragment.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeWordFragmentImpl",
+   "path": "platform/util/diff/src/com/intellij/diff/fragments/MergeWordFragmentImpl.kt",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineOffsets",
+   "path": "platform/util/diff/src/com/intellij/diff/tools/util/text/LineOffsets.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineOffsetsImpl",
+   "path": "platform/util/diff/src/com/intellij/diff/tools/util/text/LineOffsetsImpl.kt",
+   "lines": 68,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DiffRangeUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/util/DiffRangeUtil.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Enumerator",
+   "path": "platform/util/diff/src/com/intellij/diff/util/Enumerator.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeConflictResolutionStrategy",
+   "path": "platform/util/diff/src/com/intellij/diff/util/MergeConflictResolutionStrategy.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeConflictType",
+   "path": "platform/util/diff/src/com/intellij/diff/util/MergeConflictType.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRange",
+   "path": "platform/util/diff/src/com/intellij/diff/util/MergeRange.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergeRangeUtil",
+   "path": "platform/util/diff/src/com/intellij/diff/util/MergeRangeUtil.kt",
+   "lines": 250,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Range",
+   "path": "platform/util/diff/src/com/intellij/diff/util/Range.kt",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "Side",
+   "path": "platform/util/diff/src/com/intellij/diff/util/Side.kt",
+   "lines": 135,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreeSide",
+   "path": "platform/util/diff/src/com/intellij/diff/util/ThreeSide.kt",
+   "lines": 92,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Block",
+   "path": "platform/vcs-impl/src/com/intellij/diff/Block.java",
+   "lines": 149,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "DiffVcsDataKeys",
+   "path": "platform/vcs-impl/src/com/intellij/diff/DiffVcsDataKeys.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PatchBaseAnnotationInfo",
+   "path": "platform/vcs-impl/src/com/intellij/diff/PatchBaseAnnotationInfo.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  }
+ ]
+}

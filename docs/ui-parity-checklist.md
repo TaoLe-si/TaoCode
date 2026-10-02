@@ -1208,6 +1208,58 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   外观 / 装订线图标设置…`；点「添加书签」后重开 → `删除书签 / 编辑描述 / 切换助记键…` + 分隔 +
   `使用软换行…`（截图 `screenshots/gutter-menu.png`，行首出现书签图标）。
 
+- [x] **已补（第八十三批）** `find` + `diff` 域 630 类判决，外加**一处实测出来的
+  性能缺陷**（行级 diff 的对齐内核从 O(N·M) DP 换成上游同款 Myers O(ND) 线性空间）。
+  **① 缺陷是量出来的，不是猜的**：`src/diffText.ts` 的 `computeLCS` 原来开一张
+  (m+1)×(n+1) 的完整 DP 表，而它**跑在 UI 线程上**（剪贴板对比 `src/vcsActions.ts:122`
+  与保存冲突预览 `src/editorFileOps.ts:54`）。实测 2000² = 63 ms/31 MB、
+  4000² = 263–428 ms/119 MB、6000² = 882 ms/284 MB、8000² = 934 ms/773 MB、
+  **10000² = 1414 ms/773 MB** —— 一次大文件对比就要吃掉 0.8 GB 堆，几秒卡死。
+  **② 换算法**：`src/diffAlign.ts` 落上游 `platform/util/diff/src/com/intellij/util/diff/`
+  那套 —— 掐公共前缀 `getStartShift`（`Diff.kt:118-127`）与公共后缀 `getEndCut`（`:129-141`），
+  中间段用 `Enumerator` 映成整数 id（`Enumerator.kt:16-25`，两张数组共用一张表），
+  然后 **Myers 分治 + 中间蛇**（`MyersLCS.kt:96-190`）。V 数组**全程复用**、每层只重写
+  自己那段（`MyersLCS.kt:38-42`），所以空间是 O(N) 而不是 O(D²)。
+  同一份 10000² 现在是 **10 ms / 0.5 MB**（快 140 倍、堆少 1500 倍），
+  旧实现要 4 GB 堆才跑得动、新的在 512 MB 里就够；20000² 也只要 18 ms。
+  `computeLCS` 保留原名与 `{from,to}` 形状，三个调用点一行没动。
+  **③ 判据不是"输出与 DP 完全一致"**（那是错的：LCS 不唯一），而是两条可判的性质 ——
+  ① 吐出的公共段长度 **等于** DP 最优值；② 输出确实是一个**合法公共子序列**
+  （下标严格递增、对应行真相等）。配套 `tests/diff-align.test.mjs` 里一个滚动 DP 当裁判，
+  外加 **4000 组随机用例**（刻意用极小字母表制造大量重复行 —— 那正是分治中间蛇最容易错的地方）。
+  第一版跑到 **3182/4000**，查下来不是算法错（失败用例里公共段长度都等于 DP 最优值），
+  是**装配顺序**：`pushCommon()` 前后缀一起推，结果前缀落到了列表末尾。拆成
+  `pushPrefix()` / `pushSuffix()` 夹住中间段之后 4000/4000。
+  **④ 注释纠错**（都改在 `src/diffAlign.ts` 头）：一处编码坏掉的字、
+  一处引用了已被替换掉的函数名、一处把 `IgnorePolicy.DEFAULT` 的文案写成了
+  "Do not ignore"（bundle 里其实是 `DiffBundle.properties:277` 的 `None`）；
+  `src/diffText.ts` 里"最长公共子序列（DP）"也改成了 Myers。
+  **⑤ 判决书**：`docs/inventory/verdict-find-diff.md`（`find`+`diff` 域 **630** 类逐条判决，
+  `[x]` 11 / `[~]` 40 / `[ ]` 498 / `[-]` 81），门控在 `tests/b7-verdict.test.mjs`（8 条）。
+  门控当场抓到 **18 条 `[~]` 写了"本仓没有"却没落到任何文件**（`Range`/`Side`/`ThreeSide`/
+  `LineCol`/`LineRange`/`FairDiffIterable`/`ByLine`/`ComparisonManagerImpl` …）——
+  逐条补了本仓落点（多数在 `src/diffAlign.ts:29` 的 `AlignedPair` 与 `src/bridge.ts:102`
+  的 `DiffRow`）才通过。这正是这道门控存在的意义。
+  **⑥ §0 明确写下一个坑**：`find-diff_signals.json` 的 `in_code` 只有 6 条，但那是
+  **类名子串匹配**，命中的是 `Range`/`Side`/`LinkAction`/`impl` 这类通用词；
+  `in_comment_only` 里的 `FindUsagesManager`/`FindUsagesOptions` 命中也只是因为本仓
+  **注释里引用了上游行号** —— 引用不等于实现。判决必须逐个开源码确认。
+  **⑦ 查漏的结果改变了三条判决**：`FindUsagesManager` / `ShowUsagesAction` /
+  `FindUsagesAction` / `FindUsagesOptions` / `FindUsagesSettings` / `FindUtil` /
+  `FindPopupScopeUIImpl` / `StatusPanel` 原本按"没有查找用法"判 `[ ]`，
+  开源码后发现本仓**有**（走 LSP `textDocument/references`：`src/treeActions.ts:99-113`
+  从文件树发起 + `src/toolContents.ts:149-157` 的文案复刻 `FindBundle.properties:31-32`
+  + `src/usageViewGear.ts:36-60` 的齿轮），改判 `[~]` 并写清缺什么（usage type 分类、分组、
+  只能在文件上发起而不是光标下的符号）。**注释里的上游引用是最容易让人误判成"没做"的信号。**
+
+| 检查 | 结果 |
+|---|---|
+| `npx vue-tsc --noEmit` | exit 0，0 错误 |
+| `npm test` | **1420/1420**（1399 → 1420：新增 `tests/diff-align.test.mjs` 13 条 + `tests/b7-verdict.test.mjs` 8 条） |
+| `npx vite build` | exit 0，12.45s |
+| `tests/module-size.test.mjs` | **5/5**（`diffAlign.ts` 是新模块，不占四个宿主文件的名额） |
+| `npm run test:native` | RC 0，`ctest` **36/36** |
+
 - [x] **已补（第八十二批）** Search Everywhere 文件来源的 Smith-Waterman 模糊匹配，
   外加**一个只有真机能暴露的跨语言缺陷**。
   **① 移植对齐算法本身**（上游 `platform/searchEverywhere/backend/src/…/filesFuzzy/`）：
