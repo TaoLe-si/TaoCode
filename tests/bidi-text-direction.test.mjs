@@ -68,8 +68,9 @@ test('视图菜单里是「文本方向」子菜单，三项指向 IDEA 的三�
 })
 
 test('设置键进了前端白名单与原生 schema（否则存不下来）', () => {
-  const bridge = readFileSync('src/bridge.ts', 'utf8')
-  assert.ok(bridge.includes("key === 'bidiTextDirection'"), '前端设置白名单里没有这个键')
+  // 白名单 2026-10-04 从 src/bridge.ts 搬到了 src/previewSettings.ts（bridge 贴着机检上限）。
+  const preview = readFileSync('src/previewSettings.ts', 'utf8')
+  assert.ok(preview.includes("key === 'bidiTextDirection'"), '前端设置白名单里没有这个键')
   const schema = readFileSync('native/settings_schema.cpp', 'utf8')
   assert.ok(schema.includes('"bidiTextDirection", "contentBased"'), '原生默认值里没有这个键')
   assert.ok(schema.includes('bidiTextDirection must be contentBased, ltr or rtl'), '原生没有取值校验')

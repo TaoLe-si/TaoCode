@@ -28,6 +28,7 @@ import { createGeneralSettingsTextModels } from '../generalSettingsTextModels'
 import TodoPatternsPage from './TodoPatternsPage.vue'
 import FileTypesPage from './FileTypesPage.vue'
 import CodeFoldingSettingsPage from './CodeFoldingSettingsPage.vue'
+import EditorTabsSettingsPage from './EditorTabsSettingsPage.vue'
 import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, NamedScopeSetting, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
 import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '../bridge'
 // 构建工具组（`build.tools` + Gradle 页）的取值/文案/控件都在 src/gradle.ts 与两个子页组件里；
@@ -931,34 +932,8 @@ defineExpose({ handleEscape })
           </fieldset>
         </form>
 
-        <form
-          v-show="section === 'editor.preferences.tabs'" :id="`${id}-panel-editor.preferences.tabs`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.tabs"
-          role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.tabs`" :aria-busy="busy" @submit.prevent="applyEditor()"
-        >
-          <h3>编辑器 › 常规 › 编辑器标签页</h3>
-          <div class="editor-page-head">
-            <button type="button" class="subtle-button" title="把本页全部选项恢复为出厂默认值（需再点“应用”生效）" @click="resetEditorPage()">恢复默认</button>
-          </div>
-          <p class="section-description">对应 IDEA 的 Editor › General › Editor Tabs（EditorTabsConfigurable.kt:109 的 editbox.tab.limit，注册 id="editor.preferences.tabs"）。</p>
-          <fieldset class="settings-fields" :disabled="busy">
-            <div class="input-row">
-              <label :for="`${id}-tab-limit`">每个编辑器组的标签页上限</label>
-              <input :id="`${id}-tab-limit`" v-model.number="editor.tabLimit" type="number" min="1" max="100" step="1" required aria-describedby="editor-tab-limit-hint" />
-            </div>
-            <p id="editor-tab-limit-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">超过上限时，IDEA 会先关闭未修改且最久未选中的标签页（默认 30，范围 1–100）。</p>
-            <!-- UISettings.scrollTabLayoutInEditor（UISettingsState.kt:123 默认 true）；
-                 文案 = ApplicationBundle.properties:316「Show tabs in one row」。
-                 关掉后标签条换成 WrapMultiRowLayout：换行、不裁切、也没有「…」按钮。 -->
-            <div class="input-row">
-              <label :for="`${id}-tabs-in-one-row`">标签显示在一行</label>
-              <input :id="`${id}-tabs-in-one-row`" v-model="editor.tabsInOneRow" type="checkbox" />
-            </div>
-            <div class="input-row">
-              <label :for="`${id}-pinned-separate-row`">在单独一行中显示固定标签</label>
-              <input :id="`${id}-pinned-separate-row`" v-model="editor.pinnedTabsInSeparateRow" type="checkbox" :disabled="editor.tabsInOneRow" />
-            </div>
-          </fieldset>
-        </form>
+        <section v-show="section === 'editor.preferences.tabs'" :id="`${id}-panel-editor.preferences.tabs`" class="settings-panel" data-page="editor.preferences.tabs" role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.tabs`" :aria-busy="busy"><EditorTabsSettingsPage :settings="editor" :busy="busy" :invalid-tab-limit="!validEditor" :id-prefix="id" @reset="resetEditorPage()" /></section>
+
         <form
           v-show="section === 'editor.preferences.smartKeys'" :id="`${id}-panel-editor.preferences.smartKeys`" :ref="registerEditorForm" class="settings-panel" data-page="editor.preferences.smartKeys"
           role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.smartKeys`" :aria-busy="busy" @submit.prevent="applyEditor()"

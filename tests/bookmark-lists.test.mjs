@@ -88,16 +88,19 @@ test('「添加另一书签…」只给文件书签、且走"挑列表再加"的
 test('编辑器标签页与项目视图菜单都有文件书签那三条，且"添加另一书签"要已有书签', async () => {
   const fs = await import('node:fs')
   const app = fs.readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+  // 标签页那一份 markup 2026-10-04 搬进了 src/components/TabContextMenu.vue（App.vue 贴上限），
+  // 判据跟着搬家 —— 查的东西一个字没变。它经 ctx 取函数，所以那边写的是 `ctx.bookmarkFile(path)`。
+  const tabs = fs.readFileSync(new URL('../src/components/TabContextMenu.vue', import.meta.url), 'utf8')
   const runtime = fs.readFileSync(new URL('../src/bookmarkActions.ts', import.meta.url), 'utf8')
   // 用"同一行里同时出现"来判，不写正则（引号/括号的转义在这条链上已经错过两次）。
-  const lines = app.split(String.fromCharCode(10))
-  const rowHas = (needle, ...also) => lines.some(line => line.includes(needle) && also.every(part => line.includes(part)))
-  for (const [menu, path] of [['标签页', 'menu.path'], ['项目视图', 'treeMenu.entry.path']]) {
-    assert.ok(rowHas(`bookmarkFile(${path})`), `${menu}菜单没有「添加/删除书签」那一行`)
-    assert.ok(rowHas(`fileBookmarkLabel(${path}) === '删除书签'`, `editBookmarkAt(${path})`),
-      `${menu}菜单没有「编辑描述」那一行`)
-    assert.ok(rowHas(`fileBookmarkLabel(${path}) === '删除书签'`, `addFileBookmarkToAnotherList(${path})`),
-      `${menu}菜单没有「添加另一书签…」那一行（且要跟着"已有书签"的门）`)
+  const linesOf = text => text.split(String.fromCharCode(10))
+  const has = (text, needle, ...also) => linesOf(text).some(line => line.includes(needle) && also.every(part => line.includes(part)))
+  const cases = [['标签页', tabs, 'ctx.bookmarkFile(path)', 'ctx.editBookmarkAt(path)', 'ctx.addFileBookmarkToAnotherList(path)'],
+                 ['项目视图', app, 'bookmarkFile(treeMenu.entry.path)', 'editBookmarkAt(treeMenu.entry.path)', 'addFileBookmarkToAnotherList(treeMenu.entry.path)']]
+  for (const [menu, source, addRow, editRow, anotherRow] of cases) {
+    assert.ok(has(source, addRow), `${menu}菜单没有「添加/删除书签」那一行`)
+    assert.ok(has(source, "删除书签", editRow), `${menu}菜单没有「编辑描述」那一行`)
+    assert.ok(has(source, "删除书签", anotherRow), `${menu}菜单没有「添加另一书签…」那一行（且要跟着"已有书签"的门）`)
   }
   // 动作体：只认**文件**书签，且走"挑一张列表再加"的捷径。
   assert.match(runtime, /function addFileBookmarkToAnotherList\(path: string\) \{[\s\S]{0,260}?item\.path === path && item\.line === undefined/,

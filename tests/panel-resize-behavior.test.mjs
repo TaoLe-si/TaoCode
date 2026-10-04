@@ -5,6 +5,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import * as appearance from '../src/appearance.ts'
 import * as toolWindowResize from '../src/toolWindowResize.ts'
+import * as toolWindowPaneState from '../src/toolWindowPaneState.ts'
 
 // Run the production host with real Vue reactivity; only resolve its extensionless imports.
 const js = ts.transpileModule(readFileSync(new URL('../src/panelResize.ts', import.meta.url), 'utf8'), {
@@ -15,6 +16,7 @@ new Function('require', 'exports', js)(name => {
   if (name === 'vue') return vue
   if (name === './appearance') return appearance
   if (name === './toolWindowResize') return toolWindowResize
+  if (name === './toolWindowPaneState.ts') return toolWindowPaneState
   throw new Error(`Unexpected import: ${name}`)
 }, exports)
 

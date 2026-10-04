@@ -109,8 +109,10 @@ test('变更树头部那对按钮 = 上游的 header 动作（全部展开 / 全
   assert.match(panel, /const hasGroups = computed\(\(\) => changes\.value\.length > 0\)/, '本仓的分组就是已暂存/更改两组')
   // 折叠的是行，不是整块（组节点留着）——上游收起的是树的子节点
   assert.ok(!panel.includes('v-show="!changesCollapsed" class="sc-scroll"'), '整块滚动区不该被隐藏')
-  assert.match(panel, /v-for="change in staged" v-show="!changesCollapsed"/, '分组的行随折叠显隐')
-  assert.match(panel, /v-for="change in unstaged" v-show="!changesCollapsed"/)
+  // 第一百一十二批起这两段按「分组依据」分组渲染，行循环变成 `group.changes` ——
+  // 判的东西没变：行仍然随折叠显隐（折叠的是行，不是整块）。
+  assert.match(panel, /v-for="change in group\.changes" v-show="!changesCollapsed"/, '分组的行随折叠显隐')
+  assert.match(panel, /v-for="change in group\.changes" v-show="!changesCollapsed"/, '未暂存那一组同样随折叠显隐')
 })
 
 test('分支/检出/合并/删除/比较 不在面板里（上游位置 = 分支弹窗，本仓已有）', () => {

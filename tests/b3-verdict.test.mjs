@@ -86,11 +86,11 @@ test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
   assert.equal(count('[x]'), 13)
-  assert.equal(count('[~]'), 48)
-  assert.equal(count('[ ]'), 0)
+  assert.equal(count('[~]'), 47)
+  assert.equal(count('[ ]'), 1)
   assert.equal(count('[-]'), 17)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 78)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 13 \+ `\[~\]` 48 \+ `\[ \]` 0 \+ `\[-\]` 17 = 78/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 13 \+ `\[~\]` 47 \+ `\[ \]` 1 \+ `\[-\]` 17 = 78/,
     '表尾的和数要与逐条表一致')
 })
 

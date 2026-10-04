@@ -1,7 +1,7 @@
 // 键一致性门禁：前端 `defaultEditorSettings` 的每一个键都必须同时出现在
 //   1. `native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS` 白名单
 //   2. `native/settings_schema.cpp` 的 `editor_defaults_impl()` 默认值
-//   3. `src/bridge.ts` 的 `settings.update` 编辑器档白名单
+//   3. 预览态的 `src/previewSettings.ts` 编辑器档白名单（原在 `src/bridge.ts`）
 //
 // 这条门禁是被一个真机缺陷逼出来的：前端认 `showStatusBar`（还有 `rightMargin`、
 // `showStickyLines`、`stickyLinesLimit`、`diffContextLines`），native 白名单里却没有。
@@ -46,14 +46,15 @@ function nativeDefaults() {
   return new Set([...body[1].matchAll(/\{"([^"]+)"/g)].map(m => m[1]))
 }
 
-/** `src/bridge.ts` 的 `case 'settings.update'` 段：只认 `key === '...'` 形式的白名单。 */
+/**
+ * 预览态那份白名单：`key === '...'` 形式的键表。
+ *
+ * 2026-10-04 从 `src/bridge.ts` 搬到了 `src/previewSettings.ts`（bridge 贴着机检上限，
+ * 而这一段是纯逻辑）—— 门禁跟着搬家，但**查的东西一个字没变**：还是那条"前端这一关也不能漏"。
+ */
 function bridgeEditorAllowlist() {
-  const src = read('src/bridge.ts')
-  const start = src.indexOf("case 'settings.update'")
-  assert.ok(start > 0, "找不到 bridge.ts 的 settings.update 分支")
-  const accepted = src.slice(start, src.indexOf("case 'settings.general.update'", start) > 0
-    ? src.indexOf("case 'settings.general.update'", start) : start + 20000)
-  return new Set([...accepted.matchAll(/key === '([A-Za-z_]\w*)'/g)].map(m => m[1]))
+  const src = read('src/previewSettings.ts')
+  return new Set([...src.matchAll(/key === '([A-Za-z_]\w*)'/g)].map(m => m[1]))
 }
 
 test('defaultEditorSettings 的每个键都在 native 编辑器键白名单里（漏一个 = 整条 UI 静默消失）', () => {
@@ -81,7 +82,7 @@ test('前端设置保存走的是整本账，所以白名单里的键也必须�
     `native 认、前端不认的键：前端每次保存发整本账（App.vue:676），这些键会让保存整条失败。\n${orphans.join(', ')}`)
 })
 
-test('bridge.ts 的 settings.update 编辑器档白名单与 native 一致（前端这一关也不能漏）', () => {
+test('预览态的 settings.update 编辑器档白名单与 native 一致（前端这一关也不能漏）', () => {
   const bridge = bridgeEditorAllowlist()
   const allow = nativeAllowlist()
   const missing = frontendEditorKeys().filter(k => !bridge.has(k))

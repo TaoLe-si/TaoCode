@@ -19,6 +19,7 @@ import { PLUGIN_MENU_LABEL, pluginMenuRows } from './pluginCommands'
 import { recordActionStep } from './macroHost'
 import { bookmarkOwner } from './bookmarks'
 import { filterProjects, groupProjects } from './projectWidget'
+import { widgetToggleRows } from './statusWidgets'
 import type { EditorSettings, PluginInfo, RecentProject, Workspace } from './bridge'
 
 /** 命令面板/查找操作里的一条（IDEA 的 AnAction 在搜索列表中的投影）。 */
@@ -43,6 +44,8 @@ export interface MenuUiDeps {
   bookmarks: Ref<any[]>
   jumpMnemonic: (mnemonic: string) => void
   focusStatusBar: () => void
+  /** 此刻有没有打开的编辑器（状态栏里 editor-based 组件能不能开，判据与右键勾选同一条）。 */
+  hasEditor: () => boolean
   recentProjects: Ref<RecentProject[]>
   /** 有未完成的写入/加载时，切换项目要拦住。 */
   working: { readonly value: boolean }
@@ -219,6 +222,11 @@ const actionList = computed<ActionEntry[]>(() => {
     keywords: 'focus status bar first widget keyboard 状态栏 键盘 焦点 focus status bar', group: '窗口',
     enabled: () => Boolean(workspace.value), run: focusStatusBar,
   })
+  // 状态栏组件的「显示 <名字>」那批（上游 `StatusBarWidgetsOptionProvider`，是个
+  // `SearchTopHitProvider`：只出现在搜索里、不占菜单行）。可点性与右键勾选共用同一条判据。
+  for (const row of widgetToggleRows(deps.hasEditor())) {
+    list.push({ id: row.id, title: row.title, keywords: row.keywords, keys: '', group: '状态栏', enabled: () => row.enabled, run: row.run })
+  }
   return list
 })
 const actionResults = computed(() => rankCommands(actionList.value, actionQuery.value))

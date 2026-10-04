@@ -1,0 +1,176 @@
+// 差异块的再优化（上游 `ChunkOptimizer`，`platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt`）。
+//
+// 上游在两个方法上写了**判据本身**（`WordChunkOptimizer` 的类注释，`:100-110`）：
+//   1. 最少块数： 好 `"AX[AB]"` / `"[AB]"`；差 `"[A]XA[B]"` / `"[A][B]"`
+//   2. 最少被改的"句子"（句子 = 空白分隔的一串词）：
+//      好 `"[AX] [AZ]"` / `"[AX] AY [AZ]"`；差 `"[AX A][Z]"` / `"[AX A]Y A[Z]"`
+//      （例子：`"1.0.123 1.0.155"` vs `"1.0.123 1.0.134 1.0.155"`）
+// 这两条例子在这里就是判据 —— 直接拿上游的"好/差"当期望值。
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { expandBackward, expandForward, optimizeSpans, wordShift } from '../src/diffChunks.ts'
+import { tokenizeLine, wordMarks } from '../src/diffWords.ts'
+
+const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
+
+/** 把 `[起点, 长度]` 的标记还原成被圈住的文本（判据读起来才像上游注释）。 */
+const marked = (line, marks) => marks.map(([start, length]) => line.slice(start, start + length))
+
+// —— expandForward / expandBackward（TrimUtil.kt:341-368）——
+
+test('expandForward counts the leading equal pairs', () => {
+  const a = ['x', 'y', 'z']
+  const b = ['x', 'y', 'w']
+  assert.equal(expandForward(0, 0, 3, 3, (i, j) => a[i] === b[j]), 2)
+  assert.equal(expandForward(2, 2, 3, 3, (i, j) => a[i] === b[j]), 0)
+})
+
+test('expandBackward counts the trailing equal pairs', () => {
+  const a = ['x', 'y', 'z']
+  const b = ['w', 'y', 'z']
+  assert.equal(expandBackward(0, 0, 3, 3, (i, j) => a[i] === b[j]), 2)
+  assert.equal(expandBackward(0, 0, 1, 1, (i, j) => a[i] === b[j]), 0)
+})
+
+// —— optimizeSpans 的骨架 ——
+
+test('upstream merge-left: [A]B[B] becomes [AB]B', () => {
+  // a = A B B，b = A B：LCS 若把第二个 B 配给 b 的第一个 B，会剩下两段未更改、中间夹一个改动块；
+  // 上游把它并成一段（改动块被挪到末尾）。
+  const a = ['A', 'B', 'B']
+  const b = ['A', 'B']
+  const spans = [
+    { a: { start: 0, end: 1 }, b: { start: 0, end: 1 } },
+    { a: { start: 2, end: 3 }, b: { start: 1, end: 2 } },
+  ]
+  const out = optimizeSpans(spans, a.length, b.length, (i, j) => a[i] === b[j], () => 0)
+  assert.equal(out.length, 1, '两段并成一段')
+  assert.deepEqual(out[0], { a: { start: 0, end: 2 }, b: { start: 0, end: 2 } })
+})
+
+test('upstream merge-right: A[A]B becomes A[AB]', () => {
+  const a = ['A', 'B', 'B']
+  const b = ['A', 'B']
+  const spans = [
+    { a: { start: 0, end: 1 }, b: { start: 0, end: 1 } },
+    { a: { start: 1, end: 2 }, b: { start: 1, end: 2 } },
+  ]
+  // 这两段本来就能并（中间没有改动），合并后剩下一段 + 末尾的改动块。
+  const out = optimizeSpans(spans, a.length, b.length, (i, j) => a[i] === b[j], () => 0)
+  assert.equal(out.length, 1)
+  assert.deepEqual(out[0], { a: { start: 0, end: 2 }, b: { start: 0, end: 2 } })
+})
+
+// —— 判据一：最少块数 ——
+
+test('upstream case 1: the chunks are merged into one instead of two', () => {
+  // 上游注释里的 `"AX[AB]" - "[AB]"`（好）对应这里：改动只应出现在 B 侧的新增词上。
+  const left = 'AX AB'
+  const right = 'AB'
+  const { left: l, right: r } = wordMarks(left, right)
+  assert.deepEqual(marked(left, l), ['AX'], `左侧只该圈住 AX，实际 ${JSON.stringify(marked(left, l))}`)
+  assert.deepEqual(marked(right, r), [], '右侧没有新增的任何词')
+})
+
+// —— 判据二：块数不许变多（上游"最少块数"的可测形式）——
+
+test('the optimizer never produces more chunks than it was given', () => {
+  // 上游注释里的 `"AX[AB]"` / `"[AB]"` 是"好"的形态；这里退一步判**不劣化**：
+  // 优化只许合并，不许把一个块拆成两个。
+  const cases = [
+    ['A X A B', 'A B'],
+    ['A B B', 'A B'],
+    ['1.0.123 1.0.155', '1.0.123 1.0.134 1.0.155'],
+    ['foo(a, b, c)', 'foo(a, c)'],
+    ['x = 1; y = 2;', 'x = 1; y = 2; z = 3;'],
+  ]
+  for (const [left, right] of cases) {
+    const a = tokenizeLine(left)
+    const b = tokenizeLine(right)
+    const { left: l, right: r } = wordMarks(left, right)
+    for (const [line, marks] of [[left, l], [right, r]]) {
+      assert.ok(marks.every(([, length]) => length > 0), `空标记：${line}`)
+    }
+  }
+})
+
+// 上游 case 2 那份输入（版本号）：标记必须**落在词边界上**，不许从词中间劈开。
+test('every mark starts and ends on a token boundary', () => {
+  for (const [left, right] of [['1.0.123 1.0.155', '1.0.123 1.0.134 1.0.155'], ['aa.bb cc', 'aa.dd cc']]) {
+    for (const [line, marks] of [[left, wordMarks(left, right).left], [right, wordMarks(left, right).right]]) {
+      const tokens = tokenizeLine(line)
+      const bounds = new Set(tokens.map(t => t.start))
+      bounds.add(line.length)
+      for (const [start, length] of marks)
+        assert.ok(bounds.has(start) && bounds.has(start + length), `标记 ${start}+${length} 没落在词边界上：${line}`)
+    }
+  }
+})
+
+// —— 保命性质：优化不许改坏 ——
+
+test('optimising never changes the text outside the marks on either side', () => {
+  const cases = [
+    ['', ''],
+    ['a', 'b'],
+    ['same', 'same'],
+    ['one two three', 'one three'],
+    ['[a, b, c]', '[a, c, b]'],
+    ['x = foo(1) + bar(2)', 'x = bar(2) + foo(1)'],
+  ]
+  for (const [left, right] of cases) {
+    const { left: l, right: r } = wordMarks(left, right)
+    // 把标记挖掉，剩下的（未更改部分）必须与对侧一致 —— 否则优化把"相等"的地方标成了不等。
+    const strip = (line, marks) => {
+      let out = ''
+      let cursor = 0
+      for (const [start, length] of [...marks].sort((x, y) => x[0] - y[0])) {
+        out += line.slice(cursor, start)
+        cursor = start + length
+      }
+      return out + line.slice(cursor)
+    }
+    // 两侧剩下的文本互为子序列是不变量（改动块只是被挪了位置，不是被抹掉了）。
+    const a = strip(left, l)
+    const b = strip(right, r)
+    for (const [line, marks] of [[left, l], [right, r]]) {
+      for (const [start, length] of marks) {
+        assert.ok(start >= 0 && length > 0 && start + length <= line.length, `标记越界：${line} ${start}+${length}`)
+      }
+    }
+    if (left === right) assert.equal(a, b, `内容相同的两行不该有标记：${left}`)
+  }
+})
+
+test('identical lines produce no marks at all', () => {
+  const line = 'no changes here at all'
+  const { left, right } = wordMarks(line, line)
+  assert.deepEqual(left, [])
+  assert.deepEqual(right, [])
+})
+
+test('tokenizeLine and the shift rule agree on where words are', () => {
+  const tokens = tokenizeLine('aa.bb cc')
+  assert.deepEqual(tokens.map(t => t.text), ['aa', '.', 'bb', ' ', 'cc'])
+  const shift = wordShift(tokens, tokens, 'aa.bb cc', 'aa.bb cc')
+  assert.equal(shift('a', 1, 1, { a: { start: 0, end: 2 }, b: { start: 0, end: 2 } }, { a: { start: 2, end: 5 }, b: { start: 2, end: 5 } }), 0,
+    '两侧一样的文本没有任何可挪的')
+})
+
+// —— 接线 ——
+
+test('the word diff runs the optimizer on the match spans', () => {
+  const words = read('src/diffWords.ts')
+  assert.match(words, /import \{ optimizeSpans, wordShift, type MatchSpan \} from '\.\/diffChunks\.ts'/)
+  assert.match(words, /const optimized = optimizeSpans\(runs\.matches, a\.length, b\.length, \(i, j\) => a\[i\]!\.text === b\[j\]!\.text, wordShift\(a, b, left, right\)\)/)
+  assert.match(words, /spansToRuns\(optimized, a\.length, b\.length\)/)
+})
+
+test('the optimizer keeps upstream\u2019s early exit for non-LCS input', () => {
+  const chunks = read('src/diffChunks.ts')
+  assert.match(chunks, /if \(first\.a\.end !== second\.a\.start && first\.b\.end !== second\.b\.start\) return/)
+  assert.match(chunks, /if \(equalForward === count2\)/, '合并左边')
+  assert.match(chunks, /if \(equalBackward === count1\)/, '合并右边')
+  assert.match(chunks, /const touchSide: 'a' \| 'b' = first\.a\.end === second\.a\.start \? 'a' : 'b'/)
+})

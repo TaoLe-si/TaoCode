@@ -1,15 +1,122 @@
-# 交接说明（顶部状态更新于 2026-10-03；下面「本轮」段是 2026-09-27 的历史存档）
+# 交接说明（顶部状态更新于 2026-10-04；下面「本轮」段是 2026-09-27 的历史存档）
 
 ## 当前状态：全绿
 
 | 检查 | 结果 | 备注 |
 |---|---|---|
 | `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1482/1482** | 2026-10-03；最近一批新增 `ui-text-selection` 5 条、`popup-anchor` 5 条、`external-libraries` 7 条（上一批：`sfc-single-root` 4 条、`ui-motion` 11 条、`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
+| `npm test` | **1812/1812** | 2026-10-04；新增 `diff-smart-lines` 13 条（第一百一十六批）+ 既有 `editor-find` 16、`diff-words` 21、`tab-strip-rows` 15、`search-everywhere-empty` 9、`search-everywhere-scope` 9、`status-bar-lifecycle` 13、`popup-detail` 19、`tool-window-pane-state` 13、`bookmark-order` 12、`commit-checks-progress` 10、`compare-files` 12 条。本轮之前：最近一批新增 `ui-text-selection` 5 条、`popup-anchor` 5 条、`external-libraries` 7 条（上一批：`sfc-single-root` 4 条、`ui-motion` 11 条、`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
 | `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
 | `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
 | `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
 | 真机取证 | **同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定 `%LOCALAPPDATA%\TaoCode`）；探针的 `build/TaoCode.lsp.json` 用完立刻删，别留在用户正在用的 exe 旁边 | 姿势与脚本见 `scripts/_cdp_step.py` |
+
+**本轮十批（第八十八～九十七批）** —— 一次把 B1/B2/B6/B7 四个判决里"能做但没做"的族清掉：
+
+| 批 | 题目 | 判决变化 |
+|---|---|---|
+| 88 | **编辑器内查找栏**（`SearchReplaceComponent` + `EditorSearchSession`） | — |
+| 89 | **B7 diff 词级/字符级 + 三档空白策略** | find-diff `[~]` 40→62、`[ ]` 498→469 |
+| 90 | **B1 标签条挤压排/滚动排** | ui-tabs `[~]` 20→30、`[ ]` 56→43 |
+| 91 | **B6 随处搜索空态/作用域/预览开关** | actions `[~]` 36→40、`[ ]` 6→2 |
+| 92 | **B2 状态栏实例生命周期 + 可搜索显隐动作** | toolwindow `[~]` 80→84、`[ ]` 62→55 |
+| 93 | **B1 弹层主从详情面板 →「查看断点…」对话框** | ui-tabs `[~]` 30→34、`[ ]` 43→39 |
+| 94 | **B2 工具窗口 pane 状态 + 侧条按钮配对** | toolwindow `[~]` 84→87、`[ ]` 55→49 |
+| 95 | **B5 书签排序口径（按加入顺序 vs 按位置）+ 组内排序动作** | bookmarks 5 条 `[~]` 的理由重写 |
+| 96 | **B3 提交面板内检查进度 + 「项目分析期间」警告** | vcs-commit `[~]` 48→47、`[ ]` 0→1（一条改判） |
+| 97 | **「比较对象…」（`CompareFilesAction` 单文件分支）** | find-diff `CompareFilesAction` 行理由重写 |
+| 98 | **插入/覆盖模式**（`EditorToggleInsertStateAction`；CodeMirror 没有这个能力，用 `EditorView.inputHandler` 还原） | — |
+| 99 | **两个真功能缺口：文件系统同步指示器 + 内部错误指示器** | — |
+| 100 | **合并冲突的逐条解决**（上游三栏工具的功能落在冲突标记上） | find-diff `MergeThreesideViewer` / `MergeThreesideViewerActions`：`[ ]`→`[~]`，页脚 62→64 / 469→467 |
+| 101 | **diff 查看器的未更改片段折叠**（`FoldingModelSupport` + `collapse.unchanged.fragments`） | find-diff `SimpleDiffViewer` / `UnifiedDiffViewer` / `FoldingModelSupport` / `SyncScrollSupport`：`[ ]`→`[~]`，页脚 64→68 / 467→463 |
+| 102 | **工程内搜索的分块发布**（`SearchResults` 的 chunk 流：边搜边出结果） | find-diff `LivePreview` / `SearchResults` / `SelectionManager` / `LivePreviewController`：`[ ]`→`[~]`，页脚 68→72 / 463→459 |
+| 103 | **差异块的再优化**（`ChunkOptimizer`：碎块合并 + 词边界微调） | find-diff `ChunkOptimizer` `[-]`→`[~]`、`ChangeCorrector` `[-]`→`[ ]`，页脚 72→73 / 459→460 / 88→86 |
+| 104 | **第四档比较策略「忽略空格和空行」**（`IgnorePolicy.IGNORE_WHITESPACES_CHUNKS`） | find-diff `ComparisonPolicy` `[~]`→`[x]`、`IgnorePolicy` 理由重写，页脚 11→12 / 73→72 |
+| 105 | **查找面板的预览**（`UsagePreviewPanel`：跟光标走 + 命中行高亮）+ 宿主侧「重按即重启搜索」（去掉 BUSY 那条路） | find-diff `FindPopupPanel` / `FindPopupHeader` / `FindPopupScopeUI` / `FindPopupResultsAutoloadHandler`：`[ ]`→`[~]`，页脚 72→76 / 460→456 |
+| 106 | **查找结果右键菜单**（`FindInFiles.Results.ContextMenu` → 「复制路径/引用…」四项） | — |
+| 107 | **状态栏六个 widget 工厂的口径更正**（第三十批就有工厂层，§C 却写着"无工厂层"） | toolwindow `ReadOnlyAttribute` / `Encoding` / `Position` 判 `[x]`、`LineSeparator` / `MemoryIndicator` / `SmartMode` 判 `[~]`，页脚 12+89+45+204 → **15+92+39+204=350** |
+| 108 | **「复制路径/引用…」进编辑菜单**（上游 `CopyPaths` 锚点后的第二个宿主） | — |
+| 109 | **标签右键菜单整块搬出 App.vue**（2737→2720）+ **「复制路径/引用…」进标签右键**（第三个宿主） | — |
+| 110 | **剩余缺口的核实记录**（五处候选逐个开原文，结论与「为什么不做」写进清单） | — |
+| 111 | **提交面板变更行的右键菜单**（上游 `ChangesViewPopupMenu` 的真有子集 + 复制路径/引用…的第四个宿主） | — |
+| 112 | **提交面板的「分组依据」**（`ChangesView.GroupBy` 的目录档）+ **逐块暂存拆出组件**（SourceControl 918→894） | — |
+| 113 | **「忽略的文件」**（`ChangesView.ShowIgnored`：native `--ignored=matching` + 面板复选框 + 忽略行的菜单三行） | — |
+| 114 | **补丁导出**（`ChangesView.CreatePatch` / `CreatePatchToClipboard`：`git diff HEAD` 落盘或进剪贴板） | — |
+| 115 | **补丁收上未跟踪的文件**（native `git.patch`：`git diff HEAD` + 未跟踪按「新文件」接上） | — |
+| 116 | **行级 diff 的两步比对**（上游 `ChangeCorrector` + `ByLineRt.compareSmart`：先钉大行、再补空隙里的局部 LCS） | find-diff `ChangeCorrector` `[ ]`→`[~]`，页脚 76→77 / 456→455 |
+
+**第九十八～一百批**（2026-10-03/04）：**第九十八批**还原**插入/覆盖模式** —— CodeMirror 没有这个能力，
+第一版用 `transactionFilter` 返回 `[tr, {changes}]`，真机上**照插不误**（两笔事务都应用了）；换 `EditorView.inputHandler`
+才对，块状光标用 `baseTheme` 出。**第九十九批**补两个真功能缺口：「文件系统同步」指示器（`VfsRefreshIndicatorWidgetFactory`
+注册进状态栏清单，默认关）与「内部错误」指示器（`native/diagnostics.cpp` 的错误台账 + `app.internalErrors` 桥；
+`FatalErrorWidgetFactory` 上游 `isConfigurable=false`、本仓**刻意不注册**）。**第一百批**是**合并冲突的逐条解决**：
+上游那张三栏工具读的是 VCS 给的三份内容，本仓没有那条数据来源，于是把功能落在**冲突标记**上
+（`src/mergeConflicts.ts` + `src/editorMergeHost.ts` + `src/components/MergeBar.vue`：未决计数 / 上一个 / 下一个 /
+接受左侧 / 接受右侧；**没有「接受两者」**，上游也没这个按钮）。真机抓到的缺陷：第一版把 `props.content` 交给导航条自解析，
+**接受一侧后缓冲区对了、计数停在 2/2**（父级 `tab.content` 只在读盘/存盘时更新）—— 改成从实时文档解析；
+尺寸门禁当场拦下修复（1154 > 1148），**拆而不抬**：清单与两个动作搬进 `src/editorMergeHost.ts`，回到 1147，上限跟着降到 1147。
+
+**第一百零一～一百零二批**（2026-10-04）：**第一百零一批**补 diff 查看器的**未更改片段折叠**
+（上游 `FoldingModelSupport` + `collapse.unchanged.fragments`：五档上下文 1/2/4/8/禁用、默认 4、默认展开；
+真机抓到两处 —— 折叠标记的行号写成"片段起点"（那几行还显示在上面）、窄弹层里标签被挤成竖排）。
+**第一百零二批**把工程内搜索改成**分块发布**（上游 `SearchResults` 的 chunk 流）：`native/search.cpp` 的
+`preview()` 按"距上一块 ≥50ms 或攒够 200 条"切块推 `search.chunk`，前端 `src/searchStream.ts` 认领累积、
+面板边收边画。真机抓到两处 —— 空态那一支看的是**最终**总数，于是流式期间块到了也画不出来；
+结果区在矮停靠区被挤成 **8px**（内容 58 万像素）。顺带拆了 `src/previewSettings.ts`（bridge 到上限）。
+
+**第一百零六～一百一十批**（2026-10-04）：把「复制路径/引用…」（上游 `CopyReferencePopupGroup`）的三个宿主
+逐个接上 —— 查找结果右键（批 106）、编辑菜单（批 108，锚在 `CopyPaths` 之后）、标签右键（批 109；
+顺手把标签菜单那 46 行 markup 整块搬进 `src/components/TabContextMenu.vue`，App.vue 2737→2720，并新增
+「组件里每个 `ctx.X` 都必须在宿主真的存在」的门禁 —— `ctx` 是 any，TS 看不见这类笔误）。
+批 107 是一次**口径更正**：B2 判决书把六个状态栏组件工厂写成"无工厂层"（第三十批之前的旧口径），
+逐个改判（3 `[x]` / 3 `[~]`）并把 §A/§B/§C/§D 的标题数字改成"全表 N 类"、b2 门禁的计数与"引用可带行号"同步。
+批 110 把五个剩余候选逐个开原文核实（`ChangesViewPopupMenu` 缺的是整张右键菜单、`MainToolbarQuickActions`
+三条已被别处覆盖、alert 闪烁在平台里没有触发者、`ClosableByLeftArrow`/`IdeFocusManager` 没有对应形态），
+结论与理由都写进了清单 —— 免得下一位再走一遍。**新增门禁的代价**：这一批里三次改了既有判据的读法
+（settings 白名单搬去 `previewSettings.ts`、书签三行与 AnchoredMenu 改读组件、b2 计数），每次都是
+"查的东西不变、路径跟着搬家"。
+
+**第一百一十一批**（2026-10-04）：提交面板变更行的**右键菜单**（上游 `ChangesViewPopupMenu`：
+显示差异 / 复制路径/引用… / 回滚… / 暂存 / 取消暂存 / 添加到 VCS / 加入 .gitignore / 刷新，按变更状态出没）。
+真机抓到两个只有真机能发现的缺陷：菜单 markup 插进了嵌套 `<template>` 分支（`indexOf('</template>')`
+命中第一个），以及"点了复制什么都没进剪贴板"（清空 `rowMenu` 后再读依赖它的 computed）。
+**并诚实记一次事故**：修插层时用了 `git checkout -- src/components/SourceControl.vue`，
+把该文件所有未提交改动（含批 96 的面板内检查进度行与 `analyzing` prop）一起抹了 ——
+靠全量测试点名 + 模块导出重建回来；教训写进清单：回滚单文件先备份或 `git stash push -- <file>`。
+
+**第一百一十六批**（2026-10-04）：**行级 diff 的两步比对**。上游 `ByLineRt.doCompare` 走
+`compareSmart`（`ByLineRt.kt:335-348`）：先只比**大行**（`nonSpaceChars > 3`，阈值是常量
+`DiffConfig.UNIMPORTANT_LINE_CHAR_COUNT = 3`，`util/diff/DiffConfig.kt:12`），再按
+`ChangeCorrector.execute()`（`ChangeCorrector.kt:27-50`）在每两对相邻的已匹配大行之间
+`matchGap`（`ChangeCorrector.kt:101-115`：`TrimUtil.expand` 让出两端相等的行 → 中间那段局部 LCS）。
+本仓新增 `src/diffSmartLines.ts`，接在 `src/diffText.ts` 的 `buildDiffRows` 上。为什么值：
+全局 LCS 在并列最优时会随便挑一种配法，短行（括号/空行）就可能配错位置 —— 实测
+`if (x) { / a(); / }` 那组输入上两者**配对数一样**（都是 5 对），但两步比对认"括号挪了"，
+普通 LCS 认成"语句挪了"。**没做的两道修补也写进判词**：`optimizeLineChunks` 与
+`expandRanges` / `correctChangesSecondStep` 还没做，所以 `buildDiffRows` 里加了一条兜底
+——**两步比对的配对数不许少于普通 LCS**（少配一定更差，多配或同样多才取新结果）。
+新增判据 13 条（`tests/diff-smart-lines.test.mjs`）。六道门禁全绿。
+
+**真机/门禁抓到的六个缺陷**（都不是纯代码审读能发现的）：
+① 查找栏的 Ctrl+Alt+E / F3 在**焦点位于搜索框**时失效（编辑器 keymap 只管 `.cm-editor` 内部）；
+② 标签条的**绝对定位元素用 `width:auto` 量到的是 shrink-to-fit**，缩小的值进缓存后窗口拉宽也不恢复；
+③ 标签条的 **ResizeObserver 只在第一次调用时登记对象**，元素被替换后窗口变化不再触发重算；
+④ 标签条挤压排的 `decreaseMaxLengths` 首版把**下限抬到了比原值更高**（总长反而超预算）；
+⑤ 断点列表按带行号的路径做字典序排，**第 10 行排到了第 9 行前面**（写判据时抓到）；
+⑥ 侧条按钮的"恢复"配对检查写成与"移除"**相反**的一条（已有的回滚判据当场抓到）。
+⑦ 提交面板那条进度行的**可见性写成了恒 true**，空闲时也一直挂着（真机取证当场发现）。
+另有两处**口径错误**是复核源码时发现的：书签默认排序本仓只做了"按位置"一支（上游默认是**按加入顺序**，`UISettingsState.kt:249` = false）；「项目分析期间检查不可用」原先记成"本仓没有这个状态"，而语言服务首次导入就是同一个语义。
+
+**第八十八批（编辑器内查找栏）**：判决 `docs/inventory/verdict-find-diff.md` §C 第一条点名的
+"编辑器内查找整体缺席"已补上。**先分清上游有两根查找** —— `FindPopupPanel` 是工程内对话框，
+编辑器里那根栏是 `SearchReplaceComponent` 由 `EditorSearchSession` 驱动（挂在
+`editor.setHeaderComponent`）。四个新模块：`src/editorSearch.ts`（匹配语义，纯函数）、
+`src/editorSearchExtension.ts`（CodeMirror 状态/高亮/跳转）、`src/editorFindController.ts`
+（宿主状态域）、`src/components/EditorFindBar.vue`（UI）。原先 CodeMirror 的
+`findNext/findPrevious` 在"自己的面板没开"时是**空操作**，所以那两条 F3 键位其实什么都没做。
+**真机抓到一个只有真机能发现的缺陷**：Ctrl+Alt+E 与 F3 在**焦点位于搜索框**时失效 ——
+编辑器那张 keymap 只管 `.cm-editor` 内部，输入框在外面；上游把动作组注册在整条栏上，所以栏里也补了一份。
+判决四档随之从 `[x]` 11 / `[~]` 40 / `[ ]` 498 / `[-]` 81 变成 **`[x]` 11 / `[~]` 56 / `[ ]` 479 / `[-]` 84**。
 
 **最近这一段（第七十七～七十九批）的落点**：补全弹层的收尾（排序/分组更正/`filterText`/「选择声明」）、
 `Ctrl+Alt+B`「选择实现」弹层、**「快速定义」Ctrl+Shift+I + 库类型源码**（`native/library_sources.cpp` +
@@ -193,7 +300,7 @@ toolbar 15 / action 16 / rail 20 / artwork 24 / hero 28），`ICON_STROKE = 2`�
    **终端刻意不在白名单里**：xterm.js 用隐藏 textarea 驱动自己的选区，浏览器原生选区会打架
    （同一个字选两遍）。`-webkit-user-select` 两个属性都要写，否则 WebView2 里整条失效。
 
-**两条工具性教训**：① **写源码时别让工具把 ` ` 当真 NUL 字节落进文件** —— 它会让 `git diff`
+**两条工具性教训**：① **写源码时别让工具把 `\0` 当真 NUL 字节落进文件** —— 它会让 `git diff`
 与编辑器把文件当二进制，`.file`/Edit 还会报「Unsupported or binary text encoding」。`externalLibraries.ts`
 最后改用 `String.fromCharCode(0)` 并在注释里解释原因，`tests/external-libraries.test.mjs` 里有一条
 钉住「这个文件里不能有控制字符」。② **`.mjs` 测试不是 TS**：`.find(...)!` 这种非空断言会直接语法错。

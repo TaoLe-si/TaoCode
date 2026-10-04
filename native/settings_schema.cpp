@@ -241,6 +241,10 @@ Json editor_defaults_impl() {
             // UISettingsState.kt:123 `scrollTabLayoutInEditor` 默认 **true** ⇒ 标签排成一行；
             // 关掉才走 WrapMultiRowLayout（JBTabsImpl.kt:766-773 + EditorTabbedContainer.kt:582-584）。
             {"tabsInOneRow", true},
+            // UISettingsState.kt:125 `hideTabsIfNeeded by property(true)` —— 默认滚动而非挤压。
+            {"hideTabsIfNeeded", true},
+            // UISettingsState.kt:249 `sortBookmarks by property(false)` —— 默认按加入顺序，不是按位置。
+            {"sortBookmarks", false},
             // Indent with tabs instead of spaces, render whitespace, reformat on save
             // (IDEA: Editor → Code Style "Use tab character", "Show whitespaces",
             // "Reformat code" in Actions on Save).

@@ -91,18 +91,153 @@
 - `FindUtil` —— `showInUsageView` 的"把这批地点放进查找窗口"，本仓是 `src/semanticActions.ts:134` 钉到引用面板。
 - `FindPopupScopeUIImpl` —— 作用域选择器，`src/components/SearchPanel.vue:8` 明确写明是照 `FindPopupScopeUIImpl.java:59,137` 来的。
 
-### B3. 编辑器内查找：只有两个键
+### B3. 编辑器内查找：查找栏已落地（第八十八批）
 
-`EditorSearchSession` / `FindManager` / `FindResult` / `SearchReplaceComponent` / `SearchTextArea` / `FindAllAction`：本仓编辑器里只有 F3 / Shift+F3 两个键（`src/components/CodeEditor.vue:995-996`），没有查找栏、没有结果环、没有多光标全选。
+**上一版的"只有两个键"已作废。** 现在编辑器里有一根真的查找栏，上游对应物是
+`SearchReplaceComponent`（`platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java`）
+由 `EditorSearchSession` 驱动（`EditorSearchSession.java:137-157` 的 builder，挂在
+`editor.setHeaderComponent(...)` 上）—— **不是** `FindPopupPanel`（那是工程内查找对话框）。
+
+四个模块，各管一段：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 匹配语义 | `src/editorSearch.ts` | `buildSearchRegex`（字面量转义 / 全词词边界 / 正则 flag，对应 `FindModel.compileRegExp` `FindModel.kt:531-567`）、`collectSearchMatches`（含零宽匹配手动前进，否则 `lastIndex` 不前进会死循环）、`nextMatch`（**走完一圈回绕**） |
+| CodeMirror 侧 | `src/editorSearchExtension.ts` | 状态字段（开合/查询词/选项/当前命中）、命中高亮（对应 `LivePreview.highlightUsages` `LivePreview.java:337-343`：当前条另用一档 class）、`goToMatch` 的真实跳转 |
+| 宿主状态域 | `src/editorFindController.ts` | 打开/关闭、五档选项的读写与持久化、替换一行/全部、历史、`findWordAtCaret`、`toggleInSelection` |
+| UI | `src/components/EditorFindBar.vue` | 行内顺序照 `EditorSearchSession.java:238-265`；文案逐条取本机随 IDE 发货的中文语言包（`FindBundle.properties:10/11/43/65/96/101/124`） |
+
+**键位**（逐条对 `$default.xml`）：Find = Ctrl+F（`:565-567`）、Replace = Ctrl+R（`:374-376`）、
+FindNext = F3（`:707-708`）、FindPrevious = Shift+F3（`:507-508`）、FindWordAtCaret = Ctrl+F3、
+FindPrevWordAtCaret = Ctrl+Shift+F3、ToggleFindInSelection = Ctrl+Alt+E、
+UnselectPreviousOccurrence = Alt+Shift+J。菜单侧 `FindMenuGroup`（`PlatformActions.xml:465-486`）
+的子项顺序逐条照抄，FindInPath / ReplaceInPath 指向工程内那个搜索面板。
+
+**首次默认五档全关**（`FindSettingsBase.java:53-64` + `FindPopupPanel.java:1456-1463`），
+三档（大小写/全词/正则）之后沿用上次（上游 `FindSettings.setLocalCaseSensitive` 的等价物，
+键 `taocode.findOptions`）；「仅在选区内」不持久化（上游 `isGlobal` 由选区决定）。
+
+`FindManager` / `FindResult` 仍是 `[~]`：工程内那侧有等价物，但**不统一** ——
+编辑器内的一根栏与工程内的 `native/search.cpp` 各有各的状态，没有上游那个统一的 FindManager 门面。
 
 `FindResult` 判 `[~]` 而不是 `[ ]`，是因为工程内那侧确实有等价物：`native/search.cpp:413` 的 `truncated` 与 `:422` 的 `skippedNonUtf8` 就是"还有没有更多 + 有没有坏文件"的报告位。
 
 ### B4. 文件比较的两个入口，形态不同
 
 - `CompareFileWithEditorAction` —— 保存冲突预览确实展示了差异（`src/editorFileOps.ts:44-54` 的 `conflictDiff`，左边磁盘版右边缓冲区），但它是保存冲突流程里的一步，不是独立动作，也没有 Compare 工具窗。
-- `CompareFilesAction` —— 本仓没有任选两个文件比较的对话框。
+- `CompareFilesAction` —— **第九十七批已落单文件分支**（编辑器右键「比较对象…」；纯逻辑在 `src/compareFiles.ts`）。仍缺多选两个/三个文件的入口、目录比较、归档比较与三方比较。
 - `FindInPathAction` / `ReplaceInPathAction` —— 对话框本体在 `src/components/SearchPanel.vue`，但没有"打开查找工具窗"这一形态，也没有最近搜索历史。
 - `FindInProjectUtil` / `FindInProjectTask` —— 作用域求值有（`src/scopes.ts`），标题与展示设置、分批读（`USAGES_PER_READ_ACTION = 100`）、进度模型都没有。
+
+### B5. 合并冲突：功能落在**标记文本**上（第一百批）
+
+上游那张三栏工具（`MergeThreesideViewer`、`MergeRequestProcessor`、`MergeConflictModel`）读的是
+**VCS 给的三份内容**（base / yours / theirs），由 `MergeConflictModel` 算出 merge changes，结果栏是一份
+独立文档。整棵上游树上唯一认 `<<<<<<<` 的地方是 `GitMergeUtil.java:63-67` 的 `MERGE_MARKERS`
+（判断文件还在不在冲突态）。
+
+本仓没有读索引三阶段那条路，于是把**同一场景**（`git merge` 之后、文件里带冲突标记）的功能落在标记文本上：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 解析与解决 | `src/mergeConflicts.ts` | `parseConflicts`（只认**成对**标记；diff3 的基线段记下来但不进任何一侧）、`acceptSide`（整段替换那一处）、`nextConflict`（走完一圈回绕）、`conflictStatus`（"第 n / 共 m"） |
+| 宿主动作 + 状态域 | `src/editorMergeHost.ts` | `createMergeState`：清单（取**实时文档**）+ 接受 / 导航两个动作；文案取 `DiffBundle.properties:47-48` 的「接受左侧 / 接受右侧」（`MergeThreesideViewer.java:333-336` 用的就是这两条 key） |
+| 界面 | `src/components/MergeBar.vue` | 条上四样：未决计数 · 上一个 · 下一个 · 接受左侧 / 接受右侧。**没有「接受两者」**——上游那个工具里也没有这个按钮 |
+
+**与上游的差别（关键面）**：没有三栏视图、没有 base 栏可看、**没有逐片段（Fragment）级的接受**、
+没有 `ApplyNonConflicts`（自动接受所有不冲突的改动）、没有 "Resolve/Cancel" 那套对话框语义，
+也没有把结果写回索引三阶段的能力（本仓的结果就是编辑器缓冲区，保存即落盘）。
+
+`MergeThreesideViewer` / `MergeThreesideViewerActions` 因此判 `[~]`：两个按钮与冲突导航有真实落点，
+但上面那一串缺口会让人一眼看出不是同一张工具。`MergeConflictModel` / `MergeRequestProcessor` 与三个
+`*MergeTool` 仍判 `[ ]`：它们要的是三份内容与工具注册表，本仓没有这条数据来源。
+
+### B6. diff 查看器：折叠已落，同步滚动是"架构自带"（第一百零一批）
+
+- **未更改片段的折叠**（上游 `FoldingModelSupport` + `TextDiffViewerUtil.ToggleExpandByDefaultAction`）已落：
+  `src/diffFold.ts` 五档上下文（1/2/4/8/禁用，默认 4，禁用时整个控件隐藏）、默认展开、藏不足 2 行不生成折叠区；
+  `src/components/DiffView.vue` 上那个开关与逐片段展开，文案取随 IDE 发货的中文包。**缺**三层候选的逐级展开、
+  折叠处显示面包屑描述、悬停提示。
+- **同步滚动**：本仓的并排对比是**一个滚动容器里的对齐行表**，两侧天然同进同退；上游是两个独立编辑器 +
+  偏移映射（`SyncScrollSupport.java:316-330`）—— 功能上等价，机制上没有对应物。上游那个「同步滚动」开关
+  在本仓**没有可关的东西**，所以不摆这个开关（不放假控件）。**缺**横向独立滚动与折叠状态下的偏移补偿。
+- 那个对话框很窄（存盘冲突里嵌的 DiffView）：**真机取证**抓到标签被挤成竖排，已改成"工具带整条换行、
+  标签一律 nowrap"。
+
+### B7. 工程内搜索的**分块发布**（第一百零二批）
+
+上游 `SearchResults` 把一次搜索切成小块，每块一搜到就发布出去 —— "慢搜索也能先看到命中"
+（`SearchResults.java:87` 的 `CHUNK_TIME_BUDGET_MS = 50`，`:256-306` 的注释写明动机），
+而且每块之间可以在读锁边界让出写锁。
+
+本仓的一次扫描没有读锁（`native/search.cpp` 的 `walk()` 是单线程遍历），所以切块按
+"距上一块 ≥50ms **或** 攒够 200 条"两条中先到的：
+
+| 层 | 落点 |
+|---|---|
+| 宿主 | `native/search.hpp` 的 `Options::on_chunk`（`chunk_budget_ms = 50`、`chunk_max_matches = 200`）+ `search.cpp` 里 `preview()` 的分块冲刷 + `chunk_event()` 的事件体 |
+| 事件 | `search.chunk`（`streamId` / `matches` / `fileCount` / `done`），只在 `search.preview` 这条路上推（替换那几条要整份清单） |
+| 前端 | `src/searchStream.ts`（认领 `streamId`、累积、**丢掉迟到的块**）、`src/components/SearchPanel.vue`（边收边画 + 「正在搜索…已找到 N 条 / M 个文件」） |
+
+**缺口**：上游按持有读锁的时长切块并能在块边界让出写锁；块之间还有文档戳校验
+（`documentTimeStamp` 对不上就整份作废）—— 本仓用 `streamId` 认领代替，语义是"这一块属于哪一次搜索"。
+另外上游的编辑器侧预览只搜**可见区**，本仓每次改文档全量扫一遍。
+
+### B8. 差异块的再优化（第一百零三批）
+
+逐 token 的 LCS 只保证"改动最少"，不保证"看起来像人改的"。上游 `ChunkOptimizer` 在**未更改段**上
+两两取相邻的一段做两件事：**能合并的块合并**（`"[A]XA[B]"` → `"AX[AB]"`），**按词边界挪切点**
+（`"1.0.123 1.0.155"` vs `"1.0.123 1.0.134 1.0.155"` 不该把词从中间劈开）。
+
+本仓 `src/diffChunks.ts` 逐条照抄骨架与 `WordChunkOptimizer`：
+
+| 上游 | 本仓 |
+|---|---|
+| `build` 每次 push 后 `processLastRanges` | `optimizeSpans` 的 `processLast()`（合并后 `continue` 递归） |
+| `expandForward` / `expandBackward`（`TrimUtil.kt:341-368`） | 同名导出，判据直接对着它们写 |
+| 两段两侧都不相接 ⇒ 直接 return（不是 LCS，别动） | 同款早退 |
+| `equalForward == count2` 合并左 / `equalBackward == count1` 合并右 | 同款 |
+| `WordChunkOptimizer.getShift`：已被空白分开就不动；否则先往后找词边界，再往前找 | `wordShift`（`separated` / `edgeShift` 两条） |
+
+**实测**（本仓自己的源文件，5395 对相邻行）：315 对的结果被优化，**每一对都是块数变少**
+（例如 4 → 3、10 → 8），没有一对变多。
+
+**缺口**：`DelimiterChunkOptimizer`（分隔符块那一档）与 `LineChunkOptimizer`（空行对齐）没做；
+`ChangeCorrector`（行级两步比对）已在**第一百一十六批**落地（`src/diffSmartLines.ts`），
+但它后面那两道修补（`optimizeLineChunks` / `correctChangesSecondStep`）还没有 —— 判 `[~]`。
+
+### B9. 「忽略空格和空行」那一档（第一百零四批）
+
+上游界面上 `忽略差异` 是**六项**（`IgnorePolicy.java:12-17`），但只有三档 `ComparisonPolicy`：
+`IgnorePolicy.getComparisonPolicy()`（`:31-33`）把 `IGNORE_WHITESPACES_CHUNKS` 也折成
+`IGNORE_WHITESPACES`，它多出来的是 `isShouldTrimChunks()`（`:41-43`）—— 在
+`ComparisonManagerImpl.processAdjoining` 里把**只差空白**的改动从改动块的首尾剪掉
+（从前往后、从后往前各一轮，遇到真的不等的行就停）。
+
+本仓第一百零四批把这第四项做了：`src/diffComparison.ts` 的第四档 = 同样的折键 + `whitespaceOnlyDifference`
+（缺一侧按空串算 —— 空行的增删也算"只差空白"）+ `src/diffText.ts` 的 `trimChunkEdges`（剪掉的行按
+未更改渲染，底色与行内标记都不画，对应上游"把那个 fragment 整个丢掉"）。
+
+**缺口**：`FORMATTING`（要语言格式化器才能比"格式化后是否相同"）与
+`IGNORE_LANGUAGE_SPECIFIC_CHANGES`（要语言侧的忽略规则）没做，选择器也就**不列**这两项。
+
+### B10. 查找面板的预览（第一百零五批）
+
+上游 `FindPopupPanel` 把结果表与预览放在一个 splitter 的两侧（`:895-896`，比例 .33，比例记忆），
+选中变化 **50ms 去抖**后刷新预览（`:868-872`）；预览体是 `UsagePreviewPanel`：文件内容 + 命中高亮，
+加载中 `showLoading()`，标题栏写文件名与位置（`:369-377`）。文案取随 IDE 发货的中文包
+`UsageViewBundle.properties`：`tab.title.preview`（`:106` 预览）、`select.the.usage.to.preview`
+（`:86` 选择要预览的项）、`usage.preview.isnt.available`（`:110` 所选条目没有预览）。
+
+本仓（`src/searchPreview.ts` + `SearchPanel.vue`）：预览贴在结果列表下方，跟**光标**走
+（Enter / Shift+Enter 走动时不需要离开面板就能看上下文），窗口 = 命中行上下 40 行，
+标题 = 文件名 + 「行 N / 共 M」。两处如实差异：① 上游预览体是一整个编辑器，本仓是一段只读文本 +
+窗口（`ponytail:` 不为预览再起一个编辑器；文件大时升级路径是给窗口外补虚拟化滚动）；
+② `several.occurrences.selected`（跨文件多选）在本仓用不上 —— 结果列表是单选。
+
+**顺带修掉的宿主缺陷**：面板在搜索进行中再按一次 Enter（输入框有焦点时就是"重搜"）会被宿主回
+`BUSY`（「已有搜索在进行中，请先取消或等待。」）—— 真机取证时撞到的。上游是"重按即重启搜索"，
+所以宿主改成**取消并 join 上一次**再起新的（`native/main.cpp` 的搜索分支），报错那条路整个去掉。
 
 ---
 
@@ -112,15 +247,15 @@
 
 | 一族 | 代表类 | 为什么不做 / 缺什么 |
 |---|---|---|
-| 查找工具窗 | `FindPopupPanel`(2399 行)、`FindPopupHeader`、`FindPopupScopeUI`、30 个 `editorHeaderActions` | 本仓的查找是 Find in Files 对话框（`src/components/SearchPanel.vue`），编辑器里那根栏一次都没做。这根栏是 IDEA 查找体验的大头，缺它等于"编辑器内查找"整体缺席 |
+| 查找工具窗 | `FindPopupHeader`、30 个 `editorHeaderActions`、结果右键菜单 | 本仓的**工程内**查找是 `src/components/SearchPanel.vue`（**编辑器内**那根栏见 §B3）。**第一百零五批补上预览面板**（`UsagePreviewPanel` 的等价物：标题 = 文件名 + 「行 N / 共 M」，正文 = 命中行上下 40 行，命中行高亮，50ms 去抖），**第一百零二批**补上分块发布（结果边搜边出）。仍缺：上游那套 `editorHeaderActions` 工具栏、按目录分组的树、结果右键菜单 |
 | 查找用法引擎（PSI） | `JavaFindUsagesHandler`(273)、`JavaFindUsagesHelper`(512)、`FindUsagesHandlerFactory` 系列 | 本仓走 LSP `textDocument/references`，没有 PSI 引用图。跨语言统一查找、类型推断级精度都做不到 |
 | 相似用法 | `JavaSimilarityFeaturesExtractor`(431)、`SilhouetteScore`、聚类 UI | 需要 PSI + 机器学习特征，且仅 Java |
 | 三元组索引 | `TrigramIndex`(154)、`TrigramTextSearchService` | 本仓是线性扫描（`native/search.cpp:322-338`）。文件多时慢，但没有索引要维护 |
-| 实时预览 | `LivePreview`(623)、`SearchResults`(1083)、`SelectionManager` | 边输边搜 + 分块加载 + 选区管理，本仓是"点搜索才跑" |
-| 词级/字符级差异 | `ByWordRt`(1149)、`ByCharRt`(292)、`LineFragmentSplitter`、`ChunkOptimizer`、`ChangeCorrector`、`TrimUtil`(584) | 本仓只有行级。改了同一行里的一个词时，上游会把那一行里的词标红，本仓只能整行标 |
-| 非默认比较策略 | `ComparisonPolicy.TRIM_WHITESPACES` / `IGNORE_WHITESPACES` | 这两档要求用户能切。缺它们意味着**默认行为是对的，但少两个可选项** |
-| diff 查看器 | `SimpleDiffViewer`(1012)、`UnifiedDiffViewer`(1771)、`CombinedDiffViewer`(984)、`FoldingModelSupport`(1274)、`SyncScrollSupport`(545) | 本仓只**生成** unified 文本（`src/diffText.ts:52`）拿去存/贴，不渲染它，也没有左右同步滚动与折叠 |
-| 三方合并 | `MergeRequestProcessor`(579)、`MergeThreesideViewer`(1263)、`MergeConflictModel`(552) | 本仓的保存冲突只展示，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。没有冲突标记、没有三栏合并工具 |
+| 实时预览 | `LivePreview`(623)、`SearchResults`(1083)、`SelectionManager` | **两半都已落**：编辑器内的边输边搜与当前命中选择（第八十八批，`src/editorSearchExtension.ts`）+ 工程内搜索的**分块发布**（第一百零二批，`native/search.cpp` 的 `on_chunk` → `search.chunk` → `src/searchStream.ts`）。仍缺：上游按读锁时长切块、块间文档戳校验、按可见区裁剪的增量扫描 |
+| 词级/字符级差异 | `ByWordRt`(1149)、`ByCharRt`(292)、`LineFragmentSplitter`、`ChangeCorrector`、`TrimUtil`(584) | **两批都已做**：第八十九批 `src/diffWords.ts`（tokenize + 词级/字符级 LCS，与 native `history.cpp` 同一套规则）；**第一百零三批** `src/diffChunks.ts` 的块优化（上游 `ChunkOptimizer` 的骨架 + `WordChunkOptimizer` 的词边界微调；实测本仓 5395 对相邻行里 315 对因此少了一到两个碎块）。**第一百一十六批**补上 `ChangeCorrector`（行级两步比对，`src/diffSmartLines.ts`；缺它后面的 `optimizeLineChunks`/`correctChangesSecondStep` 两道修补）；仍缺 `DelimiterChunkOptimizer` |
+| 非默认比较策略 | `ComparisonPolicy.TRIM_WHITESPACES` / `IGNORE_WHITESPACES` | **第一百零四批补齐四项**：`src/diffComparison.ts` 四档（无 / 修整空白 / 忽略空格 / 忽略空格和空行），文案取中文包；`DiffView` 的「忽略差异」下拉四项。仍缺 `FORMATTING`（要语言格式化器）与 `IGNORE_LANGUAGE_SPECIFIC_CHANGES`（要语言侧忽略规则） |
+| diff 查看器 | `CombinedDiffViewer`(984)、按 fragment 逐块应用那一层 | 并排 / 统一两个形态本仓都有（`src/components/DiffView.vue`），**第一百零一批**补上未更改片段的折叠（`src/diffFold.ts`，见 §B6）；两侧同处一个滚动容器，同步滚动是架构自带。仍缺「多文件合成一个 diff」（`CombinedDiffViewer`）与逐块应用 |
+| 三方合并 | `MergeRequestProcessor`(579)、`MergeConflictModel`(552)、`MergeTool` 一族 | 上游读 **VCS 给的三份内容**（base / yours / theirs）算 merge changes。本仓没有索引三阶段这条数据来源，**第一百批把功能落在标记文本上**（`src/mergeConflicts.ts` + `src/components/MergeBar.vue`：逐条接受左侧/右侧 + 冲突导航，见 §B5）。三栏视图、base 栏、逐片段接受、`ApplyNonConflicts` 仍没有 |
 | 语言特化忽略 | `JavaDiffIgnoredRangeProvider`、`LangDiffSpecificProvider` | 纯文本逐行比较，跳过 import / 字符串这类规则没做 |
 | diff 请求框架 | `DiffRequestProcessor`(1659)、`AsyncDiffRequestChain`、缓存 | 本仓两次 diff 都是同步函数调用，没有请求对象、取消与缓存 |
 
@@ -139,10 +274,12 @@
 | # | 上游怎么做 | 本仓怎么做 | 影响面 |
 |---|---|---|---|
 | 1 | 超阈值抛 `FilesTooBigForDiffException` 后**改用 Patience**（`Diff.kt:96-101`） | 捕获后退化为"掐掉前后公共段，中间整段视作一整块改动"（`src/diffAlign.ts` 的 `alignLines`） | 触发条件是差异量超过两万以上（`MyersLCS.kt:64-70` 的 `max(20000 + 10*sqrt(N), 20000)`），正常编辑碰不到；碰到时输出仍**合法**（前后公共段照旧成对），只是粗 |
-| 2 | 三档 `ComparisonPolicy`（`ComparisonPolicy.kt:4-8`） | 只有 `DEFAULT`，`TRIM_WHITESPACES` / `IGNORE_WHITESPACES` 两档没做 | 默认行为一致（上游默认也是 `DEFAULT`，`TextDiffSettingsHolder.kt:47`）；少两个用户可选项 |
-| 3 | 差异结果是不重叠区间 + 不 squash 的 `DiffIterable`（`DiffIterable.kt:10-15`） | 只吐公共行对，改动行由差集反推（`src/diffText.ts:16-47`） | 输出语义等价，但没有 `verifyFair` 那套可校验契约可复用 |
+| 2 | 三档 `ComparisonPolicy`（`ComparisonPolicy.kt:4-8`） | 三档都做了（`src/diffComparison.ts`），默认仍是上游默认 `DEFAULT`；`DiffView` 的"忽略差异"下拉可切 | 用户可切；仍缺 `IGNORE_WHITESPACES_CHUNKS`（忽略空格和空行）与 `FORMATTING`（要语言格式化器） |
+| 3 | 差异结果是不重叠区间 + 不 squash 的 `DiffIterable`（`DiffIterable.kt:10-15`） | 只吐公共行对，改动行由差集反推（`src/diffText.ts`）；行内差异以 `[起点,长度]` 标记（`src/diffWords.ts`）挂在 `DiffRow` 上 | 输出语义等价，但没有 `verifyFair` 那套可校验契约可复用 |
 | 4 | 查找可用 PSI 引用图、trigram 索引、语言特化 | 线性扫描 + LSP `textDocument/references` | 大仓搜索慢、无索引维护成本；跨语言精度依赖 LSP 服务器 |
-| 5 | 编辑器内查找有完整查找栏 | 只有 F3 / Shift+F3（`src/components/CodeEditor.vue:995-996`） | 编辑器内查找体验整体缺席 |
+| 5 | 编辑器内查找栏 + 逐条 `DiffIterable` | 栏已有（`src/components/EditorFindBar.vue`，见 §B3）；**缺**搜索上下文过滤（注释/字面量）、保留大小写、结果环 | 编辑器内查找的主干可用；上述三档在 LSP/本仓架构下没有对应能力（见 §G 各行理由） |
+| 6 | 三方合并读 **VCS 的三份内容**（base / yours / theirs），结果栏是独立文档 | 本仓没有索引三阶段那条数据来源，功能落在文件里的**冲突标记**上（`src/mergeConflicts.ts` + `src/components/MergeBar.vue`，见 §B5）：逐条接受左侧/右侧 + 冲突导航，结果就是编辑器缓冲区 | `git merge` 之后的日常场景可用；没有三栏视图、base 栏、逐片段接受、`ApplyNonConflicts`，也不能把结果写回索引 |
+| 7 | 折叠区里塞 5 个空格的占位文本（`FoldingModelSupport.PLACEHOLDER`），被藏的行数不显示 | 折叠行上写「⋯ N 行未更改 ⋯」（`src/diffFold.ts` 的 `foldLabel`），行号槽从第一条被藏的行起跳号 | 本仓的行号槽不像 IDEA 那样在折叠处给区间提示，所以把行数写出来；**这一处是本仓的呈现**，其余规则（层数、阈值、默认展开、禁用即隐藏控件）都照上游 |
 
 ---
 
@@ -218,7 +355,7 @@
 | `DiffRequestSelectionChain` | `platform/diff-api/src/com/intellij/diff/chains/DiffRequestSelectionChain.java` | `[ ]` | 异步 diff 请求链与结果缓存。本仓的两处 diff 都是同步算完直接用。 |
 | `SimpleDiffRequestChain` | `platform/diff-api/src/com/intellij/diff/chains/SimpleDiffRequestChain.java` | `[ ]` | 异步 diff 请求链与结果缓存。本仓的两处 diff 都是同步算完直接用。 |
 | `SimpleDiffRequestProducer` | `platform/diff-api/src/com/intellij/diff/chains/SimpleDiffRequestProducer.java` | `[ ]` | 异步 diff 请求链与结果缓存。本仓的两处 diff 都是同步算完直接用。 |
-| `ComparisonManager` | `platform/diff-api/src/com/intellij/diff/comparison/ComparisonManager.java` | `[~]` | 比较结果的对外门面（选一级/二级策略、要不要 intrahunk）。本仓直接调 `src/diffAlign.ts:214` `alignLines`，跳过这一层。 |
+| `ComparisonManager` | `platform/diff-api/src/com/intellij/diff/comparison/ComparisonManager.java` | `[~]` | 比较结果的对外门面（选一级/二级策略、要不要 intrahunk）。本仓的策略选择在 `src/diffText.ts` 的 `buildDiffRows(before, after, {comparison, highlight})`：`comparison` 折行键、`highlight` 决定要不要行内标记；门面本身仍是 `src/diffAlign.ts` 的 `alignLines`。 |
 | `InnerFragmentsPolicy` | `platform/diff-api/src/com/intellij/diff/comparison/InnerFragmentsPolicy.java` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
 | `DiffContent` | `platform/diff-api/src/com/intellij/diff/contents/DiffContent.java` | `[ ]` | 内容抽象（文件/文档/目录/二进制）。本仓直接吃字符串数组。 |
 | `DiffContentBase` | `platform/diff-api/src/com/intellij/diff/contents/DiffContentBase.java` | `[ ]` | 内容抽象（文件/文档/目录/二进制）。本仓直接吃字符串数组。 |
@@ -249,7 +386,7 @@
 | `AssignmentTracker` | `platform/diff-api/src/com/intellij/diff/util/AssignmentTracker.kt` | `[-]` | diff 工具类：行标记绘制、行号转换、数据键、常量。依赖编辑器绘制上下文，本仓不需要。 |
 | `DiffNotificationProvider` | `platform/diff-api/src/com/intellij/diff/util/DiffNotificationProvider.java` | `[-]` | diff 工具类：行标记绘制、行号转换、数据键、常量。依赖编辑器绘制上下文，本仓不需要。 |
 | `DiffUserDataKeys` | `platform/diff-api/src/com/intellij/diff/util/DiffUserDataKeys.java` | `[-]` | diff 工具类：行标记绘制、行号转换、数据键、常量。依赖编辑器绘制上下文，本仓不需要。 |
-| `LineCol` | `platform/diff-api/src/com/intellij/diff/util/LineCol.java` | `[~]` | 行列坐标。上游词级差异要它。本仓 `src/bridge.ts:102` 的 `DiffRow` 只到行，不带列信息（不做词级）。 |
+| `LineCol` | `platform/diff-api/src/com/intellij/diff/util/LineCol.java` | `[~]` | 行列坐标。本仓行内标记用**行内字符偏移**表达（`DiffRow.leftMarks` 的 `[起点,长度]`，`src/diffWords.ts` 产出），不是 `(行,列)` 二元组 —— 行号在 `DiffRow.left.no` 上，两者合起来等价。 |
 | `LineRange` | `platform/diff-api/src/com/intellij/diff/util/LineRange.java` | `[~]` | 单侧行号区间。本仓没有这个类型，但有等价的单侧行：`src/bridge.ts:102` 的 `DiffRow.left` / `.right` 各自带 `no`，`delete` / `insert` 行只填一侧。 |
 | `DiffActionPromoter` | `platform/diff-impl/src/com/intellij/diff/DiffActionPromoter.kt` | `[ ]` | diff 框架层（请求/窗口/工具注册）。本仓的 diff 只有剪贴板对比与保存冲突预览两处纯函数（`src/diffText.ts:16-52`），不存在 DiffRequest/DiffWindow 这一层。 |
 | `DiffContentFactoryEx` | `platform/diff-impl/src/com/intellij/diff/DiffContentFactoryEx.java` | `[ ]` | diff 框架层（请求/窗口/工具注册）。本仓的 diff 只有剪贴板对比与保存冲突预览两处纯函数（`src/diffText.ts:16-52`），不存在 DiffRequest/DiffWindow 这一层。 |
@@ -265,7 +402,7 @@
 | `BufferedLineIterator` | `platform/diff-impl/src/com/intellij/diff/actions/BufferedLineIterator.java` | `[ ]` | diff 的动作族（比较、显示、Undo/Redo 代理），绝大多数挂在 diff 工具窗的标题栏上。 |
 | `CompareClipboardWithSelectionAction` | `platform/diff-impl/src/com/intellij/diff/actions/CompareClipboardWithSelectionAction.java` | `[x]` | 编辑器右键「与剪贴板比较」（`src/menus/codeMenu.ts:103`）→ `src/vcsActions.ts:114-122` 取当前标签文本与剪贴板文本喂 `buildDiffRows`，产出 `clipboardDiff`。 |
 | `CompareFileWithEditorAction` | `platform/diff-impl/src/com/intellij/diff/actions/CompareFileWithEditorAction.java` | `[~]` | 保存冲突预览确实做了差异展示（`src/editorFileOps.ts:44-54` 的 `conflictDiff`），但它是保存冲突流程里的一步，不是独立动作，也没有上游那个 Compare 工具窗。 |
-| `CompareFilesAction` | `platform/diff-impl/src/com/intellij/diff/actions/CompareFilesAction.java` | `[~]` | 打开 Compare with File。本仓只有「与剪贴板比较」（`src/menus/codeMenu.ts:103`）与保存冲突预览，没有任选文件的两两比较对话框。 |
+| `CompareFilesAction` | `platform/diff-impl/src/com/intellij/diff/actions/CompareFilesAction.java` | `[~]` | **第九十七批已落**（单文件分支）：`src/compareFiles.ts` 的 `compareActionText` / `compareAvailable` / `lastUsedKeyFor` / `defaultCompareSelection`（逐条照 `CompareFilesAction.java:49-96/152-182`），入口是编辑器右键的「比较对象…」（`src/menus/editorPopupMenu.ts` 的 `CompareActions` 组、`src/menus/codeMenu.ts` 的行），实现在 `src/vcsActions.ts` 的 `compareWithFile`（`dialog.pickFile` 选择器 + 复用 `clipboardDiff` 那条渲染通道 + 记住上次用过的路径）。**缺**：多选两个/三个文件的入口（项目树多选）、目录比较、归档比较、三方（带 base）比较。 |
 | `DiffReaderModeMatcher` | `platform/diff-impl/src/com/intellij/diff/actions/DiffReaderModeMatcher.kt` | `[ ]` | diff 的动作族（比较、显示、Undo/Redo 代理），绝大多数挂在 diff 工具窗的标题栏上。 |
 | `DocumentFragmentContent` | `platform/diff-impl/src/com/intellij/diff/actions/DocumentFragmentContent.java` | `[ ]` | diff 的动作族（比较、显示、Undo/Redo 代理），绝大多数挂在 diff 工具窗的标题栏上。 |
 | `DocumentsSynchronizer` | `platform/diff-impl/src/com/intellij/diff/actions/DocumentsSynchronizer.java` | `[ ]` | diff 的动作族（比较、显示、Undo/Redo 代理），绝大多数挂在 diff 工具窗的标题栏上。 |
@@ -301,7 +438,7 @@
 | `AsyncDiffRequestChain` | `platform/diff-impl/src/com/intellij/diff/chains/AsyncDiffRequestChain.java` | `[ ]` | 异步 diff 请求链与结果缓存。本仓的两处 diff 都是同步算完直接用。 |
 | `ByLine` | `platform/diff-impl/src/com/intellij/diff/comparison/ByLine.java` | `[~]` | 行级比较的对象版（`ByLine.kt`）。本仓只有函数版 `src/diffAlign.ts:214` `alignLines`，没有 `DiffIterable` 形态。 |
 | `ByWord` | `platform/diff-impl/src/com/intellij/diff/comparison/ByWord.java` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
-| `ComparisonManagerImpl` | `platform/diff-impl/src/com/intellij/diff/comparison/ComparisonManagerImpl.java` | `[~]` | 794 行的策略选择器（先按行再按词再按字符、可降级、可取消）。本仓固定一级，入口就是 `src/diffAlign.ts:214` `alignLines`。 |
+| `ComparisonManagerImpl` | `platform/diff-impl/src/com/intellij/diff/comparison/ComparisonManagerImpl.java` | `[~]` | 794 行的策略选择器（先按行再按词再按字符、可降级、可取消）。本仓两级：行级 `src/diffAlign.ts` 的 `alignLines` + 行内 `src/diffWords.ts` 的 `marksFor`（按 `HighlightPolicy` 选词级/字符级/不标）。**缺**取消检查与自动降级（超预算时本仓退化，不换算法）。 |
 | `DiffIterableUtilEx` | `platform/diff-impl/src/com/intellij/diff/comparison/DiffIterableUtilEx.java` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
 | `IndicatorCancellationChecker` | `platform/diff-impl/src/com/intellij/diff/comparison/IndicatorCancellationChecker.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
 | `DirectoryContentImpl` | `platform/diff-impl/src/com/intellij/diff/contents/DirectoryContentImpl.java` | `[ ]` | 内容抽象（文件/文档/目录/二进制）。本仓直接吃字符串数组。 |
@@ -374,8 +511,8 @@
 | `MergeRequestProcessor` | `platform/diff-impl/src/com/intellij/diff/merge/MergeRequestProcessor.java` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
 | `MergeStatisticsAggregator` | `platform/diff-impl/src/com/intellij/diff/merge/MergeStatisticsAggregator.kt` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
 | `MergeThreesideLineStatusMarkerRenderer` | `platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideLineStatusMarkerRenderer.kt` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
-| `MergeThreesideViewer` | `platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewer.java` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
-| `MergeThreesideViewerActions` | `platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewerActions.kt` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
+| `MergeThreesideViewer` | `platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewer.java` | `[~]` | 两个按钮（接受左侧/接受右侧，`MergeThreesideViewer.java:333-336`）与冲突导航在本仓有真实落点：`src/components/MergeBar.vue` + `src/editorMergeHost.ts` + `src/mergeConflicts.ts`，走的是文件里的**冲突标记**（上游那张窗口读 VCS 的三份内容）。缺口：三栏视图、base 栏、逐片段接受、`ApplyNonConflicts`、Resolve/Cancel 语义（见 §B5）。 |
+| `MergeThreesideViewerActions` | `platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewerActions.kt` | `[~]` | 这一族动作里只落了两个：接受左侧/接受右侧（`src/editorMergeHost.ts` 的 `createMergeState` 与 `src/components/MergeBar.vue` 上那两个按钮），外加冲突导航。`ApplyNonConflicts`、`ScrollToNextChange` 那些仍无（见 §B5）。 |
 | `MergeUtil` | `platform/diff-impl/src/com/intellij/diff/merge/MergeUtil.java` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
 | `MergeWindow` | `platform/diff-impl/src/com/intellij/diff/merge/MergeWindow.java` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
 | `MessageMergeViewer` | `platform/diff-impl/src/com/intellij/diff/merge/MessageMergeViewer.java` | `[ ]` | 三方合并与冲突解决。本仓的保存冲突只**展示**差异，由用户自己在编辑器里改（`src/editorFileOps.ts:44-54`）。 |
@@ -440,7 +577,7 @@
 | `UnifiedDiffModel` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffModel.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
 | `UnifiedDiffPanel` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffPanel.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
 | `UnifiedDiffTool` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffTool.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
-| `UnifiedDiffViewer` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffViewer.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
+| `UnifiedDiffViewer` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffViewer.java` | `[~]` | unified 形态本仓有（`src/components/DiffView.vue` 的「统一」档渲染 `src/diffText.ts:52` 生成的补丁），**第一百零一批**还把未更改片段的折叠接了上去；缺上游那种按 fragment 分块 + 逐块应用/回滚的交互。 |
 | `UnifiedEditorHighlighter` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedEditorHighlighter.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
 | `UnifiedEditorRangeHighlighter` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedEditorRangeHighlighter.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
 | `UnifiedFoldingModel` | `platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFoldingModel.java` | `[ ]` | unified diff 查看器（1771 行）。本仓只在预览里**生成** unified 文本（`src/diffText.ts:52`），不渲染它。 |
@@ -457,7 +594,7 @@
 | `SimpleDiffChangesHolder` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffChangesHolder.kt` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
 | `SimpleDiffModel` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffModel.java` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
 | `SimpleDiffTool` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffTool.java` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
-| `SimpleDiffViewer` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffViewer.java` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
+| `SimpleDiffViewer` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffViewer.java` | `[~]` | 左右分栏本仓有：`src/components/DiffView.vue`（行分类 + 行内词级标记 + 两侧行号 + 「并排 / 统一」两档），**第一百零一批**补上未更改片段的折叠（`src/diffFold.ts`）；缺上游的分隔器、按 fragment 的逐个应用、以及两个独立编辑器的滚动条。 |
 | `SimpleDiffViewerHighlighters` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleDiffViewerHighlighters.kt` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
 | `SimpleOnesideDiffViewer` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleOnesideDiffViewer.java` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
 | `SimpleThreesideDiffChange` | `platform/diff-impl/src/com/intellij/diff/tools/simple/SimpleThreesideDiffChange.kt` | `[ ]` | 左右分栏 diff 查看器（1012 行）及其模型。本仓的对比视图只覆盖"行分类"这一步。 |
@@ -473,7 +610,7 @@
 | `DiffTitleHandler` | `platform/diff-impl/src/com/intellij/diff/tools/util/DiffTitleHandler.kt` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `EmptyUnifiedLineFoldingRenderer` | `platform/diff-impl/src/com/intellij/diff/tools/util/EmptyUnifiedLineFoldingRenderer.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `FocusTrackerSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/FocusTrackerSupport.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
-| `FoldingModelSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/FoldingModelSupport.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
+| `FoldingModelSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/FoldingModelSupport.java` | `[~]` | **第一百零一批已落**未更改片段的折叠：`src/diffFold.ts`（五档上下文 1/2/4/8/禁用、默认 4、默认展开、藏不足 2 行不生成折叠区，逐条照 `TextDiffSettingsHolder.kt:30,59,64` 与 `FoldingModelSupport.java:310`）+ `DiffView.vue` 的开关（文案取中文包「收起未更改的片段」，范围 = 禁用时整个控件隐藏）。缺：三层候选的逐级展开、折叠处显示面包屑描述（上游用 `getLineSeparatorDescription`）、悬停提示。 |
 | `KeyboardModifierListener` | `platform/diff-impl/src/com/intellij/diff/tools/util/KeyboardModifierListener.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `PrevNextDifferenceIterable` | `platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextDifferenceIterable.kt` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `PrevNextDifferenceIterableBase` | `platform/diff-impl/src/com/intellij/diff/tools/util/PrevNextDifferenceIterableBase.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
@@ -481,15 +618,15 @@
 | `SimpleDiffPanel` | `platform/diff-impl/src/com/intellij/diff/tools/util/SimpleDiffPanel.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `SoftHardCacheMap` | `platform/diff-impl/src/com/intellij/diff/tools/util/SoftHardCacheMap.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `StatusPanel` | `platform/diff-impl/src/com/intellij/diff/tools/util/StatusPanel.java` | `[~]` | 状态栏那段「无消息 / 有消息 / 60 秒后加时间后缀」的刷新逻辑，本仓在 `src/statusBarText.ts:37-39,63` 照 `StatusPanel.java:186-213` 复刻了。diff 工具窗那一侧的状态栏没有。 |
-| `SyncScrollSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/SyncScrollSupport.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
+| `SyncScrollSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/SyncScrollSupport.java` | `[~]` | 本仓的前后对比是**一个滚动容器里的对齐行表**（`src/components/DiffView.vue`），两侧天然同进同退 —— 上游那套「两个编辑器 + 偏移映射 + 锚点」（`SyncScrollSupport.java:316-330`）在本仓没有对应物，也没有上游那个「同步滚动」开关（没有可关的东西，所以不摆假开关）。缺：横向独立滚动、折叠状态下的偏移补偿。 |
 | `ThreeDiffSplitter` | `platform/diff-impl/src/com/intellij/diff/tools/util/ThreeDiffSplitter.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `TransferableFileEditorStateSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/TransferableFileEditorStateSupport.java` | `[ ]` | diff 工具窗的公共设施（同步滚动、拆分器、状态栏）。 |
 | `DiffPanelBase` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffPanelBase.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
 | `DiffViewerBase` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffViewerBase.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
 | `DiffViewerListener` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/DiffViewerListener.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
-| `HighlightPolicy` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/HighlightPolicy.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
+| `HighlightPolicy` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/HighlightPolicy.java` | `[~]` | 行内高亮三档。本仓 `src/diffWords.ts` 的 `HighlightPolicy`（`byWord`/`byLine`/`byChar`）与 `marksFor`，默认 `byWord`（上游 `TextDiffSettingsHolder.PlaceSettings` 的 `HIGHLIGHT_POLICY = HighlightPolicy.BY_WORD`），界面上是 `src/components/DiffView.vue` 的"高亮"下拉。 |
 | `HighlightingLevel` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/HighlightingLevel.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
-| `IgnorePolicy` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/IgnorePolicy.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
+| `IgnorePolicy` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/IgnorePolicy.java` | `[~]` | 六项里**四项**已落（第一百零四批补第 4 项）：`src/diffComparison.ts` 的四档 = 无 / 修整空白 / 忽略空格 / **忽略空格和空行**（`option.ignore.policy.*` 四条文案取随 IDE 发货的中文包 `DiffBundle.properties:234-237`）。第四档按上游拆成两件事：比较仍折成 `IGNORE_WHITESPACES`（`IgnorePolicy.java:31-33` 的 `getComparisonPolicy`），另外把"只差空白"的改动从改动块首尾剪掉（`isShouldTrimChunks`，`:41-43` → `ComparisonManagerImpl.processAdjoining` 的 `trim` 分支）。缺 `FORMATTING`（要语言格式化器）与 `IGNORE_LANGUAGE_SPECIFIC_CHANGES`（要语言侧忽略规则）。 |
 | `InitialScrollPositionSupport` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/InitialScrollPositionSupport.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
 | `ListenerDiffViewerBase` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/ListenerDiffViewerBase.java` | `[ ]` | 查看器基类与 diff 设置持有者。 |
 | `TextDiffSettingsHolder` | `platform/diff-impl/src/com/intellij/diff/tools/util/base/TextDiffSettingsHolder.kt` | `[ ]` | 查看器基类与 diff 设置持有者。 |
@@ -550,14 +687,14 @@
 | `TrigramIndexRegistryValueListener` | `platform/indexing-impl/src/com/intellij/find/ngrams/TrigramIndexRegistryValueListener.kt` | `[ ]` | 三元组索引加速的文件搜索。本仓是线性扫描（`native/search.cpp:322-338`）。 |
 | `TrigramTextSearchService` | `platform/indexing-impl/src/com/intellij/find/ngrams/TrigramTextSearchService.java` | `[ ]` | 三元组索引加速的文件搜索。本仓是线性扫描（`native/search.cpp:322-338`）。 |
 | `SearchInBackgroundOption` | `platform/lang-api/src/com/intellij/find/SearchInBackgroundOption.java` | `[ ]` | 编辑器内查找的核心模型与服务。本仓只有 Find in Files；编辑器里 F3/Shift+F3 只绑了跳下一个/上一个匹配（`src/components/CodeEditor.vue:995-996`）。 |
-| `EditorSearchSession` | `platform/lang-impl/src/com/intellij/find/EditorSearchSession.java` | `[~]` | 编辑器内搜索会话。本仓有 F3/Shift+F3 的"下一个/上一个匹配"（`src/components/CodeEditor.vue:995-996`），但没有会话、没有查找栏、没有结果环。 |
-| `FindAllAction` | `platform/lang-impl/src/com/intellij/find/FindAllAction.java` | `[~]` | 在文件内查找全部匹配并选中多光标。本仓编辑器里只有 F3/Shift+F3 单步跳转（`src/components/CodeEditor.vue:995-996`）。 |
+| `EditorSearchSession` | `platform/lang-impl/src/com/intellij/find/EditorSearchSession.java` | `[~]` | 编辑器内查找栏已落地（第八十八批）：`src/components/EditorFindBar.vue`（UI）+ `src/editorFindController.ts`（宿主状态域）+ `src/editorSearchExtension.ts`（CodeMirror 状态/高亮/导航）+ `src/editorSearch.ts`（匹配语义）。 会话状态（查询词/五档选项/当前命中/替换/历史）在 `src/editorFindController.ts`。**缺**：跨标签的结果环（上游把会话绑在 `EditorSearchSession` 上供工具栏与结果条共用）、多光标会话对象。 |
+| `FindAllAction` | `platform/lang-impl/src/com/intellij/find/FindAllAction.java` | `[~]` | 在文件内查找全部匹配并选中多光标：本仓走 `editingCommands['occurrence.select']`（`selectMatches`，Ctrl+Alt+Shift+J，`src/editorCommands.ts`）。**缺**：查找栏里那个"在查找窗口中打开"的按钮（上游 `FindAllAction.java:29,35` 的 `show.in.find.window.button.name`）—— 本仓的栏接的是编辑器内结果，不做"开工具窗"。 |
 | `FindReplaceActionButton` | `platform/lang-impl/src/com/intellij/find/FindReplaceActionButton.kt` | `[ ]` | 编辑器内查找的核心模型与服务。本仓只有 Find in Files；编辑器里 F3/Shift+F3 只绑了跳下一个/上一个匹配（`src/components/CodeEditor.vue:995-996`）。 |
 | `FindUsagesCollector` | `platform/lang-impl/src/com/intellij/find/FindUsagesCollector.kt` | `[ ]` | 编辑器内查找的核心模型与服务。本仓只有 Find in Files；编辑器里 F3/Shift+F3 只绑了跳下一个/上一个匹配（`src/components/CodeEditor.vue:995-996`）。 |
 | `FindUtil` | `platform/lang-impl/src/com/intellij/find/FindUtil.java` | `[~]` | `FindUtil.showInUsageView` 的"把这批地点放进查找窗口"，本仓对应 `src/semanticActions.ts:134`（钉到引用面板）。1105 行里的编辑器内匹配、字面量转正则、大小写折叠那一整套都没有。 |
-| `SearchReplaceComponent` | `platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java` | `[~]` | 查找/替换的 UI 组合。本仓 `src/components/SearchPanel.vue` 是 Find in Files 对话框，缺"编辑器内查找栏"这一形态。 |
+| `SearchReplaceComponent` | `platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java` | `[~]` | 查找/替换的 UI 组合。本仓是 `src/components/EditorFindBar.vue`：行内顺序照 `EditorSearchSession.java:238-265`（状态文案 · 上一个 · 下一个 · 过滤组 · 更多 · 关闭），替换行照 `SwitchToReplace`。**缺**："更多"溢出组（上游把低频动作收进 `editorsearch.more.popup`）。 |
 | `SearchSession` | `platform/lang-impl/src/com/intellij/find/SearchSession.java` | `[ ]` | 编辑器内查找的核心模型与服务。本仓只有 Find in Files；编辑器里 F3/Shift+F3 只绑了跳下一个/上一个匹配（`src/components/CodeEditor.vue:995-996`）。 |
-| `SearchTextArea` | `platform/lang-impl/src/com/intellij/find/SearchTextArea.java` | `[~]` | 查找输入框（Swing，带历史、大小写/正则快捷切换）。本仓 `src/components/SearchPanel.vue:346-347` 有一对普通输入框，功能面窄得多。 |
+| `SearchTextArea` | `platform/lang-impl/src/com/intellij/find/SearchTextArea.java` | `[~]` | 查找输入框：本仓 `.find-field`（`src/components/EditorFindBar.vue`）带**搜索历史下拉**（Alt+Down，条目存 `localStorage` 的 `taocode.findHistory`，对应 `FindInProjectSettings.getRecentFindStrings`，`SearchTextArea.java:408-409`）与大小写/正则/全词快捷开关。**缺**：Swing 侧的替换历史与 `SearchTextField` 的引号补全。 |
 | `ActivateFindToolWindowAction` | `platform/lang-impl/src/com/intellij/find/actions/ActivateFindToolWindowAction.kt` | `[ ]` | 查找工具窗的入口动作（Show Usages / 最近历史 / 查找选项弹窗）。 |
 | `CompositeActiveComponent` | `platform/lang-impl/src/com/intellij/find/actions/CompositeActiveComponent.java` | `[ ]` | 查找工具窗的入口动作（Show Usages / 最近历史 / 查找选项弹窗）。 |
 | `FindInPathAction` | `platform/lang-impl/src/com/intellij/find/actions/FindInPathAction.java` | `[~]` | Find in Path 入口。本仓的 Find in Files 对话框就是这个东西（`src/components/SearchPanel.vue`），但没有"打开查找工具窗 + 最近搜索历史"。 |
@@ -586,36 +723,36 @@
 | `compositeActiveComponentPanel` | `platform/lang-impl/src/com/intellij/find/actions/compositeActiveComponentPanel.kt` | `[ ]` | 查找工具窗的入口动作（Show Usages / 最近历史 / 查找选项弹窗）。 |
 | `findUsages` | `platform/lang-impl/src/com/intellij/find/actions/findUsages.kt` | `[~]` | Kotlin 便捷入口（`findUsages.kt:88`）。本仓的对应入口是 `src/treeActions.ts:99 findUsagesOf` 与 `src/chooseTarget.ts:126` 那条 target 选择链，都不经过这个文件。 |
 | `resolver` | `platform/lang-impl/src/com/intellij/find/actions/resolver.kt` | `[ ]` | 查找工具窗的入口动作（Show Usages / 最近历史 / 查找选项弹窗）。 |
-| `AddOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/AddOccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ContextAwareShortcutProvider` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ContextAwareShortcutProvider.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `EditorHeaderSetSearchContextAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderSetSearchContextAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `EditorHeaderToggleAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderToggleAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `Embeddable` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Embeddable.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `NextOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/NextOccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `OccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/OccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `PrevNextOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevNextOccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `PrevOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevOccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `RemoveOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/RemoveOccurrenceAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `RestorePreviousSettingsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/RestorePreviousSettingsAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `SelectAllAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SelectAllAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ShowFilterPopupGroup` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ShowFilterPopupGroup.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `StatusTextAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/StatusTextAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `SwitchToFind` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToFind.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `SwitchToReplace` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToReplace.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleAnywhereAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleAnywhereAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleExceptCommentsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleExceptCommentsAndLiteralsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAndLiteralsAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleExceptLiteralsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptLiteralsAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleFindInSelectionAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleFindInSelectionAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleInCommentsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInCommentsAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleInLiteralsOnlyAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInLiteralsOnlyAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleMatchCase` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleMatchCase.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `TogglePreserveCaseAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/TogglePreserveCaseAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleRegex` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleRegex.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleScrollToResultsDuringTypingAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleScrollToResultsDuringTypingAction.kt` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `ToggleWholeWordsOnlyAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleWholeWordsOnlyAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `Utils` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Utils.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
-| `VariantsCompletionAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/VariantsCompletionAction.java` | `[ ]` | 编辑器查找栏上的 30 个小动作（正则、大小写、全词、注释/字面量过滤…）。本仓没有这根查找栏。 |
+| `AddOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/AddOccurrenceAction.java` | `[~]` | SelectNextOccurrence = Alt+J。本仓 `editingCommands['occurrence.next']`（`selectNextOccurrence`，`src/editorCommands.ts`），编辑菜单的「添加下一个匹配」也在。 |
+| `ContextAwareShortcutProvider` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ContextAwareShortcutProvider.java` | `[-]` | 平台接口：让动作按上下文给不同快捷键（Swing keymap 机制）。本仓是 DOM `keymap` 一张表，没有"动作自带键位"这一层。 |
+| `EditorHeaderSetSearchContextAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderSetSearchContextAction.java` | `[ ]` | 设置搜索上下文（注释 / 字面量 / 排除二者）。本仓**没有**这个能力：要按语言把注释与字符串区间判出来（上游走 PSI `searchContext`），LSP 没有对应请求 ⇒ 做出来只能瞎猜。 |
+| `EditorHeaderToggleAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/EditorHeaderToggleAction.java` | `[~]` | 查找栏上的四档开关基类。本仓同形态的是 `.find-toggle` 按钮（`aria-pressed` + 选中底色，`src/components/EditorFindBar.vue`），状态写在 `src/editorSearch.ts` 的 `SearchOptions`。 |
+| `Embeddable` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Embeddable.java` | `[-]` | 平台标记接口（空接口，标明该动作可嵌进查找栏）。本仓的栏直接写组件，不需要这层标记。 |
+| `NextOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/NextOccurrenceAction.java` | `[~]` | 下一个匹配。本仓 `goToMatch(view,false)`（`src/editorSearchExtension.ts`）+ 栏上的「下一个匹配项」按钮 + Enter/F3。 |
+| `OccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/OccurrenceAction.java` | `[~]` | 上一/下一个动作的基类。本仓对应物是 `src/editorSearchExtension.ts` 里那一对 `Command`（`goToMatch`）。 |
+| `PrevNextOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevNextOccurrenceAction.java` | `[~]` | 上一个/下一个这一对（上游按当前 `FindModel` 方向合并成一个位置）。本仓两个**独立**按钮（`src/components/EditorFindBar.vue` 的「上一个匹配项」/「下一个匹配项」），不做"同一格按方向变脸"。 |
+| `PrevOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/PrevOccurrenceAction.java` | `[~]` | 上一个匹配。本仓 `goToMatch(view,true)` + 栏上的「上一个匹配项」按钮 + Shift+Enter/Shift+F3，回绕语义在 `src/editorSearch.ts` 的 `nextMatch`。 |
+| `RemoveOccurrenceAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/RemoveOccurrenceAction.java` | `[~]` | UnselectPreviousOccurrence = Alt+Shift+J（本批补上）：`editingCommands['occurrence.unselect']`（`src/editorCommands.ts` 的 `unselectPreviousOccurrenceCommand`，摘掉多光标集合的最后一条），编辑菜单「取消选择匹配项」同一条。 |
+| `RestorePreviousSettingsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/RestorePreviousSettingsAction.java` | `[~]` | "沿用上次的查找选项"：本仓三档（大小写/全词/正则）持久化在 `localStorage` 的 `taocode.findOptions`，下次打开自动沿用（`src/editorFindController.ts` 的 `readStoredOptions`）。**缺**：上游那个"恢复到上一次会话"的显式动作按钮。 |
+| `SelectAllAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SelectAllAction.java` | `[~]` | SelectAllOccurrences = Ctrl+Alt+Shift+J。本仓 `src/editorCommands.ts` 的 `editingCommands['occurrence.select']`（`selectMatches`）+ 编辑菜单同行（`src/menus/editMenu.ts`）。**缺**：上游 `SelectAllAction.java:61` 还借了 Alt+Enter 键位、`:43` 关闭会话 —— 本仓不关栏。 |
+| `ShowFilterPopupGroup` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ShowFilterPopupGroup.java` | `[ ]` | 过滤组弹层（收纳下面那一族搜索上下文）。与 `EditorHeaderSetSearchContextAction` 同因：没有语言侧上下文判定，不造这层弹层。 |
+| `StatusTextAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/StatusTextAction.java` | `[~]` | 查找栏上的状态文案。本仓 `.find-status` 显示「第 n / 共 m 条」（`matchStatus`，`src/editorSearch.ts`），带 `aria-live`。**缺**：上游那套按状态变化的整句提示（"没有匹配项" / 坏正则说明）。 |
+| `SwitchToFind` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToFind.java` | `[~]` | 切到"查找"模式。本仓 Find = Ctrl+F（`$default.xml:565-567`）与 `openFindBar(false)`（`src/components/CodeEditor.vue`）。 |
+| `SwitchToReplace` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/SwitchToReplace.java` | `[~]` | 切到"替换"模式：Replace = Ctrl+R（`$default.xml:374-376`）、`openFindBar(true)`，栏上替换按钮就地展开第二行（`.find-replace-row`）。替换一行/全部走 `src/editorFindController.ts` 的 `replaceOne`/`replaceAll`。 |
+| `ToggleAnywhereAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleAnywhereAction.java` | `[ ]` | 搜索上下文 = 任意位置。**本仓的默认就是这样**，但它不是一个可切档位（其余六档缺语言侧判定），所以不渲染成一个永远选中的开关。 |
+| `ToggleExceptCommentsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAction.java` | `[ ]` | 排除注释。缺语言侧注释区间判定。 |
+| `ToggleExceptCommentsAndLiteralsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptCommentsAndLiteralsAction.java` | `[ ]` | 同时排除注释与字面量。缺语言侧区间判定。 |
+| `ToggleExceptLiteralsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleExceptLiteralsAction.java` | `[ ]` | 排除字面量。缺语言侧字符串区间判定。 |
+| `ToggleFindInSelectionAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleFindInSelectionAction.java` | `[~]` | 只在选区内搜索（`FindModel.isGlobal` 取反，默认关）。本仓 `options.inSelection` → `searchScope` 把范围收到主选区所在行（`src/editorSearchExtension.ts`），栏上与编辑器里各有一条 Ctrl+Alt+E（`$default.xml`）。 |
+| `ToggleInCommentsAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInCommentsAction.java` | `[ ]` | 只在注释里搜索。缺语言侧注释区间判定（同 `EditorHeaderSetSearchContextAction`）。 |
+| `ToggleInLiteralsOnlyAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleInLiteralsOnlyAction.java` | `[ ]` | 只在字面量里搜索。缺语言侧字符串区间判定。 |
+| `ToggleMatchCase` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleMatchCase.java` | `[~]` | 区分大小写（默认**关**，`FindSettingsBase.java:53-64`）。本仓 `src/editorSearch.ts` 的 `options.caseSensitive` → `buildSearchRegex` 的正则 flag（对应 `FindModel.kt:540`），并存进 `localStorage`（上游 `FindSettings.setLocalCaseSensitive`，`ToggleMatchCase.java:27` 的等价物）。 |
+| `TogglePreserveCaseAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/TogglePreserveCaseAction.java` | `[ ]` | 替换时保留大小写。本仓的替换是字面量落盘（`replaceOne`/`replaceAll`，`src/editorFindController.ts`），没有"按原命中形态改写替换文本"这一档 —— 栏里因此**不渲染**这个开关（不放假控件）。见 `FindModel.isPreserveCase`、`FindBundle.properties:85`。 |
+| `ToggleRegex` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleRegex.java` | `[~]` | 正则表达式（默认关）。本仓 `src/editorSearch.ts` 的 `options.regex` 走 `buildSearchRegex` 的正则分支；**坏表达式把输入框画红**（`.find-field.invalid`）而不是抛异常 —— 上游 `PatternUtil` 报错的等价物。 |
+| `ToggleScrollToResultsDuringTypingAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleScrollToResultsDuringTypingAction.kt` | `[ ]` | 边打字边把命中滚进视野。本仓的栏**行为上就是这样**（`setQuery` 即定位首条并 `scrollIntoView`），但没有第二个状态可切 ⇒ 不渲染成开关。 |
+| `ToggleWholeWordsOnlyAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/ToggleWholeWordsOnlyAction.java` | `[~]` | 全词（默认关）。本仓 `src/editorSearch.ts` 的 `options.wholeWords` 在字面量档两侧加词边界（`FindModel.isWholeWordsOnly`，`FindModel.kt:114`）。 |
+| `Utils` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/Utils.java` | `[-]` | 该包的 Swing 工具（把动作按 `IdeActions` id 包成栏上的按钮）。本仓的按钮直接绑组件动作，不需要这层。 |
+| `VariantsCompletionAction` | `platform/lang-impl/src/com/intellij/find/editorHeaderActions/VariantsCompletionAction.java` | `[ ]` | 查找框里的**查询命令补全**（`FindPopupPanel` 的查询语言）。本仓的搜索框是纯文本，没有查询语言（与 §C 里 `Autocompletion` 页签同因）。 |
 | `FindInProjectManager` | `platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectManager.java` | `[~]` | Find in Project 的调度（含最近搜索 `FindInProjectRecents`）。本仓 `src/components/SearchPanel.vue` 每次打开都是空的，没有最近搜索历史。 |
 | `FindInProjectScopeService` | `platform/lang-impl/src/com/intellij/find/findInProject/FindInProjectScopeService.kt` | `[x]` | 命名作用域：本仓有完整的作用域语言（union/intersection/complement + 模块通配），在 `src/scopes.ts:245 compileScope` / `:374 scopeMatches`，界面在 `src/components/SearchPanel.vue:50-53`。 |
 | `AbstractFindUsagesDialog` | `platform/lang-impl/src/com/intellij/find/findUsages/AbstractFindUsagesDialog.java` | `[ ]` | 查找用法引擎与对话框（PSI 引用图）。本仓走 LSP，没有引用索引。 |
@@ -650,10 +787,10 @@
 | `FindManagerBase` | `platform/lang-impl/src/com/intellij/find/impl/FindManagerBase.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `FindManagerImpl` | `platform/lang-impl/src/com/intellij/find/impl/FindManagerImpl.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `FindPopupDirectoryChooser` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupDirectoryChooser.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
-| `FindPopupHeader` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupHeader.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
-| `FindPopupPanel` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
-| `FindPopupResultsAutoloadHandler` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupResultsAutoloadHandler.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
-| `FindPopupScopeUI` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUI.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
+| `FindPopupHeader` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupHeader.kt` | `[~]` | 头部（搜索框 + 选项 + 范围）。本仓是 `src/components/SearchPanel.vue` 的两行（`搜索全部文件` 输入 + `Aa/.*/词` 三档 + `包含/排除/范围` 一行）；缺上游头部的「打开/折叠过滤器」与结果计数那几处细节。 |
+| `FindPopupPanel` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java` | `[~]` | 工程内查找的宿主面板。本仓对应物是 `src/components/SearchPanel.vue`（**不是**上游那根编辑器内的栏 —— 那根在 `src/components/EditorFindBar.vue`，见 §B3）：查询/替换两行、五档选项、包含/排除掩码、命名作用域、按文件分组的结果、逐条/逐文件/全部替换、**第一百零五批补上预览面板**（`:862-872` 的 `UsagePreviewPanel` + `:954-957` 的标题栏；真机验证可跟光标走）。缺：上游那套 `editorHeaderActions` 工具栏、按目录分组的树、结果右键菜单（`FindInFiles.Results.ContextMenu`）。 |
+| `FindPopupResultsAutoloadHandler` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupResultsAutoloadHandler.kt` | `[~]` | 结果的**分页续载**（滚到底就再搜一页：`start` / `tryLoadMore` / `cancel`，含去重与"首行冻结"）。本仓没有分页续载（宿主的一次扫描把上限内的结果一次给全），但**第一百零二批**用另一条路覆盖了同一个目标：`native/search.cpp` 的 `on_chunk` 边走边推 + `src/searchStream.ts` 累积，结果不再等整趟走完才出现。 |
+| `FindPopupScopeUI` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUI.kt` | `[~]` | 作用域选择器。本仓 `src/scopes.ts`（作用域语言）+ `SearchPanel.vue` 的「范围」下拉（`FindPopupScopeUIImpl.java:59,137` 的等价物）；**第九十一批**又把命名作用域接到了随处搜索上（`src/searchEverywhereScope.ts`）。缺上游作用域编辑器里的"按目录树勾选"。 |
 | `FindPopupScopeUIImpl` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIImpl.java` | `[~]` | 作用域选择器。`src/components/SearchPanel.vue:8` 写明是照 `FindPopupScopeUIImpl.java:59,137` 来的，求值落在 `src/scopes.ts:245` / `:374`。但没有多作用域的 include/exclude 交互（`src/scopes.ts:450-461` 那两个函数还没接界面），也没有工程设置之外的持久化。 |
 | `FindPopupScopeUIProvider` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIProvider.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `FindPopupScopeUIProviderImpl` | `platform/lang-impl/src/com/intellij/find/impl/FindPopupScopeUIProviderImpl.java` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
@@ -682,11 +819,11 @@
 | `WelcomeScreenFindScope` | `platform/lang-impl/src/com/intellij/find/impl/WelcomeScreenFindScope.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `EditorLivePreviewPresentation` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/EditorLivePreviewPresentation.kt` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
 | `EditorSearchAreaProvider` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/EditorSearchAreaProvider.java` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
-| `LivePreview` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreview.java` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
-| `LivePreviewController` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewController.java` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
+| `LivePreview` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreview.java` | `[~]` | 编辑器内的"边输边搜 + 当前命中选择 + 未命中处不变暗"第八十八批已落：`src/editorSearchExtension.ts`（高亮与 `goToMatch`）+ `src/editorFindController.ts`（边输边搜的入口，中文文案取 `FindBundle`）。缺：上游 `LivePreview` 的"只搜可见区 + 选区驱动"那套增量策略（本仓每次改文档全量扫一遍）。 |
+| `LivePreviewController` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewController.java` | `[~]` | 上游把"查找栏的输入 ↔ 编辑器里的预览"接起来的控制器。本仓同一职责在 `src/editorFindController.ts`（宿主状态域：开合 / 五档选项 / 历史 / 替换 / `findWordAtCaret`）。缺：上游的多编辑器（多文档查找）与 `LivePreview` 的可见区裁剪。 |
 | `LivePreviewPresentation` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewPresentation.kt` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
-| `SearchResults` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/SearchResults.java` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
-| `SelectionManager` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/SelectionManager.java` | `[ ]` | 边输边搜的实时预览、分块加载与选区管理。 |
+| `SearchResults` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/SearchResults.java` | `[~]` | **第一百零二批已落分块发布**：`native/search.cpp` 的 `preview()` 按"距上一块 ≥50ms 或攒够 200 条"切块（上游 `CHUNK_TIME_BUDGET_MS = 50`，`SearchResults.java:87`），经 `search.chunk` 事件回到 `src/searchStream.ts`，面板边收边画（`src/components/SearchPanel.vue` 的「正在搜索…已找到 N 条 / M 个文件」）。缺：上游按**持有读锁时长**切块并能在块边界让出写锁（本仓的一次扫描没有读锁）、块之间的文档戳校验（本仓用 `streamId` 认领代替）。 |
+| `SelectionManager` | `platform/lang-impl/src/com/intellij/find/impl/livePreview/SelectionManager.java` | `[~]` | 编辑器内的"当前命中"选择第八十八批已落：`src/editorSearchExtension.ts` 的 `goToMatch` 与 `setSearchState`（当前条单独一档样式，等价于上游 `SelectionManager.updateSelection`）。缺：多文档/多编辑器的选区同步（本仓的查找栏只服务一个编辑器）。 |
 | `uiModel` | `platform/lang-impl/src/com/intellij/find/impl/uiModel.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `usageAdapters` | `platform/lang-impl/src/com/intellij/find/impl/usageAdapters.kt` | `[ ]` | 查找工具窗实现（FindPopupPanel 2399 行及其周边）。本仓没有这根查找栏。 |
 | `ReplaceInProjectManager` | `platform/lang-impl/src/com/intellij/find/replaceInProject/ReplaceInProjectManager.java` | `[x]` | Replace in Files 的编排：`src/components/SearchPanel.vue:174-193` 逐条勾选/跳过 → `native/search.cpp:533` `replace_selected` 精确替换；全量替换走 `:438 replace()`。改写会移动字节偏移，所以替换后强制重跑预览（`SearchPanel.vue:188`）。 |
@@ -743,20 +880,20 @@
 | `UsageCodeSnippetComponent` | `platform/usageView-impl/src/com/intellij/find/findUsages/similarity/UsageCodeSnippetComponent.java` | `[-]` | 相似用法聚类，仅 Java 语义，本仓无 PSI 也就无从提特征。 |
 | `UsagePreviewComponent` | `platform/usageView-impl/src/com/intellij/find/findUsages/similarity/UsagePreviewComponent.kt` | `[-]` | 相似用法聚类，仅 Java 语义，本仓无 PSI 也就无从提特征。 |
 | `SilhouetteScore` | `platform/usageView/src/com/intellij/find/findUsages/similarity/SilhouetteScore.java` | `[-]` | 相似用法聚类，仅 Java 语义，本仓无 PSI 也就无从提特征。 |
-| `ByCharRt` | `platform/util/diff/src/com/intellij/diff/comparison/ByCharRt.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `ByCharRt` | `platform/util/diff/src/com/intellij/diff/comparison/ByCharRt.kt` | `[~]` | 字符级比较。本仓 `src/diffWords.ts` 的 `charMarks`：逐字符一个 token，跑同一套方向表后折成 `[起点,长度]`。**缺**上游 `TrimUtil` 的空白归一与 `ChunkOptimizer` 的块合并。 |
 | `ByLineRt` | `platform/util/diff/src/com/intellij/diff/comparison/ByLineRt.kt` | `[~]` | 行级比较的入口（`ByLineRt.kt:22-30` → `getLines` 按 `ComparisonPolicy` 归一后跑 Myers）。本仓走的是同一套算法（`src/diffAlign.ts`），但**没有** policy 参数、没有取消检查、没有三向重载，也没有 `FairDiffIterable` 的 fair 契约。 |
-| `ByWordRt` | `platform/util/diff/src/com/intellij/diff/comparison/ByWordRt.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `ByWordRt` | `platform/util/diff/src/com/intellij/diff/comparison/ByWordRt.kt` | `[~]` | 词级比较。本仓 `src/diffWords.ts` 的 `wordMarks`：`tokenizeLine`（与 `native/history.cpp` 的 `tokenize` **同一条规则**）+ `diffRuns`（LCS 方向表 + 回放未更改段）+ `runsToMarks`（去空白首尾），中间过一遍 `src/diffChunks.ts` 的块优化（**第一百零三批**，上游 `ChunkOptimizer.WordChunkOptimizer`）。**缺** `ByWordRt` 的标点调整组（上游会把标点与相邻词并成一个 `InlineChunk`）。 |
 | `CancellationChecker` | `platform/util/diff/src/com/intellij/diff/comparison/CancellationChecker.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
-| `ChangeCorrector` | `platform/util/diff/src/com/intellij/diff/comparison/ChangeCorrector.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `ChangeCorrector` | `platform/util/diff/src/com/intellij/diff/comparison/ChangeCorrector.kt` | `[~]` | 差异结果的后处理：**行级两步比对**。上游 `ByLineRt.doCompare` 走 `compareSmart`（`ByLineRt.kt:335-348`）：先只比"大行"（`nonSpaceChars > 3`，阈值是常量 `DiffConfig.UNIMPORTANT_LINE_CHAR_COUNT`，`util/diff/DiffConfig.kt:12`），再按 `ChangeCorrector.execute()`（`ChangeCorrector.kt:27-50`）在每两对相邻的已匹配大行之间 `matchGap`（`ChangeCorrector.kt:101-115`：先 `TrimUtil.expand` 让出两端相等的行，`TrimUtil.kt:323-339`；中间那段做一次局部 LCS）。**第一百一十六批已落**：`src/diffSmartLines.ts`（`smartLineMatch` / `nonSpaceChars` / `bigLineIndexes`），接在 `src/diffText.ts` 的 `buildDiffRows` 上。实测同一组输入上配对数与普通 LCS 相同、配对位置更对（`if (x) { / a(); / }` 那组里认"括号挪了"而不是"语句挪了"，见 `tests/diff-smart-lines.test.mjs`）。**缺**后处理两档：`optimizeLineChunks`（`ChunkOptimizer.LineChunkOptimizer`，按同一阈值合并行块）与 `expandRanges` / `correctChangesSecondStep`（`ByLineRt.kt:120-270`，把"策略意义下相等但原文不等"的行再修一遍）—— 后者本仓用"配对数不许少于普通 LCS"兜底；`DefaultCharChangeCorrector`（字符级那一支）也没做。 |
 | `CharacterUtils` | `platform/util/diff/src/com/intellij/diff/comparison/CharacterUtils.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
-| `ChunkOptimizer` | `platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `ChunkOptimizer` | `platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt` | `[~]` | **第一百零三批已落**（`src/diffChunks.ts`）：骨架（`build` / `processLastRanges`：两段相接才动、`equalForward === count2` 合并左边、`equalBackward === count1` 合并右边、否则按 `shift` 微调、递归合并）逐条照抄；词级那一档（`WordChunkOptimizer`）的"切点挪到空白处"也照抄（`wordShift`）。**缺** `DelimiterChunkOptimizer`（分隔符块）与行级那一档（`LineChunkOptimizer` 的空行对齐）。 |
 | `ComparisonMergeUtil` | `platform/util/diff/src/com/intellij/diff/comparison/ComparisonMergeUtil.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
-| `ComparisonPolicy` | `platform/util/diff/src/com/intellij/diff/comparison/ComparisonPolicy.kt` | `[~]` | 三档比较策略（`ComparisonPolicy.kt:4-8`：DEFAULT / TRIM_WHITESPACES / IGNORE_WHITESPACES）。本仓**只做了 DEFAULT**，这一档恰好是上游默认（`TextDiffSettingsHolder.kt:47` → `IgnorePolicy.java:29-35`），本仓 `src/diffAlign.ts:51` 的逐行相等与之一致；另两档判 §C。 |
-| `ComparisonUtil` | `platform/util/diff/src/com/intellij/diff/comparison/ComparisonUtil.kt` | `[~]` | 三个算法的统一入口 + 参数校验（两列长度必须相同）。本仓是 `src/diffAlign.ts:214` `alignLines` 自己校验。 |
+| `ComparisonPolicy` | `platform/util/diff/src/com/intellij/diff/comparison/ComparisonPolicy.kt` | `[x]` | 三档比较策略。**三档全做了**：`src/diffComparison.ts` 的 `comparisonKey`（`default` 原样 / `trimWhitespaces` 掐首尾 / `ignoreWhitespaces` 去掉全部空白），默认档仍是上游默认（`TextDiffSettingsHolder.kt` 的 `IGNORE_POLICY = IgnorePolicy.DEFAULT`）。**缺**上游 `IGNORE_WHITESPACES_CHUNKS` 的"忽略空格和空行"（`IgnorePolicy.java:29-35` 折进第三档，本仓不区分）。 上游只有三档，本仓三档**逐档对齐**（第四档「忽略空格和空行」是 `IgnorePolicy` 那一层的 `isShouldTrimChunks`，见那一行；本仓按用户可见的四项呈现，实现上仍是这三档 + 一次剪边界）。 |
+| `ComparisonUtil` | `platform/util/diff/src/com/intellij/diff/comparison/ComparisonUtil.kt` | `[~]` | 三个算法的统一入口 + 参数校验。本仓的入口是 `src/diffText.ts` 的 `buildDiffRows`（按 `comparison` 折键、按 `highlight` 补行内标记），参数校验在 `src/diffAlign.ts` 的 `alignLines` 里。 |
 | `DiffTooBigException` | `platform/util/diff/src/com/intellij/diff/comparison/DiffTooBigException.kt` | `[x]` | 差异量超阈值时上游抛的信号（`MyersLCS.kt:186-188`），本仓 `src/diffAlign.ts:74` 的 `FilesTooBigForDiff` 同义，被 `alignLines` 捕获后退化成"整段一块改动"。 |
-| `LineFragmentSplitter` | `platform/util/diff/src/com/intellij/diff/comparison/LineFragmentSplitter.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `LineFragmentSplitter` | `platform/util/diff/src/com/intellij/diff/comparison/LineFragmentSplitter.kt` | `[~]` | 把行级改动拆成"行数相等"与"行数不等"两种块，前者才做词级比较。本仓在 `src/diffText.ts` 的配对循环里做同一件事：只有配成 `change` 的两行才调 `marksFor`（纯增/纯删不做行内标记）。 |
 | `MergeResolveUtil` | `platform/util/diff/src/com/intellij/diff/comparison/MergeResolveUtil.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
-| `TrimUtil` | `platform/util/diff/src/com/intellij/diff/comparison/TrimUtil.kt` | `[ ]` | 比较算法族。本仓只做了行级（`src/diffAlign.ts`），词级/字符级都没有。 |
+| `TrimUtil` | `platform/util/diff/src/com/intellij/diff/comparison/TrimUtil.kt` | `[~]` | 空白归一与区间扩张。本仓 `src/diffComparison.ts` 的 `comparisonKey` 覆盖它**比较用**的那一半（trim / ignore）；`expand` 那一族（把改动区间向两侧扩张到相邻未改内容）没有对应物。 |
 | `ChangeDiffIterableBase` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/ChangeDiffIterableBase.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
 | `DiffChangeDiffIterable` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffChangeDiffIterable.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
 | `DiffFragmentsDiffIterable` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/DiffFragmentsDiffIterable.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
@@ -768,13 +905,13 @@
 | `InvertedDiffIterableWrapper` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/InvertedDiffIterableWrapper.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
 | `RangesDiffIterable` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/RangesDiffIterable.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
 | `SubiterableDiffIterable` | `platform/util/diff/src/com/intellij/diff/comparison/iterables/SubiterableDiffIterable.kt` | `[ ]` | 上游的差异惰性迭代器 + 校验工具（fair 校验、range 合并）。本仓输出的是一次性对齐数组。 |
-| `DiffFragment` | `platform/util/diff/src/com/intellij/diff/fragments/DiffFragment.kt` | `[~]` | 差异片段（两段区间 + 类型）。本仓的改动块是 `buildDiffRows` 现场推导出来的 `src/diffText.ts:19-47` 里的 `DiffRow`，不是独立对象。 |
-| `DiffFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/DiffFragmentImpl.kt` | `[ ]` | 片段模型（区间 + 类型 + 行首标记）。本仓的对齐结果是 `{from,to}` 对，没有片段对象。 |
+| `DiffFragment` | `platform/util/diff/src/com/intellij/diff/fragments/DiffFragment.kt` | `[~]` | 差异片段（两段区间 + 类型）。本仓行级是 `src/bridge.ts` 的 `DiffRow`（现场推导），**行内**是同一模块的 `leftMarks`/`rightMarks`（`[起点,长度]`，由 `src/diffWords.ts` 产出）—— 后者就是 `DiffFragment` 在行内的等价物。 |
+| `DiffFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/DiffFragmentImpl.kt` | `[-]` | 片段模型的**实现类**。本仓的片段是裸的 `[起点,长度]` 元组（`src/bridge.ts` 的 `leftMarks`），没有 `equals`/`hashCode`/`toString` 那一层对象协议 —— 不需要，因为没有任何地方按片段做集合运算。 |
 | `LineFragment` | `platform/util/diff/src/com/intellij/diff/fragments/LineFragment.kt` | `[~]` | 行片段（start1/end1/start2/end2 + type）。本仓 `src/diffAlign.ts:29` 的 `{from,to}` 对表达连续相等段，是它的简化形态。 |
-| `LineFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/LineFragmentImpl.kt` | `[~]` | 行片段实现。本仓无对象封装，`src/diffAlign.ts:29` 直接吐裸对象。 |
+| `LineFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/LineFragmentImpl.kt` | `[~]` | 行片段实现。本仓无对象封装：`src/diffAlign.ts` 直接吐 `{from,to}` 裸对象，渲染层由 `src/diffText.ts` 的 `buildDiffRows` 折成 `DiffRow`。 |
 | `MergeLineFragment` | `platform/util/diff/src/com/intellij/diff/fragments/MergeLineFragment.kt` | `[ ]` | 片段模型（区间 + 类型 + 行首标记）。本仓的对齐结果是 `{from,to}` 对，没有片段对象。 |
 | `MergeLineFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/MergeLineFragmentImpl.kt` | `[ ]` | 片段模型（区间 + 类型 + 行首标记）。本仓的对齐结果是 `{from,to}` 对，没有片段对象。 |
-| `MergeWordFragment` | `platform/util/diff/src/com/intellij/diff/fragments/MergeWordFragment.kt` | `[ ]` | 片段模型（区间 + 类型 + 行首标记）。本仓的对齐结果是 `{from,to}` 对，没有片段对象。 |
+| `MergeWordFragment` | `platform/util/diff/src/com/intellij/diff/fragments/MergeWordFragment.kt` | `[-]` | 三方合并用的词片段。本仓没有三方合并（`MergeRequestProcessor` 那一族整体没做）。 |
 | `MergeWordFragmentImpl` | `platform/util/diff/src/com/intellij/diff/fragments/MergeWordFragmentImpl.kt` | `[ ]` | 片段模型（区间 + 类型 + 行首标记）。本仓的对齐结果是 `{from,to}` 对，没有片段对象。 |
 | `LineOffsets` | `platform/util/diff/src/com/intellij/diff/tools/util/text/LineOffsets.kt` | `[ ]` | 文本 diff 提供者（含词级内层差异）。本仓只有词级之外的一层。 |
 | `LineOffsetsImpl` | `platform/util/diff/src/com/intellij/diff/tools/util/text/LineOffsetsImpl.kt` | `[ ]` | 文本 diff 提供者（含词级内层差异）。本仓只有词级之外的一层。 |
@@ -791,4 +928,4 @@
 | `DiffVcsDataKeys` | `platform/vcs-impl/src/com/intellij/diff/DiffVcsDataKeys.kt` | `[ ]` | diff 框架层（请求/窗口/工具注册）。本仓的 diff 只有剪贴板对比与保存冲突预览两处纯函数（`src/diffText.ts:16-52`），不存在 DiffRequest/DiffWindow 这一层。 |
 | `PatchBaseAnnotationInfo` | `platform/vcs-impl/src/com/intellij/diff/PatchBaseAnnotationInfo.kt` | `[ ]` | diff 框架层（请求/窗口/工具注册）。本仓的 diff 只有剪贴板对比与保存冲突预览两处纯函数（`src/diffText.ts:16-52`），不存在 DiffRequest/DiffWindow 这一层。 |
 
-合计 630 类：`[x]` 11、`[~]` 40、`[ ]` 498、`[-]` 81。
+合计 630 类：`[x]` 12、`[~]` 77、`[ ]` 455、`[-]` 86。

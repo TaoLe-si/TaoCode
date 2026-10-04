@@ -80,12 +80,14 @@ test('12 个 testSources 类必须判 [-]', () => {
 test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
+  // 第八十九批把四类从 `[ ]` 改判到 `[~]`/`[-]`（随处搜索的空态文案、作用域选择、预览开关，
+  // 以及一个复核发现上游根本没有实现的重排服务），数字随判决一起更新。
   assert.equal(count('[x]'), 12)
-  assert.equal(count('[~]'), 36)
-  assert.equal(count('[ ]'), 6)
+  assert.equal(count('[~]'), 40)
+  assert.equal(count('[ ]'), 2)
   assert.equal(count('[-]'), 263)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 317)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 12 \+ `\[~\]` 36 \+ `\[ \]` 6 \+ `\[-\]` 263 = \*\*317\*\*/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 12 \+ `\[~\]` 40 \+ `\[ \]` 2 \+ `\[-\]` 263 = \*\*317\*\*/,
     '表尾的和数要与逐条表一致')
 })
 

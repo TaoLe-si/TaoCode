@@ -19,6 +19,8 @@ import type { ToolWindowViewContext } from './components/ToolWindowView.vue'
 export interface ToolViewContext {
   active: any
   activePath: any
+  activeConfigured: any
+  activeLspRunning: any
   commitMessageSettings: any
   dropBookmark: any
   editorFor: any
@@ -63,6 +65,8 @@ export interface ToolViewContext {
   saveSettingsPatch: any
   searchPanelRef: any
   sortedAll: any
+  /** 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`）。 */
+  sortBookmarkGroup: any
   syntheticNodes: any
   testRunnerRef: any
   todoSource: any
@@ -75,7 +79,7 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, sortBookmarkGroup, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
@@ -85,6 +89,9 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   workspace: workspace.value ? { root: workspace.value.root, name: workspace.value.name, entries: workspace.value.entries } : null,
   activePath: activePath.value,
   activeTabPath: active.value?.path ?? '',
+  // 「项目分析中」= 当前文件配了语言服务但还没跑起来（与状态栏 `smartModeLabel` 同一条判据）。
+  activeConfigured: active.value?.lspConfigured === true,
+  activeLspRunning: active.value?.lspRunning === true,
   lspReady: lspReady.value,
   isDesktop,
   outline: outline.value,
@@ -110,6 +117,7 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   onReveal: target => { void revealLocation(target as never) },
   onBookmarkRemove: entry => dropBookmark(entry as never),
   onBookmarkAssign: () => openMnemonicPrompt(),
+  onBookmarkSortGroup: (path: string) => sortBookmarkGroup(path),
   onHistoryRevert: payload => revertHistory(payload as never),
   onTreeContext: payload => onTreeContext(payload as never),
   // 从树里打开：进不进预览标签由「用预览标签打开」开关定（IDEA `openInPreviewTabIfPossible`，

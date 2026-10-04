@@ -284,7 +284,8 @@ test('模糊匹配的接线三处都在', () => {
   const shell = shellSource()
   assert.match(shell, /<SearchEverywhereDialog[^>]*:fuzzy-files="generalSettings\.fuzzyFileSearch"/, '外壳没有把设置开关传给对话框')
   const dialog = readFileSync(join(root, 'src', 'components', 'SearchEverywhereDialog.vue'), 'utf8')
-  assert.match(dialog, /searchEverywhereResults\(props\.items, query\.value, tab\.value, SEARCH_EVERYWHERE_LIMIT, props\.fuzzyFiles\)/,
+  // 第六个实参是作用域谓词（上游 `ScopeChooserAction`）—— 本批新加的，所以断言放宽到"开关在位"。
+  assert.match(dialog, /searchEverywhereResults\(props\.items, query\.value, tab\.value, SEARCH_EVERYWHERE_LIMIT, props\.fuzzyFiles, scopePredicate\.value\)/,
     '对话框没有把开关交给打分函数')
   assert.match(dialog, /fuzzyTitleFragments\(item, query\.value, props\.fuzzyFiles\)/, '对话框没有按命中下标画高亮')
   const toggles = readFileSync(join(root, 'src', 'components', 'GeneralRegistryToggles.vue'), 'utf8')

@@ -5,6 +5,8 @@ import { errorMessage } from './errors.ts'
 // base64（桥上的二进制载荷）与 Gradle 同步通道都拆成了独立模块；这里转出给既有调用方。
 import { fromBase64, toBase64 } from './base64.ts'
 import { handleGradleEvent } from './gradleEvents.ts'
+import { handleSearchChunk } from './searchStream.ts'
+import { previewSettingsError } from './previewSettings.ts'
 import { handleLspProgressEvent } from './lspProgress.ts'
 import { decodeRunChunk, flushRunDecoder, handleRunExit, handleRunOutput, handleRunStarted } from './runInstances.ts'
 import { deliverTermOutput, emitTermExit, subscribeTerm, subscribeTermExit, type TermCreateResult } from './terminalEvents.ts'
@@ -93,7 +95,7 @@ export function normalizeEditorSettings(settings: EditorSettings): EditorSetting
   return { ...settings, showBreadcrumbs: false, breadcrumbsPlacement: 'bottom' }
 }
 
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.patch' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.internalErrors' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
 export type { GitChange, GitUser, GitStatus, GitDiff, GitCommit, GitLog, GitRef, GitFullCommit, GitFullLog, GitLogQuery, GitCommitDetails, GitCommitChange, GitCommitComparison, GitCommitChanges, GitCommitFileDiff, GitStashEntry, GitStash, GitAheadBehind, GitHunk, GitHunks, GitTags, GitCompareFile, GitCompare, GitBlameLine, GitBlame } from './vcsLogTypes'
 import type { GitCommit } from './vcsLogTypes'
 // One aligned row of the side-by-side viewer. Marks are [start, length] byte ranges
@@ -257,6 +259,8 @@ interface Reply {
   running?: boolean; queued?: number
   // term.opened / fs.watchStopped carry a working directory and a stop reason.
   cwd?: string; reason?: string; restarting?: boolean; attempt?: number
+  // search.chunk：这一次分块属于哪一次搜索（前端给的 streamId）。
+  streamId?: number
   // gradle.started 带回同步用的命令行；gradle.exit 带回"是被取消的吗"。
   command?: string; cancelled?: boolean
   language?: string; token?: string; kind?: string; title?: string; percentage?: number; cancellable?: boolean  // lsp.progress：`$/progress` 的一条报告（整形见 native/lsp_host_bootstrap.cpp）
@@ -362,6 +366,9 @@ export function handleHostEvent(data: Reply | undefined): boolean {
     case 'gradle.output':
     case 'gradle.exit':
       return handleGradleEvent(data.event, data)
+    // 工程内查找的分块（宿主 native/search.cpp 的 preview() 边走边推）：累积逻辑在 src/searchStream.ts。
+    case 'search.chunk':
+      return handleSearchChunk(data)
     // 终端输出：订阅表与"订阅前的缓冲"都在 src/terminalEvents.ts。
     case 'term.output':
       return deliverTermOutput(data.id, data.dataB64)
@@ -864,6 +871,7 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
       return { name: 'taocode-preview', root: previewRoot, entries: previewEntries('') }
     }
     case 'workspace.close': previewState.lastProject = null; return { closed: true }
+    case 'app.internalErrors': return { count: 0, latest: [] }
     case 'workspace.list': return previewEntries(path)
     // The browser sample has no disk walk; the in-memory sample map *is* the project
     // tree, so the same "excluded directory" rule as previewEntries produces it.
@@ -1112,46 +1120,11 @@ async function previewRequest(method: Method, params: Record<string, unknown>): 
     case 'settings.update': {
       const patch = params.settings as Record<string, unknown>
       if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
+      // 预览态的键表与取值校验在 src/previewSettings.ts（同一条规则的第二道关卡，
+      // 桌面端真源是 native/settings_schema.cpp；tests/settings-keys-parity.test.mjs 读的正是那里）。
       for (const [key, value] of Object.entries(patch)) {
-        const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
-          key === 'lineNumbers' ||
-          key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' || key === 'tabsInOneRow' ||
-          key === 'useTabCharacter' || key === 'showWhitespaces' || key === 'formatOnSave' ||
-          key === 'uiZoomPercent' || key === 'compactMode' || key === 'fullPathsInWindowHeader' ||
-          key === 'showTreeIndentGuides' || key === 'compactTreeIndents' ||
-          key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' ||
-          key === 'collapseImports' || key === 'collapseCustomRegions' || key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
-          key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || key === 'fileColorsForProjectView' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
-          key === 'smoothScrolling' || key === 'showIconsInMenus' ||
-          key === 'rememberSizeForEachToolWindow' || key === 'showToolWindowNames' || key === 'showToolWindowBars' ||
-          key === 'leftSideBySide' || key === 'wideScreenSupport' || key === 'rightSideBySide' ||
-          key === 'showToolWindowNumbers' ||
-          key === 'keepPopupsForToggles' || key === 'dndWithPressedAltOnly' || key === 'powerSaveMode' ||
-          key === 'useContrastScrollbars' || key === 'colorBlindness' || key === 'uiFontFamily' || key === 'uiFontSize' ||
-          key === 'backgroundImagePath' || key === 'backgroundImageOpacity' || key === 'backgroundImageFill' ||
-          key === 'backgroundImageKeepRatio' || key === 'presentationMode' || key === 'presentationModeFontSize' ||
-          key === 'showStatusBar' || key === 'rightMargin' ||
-          key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick' || key === 'maximizeEditorOnTabDoubleClick' || key === 'pinnedTabsInSeparateRow'
-        if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
-        if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
-          : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'
-          : key === 'tabLimit' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
-          : key === 'uiZoomPercent' ? !Number.isInteger(value) || Number(value) < 50 || Number(value) > 400
-          : key === 'uiFontSize' ? !Number.isInteger(value) || Number(value) < 9 || Number(value) > 24
-          : key === 'backgroundImageOpacity' ? !Number.isInteger(value) || Number(value) < 0 || Number(value) > 100
-          : key === 'presentationModeFontSize' ? !Number.isInteger(value) || Number(value) < 12 || Number(value) > 72
-          : key === 'backgroundImagePath' ? typeof value !== 'string' || value.length > 512
-          : key === 'backgroundImageFill' ? !['scale', 'tile', 'center'].includes(String(value))
-          : key === 'mainMenuDisplayMode' ? !['hamburger', 'merged', 'separate'].includes(String(value))
-          : key === 'uiFontFamily' ? typeof value !== 'string' || value.length > 120
-          : key === 'colorBlindness' ? !['none', 'deuteranopia', 'protanopia', 'tritanopia'].includes(String(value))
-          : key === 'stickyLinesLimit' ? !Number.isInteger(value) || Number(value) < 0 || Number(value) > 10
-          : key === 'diffContextLines' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
-          // 与原生 validate_language_flags 同一套规则：键必须是已知语言 id，值是布尔。
-          : key === 'breadcrumbsLanguages' ? !value || typeof value !== 'object' || Array.isArray(value) ||
-            Object.entries(value).some(([id, flag]) => !(EDITOR_LANGUAGES as readonly string[]).includes(id) || typeof flag !== 'boolean')
-          : typeof value !== 'boolean')
-          throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
+        const invalid = previewSettingsError(key, value, EDITOR_LANGUAGES)
+        if (invalid) throw new BridgeError('INVALID_SETTINGS', invalid)
       }
       Object.assign(previewState.settings, patch)
       return { ...previewState.settings }

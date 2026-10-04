@@ -65,8 +65,9 @@ test('对话框里挂的是拆出来的页面组件（宿主不塞逻辑，且�
 })
 
 test('设置被接受并保存（前端白名单 + 编辑器设置默认值 + 原生键表）', () => {
-  const bridge = read('src/bridge.ts')
-  assert.match(bridge, /key === 'collapseImports' \|\| key === 'collapseCustomRegions'/, 'settings.update 要认这两个键')
+  // 白名单 2026-10-04 从 src/bridge.ts 搬到了 src/previewSettings.ts（bridge 贴着机检上限）。
+  const preview = read('src/previewSettings.ts')
+  assert.match(preview, /key === 'collapseImports' \|\| key === 'collapseCustomRegions'/, 'settings.update 要认这两个键')
   const model = read('src/settingsModel.ts')
   assert.match(model, /collapseImports: boolean; collapseCustomRegions: boolean/)
   assert.match(model, /defaultEditorSettings: EditorSettings = \{ collapseImports: true, collapseCustomRegions: false,/)

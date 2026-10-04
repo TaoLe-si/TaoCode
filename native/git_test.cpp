@@ -113,6 +113,44 @@ int main() {
         check(b && b->untracked, "b.txt should be untracked");
     });
 
+    // 「忽略的文件」（IDEA `ChangesView.ShowIgnored`）：默认不列，开着时用 `!!` 记录列出来。
+    run("ignored files only show when asked for", [&] {
+        put(root / ".gitignore", "ignored.txt\n");
+        put(root / "ignored.txt", "not tracked on purpose\n");
+        const auto hidden = taocode::git::status(root);
+        for (const auto& change : hidden) check(change.path != "ignored.txt", "默认不列忽略的文件");
+        const auto shown = taocode::git::status(root, true);
+        const Change* hit = nullptr;
+        for (const auto& change : shown) if (change.path == "ignored.txt") hit = &change;
+        check(hit && hit->ignored, "开着时忽略的文件要列出来，并标成 ignored");
+        check(hit && !hit->staged && !hit->untracked, "忽略的文件既不是已暂存也不是未跟踪");
+        check(hit && hit->index_status == "!" && hit->work_status == "!", "porcelain 的 `!!` 记录要如实带出来");
+        // 收尾：这个用例建的 .gitignore 与文件要清掉，否则后面那条 `ignore_path appends once and only once`
+        // 会看见一个非空 .gitignore（共享同一个临时仓库，用例之间不许留脏东西）。
+        std::error_code cleanup;
+        fs::remove(root / ".gitignore", cleanup);
+        fs::remove(root / "ignored.txt", cleanup);
+    });
+
+    // 补丁（IDEA `CreatePatchFromChangesAction` 的输入）：`git diff HEAD` + 未跟踪文件按"新文件"接上；
+    // 忽略的文件不进补丁（git 的 diff 不认它，`--no-index` 那一路也跳过它 —— 它没出现在 status 里）。
+    run("the patch carries tracked changes and untracked files as new files", [&] {
+        put(root / "patch-new.txt", "brand new\n");
+        put(root / "a.txt", "hello world\nmore\n");
+        const auto text = taocode::git::patch(root, true);
+        check(text.find("diff --git a/a.txt b/a.txt") != std::string::npos, "已跟踪的改动要在补丁里");
+        check(text.find("diff --git a/patch-new.txt b/patch-new.txt") != std::string::npos, "未跟踪的文件也要在补丁里");
+        check(text.find("new file mode") != std::string::npos, "未跟踪的那一份要标成新文件");
+        check(text.find("--- /dev/null") != std::string::npos, "新文件的旧侧是 /dev/null");
+        check(text.find("+brand new") != std::string::npos, "内容要带上");
+        check(taocode::git::patch(root, false).find("patch-new.txt") == std::string::npos, "关掉时不含未跟踪文件");
+        // 收尾：a.txt 恢复成本用例之前的样子（下一条 `diff shows the modification` 拿它当夹具，
+        // 共享同一个临时仓库，用例之间不许留脏东西），未跟踪的那个文件也删掉。
+        std::error_code cleanup;
+        fs::remove(root / "patch-new.txt", cleanup);
+        put(root / "a.txt", "hello world" + std::string(1, char(10)));
+    });
+
     run("diff shows the modification", [&] {
         const auto diff = taocode::git::diff(root, "a.txt", false);
         check(diff.find("hello world") != std::string::npos, "diff should include the new line");

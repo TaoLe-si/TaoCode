@@ -3,6 +3,8 @@
 // 成员先用 any（参数逆变 + 内部类型未提取），随批次收紧。
 import type { MenuRow } from './types'
 import { createInspectCodeInCodeMenuRows, type AnalyzeGroupContext } from './analyzeMenu'
+// 「比较对象…」的标题常量（上游 `action.compare.with.text`，中文包取值）。
+import { COMPARE_WITH_TEXT } from '../compareFiles'
 
 export interface CodeMenuContext extends AnalyzeGroupContext {
   hasEditor: () => boolean
@@ -21,6 +23,8 @@ export interface CodeMenuContext extends AnalyzeGroupContext {
   /** 「追溯」是否开着 —— `AnnotateToggleAction` 是 `ToggleAction`（`:67`），菜单行带勾选态。 */
   blameEnabled: () => boolean
   compareWithClipboard: () => any
+  /** 「比较对象…」（上游 `CompareFilesAction` 的单文件分支）。 */
+  compareWithFile: () => any
   copyFilePath: () => any
 }
 
@@ -100,6 +104,9 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
     { id: 'code.optimizeImports', title: '优化导入', keys: 'Ctrl Alt O', keywords: 'optimize imports organize 优化导入', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: () => void ctx.runOrganizeImports() },
     { id: 'code.rule3', rule: true },
     { id: 'code.blame', title: 'Git 追溯（Annotate）', keywords: 'blame annotate git history 追溯', checked: () => ctx.blameEnabled(), enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.showBlame() },
+    // `PlatformActions.xml:562-568` 的 `CompareActions` 组：`PairFileActions`（比较文件 / 与编辑器比较）
+    // 在前，`CompareClipboardWithSelection` 在后。本仓原先只有最后那一条。
+    { id: 'code.compareWith', title: COMPARE_WITH_TEXT, keywords: 'compare with file two files diff 比较对象 比较文件', enabled: () => Boolean(ctx.active.value) && ctx.isDesktop, run: () => void ctx.compareWithFile() },
     { id: 'code.compareClipboard', title: '与剪贴板比较', keywords: 'compare clipboard diff 与剪贴板比较', enabled: () => Boolean(ctx.active.value), run: () => void ctx.compareWithClipboard() },
     { id: 'code.copyPath', title: '复制文件路径', keywords: 'copy file path absolute 复制文件路径', enabled: () => Boolean(ctx.active.value), run: () => void ctx.copyFilePath() },
     // ActionsBundle: "Toggle Read-Only Attribute" (synonyms Make File Writable /

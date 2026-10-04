@@ -2,17 +2,29 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { GitBranch, RefreshCw, Plus, Minus, Check, X, CircleSlash, Download, Upload, Ban, GitPullRequestArrow, ChevronsUpDown, ChevronsDownUp, Clock, Settings, Undo2, TriangleAlert } from 'lucide-vue-next'
 import DiffView from './DiffView.vue'
+import ChangedHunks from './ChangedHunks.vue'
+import AnchoredMenu from './AnchoredMenu.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { commitBlockMessage, commitBlockReason } from '../commitCheck'
 import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
   EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../commitPanelStrings'
 import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
 import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, SHOW_DETAILS_TEXT, checksFailedTitle, commitAnywayLabel,
+  checksProgress as checksProgressOf, indexingWarningVisible, NOT_AVAILABLE_DURING_INDEXING, CHECKS_CANCEL_TEXT,
   commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
+import { changesMenuRows, type ChangesMenuTarget } from '../changesMenuActions'
+import { copyPatchToClipboard, createPatchFile } from '../patchExport'
+import { CHANGES_GROUP_BY_LABELS, GROUP_BY_LABEL, groupChanges, type ChangesGroupBy } from '../changesGrouping'
+
+// 「忽略的文件」那一档的文案（`VcsBundle.properties`：`:9` 是短名、`:8` 是说明）。
+const SHOW_IGNORED_TEXT = '忽略的文件'
+const SHOW_IGNORED_DESCRIPTION = '显示忽略的文件'
+import { copyPathMenuRows, findResultClipboardText, type FindCopyActionId } from '../copyPathActions'
+import { copyToClipboard } from '../clipboard.ts'
 import { setStatusText } from '../statusBarText'
 import type { NoticeAction } from '../notices'
 import { COMMIT_CANCELED, COMMIT_NOTIFICATION_ID, commitNotificationRows, commitNotificationTitle, countCommittedPaths } from '../commitNotification'
-import { authorEmailPart, authorNamePart, extendsBeyondDefault, fullName, knownAuthors, shortName, splitAuthorInput, type CommitAuthor } from '../commitAuthor'
+import { authorEmailPart, authorNamePart, extendsBeyondDefault, fullName, knownAuthors, readSavedAuthors, saveUsedAuthor as saveUsedAuthorIn, shortName, splitAuthorInput, type CommitAuthor } from '../commitAuthor'
 import {
   addBlankLineAfterSubject,
   exceedingText,
@@ -35,6 +47,8 @@ const props = defineProps<{
   todoPatterns: TodoPattern[]
   /** 统一 diff 的上下文行数（IDEA diff 设置 settings.context.lines；0/未传 = git 默认）。 */
   diffContextLines?: number
+  /** 「项目分析中」：有活动文件 + 配了语言服务 + 还没跑起来（与状态栏 `smartModeLabel` 同源，见 ToolWindowView 的传参）。 */
+  analyzing?: boolean
   /** IDEA's commit-message inspections (Settings › Version Control › Commit). */
   commitSettings: CommitMessageInspectionSettings
   /** 「与某分支比较」的目标（工具栏分支弹窗 → 比较）：设好后本面板直接跑一次比较。 */
@@ -57,9 +71,8 @@ const message = ref('')
 const amend = ref(false)
 // `ToggleAmendCommitOption.kt:23` tooltip = VcsBundle.properties:1163
 // `commit.tooltip.merge.this.commit.with.the.previous.one`, plus the `VK_M` mnemonic of `:19`.
-interface DiffState { path: string; staged: boolean; base: string; text: string; rows: DiffRow[]; truncated: boolean; hunks?: GitHunks; hunkPicked?: Set<number> }
+interface DiffState { path: string; staged: boolean; base: string; text: string; rows: DiffRow[]; truncated: boolean; hunks?: GitHunks }
 const diff = ref<DiffState | null>(null)
-const hunkError = ref('')
 const compareTo = ref('')
 const compared = ref<GitCompareFile[]>([])
 
@@ -106,13 +119,19 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await request<GitStatus>('git.status')
+    const result = await request<GitStatus>('git.status', { ignored: showIgnored.value })
     if (token !== statusToken) return
     status.value = result
     void refreshExtras()
   }
   catch (caught) { if (token === statusToken) error.value = errorText(caught) }
   finally { if (token === statusToken) loading.value = false }
+}
+/** 逐块暂存/退回之后：刷新变更列表与差异（原先是 applyHunks 里那两行，现在由子组件发事件触发）。 */
+async function refreshAfterHunkApply() {
+  await load()
+  const current = diff.value
+  if (current) await showDiff({ path: current.path, staged: current.staged, base: current.base })
 }
 async function refreshExtras() {
   const token = statusToken
@@ -130,6 +149,52 @@ async function refreshExtras() {
 // the exception actions (`CommitExceptionWithActions`, :63-74) — TaoCode has no plugin EPs, and its
 // notification rows carry no action buttons.
 const emit = defineEmits<{ notify: [message: string, error?: boolean, displayId?: string, detail?: string[], actions?: NoticeAction[]] }>()
+// 变更行的右键菜单（上游 `ChangesViewPopupMenu`，行表在 src/changesMenuActions.ts）。
+// 位置用视口坐标 —— 浮层是 `position: fixed`（`src/popupAnchor.ts`），放在滚动容器里也不会被裁。
+// 「忽略的文件」（上游 `ChangesView.ShowIgnored`，文案取 `VcsBundle.properties:9`）：默认**关**，
+// 开着时 `git status --ignored=matching` 会把被 .gitignore 忽略的文件也列出来。
+const showIgnored = ref(false)
+watch(showIgnored, () => { void load() })
+const groupBy = ref<ChangesGroupBy>('none')
+const stagedGroups = computed(() => groupChanges(staged.value, groupBy.value))
+const unstagedGroups = computed(() => groupChanges(unstaged.value, groupBy.value))
+const rowMenu = ref<{ x: number; y: number; change: { path: string; staged: boolean; untracked?: boolean; ignored?: boolean } } | null>(null)
+const copyOpen = ref(false)
+const rowMenuRows = computed(() => (rowMenu.value ? changesMenuRows(rowMenu.value.change) : []))
+const rowCopyRows = computed(() => copyPathMenuRows({
+  target: () => (rowMenu.value ? { path: rowMenu.value.change.path, line: 1 } : null),
+  root: () => props.root,
+  copy: (text: string) => void copyToClipboard(text),
+}))
+function openRowMenu(event: MouseEvent, change: { path: string; staged: boolean; untracked?: boolean; ignored?: boolean }) {
+  copyOpen.value = false
+  rowMenu.value = { x: event.clientX, y: event.clientY, change }
+}
+/** 菜单里选了一条：`copyPath.*` 归复制那一组，其余按 id 分派到面板已有的处理函数。 */
+function pickRowMenu(row: { id: string }) {
+  const menu = rowMenu.value
+  rowMenu.value = null
+  if (!menu) return
+  const path = menu.change.path
+  if (row.id.startsWith('copyPath.')) {
+    // 用**存下来的** `menu`，别再用 `rowCopyRows` 那个 computed —— 它的输入就是 `rowMenu`，
+    // 上面刚把它清空，读它只会拿到"没有目标 ⇒ 禁用"（真机抓到的：点了复制却什么都没进剪贴板）。
+    const action = row.id.slice('copyPath.'.length) as FindCopyActionId
+    void copyToClipboard(findResultClipboardText(action, { path, line: 1 }, props.root))
+    return
+  }
+  switch (row.id) {
+    case 'diff': return showDiff({ path, staged: menu.change.staged })
+    case 'revert': return rollbackConfirm(path)
+    case 'stage': return void stage(path)
+    case 'unstage': return void unstage(path)
+    case 'addToVcs': return void stage(path)
+    case 'ignore': return void ignore(path)
+    case 'patch': return void createPatchFile({ notify: (message, error) => emit('notify', message, error), copy: copyToClipboard })
+    case 'patchClipboard': return void copyPatchToClipboard({ notify: (message, error) => emit('notify', message, error), copy: copyToClipboard })
+    case 'refresh': return void load()
+  }
+}
 // 提交检查与"提交期间保存文件"要问宿主两件事：哪些要提交的文件还没保存、以及怎么保存它们
 // （上游 `SaveCommittingDocumentsVetoer` + `FileDocumentManager.saveDocument`）。
 function dirtyPaths(): string[] { return props.dirtyPaths?.() ?? [] }
@@ -215,16 +280,8 @@ const effectiveAuthor = computed(() => authorOverride.value ?? repositoryAuthor.
 // GitCommitOptionsUi.kt:259 — the field completes over `getAllUsers(project) + settings.commitAuthors`,
 // i.e. the authors the log has seen plus the ones saved from earlier commits.
 const knownAuthorEntries = ref<string[]>([])
-function authorStorageKey() { return `taocode.commitAuthors:${props.root}` }
-function readSavedAuthors(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(authorStorageKey()) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
-  } catch { return [] }
-}
 function saveUsedAuthor(entry: string) {
-  const saved = knownAuthors(readSavedAuthors(), [entry])
-  try { localStorage.setItem(authorStorageKey(), JSON.stringify(saved)) } catch { /* storage unavailable: session-only */ }
+  saveUsedAuthorIn(props.root, entry)
   knownAuthorEntries.value = knownAuthors(knownAuthorEntries.value, [entry])
 }
 // The two fields replace IDEA's single "Name <email>" text field, so the log's exact strings
@@ -236,10 +293,10 @@ async function loadAuthor() {
     const user = await request<CommitAuthor>('git.user')
     repositoryAuthor.value = { name: user.name ?? '', email: user.email ?? '' }
   } catch { repositoryAuthor.value = { name: '', email: '' } }
-  knownAuthorEntries.value = knownAuthors([], readSavedAuthors())
+  knownAuthorEntries.value = knownAuthors([], readSavedAuthors(props.root))
   try {
     const listed = await request<{ authors?: string[] }>('git.authors')
-    knownAuthorEntries.value = knownAuthors(listed.authors ?? [], readSavedAuthors())
+    knownAuthorEntries.value = knownAuthors(listed.authors ?? [], readSavedAuthors(props.root))
   } catch { /* completion is a convenience: a repo without a log just has none */ }
 }
 // The options popup owns the input, so opening it seeds the draft the way setAuthor (:205-213)
@@ -308,13 +365,31 @@ function applyChecksReport(report: CommitCheckReport, commitActions = false) {
   if (commitActions) actions.push({ label: commitAnywayLabel(), run: () => commit() })
   emit('notify', checksFailedTitle(), true, undefined, report.failures, actions)
 }
+// IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）在面板里挂的那一行：
+// 标题 + 两档正文 + 取消。`checksProgress()` 的 `running` 参数就是"这一行此刻该不该在"。
+const checksProgress = computed(() => checksProgressOf(true, null, checksBusy.value))
+/** 「项目分析期间某些提交检查不可用」（`CommitProgressPanel.kt:310`）；跑检查时让位给进度行。 */
+const indexingWarning = computed(() => indexingWarningVisible(Boolean(props.analyzing), checksBusy.value))
+/** 取消那一轮检查（上游 `ProgressIndicator.cancel()`）：这一轮的结果回来时不再落地。 */
+function cancelCommitChecks() {
+  if (!checksBusy.value) return
+  ++checksToken
+  checksBusy.value = false
+  setStatusText(null, null)
+  emit('notify', CHECKS_CANCEL_TEXT)
+}
+let checksToken = 0
 function runCommitChecks() {
   if (checksBusy.value) return
+  const token = ++checksToken
   checksBusy.value = true
   setStatusText(RUNNING_CHECKS_TEXT, null)
   void act(async () => {
     try {
-      applyChecksReport(await collectCommitChecks())
+      const report = await collectCommitChecks()
+      // 用户按了取消（`cancelCommitChecks` 会 ++checksToken）：这一轮的结果不落地 ——
+      // 上游 `ProgressIndicator.cancel()` 之后那个任务的结果同样不会被采纳。
+      if (token === checksToken) applyChecksReport(report)
     } finally {
       checksBusy.value = false
       setStatusText(null, null)
@@ -527,27 +602,8 @@ const push = () => act(() => request('git.push'))
 // "Add to .gitignore" for untracked rows.
 const fetch = () => act(() => request('git.fetch'))
 const ignore = (path: string) => act(() => request('git.ignore', { path }))
-async function applyHunks(reverse: boolean) {
-  if (!diff.value || !diff.value.hunks) return
-  const selectedIndexes = diff.value.hunks.hunks.filter(hunk => diff.value?.hunkPicked?.has(hunk.index)).map(hunk => hunk.index)
-  if (!selectedIndexes.length) return
-  const target = { path: diff.value.path, staged: diff.value.staged }
-  await act(async () => {
-    await request('git.applyHunks', { ...target, hunks: selectedIndexes, reverse })
-    await showDiff(target)
-  })
-}
-function toggleHunk(index: number) {
-  if (!diff.value) return
-  diff.value.hunkPicked ??= new Set()
-  if (diff.value.hunkPicked.has(index)) diff.value.hunkPicked.delete(index)
-  else diff.value.hunkPicked.add(index)
-  // Set mutation needs a fresh Set to stay reactive for the checkbox binding.
-  diff.value.hunkPicked = new Set(diff.value.hunkPicked)
-}
 async function showDiff(target: { path: string; staged: boolean; base?: string }) {
   const base = target.base ?? ''
-  hunkError.value = ''
   // context：把设置里的 diff 上下文行数透给 native（拼成 git 的 -U<n>）。
   const params = base
     ? { path: target.path, staged: target.staged, base, context: props.diffContextLines ?? 0 }
@@ -564,13 +620,13 @@ async function showDiff(target: { path: string; staged: boolean; base?: string }
     let hunks: GitHunks | undefined
     if (!base) {
       try { hunks = await request<GitHunks>('git.diffHunks', { path: target.path, staged: target.staged }) }
-      catch (caught) { hunks = undefined; hunkError.value = `读取改动块失败，只能整体暂存：${errorText(caught)}` }
+      catch (caught) { hunks = undefined; commitCheckError.value = `读取改动块失败，只能整体暂存：${errorText(caught)}` }
     }
     diff.value = {
       path: target.path, staged: target.staged, base,
       text: unified.diff || '（无差异；可能是未跟踪文件）',
       rows: sides.rows ?? [], truncated: sides.truncated === true,
-      hunks, hunkPicked: new Set(),
+      hunks,
     }
   } catch (caught) { error.value = errorText(caught) }
 }
@@ -691,6 +747,12 @@ watch(() => [props.root, props.active] as const, () => {
              `Vcs.Push` :80-85）：更新项目 / 提交 / 切换提交界面 / 推送 / 比较同版本 / 文件历史 / 回滚。
              本仓这一行只放我们真有的那两个（更新项目、推送）；获取/变基/储藏/取出储藏在上游都不在这一行
              （它们在 Git 菜单与日志窗口那一族），所以留在 Git 菜单里、不在这里重复一份。 -->
+        <label class="sc-ignored" :title="SHOW_IGNORED_DESCRIPTION"><input type="checkbox" v-model="showIgnored" />{{ SHOW_IGNORED_TEXT }}</label>
+        <label class="sc-groupby" :title="GROUP_BY_LABEL"><span>{{ GROUP_BY_LABEL }}</span>
+          <select v-model="groupBy" :aria-label="GROUP_BY_LABEL">
+            <option v-for="(label, value) in CHANGES_GROUP_BY_LABELS" :key="value" :value="value">{{ label }}</option>
+          </select>
+        </label>
         <button class="sc-tool" :disabled="busy" title="更新项目（Ctrl+T）" @click="updateProject"><Download :size="iconSize.menu" />更新项目<span v-if="ahead.available && ahead.behind" class="sc-badge">{{ ahead.behind }}</span></button>
         <button class="sc-tool" :disabled="busy" title="推送（Ctrl+Shift+K）" @click="push"><Upload :size="iconSize.menu" />推送<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button><!-- IDEA's commit legend: right-aligned in the row that hosts the commit toolbar (NonModalCommitPanel.kt:104-107 -> statusComponent.addToLeft(toolbar.component)). --><div v-if="legendFullText" ref="legendRef" class="sc-legend" role="status" aria-label="提交图例"><span v-for="group in legendRows" :key="group.kind" class="sc-legend-item" :class="`legend-${group.kind}`">{{ legendCompact ? `${group.compact}${group.count}` : `${group.count} 个${group.full}` }}</span><span ref="legendProbe" class="sc-legend-probe" aria-hidden="true">{{ legendFullText }}</span></div>
       </div>
@@ -699,19 +761,25 @@ watch(() => [props.root, props.active] as const, () => {
       <div class="sc-scroll">
         <section v-if="staged.length" class="sc-section">
           <h3>已暂存 <span class="sc-count">{{ staged.length }}</span></h3>
-          <div v-for="change in staged" v-show="!changesCollapsed" :key="'s' + change.path" class="sc-row">
+          <template v-for="group in stagedGroups" :key="'sg' + group.dir">
+          <p v-if="groupBy === 'directory'" class="sc-group-head" :title="group.dir || '.'">{{ group.dir || '.' }}</p>
+          <div v-for="change in group.changes" v-show="!changesCollapsed" :key="'s' + change.path" class="sc-row" @contextmenu.prevent="openRowMenu($event, change)">
             <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.indexStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
             <button class="icon-button" title="取消暂存" aria-label="取消暂存" :disabled="busy" @click="unstage(change.path)"><Minus :size="iconSize.control" /></button>
           </div>
+          </template>
         </section>
         <section v-if="unstaged.length" class="sc-section">
           <h3>更改 <span class="sc-count">{{ unstaged.length }}</span></h3>
-          <div v-for="change in unstaged" v-show="!changesCollapsed" :key="'u' + change.path" class="sc-row">
-            <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.untracked ? '?' : change.workStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
-            <button v-if="!change.untracked" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="iconSize.control" /></button>
+          <template v-for="group in unstagedGroups" :key="'ug' + group.dir">
+          <p v-if="groupBy === 'directory'" class="sc-group-head" :title="group.dir || '.'">{{ group.dir || '.' }}</p>
+          <div v-for="change in group.changes" v-show="!changesCollapsed" :key="'u' + change.path" class="sc-row" @contextmenu.prevent="openRowMenu($event, change)">
+            <button class="sc-file" :title="change.path" @click="showDiff(change)"><span class="sc-status">{{ change.ignored ? '!' : change.untracked ? '?' : change.workStatus }}</span><span class="sc-path">{{ change.path }}</span></button>
+            <button v-if="!change.untracked && !change.ignored" class="icon-button" title="回滚工作区改动（IDEA Rollback，丢弃未暂存修改）" aria-label="回滚改动" :disabled="busy" @click="rollbackConfirm(change.path)"><Undo2 :size="iconSize.control" /></button>
             <button v-if="change.untracked" class="icon-button" title="加入 .gitignore" aria-label="加入 .gitignore" :disabled="busy" @click="ignore(change.path)"><Ban :size="iconSize.menu" /></button>
-            <button class="icon-button" title="暂存" aria-label="暂存" :disabled="busy" @click="stage(change.path)"><Plus :size="iconSize.control" /></button>
+            <button v-if="!change.ignored" class="icon-button" title="暂存" aria-label="暂存" :disabled="busy" @click="stage(change.path)"><Plus :size="iconSize.control" /></button>
           </div>
+          </template>
         </section>
         <div v-if="!changes.length" class="sc-empty"><Check :size="iconSize.artwork" /><p>工作区干净</p><span>没有需要提交的更改。</span></div>
         <section v-if="compareTo" class="sc-section">
@@ -722,6 +790,15 @@ watch(() => [props.root, props.active] as const, () => {
           <p v-if="!compared.length" class="sc-empty-line">该分支相对此处没有多出的文件。</p>
         </section>
       </div>
+      <!-- IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）：跑检查时那一行
+           （标题 + 两档正文 + 取消），任务结束整行收掉（可见性由 `checksProgress(..., running)` 给）。 -->
+      <div v-if="checksProgress.visible" class="sc-checks-progress" role="status">
+        <span class="sc-checks-progress-text"><strong>{{ checksProgress.title }}</strong>{{ checksProgress.text }}</span>
+        <span v-if="checksProgress.detail" class="sc-checks-progress-detail">{{ checksProgress.detail }}</span>
+        <button v-if="checksProgress.cancellable" class="sc-tool" :disabled="!checksBusy" @click="cancelCommitChecks">{{ checksProgress.cancelText }}</button>
+      </div>
+      <!-- 项目分析期间那条警告（`:310`）：不在分析中、或者正在跑检查时都不出现。 -->
+      <p v-if="indexingWarning" class="sc-checks-indexing" role="status">{{ NOT_AVAILABLE_DURING_INDEXING }}</p>
       <p v-if="commitCheckError" class="sc-commit-check" role="alert">{{ commitCheckError }}</p>
       <!-- IDEA's FailuresPanel (CommitProgressPanel.kt:394-471): the commit-check failures live on
            their own row — warning icon + the failure texts + the "Rerun commit checks" toolbar
@@ -779,26 +856,42 @@ watch(() => [props.root, props.active] as const, () => {
       <section class="diff-dialog" role="dialog" aria-modal="true" :aria-label="`差异 ${diff.path}`">
         <!-- IDEA's commit viewer: each hunk of the diff is selectable and the
              toolbar stages/unstages exactly the picked hunks. -->
-        <div v-if="diff.hunks?.hunks.length" class="sc-hunks">
-          <button class="sc-tool" :disabled="busy" title="把勾选的改动块暂存（git apply --cached）" @click="applyHunks(false)"><Plus :size="iconSize.dense" />暂存所选块</button>
-          <button class="sc-tool" :disabled="busy" title="把勾选的已暂存块退回工作区（reverse apply）" @click="applyHunks(true)"><Minus :size="iconSize.dense" />取消暂存所选块</button>
-          <span class="sc-hunk-hint">{{ diff.staged ? '已暂存差异' : '工作区差异' }} · {{ diff.hunks.hunks.length }} 块</span>
-        </div>
-        <p v-if="hunkError" class="sc-warning sc-hunk-error" role="status">{{ hunkError }}</p>
-        <div v-if="diff.hunks?.hunks.length" class="sc-hunk-list">
-          <label v-for="hunk in diff.hunks.hunks" :key="hunk.index" class="sc-hunk">
-            <input type="checkbox" :checked="diff.hunkPicked?.has(hunk.index)" @change="toggleHunk(hunk.index)" />
-            <code class="sc-hunk-header">{{ hunk.header.trim() }}</code>
-            <span class="sc-hunk-counts">+{{ hunk.additions }} −{{ hunk.deletions }}</span>
-          </label>
-        </div>
+        <!-- 逐块暂存在 src/components/ChangedHunks.vue（这一段与变更列表无关：吃一份 hunks、自己选择与请求）。 -->
+        <ChangedHunks :path="diff.path" :staged="diff.staged" :hunks="diff.hunks" @changed="refreshAfterHunkApply" />
         <DiffView closable :path="diff.path" :subtitle="diff.base ? `（与 ${diff.base} 的比较）` : diff.staged ? '（已暂存）' : '（工作区）'" :rows="diff.rows" :unified="diff.text" :truncated="diff.truncated" @close="diff = null" />
       </section>
     </div>
+  </div>
+
+  <!-- 变更行的右键菜单（上游 `ChangesViewPopupMenu`）：行表在 src/changesMenuActions.ts，
+       复制那一组复用 src/copyPathActions.ts 的四项。外套 `.tree-menu-backdrop` 与全仓其它菜单一致
+       （没有它会 `z-index: auto` 被别的浮层背景盖住 —— 批 106 真机踩过）。 -->
+  <div v-if="rowMenu" class="tree-menu-backdrop" @pointerdown="rowMenu = null" @contextmenu.prevent="rowMenu = null">
+    <AnchoredMenu :x="rowMenu.x" :y="rowMenu.y" @pointerdown.stop>
+      <template v-for="row in rowMenuRows" :key="row.id">
+        <template v-if="row.id === 'copyPath'">
+          <button class="has-sub" role="menuitem" :aria-expanded="copyOpen" @click="copyOpen = !copyOpen">复制路径/引用…</button>
+          <template v-if="copyOpen">
+            <button v-for="entry in rowCopyRows" :key="entry.id" class="sub-item" role="menuitem" @click="pickRowMenu(entry)">{{ entry.title }}</button>
+          </template>
+        </template>
+        <button v-else role="menuitem" @click="pickRowMenu(row)">{{ row.label }}</button>
+      </template>
+    </AnchoredMenu>
   </div>
 </template>
 
 <style scoped>
 .sc-warning { margin: 0 12px; color: var(--warning); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .sc-hunk-error { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--warning-bg); }
+/* 面板内的检查进度行（上游 `CommitProgressPanel.kt:108-130`）：一行文字 + 可选的取消。 */
+.sc-checks-progress { display: flex; align-items: center; gap: var(--space-2); margin: 4px 12px 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--panel); color: var(--text); font-size: 11px; }
+.sc-checks-progress-text { flex: 1 1 auto; min-width: 0; display: inline-flex; gap: var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-checks-progress-detail { color: var(--muted); }
+.sc-checks-indexing { margin: 4px 12px 0; color: var(--muted); font-size: 11px; }
+/* 「分组依据」下拉（上游 `ChangesView.GroupBy`）与目录组头。 */
+.sc-groupby { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 11px; }
+.sc-ignored { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.sc-groupby select { height: var(--ctrl-height-sm); padding: 0 var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-ui); }
+.sc-group-head { margin: 4px 12px 0; color: var(--muted); font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -8,7 +8,10 @@ import {
 import { foldAll, unfoldAll } from '@codemirror/language'
 import { expandAllToLevel, expandCaretToLevel, foldAtCaret, foldBlockAtCaret, foldDocComments, foldRecursively,
   toggleFoldAtCaret, toggleFoldSelection, unfoldAtCaret, unfoldDocComments, unfoldRecursively } from './editorFolding.ts'
-import { findNext, findPrevious, openSearchPanel, replaceAll, replaceNext, selectMatches, selectNextOccurrence } from '@codemirror/search'
+// 查找/替换**不在这个表里**：编辑器内查找栏是自绘的（src/editorSearch*.ts +
+// src/editorFindController.ts），命令覆盖在 CodeEditor.vue 的 editorActions 里。
+// 这里只剩多光标那一条 CodeMirror 命令。
+import { selectMatches, selectNextOccurrence } from '@codemirror/search'
 import { EditorSelection, type StateCommand } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
 
@@ -57,6 +60,17 @@ function flipCase(text: string) {
   return text === text.toLowerCase() ? text.toUpperCase() : text.toLowerCase()
 }
 
+// UnselectPreviousOccurrence = Alt+Shift+J（`$default.xml` 的 `UnselectPreviousOccurrence`）：
+// 把**最后加进来的那个**光标/选区从多光标集合里摘掉（`RemoveOccurrenceAction.java:14` 的
+// `ACTION_UNSELECT_PREVIOUS_OCCURENCE`）。本仓的 `selectNextOccurrence` 是往选区尾部追加，
+// 所以"最后加进来的"就是 `ranges` 的最后一条 —— 只剩一条时返回 false（无对象可摘）。
+export const unselectPreviousOccurrenceCommand: StateCommand = ({ state, dispatch }) => {
+  if (state.selection.ranges.length <= 1) return false
+  const ranges = state.selection.ranges.slice(0, -1)
+  dispatch(state.update({ selection: EditorSelection.create(ranges, ranges.length - 1) }))
+  return true
+}
+
 // Names are the contract: the keymap, the 编辑/查找 menus and the offline test all
 // address these commands by the same string.
 export const editingCommands: Record<string, Command> = {
@@ -67,11 +81,8 @@ export const editingCommands: Record<string, Command> = {
   // Ctrl+D belongs to "duplicate line" here (IDEA), so CM's own Mod-d binding is
   // replaced and "add next occurrence" moves to Alt+J (also IDEA's).
   'occurrence.next': fromState(selectNextOccurrence),
-  find: openSearchPanel,
-  'find.next': findNext,
-  'find.previous': findPrevious,
-  'replace.next': replaceNext,
-  'replace.all': replaceAll,
+  // UnselectPreviousOccurrence = Alt+Shift+J（上面那个的逆动作）。
+  'occurrence.unselect': fromState(unselectPreviousOccurrenceCommand),
   'comment.line': toggleLineComment, 'comment.block': toggleBlockComment,
   // 收起/展开 = 上游 `CollapseRegion` / `ExpandRegion`（在 `src/editorFolding.ts` 里按
   // `CollapseRegionAction` / `ExpandRegionAction` 的挑法实现）；`foldAll`/`unfoldAll` 用

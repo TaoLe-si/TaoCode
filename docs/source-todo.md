@@ -265,10 +265,16 @@
 
 - 失败行上的**「显示详细信息 / 查看详情」链接动作**（上游 `CommitCheckFailure.WithDetails` 那一档：
   `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板上）——本仓的失败行是纯文本。
-- **面板内的检查进度**（`CommitChecksProgressIndicator`，`CommitProgressPanel.kt:108-130`）：
-  本仓走状态栏文字（`commit.checks.only.progress.text`），没有面板内的指示器与悬停浮层。
-- **索引期间检查不可用**那条警告（`label.commit.checks.not.available.during.indexing`，`:310`）：
-  本仓没有"索引中"这个状态。
+- [x] **面板内的检查进度**（`CommitChecksProgressIndicator`，`CommitProgressPanel.kt:108-130`）：
+      **第九十六批已做**（面板内那条）：`src/commitChecks.ts` 的 `checksProgress` + `fixDoubleEllipsis`
+      （照 `CommitChecksTaskInfo:18-23` 与 `StatusBarProgressIndicator.setText:105-125`、`:71-86`），
+      渲染在 `src/components/SourceControl.vue` 的 `.sc-checks-progress`（标题 + 两档正文 + 取消）。
+      **仍缺**：`CommitChecksProgressIndicatorTooltip` 那个**悬停浮层**（点一下在指示器上方弹一个
+      `PopupCommitChecksProgressIndicator`）—— 状态栏任务行的可展开列表是另一种形态，判决里已从 `[~]` 改判 `[ ]`。
+- [x] **索引期间检查不可用**那条警告（`label.commit.checks.not.available.during.indexing`，`:310`）：
+      **第九十六批已做**：文案 `NOT_AVAILABLE_DURING_INDEXING` + `indexingWarningVisible(analyzing, checksBusy)`。
+      本仓的"分析中"= **配了语言服务但还没跑起来**（与状态栏 `smartModeLabel` 同一条判据）——
+      原先记的"本仓没有索引中这个状态"是错的：语言服务首次导入就是同一个语义。
 - `RecentCommitChecks` 的其余几档（`MODIFICATIONS_FAILED` / `POST_FAILED` / `SMART_MODE_REQUIRED`）：
   本仓的检查是一次性的（全在提交前），没有"提交后再补检查"那两档。
 
@@ -309,5 +315,7 @@
       子 = 已加载里 `parents` 含这个 hash 的（顺序 = 图上的顺序）；可用性 = 候选非空；多候选按上游那条
       `{0} {1}，作者 {2}，{3} {4}` 逐候选补一行；跳转走既有的 `jump`。上游没有默认键位 ⇒ 不编。
       见审计 §BD —— **§17 至此全部收口**。
-- [ ] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
-      「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）。
+- [x] 面板内的检查进度指示（`CommitChecksProgressIndicator`）与
+      「索引期间某些提交检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`）：
+      **第九十六批已做**，逐条见上文两条 `[x]` 与本文件上方的记录 ——
+      仍缺的只有 `CommitChecksProgressIndicatorTooltip` 那个悬停浮层（判决里已从 `[~]` 改判 `[ ]`）。

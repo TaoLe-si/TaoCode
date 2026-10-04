@@ -16,20 +16,30 @@ struct Change {
     std::string work_status;   // porcelain Y (unstaged)
     bool staged = false;
     bool untracked = false;
+    /** 被 .gitignore 忽略的文件（只有 `status(repo, true)` 那一档才会列出来）。 */
+    bool ignored = false;
     std::string rename_from;   // set for renames/copies
 };
 
 bool available();
-std::vector<Change> status(const std::filesystem::path& repo);
+// `include_ignored` 对应 IDEA 的 `ChangesView.ShowIgnored` 那一档：开着时把被 .gitignore
+// 忽略的文件也列出来（`git status --ignored=matching`，porcelain 里是 `!!` 记录）。
+std::vector<Change> status(const std::filesystem::path& repo, bool include_ignored = false);
 // With a non-empty `base`, the diff compares the two tips (`git diff HEAD base`), so the
 // other side's files read as additions and files only this side has read as deletions —
 // IDEA's compare view. Otherwise it is the staged/unstaged working-tree state.
 // context：统一 diff 的上下文行数（<=0 = git 默认；对应 IDEA diff 设置 settings.context.lines）。
+// `whole` = 工作区对 HEAD 的整份差异（暂存 + 未暂存一起，未跟踪的文件不在里面）——
+// 补丁导出用（IDEA `CreatePatchFromChangesAction` 的输入）。它与 `base` 互斥：`base` 是"比两个尖端"。
 std::string diff(const std::filesystem::path& repo, const std::string& path, bool staged,
-                 const std::string& base = std::string(), int context = 0);
+                 const std::string& base = std::string(), int context = 0, bool whole = false);
 // Same diff, folded into left/right rows for a side-by-side viewer (see history.hpp).
 Json diff_sides(const std::filesystem::path& repo, const std::string& path, bool staged,
-                const std::string& base = std::string(), int context = 0);
+                const std::string& base = std::string(), int context = 0, bool whole = false);
+// 本地更改的**补丁**（IDEA `CreatePatchFromChangesAction` 的输入）＝ `git diff HEAD`（暂存 + 未暂存），
+// `include_untracked` 为真时再把未跟踪的文件按"新文件"接在后面（`git diff --no-index -- /dev/null <file>`，
+// 那条命令**有差异时退出码是 1**，不是失败）。二进制/读不了的文件跳过。
+std::string patch(const std::filesystem::path& repo, bool include_untracked);
 // {files:[{status,path}]} for every file where `base` and HEAD differ.
 Json compare(const std::filesystem::path& repo, const std::string& base);
 std::string head(const std::filesystem::path& repo);                 // branch name, detached hash, or empty

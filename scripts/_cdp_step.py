@@ -20,6 +20,12 @@ KEY = {
     'ctrl+shift+b': dict(modifiers=10, key='B', code='KeyB', windowsVirtualKeyCode=66, nativeVirtualKeyCode=66),
     'ctrl+shift+i': dict(modifiers=10, key='I', code='KeyI', windowsVirtualKeyCode=73, nativeVirtualKeyCode=73),
     'ctrl+shift+alt+n': dict(modifiers=11, key='N', code='KeyN', windowsVirtualKeyCode=78, nativeVirtualKeyCode=78),
+    'ctrl+f': dict(modifiers=2, key='f', code='KeyF', windowsVirtualKeyCode=70, nativeVirtualKeyCode=70),
+    'ctrl+r': dict(modifiers=2, key='r', code='KeyR', windowsVirtualKeyCode=82, nativeVirtualKeyCode=82),
+    'ctrl+alt+e': dict(modifiers=3, key='e', code='KeyE', windowsVirtualKeyCode=69, nativeVirtualKeyCode=69),
+    'f3': dict(key='F3', code='F3', windowsVirtualKeyCode=114, nativeVirtualKeyCode=114),
+    'shift+f3': dict(modifiers=8, key='F3', code='F3', windowsVirtualKeyCode=114, nativeVirtualKeyCode=114),
+    'ctrl+f3': dict(modifiers=2, key='F3', code='F3', windowsVirtualKeyCode=114, nativeVirtualKeyCode=114),
 }
 
 with connect(ws_url, max_size=64 * 1024 * 1024) as ws:

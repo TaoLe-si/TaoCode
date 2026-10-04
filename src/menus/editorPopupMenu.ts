@@ -57,6 +57,9 @@ export const EDITOR_POPUP_SPEC: readonly EditorPopupRef[] = [
     'fold', 'fold.recursively', 'foldAll', 'unfold.docs', 'fold.docs', 'fold.toggle', 'fold.selection', 'fold.block'] },
   { rule: true },
   { action: 'tools.externalTools' },               // ExternalToolsGroup（本仓这行自带子项）
+  // `CompareActions` 组（`PlatformActions.xml:562-568`）：`PairFileActions`（比较文件 / 与编辑器比较）
+  // 在前、`CompareClipboardWithSelection` 在后。本仓有前者的单文件分支（比较对象…）与后者。
+  { action: 'code.compareWith' },                  // CompareTwoFiles（单文件分支）
   { action: 'code.compareClipboard' },             // CompareClipboardWithSelection
   { action: 'gradle.link' },                       // Gradle.ImportExternalProject（anchor=last）
 ]

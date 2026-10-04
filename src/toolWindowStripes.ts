@@ -14,6 +14,8 @@ import {
   type LegacyMachineLayout, type StoredProjectLayout, type WindowInfo,
 } from './toolLayoutProfiles.ts'
 import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
+// 侧条按钮的挂/摘配对契约 + 分栏比例的哨兵（上游 `ToolWindowEntry` / `ToolWindowPaneState`）。
+import { attachStripeButton, detachStripeButton } from './toolWindowPaneState.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
 import { sortedByMnemonicThenId } from './toolWindows.ts'
 import type { Workspace } from './bridge'
@@ -361,6 +363,9 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   function saveHiddenStripeButtons() { saveLayout() }
   /** `RemoveStripeButtonAction.actionPerformed`（`:923-925`）。 */
   function removeStripeButton(id: ToolWindowId) {
+    // 挂/摘**严格配对**（上游 `ToolWindowEntry.stripeButton` 的 setter 断言，`ToolWindowEntry.kt:38-45`）：
+    // 重复移除同一个按钮不写盘也不重复通知 —— 契约在 `detachStripeButton` 里，可单测。
+    if (!detachStripeButton(hiddenStripeButtons.has(id) ? null : id).ok) return
     hiddenStripeButtons.add(id)
     saveHiddenStripeButtons()
   }
@@ -370,7 +375,10 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
    * 就会把按钮放回侧条。本仓把这个动作放在 `activateToolWindow` 里。
    */
   function restoreStripeButton(id: ToolWindowId) {
-    if (!hiddenStripeButtons.delete(id)) return
+    // 同一条配对契约的另一半：当前**已挂**（不在隐藏集里）就不能再挂一次。
+    // `hiddenStripeButtons` 是"按钮不在侧条上"的集合，所以这里的 current 恰好是它的取反。
+    if (!attachStripeButton(hiddenStripeButtons.has(id) ? null : id, id).ok) return
+    hiddenStripeButtons.delete(id)
     saveHiddenStripeButtons()
   }
   const stripeOrder = computed(() => (side: Anchor) => toolOrder.value[side].filter(id => (toolAnchors[id] ?? 'left') === side && !hiddenStripeButtons.has(id)))

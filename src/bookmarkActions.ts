@@ -6,12 +6,14 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge'
 import { errorMessage } from './errors'
-import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
+import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
 import { addBookmarkToNamedList, configureBookmarkLists, runWithChosenList, syncBookmarkLists } from './bookmarkListActions.ts'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
 
 export interface BookmarkActionsDeps {
+  /** 编辑器/UISettings 那一份（本批用到 `sortBookmarks`）。 */
+  editorSettings?: { readonly value: { sortBookmarks?: boolean } }
   notify: (message: string, error?: boolean) => void
   /** 桌面端才有原生剪贴板/对话框。 */
   isDesktop: boolean
@@ -60,7 +62,9 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
   const { menu, projectSettings, workspace, active, language, baseName, rememberPlace, revealLocation } = deps
   const viewSettings = (): BookmarksViewSettings => ({ ...DEFAULT_BOOKMARKS_VIEW, ...(projectSettings.value.bookmarksView ?? {}) })
   const bookmarks = ref<Bookmark[]>([])
-  const sortedAll = computed(() => sortedBookmarks(bookmarks.value))
+  // 排序口径由 `UISettings.sortBookmarks` 决定（默认 false = **按加入顺序**，见
+  // src/bookmarks.ts 的 `orderedBookmarks`）。变量名沿用 sortedAll：它读到的是当前口径下的顺序。
+  const sortedAll = computed(() => orderedBookmarks(bookmarks.value, deps.editorSettings?.value?.sortBookmarks === true))
   const bookmarkLines = computed(() => {
     const map: Record<string, number[]> = {}
     // 文件书签没有行号 ⇒ 没有装订线图标（上游也只有行书签走 gutter 高亮器）。
@@ -291,6 +295,21 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     if (!target) { deps.notify(bookmarks.value.length ? '只有这一个书签。' : '还没有书签：F11 标记当前行，Ctrl+F11 编号。', true); return }
     goTo(target)
   }
+  /**
+   * 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction` + `Group.sortLater`
+   * `BookmarksManagerImpl.kt:649-659`）：把**某一个分组内**的书签按提供者权重 + 位置重排，
+   * 顺序**写回存档**（上游 `groupBookmarks` 是持久的，不是渲染期的临时排序）。
+   * 本仓的数组顺序就是加入顺序，所以排序 = 按该文件重排数组里属于它的那一段。
+   */
+  function sortGroup(path: string) {
+    const own = bookmarks.value.filter(entry => entry.path === path)
+    if (own.length < 2) return
+    const sorted = sortGroupBookmarks(own)
+    // 保持其他文件的相对位置：把属于这个文件的位置按新顺序填回去。
+    let next = 0
+    bookmarks.value = bookmarks.value.map(entry => (entry.path === path ? sorted[next++]! : entry))
+    persistBookmarks()
+  }
   function dropBookmark(entry: Bookmark) {
     bookmarks.value = removeBookmark(bookmarks.value, entry)
     persistBookmarks()
@@ -307,6 +326,6 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     gutterBookmarks, toggleBookmarkAt, descriptionPrompt, editBookmarkAt, saveBookmarkDescription,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,
-    jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks,
+    jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, sortGroup,
   }
 }

@@ -96,6 +96,41 @@ export function sortedBookmarks(list: readonly Bookmark[]): Bookmark[] {
   return [...list].sort(compare)
 }
 
+/**
+ * 排序口径（上游 `BookmarkManager.getValidBookmarks`，`BookmarkManager.java:140-150`）：
+ *
+ * ```
+ * if (UISettings.getInstance().getSortBookmarks()) return ContainerUtil.sorted(answer)   // 按位置
+ * else return ContainerUtil.sorted(answer, Comparator.comparingInt(b -> b.index))        // 按加入顺序
+ * ```
+ *
+ * `UISettingsState.kt:249` `var sortBookmarks: Boolean by property(false)` ⇒ **默认 false**，
+ * 也就是**默认按加入顺序**（`index` 是加入时的自增序号，`BookmarkManager.java:104-125`）。
+ *
+ * 本仓原先只有"按路径 + 行号"一种顺序（等于上游 `sortBookmarks = true` 那一支），
+ * 所以默认行为与上游**不一致** —— 这一批补上"按加入顺序"并把默认改成上游的 false。
+ *
+ * 加入顺序从哪来：书签在项目设置里的**数组顺序**就是加入顺序（`placeBookmark` 追加、
+ * 持久化原样写回），所以这里直接用输入数组的下标当 `index`。
+ */
+export function orderedBookmarks(list: readonly Bookmark[], sortByPosition: boolean): Bookmark[] {
+  if (sortByPosition) return sortedBookmarks(list)
+  return [...list]
+}
+
+/**
+ * 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction` +
+ * `BookmarksManagerImpl.Group.compare:661-668`）：先按**提供者权重降序**、权重相同再按
+ * 提供者自己的比较器。本仓只有一种提供者（行/文件书签），权重相同 ⇒ 落到
+ * "文件路径 + 行号"（`compare`），也就是 `sortedBookmarks`。
+ *
+ * 这个函数存在的意义是把"分组内排序"写成**可点的一次动作**（上游是组节点的右键动作），
+ * 而不是让面板每次渲染都自动排 —— 上游的默认是**按加入顺序**，排序要用户主动触发。
+ */
+export function sortGroupBookmarks<T extends Bookmark>(entries: readonly T[]): T[] {
+  return [...entries].sort(compare)
+}
+
 const withMnemonic = (entry: Bookmark, mnemonic?: string): Bookmark => {
   // 文件书签**不写 line 键**（上游持久化也只在行号 ≥ 0 时才写）—— 别把 `line: undefined` 物化出来。
   const next: Bookmark = entry.line === undefined ? { path: entry.path } : { path: entry.path, line: entry.line }
@@ -232,3 +267,9 @@ export function reconcileBookmarks(
   unique.sort(compare)
   return { list: unique, dropped: nextDropped }
 }
+
+/**
+ * 「按类型和名称对书签进行排序」的展示名（上游 `action.BookmarksView.SortGroupBookmarks.text`，
+ * 中文包 `ActionsBundle.properties:76`）。动作本体是 `sortGroupBookmarks`。
+ */
+export const SORT_GROUP_LABEL = '按类型和名称对书签进行排序'

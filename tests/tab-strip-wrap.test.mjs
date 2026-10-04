@@ -62,32 +62,56 @@ test('条总高 = 行数 × 行高，且 CSS 与 JS 用的是同一个数', () =
     '工具条只在第一行右侧（对应 withEntryPointToolbar 只在 isFirst 时保留宽度）')
 })
 
-test('两种布局由设置决定，且分支只有一处', () => {
+test('三种排法由设置决定，且分支只有一处', () => {
+  // 上游 `EditorTabbedContainer.kt:657-672` 的 createRowLayout：
+  //   一行 + hideTabsIfNeeded  -> ScrollableSingleRowLayout / ScrollableMultiRowLayout
+  //   一行 + 挤压标签页         -> CompressibleMultiRowLayout
+  //   多行                      -> WrapMultiRowLayout
   const view = read('src/tabStripView.ts')
-  assert.match(view, /if \(singleRow\(\)\) \{/, '必须按设置选布局，而不是"放不下了才换行"')
+  // 上游两个分支（`EditorTabbedContainer.kt:657-672`）：挤压/滚动两排都在**一行**这一侧，
+  // `!singleRow` 永远是换行排。这里逐条钉住这三支各自的入口条件。
+  assert.match(view, /if \(singleRow\(\) && \(separatePinnedRow\(\) \|\| !hideTabsIfNeeded\(\)\)\) \{/,
+    '一行 + （固定标签另起一排 或 挤压标签页）才进挤压/滚动那两族')
+  assert.match(view, /hideTabsIfNeeded\(\)[^?]*\? layoutScrollableMultiRow/, '这一支里按 hideTabsIfNeeded 选滚动排')
+  assert.match(view, /: layoutCompressibleMultiRow\(layoutInput\)/, '另一支是挤压排')
+  assert.match(view, /tabMultiLayouts\.value\[pane\] = layoutMultiRow\(layoutInput\)/, '多行那一支仍是换行排（WrapMultiRowLayout）')
   // 两边互斥：一个算出来，另一个要清成 null，否则模板会同时读到两份旧布局。
   assert.match(view, /tabMultiLayouts\.value\[pane\] = null/)
   assert.match(view, /tabStripLayouts\.value\[pane\] = null/)
-  // 换档要重算：设置键进了重算的依赖里。
-  assert.match(view, /singleRow\(\)\]\.join\('~'\)/)
+  // 换档要重算：两个设置键都进了重算的依赖里。
+  assert.match(view, /singleRow\(\), hideTabsIfNeeded\(\), separatePinnedRow\(\)\]\.join\('~'\)/)
 
   const app = read('src/App.vue')
   assert.match(app, /singleRow: \(\) => editorSettings\.value\.tabsInOneRow/)
+  assert.match(app, /hideTabsIfNeeded: \(\) => editorSettings\.value\.hideTabsIfNeeded/)
   assert.match(app, /:class="\{ 'tabs-wrapped': tabStripWraps\(pane\) \}" :style="tabStripStyle\(pane\)"/)
 
-  const dialog = read('src/components/SettingsDialog.vue')
-  assert.match(dialog, /v-model="editor\.tabsInOneRow" type="checkbox"/, '设置页要有 IDEA 那条「Show tabs in one row」')
+  const dialog = read('src/components/EditorTabsSettingsPage.vue')
+  // 上游 New UI 是**两组**单选（`EditorTabsConfigurable.kt:59-71`）：外组「一行…/多行」绑
+  // scrollTabLayoutInEditor，内组（缩进）「滚动/挤压」绑 hideTabsIfNeeded。两组的 name 必须不同。
+  assert.match(dialog, /v-model="oneRow" type="radio" name="tab-one-row"/, '外组'
+  )
+  assert.match(dialog, /v-model="squeeze" type="radio" name="tab-squeeze"/, '内组')
+  assert.match(dialog, /滚动标签页面板/)
+  assert.match(dialog, /挤压标签页/)
+  assert.match(dialog, /多行/)
+  assert.match(dialog, /滚动标签页面板/, '文案取随 IDE 发货的中文包（ApplicationBundle.properties:682）')
+  assert.match(dialog, /挤压标签页/, 'ApplicationBundle.properties:685')
+  assert.match(dialog, /多行/, 'ApplicationBundle.properties:680')
 })
 
 test('设置键在四个口径里都登记了（少一处就会掉键或被判损坏）', () => {
   // 1) 默认值与类型；2) 桥接白名单；3) 原生默认；4) 原生已知键表（不在表里会被 prune 掉）。
   assert.match(read('src/settingsModel.ts'), /defaultEditorSettings: EditorSettings = \{[^}]*tabLimit: 30, tabsInOneRow: true/)
   assert.match(read('src/settingsModel.ts'), /tabLimit: number;[^\n]*tabsInOneRow: boolean/)
-  assert.match(read('src/bridge.ts'), /key === 'tabLimit' \|\| key === 'tabsInOneRow'/)
+  assert.match(read('src/previewSettings.ts'), /key === 'tabLimit' \|\| key === 'tabsInOneRow' \|\| key === 'hideTabsIfNeeded'/)
   // 原生默认值两条都在（中间隔着注释，所以只断言"两条都有"，不断言相邻）。
   assert.match(read('native/settings_schema.cpp'), /\{"tabLimit", 30\},/)
   assert.match(read('native/settings_schema.cpp'), /\{"tabsInOneRow", true\},/)
-  assert.match(read('native/settings_schema.hpp'), /"tabLimit", "tabsInOneRow"/)
+  assert.match(read('native/settings_schema.hpp'), /"tabLimit", "tabsInOneRow", "hideTabsIfNeeded"/)
+  // hideTabsIfNeeded（`UISettingsState.kt:125` 默认 true）也走同一套四口径。
+  assert.match(read('src/settingsModel.ts'), /tabsInOneRow: true, hideTabsIfNeeded: true/)
+  assert.match(read('native/settings_schema.cpp'), /\{"hideTabsIfNeeded", true\},/)
   // 反例（判据自证）：老项目文件里没有这一键 ⇒ 必须补默认，不能判损坏。
   assert.match(read('native/projects.cpp'), /fill_defaults\(result, \*found\)/,
     '缺键补默认的机制不在了 —— 新键会让旧设置文件读不出来')

@@ -12,6 +12,7 @@
 
 #include <cctype>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <fstream>
 #include <iterator>
@@ -485,6 +486,14 @@ std::string substitution_text(const Options& options, const std::string& content
     return options.replacement;
 }
 
+Json chunk_event(std::int64_t stream_id, const Json& matches, std::size_t file_count) {
+    return {{"event", "search.chunk"},
+            {"streamId", stream_id},
+            {"matches", matches},
+            {"fileCount", static_cast<std::int64_t>(file_count)},
+            {"done", false}};
+}
+
 Json preview(const fs::path& root, const Options& options) {
     if (root.empty()) fail("NOT_OPEN", "请先打开一个工作区。");
     if (!options.regex && options.query.empty())
@@ -495,6 +504,15 @@ Json preview(const fs::path& root, const Options& options) {
     Json matches = Json::array();
     std::size_t files = 0;
     bool truncated = false;
+    // 分块发布（见 Options::on_chunk）：`pending` 是还没交出去的那一段。
+    Json pending = Json::array();
+    auto last_flush = std::chrono::steady_clock::now();
+    const auto flush = [&]() {
+        if (!options.on_chunk || pending.empty()) return;
+        options.on_chunk(pending, files);
+        pending = Json::array();
+        last_flush = std::chrono::steady_clock::now();
+    };
     const bool complete = walk(root, scan, [&](const fs::path&, const std::string& rel, const std::string& content) {
         const std::size_t before = matches.size();
         std::size_t line = 1, line_start = 0, cursor = 0;
@@ -520,11 +538,18 @@ Json preview(const fs::path& root, const Options& options) {
                                            line_text.substr(std::min(pos - line_start + len, line_text.size())))},
                     {"preview", clip_preview(std::string_view(line_text))},
                 });
+                if (options.on_chunk) {
+                    pending.push_back(matches.back());
+                    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - last_flush).count();
+                    if (pending.size() >= options.chunk_max_matches || elapsed >= options.chunk_budget_ms) flush();
+                }
                 return matches.size() < max_matches;
             });
         if (matches.size() >= max_matches) truncated = true;
         if (matches.size() > before) ++files;
     });
+    flush();  // 最后一段（不足一块的那些）也要交出去
     if (scan.cancelled_hit) return {{"matches", Json::array()}, {"truncated", true}, {"fileCount", 0}, {"cancelled", true}};
     if (!complete) truncated = true;
     return {{"matches", std::move(matches)}, {"truncated", truncated}, {"fileCount", files}};

@@ -267,9 +267,13 @@ export interface MultiRowLayout {
   rowCount: number
   /** 每行一条标签的高度；条总高 = `rowCount * rowHeight`（上游 `rowHeight = headerFitSize.height`）。 */
   rowHeight: number
-  /** 多行布局没有"更多"按钮，也永远不滚动。 */
-  moreButtonVisible: false
-  scrollOffset: 0
+  /**
+   * 多行布局里**换行排**没有"更多"按钮、也永远不滚动（`MultiRowLayout.isWithScrollBar()=false`、
+   * `getScrollOffset()=0`）；滚动排（`layoutScrollableMultiRow`）两样都有，所以这里放宽成
+   * 普通类型，由各自的返回类型收窄。
+   */
+  moreButtonVisible: boolean
+  scrollOffset: number
 }
 
 /**
@@ -335,3 +339,205 @@ export function layoutMultiRow(input: TabStripInput & { rowHeight?: number; pinn
   return { placed, rowCount: row + (input.preferredWidths.length ? 1 : 0), rowHeight, moreButtonVisible: false, scrollOffset: 0 }
 }
 
+
+// ---------------------------------------------------------------------------
+// 多行的另外两种排法：**挤压**（`CompressibleMultiRowLayout` / `CompressibleTabsRow`）与
+// **滚动**（`ScrollableMultiRowLayout` / `ScrollableTabsRow`）。
+//
+// 选哪一种由设置决定（`EditorTabbedContainer.kt:657-672` 的 `createRowLayout`）：
+//
+//   if (!isSingleRow || (isHorizontalTabs && (showPinnedTabsSeparately() || !hideTabsIfNeeded))) {
+//     !isSingleRow                        -> WrapMultiRowLayout          ← 本仓的 layoutMultiRow
+//     UISettings.hideTabsIfNeeded         -> ScrollableMultiRowLayout    ← layoutScrollableMultiRow
+//     else                                -> CompressibleMultiRowLayout  ← layoutCompressibleMultiRow
+//   } else                                 ScrollableSingleRowLayout      ← 本仓的 layoutSingleRow
+//
+// `UISettingsState.kt:125` `var hideTabsIfNeeded: Boolean by property(true)` ⇒ **默认 true**，
+// 设置页那两组单选的文案（`ApplicationBundle.properties:681-685`，中文取随 IDE 发货的语言包）：
+//   一行，如果标签页不适合：→ 滚动标签页面板（hideTabsIfNeeded=true）/ 挤压标签页（=false） / 多行
+//
+// 两者共同的**分行**规则是 `splitToPinnedUnpinned`（`MultiRowLayout.kt:105-120`，本仓的
+// `splitPinnedRow`）：固定排那一行永远是**挤压**的（`ScrollableMultiRowLayout.splitToRows`
+// 里固定排也用 `CompressibleTabsRow`），未固定排才是滚动的那一行。
+// ---------------------------------------------------------------------------
+
+/**
+ * 挤压时每个标签的下限。
+ *
+ * 上游的下限来自 `minTabInsets`（`CompressibleTabsRow.calculateDecreasedInsets` 的最后一支：
+ * 缩到"最小装饰"为止），那是 Swing 侧 insets 的和 —— 本仓标签的装饰是 CSS padding 加一个
+ * 关闭按钮，量不出 insets 这个中间量。取一个能让图标与关闭按钮都还在的常量，并在
+ * `tests/tab-strip-layout.test.mjs` 里钉住"挤压后不会小于它"。
+ */
+export const MIN_COMPRESSED_TAB_WIDTH = 32
+
+/**
+ * `CompressibleTabsRow.decreaseMaxLengths`（`CompressibleTabsRow.kt:127-166`）：把总长降到
+ * `maxLength`，**从最长的开始降**，因此最短的那几条最后才动。
+ *
+ * 上游的推导写得很绕（先算前缀和的"全都降到第 i 档"序列，再 `indexOfFirst { it >= maxLength }`
+ * 找分界），这里照抄同一套：分界之前的长度**原样保留**，分界及之后的全部取平均并分配余数。
+ * 这样得到的性质与上游一致 —— ① 总和（尽量）等于上限；② 短的不会被压得比长的还窄。
+ */
+export function decreaseMaxLengths(lengths: readonly number[], maxLength: number, floor = MIN_COMPRESSED_TAB_WIDTH): number[] {
+  const count = lengths.length
+  if (!count) return []
+  const sorted = lengths.map((value, index) => ({ value, index })).sort((a, b) => a.value - b.value)
+  const indexes = sorted.map(entry => entry.index)
+  const values = sorted.map(entry => entry.value)
+
+  // sums[i] = 把"下标 i 及之后的全降到 values[i]"之后的总长（上游同一套前缀和）。
+  const sums: number[] = new Array(count).fill(0)
+  sums[0] = values[0]! * count
+  for (let i = 1; i < count; i++) sums[i] = sums[i - 1]! + (values[i]! - values[i - 1]!) * (count - i)
+
+  // 从哪一档开始降：分界之前原样保留，分界及之后平摊剩下的额度。
+  const cut = sums.findIndex(sum => sum >= maxLength)
+  const result: number[] = new Array(count).fill(0)
+  // 预算比"一个都不压"还宽裕（`maxLength >= 自然总长`）：没有要压的东西，原样返回。
+  // 上游不会走到这里（调用点已经保证 required > maxLength），但不能靠调用点活着。
+  if (cut < 0) return [...lengths]
+  for (let i = 0; i < cut; i++) result[indexes[i]!] = values[i]!
+  const kept = values.slice(0, cut).reduce((sum, value) => sum + value, 0)
+  const budget = Math.max(0, maxLength - kept)
+  const share = Math.floor(budget / (count - cut))
+  let remainder = budget - share * (count - cut)
+  for (let i = cut; i < count; i++) {
+    const computed = share + (remainder-- > 0 ? 1 : 0)
+    // 下限是"还能认出这是个标签"的宽度；**但绝不把本来就更窄的标签抬高** ——
+    // 上游的下限来自 `minTabInsets`（恒 ≤ 当前长度），抬高了反而会让总长超过预算。
+    result[indexes[i]!] = Math.min(values[i]!, Math.max(floor, computed))
+  }
+  return result
+}
+
+/** 挤压排（`CompressibleTabsRow`）：不超就按自然宽，超了就把最长的先压下去。 */
+export function compressRowWidths(preferredWidths: readonly number[], maxLength: number, gap = 0): number[] {
+  const gaps = gap * Math.max(0, preferredWidths.length - 1)
+  const required = preferredWidths.reduce((sum, width) => sum + width, 0) + gaps
+  if (required <= maxLength) return [...preferredWidths]
+  return decreaseMaxLengths(preferredWidths, Math.max(0, maxLength - gaps))
+}
+
+export interface CompressibleRowLayout extends MultiRowLayout {
+  /** 每一行分到多宽（`rowCapacity`），供渲染层与判据核。 */
+  rowWidths: number[]
+}
+
+/**
+ * `CompressibleMultiRowLayout`（`CompressibleMultiRowLayout.kt:20-36`）：**一行**时就是一条挤压排；
+ * `showPinnedTabsSeparately` 时固定一条 + 未固定一条。注意它**不换行** —— 挤不下就继续压，
+ * 这是它与 `WrapMultiRowLayout` 的本质差别（上游的 `splitToRows` 只产出 1～2 条 row）。
+ */
+export function layoutCompressibleMultiRow(input: TabStripInput & { rowHeight?: number; pinned?: readonly boolean[]; separatePinnedRow?: boolean }): CompressibleRowLayout {
+  const gap = input.gap ?? 0
+  const insetLeft = input.insetLeft ?? 0
+  const insetRight = input.insetRight ?? 0
+  const stripWidth = Math.max(0, input.stripWidth)
+  const sideToolbar = input.sideToolbarMinWidth ?? 0
+  const rowHeight = Math.max(1, input.rowHeight ?? TAB_STRIP_ROW_HEIGHT)
+  const fullRowWidth = Math.max(0, stripWidth - insetLeft - insetRight)
+  const firstRowWidth = Math.max(0, fullRowWidth - sideToolbar)
+  const split = input.separatePinnedRow ? splitPinnedRow(input.pinned ?? []) : { pinnedCount: 0, hasPinned: false }
+
+  const pinnedWidths = split.hasPinned ? input.preferredWidths.slice(0, split.pinnedCount) : []
+  const restWidths = split.hasPinned ? input.preferredWidths.slice(split.pinnedCount) : [...input.preferredWidths]
+  const rows: { widths: number[]; base: number; capacity: number }[] = []
+  if (split.hasPinned) {
+    rows.push({ widths: compressRowWidths(pinnedWidths, firstRowWidth, gap), base: 0, capacity: firstRowWidth })
+    if (restWidths.length) rows.push({ widths: compressRowWidths(restWidths, fullRowWidth, gap), base: split.pinnedCount, capacity: fullRowWidth })
+  } else {
+    rows.push({ widths: compressRowWidths(restWidths, firstRowWidth, gap), base: 0, capacity: firstRowWidth })
+  }
+
+  const placed: PlacedRowTab[] = []
+  rows.forEach((row, rowIndex) => {
+    let position = insetLeft
+    row.widths.forEach((width, offset) => {
+      placed.push({ index: row.base + offset, row: rowIndex, position, width })
+      position += width + gap
+    })
+  })
+  return {
+    placed, rowCount: rows.length, rowHeight,
+    moreButtonVisible: false, scrollOffset: 0,
+    rowWidths: rows.map(row => row.capacity),
+  }
+}
+
+export interface ScrollableRowLayout extends MultiRowLayout {
+  /** 「…」按钮的左边（相对标签条），`ScrollableTabsRow.layoutTabs` 的 `moreRect.x`。 */
+  moreButtonPosition: number
+  /** 当前滚动偏移（夹过）。 */
+  scrollOffset: number
+  maxScrollOffset: number
+  /** 被挤出可视区的标签下标（渲染层给它们 0 宽）。 */
+  dropped: number[]
+}
+
+/**
+ * `ScrollableTabsRow.layoutTabs`（`ScrollableTabsRow.kt:22-49`）：自然宽度之和超出行宽时，
+ * 右边留给「…」按钮，标签**从右边缘裁掉**（`len = max(0, x + tabsLength - curX)`），
+ * 其余靠 `scrollOffset` 往左推。
+ *
+ * 固定排沿用上游的选择：`ScrollableMultiRowLayout.splitToRows` 里固定那一排是
+ * **CompressibleTabsRow**（`ScrollableMultiRowLayout.kt:22-29`），所以这里第一行按挤压排、
+ * 第二行才是可滚动的。
+ */
+export function layoutScrollableMultiRow(input: TabStripInput & { rowHeight?: number; pinned?: readonly boolean[]; separatePinnedRow?: boolean }): ScrollableRowLayout {
+  const gap = input.gap ?? 0
+  const insetLeft = input.insetLeft ?? 0
+  const insetRight = input.insetRight ?? 0
+  const stripWidth = Math.max(0, input.stripWidth)
+  const sideToolbar = input.sideToolbarMinWidth ?? 0
+  const rowHeight = Math.max(1, input.rowHeight ?? TAB_STRIP_ROW_HEIGHT)
+  const fullRowWidth = Math.max(0, stripWidth - insetLeft - insetRight)
+  const firstRowWidth = Math.max(0, fullRowWidth - sideToolbar)
+  const split = input.separatePinnedRow ? splitPinnedRow(input.pinned ?? []) : { pinnedCount: 0, hasPinned: false }
+  const moreWidth = Math.max(0, input.moreButtonWidth)
+
+  // 无固定排时只有一条可滚动的 row（`ScrollableMultiRowLayout.splitToRows` 的最后一支）。
+  if (!split.hasPinned) {
+    return scrollableRow(input.preferredWidths, 0, 0, firstRowWidth, { gap, insetLeft, rowHeight, moreWidth, scrollOffset: input.scrollOffset ?? 0 })
+  }
+const pinned = compressRowWidths(input.preferredWidths.slice(0, split.pinnedCount), firstRowWidth, gap)
+  const rest = input.preferredWidths.slice(split.pinnedCount)
+  const scroll = scrollableRow(rest, 1, split.pinnedCount, fullRowWidth, { gap, insetLeft, rowHeight, moreWidth, scrollOffset: input.scrollOffset ?? 0 })
+  const placed: PlacedRowTab[] = []
+  let position = insetLeft
+  pinned.forEach((width, offset) => { placed.push({ index: offset, row: 0, position, width }); position += width + gap })
+  return { ...scroll, placed: [...placed, ...scroll.placed], rowCount: 2 }
+}
+
+function scrollableRow(
+  widths: readonly number[], row: number, base: number, capacity: number,
+  options: { gap: number; insetLeft: number; rowHeight: number; moreWidth: number; scrollOffset: number },
+): ScrollableRowLayout {
+  const { gap, insetLeft, rowHeight, moreWidth } = options
+  const requiredLength = widths.reduce((sum, width) => sum + width, 0) + gap * Math.max(0, widths.length - 1)
+  // `ScrollableTabsRow.kt:31-36`：放不下才给「…」留位置，放得下时按钮不占宽。
+  const overflows = requiredLength > capacity
+  const tabsLength = overflows ? Math.max(0, capacity - moreWidth) : capacity
+  const maxScrollOffset = Math.max(0, requiredLength - tabsLength)
+  const scrollOffset = clamp(options.scrollOffset, 0, maxScrollOffset)
+
+  const placed: PlacedRowTab[] = []
+  const dropped: number[] = []
+  let cursor = insetLeft - scrollOffset
+  for (let index = 0; index < widths.length; index++) {
+    const length = widths[index]!
+    // 右边缘裁切：`len = max(0, x + tabsLength - curX)`，`<= |gap|` 的直接给 0 宽（上游那一行）。
+    const clipped = cursor + length > insetLeft + tabsLength ? Math.max(0, insetLeft + tabsLength - cursor) : length
+    const effective = clipped <= Math.abs(gap) ? 0 : clipped
+    if (effective <= 0) dropped.push(index)
+    else placed.push({ index: base + index, row, position: cursor, width: effective })
+    cursor += length + gap
+  }
+  return {
+    placed, rowCount: 1, rowHeight,
+    moreButtonVisible: false,
+    scrollOffset, maxScrollOffset, dropped,
+    // `Top.getMoreRect`（SingleRowLayoutStrategy.java:232-242）：按钮贴在右边缘。
+    moreButtonPosition: insetLeft + capacity - moreWidth,
+  }
+}

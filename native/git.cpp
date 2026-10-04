@@ -261,8 +261,11 @@ void request_cancel() { kill_current(); }
 
 bool available() { return !find_git_executable().empty(); }
 
-std::vector<Change> status(const fs::path& repo) {
-    const auto result = run(repo, {L"status", L"--porcelain=v1", L"-z", L"--untracked-files=all"});
+std::vector<Change> status(const fs::path& repo, bool include_ignored) {
+    // `--ignored=matching` 让 git 用 `!!` 记录把被忽略的文件也报出来（IDEA 的「忽略的文件」那一档）。
+    std::vector<std::wstring> arguments = {L"status", L"--porcelain=v1", L"-z", L"--untracked-files=all"};
+    if (include_ignored) arguments.push_back(L"--ignored=matching");
+    const auto result = run(repo, arguments);
     require_ok(result, "读取状态");
     std::vector<Change> changes;
     // Records are NUL-separated: "XY path"; a rename/copy inserts an extra "from" record.
@@ -283,7 +286,8 @@ std::vector<Change> status(const fs::path& repo) {
         change.index_status = std::string(1, x);
         change.work_status = std::string(1, y);
         change.untracked = (x == '?' && y == '?');
-        change.staged = x != ' ' && x != '?';
+        change.ignored = (x == '!' && y == '!');
+        change.staged = x != ' ' && x != '?' && !change.ignored;
         if (x == 'R' || x == 'C' || y == 'R' || y == 'C') {
             if (index + 1 < records.size()) { change.rename_from = records[index + 1]; ++index; }
         }
@@ -292,10 +296,12 @@ std::vector<Change> status(const fs::path& repo) {
     return changes;
 }
 
-std::string diff(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context) {
+std::string diff(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context, bool whole) {
     std::vector<std::wstring> arguments = {L"diff", L"--no-color"};
     if (context > 0) arguments.push_back(L"-U" + std::to_wstring(context));
-    if (!base.empty()) { const auto range = range_args(repo, base); arguments.insert(arguments.end(), range.begin(), range.end()); }
+    // `whole`：工作区对 HEAD（一个 rev 就够了 —— `git diff HEAD` 把暂存与未暂存一起算）。
+    if (whole) arguments.push_back(L"HEAD");
+    else if (!base.empty()) { const auto range = range_args(repo, base); arguments.insert(arguments.end(), range.begin(), range.end()); }
     else if (staged) arguments.push_back(L"--cached");
     if (!path.empty()) {
         arguments.push_back(L"--");
@@ -306,10 +312,25 @@ std::string diff(const fs::path& repo, const std::string& path, bool staged, con
     return result.out;
 }
 
-Json diff_sides(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context) {
+Json diff_sides(const fs::path& repo, const std::string& path, bool staged, const std::string& base, int context, bool whole) {
     // The unified text is the single source of truth: parsing it keeps the side-by-side
     // view agreeing with the unified one, and needs no second read of the worktree.
-    return history::diff_sides_from_unified(diff(repo, path, staged, base, context));
+    return history::diff_sides_from_unified(diff(repo, path, staged, base, context, whole));
+}
+
+std::string patch(const fs::path& repo, bool include_untracked) {
+    std::string text = diff(repo, std::string(), false, std::string(), 0, /*whole=*/true);
+    if (!include_untracked) return text;
+    // 限定名：`status` 与 `std::filesystem::status` 在这个作用域里重载歧义（C2668）。
+    for (const auto& change : taocode::git::status(repo)) {
+        if (!change.untracked) continue;
+        // `--no-index` 比较两个路径：`/dev/null` 对文件 = "新文件"那一份补丁。
+        // **退出码 1 表示"有差异"**（git 的约定），不是失败；其余非零码（读不了、二进制）跳过这个文件。
+        const auto result = run(repo, {L"diff", L"--no-color", L"--no-index", L"--", L"/dev/null", utf8_to_wide(change.path)});
+        if (result.code != 0 && result.code != 1) continue;
+        text += result.out;
+    }
+    return text;
 }
 
 Json compare(const fs::path& repo, const std::string& base) {

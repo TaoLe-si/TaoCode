@@ -13,6 +13,8 @@
 import { reactive, watch } from 'vue'
 import { clampPanelSize } from './appearance'
 import { RESIZE_CHARS, resizeDirectionEnabled, stretchDelta, type ResizeDirection } from './toolWindowResize'
+// 分栏比例的「0 = 没存过」哨兵（上游 `ToolWindowPaneState.getPreferredSplitProportion` 的等价物）。
+import { splitSizeOrDefault } from './toolWindowPaneState.ts'
 
 /** 面板尺寸表的键（与 `panelSizes` 同域）。 */
 export type Panel = 'explorer' | 'trace' | 'output'
@@ -172,7 +174,9 @@ function resizeSplitKey(event: KeyboardEvent) {
   const grow = vertical ? 'ArrowUp' : 'ArrowLeft'
   if (event.key !== shrink && event.key !== grow) return
   event.preventDefault()
-  if (splitSize.value === 0) splitSize.value = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
+  // 「0 = 没存过」的哨兵与上游同一语义（见 toolWindowPaneState.ts 的文件头）。
+  const halfSize = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
+  splitSize.value = splitSizeOrDefault(splitSize.value, halfSize)
   setSplitSize(splitSize.value + (event.key === grow ? 16 : -16))
 }
 function startSplitResize(event: PointerEvent) {
@@ -181,7 +185,8 @@ function startSplitResize(event: PointerEvent) {
   event.preventDefault()
   const target = event.currentTarget as HTMLElement
   const vertical = splitOrientation.value === 'vertical'
-  if (splitSize.value === 0) splitSize.value = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
+  const halfSize = Math.round(editorStageSize(vertical ? 'y' : 'x') / 2)
+  splitSize.value = splitSizeOrDefault(splitSize.value, halfSize)
   const origin = vertical ? event.clientY : event.clientX
   const size = splitSize.value
   const move = (next: PointerEvent) => {

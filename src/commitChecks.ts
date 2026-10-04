@@ -30,6 +30,20 @@ import type { CommitMessageProblem } from './commitMessageInspection.ts'
 
 /** `commit.checks.only.progress.text`（中文包 = 正在运行提交检查…）。 */
 export const RUNNING_CHECKS_TEXT = '正在运行提交检查…'
+/** `commit.checks.only.progress.text.with.context` = `正在运行提交检查: {0}`（{0} = 当前那一步）。 */
+export const RUNNING_CHECKS_WITH_CONTEXT = '正在运行提交检查'
+/** `progress.title.commit.checks`（中文包 = 提交检查）—— 面板内指示器那一行的标题。 */
+export const CHECKS_PROGRESS_TITLE = '提交检查'
+/** `CommonBundle` 的取消按钮文案（面板内指示器上那个取消）。 */
+export const CHECKS_CANCEL_TEXT = '取消'
+/**
+ * `label.commit.checks.not.available.during.indexing`（中文包 = 项目分析期间某些提交检查不可用）。
+ *
+ * 上游 `CommitProgressPanel.kt:310` 在 **dumb 模式**（索引/项目分析中）时把这条警告挂在检查那一行上。
+ * 本仓没有 PSI 索引，但有等价状态：语言服务正在**初始化/导入**（JDT LS 首次同步那几分钟）。
+ * 所以本仓的"分析中"= `lspRunning`（不是"服务器没起"——那只是没配语言服务，检查照样能跑）。
+ */
+export const NOT_AVAILABLE_DURING_INDEXING = '项目分析期间某些提交检查不可用'
 /** `tooltip.rerun.commit.checks`（中文包 = 重新运行提交检查）—— 失败行上那个刷新按钮的提示。 */
 export const RERUN_CHECKS_TOOLTIP = '重新运行提交检查'
 /** `commit.checks.failed.notification.show.details.action`（中文包 = 显示详细信息）—— 失败通知上那个按钮。 */
@@ -113,4 +127,76 @@ export function saveDuringCommitQuestion(unsaved: readonly string[]): string {
   return `在提交期间保存文件\n\n当前正在将以下${noun}提交到 VCS。立即保存可能会导致提交的数据不一致。\n`
     + `${unsaved.join('\n')}\n立即保存${noun}?`
     + `\n\n（浏览器确认框只有"确定/取消"两个按钮：确定 = 立即保存，取消 = 延迟保存，按磁盘上的版本提交。）`
+}
+
+
+/**
+ * 面板内那条检查进度（上游 `CommitChecksProgressIndicator` + `InlineCommitChecksProgressIndicator`，
+ * `CommitChecksProgressIndicator.kt:25-139`）。
+ *
+ * 上游的形状逐条：
+ *   · 它是一个 `InlineProgressIndicator`（不是对话框），标题 `progress.title.commit.checks`
+ *     （`:20` 的 `CommitChecksTaskInfo.getTitle`）、**可取消**（`:21`）、取消文案来自
+ *     `CommonBundle.getCancelButtonText()`；
+ *   · 正文（`text`）由 `StatusBarProgressIndicator.setText`（`:105-125`）按"只跑检查 / 提交中"
+ *     两档折算成 `commit.checks.only.progress.text[.with.context]` 或
+ *     `commit.checks.on.commit.progress.text[.with.context]`（`:108-115`）；
+ *   · 副文本（`text2`）置灰（`:39` 的 `setText2Enabled(false)`）；
+ *   · **双省略号**会被修掉（`:71-86`）：正文以省略号结尾、副文本又以省略号开头时，把正文那个去掉。
+ *
+ * 本仓原先只有一行状态栏文字（`setStatusText(RUNNING_CHECKS_TEXT)`），没有面板内指示器、
+ * 也没有"当前在进行哪一步"的上下文文案。这一层把上面四条折成一个**可渲染的状态对象**。
+ */
+export interface ChecksProgress {
+  /** 标题（上游 `getTitle()`）。空串 = 不显示这一行。 */
+  title: string
+  /** 正文（上游 `text`）。 */
+  text: string
+  /** 副文本（上游 `text2`，置灰显示）。 */
+  detail: string | null
+  /** 能不能取消（上游 `isCancellable() = true`）。 */
+  cancellable: boolean
+  /** 取消按钮的文案。 */
+  cancelText: string
+  /** 这一行要不要显示。 */
+  visible: boolean
+}
+
+/**
+ * 上游那两档标志：`isOnlyRunCommitChecks`（只跑检查）与 `isCommitting`。
+ *
+ * `running` 是**这一行此刻该不该在界面上**（上游那个 `InlineProgressIndicator` 只在任务活着时
+ * 挂在面板上；任务一结束 `stop()` 就把组件收掉）。写成参数而不是让调用方自己套 `v-if`，
+ * 是为了让"什么时候该显示"与文案一起可测 —— 第一版把 `visible` 写成了恒 true，真机上那一行
+ * 就一直挂着（真机取证当场发现的）。
+ */
+export function checksProgress(onlyRunChecks: boolean, step: string | null, running = true, cancellable = true): ChecksProgress {
+  const base = onlyRunChecks ? RUNNING_CHECKS_TEXT : '正在提交…'
+  const withContext = `${onlyRunChecks ? RUNNING_CHECKS_WITH_CONTEXT : '正在提交'}: ${step}`
+  return {
+    title: CHECKS_PROGRESS_TITLE,
+    text: step ? withContext : base,
+    detail: null,
+    cancellable,
+    cancelText: CHECKS_CANCEL_TEXT,
+    visible: running,
+  }
+}
+
+/**
+ * 上游 `fixDoubleEllipsis`（`:71-86`）：正文以省略号结尾、副文本又以省略号开头时，
+ * 把正文那个去掉 —— 否则界面上会出现 "正在运行… …正在导入" 这种两个省略号挨着的样子。
+ * `…`（U+2026）与 `...` 两种写法都要认（上游 `endsWithEllipsis` 就是这么判的）。
+ */
+export function fixDoubleEllipsis(text: string, detail: string | null): string {
+  if (!detail) return text
+  const endsEllipsis = text.endsWith('…') || text.endsWith('...')
+  const startsEllipsis = detail.startsWith('…') || detail.startsWith('...')
+  if (!endsEllipsis || !startsEllipsis) return text
+  return (text.endsWith('…') ? text.slice(0, -1) : text.slice(0, -3)).trimEnd()
+}
+
+/** 检查那一行该不该挂"分析中不可用"的警告（上游 dumb 模式的等价物，见常量注释）。 */
+export function indexingWarningVisible(analyzing: boolean, checksBusy: boolean): boolean {
+  return analyzing && !checksBusy
 }

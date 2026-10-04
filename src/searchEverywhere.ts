@@ -148,9 +148,13 @@ export function searchEverywhereResults(
   tab: SearchEverywhereTab,
   limit = SEARCH_EVERYWHERE_LIMIT,
   fuzzyFiles = FUZZY_FILES_ENABLED_DEFAULT,
+  /** 作用域过滤（上游 `ScopeChooserAction` 选中的那一档）：null = 项目全部文件，不过滤。 */
+  inScope: (item: SearchEverywhereItem) => boolean = () => true,
 ): SearchEverywhereItem[] {
   const def = SEARCH_EVERYWHERE_TABS.find(entry => entry.id === tab) ?? SEARCH_EVERYWHERE_TABS[0]!
-  const scoped = items.filter(item => def.sources.includes(item.source))
+  // 作用域只作用于**文件与符号**两类供给者（上游 `ScopeChooserAction` 也只挂在
+  // `TextSearchContributor` 与 `AbstractGotoSEContributor` 上）；命令与运行配置与作用域无关。
+  const scoped = items.filter(item => def.sources.includes(item.source) && (item.source === 'commands' || item.source === 'runConfigs' || inScope(item)))
   const needle = query.trim()
   if (!needle) return scoped.slice(0, limit)
   const scored: { item: SearchEverywhereItem; weight: number; index: number }[] = []

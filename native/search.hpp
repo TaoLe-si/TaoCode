@@ -24,7 +24,26 @@ struct Options {
     // cannot be cancelled freezes the whole host: the request runs on its own thread
     // but the UI would still be waiting on a result nobody wants any more.
     std::function<bool()> cancelled;
+    /*
+     * 分块发布：每攒够一块就把**这一块**的命中交出去（`matches` 是按顺序的一段，
+     * `file_count` 是到此刻为止命中过的文件数）。空 = 不分块（老的一次性返回）。
+     *
+     * 上游 `SearchResults` 就是这么做的 —— `CHUNK_TIME_BUDGET_MS = 50`，
+     * "每搜到一块就先发出去，慢搜索也能先看到命中"（`SearchResults.java:87`、`:256-306`）。
+     * 本仓的不同只在预算的计量：上游按**持有读锁的时长**切块，本仓的一次扫描没有读锁，
+     * 所以按"距上一块的墙钟时间 + 条数"两条中先到的那条切。
+     */
+    std::function<void(const Json& matches, std::size_t file_count)> on_chunk;
+    int chunk_budget_ms = 50;
+    std::size_t chunk_max_matches = 200;
 };
+
+/*
+ * 把一块命中包成 `search.chunk` 事件体（宿主 main.cpp 的 search.preview 分支推给前端）。
+ * 形状与 payload 一起放在这里而不是 main.cpp：main.cpp 贴着 2000 行硬上限，
+ * 而"这一块长什么样"本来就属于搜索这件事（收块的地方见 src/searchStream.ts）。
+ */
+Json chunk_event(std::int64_t stream_id, const Json& matches, std::size_t file_count);
 
 // Splits a user filter box ("*.cpp, src/** build/**") on commas/whitespace.
 std::vector<std::string> parse_patterns(const std::string& text);

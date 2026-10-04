@@ -26,7 +26,7 @@ import { ref } from 'vue'
 import {
   configurableFactories, migrateHiddenKeys, shouldCreateWidget, widgetEnabled, widgetToggleEnabled, withWidgetEnabled,
   type StatusBarWidgetFactory,
-} from './statusBarWidgets'
+} from './statusBarWidgets.ts'
 
 const STORAGE_KEY = 'taocode.hiddenStatusWidgets'
 
@@ -69,6 +69,10 @@ export const STATUS_WIDGETS: StatusBarWidget[] = [
   { id: 'column', displayName: '列选择', factory: true, upstreamId: 'InsertOverwrite', editorBased: true },
   { id: 'indent', displayName: '缩进', factory: true, upstreamId: 'CodeStyleStatusBarWidget', editorBased: true },
   { id: 'notices', displayName: '通知中心', factory: true, upstreamId: 'Notifications' },
+  // `VfsRefreshIndicatorWidgetFactory.java:53-59`：显示名取 `status.bar.vfs.refresh.widget.name`
+  // （中文包 =「文件系统同步」）、`isEnabledByDefault() = false`（用户要去勾选清单里打开）、
+  // 空闲时那个 JLabel 是**空图标**，只在同步期间转起来（`:96-110` 的 start/stop）。
+  { id: 'vfsRefresh', displayName: '文件系统同步', factory: true, upstreamId: 'VfsRefresh', enabledByDefault: false },
   { id: 'memory', displayName: '内存', factory: true, upstreamId: 'Memory', enabledByDefault: false },
   { id: 'powerSave', displayName: '省电模式', factory: true, upstreamId: 'PowerSaveMode', enabledByDefault: false },
   // 上游有两个"跟语言服务有关"的组件：`SmartModeIndicator`（默认关、`isInternal = true`，只在内部模式出现）
@@ -146,4 +150,44 @@ export function toggleWidget(id: string) {
 export function showAllWidgets() {
   widgetOverrides.value = {}
   persist()
+}
+
+/**
+ * 「显示 <组件名>」这一批**可搜索动作**（上游 `StatusBarWidgetsOptionProvider`）。
+ *
+ * 上游那一类不是设置页，而是 `SearchTopHitProvider`（`StatusBarWidgetsOptionProvider.kt:13-41`）：
+ * 它把每个 `canBeEnabledOnStatusBar` 为真的工厂折成一条 `label.show.status.bar.widget`
+ * （`IdeBundle.properties:2402` = 「显示 {0}」，中文包同 key `:1403`）的**搜索命中**，
+ * 于是用户在「查找操作 / 随处搜索」里搜组件名就能开关它 —— 与右键勾选那份状态是**同一份**。
+ *
+ * 本仓的落点就是 `src/menuUi.ts` 的动作索引（查找操作与 SE 的 Commands 档都吃它）。
+ * `matcher.matches(name)` 那一句由 `rankCommands` 承担，所以这里只负责"有哪些行、点了做什么"。
+ *
+ * 可点性用**与右键勾选同一条**判据（`widgetToggleEnabled`，对应上游的 `canBeEnabledOnStatusBar`）——
+ * 上游那里过滤用的也是同一个方法，两处不会各判一套。
+ */
+export interface WidgetToggleRow {
+  id: string
+  title: string
+  keywords: string
+  /** 此刻能不能点（editor-based 工厂在没有编辑器时不可开）。 */
+  enabled: boolean
+  run: () => void
+}
+
+/** 上游 `label.show.status.bar.widget` 的中文取值（`localization-zh.jar` 的 `IdeBundle.properties:1403`）。 */
+export const SHOW_WIDGET_LABEL = '显示'
+
+export function widgetToggleRows(hasEditor: boolean): WidgetToggleRow[] {
+  // 只覆盖 **EP 工厂**（`factory: true`）：上游 `StatusBarWidgetsOptionProvider` 遍历的是
+  // `manager.getWidgetFactories()`，而 `file`/`progress`/`bridge`/`problems` 那四条在本仓是
+  // "直接画进面板的组件"（上游 `ToolWindowsWidget` / `InfoAndProgressPanel` 那一类），
+  // 根本没有工厂，也不会出现在那批搜索命中里。
+  return configurableFactories(STATUS_WIDGETS.filter(widget => widget.factory)).map(widget => ({
+    id: `statusBar.widget.${widget.id}`,
+    title: `${SHOW_WIDGET_LABEL} ${widget.displayName}`,
+    keywords: `status bar widget show hide 状态栏 组件 ${widget.displayName} ${widget.upstreamId ?? ''}`.trim(),
+    enabled: widgetToggleEnabled(widget, hasEditor),
+    run: () => toggleWidget(widget.id),
+  }))
 }

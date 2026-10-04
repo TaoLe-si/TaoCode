@@ -1086,9 +1086,10 @@ struct App {
                 if (!taocode::git::available()) { result = {{"available", false}}; }
                 else {
                     Json changes = Json::array();
-                    for (const auto& change : taocode::git::status(repository))
+                    for (const auto& change : taocode::git::status(repository, params.value("ignored", false)))
                         changes.push_back({{"path", change.path}, {"indexStatus", change.index_status}, {"workStatus", change.work_status},
-                                           {"staged", change.staged}, {"untracked", change.untracked}, {"renameFrom", change.rename_from}});
+                                           {"staged", change.staged}, {"untracked", change.untracked},
+                                           {"ignored", change.ignored}, {"renameFrom", change.rename_from}});
                     result = {{"available", true}, {"head", taocode::git::head(repository)},
                               {"branches", taocode::git::branches(repository)}, {"changes", std::move(changes)}};
                         }
@@ -1099,7 +1100,14 @@ struct App {
                 // context = diff 的上下文行数（前端从 generalSettings.diffContextLines 传入；0 = git 默认）。
                 result = {{"diff", taocode::git::diff(fs::path(wide(current_root)), params.at("path").get<std::string>(),
                                                       params.value("staged", false), params.value("base", std::string()),
-                                                      params.value("context", 0))}};
+                                                      params.value("context", 0), params.value("whole", false))}};
+                break;
+            }
+            case "git.patch"_h: {
+                // 本地更改的补丁（IDEA `CreatePatchFromChangesAction` 的输入）：`git diff HEAD`
+                // （暂存 + 未暂存）＋ 未跟踪文件按"新文件"接在后面。前端 `src/patchExport.ts` 用它。
+                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                result = {{"patch", taocode::git::patch(fs::path(wide(current_root)), params.value("includeUntracked", true))}};
                 break;
             }
             case "git.diffSides"_h: case "git.compare"_h: {
@@ -1255,6 +1263,16 @@ struct App {
                 options.exclude = taocode::search::parse_patterns(params.value("exclude", std::string()));
                 options.replacement = params.value("replacement", std::string());
                 options.cancelled = [this] { return search_cancel.load(); };
+                // 分块发布（上游 `SearchResults` 的 chunk 流）：`search.preview` 一边扫一边把
+                // 已经攒够的那几块推给前端，慢搜索也能先看到命中。**只有这条镜像请求会分块**——
+                // 替换那几条要的是"整份结果"（勾选/取消勾选都按完整清单对齐），分块只会把它们
+                // 拉成两半。`streamId` 由前端给，用来把块认回是哪一次搜索的（并发时尤其重要）。
+                if (method == "search.preview") {
+                    const auto stream_id = params.value("streamId", std::int64_t{0});
+                    options.on_chunk = [this, stream_id](const Json& chunk, std::size_t files) {
+                        queue_search(taocode::search::chunk_event(stream_id, chunk, files));
+                    };
+                }
                 std::vector<taocode::search::Selection> selections;
                 if (method == "search.replaceSelected") {
                     if (params.contains("matches") && params.at("matches").is_array())
@@ -1269,7 +1287,12 @@ struct App {
                             }
                     if (selections.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "没有勾选任何要替换的匹配。");
                 }
-                if (search_busy.exchange(true)) throw taocode::WorkspaceError("BUSY", "已有搜索在进行中，请先取消或等待。");
+                // 上一次还在跑：**取消并等它收手**，再起新的一次。上游的 Find 是"重按就重启搜索"，
+                // 报 BUSY 让用户先去点取消是另一种交互（而且本仓那个取消按钮在结果区里，未必在眼前）。
+                // 旧线程的答复照旧推给前端，由那边的世代计数丢掉（`src/components/SearchPanel.vue` 的
+                // `searchToken`：迟到的答复不许覆盖更新的结果）。
+                if (search_busy.load()) stop_search();
+                search_busy.store(true);
                 search_cancel.store(false);
                 if (search_thread.joinable()) search_thread.join();
                 const auto id = request["id"];
@@ -1588,6 +1611,8 @@ struct App {
             case "app.jdks"_h: result = taocode::jdk::to_json(taocode::jdk::find_all()); break;
             // 帮助 › 显示日志：日志文件与目录（`ShowLogAction.showLog` 的落点）。
             case "app.logPaths"_h: result = taocode::diagnostics::paths(profile); break;
+            // 内部错误账（状态栏「内部错误」组件读它）：进程内的计数，不读日志文件（那会把上次启动的算进来）。
+            case "app.internalErrors"_h: result = taocode::diagnostics::internal_errors(); break;
             // 帮助 › 浏览特殊目录：IDEA `BrowseSpecialPathsAction` 的目录清单。
             case "app.specialPaths"_h: result = taocode::diagnostics::special_paths(profile, ui.parent_path()); break;
             // 帮助 › 收集日志并打包（`CollectZippedLogsAction` → `LogPacker.packLogs`）。
@@ -1655,7 +1680,7 @@ struct App {
         // handles would be answered as UNKNOWN_METHOD off the UI thread.
         static const std::set<std::string> methods = {
             "git.status", "git.stage", "git.unstage", "git.commit", "git.rebase", "git.cherryPick",
-            "git.user", "git.authors", "git.diff", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
+            "git.user", "git.authors", "git.diff", "git.patch", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
             "git.log", "git.logFull", "git.commitDetails", "git.commitChanges", "git.commitFileDiff", "git.showCommit", "git.blame", "git.fileHistory",
             "git.checkout", "git.branch.create", "git.branch.delete", "git.merge",
             "git.revert", "git.reset",

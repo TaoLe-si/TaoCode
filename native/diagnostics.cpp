@@ -1,5 +1,8 @@
 // 诊断支持实现（见 diagnostics.hpp 的源码对照）。
 #include "diagnostics.hpp"
+
+#include <utility>
+#include <vector>
 #include "jdk.hpp"
 #include "time_format.hpp"
 #include "zipstore.hpp"
@@ -95,6 +98,32 @@ void event(const std::filesystem::path& profile, const std::string& level, const
     const auto file = log_file(profile);
     rotate_if_needed(file, rotate_bytes);
     append_line(file, timestamp() + " " + level + " - " + message);
+    // 内部错误账（等级为 ERROR 的那些）—— 状态栏那个「内部错误」组件读它。
+    record_internal_error(level, message);
+}
+
+namespace {
+// 本 session 的内部错误账（理由见头文件）。上限 50 条：状态栏那个计数只需要"有多少"，
+// 弹层里的"最近几条"再多也没人看。
+constexpr std::size_t kMaxInternalErrors = 50;
+std::vector<std::pair<std::string, std::string>>& internal_error_log() {
+    static std::vector<std::pair<std::string, std::string>> entries;
+    return entries;
+}
+}  // namespace
+
+void record_internal_error(const std::string& level, const std::string& message) {
+    if (level != "ERROR" || message.empty()) return;
+    auto& entries = internal_error_log();
+    entries.emplace_back(timestamp(), message);
+    if (entries.size() > kMaxInternalErrors)
+        entries.erase(entries.begin(), entries.begin() + static_cast<std::ptrdiff_t>(entries.size() - kMaxInternalErrors));
+}
+
+Json internal_errors() {
+    Json latest = Json::array();
+    for (const auto& entry : internal_error_log()) latest.push_back({{"time", entry.first}, {"message", entry.second}});
+    return {{"count", internal_error_log().size()}, {"latest", std::move(latest)}};
 }
 
 void run_step(const std::filesystem::path& profile, const char* name, const std::function<void()>& body) {

@@ -117,6 +117,44 @@ int main() {
         fs::remove(root / "case.txt", ec);
     });
 
+    // 分块发布（上游 `SearchResults` 的 chunk 流）：`preview()` 一边扫一边把攒够的那几块交出来，
+    // 块加起来必须**等于**一次性结果，否则"边搜边看"看到的和最终结果对不上。
+    run("preview publishes chunks that add up to the full result", [&] {
+        Options options = literal("alpha");
+        options.chunk_max_matches = 1;  // 每条一块，验证切块本身而不是时间预算
+        options.chunk_budget_ms = 0;
+        std::vector<taocode::Json> chunks;
+        std::size_t last_files = 0;
+        options.on_chunk = [&](const taocode::Json& matches, std::size_t files) {
+            chunks.push_back(matches);
+            last_files = files;
+        };
+        const auto full = taocode::search::preview(root, options);
+        check(!chunks.empty(), "expected at least one chunk");
+        std::size_t total = 0;
+        for (const auto& chunk : chunks) {
+            check(chunk.is_array() && !chunk.empty(), "every chunk carries matches");
+            total += chunk.size();
+        }
+        check(total == full.at("matches").size(),
+              "chunks (" + std::to_string(total) + ") must add up to the full result (" +
+              std::to_string(full.at("matches").size()) + ")");
+        // 块内的每一条与最终结果同形（path/line/column/preview 都在）。
+        for (const auto& item : chunks.front()) {
+            check(item.contains("path") && item.contains("line") && item.contains("column") && item.contains("preview"),
+                  "chunk entries keep the final shape");
+        }
+        check(last_files > 0, "the last chunk reports how many files matched so far");
+        const auto event = taocode::search::chunk_event(7, chunks.front(), last_files);
+        check(event.at("event").get<std::string>() == "search.chunk" && event.at("streamId").get<int>() == 7 &&
+              event.at("done").get<bool>() == false, "chunk_event carries the event name, stream id and done flag");
+    });
+
+    run("without on_chunk nothing is published (one-shot path stays one-shot)", [&] {
+        const auto result = taocode::search::preview(root, literal("alpha"));
+        check(result.at("matches").size() == 4, "the one-shot result is unchanged");
+    });
+
     run("regex search honours groups and invalid patterns error", [&] {
         Options options; options.query = "(alpha) (\\w+)"; options.regex = true; options.case_sensitive = true;
         const auto result = taocode::search::run(root, options);

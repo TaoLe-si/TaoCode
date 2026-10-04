@@ -12,7 +12,7 @@ namespace taocode {
 // extern constexpr 数组跨 TU 是不完整类型，无法构造 std::span（踩过：C2664/C2665）。
 inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     "fontSize", "tabSize", "wordWrap", "lineNumbers", "showIndentGuides", "bracketMatching",
-    "tabLimit", "tabsInOneRow", "useTabCharacter", "showWhitespaces", "formatOnSave", "uiZoomPercent",
+    "tabLimit", "tabsInOneRow", "hideTabsIfNeeded", "sortBookmarks", "useTabCharacter", "showWhitespaces", "formatOnSave", "uiZoomPercent",
     // 代码折叠（CodeFoldingSettings.java:7-11，@Storage("editor.xml")）：只登记本仓有消费者的两个
     // （COLLAPSE_IMPORTS / COLLAPSE_CUSTOM_FOLDING_REGIONS）。默认值在 settings_schema.cpp 里。
     "collapseImports", "collapseCustomRegions",

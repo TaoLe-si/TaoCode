@@ -71,12 +71,14 @@ test('没有固定标签时与关闭该开关等价（不凭空多出一排）',
 test('接线：设置键三处登记 + 设置页复选框 + 视图把 pinned 传给布局', () => {
   assert.match(read('src/settingsModel.ts'), /pinnedTabsInSeparateRow: false,/, '默认值必须是 false（UISettingsState.kt:127）')
   assert.match(read('src/settingsModel.ts'), /pinnedTabsInSeparateRow: boolean;/, '缺类型声明')
-  assert.match(read('src/bridge.ts'), /key === 'pinnedTabsInSeparateRow'/, 'bridge 白名单没放行')
+  assert.match(read('src/previewSettings.ts'), /key === 'pinnedTabsInSeparateRow'/, '预览态白名单没放行')
   assert.match(read('native/settings_schema.cpp'), /\{"pinnedTabsInSeparateRow", false\}/, '原生默认值没登记')
   assert.match(read('native/settings_schema.hpp'), /"pinnedTabsInSeparateRow",/, '原生布尔键表没登记')
-  const settings = read('src/components/SettingsDialog.vue')
-  assert.match(settings, /v-model="editor\.pinnedTabsInSeparateRow"/, '设置页没有这一条')
+  // 编辑器标签页那一页已拆成独立组件（`SettingsDialog.vue` 贴着机检上限）。
+  const settings = read('src/components/EditorTabsSettingsPage.vue')
+  assert.match(settings, /v-model="settings\.pinnedTabsInSeparateRow"/, '设置页没有这一条')
   assert.match(settings, /在单独一行中显示固定标签/, '文案缺失（ApplicationBundle.properties:324）')
+  assert.match(read('src/components/SettingsDialog.vue'), /<EditorTabsSettingsPage/, '宿主没挂上那一页')
   const view = read('src/tabStripView.ts')
   assert.match(view, /pinned: tabs\.map\(\(tab: Tab\) => Boolean\(tab\.pinned\)\)/, '视图没把 pinned 传给布局')
   assert.match(view, /separatePinnedRow: separatePinnedRow\(\)/, '视图没把开关传下去')

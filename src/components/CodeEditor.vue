@@ -3,11 +3,10 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { basicSetup } from 'codemirror'
 import { Compartment, EditorSelection, EditorState, Prec, RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
 import { Decoration, EditorView, hoverTooltip, keymap, rectangularSelection, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { HighlightStyle, foldService, foldedRanges, indentUnit, syntaxHighlighting, unfoldEffect } from '@codemirror/language'
+import { foldService, foldedRanges, indentUnit, syntaxHighlighting, unfoldEffect } from '@codemirror/language'
 import { indentLess, indentMore } from '@codemirror/commands'
 import { autocompletion, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/lint'
-import { tags } from '@lezer/highlight'
 import type { Theme } from '../appearance'
 import { editingCommands, runEditorCommand } from '../editorCommands'
 import { foldingRanges, lspFoldService } from '../editorFolding'
@@ -19,7 +18,9 @@ import { blameAnnotationsExtension, syncBlameAnnotations } from '../editorBlameA
 import type { BlameAnnotation } from '../blameAnnotations'
 import { debugLineExtension, syncDebugLine } from '../editorDebugLine'
 import { readStyledLines } from '../htmlExportDom'
-import { semanticHighlightThemeRules } from '../editorSemanticColors'
+import { whitespaceLayer } from '../editorWhitespace'
+import { diagnosticMarkers, lspPosition } from '../editorDiagnosticMarkers'
+import { editorOptionExtensions, editorTheme, syntaxColors } from '../editorTheme'
 import { insertedText } from '../editorTyping'
 import { copyToClipboard } from '../clipboard'
 import { insertTextAtCaret, pasteChannel, replaceInsertedRange, type PasteEvent } from '../editorPaste'
@@ -42,6 +43,17 @@ import { createDocumentLinks, linkField } from '../documentLinksExtension'
 import { createCodeLens } from '../codeLensExtension'
 import type { CodeLensResult } from '../codeLens'
 import { lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspHighlightResult, type LspDiagnosticReport, type LspFoldingRange, type LspFoldingRangeResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult, type LspSemanticTokensResult } from '../bridge'
+// 编辑器内查找栏（上游 `SearchReplaceComponent` + `EditorSearchSession`，不是工程内的 `FindPopupPanel`）：
+// 状态/高亮/导航在 src/editorSearchExtension.ts，匹配语义在 src/editorSearch.ts，宿主状态域在 src/editorFindController.ts。
+import EditorFindBar from './EditorFindBar.vue'
+// 合并冲突导航条（上游 `MergeThreesideViewer` 的按钮在本仓的落点）。
+import MergeBar from './MergeBar.vue'
+import { createMergeState } from '../editorMergeHost'
+import { createFindController, findCommand as findBarCommand } from '../editorFindController'
+// 插入/覆盖模式（`EditorToggleInsertStateAction`）：CodeMirror 没有这个能力，用事务过滤还原。
+import { overwriteExtension, overwriteTheme, toggleOverwrite } from '../editorOverwrite'
+import { createHintController } from '../editorHint'
+import { editorSearchExtension } from '../editorSearchExtension'
 
 const props = defineProps<{ content: string; path: string; language?: string; theme: Theme; active: boolean; settings: EditorSettings; templates: TemplateSettings; pluginTemplates?: PluginTemplateSource[]; lspEnabled: boolean; readOnly?: boolean; reveal?: { path: string; line: number } | null; breakpoints?: DapBreakpoint[]; debugLine?: number; bookmarks?: number[]; gutterIcons?: GutterIcon[]; blame?: BlameAnnotation[] }>()
 const emit = defineEmits<{
@@ -55,6 +67,17 @@ const options = new Compartment()
 const lsp = new Compartment()
 const indentGuides = new Compartment()
 let view: EditorView | undefined
+// 编辑器内查找栏的宿主侧状态域（上游 `SearchReplaceComponent` + `EditorSearchSession`）。传取值函数而不是 view：view 在 onMounted 才赋值，而控制器在 setup 期就要建好。
+const findBar = createFindController(() => view, message => emit('error', message))
+// 轻量信息提示（`HintManagerImpl`）：位置/自动消失的规则在 src/editorHint.ts。
+const { hint: errorHint, show: showErrorHint, hide: hideErrorHint } = createHintController(() => view, () => container.value)
+const findCommand = (backwards: boolean) => findBarCommand(findBar, backwards)
+const openFindBar = (replaceMode: boolean) => { findBar.open(replaceMode); nextTick(() => findBarBar.value?.focus?.()) }
+const findBarBar = ref<InstanceType<typeof EditorFindBar> | null>(null)
+// 光标行（0 基）：合并冲突条的计数要读它。清单与两个动作来自 createMergeState —— 清单取**实时文档**
+// （父级 tab.content 只在读盘/存盘时更新，编辑期间是旧的：真机抓到过接受一侧后计数停在 2/2）。
+const cursorLine = ref(0)
+const { conflicts: mergeConflicts, accept: acceptConflict, jump: jumpConflict, refresh: refreshMerge } = createMergeState(() => view, props.content)
 // Above this many characters the editor drops syntax highlighting, linting, LSP
 // and word wrap so a big file stays responsive; CodeMirror itself virtualises the
 // document so editing remains smooth. The document is owned by CodeMirror, never
@@ -147,49 +170,6 @@ const indentGuidesExtension = [
     '& .cm-indent-guide': { display: 'inline-block', width: '1px', height: '1em', background: 'var(--border)', opacity: '0.55' },
   }),
 ]
-// IDEA's "Visualize whitespaces": a dot per space and a chevron per tab, drawn as
-// replaced characters so they never shift the text they annotate.
-class WhitespaceWidget extends WidgetType {
-  constructor(readonly tab: boolean) { super() }
-  eq(other: WhitespaceWidget) { return other.tab === this.tab }
-  toDOM() {
-    const span = document.createElement('span')
-    span.className = this.tab ? 'cm-whitespace-tab' : 'cm-whitespace-space'
-    span.textContent = this.tab ? '→' : '·'
-    span.setAttribute('aria-hidden', 'true')
-    return span
-  }
-  ignoreEvent() { return false }
-}
-const whitespaceLayer = [
-  ViewPlugin.fromClass(class {
-    decorations: DecorationSet
-    constructor(readonly view: EditorView) { this.decorations = buildWhitespace(view) }
-    update(update: ViewUpdate) { if (update.docChanged || update.viewportChanged) this.decorations = buildWhitespace(update.view) }
-  }, { decorations: plugin => plugin.decorations }),
-  EditorView.theme({
-    '.cm-whitespace-space': { color: 'var(--muted)', opacity: '0.55' },
-    '.cm-whitespace-tab': { color: 'var(--muted)', opacity: '0.55' },
-  }),
-]
-// One widget budget per redraw: a minified bundle or a generated table can put tens
-// of thousands of spaces in a single screen, and each one is a real DOM node. Past
-// the budget the layer simply stops annotating instead of stalling the editor.
-const WHITESPACE_BUDGET = 50000
-function buildWhitespace(view: EditorView): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>()
-  let budget = WHITESPACE_BUDGET
-  for (const { from, to } of view.visibleRanges) {
-    const text = view.state.doc.sliceString(from, to)
-    for (let index = 0; index < text.length && budget > 0; ++index) {
-      const character = text[index]!
-      if (character !== ' ' && character !== '\t') continue
-      --budget
-      builder.add(from + index, from + index + 1, Decoration.replace({ widget: new WhitespaceWidget(character === '\t') }))
-    }
-  }
-  return builder.finish()
-}
 // Same-symbol highlighting: on caret move (debounced) ask documentHighlight and mark
 // every occurrence. Sorted + non-overlapping so the decoration builder never throws.
 const setHighlights = StateEffect.define<{ from: number; to: number }[]>()
@@ -448,6 +428,9 @@ defineExpose({
   columnModeActive: () => columnActive,
   toggleColumnSelection,
   command: (name: string) => runEditorCommand(view, editorActions, name),
+  // 查找/替换的菜单入口（编辑 › 查找 / 替换）：与 Ctrl+F / Ctrl+R 走同一个控制器。
+  openFind: () => findBar.open(false),
+  openReplace: () => findBar.open(true),
   // The Live Template Chooser picks a template by key; inserting the trigger at the
   // caret and reusing expandTemplate keeps slot/postfix semantics in one place.
   expandAtCursor: (text: string) => {
@@ -516,53 +499,6 @@ async function loadLanguage(path: string) {
     else if (/\.css$/i.test(path)) extension = (await import('@codemirror/lang-css')).css()
     if (props.path === path) view?.dispatch({ effects: language.reconfigure(extension) })
   } catch { emit('error', `无法加载 ${path} 的语法高亮，文本编辑仍可用。`) }
-}
-function lspPosition(doc: Text, line: number, character: number) {
-  const info = doc.line(Math.min(Math.max(1, Math.trunc(line) + 1), doc.lines))
-  return Math.min(Math.max(info.from, info.from + Math.max(0, Math.trunc(character))), info.to)
-}
-function lspMarkers(): Diagnostic[] {
-  const editor = view
-  if (!editor || !props.lspEnabled) return []
-  const doc = editor.state.doc
-  const markers: Diagnostic[] = []
-  for (const item of lspDiagnostics.get(props.path) ?? []) {
-    try {
-      const from = lspPosition(doc, item.line, item.character)
-      const to = Math.min(Math.max(from, item.endLine === undefined ? from + item.message.length : lspPosition(doc, item.endLine, item.endCharacter ?? 0)), doc.length)
-      markers.push({ from, to, severity: item.severity === 1 ? 'error' : item.severity === 2 ? 'warning' : 'info', message: item.message, source: item.source })
-    } catch { /* 过期或越界的诊断不影响编辑 */ }
-  }
-  return markers
-}
-// IDEA's lightweight information hint (HintManagerImpl.java:606-624): an overlay ABOVE the
-// caret line that the next key, the next text change and any scrolling dismiss. The window
-// listener is attached one tick later so the key press that asked for the hint cannot be the
-// one that hides it.
-const errorHint = ref<{ text: string; style: Record<string, string> } | null>(null)
-let errorHintKeys: (() => void) | null = null
-function dropErrorHintKey() {
-  if (errorHintKeys) { window.removeEventListener('keydown', errorHintKeys); errorHintKeys = null }
-}
-function hideErrorHint() {
-  errorHint.value = null
-  dropErrorHintKey()
-}
-function showErrorHint(text: string) {
-  const editor = view
-  const box = container.value
-  if (!editor || !box) return
-  const coords = editor.coordsAtPos(editor.state.selection.main.head)
-  if (!coords) return
-  const rect = box.getBoundingClientRect()
-  const top = coords.top - rect.top
-  const style = { left: `${Math.round(coords.left - rect.left)}px` }
-  // ABOVE is IDEA's position (HintManagerImpl.java:611); a line at the very top of the view
-  // has no room above it, so the label flips below that line instead of being clipped.
-  errorHint.value = { text, style: top >= 26 ? { ...style, bottom: `${Math.round(rect.height - top + 4)}px` } : { ...style, top: `${Math.round(coords.bottom - rect.top + 4)}px` } }
-  dropErrorHintKey()
-  errorHintKeys = hideErrorHint
-  void nextTick(() => { if (errorHintKeys) window.addEventListener('keydown', errorHintKeys, { once: true }) })
 }
 /**
  * IDEA's GotoNextError / GotoPreviousError (GotoNextErrorHandler.java). The target is picked
@@ -803,6 +739,17 @@ function emitSemantic(kind: 'rename' | 'references' | 'codeAction' | 'format' | 
 const editorActions: Record<string, Command> = {
   ...editingCommands,
   ...clipboardCommands(text => void copyToClipboard(text)), // IDEA EditorCopy/EditorCut：无选区时先选中整行（src/editorClipboard.ts）
+  // 查找那一族改走**编辑器内查找栏**（上游 `SearchReplaceComponent`）：`editingCommands` 里的
+  // `find` / `find.next` / `find.previous` 指的是 CodeMirror 自己的面板与命令，在本仓是空操作，
+  // 所以在这里整族覆盖掉。`replace.next` / `replace.all` 上游不是动作（是栏上的两个按钮），
+  // 也一并撤掉，免得 Find Action 里出现两个点了没反应的条目。
+  find: () => { openFindBar(false); return true },
+  replace: () => { openFindBar(true); return true },
+  'find.next': findCommand(false),
+  'find.previous': findCommand(true),
+  'find.wordAtCaret': () => findBar.findWordAtCaret(false),
+  'find.prevWordAtCaret': () => findBar.findWordAtCaret(true),
+  'find.toggleInSelection': () => { findBar.toggleInSelection(); return true },
   completion: startCompletion,
   definition: editor => { void revealDefinition(editor.state.selection.main.head); return true },
   // 「快速定义」QuickImplementations（$default.xml:162-164 control shift I）：在原地看一眼定义。
@@ -824,6 +771,8 @@ const editorActions: Record<string, Command> = {
   'template.expand': expandTemplate,
   'column.select': () => { toggleColumnSelection(); return true },
   'edit.last': lastEditLocation,
+  // 切换插入/覆盖（Insert 键与 Code 菜单走同一个实现）。
+  'editor.overwrite': editor => { toggleOverwrite(editor); return true },
   // IDEA's Navigate menu: GotoNextError / GotoPreviousError (PlatformActions.xml:612-615).
   'error.next': () => goToError(true),
   'error.previous': () => goToError(false),
@@ -849,7 +798,7 @@ function lspExtensions(): Extension[] {
   return [
     // Editor | Error highlighting（IDEA 的 `Errors`）两个开关：关掉后不再绘制诊断波浪线与行号旁标记，
     // 语言服务本身照常运行（对应 IDEA 关闭高亮但检查仍在后台）。
-    ...(props.settings.showDiagnostics ? [linter(() => lspMarkers())] : []),
+    ...(props.settings.showDiagnostics ? [linter(() => (view ? diagnosticMarkers(lspDiagnostics.get(props.path) ?? [], view.state.doc) : []))] : []),
     ...(props.settings.showDiagnostics && props.settings.showErrorStripe ? [lintGutter()] : []),
     hoverSource,
     // 服务端折叠区间（`foldingRange`）叠加在内置折叠之上。
@@ -911,64 +860,10 @@ function applyReveal(target: { path: string; line: number; column?: number } | n
   editor.dispatch({ selection: { anchor }, scrollIntoView: true })
   editor.focus()
 }
-const colors = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: 'var(--syntax-keyword)', fontWeight: '600' },
-  { tag: [tags.string, tags.special(tags.string), tags.regexp], color: 'var(--syntax-string)' },
-  { tag: tags.comment, color: 'var(--syntax-comment)', fontStyle: 'italic' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
-  { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: 'var(--syntax-type)' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--syntax-function)' },
-  { tag: [tags.propertyName, tags.attributeName, tags.labelName], color: 'var(--syntax-property)' },
-  { tag: [tags.operator, tags.punctuation], color: 'var(--syntax-operator)' },
-  { tag: [tags.meta, tags.annotation, tags.processingInstruction], color: 'var(--syntax-meta)' },
-])
-function editorAppearance() {
-  return EditorView.theme({
-    '&': { height: '100%', color: 'var(--text)', backgroundColor: 'var(--editor)', fontSize: `${props.settings.fontSize}px` },
-    '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono)', lineHeight: '1.7' },
-    '.cm-content': { padding: '12px 0', caretColor: 'var(--bright)' },
-    '.cm-line': { padding: '0 20px 0 12px' },
-    '.cm-gutters': { backgroundColor: 'var(--gutter)', color: 'var(--muted)', border: 'none', minWidth: props.settings.lineNumbers ? '48px' : '16px', cursor: 'pointer' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--active-line)', color: 'var(--secondary)' },
-    // CodeMirror draws selection rectangles underneath line backgrounds.
-    '.cm-activeLine': { backgroundColor: 'var(--active-line)' },
-    // LSP 语义高亮（IDEA 的 daemon 着色）。表在 src/editorSemanticColors.ts：那里也写了
-    // 「为什么选择器都要带 .cm-content」「为什么颜色复用词法着色变量」两条依据。
-    ...semanticHighlightThemeRules(),
-    // 行内补全的幽灵文本：灰色、不占位（`aria-hidden` 已在 widget 里设了）。
-    '.cm-inline-suggestion': { color: 'var(--muted)', fontStyle: 'italic', pointerEvents: 'none' },
-    // 行内装订线图标（IDEA `GutterIconRenderer`）。断点/书签/诊断不再用整行 boxShadow 表达，
-    // 统一走这一层图标（见 src/gutterIcons.ts）。
-    '.cm-gutter-icons': { minWidth: '16px' },
-    '.cm-gutter-icon-cell': { display: 'inline-flex', alignItems: 'center', gap: '1px' },
-    '.cm-gutter-icon': { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '14px', height: '14px' },
-    '.cm-gutter-icon.clickable': { cursor: 'pointer' },
-    '.cm-line.cm-debug-line': { backgroundColor: 'var(--debug-line)' },
-    '.cm-lsp-highlight': { backgroundColor: 'var(--symbol-highlight)', borderRadius: '2px' },
-    '.cm-lsp-inlay': { color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.92em' },
-    '.cm-selectionBackground': { backgroundColor: 'var(--selection-inactive)' },
-    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
-    '&.cm-focused': { outline: 'none' },
-    '.cm-cursor': { borderLeftColor: 'var(--bright)' },
-    '.cm-panels': { backgroundColor: 'var(--panel)', color: 'var(--text)' },
-    '.cm-searchMatch': { backgroundColor: 'var(--search-match)' },
-    '.cm-tooltip': { backgroundColor: 'var(--elevated)', color: 'var(--text)', borderColor: 'var(--line-strong)' },
-    '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--selected)', color: 'var(--bright)' },
-    '.lsp-hover': { padding: '7px 9px', maxWidth: '460px', whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', fontSize: '12px' },
-  }, { dark: props.theme === 'dark' })
-}
+// 那几条状态扩展的实现在 src/editorTheme.ts（与主题同族，且那个文件已经拿着编辑器外观）。
+// IDEA「Use tab character」（Editor → Code Style）：缩进单位变成真制表符。
 function editorOptions() {
-  // IDEA's "Use tab character" (Editor → Code Style): the indent unit becomes a real
-  // tab and Tab inserts one, instead of padding with spaces.
-  return [
-    EditorState.tabSize.of(props.settings.tabSize),
-    indentUnit.of(indentUnitText()),
-    props.settings.wordWrap && !heavy ? EditorView.lineWrapping : [],
-    EditorView.theme({ '.cm-lineNumbers': { display: props.settings.lineNumbers ? 'flex' : 'none' } }),
-    // "Show whitespaces": every space becomes a faint dot and every tab an arrow, the
-    // way IDEA's "Visualize whitespaces" renders them.
-    props.settings.showWhitespaces ? whitespaceLayer : [],
-  ]
+  return editorOptionExtensions({ tabSize: props.settings.tabSize, indentUnit: indentUnitText(), wordWrap: props.settings.wordWrap, lineNumbers: props.settings.lineNumbers, showWhitespaces: props.settings.showWhitespaces }, heavy, whitespaceLayer)
 }
 onMounted(() => {
   view = new EditorView({
@@ -990,10 +885,25 @@ onMounted(() => {
           { key: 'Alt-Shift-ArrowDown', preventDefault: true, run: editingCommands['line.moveDown']! },
           { key: 'Mod-Shift-j', preventDefault: true, run: editingCommands['line.join']! },
           { key: 'Mod-Shift-u', preventDefault: true, run: editingCommands['case.toggle']! },
-          // FindNext/FindPrevious = F3 / Shift+F3 ($default.xml:707-713); the 编辑
-          // menu advertises exactly these, so the editor must answer them.
-          { key: 'F3', preventDefault: true, run: editingCommands['find.next']! },
-          { key: 'Shift-F3', preventDefault: true, run: editingCommands['find.previous']! },
+          // FindNext/FindPrevious = F3 / Shift+F3（$default.xml:707-708 / :507-508）；编辑
+          // 菜单公布的正是这两条。它们**必须走查找栏的会话**：CodeMirror 自带的
+          // findNext/findPrevious 只在它自己的面板打开时才有事做，本仓的栏是自绘的
+          // （实现见 src/editorSearchExtension.ts 的 goToMatch）。
+          { key: 'F3', preventDefault: true, run: findCommand(false) },
+          { key: 'Shift-F3', preventDefault: true, run: findCommand(true) },
+          // Find = Ctrl+F / Replace = Ctrl+R（$default.xml:565-567 / :374-376）。
+          { key: 'Mod-f', preventDefault: true, run: () => { openFindBar(false); return true } },
+          { key: 'Mod-r', preventDefault: true, run: () => { openFindBar(true); return true } },
+          // FindWordAtCaret = Ctrl+F3 / FindPrevWordAtCaret = Ctrl+Shift+F3（$default.xml）。
+          { key: 'Ctrl-F3', preventDefault: true, run: () => findBar.findWordAtCaret(false) },
+          { key: 'Ctrl-Shift-F3', preventDefault: true, run: () => findBar.findWordAtCaret(true) },
+          // ToggleFindInSelection = Ctrl+Alt+E（$default.xml）。
+          { key: 'Ctrl-Alt-e', preventDefault: true, run: () => { findBar.toggleInSelection(); return true } },
+          // UnselectPreviousOccurrence = Alt+Shift+J（$default.xml，`RemoveOccurrenceAction.java:14`）。
+          { key: 'Alt-Shift-j', preventDefault: true, run: editingCommands['occurrence.unselect']! },
+          // Esc：栏开着就关栏（上游 `EscapeHandler.java:41` 清 headerComponent）；
+          // 没开时返回 false，让出给窗口级那些 Esc 语义，不吞键。
+          { key: 'Escape', preventDefault: true, run: () => { if (!findBar.state.open) return false; findBar.close(); return true } },
           { key: 'Ctrl-Alt-Shift-Up', preventDefault: true, run: editingCommands['cursor.above']! },
           { key: 'Ctrl-Alt-Shift-Down', preventDefault: true, run: editingCommands['cursor.below']! },
           { key: 'Alt-j', preventDefault: true, run: editingCommands['occurrence.next']! },
@@ -1031,6 +941,8 @@ onMounted(() => {
           // own highest-precedence keymap, which runs before this one.)
           { key: 'Tab', preventDefault: true, run: editor => nextTemplateStop(editor) || indentCommand(editor), shift: outdentCommand },
           { key: 'Ctrl-Shift-Backspace', preventDefault: true, run: lastEditLocation },
+          // EditorToggleInsertState = INSERT（`$default.xml:457-459`）。
+          { key: 'Insert', preventDefault: true, run: editor => { toggleOverwrite(editor); return true } },
         ]),
         // Keys the library would otherwise answer with something IDEA does not do. These
         // bindings have to precede basicSetup: a CodeMirror keymap facet is a plain facet, so
@@ -1049,10 +961,16 @@ onMounted(() => {
           { key: 'Alt-ArrowRight', preventDefault: true, run: () => true },
         ]),
         basicSetup,
+        // 查找栏的状态、命中高亮与 F3/Shift+F3 的会话（上游 `SearchReplaceComponent`）。
+        // 覆盖模式：事务过滤 + 块光标（上游的可见指示就是块光标，没有状态栏组件）。
+        overwriteExtension(),
+        overwriteTheme,
+        // 排在 basicSetup 之后即可：它自己那两条 F3 键位写在**前面**那张 keymap 里，先赢。
+        editorSearchExtension(),
         EditorState.lineSeparator.of(props.content.includes('\r\n') ? '\r\n' : '\n'),
         language.of([]),
-        ...(heavy ? [] : [syntaxHighlighting(colors)]),
-        appearance.of(editorAppearance()),
+        ...(heavy ? [] : [syntaxHighlighting(syntaxColors)]),
+        appearance.of(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })),
         options.of(editorOptions()),
         lsp.of(heavy ? [] : lspExtensions()),
         // Alt+drag always selects a rectangle; the compartment holds the persistent
@@ -1110,6 +1028,10 @@ onMounted(() => {
           //  派发，userEvent 是 "undo"）。宿主侧对重复通知是幂等的（rememberPlace 按
           //  文件+行去重，定时器重排就是 clear+set）。
           if (update.docChanged && !replacing) { emit('change'); scheduleLspChange(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); rangeStack = null; templateStops = []; noteEdit(); scheduleHints() }
+          // 查找栏的计数跟着文档变（改了字，命中数与当前下标都会变）。
+          if (update.docChanged || update.selectionSet) findBar.refresh()
+          // 冲突条同理：标记被接受/手写进来/删掉都要当场反映。
+          if (update.docChanged) refreshMerge(update.state.doc.toString())
           // 宏录制要的是「敲进去的字」（IDEA 的按键级录制在本仓的等价物）
           if (!replacing) { const typed = insertedText(update); if (typed) emit('typing', typed) }
           if (update.selectionSet) scheduleInlineCompletion()
@@ -1117,6 +1039,7 @@ onMounted(() => {
             const pos = update.state.selection.main.head
             const line = update.state.doc.lineAt(pos)
             emit('cursor', line.number, pos - line.from + 1)
+            cursorLine.value = line.number - 1
             // IDEA's PositionPanel switches to "N selected" while a selection exists.
             const range = update.state.selection.main
             const selected = range.to - range.from
@@ -1148,8 +1071,8 @@ watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }
   else hideErrorHint()
 })
-watch(() => props.theme, () => view?.dispatch({ effects: appearance.reconfigure(editorAppearance()) }))
-watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorAppearance()), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? indentGuidesExtension : []), setIndentGuides.of(props.settings.showIndentGuides)] }), { deep: true })
+watch(() => props.theme, () => view?.dispatch({ effects: appearance.reconfigure(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })) }))
+watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? indentGuidesExtension : []), setIndentGuides.of(props.settings.showIndentGuides)] }), { deep: true })
 watch(() => props.lspEnabled, enabled => {
   view?.dispatch({ effects: lsp.reconfigure(enabled ? lspExtensions() : []) })
   if (!enabled) {
@@ -1181,6 +1104,35 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
   <!-- 根必须唯一：App.vue 用 `v-show` 控制每个文件的显隐，多根 ⇒ 全部渲染 ⇒ 挤成一排假分屏。判据见 tests/sfc-single-root.test.mjs。 -->
   <!-- `rightMargin` 走 class 而不是 theme：CSS 在 src/style.css 里，免得这个文件（贴着机检上限）再涨。 -->
   <div ref="container" class="code-editor" :class="{ 'editor-right-margin': props.settings.rightMargin }">
+    <!-- 查找栏（上游 SearchReplaceComponent 挂在 editor 的 headerComponent 上；本仓画在编辑器顶部）。 -->
+    <EditorFindBar
+      v-if="findBar.state.open"
+      ref="findBarBar"
+      :query="findBar.state.query"
+      :options="findBar.state.options"
+      :status="findBar.state.status"
+      :invalid="findBar.state.invalid"
+      :replace-mode="findBar.state.replaceMode"
+      :replace-text="findBar.state.replace"
+      :history="findBar.state.history"
+      @update="findBar.setOptions"
+      @query="findBar.setQuery"
+      @replace="findBar.setReplace"
+      @next="findBar.next"
+      @previous="findBar.previous"
+      @close="findBar.close"
+      @toggle-replace="findBar.toggleReplace"
+      @toggle-in-selection="findBar.toggleInSelection"
+      @replace-one="findBar.replaceOne"
+      @replace-all="findBar.replaceAll"
+    />
+    <!-- 合并冲突导航条（有冲突标记才出现）。 -->
+    <MergeBar
+      :conflicts="mergeConflicts"
+      :line="cursorLine"
+      @accept="acceptConflict"
+      @next="jumpConflict"
+    />
     <!-- IDEA anchors the hint above the caret line (HintManagerImpl.java:611 ABOVE); coordinates are taken when it appears because any scroll dismisses it. -->
     <div v-if="errorHint" class="editor-hint" role="status" :style="errorHint.style">{{ errorHint.text }}</div>
     <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉；源位置不影响落点，所以能挪进根 div。 -->

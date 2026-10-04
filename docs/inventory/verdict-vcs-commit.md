@@ -86,7 +86,7 @@
 下一批真正要做的不是"补类"，而是 §C 里那几条**用户能看见的缺口**（按价值）：
 ① ~~「只运行检查」入口~~（`RunCommitChecksExecutor`）**已落**（第五十/五十一批）：入口照上游放在失败行上那把刷新按钮里，
    并补上配套的「仍然提交」（`action.commit.anyway.text`）——**没有**常显按钮（上游没有）；
-   `CommitChecksProgressIndicator` 仍是 `[~]`（进度在状态栏后台任务行，不在面板内）；
+   `CommitChecksProgressIndicator` 仍是 `[~]`（第九十六批已补面板内那一条；悬停浮层与分步上下文仍缺）；
 ② 「改某一次具体提交」（`CommitToAmend.Resolved` 那条下拉）——**仍是缺口**；
 ③ ~~提交前保存文档的否决~~（`SaveCommittingDocumentsVetoer`）**已落**（第五十批）：`saveDuringCommitQuestion` + `confirmSaveDuringCommit`；
 ④ 三层的插槽（`CommitExecutor`：让"提交"能被别的执行器接管）——这条价值最低，且要有真消费者才建。
@@ -135,15 +135,15 @@
 | `CommitActionsPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitActionsPanel.kt` | `[~]` | `src/components/SourceControl.vue` 的提交/提交并推送按钮与选项按钮（含 Ctrl+K / Ctrl+Shift+Enter 的文案） |
 | `CommitAuthorComponent` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitAuthorComponent.kt` | `[x]` | `src/commitAuthor.ts` + 面板的作者行（判据 `tests/commit-author.test.mjs`） |
 | `CommitChecks` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecks.kt` | `[~]` | 提交检查在 `src/commitCheck.ts`（TODO 预检 + 拒绝理由）；**缺**"慢检查推后到提交后"的开关（`NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS`） |
-| `CommitChecksProgressIndicator` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt` | `[~]` | "检查在跑"落在状态栏后台任务行（`src/progressPanel.ts`）；缺提交面板内的进度指示与它的悬停浮层 |
-| `CommitChecksProgressIndicatorTooltip` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicatorTooltip.kt` | `[~]` | 同上：进度行在 `src/progressPanel.ts`，浮层没有 |
+| `CommitChecksProgressIndicator` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt` | `[~]` | **第九十六批已落面板内那一条**：`src/commitChecks.ts` 的 `checksProgress`（标题 `progress.title.commit.checks`、两档正文 `commit.checks.only…` / `commit.checks.on.commit…`、可取消 + 取消文案，照 `CommitChecksTaskInfo:18-23` 与 `StatusBarProgressIndicator.setText:105-125`）+ `fixDoubleEllipsis`（`:71-86`），渲染在 `src/components/SourceControl.vue` 的 `.sc-checks-progress`。状态栏后台任务行仍在（`src/progressPanel.ts`）—— 两处本来就是同一个进度的两个投影。**缺**：悬停浮层、以及"当前进行到哪一步"那条上下文（本仓没有分步通道，`step` 恒传 null） |
+| `CommitChecksProgressIndicatorTooltip` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicatorTooltip.kt` | `[ ]` | 进度行已落（见上一行：面板内 + 状态栏两处）。**缺**是这个悬停浮层本身（`CommitChecksProgressIndicatorTooltip.kt:27-60`：点一下在指示器上方弹出那个 `PopupCommitChecksProgressIndicator`）—— 本仓的状态栏任务行有可展开的列表（`progressRows`），但那是另一种形态，**不按已实现计数** |
 | `CommitExceptionWithActions` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitExceptionWithActions.kt` | `[~]` | `src/commitNotification.ts` 的通知（含动作）；缺"异常自带动作列表"的类型面 |
 | `CommitInputBorder` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitInputBorder.kt` | `[-]` | Swing 自绘错误边框：等价物是 CSS（`.sc-msg-inspections` 那条 alert） |
 | `CommitModeManager` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitModeManager.kt` | `[~]` | 本仓只有非模态一档（`src/components/SourceControl.vue` 常驻面板）；`vcs.non.modal.commit.toggle.ui` 那套开关没有对应形态 |
 | `CommitNotification` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitNotification.kt` | `[x]` | `src/commitNotification.ts`（`expirePreviousAndNotify` 已落） |
 | `CommitOptions` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitOptions.kt` | `[~]` | 提交选项（`--signoff`/amend/TODO 预检）在 `src/components/SourceControl.vue` 的选项组；缺"选项各自 save/restore"的统一层 |
 | `CommitOptionsPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitOptionsPanel.kt` | `[~]` | 同上（选项组的呈现是 DOM，`src/components/SourceControl.vue`） |
-| `CommitProgressPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitProgressPanel.kt` | `[~]` | 错误行（`buildErrorText`，`:321-328` ⇒ `src/commitCheck.ts` 的 `commitBlockMessage` + 面板 `.sc-commit-check`）与失败行（`FailuresPanel`，`:394-471` ⇒ 面板 `.sc-check-failures` + `failuresRowText`）都在；**缺**「索引期间某些检查不可用」那条警告（`label.commit.checks.not.available.during.indexing`） |
+| `CommitProgressPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitProgressPanel.kt` | `[~]` | 错误行（`buildErrorText`，`:321-328` ⇒ `src/commitChecks.ts` 的 `commitBlockMessage` + 面板 `.sc-commit-check`）与失败行（`FailuresPanel`，`:394-471` ⇒ 面板 `.sc-check-failures` + `failuresRowText`）都在。**第九十六批补上那条警告**：`NOT_AVAILABLE_DURING_INDEXING`（`label.commit.checks.not.available.during.indexing`，`:310` 那一支）渲染在面板上，判据 `indexingWarningVisible(analyzing, checksBusy)` —— 本仓的"分析中"= **配了语言服务但还没跑起来**（与状态栏 `smartModeLabel` 同一条判据；没配服务是正常状态，不算分析中）。**缺**：检查那一刻的"还没开始"态 |
 | `CommitProjectPanelAdapter` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitProjectPanelAdapter.kt` | `[-]` | 把 workflow handler 适配成 `CheckinProjectPanel` 的桥：本仓没有 `CheckinProjectPanel` 这个契约 |
 | `CommitSessionCollector` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitSessionCollector.kt` | `[-]` | 提交会话的统计上报：没有上报通道 |
 | `CommitStatusPanel` | `platform/vcs-impl/src/com/intellij/vcs/commit/CommitStatusPanel.kt` | `[~]` | 图例在 `src/commitLegend.ts` + 面板的 `.sc-legend`（判据 `tests/commit-legend.test.mjs`）；面板容器由 Vue 承担 |
@@ -185,4 +185,6 @@
 | `SubjectBodySeparationInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectBodySeparationInspection.java` | `[x]` | `src/commitMessageInspection.ts` 的 `MISSING_BLANK_LINE_MESSAGE` + `addBlankLineAfterSubject` |
 | `SubjectLimitInspection` | `platform/vcs-impl/src/com/intellij/vcs/commit/message/SubjectLimitInspection.kt` | `[x]` | `src/commitMessageInspection.ts` 的主题行检查（`SUBJECT_LIMIT_MESSAGE`） |
 
-**四档合计**：`[x]` 13 + `[~]` 48 + `[ ]` 0 + `[-]` 17 = 78。
+**四档合计**：`[x]` 13 + `[~]` 47 + `[ ]` 1 + `[-]` 17 = 78。
+
+> **第九十六批的变化**：`CommitChecksProgressIndicator` / `CommitProgressPanel` 两条 `[~]` 的理由被重写（补上面板内进度行与「项目分析期间某些提交检查不可用」那条警告）；`CommitChecksProgressIndicatorTooltip` 从 `[~]` 改判 `[ ]` —— 复核发现本仓**没有**那个悬停浮层，状态栏任务行的可展开列表是另一种形态，不能按已实现计数。

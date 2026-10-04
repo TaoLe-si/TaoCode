@@ -1,6 +1,6 @@
 // Git log wire models; re-exported by bridge for existing callers.
 import type { DiffSides } from './bridge'
-export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string }
+export interface GitChange { path: string; indexStatus: string; workStatus: string; staged: boolean; untracked: boolean; renameFrom: string; /** 被 .gitignore 忽略（只有开着「忽略的文件」那一档才会列出来）。 */ ignored?: boolean }
 export interface GitUser { name: string; email: string }
 export interface GitStatus { available: boolean; head?: string; branches?: string[]; changes?: GitChange[] }
 export interface GitDiff { diff: string }

@@ -4,6 +4,14 @@ import { ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from 'lucide-
 import { isDesktop, request, type NamedScopeSetting, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
 import { compileScopeText, scopeLookup, scopeMatches, type ScopeContext, type ScopeSet } from '../scopes'
 import { iconSize } from '../uiIcons'
+// 分块发布（上游 `SearchResults` 的 chunk 流）：累积与认领在 src/searchStream.ts。
+import { beginSearchStream, endSearchStream, searchStream } from '../searchStream'
+// 结果预览面板（上游 FindPopupPanel 里的 UsagePreviewPanel）：窗口计算与文案在 src/searchPreview.ts。
+import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewWindow } from '../searchPreview'
+// 结果右键菜单（上游 `FindInFiles.Results.ContextMenu` → 「复制路径/引用…」那一组）。
+import { COPY_REFERENCE_GROUP, FIND_COPY_ACTIONS, findResultClipboardText, type FindCopyActionId, type FindResultTarget } from '../copyPathActions'
+import EditorPopupMenu from './EditorPopupMenu.vue'
+import { copyToClipboard } from '../clipboard.ts'
 
 // `scopes` / `moduleName` 来自项目设置：IDEA 的 Find in Path 对话框带一个 ScopeChooserCombo
 // （`FindPopupScopeUIImpl.java:59,137`），选中哪个作用域就只在那个范围里找。
@@ -43,6 +51,47 @@ const skipped = reactive(new Set<string>())
 const confirmAll = ref(false)
 const cursor = ref(-1)
 const listRef = ref<HTMLDivElement>()
+// 结果右键菜单：位置 + 点在哪一条上（上游右键菜单里只有「复制路径/引用…」这一组）。
+const resultMenu = ref<{ x: number; y: number; target: FindResultTarget } | null>(null)
+const resultMenuRows = computed(() => [{
+  id: 'copyReference',
+  title: COPY_REFERENCE_GROUP,
+  children: FIND_COPY_ACTIONS.map(action => ({ id: action.id, title: action.label })),
+}])
+function openResultMenu(event: MouseEvent, match: SearchPreviewMatch) {
+  resultMenu.value = { x: event.clientX, y: event.clientY, target: { path: match.path, line: match.line } }
+}
+/** 选了一条复制动作：写系统剪贴板 + 进剪贴板环（`src/clipboard.ts` 的规矩）。上游这几个动作是**静默**的。 */
+function pickResultMenu(row: { id: string }) {
+  const menu = resultMenu.value
+  resultMenu.value = null
+  if (!menu) return
+  void copyToClipboard(findResultClipboardText(row.id as FindCopyActionId, menu.target, props.root))
+}
+// 预览面板状态：`key` 是"这次预览对应哪一个命中"，用来丢掉迟到的答复（同 bridge 里那两个世代计数器）。
+const preview = reactive({
+  key: '',
+  path: '',
+  line: 1,
+  total: 0,
+  lines: [] as string[],
+  window: previewWindow(0, 1),
+  status: 'idle' as 'idle' | 'loading' | 'ready' | 'empty',
+})
+/** 文件内容按路径缓存：同一次搜索里走过多处命中时不重复读盘（上游那个预览编辑器也是复用的）。 */
+const previewCache = new Map<string, string[]>()
+let previewSeq = 0
+let previewTimer: ReturnType<typeof setTimeout> | undefined
+// 本次搜索的 streamId：宿主在每一块里回带它，认不回来的块丢掉（见 src/searchStream.ts）。
+let streamSeq = 0
+/** 流里已经收到的命中数（面板顶上的"搜索中 · 已找到 N 条"读它）。 */
+const streamedCount = computed(() => (searchStream.done ? 0 : searchStream.matches.length))
+/** 流式期间**边收边显示**：上面的 matches 只在最终答复时落定，这里给的是已到达的那部分。 */
+const liveMatches = computed(() => {
+  if (searchStream.done) return matches.value
+  const live = narrow(searchStream.matches)
+  return live.length ? live : matches.value
+})
 
 // NamedScopesHolder.getScope 的等价物：名字查不到时返回 null（不限定）。
 // 找到但模式解析不了的条目**不返回 null** —— 它就是一个 InvalidPackageSet，
@@ -62,7 +111,7 @@ const groups = computed<Group[]>(() => {
   const ordered: Group[] = []
   const index = new Map<string, Group>()
   let offset = 0
-  for (const match of matches.value) {
+  for (const match of liveMatches.value) {
     let group = index.get(match.path)
     if (!group) {
       group = { path: match.path, matches: [], start: offset, pending: 0 }
@@ -78,7 +127,11 @@ const groups = computed<Group[]>(() => {
 const flat = computed(() => groups.value.flatMap(group => group.matches))
 
 function keyOf(match: SearchPreviewMatch) { return `${match.path}:${match.line}:${match.column}` }
-function pending(match: SearchPreviewMatch) { return selected.has(keyOf(match)) && !skipped.has(keyOf(match)) }
+function pending(match: SearchPreviewMatch) {
+  // 流式阶段还没对账（`selected` 是上一次搜索留下的），不拿它当"将替换"。
+  if (!searchStream.done) return false
+  return selected.has(keyOf(match)) && !skipped.has(keyOf(match))
+}
 function params() {
   return {
     query: query.value,
@@ -97,7 +150,8 @@ function errorText(caught: unknown) { return caught instanceof Error ? caught.me
 let searchToken = 0
 let replaceToken = 0
 function fetchPreview() {
-  return request<SearchPreviewResult>('search.preview', { ...params(), replacement: replacement.value })
+  // streamId 让每一块能认回是哪一次搜索（并发/被取代时尤其重要）。
+  return request<SearchPreviewResult>('search.preview', { ...params(), replacement: replacement.value, streamId: streamSeq })
 }
 // 作用域在**结果**上求值。原生扫描只吃一个 include 列表，无法同时表达
 // 「作用域 ∩ 文件掩码」的交集，所以掩码走原生、作用域在这里精确过滤。
@@ -107,6 +161,7 @@ function narrow(list: SearchPreviewMatch[]): SearchPreviewMatch[] {
   return list.filter(match => scopeMatches(scope, match.path, false, scopeContext.value))
 }
 function applyResult(result: SearchPreviewResult) {
+  endSearchStream()
   const incoming = Array.isArray(result.matches) ? result.matches : []
   matches.value = narrow(incoming)
   // 原生的 fileCount 是「整次扫描命中过的文件数」；作用域过滤之后必须自己重算，
@@ -123,8 +178,10 @@ function applyResult(result: SearchPreviewResult) {
   selected.clear()
   for (const match of matches.value) if (!skipped.has(keyOf(match))) selected.add(keyOf(match))
   cursor.value = -1
+  schedulePreview()
 }
 async function refresh() {
+  beginSearchStream(++streamSeq)
   const token = ++searchToken
   try {
     const result = await fetchPreview()
@@ -134,6 +191,7 @@ async function refresh() {
 }
 async function runSearch() {
   if (!canSearch.value) return
+  beginSearchStream(++streamSeq)
   const token = ++searchToken
   running.value = true
   error.value = ''
@@ -155,6 +213,7 @@ async function cancelSearch() {
   if (!busy.value) return
   ++searchToken
   ++replaceToken
+  endSearchStream()
   running.value = false
   replacing.value = false
   note.value = '已放弃本次操作，下面仍是上一次的结果。'
@@ -284,6 +343,51 @@ function openMatch(match: SearchPreviewMatch, index?: number) {
   if (index !== undefined) cursor.value = index
   emit('open', { path: match.path, line: match.line })
 }
+/**
+ * 当前预览对象：光标所在那一条；还没走过（`cursor < 0`）时取第一条 —— 上游搜完也会选中第一行。
+ */
+const previewMatch = computed<SearchPreviewMatch | null>(() => {
+  const list = liveMatches.value
+  if (!list.length) return null
+  return list[cursor.value >= 0 ? cursor.value : 0] ?? null
+})
+/** 载入预览内容（去抖 50ms，上游 FindPopupPanel.java:868-872）。 */
+function schedulePreview() {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => { void loadPreview() }, PREVIEW_DEBOUNCE_MS)
+}
+async function loadPreview() {
+  const match = previewMatch.value
+  if (!match) {
+    preview.key = ''
+    preview.status = 'idle'
+    return
+  }
+  const key = `${match.path}:${match.line}`
+  if (key === preview.key && preview.status === 'ready') return
+  const seq = ++previewSeq
+  preview.key = key
+  preview.path = match.path
+  preview.line = match.line
+  const cached = previewCache.get(match.path)
+  if (!cached) preview.status = 'loading'
+  try {
+    const lines = cached ?? (await request<{ content: string }>('file.read', { path: match.path })).content.split('\n')
+    if (seq !== previewSeq) return  // 迟到的答复丢掉（用户已经走到下一条了）
+    previewCache.set(match.path, lines)
+    if (!lines.length) { preview.status = 'empty'; preview.lines = []; return }
+    preview.total = lines.length
+    preview.window = previewWindow(lines.length, match.line)
+    preview.lines = previewLines(lines.join('\n'), preview.window)
+    preview.status = 'ready'
+  } catch {
+    if (seq !== previewSeq) return
+    preview.status = 'empty'   // 读不到内容（文件被删/编码坏）→ 上游那句「所选条目没有预览」
+    preview.lines = []
+  }
+}
+watch(previewMatch, () => { schedulePreview() })
+
 // Enter / Shift+Enter walk the occurrences (IDEA's Find in Files). Navigation
 // expands a collapsed file instead of skipping past it.
 async function move(delta: number) {
@@ -360,7 +464,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     <p v-if="error" class="fs-error">{{ error }}</p>
     <p v-if="note" class="fs-note">{{ note }}</p>
     <div v-if="searched || running" class="fs-status">
-      <span>{{ replacing ? '正在替换…' : running ? '正在搜索…' : `共 ${total} 处 / ${fileCount} 个文件` }}{{ !busy && pendingCount !== total ? `，已选中 ${pendingCount} 处` : '' }}{{ scopeName ? `，范围：${scopeName}` : '' }}</span>
+      <!-- 搜索中就把**已经到达的那几块**报出来（上游 `SearchResults` 的 publish：慢搜索也能先看到命中）。 -->
+      <span>{{ replacing ? '正在替换…' : running ? `正在搜索…已找到 ${streamedCount} 条 / ${searchStream.fileCount} 个文件` : `共 ${total} 处 / ${fileCount} 个文件` }}{{ !busy && pendingCount !== total ? `，已选中 ${pendingCount} 处` : '' }}{{ scopeName ? `，范围：${scopeName}` : '' }}</span>
       <span class="fs-status-right">
         <span v-if="truncated" class="fs-truncated" title="结果已截断，替换只覆盖列出的匹配">结果已截断</span>
         <button v-if="busy" class="fs-cancel" title="放弃本次搜索/替换" @click="cancelSearch">取消</button>
@@ -371,7 +476,8 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     </div>
 
     <div ref="listRef" class="fs-scroll" tabindex="-1" aria-label="搜索结果" @keydown="onPanelKeydown">
-      <div v-if="running && !total" class="fs-empty">正在搜索…</div>
+      <!-- 空态看的是**已到达的**命中数，不是最终总数：否则流式期间这一支赢，块到了也画不出来。 -->
+      <div v-if="running && !liveMatches.length" class="fs-empty">正在搜索…</div>
       <template v-else-if="groups.length">
         <section v-for="group in groups" :key="group.path" class="fs-group">
           <div class="fs-group-head">
@@ -388,6 +494,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
               v-for="(match, index) in group.matches" :key="keyOf(match)" class="fs-match"
               :class="{ current: group.start + index === cursor, skipped: skipped.has(keyOf(match)) }"
               :data-index="group.start + index"
+              @contextmenu.prevent="openResultMenu($event, match)"
             >
               <div class="fs-match-main">
                 <input class="fs-check" type="checkbox" :checked="pending(match)" :disabled="busy" :aria-label="`替换 ${group.path} 第 ${match.line} 行第 ${match.column} 列`" @change="toggle(match)" />
@@ -411,11 +518,58 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
       <div v-else-if="searched" class="fs-empty">没有匹配的结果。</div>
       <div v-else class="fs-empty">输入关键词后按 Enter 搜索；Enter / Shift+Enter 在结果间移动，勾选后逐条替换。</div>
     </div>
+
+    <!-- 预览面板（上游 `FindPopupPanel` 的 `UsagePreviewPanel` + `myUsagePreviewTitle`）：
+         标题是"文件名 + 行位置"，正文是命中行上下若干行，命中行高亮。 -->
+    <div class="fs-preview" role="region" :aria-label="PREVIEW_TITLE" :data-preview-status="preview.status">
+      <div class="fs-preview-head">
+        <span class="fs-preview-title">{{ PREVIEW_TITLE }}</span>
+        <template v-if="preview.status === 'ready'">
+          <span class="fs-preview-name" :title="preview.path">{{ previewHeader(preview.path, preview.line, preview.total).name }}</span>
+          <span class="fs-preview-detail">{{ previewHeader(preview.path, preview.line, preview.total).detail }}<template v-if="preview.window.truncated">（已省略窗口外的内容）</template></span>
+        </template>
+      </div>
+      <div class="fs-preview-body">
+        <p v-if="preview.status === 'idle'" class="fs-empty">{{ PREVIEW_SELECT_HINT }}</p>
+        <p v-else-if="preview.status === 'loading'" class="fs-empty">正在载入预览…</p>
+        <p v-else-if="preview.status === 'empty'" class="fs-empty">{{ PREVIEW_UNAVAILABLE }}</p>
+        <pre v-else class="fs-preview-text"><span
+          v-for="(text, index) in preview.lines" :key="index"
+          class="fs-preview-line" :class="{ current: index === preview.window.matchIndex }"
+        >{{ text }}
+</span></pre>
+      </div>
+    </div>
+
+    <!-- 结果右键菜单（上游 `FindInFiles.Results.ContextMenu`）。渲染复用编辑器那张浮层：
+         它的文件头写的就是"只负责渲染"，行数据与执行都在这边（`src/findResultActions.ts`）。
+         **外面那层 `.tree-menu-backdrop` 是必需的**（与 App.vue 里每一张同类菜单一样）：
+         浮层自己是 `z-index: auto`，没有这层 40 号背景时会**被别的浮层背景盖住**——
+         真机取证时正是这样：菜单画出来了，但鼠标点到的是盖在它上面的另一个浮层的背景，
+         `elementFromPoint` 返回的是结果列里的一个 span（合成 click 却能生效，所以第一轮没看出来）。 -->
+    <div v-if="resultMenu" class="tree-menu-backdrop" @pointerdown="resultMenu = null" @contextmenu.prevent="resultMenu = null">
+      <EditorPopupMenu
+        :rows="resultMenuRows" :x="resultMenu.x" :y="resultMenu.y" label="复制路径/引用"
+        @pick="pickResultMenu" @close="resultMenu = null"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
-.fs-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/* 停靠区被压矮时（真机取证：底部停靠 147px）整个面板改为可滚动 —— 否则结果区会被挤成一条缝。 */
+.fs-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+/* 预览面板贴在结果列表下面（上游是一个 0.33 的 splitter，比例可拖；本仓先给固定高度，
+   15 行上下 —— `UsagePreviewPanel` 那边的最小高度也是 15 行）。 */
+.fs-preview { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 96px; max-height: 40%; border-top: 1px solid var(--line-strong); background: var(--panel); }
+.fs-preview-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); min-height: var(--ctrl-height-sm); font-size: 11px; }
+.fs-preview-title { color: var(--muted); }
+.fs-preview-name { color: var(--text); font-family: var(--font-mono); }
+.fs-preview-detail { color: var(--muted); font-variant-numeric: tabular-nums; }
+.fs-preview-body { flex: 1 1 auto; min-height: 90px; overflow: auto; }
+.fs-preview-text { margin: 0; padding: 0 var(--space-2) var(--space-2); background: var(--editor); font: 12px/1.6 var(--font-mono); color: var(--text); white-space: pre; }
+.fs-preview-line { display: block; }
+.fs-preview-line.current { background: var(--accent-soft); color: var(--bright); }
 .fs-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); height: var(--tab-h); min-height: var(--tab-h); padding: 0 var(--space-1) 0 var(--space-3); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
 .fs-heading > span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .fs-heading > span > svg { flex-shrink: 0; color: var(--muted); }
@@ -450,7 +604,9 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 .fs-action { min-height: var(--ctrl-height-sm); padding: 2px var(--space-2); color: var(--secondary); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-action:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-action:disabled { color: var(--muted); opacity: .55; }
-.fs-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); }
+/* 结果区保底高度（真机量到过 8px：内容 58 万像素高、列表只有一条缝）—— 面板放不下时
+   由 .fs-panel 滚动，而不是把列表压没（上游的 Find 工具窗也是结果区占满剩余高度）。 */
+.fs-scroll { flex: 1 1 auto; min-height: 96px; overflow: auto; padding-bottom: var(--space-2); }
 .fs-scroll:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .fs-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .fs-group { min-width: 0; }

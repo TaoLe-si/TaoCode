@@ -27,6 +27,9 @@ export interface ToolWindowViewContext {
   workspace: any
   activePath: string
   activeTabPath: string
+  /** 「项目分析中」的两个输入（见 SourceControl 的 `analyzing`）。 */
+  activeConfigured?: boolean
+  activeLspRunning?: boolean
   lspReady: boolean
   isDesktop: boolean
   // 复杂内部类型先用 any，随后续批次收紧。
@@ -89,6 +92,8 @@ export interface ToolWindowViewContext {
   onReveal: (target: { path: string; line: number; column?: number }) => void
   onBookmarkRemove: (entry: unknown) => void
   onBookmarkAssign: () => void
+  /** 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`）。 */
+  onBookmarkSortGroup?: (path: string) => void
   /** 文件书签的跳转：把文件打开（没有行号可去）。 */
   onBookmarkOpen?: (path: string) => void
   /** 「书签打开的标签页…」：把所有打开的标签页加成文件书签。 */
@@ -160,9 +165,9 @@ const props = defineProps<{
   <SearchPanel v-if="view === 'search'" :ref="(instance: any) => ctx.bindSearchPanel(instance)" :root="ctx.root" :active="active" :scopes="(ctx.scopes ?? []) as any" :module-name="ctx.moduleName ?? ''" @open="(payload: any) => ctx.onSearchOpen(payload)" @replaced="ctx.onSearchReplaced as any" />
   <TodoPanel v-else-if="view === 'todo'" :root="ctx.root" :active="active" :patterns="ctx.todoPatterns as any" :source="ctx.todoSource" @open="(payload: any) => ctx.onSearchOpen(payload)" />
   <OutlinePanel v-else-if="view === 'outline'" :path="ctx.activeTabPath" :symbols="ctx.outline" :available="ctx.lspReady" @jump="({ line, character }: { line: number; character: number }) => ctx.onReveal({ path: ctx.activePath, line, column: (character ?? 0) + 1 })" />
-  <BookmarksPanel v-else-if="view === 'bookmarks'" :entries="ctx.sortedBookmarks as any" :active-path="ctx.activePath" :settings="(ctx.bookmarksView ?? {}) as any" :lists="(ctx.bookmarkLists ?? []) as any" @jump="(entry: { path: string; line?: number }) => entry.line === undefined ? ctx.onBookmarkOpen?.(entry.path) : ctx.onReveal({ path: entry.path, line: entry.line - 1 })" @remove="ctx.onBookmarkRemove" @assign="ctx.onBookmarkAssign" @update-settings="(patch: any) => ctx.onUpdateBookmarksView?.(patch)" @bookmark-tabs="ctx.onBookmarkTabs?.()" @edit="(entry: any) => ctx.onBookmarkEdit?.(entry)" />
+  <BookmarksPanel v-else-if="view === 'bookmarks'" :entries="ctx.sortedBookmarks as any" :active-path="ctx.activePath" :settings="(ctx.bookmarksView ?? {}) as any" :lists="(ctx.bookmarkLists ?? []) as any" @jump="(entry: { path: string; line?: number }) => entry.line === undefined ? ctx.onBookmarkOpen?.(entry.path) : ctx.onReveal({ path: entry.path, line: entry.line - 1 })" @remove="ctx.onBookmarkRemove" @assign="ctx.onBookmarkAssign" @update-settings="(patch: any) => ctx.onUpdateBookmarksView?.(patch)" @bookmark-tabs="ctx.onBookmarkTabs?.()" @edit="(entry: any) => ctx.onBookmarkEdit?.(entry)" @sort-group="(path: string) => ctx.onBookmarkSortGroup?.(path)" />
   <DebugPanel v-else-if="view === 'debug'" :active-path="ctx.activePath" :ready="ctx.isDesktop && Boolean(ctx.workspace)" :evaluate-request="ctx.evaluateRequest" :program="ctx.runConfigProgram" :cwd="ctx.runConfigCwd" />
-  <SourceControl v-else-if="view === 'git'" :root="ctx.root" :active="active" :todo-patterns="ctx.todoPatterns as any" :commit-settings="ctx.commitSettings" :diff-context-lines="ctx.diffContextLines" :compare-with="ctx.gitCompareWith ?? ''" :dirty-paths="ctx.dirtyPaths" :save-path="ctx.savePath" :show-tool-window="ctx.showToolWindow" @notify="ctx.notifyFromPanel" />
+  <SourceControl v-else-if="view === 'git'" :root="ctx.root" :active="active" :analyzing="Boolean(ctx.activeTabPath) && Boolean(ctx.activeConfigured) && !ctx.activeLspRunning" :todo-patterns="ctx.todoPatterns as any" :commit-settings="ctx.commitSettings" :diff-context-lines="ctx.diffContextLines" :compare-with="ctx.gitCompareWith ?? ''" :dirty-paths="ctx.dirtyPaths" :save-path="ctx.savePath" :show-tool-window="ctx.showToolWindow" @notify="ctx.notifyFromPanel" />
   <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" @set-tag-names="ctx.onSetVcsLogTagNames?.($event)" />
   <GradlePanel v-else-if="view === 'gradle'"
     :detection="ctx.gradleDetection" :detection-error="ctx.gradleDetectionError" :result="ctx.gradleResult"

@@ -23,6 +23,12 @@ import {
 } from '../searchEverywhere'
 
 import { iconSize } from '../uiIcons'
+// 空态文案（上游 `SearchEverywhereEmptyTextProvider` + `SearchEverywhereUI.updateEmptyText`）：
+// 按 tab 与"用过哪些搜索选项"给不同提示，规则全在 src/searchEverywhereEmpty.ts（纯函数）。
+import { searchEverywhereEmptyText } from '../searchEverywhereEmpty'
+// 作用域选择（上游 `ScopeChooserAction`）：候选、过滤、以及"能不能在项目/所有位置间切换"的判据。
+import { PROJECT_SCOPE_NAME, filterByScope, scopeChoices } from '../searchEverywhereScope'
+import type { NamedScopeSetting } from '../settingsModel'
 /** 把一段文本按 [start,end) 区间切成普通段与高亮段，模板里直接 v-for 渲染。 */
 function highlightParts(text: string, fragments: readonly [number, number][]) {
   if (!fragments.length) return [{ text, hit: false }]
@@ -44,15 +50,40 @@ const props = defineProps<{
   onQuery?: (query: string) => void
   /** 文件来源是否改用 Smith-Waterman 模糊匹配（注册表键 search.everywhere.fuzzy.files.enabled，默认 false）。 */
   fuzzyFiles?: boolean
+  /** 命名作用域表（项目设置 `project.scopes`）—— 作用域选择器的候选。 */
+  scopes?: NamedScopeSetting[]
+  /** 模块名（作用域表达式里 `file[Name]:` 要比对的那个）。 */
+  moduleName?: string
 }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; /** 空态里"在文件中查找"的落点（宿主打开工程内搜索）。 */ findInFiles: [] }>()
 
 const query = ref('')
 const tab = ref<SearchEverywhereTab>('all')
+// 作用域那一档（上游 `ScopeChooserAction`）。默认"项目"（= 不过滤，本仓的文件清单本来就只含
+// 工作区内的文件）；用户选命名作用域后只筛**文件与符号**两类供给者（见 searchEverywhereResults）。
+const scopeName = ref(PROJECT_SCOPE_NAME)
 const index = ref(0)
 const input = ref<HTMLInputElement | null>(null)
 
-const results = computed(() => searchEverywhereResults(props.items, query.value, tab.value, SEARCH_EVERYWHERE_LIMIT, props.fuzzyFiles))
+const scopeOptions = computed(() => scopeChoices(props.scopes ?? []))
+const activeScope = computed(() => scopeOptions.value.find(choice => choice.name === scopeName.value) ?? scopeOptions.value[0]!)
+// `filterByScope`：表达式为 null（项目档）时原样放行；坏表达式也放行（列表来自设置页的校验）。
+const scopePredicate = computed(() => {
+  const expression = activeScope.value?.expression ?? null
+  if (expression === null) return () => true
+  const allowed = new Set(filterByScope(props.items, item => item.fuzzyPath ?? item.title, expression, { moduleName: props.moduleName }).map(item => item.id))
+  return (item: SearchEverywhereItem) => allowed.has(item.id)
+})
+const results = computed(() => searchEverywhereResults(props.items, query.value, tab.value, SEARCH_EVERYWHERE_LIMIT, props.fuzzyFiles, scopePredicate.value))
+
+/** 空态（没有结果且查询词非空时才有；查询词为空时上游也不显示，见那个模块的头注释）。 */
+const emptyText = computed(() => (results.value.length ? null : searchEverywhereEmptyText(
+  tab.value, query.value,
+  // 本仓 SE 的输入框没有这三档开关（`SearchEverywhereToolbarField` 判 `[~]` 的那一项），
+  // 所以恒传空 —— 文案里的「使用的搜索选项：」那一行在开档之前不会出现。
+  {},
+)))
+
 // 每行的模糊命中高亮区间（上游 SeFuzzyFileSearchItem 的 withPresentableTextMatchedRanges）。
 const fragmentCache = computed(() => results.value.map(item => fuzzyTitleFragments(item, query.value, props.fuzzyFiles)))
 // SePopupContentPane 的 tab model 不依赖当前查询结果；零结果也保留切换入口。
@@ -200,6 +231,18 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           @click="tab = entry.id"
         >{{ entry.label }}</button>
         <button class="se-tab" :aria-pressed="showPreview" @click="showPreview = !showPreview">预览</button>
+        <!-- 作用域选择（上游 `ScopeChooserAction` 那格按钮）：只在有可选项时出现。
+             候选 = 「项目」+ 用户自定义的作用域（`scopeChoices`）；一个自定义作用域都没有时
+             它就是恒定的一档，不渲染（不放假控件）。 -->
+        <select
+          v-if="scopeOptions.length > 1"
+          v-model="scopeName"
+          class="se-scope"
+          aria-label="作用域"
+          :title="`作用域：${scopeName}（只作用于文件与符号两类结果）`"
+        >
+          <option v-for="choice in scopeOptions" :key="choice.name" :value="choice.name">{{ choice.name }}</option>
+        </select>
         <span class="se-hint">Tab 切换 · ↑↓ 选择 · 回车打开</span>
       </div>
       <div ref="splitContainer" class="se-content" :style="{ '--se-ratio': `${splitRatio * 100}%` }">
@@ -219,7 +262,15 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
           <span class="action-group">{{ searchEverywhereSourceLabel(entry.source) }}</span>
           <ArrowRight :size="iconSize.control" />
         </button>
-        <p v-if="!results.length" class="palette-empty">没有匹配的结果。</p>
+        <!-- 空态：上游按 tab 与用过的选项给不同文案（`SearchEverywhereUI.java:1926-2011`），
+             并给一条去工程内查找的出路。 -->
+        <div v-if="emptyText" class="palette-empty se-empty">
+          <p v-if="emptyText.primary">{{ emptyText.primary }}</p>
+          <p v-if="emptyText.usedOptions" class="se-empty-options">{{ emptyText.usedOptions }}</p>
+          <button v-if="emptyText.action" class="se-empty-action" type="button" @click="emit('findInFiles')">
+            {{ emptyText.action.label }}<template v-if="emptyText.action.shortcut"> ({{ emptyText.action.shortcut }})</template>
+          </button>
+        </div>
       </div>
       <div v-if="showPreview && selected?.preview" class="se-splitter" role="separator" tabindex="0" aria-label="调整搜索结果与预览高度" aria-orientation="horizontal" :aria-valuenow="Math.round(splitRatio * 100)" :aria-valuemin="20" :aria-valuemax="80"
         @pointerdown="startSplit" @pointermove="moveSplit" @pointerup="stopSplit" @pointercancel="stopSplit" @lostpointercapture="stopSplit" @keydown="splitKey" />
@@ -230,6 +281,11 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
 </template>
 
 <style scoped>
+/* 空态（上游 `StatusText` 的几段 append）：主行 + 可选的"用过的选项" + 一条可点的出路。 */
+.se-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+.se-empty-options { white-space: pre-line; color: var(--muted); }
+.se-empty-action { padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; text-align: left; }
+.se-empty-action:hover { text-decoration: underline; }
 .search-everywhere { min-width: 0; width: min(720px, calc(100vw - 32px)); }
 /* 记过尺寸/位置之后浮层用固定定位贴回去（上游 `AbstractPopup` 的 stored size/location 分支）。 */
 .search-everywhere.is-placed { position: fixed; }
@@ -244,6 +300,7 @@ function chooseSelected() { const picked = results.value[index.value]; if (picke
 /* `--tc-border` / `--tc-hover` 不是 tokens.css 里的名字：这两个弹层一直退化成中性灰 rgba，
    深色主题下 hover 几乎看不见。改回真令牌 --line / --hover。 */
 .se-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.se-scope { height: var(--ctrl-height-sm); padding: 0 var(--space-1); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-ui); }
 .se-tab { background: none; border: 0; border-radius: 4px; padding: 3px 10px; font: inherit; color: inherit; cursor: pointer; opacity: .7; transition: opacity var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
 .se-tab:hover { opacity: 1; background: var(--hover); }
 .se-tab.active { opacity: 1; font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }

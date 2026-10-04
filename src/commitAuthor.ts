@@ -141,3 +141,23 @@ export function splitAuthorInput(name: string, email: string): CommitAuthor {
   }
   return { name: name.trim(), email: email.trim() }
 }
+
+// 提交者历史在 localStorage 里的键与读写（从 `SourceControl.vue` 拆出：那个文件贴着 900 行上限，
+// 而这两件事与面板无关 —— 一个键名 + 一次 JSON 读、一次去重写）。
+// 键按**工作区**分（`taocode.commitAuthors:<root>`），与上游 `RecentVcsUsersService` 的
+// per-project 口径一致，不跟着别的工程串。
+export function commitAuthorsKey(root: string): string { return `taocode.commitAuthors:${root}` }
+
+/** 读回这个工作区记住的提交者（坏数据当空数组 —— 这是一条"记不住也不该炸"的旁路）。 */
+export function readSavedAuthors(root: string): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(commitAuthorsKey(root)) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
+  } catch { return [] }
+}
+
+/** 记下用过的提交者（去重后写回；存储不可用时只留本次会话）。 */
+export function saveUsedAuthor(root: string, entry: string): void {
+  const saved = knownAuthors(readSavedAuthors(root), [entry])
+  try { localStorage.setItem(commitAuthorsKey(root), JSON.stringify(saved)) } catch { /* storage unavailable: session-only */ }
+}

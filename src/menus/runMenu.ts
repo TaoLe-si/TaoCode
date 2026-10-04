@@ -21,6 +21,11 @@ export interface RunMenuContext {
   showOutput: (id: any) => any
   /** 打开「运行/调试配置」对话框（IDEA RunConfigurationsDialog）。 */
   openRunConfigurations: () => void
+  /**
+   * 打开「查看断点…」对话框（IDEA `ViewBreakpointsAction` → `BreakpointsDialog`）。
+   * 上游那个对话框就是 `com.intellij.ui.popup.util` 那一族（主从详情面板）唯一的消费者。
+   */
+  openBreakpoints: () => void
   toolWindow: (view: any, title: any, keywords: any, needsDesktop?: any) => MenuRow
   editable: (name: any, title: any, keys?: any, keywords?: any) => MenuRow
 }
@@ -44,7 +49,9 @@ export function createRunMenuRows(ctx: RunMenuContext): MenuRow[] {
     // IDEA Run menu (real 2026.2 UI): 附加到进程 Ctrl+Alt+F5, 查看断点 Ctrl+Shift+F8,
     // 编辑配置 — the rows route to the debug/run panels that own those editors.
     { id: 'run.attach', title: '附加到进程…', keys: 'Ctrl Alt F5', keywords: 'attach to process debug 附加进程', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && !ctx.dapState.running, run: () => { ctx.explorer.value = true; ctx.leftView.value = 'debug'; ctx.notify('在调试面板填写进程 PID 或管道名后点“附加”。') } },
-    { id: 'run.viewBreakpoints', title: '查看断点…', keys: 'Ctrl Shift F8', keywords: 'view breakpoints 断点 查看', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value), run: () => { ctx.explorer.value = true; ctx.leftView.value = 'debug' } },
+    // 上游 `ViewBreakpointsAction` 打开的是 **BreakpointsDialog**（主从详情面板），
+    // 不是"跳到调试工具窗口"—— 本仓照此打开真对话框。
+    { id: 'run.viewBreakpoints', title: '查看断点…', keys: 'Ctrl Shift F8', keywords: 'view breakpoints 断点 查看', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value), run: () => ctx.openBreakpoints() },
     { id: 'run.editConfigs', title: '编辑配置…', keywords: 'edit configurations run debug 配置 编辑', enabled: () => Boolean(ctx.workspace.value), run: () => { ctx.openRunConfigurations() } },
     { id: 'run.output', title: '显示运行输出', keywords: 'run console output 运行输出', enabled: () => Boolean(ctx.workspace.value), run: () => ctx.showOutput('run') },
     { id: 'run.log', title: '显示操作输出', keywords: 'trace bridge log 操作输出', enabled: () => Boolean(ctx.workspace.value), run: () => ctx.showOutput('output') },

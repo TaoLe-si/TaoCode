@@ -183,16 +183,17 @@
 | `FileSearchEverywhereContributor` | `src/searchEverywhereHost.ts` 的文件供给者（`workspace.files`）+ 文件档打分；本批起可切 Smith-Waterman 档（`src/fuzzyMatch.ts` 的 `fuzzyMatchPath`，对齐 `SmithWatermanMatcher.kt:58-70`） | 按项目过滤、非索引文件处理 |
 | `RunConfigurationsSEContributor` | `src/searchEverywhereHost.ts` 的 `allRunConfigNames`（用户配置 + 自动发现候选） | 按最近使用排序、配置类型图标 |
 
-## C. 未移植（`[ ]`，6 类）—— 有真行为、本仓还没有
+## C. 未移植（`[ ]`，2 类）—— 有真行为、本仓还没有
 
 | 类 | 差在哪 | 下一批的判据 |
 |---|---|---|
 | `ClassSearchEverywhereContributor` | 本仓符号档走 LSP `workspace/symbol`（类与成员同一路），没有独立的「按类名搜」这一档 | 需要 LSP 侧区分 kind 之后才谈得上拆档 |
 | `ClassSearchEverywhereNavigationHandler` | 打开符号即跳到文件，没有「类/方法」两级区分 | 同上 |
-| `SearchEverywhereEmptyTextProvider` | 空列表没有文案 | 至少给「无结果」一句，判据是空查询与有查询两种空态 |
-| `SearchEverywhereReorderingService` | 排序是纯分数，不接受用户调序 | 记忆用户调序需要落盘，属于新增持久化字段 |
-| `ScopeChooserAction` | 动作与搜索都是全项目范围，没有作用域选择器 | 需要先把已有的命名作用域接到动作上（本仓有 scopes 设置页，但没接到动作） |
-| `PreviewAction` | 预览是常驻 tab，上游是「预览面板的开关动作」 | 低优先：常驻 tab 已经覆盖了用户可见的那一面 |
+
+**第九十一批之后的三条已落地**（§G 里已是 `[~]`，本表此处原先漏改）：`SearchEverywhereEmptyTextProvider`
+（`src/searchEverywhereEmpty.ts`）、`ScopeChooserAction`（`src/searchEverywhereScope.ts`）、`PreviewAction`
+（`SearchEverywhereDialog.vue` 的「预览」开关）。
+
 
 ## D. 不适用（`[-]`，263 类）—— 附理由
 
@@ -220,8 +221,8 @@
 - **不引入 ML 排序**（`SearchEverywhereMlService` 族）：本仓排序是纯确定性的分数函数，
   引入模型服务会让「同一查询得到同一顺序」这条可测试的性质失效。判据 `tests/search-everywhere.test.mjs`
   断言的就是确定性顺序。
-- **不做作用域选择器**（`ScopeChooserAction` 判 `[ ]` 而非 `[-]`）：它不是不适配，是还没做 ——
-  上游的作用域选择器对本仓的用户是可用的（命名作用域已经存在），所以留在 §C 而不是 §D。
+- ~~不做作用域选择器~~ **第九十一批已经做了**（`src/searchEverywhereScope.ts`，§G 判 `[~]`）——
+  这条原先记的是"还没做、所以留在 §C 而不是 §D"，现已落地；本文件的 §C 表也一并改齐（上面那三行）。
 
 ## E. 与上游口径的差异（如实记下）
 
@@ -334,8 +335,8 @@
 | `AutoCompletionProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AutoCompletionProvider.java` | `[-]` | 补全渲染器（JList + 自绘高亮）：补全弹窗的上游渲染器，本仓补全是 `src/completionUi.ts` 的补全浮层，不属本域 |
 | `CalculatorSEContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CalculatorSEContributor.kt` | `[-]` | 计算器贡献器（输入算式求值）：纯附加功能，非 IDE 核心 ⇒ 不做 |
 | `CheckBoxSearchEverywhereToggleAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CheckBoxSearchEverywhereToggleAction.java` | `[-]` | 复选框式的贡献者开关：`SearchEverywhereFiltersAction` 的同类，不做 |
-| `ClassSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt` | `[ ]` | 类贡献者：本仓符号档走 LSP `workspace/symbol`（类与成员同一路），没有独立的「按类名搜」这一档 |
-| `ClassSearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt` | `[ ]` | 类的导航（跳到文件并定位）：本仓的符号档是 LSP 符号，打开即跳到文件，没有「类/方法」两级区分 ⇒ 无对应物 |
+| `ClassSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereContributor.kt` | `[ ]` | 类贡献者：本仓符号档走 LSP `workspace/symbol`（类与成员同一路），没有独立的「按类名搜」这一档。**要做得先有**一个只回类符号的语言服务请求（LSP 没有"只要 type"的参数），或对 `workspace/symbol` 的结果按 `SymbolKind` 客户端过滤 —— 后者会把"类"的定义交给服务器返回的 kind，服务器不保证给，所以暂不做。 |
+| `ClassSearchEverywhereNavigationHandler` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ClassSearchEverywhereNavigationHandler.kt` | `[ ]` | 类的导航（跳到文件并定位）：本仓的符号档是 LSP 符号，打开即跳到文件，没有「先跳类名再跳成员」的两级区分。同 `ClassSearchEverywhereContributor` 的前置条件。 |
 | `ContributorDefinedTabsCustomizationStrategy` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ContributorDefinedTabsCustomizationStrategy.kt` | `[-]` | 由贡献者定义 tab 的策略：四个 tab 是硬编码的 ⇒ 无对应物 |
 | `CorrectionWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/CorrectionWrapper.kt` | `[-]` | 同 `SearchEverywhereSpellingCorrector` |
 | `FileSearchEverywhereContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/FileSearchEverywhereContributor.kt` | `[~]` | `src/searchEverywhereHost.ts` 的文件供给者（`workspace.files`）+ `src/searchEverywhere.ts` 的文件档打分；本批起可切 Smith-Waterman 档（`src/fuzzyMatch.ts` 的 `fuzzyMatchPath`，对齐 `SmithWatermanMatcher.kt:58-70` 的「文件名归一分 > 0.7 否则整条路径」）；还差上游的按项目过滤与非索引文件处理 |
@@ -355,7 +356,7 @@
 | `PSIPresentationBgRendererWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PSIPresentationBgRendererWrapper.java` | `[-]` | 502 行 Swing 列表渲染器（JList/JPanel/JLabel）：本仓列表行是 DOM + CSS ⇒ 自绘渲染器不适用 |
 | `PersistentSearchEverywhereContributorFilter` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PersistentSearchEverywhereContributorFilter.java` | `[-]` | 贡献者的持久过滤（记住用户关掉的档）：本仓 tab 常显 ⇒ 无对应物 |
 | `PossibleInternalCommandsContributor` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PossibleInternalCommandsContributor.kt` | `[-]` | 内部命令贡献者（IDEA 内部命令）：本仓菜单表是自有的，无内部/外部命令之分 |
-| `PreviewAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewAction.kt` | `[ ]` | 预览动作：`SearchEverywherePreview` 已落（预览 tab），但上游 `PreviewAction` 是「预览面板的开关动作」，本仓预览是常驻 tab ⇒ 那一格未做 |
+| `PreviewAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewAction.kt` | `[~]` | 预览面板的开关动作。**第九十一批已落**：`src/components/SearchEverywhereDialog.vue` 的「预览」按钮（`showPreview` + `aria-pressed`，与 `SearchEverywherePreview` 面板联动）。上游 `PreviewAction` 是动作对象，本仓是同一个开关的一个按钮 —— 行为一致，形态不同。 |
 | `PreviewExperiment` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewExperiment.kt` | `[-]` | 预览实验开关：`PreviewAction` 那一格的前置实验标记；本仓预览无实验门控 |
 | `PreviewListener` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PreviewListener.java` | `[-]` | 预览加载完成监听：预览内容由供给者一次性算出，无监听协议 |
 | `PromoAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/PromoAction.java` | `[-]` | 推广动作（试用/升级提示）：无商业化功能 ⇒ 不适用 |
@@ -370,8 +371,8 @@
 | `SEResultsListFactory` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SEResultsListFactory.java` | `[-]` | 结果列表工厂（JList + 渲染器）：同 `PSIPresentationBgRendererWrapper` |
 | `SESearcher` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SESearcher.java` | `[-]` | 搜索执行器接口：`searchEverywhereResults` 是纯函数（同步打分），无搜索器对象 |
 | `SETabSwitcherListener` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SETabSwitcherListener.kt` | `[-]` | tab 切换监听：同 `SEHeaderActionListener` |
-| `ScopeChooserAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeChooserAction.java` | `[ ]` | 作用域选择（在动作/搜索里限定范围）：本仓的动作与搜索都是全项目范围，没有作用域选择器 |
-| `ScopeSupporting` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeSupporting.java` | `[-]` | 支持作用域的动作接口：同 `ScopeChooserAction`，无作用域概念 |
+| `ScopeChooserAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeChooserAction.java` | `[~]` | 作用域选择。**第九十一批已落**：`src/searchEverywhereScope.ts` 的 `scopeChoices` / `filterByScope` + `src/components/SearchEverywhereDialog.vue` 的作用域下拉（候选 =「项目」+ 项目设置里的命名作用域；只筛**文件与符号**两类，与上游只把 `ScopeChooserAction` 挂在 `TextSearchContributor` / `AbstractGotoSEContributor` 上一致）。**缺**：预定义作用域（本仓没有 `CustomScopesProvider`，见 `docs/class-parity-todo.md` §4）与 Swing 那一格 `ActionButtonWithText` 的 Ctrl+Alt+P 切换。 |
+| `ScopeSupporting` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/ScopeSupporting.java` | `[~]` | 支持作用域的动作接口。本仓的等价物是 `src/searchEverywhereScope.ts` 的 `filterByScope` 谓词 —— 传进 `searchEverywhereResults` 的第六个实参，只作用于文件/符号来源。 |
 | `SearchAdapter` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchAdapter.kt` | `[-]` | 搜索适配器：四个供给者的数据直接进 items，无需适配 |
 | `SearchEventsBuffer` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEventsBuffer.kt` | `[-]` | 搜索事件缓冲（打字节流）：本仓用 computed + 防抖直接实现，无事件缓冲类 |
 | `SearchEverywhereActions` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereActions.java` | `[-]` | 搜索框内的动作常量类：`src/components/SearchEverywhereDialog.vue` 直接绑键 |
@@ -380,7 +381,7 @@
 | `SearchEverywhereContributorWrapper` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereContributorWrapper.kt` | `[-]` | 贡献者包装（改权重/加过滤）：本仓的权重在 `rankingWeight` 一处算，无包装层 |
 | `SearchEverywhereCoroutineScopeService` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereCoroutineScopeService.kt` | `[-]` | 搜索的协程作用域：无协程层 |
 | `SearchEverywhereDataUtils` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereDataUtils.kt` | `[-]` | 搜索数据的工具方法（去重/截断）：去重与截断在 `searchEverywhereResults` 内联 |
-| `SearchEverywhereEmptyTextProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereEmptyTextProvider.kt` | `[ ]` | 无结果时的空态文案：上游按原因给不同提示（无结果/超时/被过滤），本仓空列表没有文案 |
+| `SearchEverywhereEmptyTextProvider` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereEmptyTextProvider.kt` | `[~]` | 无结果时的空态文案。**第九十一批已落**：`src/searchEverywhereEmpty.ts` 的 `searchEverywhereEmptyText` + `src/components/SearchEverywhereDialog.vue` 的空态块（主行「找不到任何内容」+ 用过选项时才有的「使用的搜索选项：」那一行 + 一条去工程内查找的出路）。分档规则照 `SearchEverywhereUI.java:1926-2011`：有 `SearchEverywhereEmptyTextProvider` 实现者的 tab（本树里只有 `TextSearchContributor.kt:281-300`，对应 All/Project）用实现者文案，其余走通用分支。**缺**：上游的多段 swing `StatusText`（本仓是一段结构化文本）。 |
 | `SearchEverywhereFeature` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFeature.kt` | `[x]` | feature 门控 + 预热那一层：`src/searchEverywhereHost.ts` 的 `SEARCH_EVERYWHERE_SYMBOL_MIN` 门槛 与两处防抖（符号 120ms / 文件刷新 200ms）即为等价行为 —— 上游用 feature flag 决定要不要预热，本仓数据都是本地同步的（文件清单、菜单表、运行配置表），预热没有可等的对象 |
 | `SearchEverywhereFiltersAction` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFiltersAction.java` | `[-]` | 过滤器动作（按类型筛选结果）：本仓用 tab 切档，不用过滤器按钮 |
 | `SearchEverywhereFiltersStatisticsCollector` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereFiltersStatisticsCollector.java` | `[-]` | 使用统计/遥测：本仓不采集遥测 ⇒ 无对应物 |
@@ -400,7 +401,7 @@
 | `SearchEverywherePreviewGenerator` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewGenerator.kt` | `[~]` | 预览生成：`src/searchEverywhereHost.ts` 的预览字段 + `src/components/SearchEverywhereDialog.vue` 的预览 pane；还差上游的多来源预览（符号 doc / diff / usage） |
 | `SearchEverywherePreviewPrimaryUsageFinder` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywherePreviewPrimaryUsageFinder.kt` | `[-]` | 预览的主用量查找：预内容就是那一条，无用量语义 |
 | `SearchEverywhereRemoteSupportServiceImpl` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereRemoteSupportServiceImpl.kt` | `[-]` | 远程开发（Gateway/remote dev）那套：本仓是纯本地单窗口宿主，无远程后端 ⇒ 无对应物 |
-| `SearchEverywhereReorderingService` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereReorderingService.kt` | `[ ]` | 结果重排服务（用户手动调顺序并记住）：本仓排序是纯分数，不接受用户调序 |
+| `SearchEverywhereReorderingService` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereReorderingService.kt` | `[-]` | 结果重排服务：**上游本树里只有 EP 定义、没有任何实现**（`intellij.platform.lang.impl.xml:240` 注册 `com.intellij.searchEverywhereReorderingService`，全树 grep 只有接口文件与一个消费点 `MixedSearchListModel.java`）。上一版把它记成"用户手动调顺序并记住"是错的 —— 那是插件才能提供的能力，CE 里没有。 |
 | `SearchEverywhereResultsNotifier` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereResultsNotifier.kt` | `[-]` | 结果通知器：同 `SearchListener` |
 | `SearchEverywhereTabsShortcutsUtils` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereTabsShortcutsUtils.kt` | `[-]` | tab 快捷键工具（数字键切 tab）：本仓 tab 用鼠标点击切换，无数字键快捷键 |
 | `SearchEverywhereToolbarField` | `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereToolbarField.kt` | `[~]` | `src/components/SearchEverywhereDialog.vue` 的输入框（`se-input` + 防抖 + Esc/Enter 键）；还差上游的 field 校验态与「无结果」空态文案（`SearchEverywhereEmptyTextProvider`） |
@@ -565,4 +566,8 @@
 | `ActionSystemScope` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/ActionSystemScope.kt` | `[-]` | 动作系统的 coroutine scope：无协程层 |
 | `package-info` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/package-info.java` | `[-]` | 包说明文件：非类，无行为 |
 
-> **四档合计**：`[x]` 12 + `[~]` 36 + `[ ]` 6 + `[-]` 263 = **317**
+> **四档合计**：`[x]` 12 + `[~]` 40 + `[ ]` 2 + `[-]` 263 = **317**
+>
+> **第九十一批的变化**：`[ ]` → `[~]` 四类（`ScopeChooserAction` / `ScopeSupporting` / `PreviewAction` /
+> `SearchEverywhereEmptyTextProvider`）；`[ ]` → `[-]` 一类（`SearchEverywhereReorderingService` ——
+> 复核发现**上游本树里只有 EP 定义、没有任何实现**，上一版记的"用户手动调顺序并记住"是错的）。

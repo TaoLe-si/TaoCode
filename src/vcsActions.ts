@@ -10,6 +10,8 @@ import { computed, nextTick, ref } from 'vue'
 import { request, type DiffRow, type GitAheadBehind, type GitBlame, type GitBlameLine } from './bridge'
 import { blameAnnotations, type BlameAnnotation } from './blameAnnotations'
 import { buildDiffRows, generateUnifiedDiff } from './diffText'
+// 「比较对象…」（上游 `CompareFilesAction` 的单文件分支）。
+import { SELECT_FILE_TO_COMPARE, defaultCompareSelection, LAST_USED_FILE_KEY } from './compareFiles'
 import { errorMessage } from './errors'
 import type { Tab } from './editorTab'
 
@@ -99,7 +101,9 @@ const NO_BLAME: BlameAnnotation[] = []
 function blameOf(path: string): BlameAnnotation[] {
   return blameEnabled.value && blamePath.value === path ? blameAnnotationsForPath.value : NO_BLAME
 }
-const clipboardDiff = ref<{ path: string; rows: DiffRow[]; unified: string } | null>(null)
+// `leftText`/`rightText` 一并留着：DiffView 要用它们按「忽略差异 / 行内高亮」两个档位重算
+// （上游 `TextDiffSettingsHolder.PlaceSettings` 的 `IGNORE_POLICY` + `HIGHLIGHT_POLICY`）。
+const clipboardDiff = ref<{ path: string; rows: DiffRow[]; unified: string; leftText: string; rightText: string } | null>(null)
 async function showBlame() {
   const path = activePath.value
   if (!isDesktop || !path) { notify('请在桌面端为当前文件使用「追溯」。', true); return }
@@ -111,6 +115,49 @@ async function showBlame() {
   try { blameLines.value = (await request<GitBlame>('git.blame', { path })).lines ?? [] }
   catch (error) { notify(errorMessage(error), true) }
 }
+/**
+ * 「比较对象…」（上游 `CompareFilesAction` 的单文件分支 → `getOtherFile`，`CompareFilesAction.java:152-171`）：
+ * 选一个文件跟当前缓冲区比。**记住上次用过的路径**（`two.files.diff.last.used.file`，项目级），
+ * 下次打开选择器默认定位到它。
+ *
+ * 差异渲染复用剪贴板对比那条通道（`clipboardDiff` + `DiffView`）—— 上游也是同一个 DiffViewer，
+ * 只是两条请求来源不同。
+ */
+async function compareWithFile() {
+  const tab = active.value
+  if (!tab || !isDesktop) return
+  try {
+    const remembered = readLastUsedComparePath()
+    const picked = await request<{ path: string | null }>('dialog.pickFile', {
+      title: SELECT_FILE_TO_COMPARE,
+      filters: '',
+      initial: defaultCompareSelection(remembered, tab.path),
+    })
+    if (!picked.path) return
+    writeLastUsedComparePath(picked.path)
+    const other = await request<{ content: string }>('file.read', { path: picked.path })
+    // 换行常量用 charCode 拼：源码里直接写转义写法会被工具链在部分路径上还原成真换行（本仓踩过）。
+    const nl = String.fromCharCode(10)
+    const currentLines = tab.content.split(nl)
+    const otherLines = other.content.split(nl)
+    clipboardDiff.value = {
+      path: `${tab.path} ↔ ${picked.path}`,
+      rows: buildDiffRows(currentLines, otherLines),
+      unified: generateUnifiedDiff(currentLines, otherLines),
+      leftText: tab.content, rightText: other.content,
+    }
+  } catch (error) { notify(errorMessage(error), true) }
+}
+
+/** 记忆键与读写（上游 `PropertiesComponent` 的项目级存放；本仓按工作区根存 localStorage）。 */
+function compareMemoryKey() { return `taocode.${LAST_USED_FILE_KEY}:${workspace.value?.root ?? ''}` }
+function readLastUsedComparePath(): string | null {
+  try { return localStorage.getItem(compareMemoryKey()) } catch { return null }
+}
+function writeLastUsedComparePath(path: string) {
+  try { localStorage.setItem(compareMemoryKey(), path) } catch { /* session-only */ }
+}
+
 async function compareWithClipboard() {
   const tab = active.value
   if (!tab) return
@@ -119,7 +166,7 @@ async function compareWithClipboard() {
     if (!clipText) { notify('剪贴板为空或非文本。', true); return }
     const currentLines = tab.content.split('\n')
     const clipLines = clipText.split('\n')
-    clipboardDiff.value = { path: tab.path, rows: buildDiffRows(currentLines, clipLines), unified: generateUnifiedDiff(currentLines, clipLines) }
+    clipboardDiff.value = { path: tab.path, rows: buildDiffRows(currentLines, clipLines), unified: generateUnifiedDiff(currentLines, clipLines), leftText: tab.content, rightText: clipText }
   } catch { notify('无法读取剪贴板。', true) }
 }
 // The Git menu drives the same bridge methods as the 源代码管理 tool window. Stash
@@ -183,7 +230,7 @@ async function gitMenuAction(method: 'git.push' | 'git.pull' | 'git.fetch' | 'gi
 }
   return {
     branchPopupOpen, openBranchPopup, onBranchAction, refreshTreeVersion, gitCompareWith, compareWithBranch,
-    blameLines, blamePath, blameEnabled, blameOf, clipboardDiff, showBlame, compareWithClipboard,
+    blameLines, blamePath, blameEnabled, blameOf, clipboardDiff, showBlame, compareWithClipboard, compareWithFile,
     updateProject, resetHeadDialog, pushWithConfirm, gitMenuAction,
   }
 }

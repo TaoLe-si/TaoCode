@@ -10,33 +10,106 @@
 // 这里保留 `computeLCS` 这个名字与 `{from,to}` 形状 —— 它是这个模块的既有对外契约。
 import type { DiffRow } from './bridge'
 import { alignLines } from './diffAlign.ts'
+import { comparisonKeys, DEFAULT_COMPARISON_POLICY, shouldTrimChunks, whitespaceOnlyDifference, type ComparisonPolicy } from './diffComparison.ts'
+import { smartLineMatch } from './diffSmartLines.ts'
+import { DEFAULT_HIGHLIGHT_POLICY, marksFor, type HighlightPolicy } from './diffWords.ts'
+
+/** `buildDiffRows` 的两个档位（上游 `TextDiffSettingsHolder.PlaceSettings` 的 `IGNORE_POLICY` + `HIGHLIGHT_POLICY`）。 */
+export interface DiffOptions {
+  /** 空白怎么算（上游 `IgnorePolicy` → `ComparisonPolicy`）。默认 `default` = 尾随空格算不同。 */
+  comparison?: ComparisonPolicy
+  /** 行内高亮档（上游 `HighlightPolicy`）。默认 `byWord`。 */
+  highlight?: HighlightPolicy
+}
 
 // Line-level diff rows shared by the clipboard compare and the save-conflict
 // preview (left/right aligned, change/delete/insert/equal kinds).
-export function buildDiffRows(beforeLines: string[], afterLines: string[]): DiffRow[] {
-  const lcs = computeLCS(beforeLines, afterLines)
+//
+// `options` 是本批新加的（默认值 = 上游默认：`IgnorePolicy.DEFAULT` + `HighlightPolicy.BY_WORD`），
+// 不传时行为与之前**逐字节相同** —— 三个调用点（`src/vcsActions.ts:122`、
+// `src/editorFileOps.ts:54`、`src/components/DiffView.vue` 的父级）因此一行都不用改。
+export function buildDiffRows(beforeLines: string[], afterLines: string[], options: DiffOptions = {}): DiffRow[] {
+  const comparison = options.comparison ?? DEFAULT_COMPARISON_POLICY
+  const highlight = options.highlight ?? DEFAULT_HIGHLIGHT_POLICY
+  // 对齐按**折过的**行做（上游同样如此：比的是 comparison policy 看到的东西），
+  // 但渲染与词级高亮用的是**原文**。
+  //
+  // 对齐用**两步比对**（上游 `ByLineRt.compareSmart` + `SmartLineChangeCorrector`，见
+  // `src/diffSmartLines.ts`）：先钉住"大行"（非空白字符 > 3 的行），再在两条大行之间的空隙里
+  // 做一次局部 LCS。全局 LCS 在并列最优时会随便挑一种配法，短行（括号/空行）就可能配错位置；
+  // 两步比对让大行的配对稳定下来（实测：`if (x) { / a(); / }` 那组里它会认"括号挪了"，
+  // 而 LCS 会认成"语句挪了"）。
+  //
+  // **保底一条**：上游在这之后还有 `optimizeLineChunks` 与 `expandRanges` /
+  // `correctChangesSecondStep` 两道修补，本仓没做 —— 所以这里加一条"配对数不许比普通 LCS 少"
+  // 的判据（少配一定更差，多配/同样多则取语义更好的那一种）。
+  const keysBefore = comparison === 'default' ? beforeLines : comparisonKeys(beforeLines, comparison)
+  const keysAfter = comparison === 'default' ? afterLines : comparisonKeys(afterLines, comparison)
+  const plain = comparison === 'default'
+    ? computeLCS(beforeLines, afterLines)
+    : alignLines(keysBefore, keysAfter)
+  const smart = smartLineMatch(keysBefore, keysAfter, beforeLines, afterLines)
+  const lcs = smart.length >= plain.length ? smart : plain
   const rows: DiffRow[] = []
   let bi = 0, ai = 0, li = 0
   while (bi < beforeLines.length || ai < afterLines.length) {
     if (li < lcs.length && bi < lcs[li].from && ai < lcs[li].to) {
-      rows.push({ kind: 'change', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
+      const left = { no: bi + 1, text: beforeLines[bi]! }
+      const right = { no: ai + 1, text: afterLines[ai]! }
+      const marks = marksFor(highlight, left.text, right.text)
+      const row: DiffRow = { kind: 'change', left, right }
+      if (marks.left.length) row.leftMarks = marks.left
+      if (marks.right.length) row.rightMarks = marks.right
+      rows.push(row)
       bi++; ai++
     } else if (li < lcs.length && bi < lcs[li].from) {
-      rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
+      rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi]! } })
       bi++
     } else if (li < lcs.length && ai < lcs[li].to) {
-      rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
+      rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai]! } })
       ai++
     } else if (li < lcs.length) {
-      rows.push({ kind: 'equal', left: { no: bi + 1, text: beforeLines[bi] }, right: { no: ai + 1, text: afterLines[ai] } })
+      rows.push({ kind: 'equal', left: { no: bi + 1, text: beforeLines[bi]! }, right: { no: ai + 1, text: afterLines[ai]! } })
       bi++; ai++; li++
     } else {
-      if (bi < beforeLines.length) rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi] } })
-      if (ai < afterLines.length) rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai] } })
+      if (bi < beforeLines.length) rows.push({ kind: 'delete', left: { no: bi + 1, text: beforeLines[bi]! } })
+      if (ai < afterLines.length) rows.push({ kind: 'insert', right: { no: ai + 1, text: afterLines[ai]! } })
       bi++; ai++
     }
   }
+  return shouldTrimChunks(comparison) ? trimChunkEdges(rows) : rows
+}
+
+/**
+ * 「忽略空格和空行」那一档多出来的一步：把**只差空白**的改动从每个改动块的首尾剪掉
+ * （上游 `IgnorePolicy.isShouldTrimChunks()` → `ComparisonManagerImpl.processAdjoining`
+ * 的 `trim && policy == IGNORE_WHITESPACES` 分支：从前往后、从后往前各剪一轮，
+ * 遇到"真的不等"的行就停）。
+ *
+ * 剪掉的行**按未更改渲染**（上游是把那个 fragment 整个丢掉，那几行就落回 unchanged）：
+ * 底色与行内标记都不再画，否则用户看到的还是"这块改了"，只是少了几个字。
+ */
+function trimChunkEdges(rows: DiffRow[]): DiffRow[] {
+  const isChange = (row: DiffRow) => row.kind !== 'equal'
+  for (let start = 0; start < rows.length;) {
+    if (!isChange(rows[start]!)) { ++start; continue }
+    let end = start
+    while (end < rows.length && isChange(rows[end]!)) ++end
+    let from = start
+    let to = end
+    while (from < to && whitespaceOnlyDifference(rows[from]!.left?.text, rows[from]!.right?.text)) ++from
+    while (to > from && whitespaceOnlyDifference(rows[to - 1]!.left?.text, rows[to - 1]!.right?.text)) --to
+    for (let i = start; i < from; i++) rows[i] = asUnchanged(rows[i]!)
+    for (let i = to; i < end; i++) rows[i] = asUnchanged(rows[i]!)
+    start = end
+  }
   return rows
+}
+
+/** 一行"其实没改"的渲染形态：kind 归位、行内标记清掉。 */
+function asUnchanged(row: DiffRow): DiffRow {
+  const next: DiffRow = { kind: 'equal', left: row.left, right: row.right }
+  return next
 }
 /**
  * 最长公共子序列：返回按下标升序的 `{from,to}` 配对（`from` 落在 before、`to` 落在 after）。

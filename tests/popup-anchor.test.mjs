@@ -62,7 +62,9 @@ test('四张弹层都接上了按实测尺寸的落位，没有一个还写死�
   assert.doesNotMatch(app, /viewport\.width - \d+\)px`/,
     'App.vue 里还有按行数猜宽度的 Math.min(x, viewport.width - N) 夹取')
   assert.ok(app.includes('<AnchoredMenu :x="treeMenu.x" :y="treeMenu.y"'), '项目树右键菜单没走 AnchoredMenu')
-  assert.ok(app.includes('<AnchoredMenu :x="tabMenu.x" :y="tabMenu.y"'), '标签页右键菜单没走 AnchoredMenu')
+  // 标签页右键菜单 2026-10-04 搬进了 src/components/TabContextMenu.vue —— 它内部仍用 AnchoredMenu（同一口径）。
+  const tabsMenu = read('src/components/TabContextMenu.vue')
+  assert.ok(tabsMenu.includes('<AnchoredMenu :x="x" :y="y"'), '标签页右键菜单没走 AnchoredMenu')
 
   const editor = read('src/components/EditorPopupMenu.vue')
   assert.ok(editor.includes('usePopupAnchor'), '编辑器菜单没接 usePopupAnchor')

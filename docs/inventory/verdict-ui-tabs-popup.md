@@ -32,25 +32,25 @@
 | `DragHelper.java`（369L，JC） | `[~]` | TaoCode 用 HTML5 DnD：重排 `[x]`、拖到编辑区分屏 `[x]`（本轮）；IDEA 的"拖出窗口成新 frame"=`[-]`（单窗口架构） |
 | `JBTabsImpl.kt`（3896L） | `[~]` | Swing 组件本体 `[-]`；其**行为**（选中、重排、显示/隐藏策略、`selectNextTab`、`blink`）部分已在 TaoCode，`blink`/`more popup` 缺 |
 | `JBEditorTabs.kt`（81L） | `[-]` | Swing 门面 |
-| `LayoutPassInfo.java`（39L） | `[ ]` | 布局通过程的数据持有者；与 `SingleRowLayout` 一起才有意义 |
+| `LayoutPassInfo.java`（39L） | `[-]` | 布局通过程的数据持有者（Swing 抽象）。本仓两个布局族各自返回自己的结果对象（`TabStripLayout` / `MultiRowLayout`），没有共同的 Swing 通过程基类。 |
 | `MorePopupAware.java`（14L） | `[ ]` | `hasMorePopup()` ——"被挤掉的标签进 `…` 下拉"这一行为的接口；TaoCode 无标签溢出概念 |
 | `ShapeTransform.java`（358L） | `[-]` | Swing2D 形状几何（绘制用） |
 | `TabLabel.kt`（928L，G2D/JC/A11Y/ACTGRP） | `[~]` | Swing 标签组件 `[-]`；关闭按钮悬停态是可移植行为。**更正（2026-09-29 核对原文）**：本表原写的「双击就地重命名标签」是**误读** —— `TabLabel.kt:151-153` 的 `mouseClicked` 只做 `handlePopup(e)`，整个 `ui/tabs` 包里搜不到 rename 字样与任何文本域，**IDEA 没有「就地重命名标签」这个行为**。双击的真语义在 `EditorTabbedContainer.kt:348-361`：① 预览标签晋升常驻（`:349-356`，随后 return）；② 按 `editor.maximize.on.double.click`（`intellij.platform.ide.impl.xml:1511`，默认 true）执行「隐藏全部工具窗口 / 恢复窗口」。两条**已落**（见 `docs/ui-placement-audit.md` §AC） |
 | `TabLayout.java`（79L，REG） | `[ ]` | 布局基类（`isScrollable`、`morePopup`、`lastSingularLayoutPass`） |
 | `TabSideSplitter.java`（96L，JC） | `[ ]` | 标签条"侧边组件"与标签区的分隔；依赖 `JBTabsPresentation.sideComponent` |
 | `UIThemeCustomization.kt`（46L） | `[-]` | 主题绘制定制钩子 |
-| `CompressibleMultiRowLayout.kt`（24L） | `[ ]` | 多行布局的**压缩**策略（标签变窄）。上游在"非单行 + 未开 `hideTabsIfNeeded`"时用它（`EditorTabbedContainer.kt:667`）；本仓多行只换行、不在多行里压宽标签，如实未做 |
-| `CompressibleTabsRow.kt`（280L） | `[ ]` | 压缩行的实现 |
-| `MultiRowLayout.kt`（196L） | `[ ]` | 多行布局基类 + 行分配算法 |
-| `MultiRowPassInfo.kt`（31L） | `[ ]` | 多行布局通过程数据 |
-| `ScrollableMultiRowLayout.kt`（66L） | `[ ]` | 多行 + 滚动。上游在"非单行 + 开 `hideTabsIfNeeded`"时用它（`EditorTabbedContainer.kt:662-666`，且**强制** `showPinnedTabsSeparately = true`）；本仓多行不做滚动条，如实未做 |
-| `ScrollableTabsRow.kt`（49L） | `[ ]` | 可滚动行实现 |
-| `SimpleTabsRow.kt`（21L） / `TabsRow.kt`（32L） | `[ ]` | 行模型的基类/简单实现 |
+| `CompressibleMultiRowLayout.kt`（24L） | `[~]` | 多行布局的**压缩**策略（标签变窄）。**第九十批已落**：`src/tabStripLayout.ts` 的 `layoutCompressibleMultiRow` + `compressRowWidths` / `decreaseMaxLengths`（照 `CompressibleTabsRow.kt:127-166` 的"从最长的开始降"），入口在 `src/tabStripView.ts` 的排法分派（`EditorTabbedContainer.kt:667`）。**未落**：上游的 `decreaseInsets` 逐档缩 insets（Swing 装饰的中间量，本仓量不出）用一条常量下限代替。 |
+| `CompressibleTabsRow.kt`（280L） | `[~]` | 压缩行的实现。**已落**：`src/tabStripLayout.ts` 的 `compressRowWidths`（放得下原样、超了才压）；**未落** `decreaseInsets` 的 insets 逐档收缩与 `CachedDecoration` 缓存（都是 Swing 装饰概念）。 |
+| `MultiRowLayout.kt`（196L） | `[~]` | 多行布局基类 + 行分配算法。**已落**：`src/tabStripLayout.ts` 的 `layoutMultiRow`（换行排）/ `layoutCompressibleMultiRow`（挤压排）/ `layoutScrollableMultiRow`（滚动排），三支由 `EditorTabbedContainer.kt:657-672` 的 `createRowLayout` 分派，分行规则 = `splitPinnedRow`（照 `splitToPinnedUnpinned:105-120`）。**未落**：`getRowY` 的 bottom 位置（本仓标签条只在顶部）与 `layoutTabComponent`（没有标签侧组件）。 |
+| `MultiRowPassInfo.kt`（31L） | `[-]` | 多行布局通过程数据（`MultiRowPassInfo`）。本仓的等价物是 `src/tabStripLayout.ts` 各 `layout*Row` 的返回值（`MultiRowLayout` 接口），没有单独的 Swing 通过程对象。 |
+| `ScrollableMultiRowLayout.kt`（66L） | `[~]` | 多行 + 滚动。**第九十批已落**：`src/tabStripLayout.ts` 的 `layoutScrollableMultiRow` / `scrollableRow`（照 `ScrollableTabsRow.kt:22-49`：超了给「…」留宽、右边缘裁切、`dropped` 记裁掉的），滚轮经 `src/tabStripView.ts` 的 `onTabStripWheel` 驱动。**未落**：`isScrollBarAdjusting` / `recentlyActive` 两个守卫（Swing 事件态）。 |
+| `ScrollableTabsRow.kt`（49L） | `[~]` | 可滚动行实现。**已落**：`src/tabStripLayout.ts` 的 `scrollableRow`（含 `len = max(0, x + tabsLength - curX)` 的裁切与 `<= |gap|` 归零那一行）。 |
+| `SimpleTabsRow.kt`（21L） / `TabsRow.kt`（32L） | `[~]` | 行模型的基类/简单实现。**已落**：`src/tabStripLayout.ts` 的 `layoutMultiRow` 就是 `SimpleTabsRow` 那一支（自然宽度、不压不滚）；基类没有类层次 —— 三种排法是三条纯函数，由 `src/tabStripView.ts` 一处按设置分派。 |
 | `WrapMultiRowLayout.kt`（66L） | `[~]` | 多行换行策略。**已落**：本仓 `src/tabStripLayout.ts` 的 `layoutMultiRow`（按宽度分行、第一行扣掉侧工具条）＋本批补上的**固定标签单独成排**（`splitPinnedRow` / `showsPinnedTabsSeparately`，见 `docs/ui-placement-audit.md` §AH）。**未落**：上游 `splitToPinnedUnpinned:111-114` 那条"下一项是拖放占位就并入固定排"—— 本仓多行布局没有拖放占位模型 |
-| `ScrollableSingleRowLayout.java`（183L） | `[ ]` | 单行 + 滚动按钮（`scrollableTabs` 开启时的模式） |
-| `SingleRowLayout.java`（337L） | `[ ]` | **单行压缩布局本体**：标签宽度压缩到最小宽 + 溢出标签进 `…`；TaoCode 标签条完全不处理溢出（`div.editor-tabs` 无任何策略）→ 本轮 B1 的头号缺口 |
-| `SingleRowLayoutStrategy.java`（595L，JC/PT） | `[ ]` | 压缩/滚动的具体位置计算（含 `MorePopupAware` 驱动） |
-| `SingleRowPassInfo.java`（85L，JC） | `[ ]` | 单行布局通过程数据 |
+| `ScrollableSingleRowLayout.java`（183L） | `[~]` | 单行 + 滚动按钮。**已落**：`src/tabStripLayout.ts` 的 `layoutSingleRow` + `scrollUnitsToShowTab`（选中项滚进可视区）+ `src/tabStripView.ts` 的 `onTabStripWheel` / `scrollTabStrip`。本仓按用户实测（2026-09-29）取"滚轮"而不画「…」按钮，`moreButtonWidth: 0`。 |
+| `SingleRowLayout.java`（337L） | `[~]` | **单行压缩布局本体**。这一行上一版写的是"TaoCode 标签条完全不处理溢出 → 本轮 B1 的头号缺口"，**已作废**：`src/tabStripLayout.ts` 的 `layoutSingleRow` 逐行照 `applyTabLayout:119-138` 实现（裁第一个放不下的 + 其余归零），另有 `src/tabStripView.ts` 的滚轮滚动与选中项自动滚入。 |
+| `SingleRowLayoutStrategy.java`（595L，JC/PT） | `[~]` | 压缩/滚动的具体位置计算。**已落**：`src/tabStripLayout.ts` 的 `toFitLength` / `preferredTabWidth` / `layoutSingleRow`（`getToFitLength` 公式、50px 下限只对编辑器标签生效、gap 的收费规则、`getMoreRect` 的右对齐都在注释里逐条对过）。**未落**：`MorePopupAware` 驱动的 `…` 弹层（本仓用滚轮代替，见 §E）。 |
+| `SingleRowPassInfo.java`（85L，JC） | `[-]` | 单行布局通过程数据。本仓 `layoutSingleRow` 的返回值（`TabStripLayout`）就是它，没有单独的 Swing 通过程对象。 |
 | `WindowTabsLayout.java`（72L） | `[ ]` | 窗口级（多 frame）标签布局 |
 | `TableLayout.java`（486L）/ `TablePassInfo.java`（70L）/ `TableRow.java`（24L） | `[-]` | 供 `TabbedPaneImpl`（Swing `JTabbedPane` 替代品，多窗口/表格型）使用；TaoCode 无该载体 |
 | `TabTheme.kt`（142L） | `[~]` | 标签高度/内边距/下划线厚度等**度量常量**；TaoCode 的 CSS 里零散表达，未建模为一份可查询的度量 → 压缩算法需要它 |
@@ -101,11 +101,20 @@
 
 | 档 | 数量 |
 |---|---:|
-| `[x]`（本轮已移植） | 1（`TabsUtil` 的几何部分） |
-| `[~]` 部分 | 20 |
-| `[ ]` 未移植（TODO） | 56 |
-| `[-]` 不适用 | 30 |
+| `[x]`（已移植） | 1（`TabsUtil` 的几何部分） |
+| `[~]` 部分 | 34 |
+| `[ ]` 未移植（TODO） | 39 |
+| `[-]` 不适用 | 33 |
 | 合计 | 107 |
+
+**第九十三批的变化**（弹层详情面板）：`[ ]` → `[~]` 四类（`DetailController` / `DetailView` /
+`DetailViewImpl` / `ItemWrapperListRenderer`）、`[ ]` → `[-]` 一类（`MasterController`）。
+
+**第九十批的变化**（多行布局的另两种排法）：`[ ]` → `[~]` 十类
+（`SingleRowLayout` / `SingleRowLayoutStrategy` / `ScrollableSingleRowLayout` / `MultiRowLayout` /
+`CompressibleMultiRowLayout` / `CompressibleTabsRow` / `ScrollableMultiRowLayout` / `ScrollableTabsRow` /
+`SimpleTabsRow` / `TabsRow`）；`[ ]` → `[-]` 三类（`LayoutPassInfo` / `SingleRowPassInfo` /
+`MultiRowPassInfo` —— 三个都是 Swing 通过程数据对象）。另有四个 `[~]` 的理由被重写。
 
 ## E. 本轮实现（B1-a）
 
@@ -141,19 +150,22 @@
 | `FileColorModelStorageManager.kt` | `[-]` | 跨 team/user 的服务注册（`PerTeamFileColorModelStorageManager` / `PerUserFileColorModelStorageManager`），单隐式模块下无对应概念 |
 | `FileColorsUsagesCollector.kt` | `[-]` | 只为设置搜索（`FileColorsSearchOptionContributor`）收集"设置项在哪用过"；本仓设置搜索按 `keywords` 匹配，不查使用记录 |
 
-### 族二 · 弹层详情面板（`ui/popup/util`，7 类）—— 未移植，可移植
+### 族二 · 弹层详情面板（`ui/popup/util`，7 类）—— **第九十三批已落**
 
-IDEA 的"弹层右侧详情区"：列表在左、选中项的详情在右（`DetailController` 管尺寸与折叠、
-`MasterController` 管两栏、列表项经 `ItemWrapper` 补一个自定义 renderer）。
+IDEA 的"弹层右侧详情区"：列表在左、选中项的详情在右。
+**这一族在整棵上游树里只有一个真实消费者**：`BreakpointsDialog`（断点对话框）——
+`BreakpointsDialog.java` 与 `BreakpointChooser.java`，其余引用都在包内部。
+所以本仓不建一个没人用的通用框架，而是把它的行为落到同一个消费点上：
+`查看断点…`（Ctrl+Shift+F8，`ViewBreakpointsAction`）打开 {BD}，数据与规则在 {PD}。
 
 | 类 | 判定 | 依据 |
 |---|---|---|
-| `DetailController.java` | `[ ]` | 两栏比例、展开/折叠、`JBSplitter` —— 是**布局行为**，Web 下可移植（CSS grid + 拖拽条） |
-| `MasterController.kt` | `[ ]` | 同上，详情侧的展开动画与滚动同步 |
-| `DetailView.java` / `DetailViewImpl.java` | `[ ]` | 详情区本体（`JComponent` 门面 → 换成 DOM） |
-| `ItemWrapper.java` | `[-]` | 抽象基类，签名是 `setupRenderer(ColoredListCellRenderer, …)` —— Swing 渲染器契约；**它承载的能力**归到下面那行 |
-| `ItemWrapperListRenderer.java` | `[ ]` | 列表项额外挂一个详情按钮/图标的渲染 —— 可移植 |
-| `SplitterItem.java` | `[-]` | `JBSplitter` 的行内实现细节 |
+| `DetailController.java` | `[~]` | 详情面板的控制器。**已落**：{PD} 的 `elidePath`（照 `getTitle2Text`，`DetailController.java:38-49`：从第 4 个字符之后找分隔符、前缀 `...`、**找不到就原样返回**）与 `detailPaneState`（照 `doUpdateDetailView` `:60-80`：恰好选一项才出详情，否则清空并把路径标签置成空格）。**缺**：上游那个 `Alarm` 的延迟刷新（本仓是 computed，没有"稍后合并更新"的必要） |
+| `MasterController.kt` | `[-]` | 主列表控制器接口（`getSelectedItems()` + `getPathLabel()`）。本仓的等价物是 {BD} 的 `selectedId` 与 `pane.pathLabel` 两个 computed —— 单窗口单列表，不值得再抽一层接口 |
+| `DetailView.java` / `DetailViewImpl.java` | `[~]` | 详情区本体。**已落**：`PreviewState`/`previewStateOf`（照 `DetailView.java:36-58` 的 `PreviewEditorState`：行 < 0 ⇒ 没有导航位置）、`NOTHING_TO_SHOW`（`IdeCoreBundle.properties:143`，中文包 :91），渲染在 {BD} 的右栏。**缺**：上游嵌的是真编辑器（`EditorFactory.createViewer`），本仓用只读代码块；`getPropertiesPanel` 没有要展示的属性表 |
+| `ItemWrapper.java` | `[-]` | 抽象基类，签名是 `setupRenderer(ColoredListCellRenderer, …)` —— Swing 渲染器契约。它承载的能力归到下面那行 |
+| `ItemWrapperListRenderer.java` | `[~]` | 列表项渲染。**已落**：{BD} 的 `.breakpoints-row`（选中态 + 键盘上下移动，照 `JList` 的选中行为）。**缺**：`myAccessory`（行尾的附属组件）与 `setupRenderer` 的颜色分段 —— 本仓的列表是单列 |
+| `SplitterItem.java` | `[-]` | `JBSplitter` 的行内实现细节。本仓的两栏是 CSS grid，没有 splitter 条目这个概念 |
 
 ### 族三 · 弹层位置与内容刷新（`ui/popup`，3 类）—— 部分可移植
 
@@ -166,3 +178,72 @@ IDEA 的"弹层右侧详情区"：列表在左、选中项的详情在右（`Det
 **这一族的真实落点**：`PopupUpdateProcessor` 那条 `[~]` 是本族唯一有用户可感差异的缺口 ——
 「弹层开着时数据变了要自己更新」对 Search Everywhere 尤其明显（改了文件、作用域配置变了，
 弹层还是旧快照）。可移植成一个 `while open: 监听数据源 → 重算 → 原地刷新` 的通道。
+## 第九十批实现（B1-g）：挤压排与滚动排（`EditorTabbedContainer.createRowLayout` 的另两支）
+
+上游那一处分派是**唯一**的（`EditorTabbedContainer.kt:657-672`）：
+
+```
+if (!isSingleRow || (isHorizontalTabs && (showPinnedTabsSeparately() || !hideTabsIfNeeded))) {
+  !isSingleRow                 -> WrapMultiRowLayout          （换行；本仓原有的 layoutMultiRow）
+  UISettings.hideTabsIfNeeded  -> ScrollableMultiRowLayout    （滚动排，右边留「…」）
+  else                         -> CompressibleMultiRowLayout  （挤压排，只压不换行）
+} else                           ScrollableSingleRowLayout    （单行裁切 + 滚轮）
+```
+
+`UISettingsState.kt:125` `var hideTabsIfNeeded: Boolean by property(true)` ⇒ **默认滚动**。
+所以挤压与滚动这两排都发生在**"一行"这一侧**，`singleRow()` 为假时永远是换行排 ——
+这一点本批第一版写错过（放到了多行那一支），真机点"挤压"没反应才改回来。
+
+落点：`src/tabStripLayout.ts` 的 `layoutCompressibleMultiRow` / `layoutScrollableMultiRow`
+（纯函数）+ `src/tabStripView.ts` 的分派与滚轮/偏移接线 + `src/components/EditorTabsSettingsPage.vue`
+的那两组单选（文案取随 IDE 发货的中文包 `ApplicationBundle.properties:133/680-685`）。
+
+### 真机抓到的两个缺陷（都是只有真机能发现的）
+
+1. **绝对定位元素用 `width:auto` 量到的是 shrink-to-fit，不是自然宽。**
+   多行那两族把标签写成 `position: absolute`，而绝对定位的 `width:auto` 是"包含块宽 − left"。
+   在条尾的标签因此量到一丁点宽（实测 left=665、条宽 702 时量到 37，而不是真正的 171）。
+   这个被缩小的值进了缓存，之后每次重算都按"自然宽本来就这么小"算，标签永远回不到原宽 ——
+   现象是**窗口拉宽也不恢复**。修法：测量期间连 `position/left/top` 一起摘掉。
+   （`measureTabNaturalWidth` 的注释里写明了这条。）
+2. **ResizeObserver 只在第一次调用时登记对象。** 原写法 `if (tabStripObserver) return` 让
+   观察者盯着第一个标签条元素；元素被替换过（分栏/切工作区/模板重挂）之后，窗口变化不再触发重算。
+   改成每次重算都 `observe()` 一遍（对同一元素是幂等的）。
+
+第一个是"值错了"，第二个是"根本不跑"—— 两个都只有把窗口拉宽才显形，单测看不见。
+
+### 判据
+
+`tests/tab-strip-rows.test.mjs` 15 条：挤压排（从最长的开始降、下限、不换行、固定排单独一条）、
+滚动排（放不下才留「…」、右边缘裁切与 `dropped`、偏移夹取、固定排是挤压的）、以及三处接线。
+另修 `tests/tab-strip-wrap.test.mjs` / `tests/tab-strip-pinned-row.test.mjs` 里读设置页的那几条
+（那一页已拆成 `EditorTabsSettingsPage.vue`）。
+
+### 未落（如实）
+
+- `decreaseInsets` 的 insets 逐档收缩与 `CachedDecoration`：Swing 装饰的中间量，本仓用一条常量下限代替。
+- `ScrollableMultiRowLayout` 的 `isScrollBarAdjusting` / `recentlyActive` 守卫：Swing 事件态。
+- `MultiRowLayout.getRowY` 的 bottom 位置：本仓标签条只在顶部。
+
+## 第九十三批实现（B1-h）：弹层的主从详情面板 —— 落到它唯一的真实消费者上
+
+上游那一族（`platform/lang-impl/src/com/intellij/ui/popup/util/`）在**整棵源码树里只有一个
+真实消费者**：`BreakpointsDialog`（`BreakpointsDialog.java` + `BreakpointChooser.java`，
+其余引用都在包内部）。所以本仓不建通用框架，而是照上游把那套行为落到同一个消费点上：
+
+- `查看断点…`（Ctrl+Shift+F8，`ViewBreakpointsAction`）打开的**不再是"跳去调试工具窗口"**，
+  而是真对话框 `src/components/BreakpointsDialog.vue`；
+- 纯规则在 `src/popupDetail.ts`：`elidePath`（`getTitle2Text`，`:38-49`）、
+  `detailPaneState`（`doUpdateDetailView`，`:60-80`，"恰好选一项才出详情"）、
+  `PreviewState`/`previewStateOf`（`DetailView.java:36-58`）、
+  `NOTHING_TO_SHOW`（`IdeCoreBundle.properties:143`，中文包 :91 =「没有要显示的内容」）。
+
+**写测试时抓到的一个真缺陷**：断点列表原来按 `path`（尾部带行号）做字典序排，
+于是第 10 行排到第 9 行前面。改成"先按文件路径、再按行号**数值**"。
+
+三处如实差异：① 上游详情嵌的是真编辑器，本仓用只读代码块；
+② 上游列表按 文件/行/条件 分列，本仓单列（条件在详情里）；③ `MasterController` 判 `[-]`（单列表不值得再抽接口）。
+
+判据 `tests/popup-detail.test.mjs` 19 条。真机取证：`查找操作` 搜「查看断点」执行 ⇒
+对话框标题「断点（0）」、路径标签是单个空格、正文「没有要显示的内容」——
+与上游"空选时清空并把路径标签置空"逐条对上。

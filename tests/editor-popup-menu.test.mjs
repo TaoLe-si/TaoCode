@@ -31,6 +31,8 @@ test('引用顺序照 PlatformActions.xml:857-878 与各处 add-to-group', () =>
     'popup:FoldingGroup',
     'rule',
     'action:tools.externalTools',                          // ExternalToolsGroup（before Compare…）
+    // CompareActions 组（PlatformActions.xml:562-568）：PairFileActions 在前、剪贴板那条在后。
+    'action:code.compareWith',                             // CompareTwoFiles（本仓是单文件分支：比较对象…）
     'action:code.compareClipboard',                        // CompareClipboardWithSelection
     'action:gradle.link',                                  // Gradle.ImportExternalProject（anchor=last）
   ])

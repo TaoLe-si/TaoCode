@@ -98,7 +98,8 @@ test('装配：App.vue 的勾选清单走注册表，且工具栏/状态栏那�
   }
   // 每个真工厂都要写出上游 id，否则审计对照与门控无从核对。
   const lines = registry.split('\n').filter(line => /^\s*\{ id: '.+', .*factory: true/.test(line))
-  assert.equal(lines.length, 11, `真工厂应有 11 条，实为 ${lines.length}`)
+  // 第九十八批加了 `VfsRefresh`（上游 `VfsRefreshIndicatorWidgetFactory`）⇒ 11 → 12。
+  assert.equal(lines.length, 12, `真工厂应有 12 条，实为 ${lines.length}`)
   for (const line of lines) assert.match(line, /upstreamId: '[^']+'/, `缺 upstreamId：${line.trim()}`)
 })
 

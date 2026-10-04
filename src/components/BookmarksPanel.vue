@@ -16,6 +16,9 @@ import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } fro
 import type { Bookmark as BookmarkEntry } from '../bridge'
 import { bookmarkDescription, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
+// 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`）：文案取中文包。
+import { SORT_GROUP_LABEL } from '../bookmarks'
+import { ArrowDownUp } from 'lucide-vue-next'
 import { addBookmarkToNamedList, confirmDeleteList, listDialog, namedListNames, openCreateListDialog, panelLists, runWithChosenList } from '../bookmarkListActions.ts'
 import { iconSize } from '../uiIcons'
 
@@ -30,7 +33,7 @@ const emit = defineEmits<{
   bookmarkTabs: []
   /** 右键菜单里的「编辑描述」：走宿主的那个对话框（`EditBookmarkAction`）。 */
   edit: [entry: BookmarkEntry]
-}>()
+ sortGroup: [path: string]}>()
 
 const gearOpen = ref(false)
 const cursor = ref('')
@@ -166,6 +169,9 @@ function onKeydown(event: KeyboardEvent) {
           <span v-if="fileBookmarks.get(group.path)?.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic }}</span>
           <button v-if="fileBookmarks.get(group.path)" class="icon-button" title="移除书签" :aria-label="`移除书签 ${group.path}`" @click="emit('remove', fileBookmarks.get(group.path)!)"><X :size="iconSize.menu" /></button>
           <span v-else class="bookmark-group-count">{{ group.entries.length }}</span>
+          <!-- 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`，组节点的右键动作）：
+               文案取随 IDE 发货的中文包 `ActionsBundle.properties:76`。只在这一组 ≥ 2 条时才有意义。 -->
+          <button v-if="group.entries.length > 1" class="icon-button" :title="SORT_GROUP_LABEL" :aria-label="`${SORT_GROUP_LABEL} ${group.path}`" @click="emit('sortGroup', group.path)"><ArrowDownUp :size="iconSize.dense" /></button>
         </div>
         <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }" @contextmenu.prevent.stop="openRowMenu($event, entry)">
           <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"

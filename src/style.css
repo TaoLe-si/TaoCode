@@ -469,7 +469,39 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .editor-tabs.tabs-wrapped .tab-toolbar { position: absolute; top: 0; right: 0; height: var(--tab-strip-row); margin-left: 0; }
 .editor-tabs .file-tab { overflow: hidden; flex: 0 0 auto; }
 .editor-tabs .file-tab .tab-select { min-width: 0; }
-.code-editor { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.code-editor { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* 查找栏与编辑器是同一根 div 里的上下两块（CodeMirror 把 .cm-editor 挂进根容器），
+   所以根成了列向 flex，编辑器占满剩余高度。 */
+.code-editor > .cm-editor { flex: 1 1 auto; min-height: 0; }
+/* 编辑器内查找栏（上游 `SearchReplaceComponent`，由 `EditorSearchSession` 驱动 —— 不是工程内的
+   `FindPopupPanel`）。紧凑面板：字段无边框、聚焦才画圈；开关是图标按钮，选中 = 主题色。
+   行高用 --ctrl-height-sm，与全仓控件同一档（紧凑模式跟着收）。 */
+.editor-find-bar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px; padding: 3px var(--space-2); border-bottom: 1px solid var(--line-strong); background: var(--panel); }
+.find-row { display: flex; align-items: center; gap: 2px; min-height: var(--ctrl-height-sm); }
+.find-icon { display: inline-flex; align-items: center; padding: 0 2px; color: var(--muted); }
+.find-field-wrap { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
+.find-field { flex: 1 1 auto; min-width: 0; height: var(--ctrl-height-sm); padding: 0 var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px var(--font-ui); }
+.find-field:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* 坏正则 = 输入框画红（上游 `PatternUtil` 报错的等价物）。 */
+.find-field.invalid { border-color: var(--error); background: var(--error-bg); }
+.find-status { flex: 0 0 auto; min-width: 44px; padding: 0 var(--space-1); text-align: right; color: var(--muted); font: 11px var(--font-mono); }
+.find-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); padding: 0; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); }
+.find-icon-button:hover { background: var(--hover); color: var(--bright); }
+.find-icon-button.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.find-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); padding: 0; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); }
+.find-toggle:hover { background: var(--hover); color: var(--bright); }
+.find-toggle.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.find-sep { flex: 0 0 auto; width: 1px; height: 16px; margin: 0 var(--space-1); background: var(--line-strong); }
+/* 合并冲突导航条（上游 `MergeThreesideViewer` 顶部那条工具带的落点）。
+   与查找栏同高同一档控件，贴在编辑器上方、有冲突时才在。 */
+.merge-bar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-1); min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border-bottom: 1px solid var(--line-strong); background: var(--panel); }
+.merge-bar-title { flex: 0 0 auto; color: var(--text); font: 12px var(--font-ui); }
+.merge-bar-count { flex: 0 0 auto; min-width: 34px; color: var(--muted); font: 11px var(--font-mono); }
+.merge-bar-action { flex: 0 0 auto; height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent; color: var(--text); font: 12px var(--font-ui); }
+.merge-bar-action:hover { background: var(--hover); color: var(--bright); }
+.find-history { position: absolute; top: calc(var(--ctrl-height-sm) + 2px); left: 0; right: 0; z-index: 60; max-height: 220px; overflow: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--radius-sm); background: var(--elevated); box-shadow: var(--popup-shadow); }
+.find-history-row { width: 100%; font: 12px var(--font-mono); }
+.find-replace-row .find-field { font-family: var(--font-mono); }
 /* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
    above the caret line, dismissed by the next key, a text change or a scroll. */
 .editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }

@@ -56,7 +56,7 @@ test('设置键按上游默认 true 落三处（类型/默认、原生 schema、
   assert.match(model, /maximizeEditorOnTabDoubleClick: boolean;/, '缺类型声明')
   assert.match(read('native/settings_schema.cpp'), /\{"maximizeEditorOnTabDoubleClick", true\}/, '原生默认值没登记')
   assert.match(read('native/settings_schema.hpp'), /"maximizeEditorOnTabDoubleClick",/, '原生布尔键表没登记')
-  assert.match(read('src/bridge.ts'), /key === 'maximizeEditorOnTabDoubleClick'/, 'bridge 白名单没放行')
+  assert.match(read('src/previewSettings.ts'), /key === 'maximizeEditorOnTabDoubleClick'/, '预览态白名单没放行')
 })
 
 test('判决表里那条"就地重命名"的误读要被纠正（不是删掉不提）', () => {

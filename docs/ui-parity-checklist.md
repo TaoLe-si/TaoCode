@@ -1598,7 +1598,31 @@ general 那份只为不破坏已存盘的旧 state。
 - 截图：`build/ui-menu-fixed.png`（齿轮菜单左对齐列表）、`build/ui-statusbar.png`（状态栏本体）、
   `build/ui-statusbar-menu.png`（组件菜单翻到锚点上方，16 行字首齐平）。`build/` 是 gitignored 的，截图不入库。
 
-### 六、门禁（`tests/ui-icons.test.mjs` 16 条 + `tests/settings-keys-parity.test.mjs` 5 条 + `tests/menu-placement.test.mjs` 8 条）
+### 六、真机取证（保存冲突那条通道，`editorFileOps.ts:54` → `buildDiffRows`）
+
+探针：草稿工程里放一份 6 行的 `taocode-diff-align.txt`，用「转到文件…」(`Ctrl+Shift+N`) 打开，
+往缓冲区插两行让它变脏、同时把磁盘上的括号挪到语句**前面**，`Ctrl+S` ⇒ 保存冲突 ⇒ 「查看差异」。
+真机上读到的行（`.diff-line` 的类名 + 两侧格子文本）：
+
+```
+insert  (右侧) # dirty
+insert  (右侧) # dirty
+equal   if (x) {   ↔ if (x) {
+insert  (右侧) }
+equal     a();     ↔   a();
+delete  (左侧) }
+equal   if (y) {   ↔ if (y) {
+equal     b();     ↔   b();
+equal   }          ↔ }
+```
+
+正是两步比对要的结果：**两条大行（`a();` / `b();`）是相等的行，动的是括号那条短行**。
+（同样的输入交给普通 LCS，会把 `a();` 判成删+增 —— 那才是"假的改动"。）
+
+取证收尾（本仓规矩）：杀掉探针实例、删掉草稿、`projects.json` 从 `.bak-116` 恢复
+（`lastProject` 回到用户自己的工程）、确认 `build/TaoCode.lsp.json` 不存在。
+
+### 七、门禁（`tests/ui-icons.test.mjs` 16 条 + `tests/settings-keys-parity.test.mjs` 5 条 + `tests/menu-placement.test.mjs` 8 条）
 
 `tests/settings-keys-parity.test.mjs` 是这批最有价值的一条门禁，它把"前端键 ↔ native 键"钉死：
 
@@ -2010,3 +2034,1316 @@ AE2 项目的 `referencedLibraries` 配的是 `lib/**/*.jar`，而磁盘上的�
   得先补一个 `watch`。`tests/popup-anchor.test.mjs` 里那条「量完再夹」已经写了 `nextTick` 与
   0 尺寸跳过两个前提，但没钉这个。
 - 状态栏组件菜单那条 `openStatusMenu` 仍在自己算位置（`src/notifications.ts`），没接 `usePopupAnchor`。
+
+## 第八十八批验证记录（编辑器内查找栏：`SearchReplaceComponent` + `EditorSearchSession` 全链路）
+
+题目来自 `docs/inventory/verdict-find-diff.md` §C 的第一条 —— 那里写着"这根栏是 IDEA 查找体验的大头，
+缺它等于'编辑器内查找'整体缺席"。本批把它补上。
+
+### 一、先分清上游的两根"查找"
+
+这是本批最容易做错的一步：`FindPopupPanel`（2399 行）是**工程内**查找对话框，不在编辑器里；
+编辑器内那根栏是 `SearchReplaceComponent`
+（`platform/lang-impl/src/com/intellij/find/SearchReplaceComponent.java`），
+由 `EditorSearchSession` 驱动（`EditorSearchSession.java:137-157` 的 builder），
+挂在 `editor.setHeaderComponent(...)` 上。本仓早先只把 F3/Shift+F3 接到 CodeMirror 的
+`findNext/findPrevious` —— **那两个命令在"它自己的面板没打开"时是空操作**，
+所以那两条键位实际上什么都没做。
+
+### 二、四个模块，各管一段
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 匹配语义 | `src/editorSearch.ts` | 正则构造 / 命中收集 / 回绕；零宽匹配手动前进（否则 `lastIndex` 不前进会死循环） |
+| CodeMirror 侧 | `src/editorSearchExtension.ts` | 状态字段、命中高亮、`goToMatch` 的真实跳转 |
+| 宿主状态域 | `src/editorFindController.ts` | 开合、五档选项、持久化、替换、历史、`findWordAtCaret`、`toggleInSelection` |
+| UI | `src/components/EditorFindBar.vue` | 行内顺序与文案 |
+
+行内顺序照 `EditorSearchSession.java:238-265`：状态文案 · 上一个 · 下一个 · 过滤组（在所选内容中搜索打头）· 更多 · 关闭。
+文案逐条取本机随 IDE 发货的中文语言包（`localization-zh.jar` 的 `messages/FindBundle.properties`）：
+区分大小写 `:10` · 关闭 `:11` · 正则表达式 `:65` · 搜索历史记录 `:96` · 在所选内容中搜索 `:101` · 单词 `:124`；
+导航两条取 `ActionsBundle.properties:1398/1497`。
+
+### 三、键位（逐条对 `$default.xml`）
+
+| 动作 | 键 | 出处 |
+|---|---|---|
+| Find | Ctrl+F | `:565-567` |
+| Replace | Ctrl+R | `:374-376` |
+| FindNext | F3 | `:707-708` |
+| FindPrevious | Shift+F3 | `:507-508` |
+| FindWordAtCaret / FindPrevWordAtCaret | Ctrl+F3 / Ctrl+Shift+F3 | — |
+| ToggleFindInSelection | Ctrl+Alt+E | — |
+| UnselectPreviousOccurrence | Alt+Shift+J | — |
+
+菜单侧 `FindMenuGroup`（`PlatformActions.xml:465-486`）的子项顺序逐条照抄，
+FindInPath = Ctrl+Shift+F / ReplaceInPath = Ctrl+Shift+R 指向工程内那个搜索面板。
+默认五档全关（`FindSettingsBase.java:53-64` + `FindPopupPanel.java:1456-1463`）。
+
+### 四、真机取证（AE2 项目，`TAOCODE_DEBUG_PORT` + CDP）
+
+| 判决点 | 实测 |
+|---|---|
+| Ctrl+F 开栏 | 焦点落 `.find-field`，`placeholder=搜索`，五档 `aria-pressed` 全 false |
+| 输入即定位 | 输入 `shim` ⇒ `status=1/1`、`.cm-searchMatch` 1 个、`.cm-searchMatch-current` 1 个 |
+| F3 前进 | 焦点在**搜索框里**也生效（上游把动作组注册在整条栏上）；状态 1/11 → 2/11，光标 top 294 → 342 |
+| Enter / Shift+Enter | 与 F3 / Shift+F3 同义（输入框接管） |
+| 四档开关 | 逐个点击 ⇒ `aria-pressed` 逐个变 true |
+| 坏正则 | 输入 `(` 且正则档开着 ⇒ 输入框 `class="find-field invalid"` |
+| Ctrl+Alt+E | 在**搜索框里**也生效（这一条是**真机发现的缺陷**：编辑器那张 keymap 只管 `.cm-editor` 内部，焦点在框里时按它等于没按） |
+| 替换行 | 切换替换 ⇒ 栏高 31 → 58，`.find-replace-row` 出现 |
+| Esc | 关栏回编辑器 |
+
+**没动桃的工程**：取证用的 `insertText` 曾落进 `IPatternDetails.java` 的缓冲区（**未保存**），
+当场按"放弃修改并继续"关标签丢弃；事后核对磁盘文件 mtime 仍是 `2026-09-18 21:25:38`、
+`E:\...\AE2VMAddon-1.16.1` 的 `git status` 无已跟踪文件改动。
+
+### 五、判据
+
+`tests/editor-find.test.mjs` 16 条，分三层：① 匹配语义（大小写/字面量转义/全词/坏正则/零宽/上限/回绕/计数文案）；
+② CodeMirror 侧（初始全关、实时定位、关闭或空查询不找、仅在选区内）；③ 接线（编辑器挂栏 + 八条键位、
+菜单 FindMenuGroup 十行、文案出自中文包、图标不是字形）。
+
+全绿：`npm test` **1499/1499**、`vue-tsc --noEmit` 0 错、`vite build` 成功、native **36/36 ctest**、
+`build\TaoCode.exe` 重建成功（注意：`vite build` 与 `build-native-locked.bat` 要**按顺序**跑 ——
+后者只把 `dist/` 拷进 `build/ui/`，不自己编译前端；本批被这一条坑过一次，改了 UI 看不到效果）。
+
+`CodeEditor.vue` 接查找栏时从 1194 涨到 1262（上限 1195），按纪律**拆而不抬**：
+空白可视化 → `src/editorWhitespace.ts`（42 行）、主题与词法着色 → `src/editorTheme.ts`（45 行），
+落到 **1172 行**，上限跟着降到 1172。
+
+### 六、留给下一批（都在判决 §G 里逐条写了理由）
+
+- **搜索上下文过滤**（注释 / 字面量 / 排除二者，七档）：要按语言把注释与字符串区间判出来，
+  上游走 PSI `searchContext`，LSP 没有对应请求 ⇒ 不猜。
+- **保留大小写**（`TogglePreserveCaseAction`）：替换要按原命中形态改写替换文本，本仓是字面量落盘 ⇒ 栏里不渲染这个开关。
+- **结果环 / "在查找窗口中打开"**：Find 工具窗那一形态（`livePreview` 包）整体还没有。
+- **"更多"溢出组**（`editorsearch.more.popup`）。
+
+## 第八十九批验证记录（diff 的词级/字符级差异 + 三档空白比较策略）
+
+B7 判决里"词级/字符级差异"与"非默认比较策略"两族（§C 的两行，判决里各记着"本仓只有行级 / 只做了默认档"）。
+
+### 一、词级与字符级（`ByWordRt` / `ByCharRt`）
+
+上游 `ByWordRt.compare`（`platform/util/diff/src/com/intellij/diff/comparison/ByWordRt.kt:33-58`）把两行切成
+词块、对词块做 diff，再把**不同的词块段**折成 `[起点, 长度]` 交给渲染层。
+**native 侧早就有这套**（`native/history.cpp` 的 `tokenize` + `word_marks`，`git_test.cpp` / `history_test.cpp`
+各有一条判据）—— 缺的是前端那一份：`src/diffText.ts` 的 `buildDiffRows`（剪贴板对比、保存冲突预览都走它）
+从来不填 `leftMarks`/`rightMarks`，于是 `DiffView.vue` 里那段渲染词级高亮的代码一直拿不到数据。
+
+本批补上 `src/diffWords.ts`：`tokenizeLine`（**与 native `tokenize` 逐条同规则** —— 两边不一致会让同一个文件
+在两条渲染路径上圈出不同的词）、`wordMarks`（LCS 方向表 + 去空白首尾 + 纯缩进改动保留）、`charMarks`（逐字符）、
+`marksFor(policy)`。
+
+### 二、三档空白比较策略（`ComparisonPolicy`）
+
+上游 `ComparisonPolicy.kt` 只有三档（DEFAULT / TRIM_WHITESPACES / IGNORE_WHITESPACES），
+界面上是 `IgnorePolicy` 六项折成的三档（`IgnorePolicy.java:29-35`）。本仓原先只有 DEFAULT ——
+而那一档恰好是上游默认（`TextDiffSettingsHolder.kt` 的 `IGNORE_POLICY = IgnorePolicy.DEFAULT`），
+所以**默认行为一致，少两个可选项**。
+
+`src/diffComparison.ts` 的 `comparisonKey` 补上另两档，`DiffView.vue` 多了「忽略差异」与「行内高亮」两个下拉。
+**只在父级给了原始两段文本时才渲染那两个下拉** —— native 对齐好的差异（Git 变更视图、本地历史）拿不到原始文本，
+档位就没有消费者，渲染出来就是假控件。
+
+### 三、判据与真机
+
+`tests/diff-words.test.mjs` 21 条（词法切分与 native 同规则、标记的三条性质、字符级、三档、`buildDiffRows` 的接线）。
+全绿：`npm test`、`vue-tsc` 0 错、`vite build` 成功、native **36/36 ctest**。
+
+**教训一条**：`buildDiffRows` 的配对语义是"末尾变化要**后面还有一条公共行**才配成 `change`"
+（`li < lcs.length` 那条既有守卫），我第一版的判据按"两条不同就该是 change"写，三条测试全红 ——
+**是判据错了，不是代码错了**。改判据前先去读了一遍既有的配对循环。
+
+## 第九十批验证记录（编辑器标签条的另两种排法：挤压与滚动）
+
+题目来自 B1 判决里 `[ ]` 那一族 —— `CompressibleMultiRowLayout` / `ScrollableMultiRowLayout`
+及它们的行实现。上游的分派只有一处（`EditorTabbedContainer.kt:657-672` 的 `createRowLayout`）：
+
+| 条件 | 布局 |
+|---|---|
+| `!isSingleRow` | `WrapMultiRowLayout`（换行；本仓原有的 `layoutMultiRow`） |
+| 一行 + `hideTabsIfNeeded` | `ScrollableMultiRowLayout`（滚动排，右边留「…」） |
+| 一行 + 其余 | `CompressibleMultiRowLayout`（挤压排，只压不换行） |
+| 一行 + 无固定排 + 滚动档 | `ScrollableSingleRowLayout`（裁切 + 滚轮） |
+
+`UISettingsState.kt:125` 的 `hideTabsIfNeeded` **默认 true**，所以默认是"滚动"那一档。
+**挤压与滚动这两排都在"一行"这一侧** —— 本批第一版把它们放进了多行那一支，
+真机上点"挤压"没反应才改回来（`singleRow()` 为假时永远是换行排）。
+
+### 一、落点
+
+- `src/tabStripLayout.ts` +207 行：`layoutCompressibleMultiRow` / `layoutScrollableMultiRow` /
+  `compressRowWidths` / `decreaseMaxLengths` / `scrollableRow`，逐条照
+  `CompressibleTabsRow.kt:127-166`（从最长的开始降）与 `ScrollableTabsRow.kt:22-49`（右边缘裁切）。
+- `src/tabStripView.ts`：排法分派 + 滚轮/偏移接线（滚动排是真的会滚的那一族）。
+- `src/components/EditorTabsSettingsPage.vue`：**新拆出来的一页** —— 上游 New UI 是两组单选
+  （`EditorTabsConfigurable.kt:59-71`：外组「一行…/多行」、内组「滚动标签页面板/挤压标签页」），
+  文案取随 IDE 发货的中文包（`ApplicationBundle.properties:133/680-685`）。
+- `hideTabsIfNeeded` 走四口径登记（前端接口/默认值、`bridge.ts` 白名单、原生键表与默认值）。
+
+### 二、真机抓到的两个缺陷（都只有真机能发现）
+
+1. **绝对定位元素的 `width:auto` 是 shrink-to-fit，不是自然宽。** 多行那两族把标签写成
+   `position: absolute`，在条尾的标签量到的是"包含块宽 − left"（实测 left=665、条宽 702 时
+   量到 **37**，真值 171）。缩小的值进缓存后每次重算都按"自然宽就这么小"算 —— 现象是
+   **窗口拉宽也不恢复**。修法：测量期间连 `position/left/top` 一并摘掉。
+2. **ResizeObserver 只在第一次调用时登记。** `if (tabStripObserver) return` 让观察者盯着
+   第一个标签条元素，元素被替换过之后窗口变化不再触发重算。改成每次重算都 `observe()`。
+
+### 三、真机判决点（AE2 项目，`TAOCODE_DEBUG_PORT` + CDP）
+
+| 档位 | 盘上设置 | 实测 |
+|---|---|---|
+| 滚动（默认） | `hideTabsIfNeeded=true, tabsInOneRow=true` | 条高 34、`tabs-wrapped` 无 |
+| 挤压 | `false, true` | 条高 34、`tabs-wrapped` 有；5 条等宽 108/108/108/109/109（条 702、工具条 161 ⇒ 预算 541，自然总长 729 > 541） |
+| 多行 | `false, false` | 条高 **68**（= 2 行 × 34，`tabStripStyle` 给了 `height/min-height`）、标签分两行（top 41 三条 + top 75 两条）、自然宽 139/165/171/127/127 |
+
+**窗口拉宽的恢复**也测了：挤压态下把视口拉到 1500，标签回到自然宽 `139/165/171/127/127`；
+拉回 702 重新压到 `108·109`。取证完把设置改回默认并核对盘上仍是 `true/true`。
+
+### 四、判据
+
+`tests/tab-strip-rows.test.mjs` 15 条。全绿：`npm test` **1535/1535**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**、`build\TaoCode.exe` 重建成功。
+
+`SettingsDialog.vue` 接这一页时从 1381 涨到 1398（上限 1381），按纪律**拆而不抬**：
+编辑器标签页那一页搬到 `EditorTabsSettingsPage.vue`（86 行），落到 **1357 行**，上限跟着降到 1357。
+
+### 五、未落（如实）
+
+- `decreaseInsets` 的 insets 逐档收缩与 `CachedDecoration` 缓存：Swing 装饰的中间量，本仓用一条常量下限代替（`MIN_COMPRESSED_TAB_WIDTH`）。
+- `ScrollableMultiRowLayout` 的 `isScrollBarAdjusting` / `recentlyActive` 两个守卫：Swing 事件态。
+- `MultiRowLayout.getRowY` 的 bottom 位置：本仓标签条只在顶部。
+
+## 第九十一批验证记录（随处搜索：空态文案、作用域选择、预览开关）
+
+B6 判决里 `[ ]` 那几类里能被本仓架构承接的三条，外加一条**复核发现的本仓误记**。
+
+### 一、空态文案（`SearchEverywhereEmptyTextProvider` + `SearchEverywhereUI.updateEmptyText`）
+
+上游 `SearchEverywhereUI.java:1926-2011` 分两支：实现过 `SearchEverywhereEmptyTextProvider` 的 tab
+用实现者的文案（本树里**只有** `TextSearchContributor.kt:281-300`，也就是文字搜索 ≡ 本仓的 All/Project），
+否则走通用分支。本仓落成 `src/searchEverywhereEmpty.ts`（纯函数）+ 对话框的空态块：
+
+- 查询词为空时**不显示空态**（`SearchEverywhereUI.java:1929` 的 `if (pattern.isEmpty()) return`）；
+- 主行「找不到任何内容」（中文包 `IdeBundle.properties:2330`）；
+- 「使用的搜索选项：」那一行**只有用过选项才出现**（`TextSearchContributor.kt:284` 的守卫）；
+- 一条去工程内查找的出路（上游 `showFindInFilesAction` 那一支，文案 `IdeBundle.properties:1136-1137`）。
+- 上游通用分支里那句「将作用域设置为…」**不渲染**：本仓没有作用域选择器时可点，写了就是死链。
+
+### 二、作用域选择（`ScopeChooserAction`）
+
+上游那一格挂在 `TextSearchContributor` 与 `AbstractGotoSEContributor` 上 —— **只作用于文字搜索与 Goto
+（文件/符号）**，命令与运行配置与作用域无关。本仓落在 `src/searchEverywhereScope.ts`：
+候选 =「项目」+ 项目设置里的命名作用域；过滤走已有的作用域语言（`src/scopes.ts` 的 `scopeMatches`）；
+`searchEverywhereResults` 多了一个作用域谓词实参，只筛 `project` / `symbols` 两类来源。
+
+**两处如实差异**：① 预定义作用域（`CustomScopesProvider`）本仓没有，候选里只有「项目」+用户自定义；
+② `canToggleEverywhere()`（`ScopeChooserAction.java:264-266`）判「项目」与「所有位置」是不是同一个集合 ——
+本仓没有库索引，两者是**同一个集合**，所以那格 Ctrl+Alt+P 切换按钮**不渲染**（判据写成了一个可检查的函数）。
+
+### 三、预览开关（`PreviewAction`）
+
+预览面板本来就有（`SearchEverywherePreview` + 常驻「预览」tab），本批补的是**开关**：
+「预览」按钮带 `aria-pressed`，与面板联动。上游是 `AnAction` 对象，本仓是同一个开关的一个按钮。
+
+### 四、一条复核发现的本仓误记
+
+`SearchEverywhereReorderingService` 上一版判 `[ ]`、理由写的是"用户手动调顺序并记住"。复核源码：
+`intellij.platform.lang.impl.xml:240` 只注册了 EP，**全树 grep 只有接口文件本身与一个消费点**
+（`MixedSearchListModel.java`），**没有任何实现**。所以那不是"没做"，而是 CE 里根本不存在的行为 ⇒ 改判 `[-]`。
+
+### 五、真机判决点（AE2 项目，`TAOCODE_DEBUG_PORT=9370` + CDP）
+
+| 判决点 | 实测 |
+|---|---|
+| 空态 | 输入 `zzqqxx` ⇒ `.se-empty` 文本 = 「找不到任何内容。使用 在文件中查找 (Ctrl Shift F)」，且带一个可点按钮 |
+| 出路有真落点 | 点那个按钮 ⇒ SE 关闭、底部 dock 选中「搜索」（`showView('search')` 走的是底部停靠那一支） |
+| 预览开关 | `.se-tab` 的 `aria-pressed` 由 `false` → `true` |
+| 作用域选择器 | **不出现** —— 该工程没有命名作用域，候选只有「项目」一档，按 `v-if="scopeOptions.length > 1"` 不渲染（这正是"不放假控件"那条规则的运行结果） |
+
+### 六、判据
+
+`tests/search-everywhere-empty.test.mjs` 9 条 + `tests/search-everywhere-scope.test.mjs` 9 条。
+全绿：`npm test` **1553/1553**、`vue-tsc` 0 错、`vite build` 成功、native **36/36 ctest**、`TaoCode.exe` 重建成功。
+
+**两条测试性教训**：① `.mjs` 里不能写 `import { type X }` —— 那是 TS 语法，`node --test` 直接 SyntaxError
+（这个坑 HANDOFF 里记过一次，本批又踩了一次）；② `compileScope` 的契约是**抛** `ScopeParseError`
+（`src/scopes.ts:243-246`），不返回 `invalid` —— 按返回 `invalid` 写的过滤函数会直接炸，已改成 try/catch。
+
+B6 四档随之变为 `[x]` 12 / `[~]` 40 / `[ ]` 2 / `[-]` 263 = 317，门控 `tests/b6-verdict.test.mjs` 同步更新。
+
+## 第九十二批验证记录（状态栏组件：实例生命周期 + 可搜索的显隐动作）
+
+B2 §C 第 2、4 条那两族。上游把"工厂"与"组件实例"分成两层，本仓早先只有工厂那一层。
+
+### 一、实例生命周期（`EditorBasedWidget` → `src/statusBarLifecycle.ts`）
+
+逐条照 `EditorBasedWidget.kt:57-109`：
+
+| 上游 | 本仓 |
+|---|---|
+| `install(statusBar)` + "不许装到别的项目上"的断言（`:96-102`） | `installWidget(factory, bar, windowId)`，窗口对不上**抛 `StatusBarMismatchError`**（静默接受会让后面所有 `isOurEditor` 判错，缺陷会跑到很远才显形） |
+| `dispose()` 置 `isDisposed` 并置空 `myStatusBar`（`:104-108`） | `disposeWidget` 返回一个 `isDisposed: true` / `statusBar: null` 的实例 |
+| `isOurEditor(editor)`（`:57-64`）：非空 + `isShowing` + 属于本状态栏 | `isOurEditor(instance, editorId, bar?)` |
+| `getSelectedFile()`（`:91-95`） | `selectedFile(instance, bar?)` |
+| 每个子类在 `selectionChanged` 里先过的那一关 | `shouldUpdateForEditor` = `!isDisposed && isOurEditor` |
+
+`StatusBarUtil.getStatusBar(component)`（`StatusBarUtil.kt:27-37`）是沿组件树上溯找 `IdeFrame` ——
+本仓没有 `IdeFrame`，等价物是 `windowId`。
+
+### 二、可搜索的显隐动作（`StatusBarWidgetsOptionProvider` → `widgetToggleRows`）
+
+上游那一类**不是设置页**，是个 `SearchTopHitProvider`（`StatusBarWidgetsOptionProvider.kt:13-41`）：
+把每个 `canBeEnabledOnStatusBar` 为真的工厂折成一条 `label.show.status.bar.widget`
+（`IdeBundle.properties:2402`，中文包 `:1403` =「显示 {0}」）的**搜索命中**。
+本仓落在 `src/statusWidgets.ts` 的 `widgetToggleRows` + `src/menuUi.ts` 的动作索引：
+「查找操作」与 SE 的 Commands 档搜组件名即可开关，且与右键勾选**共用同一份状态、同一条可点性判据**
+（`widgetToggleEnabled`，对应上游的 `canBeEnabledOnStatusBar`）。
+
+**只覆盖 EP 工厂**：`file`/`progress`/`bridge`/`problems` 四条在本仓是"直接画进面板的组件"
+（上游 `ToolWindowsWidget` / `InfoAndProgressPanel` 那一类），没有工厂，也不会出现在上游那批命中里
+—— 这一条是写测试时发现的（第一版把它们也列进去了）。
+
+三处如实差异：① 上游的模糊匹配是 `WordPrefixMatcher`，本仓由 `rankCommands` 承担；
+② `EditorBasedStatusBarPopup` 判 `[-]`（本仓的 chip 弹层是自绘的）；③ `StatusBarWidgetProvider`
+与 `StatusBarWidgetProviderToFactoryAdapter` 判 `[-]`（没有插件运行时）。
+
+### 三、判据
+
+`tests/status-bar-lifecycle.test.mjs` 13 条。全绿：`npm test` **1566/1566**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**。
+
+**一条测试性教训**：`src/statusWidgets.ts` 原本用 `'./statusBarWidgets'`（无扩展名）import，
+在 vite/tsc 下没事，但 `node --test` 直接跑 `.ts` 时是 `ERR_MODULE_NOT_FOUND` ——
+新加测试引用这个模块才暴露出来，已补上 `.ts`。
+
+B2 四档随之变为 `[x]` 12 / `[~]` 84 / `[ ]` 55 / `[-]` 199 = 350，门控 `tests/b2-verdict.test.mjs` 同步更新。
+
+## 第九十三批验证记录（「查看断点…」对话框 —— 弹层主从详情面板的唯一真实消费者）
+
+### 一、先确定这一族该落到哪儿（关键的一步）
+
+上游 `com.intellij.ui.popup.util` 那一族（`MasterController` / `DetailController` / `DetailView` /
+`ItemWrapperListRenderer`）在**整棵源码树里只有一个真实消费者**：
+
+```
+$ grep -rln "DetailController\|MasterController\|DetailViewImpl" --include=*.java --include=*.kt .
+platform/lang-impl/src/com/intellij/ui/popup/util/{DetailController,MasterController,DetailViewImpl}.java   ← 包内部
+platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointChooser.java
+platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointsDialog.java
+```
+
+所以不建一个没人用的通用框架，而是照上游把它落到同一个消费点：`查看断点…`（Ctrl+Shift+F8）。
+本仓原来那一行是"跳去调试工具窗口"，**不是**上游的行为 —— 上游 `ViewBreakpointsAction` 打开的是对话框。
+
+### 二、逐条对照
+
+| 上游 | 本仓 |
+|---|---|
+| `DetailController.getTitle2Text`（`:38-49`）：路径过长**从左侧省略**，从第 4 个字符之后找分隔符、前缀 `...`、找不到就原样返回 | `src/popupDetail.ts` 的 `elidePath`（量宽作为参数传入 —— 上游用 `FontMetrics`，那在纯逻辑里拿不到） |
+| `doUpdateDetailView`（`:60-80`）：**恰好选一项**才出详情，否则清空并把路径标签置成空格 | `detailPaneState` |
+| `PreviewEditorState`（`DetailView.java:36-58`）：行 < 0 ⇒ 没有导航位置 | `PreviewState` / `previewStateOf` |
+| `DetailViewImpl` 的空态 `IdeCoreBundle.properties:143` | `NOTHING_TO_SHOW` =「没有要显示的内容」（中文包 :91） |
+| `ItemWrapperListRenderer` 的选中行 | `.breakpoints-row`（选中态 + 键盘上下移动） |
+
+**写测试时抓到一个真缺陷**：列表原来按 `path`（尾部带行号）做字典序排，于是第 10 行排到第 9 行前面。
+改成"先按文件路径、再按行号**数值**"，并加了一条钉住它的判据。
+
+### 三、真机取证（`TAOCODE_DEBUG_PORT=9374` + CDP）
+
+`查找操作`（Ctrl+Shift+A）搜「查看断点」→ 执行 ⇒ 对话框出现，实测：
+
+```json
+{"heading":"断点（0）","rows":[],"path":" ","body":"没有要显示的内容"}
+```
+
+标题、空列表、**路径标签是单个空格**（上游"空选时置空格"那一支）、正文是上游的中文空态文案 ——
+四条都与 `DetailController` / `DetailViewImpl` 的行为对上。带内容的详情面板由 19 条单测覆盖
+（`breakpointDetail` / `breakpointDetailsFromBuffers` / `detailPaneState` 的三种选中情形）。
+
+### 四、判据
+
+`tests/popup-detail.test.mjs` 19 条。全绿：`npm test` **1585/1585**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**。
+
+`App.vue` 接这个对话框时从 2736 涨到 2749（上限 2737），按纪律**拆而不抬**：
+"从缓冲区取第 n 行"的装配搬进 `src/popupDetail.ts` 的 `breakpointDetailsFromBuffers`，
+宿主只剩一行 computed + 一行跳转。
+
+### 五、未落（如实）
+
+- 上游详情面板嵌的是**真编辑器**（`EditorFactory.createViewer` + 语法高亮 + 行高亮），本仓是只读代码块。
+- `ItemWrapperListRenderer` 的 `myAccessory`（行尾附属组件）与 `setupRenderer` 的颜色分段：本仓列表是单列。
+- `getPropertiesPanel`（属性面板）：本仓没有要展示的属性表。
+
+## 第九十四批验证记录（工具窗口 pane 状态对象：分栏比例哨兵 + 按钮挂/摘配对）
+
+B2 §C 第 9、12 条里那一族（`ToolWindowPaneState` / `ToolWindowEntry` / `ToolWindowButtonManager` 等）。
+先复核上游**本树里真有实现的那部分**，再决定哪些可落。
+
+### 一、上游三个对象，两个有可落的契约
+
+| 上游 | 本仓 |
+|---|---|
+| `getPreferredSplitProportion(id, default)`（`ToolWindowPaneState.kt:20-29`）：`if (f == 0f) return default` —— `Object2FloatOpenHashMap` 对缺失键返回 0，**0 就是"没存过"** | `src/toolWindowPaneState.ts` 的 `preferredSplitProportion` + 单值形态 `splitSizeOrDefault` |
+| `addSplitProportion(info, component, splitter)`（`:31-38`）：**只有 `info.isSplit` 且组件存在**才记 | `withSplitProportion(…, isSplit)` |
+| `isMaximized(window)`（`:41-44`）：按**窗口身份**比 | `isMaximized(maximizedId, id)` |
+| `ToolWindowEntry.stripeButton` 的 setter 断言（`:38-45`）：挂的时候原值必须为空、摘的时候必须非空 | `attachStripeButton` / `detachStripeButton` 返回结构化结果（上游是 `assert`，本仓让调用方决定） |
+| `removeStripeButton()`（`:68-70`）：用**窗口自己的锚点** | `stripeButtonKey(id, anchor)` |
+
+### 二、"哨兵收敛"而不是"加一层抽象"
+
+`panelResize.ts` 里本来就有**两处**内联的 `if (splitSize.value === 0) splitSize.value = 一半`
+（键盘微调与指针拖拽各一处）—— 语义与上游那条哨兵**逐字相同**，但没有名字、也没有判据。
+这一批把它抽成 `splitSizeOrDefault`，两处调用点都改过去，并加了一条"不许再出现内联写法"的判据。
+
+### 三、真机/门禁抓到的两个缺陷
+
+1. **写歪的配对逻辑**：接进 `toolWindowStripes.ts` 时，恢复那条写成 `attachStripeButton(hidden ? id : null, id)`
+   —— 与移除那条**反了**（隐藏集是"按钮不在侧条上"，所以 current 恰好是它的取反）。
+   已有的 `remove-stripe-button.test.mjs`「再激活就回来」一条当场抓到。
+2. **测试桩要登记新模块**：`panel-resize-behavior.test.mjs` 用 `ts.transpileModule` + 只解析无扩展名
+   import 的方式跑真实宿主，新 import 一加就 `Unexpected import`。这类桩每加一个依赖都要同步 ——
+   已登记在测试文件里。
+
+### 四、判据
+
+`tests/tool-window-pane-state.test.mjs` 13 条。全绿：`npm test` **1598/1598**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**。
+
+### 五、判 `[-]` 的三条（附理由）
+
+- `ToolWindowPaneNewButtonManager` / `ToolWindowPaneOldButtonManager`：**两套实现**这个前提在本仓不存在
+  （本仓只有一套 UI，没有新旧开关）。
+- `StripeActionGroup`：本仓没有**顶部条纹**（§C 第 16 条已记）。
+- `ToolWindowButtonManager` 判 `[~]`：状态域 + 渲染 + 拖宽/「更多」都有（第三十六批），
+  缺的是 `getStripeFor(devicePoint, …)` 的**跨区拖放命中**与 `getBottomHeight`。
+
+B2 四档随之变为 `[x]` 12 / `[~]` 87 / `[ ]` 49 / `[-]` 202 = 350，门控 `tests/b2-verdict.test.mjs` 同步更新。
+
+## 第九十五批验证记录（书签的排序口径 + 组内排序动作）
+
+B5 判决里 `BookmarkManager` 那条 `[~]` 记的缺口是"`UISettings.sortBookmarks` 的按加入顺序那一支没做"。
+复核上游 `BookmarkManager.getValidBookmarks`（`BookmarkManager.java:140-150`）：
+
+```java
+if (UISettings.getInstance().getSortBookmarks()) return ContainerUtil.sorted(answer);      // 按位置
+else return ContainerUtil.sorted(answer, Comparator.comparingInt(b -> b.index));           // 按加入顺序
+```
+
+`UISettingsState.kt:249` `var sortBookmarks: Boolean by property(false)` ⇒ **默认 false，也就是按加入顺序**。
+
+**所以本仓原先只做"按位置"这一支，等于默认行为与上游不一致** —— 这一批的自变量不是"补一个设置"，
+而是**把默认口径改对**：`src/bookmarks.ts` 的 `orderedBookmarks(list, sortByPosition)`，
+默认取 false（加入顺序）。项目设置里的数组顺序就是加入顺序，所以"按加入顺序"= 原样返回。
+
+### 组内排序动作（`SortGroupBookmarksAction`）
+
+2026.2 的现代书签里，组内排序是一个**组节点的动作**（`SortGroupBookmarksAction` →
+`BookmarksManagerImpl.Group.sortLater:649-659`），排序**写回存档**（`groupBookmarks` 持久）。
+本仓落在 `BookmarksPanel` 组头的「按类型和名称对书签进行排序」（文案取 `ActionsBundle.properties:76`，
+只在一组 ≥ 2 条时出现），经 `ToolWindowView` → `toolViewContext` → `App.vue` → `bookmarkActions.sortGroup`
+一路接到 `persistBookmarks`。
+
+### 判据
+
+`tests/bookmark-order.test.mjs` 12 条。全绿：`npm test`、`vue-tsc` 0 错、`vite build` 成功、native **36/36 ctest**。
+
+**一条如实说明**：`sortBookmarks` 这个开关**没有设置页行** —— 上游 CE 里也没有
+（`IdeDeprecatedMessagesBundle.properties:110` 那条 `action.bookmark.toggle.sort` 已废弃）。
+本仓照此不给假控件：它被 `orderedBookmarks` 读取、默认值与上游一致，用户要改顺序就用那个排序动作。
+
+## 第九十六批验证记录（提交面板：面板内检查进度 + 「项目分析期间」那条警告）
+
+B3 判决 §G 里最后两条 `[~]`（`source-todo.md` §16 也各记了一条）。
+
+### 一、面板内的检查进度（`CommitChecksProgressIndicator`）
+
+上游 `platform/vcs-impl/src/com/intellij/vcs/commit/CommitChecksProgressIndicator.kt` 逐条：
+
+| 上游 | 本仓 |
+|---|---|
+| `CommitChecksTaskInfo`（`:18-23`）：标题 `progress.title.commit.checks`、`isCancellable() = true`、取消文案来自 `CommonBundle.getCancelButtonText()` | `checksProgress()` 的 `title` / `cancellable` / `cancelText` |
+| `StatusBarProgressIndicator.setText`（`:105-125`）：按"只跑检查 / 提交中"两档折算正文 | 两档 + `.with.context` 后缀 |
+| `setText2Enabled(false)`（`:39`）：副文本置灰 | `detail` 字段（本仓恒 null —— 没有分步通道） |
+| `fixDoubleEllipsis`（`:71-86`）：正文尾部省略号与副文本头部省略号撞车时去掉正文那个 | `fixDoubleEllipsis`（`…` 与 `...` 两种写法都认） |
+
+渲染在 `SourceControl.vue` 的 `.sc-checks-progress`。**原先只有状态栏一行字**，面板里什么都没有。
+
+### 二、「项目分析期间某些提交检查不可用」
+
+上游那条在 `CommitProgressPanel.kt:310` 的 **dumb 模式**分支上。本仓原先登记的理由是
+"本仓没有'索引中'这个状态" —— **那条理由站不住**：本仓确实没有 PSI 索引，
+但**语言服务首次导入**（JDT LS 同步那几分钟）是同一个语义。
+
+判据取与状态栏 `smartModeLabel` **同一条**：`lspConfigured && !lspRunning`
+（配了服务但还没跑起来）。**没配服务不算分析中** —— 本仓不内置所有语言的服务器，
+那是正常状态，报"分析中"就是假警告。这条差异写进了 prop 的注释与判据里。
+
+### 三、一条改判
+
+`CommitChecksProgressIndicatorTooltip`（悬停浮层）从 `[~]` **改判 `[ ]`**：
+复核发现本仓没有那个浮层，状态栏任务行的可展开列表是另一种形态 ——
+按已实现计数会让"浮层"这条缺口在判决表里消失。B3 四档随之变为
+`[x]` 13 / `[~]` 47 / `[ ]` 1 / `[-]` 17 = 78，门控同步更新。
+
+### 四、真机抓到的第三个缺陷
+
+那一行的**可见性**第一版写成了恒 `true`，于是它在面板上**一直挂着**。真机取证时看到的正是这个：
+空闲态下 `.sc-checks-progress` 还在，文案停在「正在运行提交检查…」，而实际上什么都没在跑。
+修法：`checksProgress(onlyRunChecks, step, running, cancellable)` 多一个 `running` 参数
+（上游那个 `InlineProgressIndicator` 也只在任务活着时挂着，任务一结束 `stop()` 就收掉组件），
+调用点传 `checksBusy.value`。加了一条判据钉住"没在跑就不显示"。
+
+真机判决点（`TAOCODE_DEBUG_PORT=9376`）：
+
+| 状态 | 实测 |
+|---|---|
+| 空闲 | `.sc-checks-progress` **不存在**（修好后） |
+| 检查在跑 | 标题「提交检查」、正文「正在运行提交检查…」、带取消按钮（修好前也在，正因为那时恒显示） |
+| 「项目分析期间」警告 | 不显示 —— 该文件没配语言服务（`activeConfigured` 为假），按设计不算"分析中" |
+
+### 五、判据
+
+`tests/commit-checks-progress.test.mjs` 10 条。全绿：`npm test` **1620/1620**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**。
+
+## 第九十七批验证记录（「比较对象…」—— `CompareFilesAction` 的单文件分支）
+
+B7 判决里 `CompareFilesAction` 那条 `[~]`（"本仓没有任选两个文件比较的对话框"）做了它**上游最常用的那一支**。
+
+### 一、上游形状（逐条核过 `CompareFilesAction.java`）
+
+| 上游 | 本仓 |
+|---|---|
+| `update()`（`:49-78`）：按选中个数与类型改标题 —— 1 个 = `action.compare.with.text`（比较对象…）；2/3 个同类按类型取名；混杂退回 `action.compare.text` | `compareActionText(kinds)` |
+| `isAvailable`（`:80-96`）：0 个或 >3 个不可用；三个里带目录/归档也不可用 | `compareAvailable(kinds)` |
+| `getOtherFile`（`:152-182`）：记住上次用过的文件/目录（`two.files.diff.last.used.file` / `…folder`，项目级），下次打开选择器默认定位到它 | `compareFiles.ts` 的 `LAST_USED_*` / `lastUsedKeyFor` / `defaultCompareSelection` + 宿主按工作区根存 localStorage |
+| 选择器标题 `select.file.to.compare`（`DiffBundle.properties:252`） | `SELECT_FILE_TO_COMPARE` |
+| 菜单位置 `PlatformActions.xml:562-568` 的 `CompareActions`：`PairFileActions`（比较文件 / 与编辑器比较）在**前**、`CompareClipboardWithSelection` 在**后** | 编辑器右键与 Code 菜单里 `code.compareWith` 排在 `code.compareClipboard` **之前** |
+
+### 二、本仓落点
+
+- 纯逻辑 `src/compareFiles.ts`（12 条判据）；
+- 动作 `src/vcsActions.ts` 的 `compareWithFile`：`dialog.pickFile` 选文件 → `file.read` 读另一侧 →
+  复用 `clipboardDiff` 那条渲染通道（`DiffView` 的并排/统一、忽略差异、行内高亮三档都能用）；
+- 菜单两处：编辑器右键（`src/menus/editorPopupMenu.ts` 的 `CompareActions` 位置）与代码菜单。
+
+### 三、真机取证（`TAOCODE_DEBUG_PORT=9378`）
+
+编辑器右键弹出的真实菜单行（CDP 读的 `.editor-popup-menu`）：
+
+```
+显示上下文操作 · 剪切 · 复制 · 粘贴 · 复制/特殊粘贴 · 列选择模式 · 查找用法 · 转到 · 折叠 · 外部工具 ·
+比较对象… · 与剪贴板比较
+```
+
+「比较对象…」确实排在「与剪贴板比较」**之前**（上游 `CompareActions` 的顺序）。
+另外在「查找操作」里搜「比较对象」也命中（说明它同时进了动作索引）。
+
+### 四、判据
+
+`tests/compare-files.test.mjs` 12 条。全绿：`npm test` **1632/1632**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**。
+
+### 五、未落（如实）
+
+多选两个/三个文件的项目树入口、目录比较、归档比较、三方（带 base）比较 —— 见判决 §G 该行的"缺"。
+
+## 第九十八批验证记录（插入/覆盖模式 —— CodeMirror 没有的能力，用事务钩子还原）
+
+`InsertOverwrite` 那一族里**唯一没有状态栏组件**的能力：覆盖模式本身。上游 `EditorToggleInsertStateAction`
+（`openapi/editor/actions/ToggleInsertStateAction.java:23-27`：`setInsertMode(!isInsertMode())`）
++ `$default.xml:457-459` 的 INSERT 键。CE 里那个 `InsertOverwrite` 工厂 id 其实指向**列选择**组件
+（`intellij.platform.ide.impl.xml:1627`），覆盖模式的可见指示是**块状光标**（`ImmediatePainter.java:164`
+的 `isBlockCursor = isInsertMode() == settings.isBlockCursor()`）—— 所以本仓也不加芯片，改光标形状。
+
+### 一、逐条对照
+
+| 上游 | 本仓 |
+|---|---|
+| `TypedCharImpl.java:31-47` 的 `COMPLEX_CHARS`（`\n \t ( ) < > [ ] { } " '`）：这些字符**永不覆盖** | `shouldOverwrite` 逐字照抄这个集合（打 `(` 吃掉右边那个配对括号是典型的错法） |
+| 代理对 / 多字符输入（粘贴、输入法）不走覆盖路径 | 同上（`length !== 1` 与 0xD800-0xDFFF 都放行） |
+| 行尾只能追加 | `overwriteChange` 在 `head >= line.to` 时返回 null（放行默认插入） |
+| 每编辑器一个开关（`EditorEx.myInsertMode`） | CodeMirror `StateField` |
+| 可见指示 = 块光标 | `.cm-overwrite .cm-cursor`（`overwriteTheme`） |
+
+### 二、真机抓到的缺陷（第一版是错的）
+
+第一版用 `EditorState.transactionFilter` 并返回 `[tr, {changes: rewritten}]` ——
+真机上打一个字是**插入**而不是覆盖。原因：**返回数组的语义是"这两笔都应用"，不是"改写原来那笔"**。
+正确的口子是 `EditorView.inputHandler`（CodeMirror 为这件事准备的钩子）：它在默认插入发生**之前**
+拿到 `(from, to, text)`，返回 true 即"这次输入我接管了"。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9380`）
+
+光标放在第一行第 2 列，打一个 `Z`：
+
+| 档位 | 结果 |
+|---|---|
+| 插入（覆盖关） | `# ZAE2 VM Addon …` —— 插进去了 |
+| 按 INSERT 后（`cm-overwrite` 类出现） | `# ZE2 VM Addon …` —— **替换掉了 `A`** |
+| 再按 INSERT | 类消失，回到插入档 |
+
+### 四、判据
+
+`tests/editor-overwrite.test.mjs` 14 条（含"多光标要真的有两个光标"的前置断言 ——
+CodeMirror 默认会把多选区折成一个，测试里必须自己开 `allowMultipleSelections`，
+否则那条判据是**空跑**）。全绿：`npm test` **1646/1646**、`vue-tsc` 0 错、`vite build` 成功、native **36/36 ctest**。
+
+`CodeEditor.vue` 接这个能力时从 1172 涨到 1181，按纪律**拆而不抬**：轻量信息提示搬到
+`src/editorHint.ts`，落到 **1155 行**，上限跟着降。
+
+### 五、一条流程教训（写给下一位）
+
+真机验证"打字类"功能时，**不要拿用户工程里的文件当靶子**。这一批我在
+`MIGRATION-PATTERNS.md` 里打了字，虽然当场撤销、内容核对无损（首行原样、无残留字符），
+但应用的自动保存在中途把它重写了一次（mtime 变成当天，内容未变）。
+**正确姿势：先在自建草稿文件上开标签再验**，别让用户的文件参与。
+
+## 第九十九批验证记录（两个真功能缺口：文件系统同步指示器 + 内部错误指示器）
+
+按桃的口径「架构上不可移植，就改用我们的架构去还原功能」，把 B2 那一族 `[ ]` 里**承载真功能**
+的两条做了 —— 它们原先的理由是"本仓没有那个机制"（VFS 刷新窗口期 / 索引写线程），
+但**功能**是有的：一个是"正在把磁盘变更同步进来"，一个是"这一轮 IDE 出过错"。
+
+### 一、文件系统同步（`VfsRefreshIndicatorWidgetFactory`）
+
+| 上游 | 本仓 |
+|---|---|
+| `getDisplayName()` = `status.bar.vfs.refresh.widget.name`（中文包「文件系统同步」） | 组件注册表的 `displayName` |
+| `isEnabledByDefault() = false`（`:58-60`）：默认关，用户在勾选清单里打开 | `enabledByDefault: false` |
+| 空闲时那个 `JLabel` 是**空图标** + tooltip「文件系统同步未运行」；`start()/stop()` 期间换成动画图标（`:89-108`） | 空闲 = 静止图标 + 同一句 tooltip；同步中 = `status-spin` 转圈 |
+| 数据源 = VFS 刷新窗口期 | 数据源 = `diskSync` 的 `syncing` 标志 |
+
+**一个真缺陷**：`syncing` 原来是 App.vue 里的普通 `let`（`diskSync` 通过 getter/setter 读写），
+**驱动不了界面** —— 接这个芯片时才发现。改成 `ref` 后才进得了 `v-if`。
+
+### 二、内部错误（`FatalErrorWidgetFactory` → `IdeMessagePanel`）
+
+上游三条要点：显示名 `status.bar.fatal.error.widget.name`（中文包「内部错误」）；
+`isConfigurable() = false` **且** `canBeEnabledOn(statusBar) = false`（`:32-42`）——
+**不进勾选清单、用户不能开关**，自己按"有没有内部错误"显形；内容是**进程内**的 `MessagePool`。
+
+本仓落了**跨层的一条链**：
+
+- 宿主 `native/diagnostics.cpp`：`event(..., "ERROR", ...)` 顺手记进账本（上限 50 条），
+  新增 `internal_errors()` 查询面；
+- 路由 `app.internalErrors`（`native/main.cpp` + `src/bridge.ts` 的 Method 联合与预览态分支）；
+- 前端 `src/internalErrors.ts`（纯逻辑：显不显、计数文案、tooltip 取最新一条）
+  + `src/components/InternalErrorsChip.vue`（芯片 + 列表弹层 + 去日志的出路 + 30s 轮询）。
+
+**为什么不直接读日志文件**：日志是跨 session 追加的，读它会把**上次启动**的错误也算进"本次"。
+进程内计数才是"这一轮 IDE 出过几次内部错误"的准确答案（上游 `MessagePool` 也是进程内的）。
+判据里专门有一条钉住这件事（不许在 `internal_errors` 旁边出现文件读取）。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9381`）
+
+| 判决点 | 实测 |
+|---|---|
+| 内部错误芯片（0 个错误时） | **不显示** —— 与上游"有内容才可见"一致 |
+| 勾选清单里有没有「文件系统同步」 | 有（16 项里第 13 项），勾选后芯片出现，tooltip =「文件系统同步未运行」 |
+| 取消勾选后 | 芯片消失（恢复默认关） |
+
+### 四、判据
+
+`tests/internal-errors.test.mjs` 7 条，`tests/status-bar-lifecycle.test.mjs` 加 2 条
+（VFS 组件的注册与默认值；`syncing` 必须响应式）。全绿：`npm test` **1655/1655**、
+`vue-tsc` 0 错、`vite build` 成功、native **36/36 ctest**、`build-native-locked.bat` RC 0 / 0 warning。
+
+### 五、两处尺寸门禁的处置（纪律：拆而不抬）
+
+- `App.vue` 接这两个指示器后涨到 2739（上限 2737）：把「内部错误」整块（状态 + 轮询 + 芯片 +
+  弹层）拆成 `src/components/InternalErrorsChip.vue`，另并了两处重复注释，落到 **2735**。
+- `bridge.ts` 因新增预览态分支涨到 1209（上限 1208）：**没有抬上限** ——
+  把分支压回一行（预览态那种内联字面量本来就只有一行），回到 **1208**。
+
+## 第一百批验证记录（合并冲突的逐条解决 —— 三栏工具那条路的功能，落在冲突标记上）
+
+### 一、上游形状（逐条核过）
+
+- 那张三栏工具（`platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewer.java`）读的是
+  **VCS 给的三份内容**（base / yours / theirs）：`MergeConflictModel.kt:41-60` 算 merge changes，结果栏是一份
+  独立文档。**它不解析文件里的冲突标记**。
+- 两个按钮的文案取 `MergeThreesideViewer.java:333-336` 的 `DiffBundle.message("button.merge.resolve.accept.left" / ".right")`，
+  中文包里就是「接受左侧 / 接受右侧」（`DiffBundle.properties:47-48`）。
+- 整棵上游树上唯一认这几个标记的地方是
+  `plugins/git4idea/backend/src/merge/GitMergeUtil.java:63-67` 的 `MERGE_MARKERS` —— 拿它判断
+  "这个文件还处在冲突态"。
+
+**所以本批不是"复刻三栏窗口"，而是把同一场景（`git merge` 之后带标记的文件）的功能落在标记文本上** ——
+这是用户天天遇到的那条路，也是本仓唯一拿得到的数据来源。
+
+### 二、本仓落点
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 解析与解决 | `src/mergeConflicts.ts` | `parseConflicts`（只认**成对**标记）、`acceptSide`（整段替换那一处）、`nextConflict`（回绕）、`conflictStatus`、`conflictsIn`（带 `includes` 预检的热路径入口） |
+| 宿主动作 + 状态域 | `src/editorMergeHost.ts` | `createMergeState`：清单 + 接受 / 导航；文案取中文包那两句 |
+| 界面 | `src/components/MergeBar.vue` | 未决计数 · 上一个 · 下一个 · 接受左侧 / 接受右侧 |
+
+**没有「接受两者」**：上游那个工具里也没有这个按钮，做了就是发明（想两边都要就在缓冲区里手编）。
+
+### 三、真机抓到的缺陷（第一版是错的）
+
+- **计数停在旧值**：第一版把 `props.content` 交给导航条自解析。真机上接受了一侧后**缓冲区对了、
+  条上的计数还停在 2/2** —— 因为父级的 `tab.content` 只在读盘/存盘时更新，编辑期间一直是打开时那一份
+  （`src/lspNavigation.ts:145` 的 `onEditorChange` 只置脏、不写 content）。
+  处置：清单改由宿主从**实时文档**解析（`updateListener` 里 `refreshMerge(update.state.doc.toString())`），
+  与查找栏 `findBar.refresh()` 同一种取法。
+- 尺寸门禁当场拦下这次修复（CodeEditor.vue 1154 > 1148）：**拆而不抬** —— 清单与两个动作整个搬进
+  `src/editorMergeHost.ts`，回到 1147，上限跟着降到 1147。
+- 另一条顺手更正的：初版注释写着"上游 `MergeConflictModel` 也认这几个标记"，核实后是**错的**（见上），
+  代码注释与判决书都已改正。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9382`）
+
+草稿文件（**在用户工程里新建、验完即删**；纪律：不拿用户自己的文件当打字靶子）——两处冲突：
+
+| 判决点 | 实测 |
+|---|---|
+| 打开带标记的文件 | 条立刻出现，计数 **1/2**（初始值取打开时那份内容） |
+| 「下一个冲突」×2 | 光标 1:1 → 3:1 → 9:1，计数 **2/2** |
+| 「接受左侧」 | 缓冲区那一块换成左侧，计数**当场**变 **1/1**（修复前停在 2/2） |
+| 「接受右侧」（光标不在冲突里 → 落到第一条） | 缓冲区换成右侧，**整条消失** |
+| 收尾 | 草稿标签关闭并丢弃、文件从磁盘删除；用户文件 `MIGRATION-PATTERNS.md` mtime 未变（18:30） |
+
+### 五、判据
+
+`tests/merge-conflicts.test.mjs` 26 条（解析 / 接受两侧 / diff3 基线不进任何一侧 / 回绕导航 /
+计数 / 文案 / 接线 / 实时文档）。全绿：`npm test` **1683/1683**、`vue-tsc` 0 错、
+`vite build` 成功、native **36/36 ctest**、`build-native-locked.bat` RC 0 / 0 warning
+（native 源码本批未动，ninja 只做了 dist→build/ui 的拷贝）。B7 判决书：`MergeThreesideViewer` /
+`MergeThreesideViewerActions` 由 `[ ]` 改判 `[~]`（页脚 62→64 / 469→467 同步改），新增 §B5 与 §E 第 6 条。
+
+## 第一百零一批验证记录（diff 查看器：未更改片段的折叠）
+
+### 一、上游形状（逐条核过 `FoldingModelSupport.java` / `TextDiffViewerUtil.java` / `TextDiffSettingsHolder.kt`）
+
+- 上下文范围五档 `CONTEXT_RANGE_MODES = intArrayOf(1, 2, 4, 8, -1)`（`TextDiffSettingsHolder.kt:30`），
+  默认 **4**（`:59`），-1 = 禁用（中文包 `DiffBundle.properties:75`）；默认**展开**（`:64` 的 `EXPAND_BY_DEFAULT = true`）。
+- 每段未更改的行按 shift = range / 2×range / 4×range 生成三层候选（`getRangeShift`，`:1234-1241`），
+  **藏起来不足 2 行就不生成折叠区**（`createBlock` 的 `ends - starts < 2`，`:310`）。三层都收起来时可见结果
+  等于包得最外的一层（shift = range）—— 本仓两态交互只保留这一层。
+- 工具栏开关 `collapse.unchanged.fragments`（`TextDiffViewerUtil.java:443`，中文包 `:63` = 收起未更改的片段），
+  上下文范围 = 禁用时**整个不可见**（`:455`）。
+
+### 二、本仓落点
+
+`src/diffFold.ts`（纯逻辑：`unchangedRuns` / `foldForRun` / `diffFolds` / `foldRows` / `foldLabel`）+
+`src/components/DiffView.vue`（开关、五档下拉、折叠行）。**上游折叠区里是 5 个空格的占位文本**，
+本仓在那一行写「⋯ N 行未更改 ⋯」并把行号槽从第一条被藏的行起跳号 —— 这是本仓的呈现，已在 §E 第 7 条记明。
+
+### 三、真机抓到的缺陷（两处）
+
+1. **折叠标记的行号写错了**：第一版写的是"片段起点"，而那几行**明明还显示在上面**（那正是上下文行）。
+   改成第一条被藏起来的行的行号（行号槽在折叠处跳号，与 IDEA 一致）。
+2. **窄容器里标签竖排**：存盘冲突那个对话框很窄，`未更改片段` / `收起未更改的片段` 被挤成竖排
+   （真机截图里是"未更 改的 片段"）。改成"工具带整条换行 + 标签一律 nowrap"。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9384/9385`）
+
+两条路径都验过（都要先生效**实时文档**那条架构规则，见批 100）：
+
+| 判决点 | 实测 |
+|---|---|
+| 「与剪贴板比较」（宽弹层） | 开关与五档下拉俱在；点开关后两处未更改片段各收成一行：`⋯ 6 行未更改 ⋯` / `⋯ 11 行未更改 ⋯`，两侧各留 4 行上下文 |
+| 「保存冲突 · 查看差异」（窄弹层，磁盘 ↔ 缓冲） | 同样的开关与折叠；本次抓到的两处缺陷都在这里 |
+| 上下文范围切到「禁用」 | 整个折叠控件**消失**、折叠行全展开（与上游 `setVisible(getContextRange() != -1)` 一致） |
+
+草稿文件（`taocode-fold-a/b.txt`：**自建、验完即删**）用完删除；用户文件 `MIGRATION-PATTERNS.md` mtime 未变（18:30）。
+
+### 五、判据
+
+`tests/diff-fold.test.mjs` 23 条（常量 / 连续段 / 阈值边界 / 三档上下文 / 禁用 / 折叠渲染 /
+标记行号 / 接线 / 窄容器排版）。B7 判决书四条改判：`SimpleDiffViewer`、`UnifiedDiffViewer`、
+`FoldingModelSupport`、`SyncScrollSupport` 由 `[ ]` 改 `[~]`（页脚 64→68 / 467→463 同步改），
+新增 §B6 与 §E 第 7 条。
+
+## 第一百零二批验证记录（工程内搜索的分块发布 —— `SearchResults` 的 chunk 流）
+
+### 一、上游形状（逐条核过 `SearchResults.java`）
+
+- `CHUNK_TIME_BUDGET_MS = 50`（`:87`）；`:256-306` 的注释写明动机 —— "每搜到一块就先发出去，
+  慢搜索也能先看到命中"，每块之间可以在读锁边界让出写锁，块内的偏移以 `documentTimeStamp` 对账。
+- 发布签名 `publish(chunk, first, done, stamp)`：块要说明自己是不是第一块/最后一块。
+
+本仓的一次扫描没有读锁，所以切块按"**距上一块的墙钟时间 ≥50ms 或攒够 200 条**"，两条中先到的。
+
+### 二、本仓落点
+
+| 层 | 落点 |
+|---|---|
+| 宿主 | `native/search.hpp` 的 `Options::on_chunk` + `native/search.cpp` 的 `preview()` 分块冲刷 + `chunk_event()` |
+| 事件 | `search.chunk`（`streamId` / `matches` / `fileCount` / `done`），**只走 `search.preview`** |
+| 前端 | `src/searchStream.ts`（认领 / 累积 / 丢迟到块）+ `src/components/SearchPanel.vue`（边收边画） |
+
+native 侧新增两条判据（`native/search_test.cpp`）：**块加起来必须等于一次性结果**、以及"不给
+`on_chunk` 时一条都不推"（一次性那条路不能变）。
+
+### 三、真机抓到的两个缺陷
+
+1. **流式期间列表画不出来**：空态那一支写的判据是 `running && !total`，而 `total` 是**最终**总数
+   （流式期间恒为 0）—— 于是"正在搜索…"一直挂着，块到了也不渲染。改成看**已到达**的命中数。
+2. **结果区被挤成一条缝**：底部停靠区 147px 时，`.fs-scroll` 实测只有 **8px** 高，而内容 58 万像素
+   （`flex: 1; min-height: 0` 的老问题）。改成"列表保底 96px + 面板整体可滚动"。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9386/9387/9388`）
+
+工作区 = 用户那个 AE2 目录（**只读，未改一个字节**）：
+
+| 判决点 | 实测 |
+|---|---|
+| 搜 `gradle`（约 6 秒才走完） | 状态行逐次刷新：576 → 723 → 744 → 1157 → …→ 5108 条 / 586 个文件，**搜索未结束就已经在涨** |
+| 同一次搜索的分组树 | 94 → 186 → 404 → 765 → 1211 组，边收边画 |
+| 结束后 | 「共 5732 处 / 1211 个文件」+「结果已截断」，列表与一次性结果一致 |
+| 结果区高度 | 修复前 8px / 修复后 96px（面板可滚动） |
+
+### 五、判据
+
+`tests/search-stream.test.mjs` 12 条（累积 / 认领 / 丢迟到块 / 畸形块 / native 分块常量与冲刷点 /
+只有 preview 分块 / 事件体形状 / bridge 路由 / 面板接线与文案）。
+B7 判决书四条改判：`LivePreview`、`SearchResults`、`SelectionManager`、`LivePreviewController`
+由 `[ ]` 改 `[~]`（页脚 68→72 / 463→459 同步改），新增 §B7。
+
+**顺带的一处拆分**（纪律：拆而不抬）：`bridge.ts` 加了事件分支后 1214 > 上限 1208 ——
+把预览态的键表与取值校验整段搬进 `src/previewSettings.ts`（回到 1180），
+`tests/settings-keys-parity.test.mjs` 跟着指到新模块（查的东西一个字没变）。
+
+## 第一百零三批验证记录（差异块的再优化 —— `ChunkOptimizer`）
+
+### 一、上游形状（逐条核过 `ChunkOptimizer.kt`）
+
+- 骨架在**未更改段**上工作：两两取相邻两段，只有"某一侧相接"时才动手（两侧都不相接 ⇒ 上游直接
+  return，因为那不是 LCS）；合并的判据是 `equalForward == count2`（合并左）与 `equalBackward == count1`
+  （合并右），合并后**递归**再看一次；剩下的情况按 `getShift` 微调切点。
+- `expandForward` / `expandBackward` 的原语在 `TrimUtil.kt:341-368`（本仓同名导出，判据直接对着它们写）。
+- 词级那一档（`WordChunkOptimizer.getShift`，`:100-146`）：两个块**已被空白分开**就不动；
+  否则先往后找词边界（找到就往前挪 `[X]A Y[A ZA]` → `[XA] YA [ZA]`），再往前找（找到就往后挪
+  `[AX A]Y A[Z]` → `[AX] AY [AZ]`）。上游把这两条写成了"最少块数 / 最少被改的句子"两条判据。
+
+### 二、本仓落点
+
+`src/diffChunks.ts`（`optimizeSpans` + `wordShift` + 两个 expand 原语）；`src/diffWords.ts` 的
+`diffRuns` 现在同时回放**未更改段**（`matches`），`wordMarks` 过一遍优化器再由
+`spansToRuns`（补集）折回改动段。
+
+### 三、量出来的效果（不是"应该会更好"）
+
+拿本仓自己的源文件做对照：5395 对相邻行里 **315 对**的结果被优化改变，**每一对都是块数变少**
+（4→3、10→8 这种），没有一对变多。这 315 对就是这条门禁"真的在干活"的证据（探针脚本当天跑完即删，
+判据留在 `tests/diff-chunks.test.mjs` 里的是可复现的那几条）。
+
+### 四、真机取证（`TAOCODE_DEBUG_PORT=9389`）
+
+自建草稿两份（`taocode-chunk-a/b.txt`，验完即删）：三条公共行 + 两处词级改动
+（`compute(alpha, beta)` → `compute(alpha, beta, gamma)`、`render(total, options)` →
+`render(total, options, { deep: true })`）。走"存盘冲突 → 查看差异"这条通道打开 DiffView，实测：
+
+| 判决点 | 实测 |
+|---|---|
+| 词级标记 | 左（磁盘版）圈住 `, gamma` 与 `, { deep: true }`，右（缓冲）圈住多打的 `X` —— 与探针读出的 `leftMarks`/`rightMarks` 一致 |
+| 折叠控件 | 同一次打开里「未更改片段 4 / 收起未更改的片段」都在（批 101 的功能没被这次改动碰坏） |
+
+### 五、判据
+
+`tests/diff-chunks.test.mjs` 12 条：`expandForward` / `expandBackward` 的计数、上游两个合并方向
+（`[A]B[B]` → `[AB]B`、`A[A]B` → `A[AB]`）、非 LCS 输入不许乱动、标记必须落在词边界上、
+相同行不产生标记、标记不许越界、词级接线（`optimizeSpans(...)` 与 `spansToRuns(...)`）、
+骨架的三个分支（早退 / 合并左 / 合并右 / 触碰侧）。
+全绿：`npm test` **1730/1730**、`vue-tsc` 0 错、`vite build` 成功、native RC 0 / 0 warning、ctest 36/36。
+B7 判决书三条改判：`ChunkOptimizer` 由 `[-]` 改 `[~]`（原来的理由"本仓不做"已作废）、
+`ByWordRt` 的理由重写、`ChangeCorrector` 由 `[-]` 改 `[ ]`（它确实是另一层，本仓没有）。
+页脚 72→73 / 459→460 / 88→86。
+
+## 第一百零四批验证记录（第四档比较策略「忽略空格和空行」）
+
+### 一、上游形状（逐条核过 `IgnorePolicy.java` / `ComparisonManagerImpl`）
+
+- 界面上的「忽略差异」是**六项**（`IgnorePolicy.java:12-17`），文案 `option.ignore.policy.*`
+  （中文包 `DiffBundle.properties:232-237`：无 / 修整空白 / 忽略空格 / 忽略空格和空行 / 忽略格式设置 /
+  忽略针对特定语言的更改）。
+- 但 `ComparisonPolicy` 只有三档，`getComparisonPolicy()`（`:31-33`）把 `IGNORE_WHITESPACES_CHUNKS`
+  折成 `IGNORE_WHITESPACES` —— 它多出来的是 `isShouldTrimChunks()`（`:41-43`）：
+  `ComparisonManagerImpl.processAdjoining` 在 `trim && policy == IGNORE_WHITESPACES` 时，
+  从改动块**首尾**各剪一轮"只差空白"的行，遇到真的不等的行就停。
+
+### 二、本仓落点
+
+`src/diffComparison.ts` 第四档（同折键 + `whitespaceOnlyDifference`，缺一侧按空串 = 空行增删也算）
++ `src/diffText.ts` 的 `trimChunkEdges`（剪掉的行按**未更改**渲染：底色与行内标记都不画 ——
+上游是把那个 fragment 丢掉，那几行落回 unchanged）。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9390`）
+
+自建草稿（`taocode-policy-a/b.txt`，验完即删；只差「尾随空格」与「多一个空行」），走
+「与剪贴板比较」打开 DiffView（**只有这条通道会给 `leftText`/`rightText`，选择器才在** ——
+存盘冲突那个弹层只给对齐好的 rows，两批验证都确认了这一点）：
+
+| 判决点 | 实测 |
+|---|---|
+| 「忽略差异」下拉 | **四项**：`["无","修整空白","忽略空格","忽略空格和空行"]`（文案逐字对上中文包） |
+| 同一份输入切三档 | **无**：`beta  ` vs 空行 + 空行插入 → 两处改动；**忽略空格**：尾随空格那处不再是改动，空行插入**仍是**改动；**忽略空格和空行**：两处都不是改动（统计 `+0 −0`） |
+| 折叠控件 | 与选择器同排显示（批 101 的功能没被碰坏） |
+
+### 四、判据
+
+`DiffView` 的「忽略差异」下拉自动多出第四项（它按 `COMPARISON_POLICY_LABELS` 迭代渲染），
+文案「忽略空格和空行」。行为判据在单测里（空行插入/删除在第四档下不再是改动，
+在「忽略空格」档下**仍然**是改动 —— 两档的差别就在这一处）。
+
+### 五、判据
+
+`tests/diff-words.test.mjs` 新增 7 条（第四档的折键与上一档相同、只有它剪边界、缺一侧按空串、
+空行插入/删除不算改动、剪边界遇到真改动就停、剪掉的行不带标记、四档文案）。
+全绿：`npm test` **1738/1738**、`vue-tsc` 0 错、`vite build` 成功、native RC 0 / 0 warning、ctest 36/36。
+B7 判决书：`ComparisonPolicy` 由 `[~]` 升 `[x]`（三档逐档对齐）、`IgnorePolicy` 的理由重写
+（六项里四项已落），页脚 11→12 / 73→72。
+
+## 第一百零五批验证记录（查找面板的预览 —— `UsagePreviewPanel`）
+
+### 一、上游形状（逐条核过 `FindPopupPanel.java` / `UsagePreviewPanel.kt`）
+
+- `:895-896` 结果表与预览分居一个 splitter 两侧（`OnePixelSplitter(true, .33f)` + `setSplitterProportionKey`
+  记住用户拖过的比例）；`:868-872` 选中变化 **50ms 去抖**后刷新；`:871` 预览体最小高度 15 行；
+  `:369-377` 标题栏写文件名 + 位置。
+- 预览体是 `UsagePreviewPanel`：文件内容 + 命中高亮，`:376` 加载中 `showLoading()`；
+  `:652-668` 三句状态文案，取随 IDE 发货的中文包 `UsageViewBundle.properties`：
+  `tab.title.preview`（`:106` 预览）、`select.the.usage.to.preview`（`:86` 选择要预览的项）、
+  `usage.preview.isnt.available`（`:110` 所选条目没有预览）。
+
+### 二、本仓落点
+
+`src/searchPreview.ts`（窗口计算 + 文案 + 标题）＋ `src/components/SearchPanel.vue` 的 `.fs-preview`
+（标题栏 + 正文 + 命中行高亮；50ms 去抖；按路径缓存文件内容；`file.read` 取内容；迟到的答复按
+`previewSeq` 丢掉）。两处如实差异（已记进判决书 §B10）：预览体是只读文本 + 窗口（不是整个编辑器），
+`several.occurrences.selected` 那一档用不上（本仓结果列表是单选）。
+
+### 三、真机抓到的两处（一处功能缺陷、一处探针教训）
+
+1. **搜索进行中重按 Enter 会被宿主回 BUSY**（「已有搜索在进行中，请先取消或等待。」）：
+   输入框有焦点时 Enter = 重搜，而宿主原来在 `search_busy` 上直接抛错。上游是"重按即重启搜索"，
+   所以改成宿主侧**取消并 join 上一次**再起新的（`native/main.cpp` 的搜索分支），报错那条路整个去掉。
+   复验：连按两次 Enter 后 `error: ""`、670 条结果、预览 ready（修复前是错误提示 + 结果清空）。
+2. **探针教训（不是产品缺陷）**：我用"点列表右下角"去给列表焦点，结果点到行内的「跳过」按钮上，
+   随后的 Enter 激活了那个按钮（DOM 的标准行为：焦点在按钮上时 Enter = 点它）。
+   当时立刻查了磁盘：`find . -newermt "-20 minutes" -type f` 为空 —— **没有文件被写**（命中的是「跳过」，
+   只改面板状态）。教训照旧：动"会写盘"的按钮之前，先确认点到了什么。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9392/9393/9394`）
+
+| 判决点 | 实测 |
+|---|---|
+| 搜 `mods_folder` | 预览 `ready`：标题「预览 2026-09-13.md 行 57 / 共 91（已省略窗口外的内容）」，75 行窗口，命中行高亮 |
+| 搜无命中的词 | 预览回到 `idle`（标题只剩「预览」） |
+| Enter 走动光标 | `cursor` 0→1→2；走到第 3 条时预览**换了文件**（`client_mappings.txt` → `server_mappings.txt` 行 48701 / 共 78080） |
+| 面板滚到底 | 预览体可见（矮停靠区里给 `.fs-preview` 保底 96px，其余靠面板滚动） |
+
+### 五、判据
+
+`tests/search-preview.test.mjs` 17 条（去抖/上下文常量、三句文案、窗口边界（首/末行、越界、空文件、
+零上下文）、`\r` 处理、标题、`file.read` + 缓存、迟到答复、三档状态、跟随光标、矮容器保底高度）。
+B7 判决书四条改判：`FindPopupPanel` / `FindPopupHeader` / `FindPopupScopeUI` /
+`FindPopupResultsAutoloadHandler` 由 `[ ]` 改 `[~]`（页脚 72→76 / 460→456），新增 §B10，
+「查找工具窗」那一行重写。
+
+## 第一百零六批验证记录（查找结果列表的右键菜单 —— 「复制路径/引用…」）
+
+### 一、上游形状（逐条核过 `PlatformActions.xml` / `CopyPathProvider.kt`）
+
+- `FindInFiles.Results.ContextMenu`（`:1330-1332`）里只有一条引用：`CopyReferencePopupGroup`；
+- 该组（`:1266-1281`，`popup="true"`，组名 `group.CopyReferencePopupGroup.text` = 复制路径/引用…）：
+  `CopyFileReference` 组 → 绝对路径 · 文件名 · (分隔) · 带行号的路径 · 来自内容根的路径 · 来自源根的路径；
+  `CopyExternalReferenceGroup` 组 → 工具箱 URL；
+- 各条口径：`CopyPathProvider.kt:117`（presentableUrl）、`:133-139`（`FqnUtil.getVirtualFileFqn(...) + ":" + 行号`，
+  FQN 问不到语言限定名时退回相对基目录的路径）、`:121-129`（相对内容根）。
+- **两条不做**（已写进模块头，不摆假菜单项）：来自源根的路径（要源根模型）、工具箱 URL（JetBrains 专有链接）。
+
+### 二、本仓落点
+
+`src/copyPathActions.ts`（文案 + 文本口径 + 菜单行工厂）＋ `SearchPanel.vue` 的结果行右键 →
+复用应用既有的浮层渲染器 `EditorPopupMenu.vue`。
+
+### 三、真机抓到的缺陷（菜单画得出来、点不到）
+
+第一版忘了给浮层包 `.tree-menu-backdrop`：浮层自己是 `z-index: auto`，被另一个浮层的
+`z-index:40` 全屏背景盖住 —— **鼠标点到的是背景**（`elementFromPoint` 返回结果列里的一个 span），
+合成 `click()` 却能生效，所以第一轮探针没看出来。包上那层背景后 `elementFromPoint` 返回
+`BUTTON.has-sub`（就是菜单自己），真实点击才通。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9396`）
+
+| 判决点 | 实测 |
+|---|---|
+| 右键结果行 | 菜单只有一组「复制路径/引用…」 |
+| 展开 | 四项：绝对路径 / 文件名 / 带行号的路径 / 来自内容根的路径（顺序照上游） |
+| 点「带行号的路径」 | 剪贴板 = `.workbuddy/memory/2026-09-13.md:57`（该行 `.fs-pos` 显示 `57:30`，行号对得上） |
+
+## 第一百零七批验证记录（状态栏六个 widget 工厂的口径更正）
+
+**问题**：B2 判决书 §C 第 5/6 条把六个状态栏组件工厂列成"未移植"，§G 里那六行也写
+「§C：行为在 App.vue 按钮里，**无工厂层**」—— 那是第三十批之前的旧口径：工厂层（`src/statusBarWidgets.ts`
+的契约 + `src/statusWidgets.ts` 的工厂表 + 勾选清单）在第三十批就落地了。
+
+**逐条改判**（都核过实现与上游语义）：
+
+| 类 | 新判 | 依据 / 缺口 |
+|---|---|---|
+| `ReadOnlyAttributeWidgetFactory` | `[x]` | `statusWidgets.ts` 的 `readonly` 工厂位 + `status-locked` 芯片（点击切换可写） |
+| `EncodingPanelWidgetFactory` | `[x]` | `encoding` 工厂位 + 编码弹层（重新读取 / 转换保存 / BOM） |
+| `LineSeparatorWidgetFactory` | `[~]` | 有徽标与 LF↔CRLF 切换；**缺** `ChangeLineSeparators` 动作组里的 **CR** 档 |
+| `PositionPanelWidgetFactory` | `[x]` | 光标位置 / 已选字符 / 多光标 / 点击转到行 |
+| `MemoryIndicatorWidgetFactory` | `[~]` | 有工作集与峰值；**缺**上游单击强制 GC（`MemoryUsagePanel.java:121-138`）—— 宿主没有 JVM 堆 |
+| `SmartModeIndicatorWidgetFactory` | `[~]` | 有语言服务状态芯片；**缺**索引期的进度与受限动作提示（本仓语言服务就绪即视为 smart） |
+
+页脚 12+89+45+204 → **15 + 92 + 39 + 204 = 350**；b2 门禁的计数与"引用可带行号"（`src/x.ts:12` 先剥
+`:12` 再查存在性，与 b7 同款）一并更新；§A/§B/§C/§D 的标题数字也改成"全表 N 类"（原来那些数字与四档对不上）。
+
+## 第一百零八批验证记录（「复制路径/引用…」的第二个宿主：编辑菜单）
+
+**上游的第二、三个宿主**（`PlatformActions.xml`）：`:1279` 把这一组加进 `CutCopyPasteGroup`
+（锚在 `CopyPaths` 之后 ⇒ 编辑菜单），`:1280` 又加进 `EditorTabPopupMenu`（标签右键）。
+
+本批落了**编辑菜单**这一处（`src/menus/editMenu.ts` 在「复制」之后插组，四行由
+`src/copyPathActions.ts` 的 `copyPathMenuRows()` 提供，App.vue 只多一行装配），
+目标 = 当前文件 + 光标行，复制走 `copyToClipboard`。
+
+**标签右键那一处如实记为缺口**：App.vue 贴着 2737 行上限（本批为放进这一行把 import 与
+`copyToClipboard` 合并成一行、并删掉自己写的两行注释才回到 2737），标签右键是手写模板，
+要再加一个子菜单得先拆模板 —— 留给下一批，判决书里已注明。
+
+真机（`TAOCODE_DEBUG_PORT=9397`）：编辑菜单里「复制路径/引用…」紧跟「复制」；悬停展开四项；
+光标放在 4:3 时点「带行号的路径」→ 剪贴板 `MIGRATION-PATTERNS.md:4`（行号确实来自光标）。
+
+## 第一百零九批验证记录（标签右键菜单整块搬出 App.vue + 「复制路径/引用…」的第三个宿主）
+
+### 一、上游形状
+
+`PlatformActions.xml:1280` 的 `<add-to-group group-id="EditorTabPopupMenu" anchor="after" relative-to-action="CopyPaths"/>`
+—— `CopyReferencePopupGroup` 也挂在**编辑器标签右键**上，插在「复制路径」之后（与编辑菜单那一处同源）。
+
+### 二、本仓落点
+
+标签右键那一块 46 行 markup 原先是**手写在 App.vue 里**的，而 App.vue 贴着 2737 行的机检上限（上一批
+为放进一行装配已把它压到 2737）。这一批把它整块搬进 `src/components/TabContextMenu.vue`：
+
+- 组件只持有"子菜单展开"这一点本地状态，其余依赖经 `ctx` 注入（与 `ToolWindowView.vue` 同一套做法）；
+- App.vue 里那段 `const tab = findTab(path); if (tab) …` 的模板表达式逐条改写成 `ctx` 上的薄包装，
+  **守卫一步不少**（有判据锁住：`closeTabIn` / `closeTabsToRightIn` / `copyPathOfTab` /
+  `convertLineSeparators` / `togglePinTab` / `keepTabOpen` 六个都必须带 `if (tab)`）；
+- 净效果：**App.vue 2737 → 2720**（腾出 17 行），组件的 29 行菜单数据留在组件里。
+
+新门禁 `tests/tab-context-menu.test.mjs`（6 条）里最要紧的一条：组件模板里的每个 `ctx.X` 都必须在
+App.vue 的 `tabMenuContext` 里真的有 —— `ctx` 是 `any`，**TS 看不见这类笔误**，少了就是"点了没反应"。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9398`）
+
+| 判决点 | 实测 |
+|---|---|
+| 右键标签 | 29 行，顺序与上游一致：书签 → 关闭组 → **复制路径 → 复制路径/引用…** → 只读 → 关联类型 → 行尾 → 拆分组 → 固定/保持/配置 |
+| 展开复制组 | 四项：绝对路径 / 文件名 / 带行号的路径 / 来自内容根的路径 |
+| 光标在 4:3 时点「带行号的路径」 | 剪贴板 `MIGRATION-PATTERNS.md:4`（行号取自该标签记住的光标行） |
+
+### 四、判据
+
+`tests/tab-context-menu.test.mjs` 6 条（ctx 键齐、行序、子菜单四行、目标口径、App 只留一行、
+守卫不丢）；另两条既有判据跟着搬家（`bookmark-lists` 的书签三行、`popup-anchor` 的 AnchoredMenu），
+查的东西一字未改。全绿：`npm test` **1775/1775**、`vue-tsc` 0 错、`vite build` 成功、
+native RC 0 / 0 warning、ctest 36/36、模块尺寸门禁 5/5（App.vue 2720 ≤ 2737）。
+
+## 第一百一十批验证记录（剩余缺口的**核实**记录：四处查证，都不动手做的理由写清楚）
+
+这一批没有改产品代码 —— 把"下一步候选"逐个开原文核实了一遍，结论写在下面，免得下一位再走一遍。
+
+| 候选 | 核实结论（上游原文） | 处置 |
+|---|---|---|
+| `ChangesViewPopupMenu` 里也挂 `CopyReferencePopupGroup` | `VcsActions.xml:185-197`：提交面板变更行的右键菜单里，该组在「跳转到源」之后、删除之前 | **缺口如实记**：本仓变更行**没有右键菜单**（动作是行内按钮 + 点行开 diff）。要接这一组得先建 `ChangesViewPopupMenu` 本身（显示差异/跳转到源/回滚/删除…），属于下一批的整块活 |
+| `MainToolbarQuickActions`（B2 §C 第 18 条剩下的那项） | `PlatformActions.xml:1337-1345` + `intellij.platform.ide.impl.xml:1594-1601`：内容只有三条 —— `BackForwardQuickAction`（后退/前进）、`BuildQuickAction`（构建）、`SaveAllQuickAction`（全部保存） | **不做**：这三样本仓顶栏/菜单里都已经各有一处（后退/前进箭头、构建、全部保存），再做一个"…"只是把它们复制第二遍。判 `[ ]` 但理由改写成"内容已被别处覆盖" |
+| `TabInfo` 的 alert（闪烁提醒） | `TabInfo.kt:294-316`（`setAlertIcon` → `isAlertRequested`）+ `TabLabel.kt:662-682`（`maxInitialBlinkCount=5`、`maxReFireBlinkCount=7`，闪几次后常亮）+ **全树只有两个 setter**：`RunnerContentUi.java:595`（把 content 的图标抄给标签）与协作工具 `CodeReviewTabs.kt:47`；平台侧**没有任何"什么情况下该提醒"的触发点** | **不做**：机制在，触发者在平台里几乎不存在 —— 本仓若自己发明"哪个工具窗口什么时候闪"，那是发明不是移植。已在 B1 的 `TabInfo` 行注明 |
+| `ClosableByLeftArrow`（左箭头关弹层） | 实现者只有 `LookupActionsStep`（补全列表右侧"动作"那一步）与"有父弹层时"（`ListPopupImpl.java:428-429`）；F6 在 263 的 `$default.xml:627` 是 `Move` 重构，不是焦点循环 | **不做**：两者在本仓都没有对应形态（补全弹层是 CodeMirror 的、没有嵌套弹层；也没有 F6 焦点循环这条键位） |
+| `IdeFocusManager` 族（B2 §C 第 15 条） | 上游是通用焦点管理器；可见入口只有"工具窗口间焦点转移"，而 263 的默认键位表里没有 F6 那类循环键 | 维持 `[ ]`，理由改为"没有用户可见的入口键位" |
+
+**顺带记一条给下一位的**：`F6` 在 2026.2 是 `Move`（移动重构）—— 不是焦点循环，别照旧印象写进判据。
+
+## 第一百一十一批验证记录（提交面板变更行的右键菜单 —— 上游 `ChangesViewPopupMenu`）
+
+### 一、上游形状（逐条核过 `VcsActions.xml:185-216`）
+
+`ChangesViewPopupMenu` 的行序：CheckinFiles · Revert · RevertFiles · Move · ShowDiff · ShowStandaloneDiff ·
+EditSource ·（**CopyReferencePopupGroup**）· —— · $Delete · AddUnversioned · RemoveDeleted · Edit ·
+—— ·（更改列表四项）· CreatePatch · CreatePatchToClipboard · Shelve · —— · Refresh · —— · VersionControlsGroup。
+
+本仓只列**真有的**动作（行表 `src/changesMenuActions.ts`，文案取中文包 `ActionsBundle.properties`）：显示差异 ·
+复制路径/引用… · 回滚… · 暂存 / 取消暂存 · 添加到 VCS · 加入 .gitignore · 刷新；**按变更状态出没**
+（未跟踪 ⇒ 有「添加到 VCS / 加入 .gitignore」、没有「回滚」；已暂存 ⇒ 有「取消暂存」、没有「暂存」）。
+缺的逐条记在模块头：签出（Perforce 语义）、更改列表四项与 Move、CreatePatch 两项、Shelve（本仓在 Git 菜单）、
+ShowStandaloneDiff 与 EditSource（要宿主的"开标签页"通道，面板只 emit notify）。
+
+### 二、真机抓到的两个缺陷（都是"单元测试看不出来"的那类）
+
+1. **菜单 markup 插错层**：我用 `indexOf('</template>')` 找插入点，而 SFC 里**第一个** `</template>` 是嵌套
+   `v-if/v-else` 分支的收尾 —— 菜单被塞进那个分支里，从而"dispatch 到了、`defaultPrevented=true`、
+   但界面上一片空白"。改成插在**最后一个** `</template>`（根模板收尾）之前。
+2. **点了复制什么都没进剪贴板**：`pickRowMenu` 先把 `rowMenu` 清空，再去读依赖它的 `rowCopyRows` computed ——
+   拿到的永远是"没有目标 ⇒ 禁用"。改成用**存下来的** `menu` 直接算文本（判据里加了"这一支不许再读
+   `rowCopyRows.value`"）。与批 100 那个"计数停在旧值"同一类错误：**热路径取状态，别取已经失效的派生量**。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9402/9403`）
+
+在一个**自建草稿 git 仓库**上验（`%TEMP%\taocode-vcs-scratch`，验完即删；用户的工程不是 git 仓库，
+所以只能换工作区 —— 换法与恢复见下面教训）：
+
+| 判决点 | 实测 |
+|---|---|
+| 右键一个未跟踪文件行 | 菜单 = 显示差异 / 复制路径/引用… / **暂存 / 添加到 VCS / 加入 .gitignore** / 刷新（未跟踪没有「回滚」，与行表一致） |
+| 展开复制组 | 绝对路径 / 文件名 / 带行号的路径 / 来自内容根的路径 |
+| 点「带行号的路径」 | 剪贴板 = `.idea/.gitignore:1` |
+| 收尾 | 工作区切回用户工程、草稿仓库删除、用户文件 mtime 未变（18:30） |
+
+### 四、两条流程教训（写下来给下一位）
+
+1. **`git checkout -- <file>` 在有未提交工作的工作树上是破坏性的**。本批为了修一处插错层，
+   `git checkout -- src/components/SourceControl.vue` 把该文件**所有未提交的改动**一起抹了 ——
+   包括批 96 的面板内检查进度行与 `analyzing` prop（工作树里 100 多个文件全是未提交状态，
+   仓库从会话开始就没提交过）。**恢复方式**：跑全量测试找红（两条判据当场点名缺什么），
+   再照判据 + `src/commitChecks.ts` 的导出把那一块重建（`checksProgress` / `indexingWarningVisible` /
+   `NOT_ANALYZED...` 的用法在测试里写得很具体），最后 1783 条全绿。**教训**：要回滚单个文件，
+   先把它备份出去（或 `git stash push -- <file>`），别直接 `checkout`。
+2. **CDP 下 `Page.reload` 之后 `Runtime.evaluate` 不再应声**（本机 WebView2 上复现两次；
+   `/json/list` 仍正常）。要"让前端重新 bootstrap"，**重启 exe 比 reload 可靠** ——
+   宿主已持久化 `lastProject`/`projects.json`，重启就回到同一个工作区。
+   换工作区的可靠姿势也是它：`window.chrome.webview.postMessage({ method: 'workspace.open', params: { path } })`
+   让宿主切，然后**重启**（不要 reload）。
+
+### 五、判据
+
+`tests/changes-menu.test.mjs` 8 条（三种变更状态各自的行集、文案与助记符、行序、每个 id 都有处理函数、
+两组行都能右键、菜单外套与 AnchoredMenu、复制走中央通道且**不读失效的派生量**）。
+全绿：`npm test` **1783/1783**、`vue-tsc` 0 错、`vite build` 成功、native RC 0 / 0 warning、ctest 36/36。
+
+## 第一百一十二批验证记录（提交面板的「分组依据」 + 逐块暂存拆出组件）
+
+### 一、上游形状（逐条核过）
+
+- 组名 `group.ChangesView.GroupBy.text` = 「分组依据」（`ActionsBundle.properties:2547`）；
+  组里那条 `<separator key="...">` 就是这行标题，策略项由 `SelectChangesGroupingActionGroup`
+  动态填（`intellij.platform.vcs.impl.shared.xml:104-109`）。
+- 三项：`ChangesView.GroupBy.Directory` = 目录（`:134`，Ctrl+Alt+P，`$default.xml:1116-1117`）、
+  `Module` = 模块（`:135`，Ctrl+Alt+M，`:1119-1120`）、`Repository` = 仓库（`:136`，dvcs-impl 注册）。
+
+**本仓只做「不分组 / 目录」两档**：模块要模块模型（本仓没有这一层）、仓库要多仓库视图
+（本仓的变更面板是"一个工作区 = 一个仓库"，分出来永远只有一组）—— 不列点了没反应的档，
+理由写在 `src/changesGrouping.ts` 的文件头。
+
+### 二、真机判决点（`TAOCODE_DEBUG_PORT=9405`，在 `D:/TaoCode/.tools/ui-parity-proj` 这个草稿工程上）
+
+| 判决点 | 实测 |
+|---|---|
+| 「分组依据」下拉 | 选项 = 不分组 / 目录（默认不分组） |
+| 切到「目录」 | 组头 = `.` / `.idea` / `out/production/ui-parity-proj` / `src`，行数不变（11） |
+| **已修改**那一行的右键菜单 | 显示差异 / 复制路径/引用… / **回滚…** / 暂存 / 刷新 —— 与未跟踪那一行（批 111 验的）差在「回滚」有无 ✓ |
+| 点该行开 diff | 逐块暂存那一段（已拆成组件）照旧：工具条「暂存勾选块 / 退回勾选块」+ 「工作区差异 · 1 块」+ 一块 `@@ -5,3 +5,5 @@` |
+
+### 三、顺手做的拆分（纪律：拆而不抬）
+
+`SourceControl.vue` 涨到 **918 行 > 900**（机检上限）：把**逐块暂存**那一整块（markup + `hunks` 选择 +
+`git.applyHunks` 请求 + 错误行）拆成 `src/components/ChangedHunks.vue` —— 它与变更列表无关
+（吃一份 `hunks`、自己选择与请求），拆完回到 **894 行**；勾选状态也一并归子组件
+（面板原来的 `DiffState.hunkPicked` 删掉，换文件时子组件自己按 `hunks` 重置）。
+两处既有判据跟着改口径（`scm-panel-strings` 里"行随折叠显隐"那两条：行循环现在是 `group.changes`，
+判的东西没变），另有 `commit-checks-progress` 的两条在上一条事故里已经恢复。
+
+### 四、判据
+
+`tests/changes-grouping.test.mjs` 8 条（标签、**只列两档**（模块/仓库不列，理由在模块里）、目录归属、
+分组排序（顶层最前 + 组内排序）、不分组 = 原样、空列表、面板接线、组头只在目录档出现）。
+全绿：`npm test` **1791/1791**、`vue-tsc` 0 错、`vite build` 成功、native RC 0 / 0 warning、
+ctest 36/36、模块尺寸门禁 5/5。
+
+## 第一百一十三批验证记录（「忽略的文件」—— 上游 `ChangesView.ShowIgnored`）
+
+### 一、上游形状（逐条核过）
+
+`intellij.platform.vcs.impl.shared.xml:138-146` 的 `ChangesView.ViewOptions` 组里：
+`ChangesView.GroupBy` · 分隔 · **`ChangesView.ShowIgnored`**（`ToggleShowIgnoredAction`）。
+文案取随 IDE 发货的中文包 `VcsBundle.properties`：`:9` `action.ChangesView.ShowIgnored.text` = 忽略的文件、
+`:8` 的 description = 显示忽略的文件。
+
+### 二、本仓落点
+
+- **原生**：`taocode::git::status(repo, include_ignored)` —— 开着时给 `git status` 加 `--ignored=matching`，
+  porcelain 的 `!!` 记录解析成 `ignored = true`（`native/git.hpp` 的 `Change` 加一个字段），
+  `git.status` 透传 `ignored` 参数；序列化里带出 `ignored`。
+- **前端**：面板工具栏上一个复选框（默认**关**）+ `load()` 带上 `ignored`；忽略的行状态显示 `!`，
+  **不给**会失败的两个按钮（回滚 / 暂存）—— `git` 对忽略的文件既没有 diff 也不收普通 `git add`。
+- **菜单**：`changesMenuRows` 多一档 `ignored`：只给「显示差异 / 复制路径/引用… / 刷新」。
+  上游那两条（从忽略列表移除 / 强制加入 VCS）要 `.gitignore` 编辑与 `git add -f`，**留作缺口**，
+  不摆会失败的菜单项（理由写在 `src/changesMenuActions.ts` 文件头）。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9407`，`D:/TaoCode/.tools/ui-parity-proj`）
+
+先在那个草稿工程里建一个 `.gitignore`（内容 `ignored-scratch.txt`）+ 被忽略的文件，然后：
+
+| 判决点 | 实测 |
+|---|---|
+| 复选框 | 文案「忽略的文件」、tooltip「显示忽略的文件」、默认未勾选 |
+| 勾选前 | 11 行、**0** 行状态是 `!` |
+| 勾选后 | 13 行，多出的两行是 `!.idea/workspace.xml` 与 `!ignored-scratch.txt` |
+| 右键一个忽略的行 | 菜单 = 显示差异 / 复制路径/引用… / 刷新（**没有**回滚/暂存/加入 .gitignore） |
+| 收尾 | 草稿工程里的 `.gitignore` 与被忽略文件删除、工作区切回用户工程、用户文件 mtime 未变 |
+
+### 四、判据
+
+`tests/changes-menu.test.mjs` 加 1 条（忽略的文件只有三行，且断言**不出现** stage/revert/ignore ——
+「staged + ignored」是个到不了的状态，不拿它当判据）；原生 `native/git_test.cpp` 加 1 条
+（默认不列 / 开着要列 / `!!` 记录如实 / 用完把自己建的 `.gitignore` 与文件删掉，别脏了后面那条
+`ignore_path appends once and only once` —— 第一次加的时候正是踩了这条）。
+全绿：`npm test` **1792/1792**、`vue-tsc` 0 错、`vite build` 成功、native RC 0 / 0 warning、ctest 36/36。
+
+**顺手再拆一刀**（SourceControl 903 → **895**，纪律：拆而不抬）：提交者历史的 localStorage 键与读写
+搬到 `src/commitAuthor.ts`（`commitAuthorsKey` / `readSavedAuthors` / `saveUsedAuthor`）——
+那两件事与面板无关，一个键名 + 一次 JSON 读写。
+
+## 第一百一十四批验证记录（补丁导出 —— `ChangesView.CreatePatch` / `CreatePatchToClipboard`）
+
+### 一、上游形状（逐条核过）
+
+`VcsActions.xml:208-211` 的 `ChangesViewPopupMenu` 里两条：`ChangesView.CreatePatch` = 「从本地更改创建补丁…」
+（`ActionsBundle.properties:127`）、`ChangesView.CreatePatchToClipboard` = 「作为补丁复制到剪贴板」（`:131`）。
+上游弹的是"创建补丁"对话框（勾选要包含的更改 + 目标文件），本仓落在**变更行的右键菜单**上。
+
+### 二、本仓落点
+
+`src/patchExport.ts`（新模块：`localPatchText` / `createPatchFile` / `copyPatchToClipboard` + 文案常量与
+`.patch` 保存过滤）＋ `SourceControl.vue` 的两行分派；行表加 `patch` / `patchClipboard` 两条
+（忽略的文件**不给** —— `git` 对它们没有 diff）。
+补丁文本 = `git diff HEAD`：**暂存 + 未暂存一起**；落盘走 `dialog.saveFile` + `app.writeExportFiles`
+（与 HTML 导出同一条通道）。
+
+**如实记的缺口**：未跟踪的文件**不在**补丁里（git 的 diff 不认它们，上游那个对话框会把它们当新文件
+加进去）—— 模块头与清单都写了，界面不假装包含。
+
+### 三、真机抓到的缺陷（第一版拿到的是**空**补丁）
+
+第一版按"比较分支"那条路传 `base: 'HEAD'`，而 `range_args()` 把它拼成 `git diff HEAD HEAD` —— 结果恒为空，
+真机上提示「没有本地更改，剪贴板未改动。」（工作区明明有改动）。处置：`git.diff` 新增 `whole` 参数
+（`git diff HEAD`，一个 rev 就够），`diff`/`diff_sides` 的签名各加一个默认参数；判据里钉住
+"必须是 `whole: true`，不许写成 `base: 'HEAD'`"。
+
+### 四、真机判决点（`TAOCODE_DEBUG_PORT=9420`，草稿工程 `D:/TaoCode/.tools/ui-parity-proj`）
+
+| 判决点 | 实测 |
+|---|---|
+| **已修改**行的右键菜单 | 显示差异 / 复制路径/引用… / 回滚… / 暂存 / **从本地更改创建补丁…** / **作为补丁复制到剪贴板** / 刷新 |
+| 点「作为补丁复制到剪贴板」 | 剪贴板 = 真补丁：`diff --git a/README.md b/README.md` + `index 8240160..71478b0 100644` + `---/+++` + `@@ -5,3 +5,5 @@` 与改动行 |
+| 收尾 | 草稿工程 `README.md` revert、工作区切回用户工程、用户文件 mtime 未变（18:30） |
+
+### 五、判据
+
+`tests/patch-export.test.mjs` 5 条（文案与 `.patch` 过滤照中文包、**补丁走 `whole: true`**、
+未跟踪缺口写在模块里、空补丁不动剪贴板、面板两条分派），`tests/changes-menu.test.mjs` 11 条
+（三种状态的行集都补上这两条、忽略的文件不给）。全绿：`npm test` **1799/1799**、`vue-tsc` 0 错、
+`vite build` 成功、native RC 0 / 0 warning、`ctest` 36/36、模块尺寸 5/5（SourceControl 929 → **898**）。
+
+**顺手再拆一刀**：补丁那三条搬进 `src/patchExport.ts`（SourceControl 929 → **898**）。
+
+## 第一百一十五批验证记录（补丁收上未跟踪的文件 —— 关掉第一百一十四批记的那个缺口）
+
+### 一、为什么做
+
+批 114 的补丁是 `git diff HEAD`，**未跟踪的文件不在里面**（git 的 diff 不认它们）——
+上游 `CreatePatchFromChangesAction` 会把它们当**新文件**加进去，所以那是个真缺口，不是取舍。
+
+### 二、本仓落点
+
+- **原生**新增 `taocode::git::patch(repo, include_untracked)`：`git diff HEAD`（暂存 + 未暂存）
+  之后，对每个未跟踪文件跑 `git diff --no-color --no-index -- /dev/null <file>` 接在后面 ——
+  那份输出就是标准的"新文件"补丁（`diff --git a/x b/x` + `new file mode` + `--- /dev/null`）。
+  **那条命令有差异时退出码是 1**（git 的约定，不是失败），其余非零码（二进制/读不了）跳过该文件。
+- 桥接新增 `git.patch { includeUntracked }`（`src/bridge.ts` 的 Method 并进那一行，
+  `native/main.cpp` 的方法清单同步）；前端 `src/patchExport.ts` 从
+  `git.diff { whole: true }` 改为 `git.patch { includeUntracked: true }`。
+
+### 三、真机判决点（`TAOCODE_DEBUG_PORT=9422`）
+
+草稿工程里一个已修改文件（`README.md`）+ 一个未跟踪文件（`fresh-scratch.txt`）：
+
+| 判决点 | 实测 |
+|---|---|
+| `git.patch` 的答复（直接在页面里挂 `chrome.webview` 消息监听读回来的） | 3995 字节，`hasReadme: true`、`hasFresh: true`、`new file: true`、`--- /dev/null: true`，开头是 `diff --git a/README.md b/README.md` |
+| 原生侧同一件事 | `native/git_test.cpp` 新增一条：跟踪改动 + 未跟踪文件都在、`new file mode` 与 `/dev/null` 都在、`include_untracked=false` 时不含它；**用例结尾把 `a.txt` 恢复原样**（下一条判据拿它当夹具，共享临时仓库） |
+
+### 四、一条新学到的取证姿势（写进来给下一位）
+
+本机这会儿抢不到前台（`SetForegroundWindow` 不生效），剪贴板读写全都报 `Document is not focused`。
+**不依赖剪贴板也能验桥接方法**：在页面里挂一次
+`window.chrome.webview.addEventListener('message', e => window.__replies[e.data.id] = e.data)`，
+再 `postMessage({ id: 777001, method: 'git.patch', params: {...} })`，
+然后用 CDP 读 `window.__replies[777001]` —— 这是"直接调任意桥接方法并看答复"的通用口子。
+
+### 五、判据
+
+`tests/patch-export.test.mjs` 5 条（改口径为 `git.patch`，并断言**不许**再出现 `base: 'HEAD'` 那条错路）、
+原生 `git_test` 26 条全绿（新增 1 条）。全绿：`npm test` **1799/1799**、`vue-tsc` 0 错、`vite build` 成功、
+native RC 0 / 0 warning、`ctest` 36/36。
+
+
+## 第一百一十六批：行级 diff 的两步比对（上游 `ChangeCorrector` + `ByLineRt.compareSmart`）
+
+### 一、上游是什么
+
+`ByLineRt.doCompare`（`platform/util/diff/src/com/intellij/diff/comparison/ByLineRt.kt:60-84`）
+不是"一把 LCS 比到底"，而是三步：
+
+1. `compareSmart`（`ByLineRt.kt:335-348`）：先只比"大行" —— `nonSpaceChars > threshold`，
+   阈值是**常量** `DiffConfig.UNIMPORTANT_LINE_CHAR_COUNT = 3`（`util/diff/DiffConfig.kt:12`）；
+   短行（`{` / `}` / `);` / 空行）**不参与第一步**（`getBigLines`，`ByLineRt.kt:350-362`）；
+2. `SmartLineChangeCorrector`（`comparison/ChangeCorrector.kt:93-126`）：按 `execute()`
+   （`ChangeCorrector.kt:27-50`）遍历第一步的**已匹配**大行，每两对之间 `matchGap`
+   （`ChangeCorrector.kt:101-115`）—— 先把两端本来就相等的行让出来（`TrimUtil.expand`，
+   `TrimUtil.kt:323-339`），中间那段做一次局部 LCS；
+3. `optimizeLineChunks` + `expandRanges` / `correctChangesSecondStep`（本批**没做**，见"五、缺口"）。
+
+### 二、为什么值
+
+全局 LCS 在"并列最优"时会随便挑一种配法，短行就可能被配到别处去。实测（本批的判据夹具）：
+
+```
+before: if (x) {    after: if (x) {
+          a();              }
+        }                   a();
+```
+
+两边的配对数**都是 5**，但两步比对认"括号挪了"（`a();` 与 `b();` 都算相等），
+普通 LCS 认成"语句挪了"（把 `a();` 判成删+增）—— 后者是假的改动。
+
+### 三、实现
+
+`src/diffSmartLines.ts`（新）：`UNIMPORTANT_LINE_CHAR_COUNT` / `nonSpaceChars` / `bigLineIndexes` /
+`smartLineMatch`（两步比对的全部逻辑，参数是**两侧按策略折过的键** + 原文行 —— 判等用键、
+筛大行用原文，与上游 `Line.nonSpaceChars` 只看 `content` 一致）。接在 `src/diffText.ts` 的
+`buildDiffRows`（剪贴板对比、保存冲突预览两条通道共用）。
+
+`tests/diff-smart-lines.test.mjs` 13 条：阈值常量、大行边界（**大于** 3 才算）、
+无大行时的退化（整篇一个空隙 = 普通 LCS）、两端让出、大行必须与"只比大行"的结果一致、
+键与原文的分工、不许少配、接线。
+
+### 四、兜底那一条（本仓的偏差，写清楚）
+
+上游靠第 3 步的两道修补来收拾 `compareSmart` 变粗的地方；本仓没有那两步，所以在
+`buildDiffRows` 里加了一条：**两步比对的配对数不许少于普通 LCS**（少配一定更差；
+多配或同样多才取两步比对的结果）。判据里也钉了这条（`smart.length >= plain.length`）。
+
+### 五、缺口（判词同步）
+
+`optimizeLineChunks`（`ChunkOptimizer.LineChunkOptimizer`，按同一阈值合并行块）、
+`expandRanges` / `correctChangesSecondStep`（`ByLineRt.kt:120-270`）、
+以及字符级的 `DefaultCharChangeCorrector` 都没做 —— 所以 `ChangeCorrector` 判 `[~]` 而不是 `[x]`。
+
+### 六、门禁
+
+`vue-tsc` 0 错、`npm test` **1812/1812**（+13）、`vite build` 成功、`build-native-locked.bat` RC 0、
+`ctest` 36/36、冒烟存活 15 秒。判决书 `verdict-find-diff.md` 页脚 `[~]` 76→77 / `[ ]` 456→455（`b7-verdict` 门禁过）。

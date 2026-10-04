@@ -80,10 +80,11 @@ const REGISTERED = new Map([
       + '版本控制动作、编辑器文件级操作（冲突/文档/缩进/行尾/编码）、标签拖放、标签条单行布局、分栏与面板尺寸、生成/重构/文件移动、文件树操作、编辑区分栏与标签页开关、工具窗口命名布局、通知与状态栏键盘导航、编辑器侧视图与项目视图定位。',
   }],
   ['src/components/SettingsDialog.vue', {
-    limit: 1381,
+    limit: 1356,
     note: '设置树的宿主 + 各页的挂载点。页面本体已在 src/components/*Page.vue（Scopes/TodoPatterns/FileTypes/BuildTools/Gradle…），'
       + '树本身（页面键/分组/节点/随项目保存的页）在 src/settingsTreeMeta.ts —— 上限跟着拆降'
-      + '（2026-09-27 接 Gradle 页时从 1450 降到 1380）。',
+      + '（2026-09-27 接 Gradle 页时从 1450 降到 1380；接标签条排法时把「编辑器标签页」页拆到'
+      + 'EditorTabsSettingsPage.vue，降到 1356）。',
   }],
   ['src/bridge.ts', {
     limit: 1208,
@@ -92,10 +93,14 @@ const REGISTERED = new Map([
       + '插件清单类型拆到 src/pluginGroups.ts（2026-09-27 从 1450 降到 1208）。',
   }],
   ['src/components/CodeEditor.vue', {
-    limit: 1195,
+    limit: 1147,
     note: 'CodeMirror 宿主。各 LSP 能力的解码/判定已拆 src/semanticTokens.ts、documentLinks.ts、inlineCompletionExtension.ts 等 —— '
       + '上限是拆一次降一次（2026-09-27 从 1250 降到 1220；再把语义着色的颜色表拆到 src/editorSemanticColors.ts、'
-      + '追溯注解列的样式并进 src/editorBlameAnnotations.ts，降到 1195）。',
+      + '追溯注解列的样式并进 src/editorBlameAnnotations.ts，降到 1195）。'
+      + '接编辑器内查找栏时又拆两块：空白可视化 → src/editorWhitespace.ts、主题与词法着色 → src/editorTheme.ts，降到 1172；'
+      + '接插入/覆盖模式时把轻量信息提示 → src/editorHint.ts（降到 1155）；接合并冲突导航条时把诊断标记与那几条状态扩展拆到 '
+      + 'src/editorDiagnosticMarkers.ts / src/editorTheme.ts（降到 1148），后来真机抓到"计数停在旧值"，'
+      + '冲突清单改取实时文档、清单与两个动作整个搬进 src/editorMergeHost.ts，降到 1147。',
   }],
 ])
 

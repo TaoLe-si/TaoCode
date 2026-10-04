@@ -86,8 +86,9 @@ test('图标带去重键（源码要求 equals/hashCode，同一行同文本只�
 
 test('默认设置里开关是开的，且前后端键白名单都登记了它', () => {
   assert.equal(defaultEditorSettings.showGutterIcons, true)
-  const bridge = readFileSync('src/bridge.ts', 'utf8')
-  assert.ok(bridge.includes("key === 'showGutterIcons'"), '前端设置白名单里没有这个键')
+  // 白名单 2026-10-04 从 src/bridge.ts 搬到了 src/previewSettings.ts（bridge 贴着机检上限）。
+  const preview = readFileSync('src/previewSettings.ts', 'utf8')
+  assert.ok(preview.includes("key === 'showGutterIcons'"), '前端设置白名单里没有这个键')
   const schema = readFileSync('native/settings_schema.cpp', 'utf8')
   assert.ok(schema.includes('{"showGutterIcons", true}'), '原生默认值里没有这个键')
   assert.ok(readFileSync('native/settings_schema.hpp', 'utf8').includes('"showGutterIcons"'), '原生键白名单里没有它')

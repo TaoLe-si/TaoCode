@@ -60,6 +60,19 @@ void run_step(const std::filesystem::path& profile, const char* name, const std:
 Json paths(const std::filesystem::path& profile);
 
 /**
+ * 本 session 的**内部错误账**（IDEA `FatalErrorWidgetFactory` → `IdeMessagePanel` 那个计数）：
+ * 每次 `event(..., "ERROR", ...)` 记一条，保留最近 N 条。
+ *
+ * 为什么不直接读日志文件：日志是跨 session 追加的，读它会把上次启动的错误也算进"本次"。
+ * 进程内计数才是"这一轮 IDE 出过几次内部错误"的准确答案（上游 `MessagePool` 也是进程内的）。
+ */
+Json internal_errors();
+
+/** `event()` 内部调用：把 ERROR 级的消息记进账本（等级不是 ERROR 时是空操作）。 */
+void record_internal_error(const std::string& level, const std::string& message);
+
+
+/**
  * 供 `BrowseSpecialPaths`：`[{ id, label, path }]`。
  * `exe_dir` 是程序所在目录（TaoCode 的安装目录）；`ui_dir` 是前端资源目录，缺省时用 `<exe_dir>/ui`。
  */

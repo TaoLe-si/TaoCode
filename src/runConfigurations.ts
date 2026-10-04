@@ -182,6 +182,8 @@ const runConfigDebug = ref(false)
 // IDEA RunConfigurationsDialog：独立的运行/调试配置对话框（左侧列表 + 右侧表单）。
 // 草稿由现有编辑状态合成，保存走同一条 persistRunConfigs 链路（不另开持久化路径）。
 const runConfigsOpen = ref(false)
+/** 「查看断点…」对话框（上游 `BreakpointsDialog`，主从详情面板唯一的消费者）。 */
+const breakpointsOpen = ref(false)
 const runConfigDraft = computed<RunConfig>(() => ({
   name: runConfigName.value,
   type: runConfigType.value,
@@ -218,6 +220,9 @@ async function saveRunConfigFromDialog(config: RunConfig) {
   loadRunConfigDraft(config.name)
 }
 function openRunConfigurations() { runConfigsOpen.value = true; menu.value = null }
+// 「查看断点…」（Ctrl+Shift+F8）—— 上游 `ViewBreakpointsAction` → `BreakpointsDialog`。
+// 断点表在宿主（`src/bridge.ts` 的 `dapBreakpoints`），这里只开对话框。
+function openBreakpoints() { breakpointsOpen.value = true; menu.value = null }
 async function removeRunConfigFromDialog(name: string) {
   await persistRunConfigs(runConfigs.value.filter(config => config.name !== name), `已删除运行配置「${name}」`)
 }
@@ -245,7 +250,7 @@ function removeConfig() {
     runConfigs, runConfigName, runWidgetTitle, configChooser, configIndex, openConfigChooser, moveConfig,
     applyConfigChoice, runConfigType, runConfigProgram, runConfigDebugAdapter, runConfigArgs, runConfigCwd,
     runConfigEnv, runConfigBefore, runConfigFolder, runConfigEditorOpen, runConfigDebug, runConfigsOpen,
-    runConfigDraft, loadRunConfigDraft, saveRunConfigFromDialog, openRunConfigurations,
+    runConfigDraft, loadRunConfigDraft, saveRunConfigFromDialog, openRunConfigurations, breakpointsOpen, openBreakpoints,
     linesToArray, arrayToLines, currentRunConfig, selectRunConfig, pickConfig, persistRunConfigs,
     addBeforeLaunchStep, removeBeforeLaunchStep, removeRunConfigFromDialog, saveConfig, removeConfig,
   }
