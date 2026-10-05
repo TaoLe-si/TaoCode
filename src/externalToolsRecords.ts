@@ -1,21 +1,29 @@
 // 外部工具的**完整 bean 字段**与本仓可用的持久化通道。
 //
-// 上游形状：`platform/lang-impl/src/com/intellij/tools/Tool.java:56-77` 的 16 个字段
+// 上游形状：`platform/lang-impl/src/com/intellij/tools/Tool.java:56-78` 的 16 个字段（订正：原写 :56-77，
+// `myOutputFilters` 实际在 :78）
 // （name / description / group / 4 个 shownIn* / enabled / useConsole / showConsoleOnStdOut /
 // showConsoleOnStdErr / synchronizeAfterExecution / workingDirectory / program / parameters /
 // outputFilters），编辑面是 `ToolEditorDialog.java:100-121`（`getData`）与 `:137-158`（`setData`），
 // 控件与文案在 `ToolEditorDialogPanel.kt` + `resources/messages/ToolsBundle.properties`。
 //
 // 本仓的持久化现状（动手前核实过，不是照抄判词）：
-//   · 宿主 `native/settings_schema.cpp:262-270` 对 `externalTools` 每条只做
+//   · 宿主 `native/settings_schema.cpp` 的 `externalTools` 原先只做
 //     `known_keys(entry, {"name","command"})` —— **多余键会被判 INVALID_SETTINGS**；
 //     `src/settingsModel.ts:148` 的 `GeneralSettingsState.externalTools` 同形（冻结文件）。
-//   ⇒ 所以「程序/参数」合成一条 `command`（`Tool.java:75-76` 两字段），其余字段
-//     落在本模块的 localStorage 表里（与 `src/fileTypeOverrides.ts:34` 的
-//     `FILE_SETS_KEY`、`src/macros.ts:306` 的 `MACRO_STORAGE_KEY` 同一先例：
-//     应用级用户数据走 localStorage）。设置页把这条限制写在页脚，不画点不动的控件。
-//   · 原生 schema 放开字段的接线请求见 `docs/wiring-requests-2026-10-06-bucket15.md` 的 W2；
-//     放开后本模块的 `toolRecordsFrom()` 就是那份「合并两处来源」的唯一入口。
+//   ⇒ 2026-10-06 订正留痕：接线请求 W2（docs/wiring-requests-2026-10-06-bucket15.md）**已经落地**，
+//     原生白名单按上游 `Tool.java:56-78` 放开（description/group/enabled/useConsole/
+//     showConsoleOnStdOut/showConsoleOnStdErr/synchronizeAfterExecution/workingDirectory/outputFilters），
+//     `toolRecordsFrom()` 也改成**宿主条目优先**（原写「宿主只存得下这两个键」已不成立）。
+//     请求原文说「前端侧不需要改动：本模块已经在读这些键」——**核过是假的**：
+//     原 `toolRecordsFrom` 只取 `entry.name`/`entry.command`，其余一律来自详情表，
+//     所以放开原生白名单后必须同时改这里的合流，否则放开的键等于没人读。
+//     其余字段仍落本模块的 localStorage 详情表（与 `src/fileTypeOverrides.ts:34` 的
+//     `FILE_SETS_KEY`、`src/macros.ts:306` 的 `MACRO_STORAGE_KEY` 同一先例：应用级用户数据走
+//     localStorage），本页是**兜底**那一半，不是唯一真源。
+//   · 没放开的两组照上游注释如实登记：`program`/`parameters`（`Tool.java:75-76`）合成一条
+//     `command`；四个 `shownIn*`（`Tool.java:62-65`）上游注明 "effectively not used anymore,
+//     see IDEA-190856"，本仓也不给它开持久化口子。
 //
 // 已经被消费掉的字段（不是死数据）：
 //   · `group` —— 子菜单分组（`BaseToolManager.java:89-113` 每个 ToolsGroup 注册成一个 delegate group）；
@@ -64,8 +72,41 @@ export const TOOL_ADVANCED_SEPARATOR = '高级选项'
 /** 上游缺省分组名（`Tool.java:53` 的 `DEFAULT_GROUP_NAME` = `ToolsBundle.properties:38` 的 `external.tools`）。 */
 export const DEFAULT_TOOL_GROUP = '外部工具'
 
-/** 宿主只存得下这两个键；本仓的 name 与命令串。 */
-export interface HostToolEntry { name: string; command: string }
+/**
+ * 宿主条目：`name` / `command` 必填，其余是上游 `Tool` 的 bean 字段（Tool.java:56-78），
+ * 2026-10-06 起 `native/settings_schema.cpp` 的白名单放开、可以随应用设置存走
+ * （接线请求 docs/wiring-requests-2026-10-06-bucket15.md W2）。一律**可选**：
+ * 旧存档少一个键不是损坏，缺的值由 `withToolDetailDefaults` 补默认。
+ * 没放开的两组：`program`/`parameters`（本仓合成一条 `command`）、四个 `shownIn*`
+ * （Tool.java:62-65 上游自己注明 "effectively not used anymore, see IDEA-190856"）。
+ */
+export interface HostToolEntry {
+  name: string
+  command: string
+  description?: string
+  group?: string
+  enabled?: boolean
+  useConsole?: boolean
+  showConsoleOnStdOut?: boolean
+  showConsoleOnStdErr?: boolean
+  synchronizeAfterExecution?: boolean
+  workingDirectory?: string
+  outputFilters?: string[]
+}
+
+/** 宿主条目上「真的带了值」的那几个键；形态不对的当没带，回落到详情表与缺省。 */
+const HOST_TOOL_TEXT_FIELDS = ['description', 'group', 'workingDirectory'] as const
+const HOST_TOOL_FLAG_FIELDS = ['enabled', 'useConsole', 'showConsoleOnStdOut', 'showConsoleOnStdErr',
+  'synchronizeAfterExecution'] as const
+
+export function hostToolFields(entry: HostToolEntry): Partial<ExternalToolDetail> {
+  const source = entry as unknown as Record<string, unknown>
+  const picked: Record<string, unknown> = {}
+  for (const key of HOST_TOOL_TEXT_FIELDS) if (typeof source[key] === 'string') picked[key] = source[key]
+  for (const key of HOST_TOOL_FLAG_FIELDS) if (typeof source[key] === 'boolean') picked[key] = source[key]
+  if (Array.isArray(source.outputFilters)) picked.outputFilters = source.outputFilters
+  return picked as Partial<ExternalToolDetail>
+}
 
 /** 除 name 之外的那部分（上游 `Tool` 的其余 15 个字段）。 */
 export type ExternalToolDetail = Omit<ExternalToolRecord, 'name'>
@@ -137,7 +178,10 @@ export function splitToolCommand(command: string): { program: string; parameters
 export function toolRecordsFrom(entries: readonly HostToolEntry[], details: Readonly<Record<string, ExternalToolDetail>>): ExternalToolRecord[] {
   return entries.map(entry => {
     const detail = details[entry.name]
-    const filled = withToolDetailDefaults(detail ?? null)
+    // 宿主条目优先（`native/settings_schema.cpp` 的 externalTools 白名单放开后它就是唯一真源），
+    // localStorage 的详情表补其次，最后 `withToolDetailDefaults` 兜缺省 ——
+    // 「按字段数量判损坏」是禁止的：少了键就回默认，旧存档继续可用。
+    const filled = withToolDetailDefaults({ ...(detail ?? {}), ...hostToolFields(entry) })
     const split = detail ? null : splitToolCommand(entry.command)
     return {
       name: entry.name,

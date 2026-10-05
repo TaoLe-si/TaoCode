@@ -180,6 +180,34 @@ int main() {
         check(parsed.at("document").at("settings").at("fontSize") == 17, "内容与文档一致");
     });
 
+    run("externalTools 的白名单按上游 Tool 的 bean 放开：缺键补默认、不按字段数判坏", [] {
+        // 上游 platform/lang-impl/src/com/intellij/tools/Tool.java:56-78 的 bean；
+        // 接线请求 docs/wiring-requests-2026-10-06-bucket15.md W2 之前这里只认 {"name","command"}，
+        // 其余 11 个字段一进补丁就被判 INVALID_SETTINGS ⇒ 只能落 localStorage、不随设置走。
+        const auto one = [](const Json& entry) { return Json{{"externalTools", Json::array({entry})}}; };
+        // ① 旧形状继续收（只有两个必填键 ⇒ 少键不是损坏，前端 withToolDetailDefaults 补默认）。
+        taocode::validate_general_patch(one({{"name", "fmt"}, {"command", "clang-format"}}));
+        // ② 放开的那批键全给一遍（都可选）。
+        taocode::validate_general_patch(one({
+            {"name", "zip"}, {"command", "zip -r a.zip"}, {"description", "打包"}, {"group", "归档"},
+            {"enabled", false}, {"useConsole", false}, {"showConsoleOnStdOut", true},
+            {"showConsoleOnStdErr", false}, {"synchronizeAfterExecution", true},
+            {"workingDirectory", "$ProjectFileDir$"}, {"outputFilters", Json::array({"^added .*$FILE_PATH$"})}}));
+        // ③ 只给其中一条也可（每个键独立可选，缺的按上游默认档）。
+        taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"enabled", true}}));
+        // ④ 不放开的一组照实拒：四个 shownIn*（Tool.java:62-65 上游注明 "effectively not used
+        //    anymore, see IDEA-190856"）与 program/parameters（Tool.java:75-76，本仓合成一条 command）。
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"shownInMainMenu", true}})); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"program", "z"}})); });
+        // ⑤ 给了就要形态对（坏值留在设置里比拒了更糟）。
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"enabled", "yes"}})); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"description", 7}})); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"outputFilters", "a;b"}})); });
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}, {"command", "y"}, {"outputFilters", Json::array({1})}})); });
+        // ⑥ 必填两键的口径没动。
+        expect_code("INVALID_SETTINGS", [&] { taocode::validate_general_patch(one({{"name", "x"}})); });
+    });
+
     std::cout << (failures == 0 ? "settings_transfer: all checks passed\n" : "settings_transfer: failures\n");
     return failures == 0 ? 0 : 1;
 }

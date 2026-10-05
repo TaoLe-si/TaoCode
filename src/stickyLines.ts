@@ -111,8 +111,12 @@ export function createStickyLines(deps: StickyLinesDeps): { stickyLines: Ref<Sti
  * 点击某条粘性行时的跳转目标（上游 `StickyLine.navigateOffset()` 在本仓的形状：
  * `revealLocation({ path, line })`，`line` 是 **0 基** —— 同一约定见 `src/bookmarkActions.ts:241`）。
  *
- * 渲染在 `src/App.vue:2169-2171`，那个 div 现在既没有 click 也没有键盘可达（还带 `aria-hidden="true"`），
- * 所以这一条是**接线请求**（保留文件不能自己改）：挂上之前这里只是一个纯函数，不放假控件。
+ * 订正留痕（2026-10-06 复核 `docs/wiring-requests-2026-10-06-bucket5b.md` W-2）：这里原写
+ * 「渲染在 src/App.vue:2169-2171，那个 div 既没有 click 也没有键盘可达（还带 aria-hidden）」——
+ * **宿主早就接上了**：现在那一行是 `src/App.vue:2191`，`role="button"` + `tabindex="0"` +
+ * `@click="revealLocation(stickyRevealTarget(…))"` + `title` 「跳转到第 N 行」，`aria-hidden` 也已去掉，
+ * 判据在 `tests/editor-sticky-navigate.test.mjs`。滚动量那一档（W-5）仍缺宿主透传，见同文件
+ * `StickyLinesDeps.firstVisibleLine`：模块与判据齐了，缺的是 `CodeEditor.vue` 的 emit 与 `App.vue` 的实参。
  */
 export function stickyRevealTarget(sticky: StickyLine, path: string): { path: string; line: number } {
   return { path, line: sticky.navigateLine }

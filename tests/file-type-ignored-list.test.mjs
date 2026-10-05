@@ -3,6 +3,7 @@
 // 那个面板的四条判定（增/改/删/校验）+ `FileTypeManagerImpl` 的默认清单与「按集合比改动」。
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 
 import {
   DEFAULT_IGNORED_FILES,
@@ -139,4 +140,27 @@ test('路径判定按段问注册表（上游只按文件名判：IgnoredFileCac
   } finally {
     fileTypeManager.setIgnoredFilesList(before)
   }
+})
+
+// 启动钩子（接线请求 docs/wiring-requests-2026-10-06-bucket15.md W3）：忽略清单必须在界面挂起来
+// **之前**就灌进进程内注册表。上游那张表是 `FileTypeManagerImpl` 的组件字段
+// （platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:165
+// `new IgnoredPatternSet(DEFAULT_IGNORED)`，默认表同文件 :142），存过的那份在 loadState 里直接
+// `ignoredPatterns.setIgnoreMasks(...)`（同文件 :1236-1238）—— 都不是某个设置页的副作用。
+// 订正：请求原文引的第二处坐标「:1363-1364」实际是 `setFileTypes` 里的 `readHashBangs`，指不到
+// 忽略清单 ⇒ 改成 :1236-1238；原文给的代码 `applyIgnoredPatterns(loadIgnoredPatterns())` 会多写
+// 一次 localStorage（`loadIgnoredPatterns()` 自己已经 apply，src/fileTypeIgnoredList.ts:226-230）
+// ⇒ 落地的只有 `loadIgnoredPatterns()` 这一句。
+test('main.ts 在挂界面之前灌忽略清单（不是等用户第一次进设置页）', () => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
+  assert.match(main, /import \{ loadIgnoredPatterns \} from '\.\/fileTypeIgnoredList\.ts'/,
+    '值 import 必须带 .ts 扩展名（本仓的语法坑）')
+  const call = main.match(/^[ \t]*loadIgnoredPatterns\(\)[ \t]*$/m)
+  assert.ok(call, 'main.ts 要真的把 loadIgnoredPatterns() 当语句调起来（只在注释里提到不算）')
+  const mountAt = main.indexOf("createApp(App).mount('#app')")
+  assert.ok(mountAt >= 0, '没有启动命令时仍要挂界面')
+  assert.ok(call.index < mountAt, '灌清单要排在挂界面之前，否则启动到第一次进设置页之间判定用的是内置默认表')
+  // 不能再套一层 applyIgnoredPatterns（它会多写一次 localStorage，语义还是「用户改了清单」）：
+  // 只看**行首的调用**，注释里那句「原写 applyIgnoredPatterns(loadIgnoredPatterns())」不算。
+  assert.doesNotMatch(main, /^[ \t]*applyIgnoredPatterns\(/m)
 })

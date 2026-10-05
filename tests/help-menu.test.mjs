@@ -14,7 +14,9 @@ import { shellSource } from './shell-source.mjs'
 const app = () => readFileSync('src/App.vue', 'utf8')
 
 test('菜单栏有「帮助」组，且按 Git → 窗口 → 帮助 的源码顺序排（menuUi 负责插窗口）', () => {
-  const source = app()
+  // 顶层档位表（`const menus`）2026-10-06 从 App.vue 逐字搬进 src/appMainMenu.ts，所以这里读两个文件；
+  // 断言体未改：搬过去的数组字面量保持 `rows: helpMenuRows` 的原样写法。
+  const source = app() + readFileSync('src/appMainMenu.ts', 'utf8')
   assert.ok(source.includes("{ menu: 'help' as const, label: '帮助', rows: helpMenuRows }"), '主菜单里没有帮助组')
   // 「窗口」是 menuUi 在 git 之后 splice 进去的；帮助跟在 git 后面 ⇒ 最终顺序是 Git → Window → Help。
   const menuUi = readFileSync('src/menuUi.ts', 'utf8')

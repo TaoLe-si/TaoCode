@@ -68,7 +68,13 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
   const commands = () => getCommandProcessor(workspace.value?.root ?? '')
   // IDEA's project-view popup nests groups (WeighingNewGroup, AssociateWithFileType,
   // VersionControlsGroup); the submenu id tracks which one is unfolded.
-  const treeSubmenu = ref<'new' | 'filetype' | 'analyze' | null>(null)
+  // 'markroot' = 上游 `MarkRootGroup`（platform/lang-impl/resources/intellij.platform.lang.impl.actions.xml:252，
+  // 组标题按选区决定：platform/lang-impl/src/com/intellij/ide/projectView/actions/MarkRootGroup.java:14-22）；
+  // 项与写回在 `src/pvMarkRoots.ts` +
+  // `src/treeActions.ts` 的 `markRootMenu`/`applyMarkRoot`，宿主那一行在保留的 `src/App.vue`
+  // （接线请求 docs/wiring-requests-2026-10-06-bucket14a.md W1）⇒ 这里先把字面量备齐，
+  // 否则宿主粘不上去（vue-tsc 会报 TS2322）。
+  const treeSubmenu = ref<'new' | 'filetype' | 'analyze' | 'markroot' | null>(null)
   // IDEA's Cut/Copy/Paste on project-view selections: an internal clipboard, because
   // the WebView sandbox cannot carry CF_HDROP. Cut pastes as a move, copy as a copy;
   // a name collision pastes as "<stem> copy<ext>", then "copy 2", "copy 3"…

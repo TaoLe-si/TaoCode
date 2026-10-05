@@ -123,6 +123,9 @@ import { gradleViewContext } from './gradleHost'
 import { createProgressPanel } from './progressPanel'
 import { createMemoryWidget } from './memoryWidget'
 import type { MenuRow } from './menus/types'
+// 从装配根搬出去的纯规则（2026-10-06）：档位表 / 布局子菜单 / 语言显示名 / 重命名校验 / 工具窗口分组 / Smart Mode 文案。
+import { createMainMenuGroups } from './appMainMenu.ts'; import { createLayoutMenuRows } from './appLayoutMenu.ts'; import { languageLabels, editorLanguageLabel } from './appLanguageLabels.ts'
+import { renameNameProblem } from './appRenameRules.ts'; import { groupToolWindowsByAnchor } from './appToolWindowGroups.ts'; import { smartModeLabelOf } from './appSmartMode.ts'
 import { createToolsMenuRows } from './menus/toolsMenu'
 import { createFileMenuRows, type FileMenuContext } from './menus/fileMenu'
 import { createWindowMenuRows } from './menus/windowMenu'
@@ -487,17 +490,11 @@ const localHistoryState = { dialog: historyDialog, canShow: () => isDesktop && B
 const renamePrompt = ref<{ path: string; line: number; character: number; current: string } | null>(null)
 const renameValue = ref('')
 const renameInput = ref<HTMLInputElement>()
+// 重命名的标识符校验（`JAVA_KEYWORDS` 与四档问题描述）见 src/appRenameRules.ts ——
 // IDEA's RenameInputValidator rejects names that are not identifiers before the
-// dialog accepts OK; JDT would refuse them anyway.
-const javaKeywords = new Set(['abstract','assert','boolean','break','byte','case','catch','char','class','const','continue','default','do','double','else','enum','extends','final','finally','float','for','goto','if','implements','import','instanceof','int','interface','long','native','new','package','private','protected','public','return','short','static','strictfp','super','switch','synchronized','this','throw','throws','transient','try','void','volatile','while','record','sealed','var'])
-const invalidRenameName = computed(() => {
-  const name = renameValue.value.trim()
-  if (!name || !renamePrompt.value) return ''
-  if (name === renamePrompt.value.current) return '新名称与当前名称相同。'
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return `“${name}”不是有效的标识符：只能包含字母、数字、下划线和 $，且不能以数字开头。`
-  if (/\.java$/.test(active.value?.path ?? '') && javaKeywords.has(name)) return `“${name}”是 Java 关键字，不能作为标识符。`
-  return ''
-})
+// dialog accepts OK; JDT would refuse them anyway. 这里只负责把「当前输入 / 当前名 / 是不是 .java」取好传入。
+const invalidRenameName = computed(() => renameNameProblem(
+  renameValue.value.trim(), renamePrompt.value ? renamePrompt.value.current : null, /\.java$/.test(active.value?.path ?? '')))
 const outline = ref<LspDocumentSymbol[]>([])
 // 粘性作用域行（IDEA `editor.stickyLines`）的规则在 src/stickyLines.ts（纯函数，可单测）。
 const { stickyLines } = createStickyLines({ editorSettings, outline, currentLine: () => active.value?.line, language: () => (active.value ? associationOf(active.value.path, active.value.content) : undefined) })
@@ -667,21 +664,12 @@ function toggleColumnModeFromStatusBar() {
 const errors = computed(() => traces.filter(trace => trace.status === 'error').length)
 const lspReady = computed(() => active.value ? lspOn(active.value) : false)
 const editingSettingsLoading = computed(() => settingsBusy.value || working.value)
-// IDEA's SmartModeIndicatorWidgetFactory shows a "dumb/scanning" icon while indexing
-// has not finished and hides itself in smart mode. TaoCode's equivalent state is
-// "the active file has a live language server"; while it is starting or absent an
-// index state of 就绪/未就绪 is shown, and nothing is shown once everything is ready.
-const smartModeLabel = computed(() => {
-  if (!active.value) return ''
-  if (editingSettingsLoading.value) return '正在载入设置'
-  if (active.value.lspRunning === true) return ''
-  if (!isDesktop) return ''
-  // A language without a configured server is a normal state for this IDE (no server
-  // is bundled), not 'indexing in progress' — IDEA also hides the indicator once the
-  // project is smart, and never shows it for an unsupported file.
-  if (!active.value.lspConfigured) return ''
-  return '语言服务未就绪'
-})
+// 状态栏 Smart Mode 指示器的文案规则见 src/appSmartMode.ts（if 链与文案逐字未改）：
+// 配了服务却没跑起来才算「未就绪」，没配服务是本 IDE 的正常状态。
+const smartModeLabel = computed(() => smartModeLabelOf({
+  hasActive: Boolean(active.value), loadingSettings: editingSettingsLoading.value,
+  lspRunning: active.value?.lspRunning === true, isDesktop, lspConfigured: active.value?.lspConfigured === true,
+}))
 const splitOrientation = computed(() => splitModel.orientation)
 // Secondary pane size in px; 0 means "50/50" until the user first drags it.
 const splitSize = ref(0)
@@ -736,24 +724,15 @@ const {
 // 标签条布局是一个域。三种排法由两个设置决定（`EditorTabbedContainer.kt:657-672`）：一行 + hideTabsIfNeeded = 裁切滚动；一行 + 挤压 = 压最长的；多行 = 换行。
 const { tabNaturalWidths, registerTabStrip, tabKeyOf, measureTabNaturalWidth, recomputeTabStrip, placedTabFor, isTabDropped, tabWidthStyle, tabStripStyle, tabStripWraps, onTabStripWheel, setTabStripHover, observeTabStrips } =
   createTabStripView({ groups, splitSize, splitOrientation, singleRow: () => editorSettings.value.tabsInOneRow, separatePinnedRow: () => editorSettings.value.pinnedTabsInSeparateRow, hideTabsIfNeeded: () => editorSettings.value.hideTabsIfNeeded })
+// 语言显示名的规则（`languageLabels` 关联表 + 扩展名兜底链）见 src/appLanguageLabels.ts ——
 // IDEA maps a file to its type by extension; a project can override that mapping
 // ("Associate with File Type…"), and the override drives both the status-bar label
-// and the editor's syntax highlighting.
-const languageLabels: Record<string, string> = { java: 'Java', cpp: 'C++', typescript: 'TypeScript', other: '纯文本' }
+// and the editor's syntax highlighting. 关联覆盖要读项目设置，所以 `associationOf` 留在这里。
 function associationOf(path: string, content = ''): string | undefined {
   return resolveEditorLanguage(path, content, projectSettings.value.fileAssociations)
 }
 function languageOf(path: string): string {
-  const mapped = associationOf(path)
-  if (mapped) return languageLabels[mapped] ?? mapped
-  if (/\.java$/.test(path)) return 'Java'
-  if (/\.(c|cpp|h|hpp|cc|cxx)$/.test(path)) return 'C++'
-  if (/\.vue$/.test(path)) return 'Vue'
-  if (/\.tsx?$/.test(path)) return 'TypeScript'
-  if (/\.[cm]?jsx?$/.test(path)) return 'JavaScript'
-  if (/\.json$/.test(path)) return 'JSON'
-  if (/CMakeLists\.txt$/i.test(path)) return 'CMake'
-  return '纯文本'
+  return editorLanguageLabel(path, associationOf(path))
 }
 const language = computed(() => languageOf(active.value?.path ?? ''))
 const candidates = computed(() => {
@@ -875,20 +854,11 @@ function toggleToolWindowStripes() {
 // the stripe titles with (ToolWindowsWidget.java:168). See src/toolWindows.ts.
 // isAvailable() && isShowStripeButton() (:163-167), then sorted by stripe title (:168).
 const availableToolWindows = computed(() => sortedByTitle([...toolWindowOrder].filter(id => !toolDisabled(id)), id => toolTitles[id]))
-// 状态栏"工具窗口"弹窗按停靠边分组（IDEA 的 ToolWindowsWidget 主体就是按 anchor 分组的列表）。
-const groupedAvailableToolWindows = computed(() => {
-  const groups: { anchor: Anchor; label: string; ids: ToolWindowId[] }[] = [
-    { anchor: 'left', label: '左侧', ids: [] },
-    { anchor: 'bottom', label: '底部', ids: [] },
-    { anchor: 'right', label: '右侧', ids: [] },
-  ]
-  for (const group of groups) {
-    group.ids = sortedByTitle(
-      toolWindowOrder.filter(id => !toolDisabled(id) && (toolAnchors[id] ?? 'left') === group.anchor),
-      id => toolTitles[id])
-  }
-  return groups.filter(group => group.ids.length > 0)
-})
+// 状态栏"工具窗口"弹窗按停靠边分组（IDEA 的 ToolWindowsWidget 主体就是按 anchor 分组的列表）：
+// 分组与空组不出现的规则见 src/appToolWindowGroups.ts，可用性判据仍是 isAvailable() && isShowStripeButton()。
+const groupedAvailableToolWindows = computed(() => groupToolWindowsByAnchor({
+  order: toolWindowOrder, anchorOf: id => toolAnchors[id] ?? 'left', titleOf: id => toolTitles[id], isDisabled: toolDisabled,
+}))
 // 工具窗口内容宿主的上下文：见 src/toolViewContext.ts（它是**所有面板的输入面**，
 // 字段清单在那边；注入的是宿主里同名变量的引用，`computed` 保证随状态变化）。
 const toolViewCtx = computed<ToolWindowViewContext>(() => createToolViewContext({
@@ -1612,27 +1582,9 @@ const runMenuRows = createRunMenuRows(runMenuContext)
 // Git 菜单：见 src/menus/gitMenu.ts（一组一文件）。
 const gitMenuContext: GitMenuContext = { active, activePath, gitAvailable, working, workspace, isDesktop, beginProject: (...a) => beginProject(...a), gitMenuAction, openSettings, openBranchPopup, openSubmodules, openWorktrees, pushWithConfirm, resetHeadDialog, showBlame, blameEnabled: () => blameEnabled.value, showFileHistory, showView, updateProject, toolWindow, localHistoryDialog: localHistoryDialogRow }
 const gitMenuRows = createGitMenuRows(gitMenuContext)
-const menus: { menu: NonNullable<typeof menu.value>; label: string; rows: MenuRow[] }[] = [
-  { menu: 'file' as const, label: '文件', rows: fileMenuRows },
-  { menu: 'edit' as const, label: '编辑', rows: editMenuRows },
-  { menu: 'view' as const, label: '视图', rows: viewMenuRows },
-  { menu: 'navigate' as const, label: '导航', rows: navigateMenuRows },
-  { menu: 'code' as const, label: '代码', rows: codeMenuRows },
-  { menu: 'refactor' as const, label: '重构', rows: refactorMenuRows },
-  // IDEA's Build menu (JavaActions.xml "Java.BuildMenu"): Build Project (CompileDirty,
-  // Ctrl+F9), Rebuild (Compile, Ctrl+Shift+F9 — bound here to a full clean rebuild),
-  // plus Stop Build. TaoCode builds through the configured shell command.
-  { menu: 'build' as const, label: '构建', rows: buildMenuRows },
-  { menu: 'run' as const, label: '运行', rows: runMenuRows },
-  // IDEA's Git.MainMenu order (intellij.vcs.git.backend.xml): Commit, Push, Update
-  // Project, Pull, Fetch | Merge, Rebase, Resolve Conflicts | Branches, New Branch,
-  // Tag, Reset | Show Log | Stash/Shelf. Rows without a git4idea-equivalent backend
-  // here (Fetch, Rebase, Tag dialog, Reset) are omitted rather than faked.
-  { menu: 'git' as const, label: 'Git', rows: gitMenuRows },
-  // IDEA 主菜单以「帮助」收尾（PlatformActions.xml:746 的 HelpMenu）。menuUi 会把「窗口」插到
-  // Git 与帮助之间，得到 Git → Window → Help 的源码顺序。
-  { menu: 'help' as const, label: '帮助', rows: helpMenuRows },
-]
+// 顶层档位的顺序与文案表见 src/appMainMenu.ts（`actionGroupStructure.txt:2444-2456` 的 MainMenu 段；
+// 「分析」不在主菜单，工具/窗口两档由 src/menuUi.ts 的 allMenuGroups 插入）。这里只把各域的行喂进去。
+const menus = createMainMenuGroups({ fileMenuRows, editMenuRows, viewMenuRows, navigateMenuRows, codeMenuRows, refactorMenuRows, buildMenuRows, runMenuRows, gitMenuRows, helpMenuRows })
 // IDEA 的 Window › LayoutsGroup 是一个**子菜单**（`<group id="LayoutsGroup" popup="true">`，
 // PlatformActions.xml:641）：出厂默认 · 命名布局列表（每项是 toggle，点即应用）· 分隔 ·
 // RestoreDefaultLayout(Shift+F12) · StoreDefaultLayout · StoreNewLayout。
@@ -1648,26 +1600,10 @@ const {
   notify, menu, nameDialog, nameInput, explorer, bottom, leftView, bottomTab, panelSizes, toolAnchors, toolOrder,
   saveToolAnchors, saveToolOrder, setPanelSize, isLeftToolWindowId,
 })
-const layoutMenuRows = computed<MenuRow[]>(() => {
-  const store = toolLayoutStore.value
-  const children: MenuRow[] = [
-    { id: 'window.factoryLayout', title: '默认布局', keywords: 'default tool window layout factory reset 默认布局 出厂', checked: () => isFactoryLayoutActive(store), run: useFactoryToolLayout },
-    { id: 'window.ruleLayoutsList', rule: true },
-  ]
-  for (const name of layoutNames(store))
-    children.push({ id: `window.layout.${name}`, title: name, keywords: `tool window layout ${name} 布局`, checked: () => store.active === name, run: () => applyNamedToolLayout(name) })
-  children.push({ id: 'window.ruleLayoutsActions', rule: true })
-  children.push({ id: 'window.restoreLayout', title: '恢复当前布局', keys: 'Shift F12', keywords: 'restore current layout reset 恢复布局 重置', run: restoreCurrentToolLayout })
-  children.push({ id: 'window.storeLayout', title: '将更改保存到当前布局', keywords: 'save changes in current layout 保存布局', run: storeCurrentToolLayout })
-  children.push({ id: 'window.storeLayoutAs', title: '将当前布局另存为新布局…', keywords: 'save current layout as new 另存为 新建布局', run: () => openLayoutNameDialog('newLayout') })
-  // Rename/Delete only exist for a stored layout: the factory default is not an entry in the map,
-  // which is also why `DeleteNamedLayoutAction` disables itself on the active layout.
-  if (!isFactoryLayoutActive(store)) {
-    children.push({ id: 'window.renameLayout', title: '重命名当前布局…', keywords: 'rename layout 重命名布局', run: () => openLayoutNameDialog('renameLayout') })
-    children.push({ id: 'window.deleteLayout', title: '删除当前布局', keywords: 'delete layout remove 删除布局', run: deleteCurrentToolLayout })
-  }
-  return [{ id: 'window.layouts', title: '布局', keywords: 'layouts tool window layout 布局', children }]
-})
+// 「窗口 › 布局」子菜单的行构造见 src/appLayoutMenu.ts（每条行的 id/文案/键位/顺序逐字未改）。
+const layoutMenuRows = computed<MenuRow[]>(() => createLayoutMenuRows(toolLayoutStore.value, {
+  useFactoryToolLayout, applyNamedToolLayout, restoreCurrentToolLayout, storeCurrentToolLayout, openLayoutNameDialog, deleteCurrentToolLayout,
+}))
 // 「窗口」菜单：见 src/menus/windowMenu.ts（一组一文件；它是最后一个从宿主搬走的菜单域）。
 const windowMenuRows = createWindowMenuRows({
   toolWindow, active, activeToolWindows, toolWindowAvailable, lastActiveId, jumpToLastToolWindow,

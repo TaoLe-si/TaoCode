@@ -26,11 +26,13 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
 
-const app = read('src/App.vue')
+// 顶层档位表 `const menus` 2026-10-06 从 App.vue 逐字搬进 src/appMainMenu.ts：这里仍按原断言
+// 切片，只是把读取面并上搬走后的那份（App.vue 在前，`const menu = ref<…>` 的联合类型还在宿主）。
+const app = read('src/App.vue') + '\n' + read('src/appMainMenu.ts')
 const codeMenu = read('src/menus/codeMenu.ts')
 const analyze = read('src/menus/analyzeMenu.ts')
 
-/** App.vue 里 `const menus: … = [ … ]` 的顶层档位（id + 标签），按声明顺序。 */
+/** 顶层档位（`const menus: … = [ … ]`，2026-10-06 起在 src/appMainMenu.ts），按声明顺序。 */
 function topLevelMenus() {
   const block = /const menus: \{[^}]*\}\[\] = \[([\s\S]*?)\n\]/.exec(app)
   assert.ok(block, '找不到主菜单数组 `const menus`')

@@ -260,15 +260,44 @@ void validate_general_patch(const Json& patch) {
             if (!value.is_number_integer())
                 fail("INVALID_SETTINGS", "inactiveTimeout must be an integer.");
         } else if (it.key() == "externalTools") {
-            // 外部工具：{name, command} 数组（上限 32 条，各字段长度受限）。
+            // 外部工具：上游 `Tool` 的 bean 形状（platform/lang-impl/src/com/intellij/tools/Tool.java:56-78，
+            // 编辑面 platform/lang-impl/src/com/intellij/tools/ToolEditorDialog.java:100-121 的 getData、
+            // :137-158 的 setData）。2026-10-06 按 docs/wiring-requests-2026-10-06-bucket15.md W2 放开：
+            // 原先白名单只有 {"name","command"} ⇒ 其余字段存不进宿主设置、只能落 localStorage。
+            // name/command 仍必填，32 条上限与两条长度限制照旧；**新放的键一律可选** —— 旧存档少键
+            // 不许判损坏（缺省由 src/externalToolsRecords.ts 的 withToolDetailDefaults 补）。
+            // 不放开两组：`program`/`parameters`（Tool.java:75-76，本仓合成一条 command，拆开就是两份真源）；
+            // 四个 `shownIn*`（Tool.java:62-65，上游注明 "effectively not used anymore, see IDEA-190856"）。
             if (!value.is_array() || value.size() > 32)
                 fail("INVALID_SETTINGS", "externalTools must be an array of at most 32 entries.");
             for (const auto& entry : value) {
                 if (!entry.is_object()) fail("INVALID_SETTINGS", "each external tool must be an object.");
-                known_keys(entry, {"name", "command"}, "INVALID_SETTINGS");
+                known_keys(entry, {"name", "command", "description", "group", "enabled", "useConsole",
+                                   "showConsoleOnStdOut", "showConsoleOnStdErr", "synchronizeAfterExecution",
+                                   "workingDirectory", "outputFilters"}, "INVALID_SETTINGS");
                 const auto name = text_or(entry, "name"), command = text_or(entry, "command");
                 if (name.empty() || name.size() > 80) fail("INVALID_SETTINGS", "external tool name must be 1..80 bytes.");
                 if (command.empty() || command.size() > 1000) fail("INVALID_SETTINGS", "external tool command must be 1..1000 bytes.");
+                // 可选文本字段：给了就要是字符串（长度上限是本仓的存储护栏，不是上游约束）。
+                for (const auto* key : {"description", "group", "workingDirectory"}) {
+                    if (entry.contains(key) && !entry.at(key).is_string())
+                        fail("INVALID_SETTINGS", std::string("external tool ") + key + " must be a string.");
+                    if (entry.contains(key) && entry.at(key).get_ref<const std::string&>().size() > 1000)
+                        fail("INVALID_SETTINGS", std::string("external tool ") + key + " must be at most 1000 bytes.");
+                }
+                for (const auto* key : {"enabled", "useConsole", "showConsoleOnStdOut", "showConsoleOnStdErr",
+                                        "synchronizeAfterExecution"}) {
+                    if (entry.contains(key) && !entry.at(key).is_boolean())
+                        fail("INVALID_SETTINGS", std::string("external tool ") + key + " must be a boolean.");
+                }
+                // outputFilters = 上游 `FilterInfo[]`（Tool.java:78）的正则本体：ToolEditorDialog.java:118
+                // 就是 `new FilterInfo(s, "", "")`，只填正则那一段 ⇒ 这里只收 1..200 字节的字符串。
+                if (entry.contains("outputFilters") && (!entry.at("outputFilters").is_array() || entry.at("outputFilters").size() > 16))
+                    fail("INVALID_SETTINGS", "external tool outputFilters must be an array of at most 16 entries.");
+                if (entry.contains("outputFilters") && entry.at("outputFilters").is_array())
+                    for (const auto& item : entry.at("outputFilters"))
+                        if (!item.is_string() || item.get_ref<const std::string&>().empty() || item.get_ref<const std::string&>().size() > 200)
+                            fail("INVALID_SETTINGS", "external tool outputFilters items must be 1..200 byte strings.");
             }
         } else if (it.key() == "debuggerEvaluationMode") {
             // EvaluationMode.EXPRESSION | CODE_FRAGMENT 两档（求值对话框是单行还是代码片段编辑器）。

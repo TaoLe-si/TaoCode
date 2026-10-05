@@ -1,5 +1,6 @@
 // 外部工具的完整 bean 字段 + 本仓的持久化通道 + 菜单消费。
-// 上游依据：`platform/lang-impl/src/com/intellij/tools/Tool.java:56-77`（16 个 bean 字段）、
+// 上游依据：`platform/lang-impl/src/com/intellij/tools/Tool.java:56-78`（16 个 bean 字段；订正：
+// 原写 :56-77，`myOutputFilters` 在 :78）、
 // `ToolEditorDialog.java:103-119`（getData 写回的字段）/ `:137-158`（setData 读出的字段）、
 // `BaseToolsPanel.java:116`（新建工具 enabled=true）/ `:248`/`:270`（列表里的启用勾选框）、
 // `BaseToolManager.java:89-113`（每个 ToolsGroup 一个 delegate group）/ `:164`（停用不进菜单）、
@@ -185,4 +186,40 @@ test('「工具 › 外部工具」子菜单按分组/启用生成（childrenOf 
   assert.deepEqual(row.childrenOf(), [])
   entries = []
   assert.equal(row.enabled(), false)
+})
+
+// W2（docs/wiring-requests-2026-10-06-bucket15.md）的**另一半**：原生 `externalTools` 白名单放开之后，
+// `toolRecordsFrom()` 必须真的读宿主条目上那些键 —— 请求原文写「前端侧不需要改动，本模块已经在读」，
+// 核过是假的（旧实现只取 entry.name / entry.command，其余一律来自 localStorage 详情表）。
+// 白名单与逐字段形状见 native/settings_schema.cpp 的 externalTools 那一支（上游 Tool.java:56-78）。
+test('宿主条目带的 bean 字段优先，详情表补其次，缺键回默认（旧存档不坏）', () => {
+  const details = {
+    fmt: withToolDetailDefaults({ group: '旧分组' }),
+    zip: withToolDetailDefaults({ group: '旧分组', description: '旧说明', enabled: true }),
+  }
+  const records = toolRecordsFrom([
+    // 旧形状：只有 name/command ⇒ 与放开之前完全一致。
+    { name: 'fmt', command: 'clang-format -i $FilePath$' },
+    // 新形状：宿主里已经带了这些键（settings_transfer 导入 / 手改存档都能带进来）。
+    {
+      name: 'zip', command: 'zip -r a.zip $FilePath$', description: '打包', group: '归档', enabled: false,
+      useConsole: false, workingDirectory: '$ProjectFileDir$', outputFilters: ['^added .*$FILE_PATH$'],
+    },
+  ], details)
+  assert.equal(records[0].group, '旧分组', '宿主没带这个键 ⇒ 仍用详情表那份')
+  assert.equal(records[1].group, '归档', '宿主带了就以宿主为准（这里就是唯一真源）')
+  assert.equal(records[1].description, '打包')
+  assert.equal(records[1].enabled, false)
+  assert.equal(records[1].useConsole, false)
+  assert.equal(records[1].workingDirectory, '$ProjectFileDir$')
+  assert.deepEqual(records[1].outputFilters, ['^added .*$FILE_PATH$'])
+  // 形态不对的键当「没带」：宿主 JSON 是外部可编辑的，不能让它把记录搞坏，也不能整份判坏。
+  const broken = toolRecordsFrom([{ name: 'x', command: 'x', enabled: 'yes', group: 7, outputFilters: 'no' }], {})
+  assert.equal(broken[0].enabled, true, 'enabled 不是布尔 ⇒ 回默认（上游新建即启用，BaseToolsPanel.java:116）')
+  assert.equal(broken[0].group, DEFAULT_TOOL_GROUP)
+  assert.deepEqual(broken[0].outputFilters, [])
+  // program/parameters **没有**放开（本仓合成一条 command，拆开存会有两份真源）⇒ 宿主写了也不读。
+  const merged = toolRecordsFrom([{ name: 'y', command: 'y -q', program: 'zzz', parameters: 'www' }], {})
+  assert.equal(merged[0].program, 'y', 'program 仍由命令串反推（splitToolCommand）')
+  assert.equal(merged[0].parameters, '-q')
 })

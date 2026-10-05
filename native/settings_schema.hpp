@@ -106,7 +106,10 @@ inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     // 粘性作用域行（显示当前所在方法/类的首行）+ 最多显示几层。
     "showStickyLines", "stickyLinesLimit",
     // ToolConfigurable（`preferences.externalTools`，lang-impl/.../tools/ToolConfigurable.java）：
-    // 外部工具 —— 应用级的命令收藏（名称 + 命令），可从菜单直接运行。
+    // 外部工具 —— 应用级的命令收藏。条目形状 = 上游 `Tool` 的 bean（Tool.java:56-78）：
+    // name/command 必填，description/group/enabled/useConsole/showConsoleOnStdOut/showConsoleOnStdErr/
+    // synchronizeAfterExecution/workingDirectory/outputFilters 可选（2026-10-06 放开，校验在
+    // settings_schema.cpp 的 externalTools 那一支）；program/parameters 合成 command 一条存。
     "externalTools",
     // SeFuzzyFileSearchProviderFactory.kt:28-31：注册表键 `search.everywhere.fuzzy.files.enabled`
     // 默认 false。同 autoShowProcessPopup 的处理 —— 上游只有注册表键、没有设置页入口，

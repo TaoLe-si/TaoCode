@@ -31,9 +31,12 @@
 //   :21 import `firstTestLocation` / `testIndexOf`；:246 用发现结果建索引；
 //   :247-250 `sourceOf()` 给节点标题与行号（模板 :496 的 tooltip、:491 的双击 `jump(node)`）；
 //   :400-408 「Navigate with Single Click / Scroll to running test」开着时用同一通道解析运行节点。
-// 面板解析出来后 `emit('jump', { path, line })`，**最后一段在宿主**：`src/App.vue:2254` 渲染面板时
-// 没有挂 `@jump`（`revealLocation` 是 0 基，本模块给的是 1 基行号），所以跳转目前停在面板里 ——
-// App.vue 是保留文件 ⇒ 已写进 `docs/wiring-requests-2026-10-06-bucket11c.md`（请求 W-B11c-1）。
+// 面板解析出来后 `emit('jump', { path, line })`，**最后一段在宿主**：渲染面板的那一行
+// （订正 2026-10-06：原写 `src/App.vue:2254`，现树实测在 **`src/App.vue:2283`**，行号随并发漂移）
+// 没挂 `@jump`（`revealLocation` 是 0 基，本模块给的是 1 基行号 —— `locateTestFromStack` 的
+// `Math.max(1, …)`，:160/:185/:192），所以跳转目前停在面板里 ——
+// App.vue 是保留文件 ⇒ 已写进 `docs/wiring-requests-2026-10-06-bucket11c.md`（请求 W-B11c-1），
+// 待主代理粘的那一行逐字稿在 `docs/wiring-requests-2026-10-06-bucketW.md` 第一节。
 // `src/testImport.ts:144` 只把 metainfo 写成 hint 的形状交给这里的 `resolveTestLocation` 认，
 // 它本身不 import 本模块。判据 `tests/test-locator.test.mjs`。
 
