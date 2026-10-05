@@ -563,11 +563,25 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
             }
         } else if (method == "textDocument/inlayHint") {
             // Two hints: one plain string label, one label-parts array with padding.
-            const Json hints = Json::array({
-                {{"position", {{"line", 0}, {"character", 4}}}, {"label", ": int"}, {"kind", 1}},
-                {{"position", {{"line", 1}, {"character", 6}}},
-                 {"label", Json::array({{{"value", "x"}, {"location", Json::object()}}})},
-                 {"paddingLeft", true}, {"paddingRight", true}}});
+            // The first one also carries a `command` (click) and a `tooltip`, so the client's forwarding
+            // of those two fields has something to forward: LSP `InlayHint.command` / `InlayHint.tooltip`.
+            // 两个提示分成两个具名对象再进数组：MSVC 对「数组字面量里套对象初始化列表」的花括号
+            // 配对会报 C3329（它把内层解析成表达式），拆开最好读也最好编译。
+            const Json hintOne = Json{
+                {"position", Json{{"line", 0}, {"character", 4}}},
+                {"label", ": int"},
+                {"kind", 1},
+                {"command", Json{{"title", "Show type"}, {"command", "editor.action.showType"}}},
+                {"tooltip", "推断出的类型"}
+            };
+            const Json hintTwo = Json{
+                {"position", Json{{"line", 1}, {"character", 6}}},
+                {"label", Json::array({Json{{"value", "x"}, {"location", Json::object()}}})},
+                {"paddingLeft", true},
+                {"paddingRight", true},
+                {"tooltip", Json{{"kind", "markdown"}, {"value", "**参数名**"}}}
+            };
+            const Json hints = Json::array({hintOne, hintTwo});
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", hints}});
         } else {
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", -32601}, {"message", "Method not found"}}}});

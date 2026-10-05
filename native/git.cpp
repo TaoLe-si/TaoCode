@@ -1,4 +1,5 @@
 #include "git.hpp"
+#include "git_detail.hpp"
 #include "git_log.hpp"
 #include "git_clone.hpp"
 #include "history.hpp"
@@ -27,8 +28,10 @@
 
 namespace taocode {
 namespace git {
-namespace {
+
 namespace fs = std::filesystem;
+
+namespace detail {
 constexpr std::size_t max_output = 4 * 1024 * 1024;
 
 std::wstring quote(std::wstring_view argument) {
@@ -76,15 +79,17 @@ std::string wide_to_utf8(std::wstring_view value) {
     return out;
 }
 
-struct Result { int code; std::string out; std::string err; };
+// `Result`（run() 的返回类型）连同 default_timeout_ms 一起搬进了 native/git_detail.hpp ——
+// git_worktree.cpp 也要拿同一份，重复定义会让两个 TU 各有一份不同的类型。
 
 // A git command that hangs — a remote that never answers, a credential helper
 // waiting on the stdin we deliberately left at NUL — must not pin the worker
 // thread forever, and closing the project must be able to stop it. So every child
 // runs inside a job object (killing it takes the whole tree: git spawns ssh and
 // credential helpers of its own) and gets a bounded wait.
-constexpr DWORD default_timeout_ms = 10 * 60 * 1000;  // a large clone/push fits in this
-constexpr DWORD kill_wait_ms = 5000;                  // grace for the tree to actually die
+// default_timeout_ms 本身连同它的注释搬进了 native/git_detail.hpp（默认实参只能写一处，
+// 而 git_worktree.cpp 也要用），这里只留 kill_wait_ms。
+constexpr DWORD kill_wait_ms = 5000;  // grace for the tree to actually die
 
 // Handles of the child currently running. request_cancel() reads them from the UI
 // thread while a worker runs git, so they are published and cleared under this
@@ -101,7 +106,9 @@ void kill_current() {
     else if (current_process) TerminateProcess(current_process, 1);
 }
 
-Result run(const fs::path& repo, std::vector<std::wstring> arguments, DWORD timeout_ms = default_timeout_ms) {
+// The default for `timeout_ms` lives in native/git_detail.hpp (default_timeout_ms), so
+// that both this file and git_worktree.cpp can call run() with just the arguments.
+Result run(const fs::path& repo, std::vector<std::wstring> arguments, DWORD timeout_ms) {
     const auto git = find_git_executable();
     if (git.empty()) throw WorkspaceError("GIT_MISSING", "未找到 Git，可执行文件不在 PATH 中。");
     std::wstring command = L"\"" + git.native() + L"\" -C \"" + repo.native() + L"\"";
@@ -249,13 +256,30 @@ std::vector<std::wstring> range_args(const fs::path& repo, const std::string& ba
     return {L"HEAD", checked_ref(repo, base)};
 }
 
-}  // namespace
+}  // namespace detail
+
+// 上面这一块原来就是匿名命名空间；2026-10-05 拆出「工作树 + 子模块」一族（native/git_worktree.cpp）
+// 之后改成 detail，因为那一族要拿到**同一份** run()（job object 与看门狗不能复制到第二个 TU）。
+// 其中跨 TU 用的那几个（Result / run / require_ok / utf8_to_wide / split_lines / utf8_path）声明在
+// native/git_detail.hpp。下面这排 using 让本文件与拆出去的那个 TU 里的调用保持原样，
+// 不必改成 detail::xxx(...)。
+using detail::checked_new_name;
+using detail::checked_ref;
+using detail::kill_current;
+using detail::max_output;
+using detail::range_args;
+using detail::require_ok;
+using detail::run;
+using detail::split_lines;
+using detail::trim;
+using detail::utf8_path;
+using detail::utf8_to_wide;
 
 // Stop the git command that is running right now, if any. Called from the UI thread
 // (closing a project or the window) while a worker thread is inside run():
 // terminating the job takes git and every process it spawned, which also breaks the
 // pipes the reader is parked on, so the worker returns. Non-blocking, and a no-op
-// when nothing runs. Deliberately outside the anonymous namespace above — it is
+// when nothing runs. Deliberately outside the detail namespace above — it is
 // declared in git.hpp and must have external linkage.
 void request_cancel() { kill_current(); }
 
@@ -773,7 +797,7 @@ void apply_hunks(const fs::path& repo, const std::string& path, bool staged,
     require_ok(result, reverse ? "按块取消暂存" : "按块暂存");
 }
 
-namespace {
+namespace detail {
 
 std::vector<std::string> split_lines(const std::string& text) {
     std::vector<std::string> lines;
@@ -789,6 +813,15 @@ std::vector<std::string> split_lines(const std::string& text) {
     return lines;
 }
 
+std::string utf8_path(const fs::path& path) {
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+}
+
+}  // namespace detail
+
+namespace {
+
 // Same 0x1F-separated record format log() asks git for.
 std::vector<std::string> split_fields(const std::string& line) {
     std::vector<std::string> fields;
@@ -802,11 +835,6 @@ std::vector<std::string> split_fields(const std::string& line) {
     return fields;
 }
 
-std::string utf8_path(const fs::path& path) {
-    const auto text = path.generic_u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
-}
-
 // A path spec is user-controlled and lands on git's command line after "--", so it
 // only has to stay inside the repository: no traversal, no newline, no option.
 std::wstring checked_path(const std::string& path) {
@@ -815,22 +843,6 @@ std::wstring checked_path(const std::string& path) {
         path.find("..") != std::string::npos)
         throw WorkspaceError("INVALID_REQUEST", "文件路径不合法。");
     return utf8_to_wide(path);
-}
-
-// A worktree destination: an absolute path outside the current repo (git refuses a
-// nested worktree) with no characters that would confuse the command line.
-void check_worktree_path(const fs::path& repo, const std::string& path) {
-    if (path.empty() || path.size() > 512 || path.front() == '-' ||
-        path.find_first_of("\r\n") != std::string::npos)
-        throw WorkspaceError("INVALID_REQUEST", "工作树路径不合法。");
-    const fs::path target(path);
-    if (!target.is_absolute()) throw WorkspaceError("INVALID_REQUEST", "工作树路径必须是绝对路径。");
-    std::error_code ec;
-    const auto canonical_repo = fs::weakly_canonical(repo, ec);
-    const auto canonical_target = fs::weakly_canonical(target, ec);
-    if (!canonical_target.empty() && !canonical_repo.empty() &&
-        canonical_target.native().starts_with(canonical_repo.native()))
-        throw WorkspaceError("INVALID_REQUEST", "工作树不能放在当前仓库目录内。");
 }
 
 }  // namespace
@@ -893,89 +905,6 @@ Json show_commit(const fs::path& repo, const std::string& revision) {
     return {{"revision", revision}, {"patch", patch}, {"sides", history::diff_sides_from_unified(patch)}};
 }
 
-Json worktree_list(const fs::path& repo) {
-    const auto result = run(repo, {L"worktree", L"list", L"--porcelain"});
-    require_ok(result, "读取工作树列表");
-    Json list = Json::array();
-    Json current = Json::object();
-    for (const auto& line : split_lines(result.out)) {
-        if (line.empty()) {
-            if (!current.empty()) { list.push_back(std::move(current)); current = Json::object(); }
-            continue;
-        }
-        if (line.rfind("worktree ", 0) == 0) current["path"] = utf8_path(line.substr(9));
-        else if (line.rfind("HEAD ", 0) == 0) current["head"] = line.substr(5);
-        else if (line.rfind("branch ", 0) == 0) current["branch"] = line.substr(7);
-        else if (line == "bare") current["bare"] = true;
-        else if (line == "detached") current["detached"] = true;
-        else if (line == "locked") current["locked"] = true;
-        else if (line == "prunable") current["prunable"] = true;
-    }
-    if (!current.empty()) list.push_back(std::move(current));
-    for (auto& entry : list) {
-        if (!entry.contains("branch")) entry["branch"] = entry.value("detached", false) ? "detached" : "";
-        if (!entry.contains("bare")) entry["bare"] = false;
-        if (!entry.contains("locked")) entry["locked"] = false;
-        if (!entry.contains("prunable")) entry["prunable"] = false;
-    }
-    return {{"worktrees", std::move(list)}};
-}
-
-void worktree_add(const fs::path& repo, const std::string& path, const std::string& branch, bool new_branch) {
-    check_worktree_path(repo, path);
-    std::vector<std::wstring> args = {L"worktree", L"add"};
-    if (!branch.empty()) {
-        if (branch.size() > 200 || branch.front() == '-' || branch.find_first_of("\r\n ") != std::string::npos)
-            throw WorkspaceError("INVALID_REQUEST", "分支名不合法。");
-        if (new_branch) args.push_back(L"-b");
-        args.push_back(utf8_to_wide(branch));
-    }
-    args.push_back(utf8_to_wide(path));
-    const auto result = run(repo, args);
-    require_ok(result, "添加工作树");
-}
-
-void worktree_remove(const fs::path& repo, const std::string& path, bool force) {
-    if (path.empty() || path.size() > 512 || path.front() == '-' || path.find_first_of("\r\n") != std::string::npos)
-        throw WorkspaceError("INVALID_REQUEST", "工作树路径不合法。");
-    std::vector<std::wstring> args = {L"worktree", L"remove"};
-    if (force) args.push_back(L"--force");
-    args.push_back(utf8_to_wide(path));
-    const auto result = run(repo, args);
-    require_ok(result, "移除工作树");
-}
-
-Json submodule_status(const fs::path& repo) {
-    const auto result = run(repo, {L"submodule", L"status"});
-    require_ok(result, "读取子模块状态");
-    Json list = Json::array();
-    for (const auto& raw : split_lines(result.out)) {
-        if (raw.size() < 2) continue;
-        const char status = raw[0];
-        std::string rest = raw.substr(1);
-        while (!rest.empty() && rest.front() == ' ') rest.erase(rest.begin());
-        const auto space = rest.find(' ');
-        const std::string commit = space == std::string::npos ? rest : rest.substr(0, space);
-        std::string path = space == std::string::npos ? std::string() : rest.substr(space + 1);
-        std::string describe;
-        const auto paren = path.find(" (");
-        if (paren != std::string::npos && path.back() == ')') {
-            describe = path.substr(paren + 2, path.size() - paren - 3);
-            path = path.substr(0, paren);
-        }
-        list.push_back({{"status", std::string(1, status)}, {"commit", commit},
-                        {"path", path}, {"describe", describe}});
-    }
-    return {{"submodules", std::move(list)}};
-}
-
-void submodule_update(const fs::path& repo, bool init, bool recursive) {
-    std::vector<std::wstring> args = {L"submodule", L"update"};
-    if (init) args.push_back(L"--init");
-    if (recursive) args.push_back(L"--recursive");
-    const auto result = run(repo, args);
-    require_ok(result, "更新子模块");
-}
 
 void revert(const fs::path& repo, const std::string& path) {
     if (path.empty()) throw WorkspaceError("INVALID_REQUEST", "要回滚的文件不能为空。");
@@ -985,6 +914,14 @@ void revert(const fs::path& repo, const std::string& path) {
         if (change.path == path && change.untracked)
             throw WorkspaceError("INVALID_REQUEST", "该文件未被 Git 跟踪，没有可回滚的版本。");
     require_ok(run(repo, {L"checkout", L"--", utf8_to_wide(path)}), "回滚文件");
+}
+
+void revert_commit(const fs::path& repo, const std::string& commit) {
+    if (commit.empty()) throw WorkspaceError("INVALID_REQUEST", "要还原的提交不能为空。");
+    // `Git.Revert.In.Log`（`intellij.vcs.git.backend.xml:111`，注册进 `Git.Log.ContextMenu`
+    // 的 `:403`）：`action.Git.Revert.In.Log.description` = 生成新提交，这会还原在原始
+    // 提交中所做的更改 ⇒ `git revert --no-edit <commit>`，不弹编辑器、不改历史。
+    require_ok(run(repo, {L"revert", L"--no-edit", checked_ref(repo, commit)}), "还原提交");
 }
 
 Json reset(const fs::path& repo, const std::string& target, const std::string& mode) {

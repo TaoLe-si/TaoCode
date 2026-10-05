@@ -11,6 +11,7 @@ import { MAX_SHOWS, NEW_BADGE_TEXT, NEW_OPTION_PAGES, badgeStorageKey, markOpene
 import { PASTE_REFORMAT_MODES, pasteReformatLabel } from '../pasteOptions'
 import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Moon, Save, Search, Sun, X } from 'lucide-vue-next'
 import TemplateSettingsPage from './TemplateSettingsPage.vue'
+import ExternalToolsSettingsPage from './ExternalToolsSettingsPage.vue'
 // 设置树的**表**在 src/settingsTreeMeta.ts（与 src/toolWindowMeta.ts 同一个模式）。
 // `groups` / `nodes` 用别名导入，模板与脚本其余部分一个字都不用改。
 import {
@@ -23,12 +24,17 @@ import GradleSettingsPage from './GradleSettingsPage.vue'
 import ScopesSettingsPage from './ScopesSettingsPage.vue'
 import FileColorsSettingsPage from './FileColorsSettingsPage.vue'
 import GeneralRegistryToggles from './GeneralRegistryToggles.vue'
+import { createSettingsSearch } from '../settingsSearchController.ts'
 import { createSettingsDraftActions, createSettingsDraftPages, type SettingsDraft } from '../settingsDraft'
-import { createGeneralSettingsTextModels } from '../generalSettingsTextModels'
 import TodoPatternsPage from './TodoPatternsPage.vue'
 import FileTypesPage from './FileTypesPage.vue'
 import CodeFoldingSettingsPage from './CodeFoldingSettingsPage.vue'
+import InlayHintsSettingsPage from './InlayHintsSettingsPage.vue'
 import EditorTabsSettingsPage from './EditorTabsSettingsPage.vue'
+import ConsoleSettingsPage from './ConsoleSettingsPage.vue'; import TrustedLocationsSettingsPage from './TrustedLocationsSettingsPage.vue' // 宿主贴死 1356 行上限，两个页面导入同一行
+import DebuggerSettingsPage from './DebuggerSettingsPage.vue'
+import AudioCuesSettingsPage from './AudioCuesSettingsPage.vue'
+import KeymapSettingsPage from './KeymapSettingsPage.vue'
 import type { EditorSettings, GeneralSettingsState, JavaProjectSettings, NamedScopeSetting, ProjectSettings, TemplateSettings, TodoPattern } from '../bridge'
 import { EDITOR_LANGUAGES, breadcrumbsShownFor, defaultGeneralSettings } from '../bridge'
 // 构建工具组（`build.tools` + Gradle 页）的取值/文案/控件都在 src/gradle.ts 与两个子页组件里；
@@ -130,8 +136,6 @@ function copyInternalSettings() {
   window.setTimeout(() => { copyHint.value = '' }, 2000)
 }
 
-const { externalToolsText, foldConsoleText, foldExceptionText } = createGeneralSettingsTextModels(general)
-
 // IDEA's ConfigurableListPanel reads the groups from intellij.platform.ide.impl.xml
 // groupConfigurable entries (lines 575-608); weight descends, so order is
 // appearance 70 > editor 60 > project 40 > build 30 > language 20 > tools 10 >
@@ -182,200 +186,18 @@ function groupHasNewBadge(key: string) {
   return showNewBadgeDot(showNewOptionsInGroup(children, badgeCounts.value), false, expanded.value.has(key))
 }
 
-// IDEA's SettingsFilter + SearchableOptionsRegistrarImpl: the search box narrows the tree to the
-// pages whose *name* contains the whole query or whose *options* match it (SettingsFilter.kt:206-229,
-// SearchableOptionsRegistrarImpl.kt:217-260), Enter jumps to a name hit first (:222-229), the
-// matching options inside the page are spotlighted (SearchUtil.kt:82-86), a query that contains the
-// group separator is treated as a pasted path (SearchableOptionsRegistrarImpl.kt:457-529), and a
-// query that matches nothing turns the field red (SettingsFilter.kt:212).
-const query = ref('')
-const searchInput = ref<HTMLInputElement>()
-const searching = computed(() => query.value.trim().length > 0)
+// 设置树的搜索（IDEA 的 SettingsFilter + SearchableOptionsRegistrarImpl + 搜索历史 + spotlight）
+// 整块搬到了 src/settingsSearchController.ts：本文件贴着机检上限，而这一族只认「一个查询把树过滤成
+// 什么样」一件事。上游出处都在那边（SettingsFilter.kt:206-229 / SearchableOptionsRegistrarImpl.kt:
+// 217-260,457-529 / SearchUtil.kt:63-86,131-171 / SettingsSearch.java:25,119-124,173-195,284-288,
+// 417-461）。宿主只留这一行工厂调用，返回的每一项模板与脚本其余部分照旧按原名用。
+const {
+  query, searchInput, searching, searchBox, historyPopup, searchHistory, historyOpen, historyCursor,
+  historyBox, historyItems, recordSearchHistory, openHistory, closeHistory, pickHistory,
+  stepSearchHistory, onSearchIconClick, optionRows, scanOptions, visibleNodes, noMatch, spotlightActive,
+  clearSearch, onSearchPointerDown, visibleGroups, flatKeys, dispose: disposeSearch,
+} = createSettingsSearch({ dialog, section, expanded })
 
-// IDEA's filter field is a `SearchTextField("SettingsSearchHistory")`
-// (options/newEditor/SettingsSearch.java:25), so it owns a search history: queries are kept
-// most-recent-first and capped at five (SearchTextField.java:69,356-384), recorded when the field
-// loses focus (:233-235), before the history popup opens (:425-426) and when an item is chosen
-// (:417-423), and listed by a popup shown underneath the field with a single selection
-// (:440-461, Alt+Down :64/:487-490, Alt+Up steps to the previous item :173-195).
-// The rules live in src/searchHistory.ts so they are testable without a DOM.
-const searchBox = ref<HTMLElement>()
-const historyPopup = ref<HTMLElement>()
-const searchHistory = ref<string[]>(loadSearchHistory())
-const historyIndex = ref(0)
-const historyOpen = ref(false)
-const historyCursor = ref(0)
-const historyBox = ref<{ x: number; y: number; width: number } | null>(null)
-const historyItems = computed(() => popupHistory(searchHistory.value))
-function loadSearchHistory(): string[] {
-  try { return parseHistory(localStorage.getItem(SETTINGS_SEARCH_HISTORY_KEY)) }
-  catch { return [] }
-}
-function writeSearchHistory(entries: string[]) {
-  try { localStorage.setItem(SETTINGS_SEARCH_HISTORY_KEY, formatHistory(entries)) }
-  catch { /* storage unavailable: kept for this session */ }
-}
-// `addCurrentTextToHistory` (:284-288) only persists when `addElement` reported a change.
-function recordSearchHistory(text = query.value) {
-  const { entries, changed } = addHistoryEntry(searchHistory.value, text)
-  searchHistory.value = entries
-  if (changed) writeSearchHistory(entries)
-}
-async function openHistory() {
-  recordSearchHistory()
-  // A list of five is the whole point of the popup; showing an empty one would just be a stray box.
-  if (historyOpen.value || !searchHistory.value.length) return
-  const box = searchBox.value
-  if (!box) return
-  const rect = box.getBoundingClientRect()
-  // `AlignedPopup.showUnderneathWithoutAlignment` (:459): below the field, left edges aligned.
-  historyBox.value = { x: rect.left, y: rect.bottom + 4, width: rect.width }
-  historyCursor.value = 0
-  historyOpen.value = true
-  await nextTick()
-  historyPopup.value?.focus()
-}
-async function closeHistory() {
-  if (!historyOpen.value) return
-  historyOpen.value = false
-  await nextTick()
-  searchInput.value?.focus()
-}
-// `createItemChosenCallback` (:417-423): the chosen value becomes the text and is re-recorded.
-function pickHistory(item: string | undefined) {
-  if (item === undefined) return
-  query.value = item
-  recordSearchHistory(item)
-  void closeHistory()
-}
-// `showPrevHistoryItem` / `showNextHistoryItem` (:173-195): the text in the field is recorded
-// first, then the index steps and the text follows it. The index starts at 0 and is never reset,
-// which is why the first Alt+Down lands on the second entry.
-function stepSearchHistory(direction: HistoryDirection) {
-  const state = stepHistory(searchHistory.value, query.value, historyIndex.value, direction)
-  searchHistory.value = state.entries
-  historyIndex.value = state.index
-  query.value = state.text
-  if (state.changed) writeSearchHistory(state.entries)
-}
-function onSearchIconClick() {
-  // The leading area of IDEA's field opens the history on a single click (:119-124); with no
-  // history there is nothing to show, so the click just puts the caret in the field.
-  if (searchHistory.value.length) void openHistory()
-  else searchInput.value?.focus()
-}
-
-// One row per labelled option in a page. Read from the DOM rather than duplicated as data, so a
-// label can never drift from the template — IDEA indexes the components themselves
-// (SearchUtil.kt:63-79 walks the component tree).
-interface OptionRow { page: PageKey; el: HTMLElement; text: string }
-const optionRows = ref<OptionRow[]>([])
-function scanOptions() {
-  const rows: OptionRow[] = []
-  for (const node of nodes) {
-    const panel = dialog.value?.querySelector<HTMLElement>(`[data-page="${node.key}"]`)
-    if (!panel) continue
-    for (const el of panel.querySelectorAll<HTMLElement>('.checkbox-row, .input-row, .theme-option')) {
-      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
-      if (text) rows.push({ page: node.key, el, text })
-    }
-  }
-  optionRows.value = rows
-}
-const optionTexts = (key: PageKey): string[] => [
-  nodes.find(node => node.key === key)?.keywords ?? '',
-  ...optionRows.value.filter(row => row.page === key).map(row => row.text),
-]
-
-// A pasted "文件 | 设置 | 编辑器 | 缩进宽度" path jumps straight to the page it names and keeps the
-// leftover segments as the spotlight text (SearchableOptionsRegistrarImpl.kt:495-500).
-const pathHit = computed(() => resolveSettingsPath(query.value, groups, nodes))
-const pathTargets = computed<PageKey[]>(() => {
-  const hit = pathHit.value
-  if (!hit) return []
-  // The path may stop at a group, which has no page of its own — then every page of that group shows.
-  if (groups.some(group => group.key === hit.key)) return nodes.filter(node => node.parent === hit.key).map(node => node.key)
-  return [hit.key as PageKey]
-})
-const visibleNodes = computed(() => {
-  if (!searching.value) return nodes
-  const targets = pathTargets.value
-  if (targets.length) return nodes.filter(node => targets.includes(node.key))
-  const named = nodes.filter(node => isNameHit(`${node.label}\n${node.keywords}`, query.value))
-  const content = nodes.filter(node => optionMatches(optionTexts(node.key), query.value))
-  return [...new Set([...named, ...content])]
-})
-// SettingsFilter.kt:212 — IDEA turns the search field red when the filter came back empty.
-const noMatch = computed(() => searching.value && visibleNodes.value.length === 0)
-// SearchUtil.lightOptions (:82-86): the strict "every word" pass over the current page first, and
-// only when it finds nothing the loose "any word or substring" pass.
-const spotlightText = computed(() => pathHit.value?.spotlight || query.value)
-const spotlightRows = computed<OptionRow[]>(() => {
-  const text = spotlightText.value
-  if (!text.trim()) return []
-  const rows = optionRows.value.filter(row => row.page === section.value)
-  const strict = rows.filter(row => matchesOption(row.text, text, true))
-  return strict.length ? strict : rows.filter(row => matchesOption(row.text, text, false))
-})
-const spotlightActive = ref(false)
-let spotlightTimer: number | undefined
-function applySpotlight() {
-  for (const row of optionRows.value) row.el.classList.remove('settings-spotlight')
-  const rows = spotlightRows.value
-  spotlightActive.value = rows.length > 0
-  if (!rows.length) return
-  for (const row of rows) row.el.classList.add('settings-spotlight')
-  // SpotlightPainter.center() (:131-171): centre the first matched component and leave the scroll
-  // position alone afterwards — DO_NOT_SCROLL (:57-59) keeps the later matches from re-scrolling.
-  rows[0]!.el.scrollIntoView({ block: 'center', inline: 'nearest' })
-}
-// SpotlightPainter debounces its recompute by 200 ms (:64-67).
-watch([spotlightText, section, optionRows], () => {
-  if (spotlightTimer !== undefined) clearTimeout(spotlightTimer)
-  spotlightTimer = window.setTimeout(applySpotlight, 200)
-})
-function clearSearch() {
-  query.value = ''
-}
-function onSearchPointerDown() {
-  // SettingsFilter.kt:93-105 — pressing into a non-empty field selects the query so it is easy to replace.
-  if (searching.value && document.activeElement !== searchInput.value) searchInput.value?.select()
-}
-// 一个匹配到的节点可能挂在另一个节点下（三层树），所以要把祖先一路走到分组。
-function ancestorGroupOf(key: string): string | null {
-  let current = nodes.find(node => node.key === key)
-  while (current && current.parent) {
-    const parent = nodes.find(node => node.key === current!.parent)
-    if (!parent) return current.parent          // parent 是分组
-    current = parent
-  }
-  return null
-}
-const visibleGroups = computed(() => {
-  const needed = new Set(visibleNodes.value.map(node => ancestorGroupOf(node.key)).filter((key): key is string => Boolean(key)))
-  return groups.filter(group => needed.has(group.key))
-})
-// Order of the tree as the arrow keys walk it: groups collapsed to their selected
-// child, expanded groups list every child, search mode lists matches directly.
-const flatKeys = computed<PageKey[]>(() => {
-  if (searching.value) return visibleNodes.value.map(node => node.key)
-  const keys: PageKey[] = []
-  for (const group of groups) {
-    if (!expanded.value.has(group.key)) continue
-    for (const node of nodes.filter(item => item.parent === group.key)) {
-      if (!isParentOnly(node.key)) keys.push(node.key)
-      for (const grand of nodes.filter(item => item.parent === node.key)) if (!isParentOnly(grand.key)) keys.push(grand.key)
-    }
-  }
-  for (const node of nodes.filter(item => !item.parent)) {
-    if (!isParentOnly(node.key)) keys.push(node.key)
-    for (const child of nodes.filter(item => item.parent === node.key)) {
-      if (!isParentOnly(child.key)) keys.push(child.key)
-      for (const grand of nodes.filter(item => item.parent === child.key)) if (!isParentOnly(grand.key)) keys.push(grand.key)
-    }
-  }
-  return keys
-})
 // IDEA's breadcrumb (外观与行为 › 外观) plus the back/forward arrows that walk the
 // configurables navigation history.
 const history = ref<PageKey[]>([])
@@ -581,9 +403,10 @@ onMounted(() => {
 })
 watch(() => props.projectSettings, scanOptions)
 onBeforeUnmount(() => {
-  if (spotlightTimer !== undefined) clearTimeout(spotlightTimer)
+  // spotlight 的定时器与它打在 DOM 上的类都归搜索模块管，收摊也由它自己做
+  // （搬出前就是这两行，见 src/settingsSearchController.ts 的 dispose）。
+  disposeSearch()
   if (copyTimer !== undefined) clearTimeout(copyTimer)
-  for (const row of optionRows.value) row.el.classList.remove('settings-spotlight')
   dialog.value?.close()
   if (previousFocus?.isConnected) previousFocus.focus()
 })
@@ -929,6 +752,8 @@ defineExpose({ handleEscape })
             <p id="editor-guides-hint" class="field-hint restore-hint">IDEA 风格的垂直引导线，帮助识别代码块层级。</p>
             <label class="checkbox-row"><input v-model="editor.bracketMatching" type="checkbox" aria-describedby="editor-bracket-hint" /><span>括号匹配高亮</span></label>
             <p id="editor-bracket-hint" class="field-hint restore-hint">光标靠近括号时高亮对应的另一侧括号。注意：IDEA 没有任何“高亮匹配括号”的开关（EditorSettingsExternalizable 里没有 bracket 字段，平台里唯一的括号复选框是 Smart Keys 的 checkbox.insert.pair.bracket =「自动插入配对括号」），IDEA 的匹配括号高亮由 Editor › Color Scheme › General › Matched brace 的配色决定 —— 本项是 TaoCode 自己的开关，位置按编辑器外观类选项放置。</p>
+            <div class="input-row"><label :for="`${id}-line-numeration`">行号排法</label><select :id="`${id}-line-numeration`" v-model="editor.lineNumeration" :aria-describedby="`${id}-line-numeration-hint`"><option value="absolute">绝对</option><option value="relative">相对</option><option value="hybrid">混合</option></select></div>
+            <p :id="`${id}-line-numeration-hint`" class="field-hint restore-hint">对应 IDEA Editor › General › Appearance 的「行号」下拉（EditorAppearanceConfigurable.kt:118-124 的 LINE_NUMERATION，默认「绝对」）：相对 = 显示与光标行的距离（折叠藏起来的行不计）；混合 = 光标行显示绝对行号、其余相对。</p>
           </fieldset>
         </form>
 
@@ -971,6 +796,10 @@ defineExpose({ handleEscape })
 
         <section v-show="section === 'editor.preferences.folding'" :id="`${id}-panel-editor.preferences.folding`" class="settings-panel" data-page="editor.preferences.folding" role="tabpanel" :aria-labelledby="`${id}-tab-editor.preferences.folding`" :aria-busy="busy">
           <CodeFoldingSettingsPage :settings="editor" :busy="busy" @reset="resetEditorPage()" />
+        </section>
+
+        <section v-show="section === 'inlay.hints'" :id="`${id}-panel-inlay.hints`" class="settings-panel" data-page="inlay.hints" role="tabpanel" :aria-labelledby="`${id}-tab-inlay.hints`" :aria-busy="busy">
+          <InlayHintsSettingsPage :settings="editor" :busy="busy" />
         </section>
 
         <form
@@ -1086,22 +915,12 @@ defineExpose({ handleEscape })
             <p id="editor-diagnostics-hint" class="field-hint">对应 IDEA 的 Editor | Error highlighting：关闭后语言服务仍然运行，只是不再绘制波浪线与标记。</p>
         </section>
 
-        <section v-show="section === 'Console'" :id="`${id}-panel-Console`" class="settings-panel" data-page="Console" role="tabpanel" :aria-labelledby="`${id}-tab-Console`" :aria-busy="busy">
-          <h3>编辑器 › 控制台</h3>
-          <p class="section-description">对应 IDEA Settings › Editor › Console（注册证据 intellij.platform.lang.impl.xml:983 `&lt;applicationConfigurable parentId="preferences.editor" id="Console"&gt;`）。</p>
-            <!-- IDEA ConsoleConfigurable（`Console`，ConsoleConfigurable.java:43-73）：两个折叠列表。 -->
-            <label class="field-row field-row-block"><span>折叠行</span><textarea :value="foldConsoleText" rows="3" aria-label="要折叠的控制台行" placeholder="每行一条：匹配到该子串的重复行会被折叠" @input="foldConsoleText = ($event.target as HTMLTextAreaElement).value" /></label>
-            <label class="field-row field-row-block"><span>例外</span><textarea :value="foldExceptionText" rows="3" aria-label="不折叠的例外" placeholder="每行一条：命中例外的行永不折叠" @input="foldExceptionText = ($event.target as HTMLTextAreaElement).value" /></label>
-            <p class="field-hint">对应 IDEA 的 `Console` 设置（控制台行折叠）：输出/终端里连续重复且命中「折叠行」的行会合并成一条并显示次数；命中「例外」的行保持原样。</p>
-        </section>
+        <section v-show="section === 'Console'" :id="`${id}-panel-Console`" class="settings-panel" data-page="Console" role="tabpanel" :aria-labelledby="`${id}-tab-Console`" :aria-busy="busy"><ConsoleSettingsPage :settings="general" :busy="busy" /></section>
+        <section v-show="section === 'preferences.keymap'" :id="`${id}-panel-preferences.keymap`" class="settings-panel" data-page="preferences.keymap" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.keymap`"><KeymapSettingsPage /></section>
 
-        <section v-show="section === 'preferences.externalTools'" :id="`${id}-panel-preferences.externalTools`" class="settings-panel" data-page="preferences.externalTools" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.externalTools`" :aria-busy="busy">
-          <h3>工具 › 外部工具</h3>
-          <p class="section-description">对应 IDEA Settings › Tools › External Tools（注册证据 intellij.platform.lang.impl.xml:1013 `groupId="tools" id="preferences.externalTools" key="tools.settings.title"`=External Tools）。</p>
-            <!-- IDEA ToolConfigurable（`preferences.externalTools`）：应用级命令收藏，每行一条「名称|命令」。 -->
-            <label class="field-row field-row-block"><span>工具</span><textarea :value="externalToolsText" rows="4" aria-label="外部工具" placeholder="名称|命令（每行一条，例如：格式化|clang-format -i *.cpp）" @input="externalToolsText = ($event.target as HTMLTextAreaElement).value" aria-describedby="general-external-tools-hint" /></label>
-            <p id="general-external-tools-hint" class="field-hint">对应 IDEA 的 `preferences.externalTools`：这里定义的工具会出现在「工具 › 外部工具」子菜单里，运行时复用构建的同一条输出通道。</p>
-        </section>
+        <section v-show="section === 'debugger'" :id="`${id}-panel-debugger`" class="settings-panel" data-page="debugger" role="tabpanel" :aria-labelledby="`${id}-tab-debugger`" :aria-busy="busy"><DebuggerSettingsPage :settings="general" :busy="busy" /></section>
+
+        <section v-show="section === 'preferences.externalTools'" :id="`${id}-panel-preferences.externalTools`" class="settings-panel" data-page="preferences.externalTools" role="tabpanel" :aria-labelledby="`${id}-tab-preferences.externalTools`" :aria-busy="busy"><ExternalToolsSettingsPage :settings="general" :busy="busy" @change="Object.assign(general, $event)" /></section>
 
         <section v-show="section === 'diff.base'" :id="`${id}-panel-diff.base`" class="settings-panel" data-page="diff.base" role="tabpanel" :aria-labelledby="`${id}-tab-diff.base`" :aria-busy="busy">
           <h3>工具 › 差异与合并</h3>
@@ -1147,7 +966,7 @@ defineExpose({ handleEscape })
         <section v-show="section === 'editing.templates'" :id="`${id}-panel-templates`" class="settings-panel" data-page="editing.templates" role="tabpanel" :aria-labelledby="`${id}-tab-templates`">
           <h3>实时模板</h3>
           <p v-if="!projectSettings" class="section-description">尚未打开项目。模板开关与自定义模板随项目保存，请先打开一个项目。</p>
-          <TemplateSettingsPage v-else :settings="projectSettings.templates" :language="templateLanguage" :busy="busy" @change="emit('saveTemplates', $event)" />
+          <TemplateSettingsPage v-else :settings="projectSettings.templates" :language="templateLanguage" :busy="busy" :project-root="projectRoot" :project-name="moduleName" @change="emit('saveTemplates', $event)" />
         </section>
 
         <!-- Settings › Version Control › Commit (CommitDialogConfigurable.kt:60-77): the
@@ -1163,7 +982,7 @@ defineExpose({ handleEscape })
               <label :for="`${id}-subject-margin`">主题行右边距 <span class="field-hint">（字符）</span></label>
               <input :id="`${id}-subject-margin`" v-model.number="commitMessage.subjectRightMargin" type="number" min="0" max="10000" step="1" :aria-describedby="`${id}-subject-margin-hint`" />
             </div>
-            <p :id="`${id}-subject-margin-hint`" class="field-hint" :class="{ 'validation-error': !validCommitMessage }">提交信息第一行超过右边距即报告「主题行不能超过 N 个字符」。默认 72，允许 0–10000。</p>
+            <p :id="`${id}-subject-margin-hint`" class="field-hint" :class="{ 'validation-error': !validCommitMessage }">提交信息第一行超过右边距即报告「主题不能超过 N 个字符」。默认 72，允许 0–10000。</p>
             <label class="checkbox-row"><input v-model="commitMessage.bodyLimit" type="checkbox" :aria-describedby="`${id}-body-margin-hint`" /><span>限制正文行长度</span></label>
             <div class="input-row">
               <label :for="`${id}-body-margin`">正文行右边距 <span class="field-hint">（字符）</span></label>
@@ -1192,6 +1011,8 @@ defineExpose({ handleEscape })
           <FileColorsSettingsPage ref="fileColorsPage" v-model:enabled="editor.fileColorsEnabled" v-model:for-tabs="editor.fileColorsForTabs" v-model:for-project-view="editor.fileColorsForProjectView" :local-colors="projectSettings?.localFileColors ?? []" :file-colors="projectSettings?.fileColors ?? []" :scopes="projectSettings?.scopes ?? []" :root="projectRoot" :busy="busy" @manage-scopes="section = 'project.scopes'" />
         </section>
 
+        <section v-show="section === 'trusted.hosts'" :id="`${id}-panel-trusted.hosts`" class="settings-panel" data-page="trusted.hosts" role="tabpanel" :aria-labelledby="`${id}-tab-trusted.hosts`" :aria-busy="busy"><TrustedLocationsSettingsPage :general="general" :busy="busy" /></section>
+        <section v-show="section === 'ide.audiocues'" :id="`${id}-panel-ide.audiocues`" class="settings-panel" data-page="ide.audiocues" role="tabpanel" :aria-labelledby="`${id}-tab-ide.audiocues`" :aria-busy="busy"><AudioCuesSettingsPage :settings="general" :busy="busy" /></section>
         <section v-show="section === 'preferences.general'" :id="`${id}-panel-general`" class="settings-panel" data-page="general" role="tabpanel" :aria-labelledby="`${id}-tab-general`" :aria-busy="busy">
           <!-- Source: GeneralSettingsConfigurable.kt:95-185 (createPanel). Row order, groups
                and every option mirror the Kotlin DSL panel; labels follow IdeBundle /

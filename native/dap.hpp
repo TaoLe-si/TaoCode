@@ -222,6 +222,39 @@ public:
     // 由能力位 `supportsCompletionsRequest` 门控（**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
     // Reply result: {available, items:[{label, text?, type?, start?, length?}]}。
     void completions(const std::string& text, long column, long frame_id, long line, Reply on_reply);
+    // DAP `loadedSources`（规范 "Loaded Sources Request"）：按需重取"适配器已加载的源文件"清单。
+    // **事件通道已经收 `loadedSource` 事件**（增量），这里补的是主动拉取整份清单的请求通道 ——
+    // 规范里 `loadedSource` 事件不带 id 也没有 list 语义，UI 想重同步只能再问一次。
+    // **IDEA 侧没有对应类**（`grep -rln "LoadedSources\|loadedSources" platform/xdebugger-*/` 零命中），
+    // 属协议侧补齐。能力位 `supportsLoadedSourcesRequest`，未声明回 `DAP_UNSUPPORTED`。
+    // Reply result: {available, sources:[{name?, path?(工作区相对), sourceReference?, origin?, presentationHint?}]}，
+    // **空数组是有意义的答案**（这个会话还没加载任何源文件）。
+    void loaded_sources(Reply on_reply);
+    // DAP `modules`（规范 "Modules Request"）：按需重取模块清单（事件 `module` 只推增量）。
+    // `start_module` <= 0 与 `module_count` <= 0 都**不发**该字段（规范：省略 = 从第 0 个开始 /
+    // 返回全部）。**IDEA 侧没有对应类**，属协议侧补齐。能力位 `supportsModulesRequest`。
+    // Reply result: {available, modules:[{id, name, path?, type?, version?, symbolStatus?, addressRange?, ...}],
+    // totalModules?}；`id`/`name` 是规范必填，缺一个的条目丢弃（既认不出也显示不了）。
+    void modules(long start_module, long module_count, Reply on_reply);
+    // DAP `stepBack` / `reverseContinue`（反向调试）：回退一步 / 反向继续执行。
+    // 两者共用能力位 `supportsStepBack`（**规范默认 false**），未声明回 `DAP_UNSUPPORTED` ——
+    // 反向执行是 GDB/LLDB 一类后端的能力，普通适配器答不上来。
+    // **IDEA 侧没有对应类**（`find . -iname "*StepBack*"` 零命中），属协议侧补齐。
+    void step_back(long thread_id, Reply on_reply);
+    void reverse_continue(long thread_id, Reply on_reply);
+    // DAP `readMemory`（规范 "Read Memory Request"）：按 `memoryReference` 读一段内存。
+    // 能力位 `supportsReadMemoryRequest`（**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
+    // `offset` <= 0 不发该字段（规范默认 0）。
+    // Reply result: {available, address?, dataB64?, offset?, unreadableBytes?} —— 字节经 base64
+    // 过桥（`data` 原样改名 `dataB64`），十六进制/ASCII 的渲染只在前端一份实现。
+    void read_memory(const std::string& memory_reference, long offset, long count, Reply on_reply);
+    // DAP `disassemble`（规范 "Disassemble Request"）：反汇编一段指令。
+    // 能力位 `supportsDisassembleRequest`（**规范默认 false**），未声明回 `DAP_UNSUPPORTED`。
+    // `offset`/`instruction_offset` <= 0 与 `resolve_symbols=false` 都不发对应字段。
+    // Reply result: {available, instructions:[{address, instruction, instructionBytes?, symbol?, path?, line?, column?}],
+    // offset?, unreadableBytes?}；`address`/`instruction` 是规范必填，缺一个的条目丢弃。
+    void disassemble(const std::string& memory_reference, long offset, long instruction_offset, long instruction_count,
+                     bool resolve_symbols, Reply on_reply);
     void pause(long thread_id, Reply on_reply);
     void next(long thread_id, Reply on_reply);
     void step_in(long thread_id, Reply on_reply);
@@ -268,6 +301,14 @@ public:
     bool supports_breakpoint_locations() const;
     // `supportsCompletionsRequest`（**默认 false**）：调试表达式补全的可用性。
     bool supports_completions() const;
+    // 按需重取清单的可用性：`supportsLoadedSourcesRequest` / `supportsModulesRequest`。
+    bool supports_loaded_sources() const;
+    bool supports_modules() const;
+    // `supportsStepBack`（**默认 false**）：反向调试（stepBack / reverseContinue）的可用性。
+    bool supports_step_back() const;
+    // `supportsReadMemoryRequest` / `supportsDisassembleRequest`（**默认 false**）。
+    bool supports_read_memory() const;
+    bool supports_disassemble() const;
     // DAP `terminate`（IDEA 的「停止」）：适配器支持就发规范请求，否则退化成
     // `disconnect{terminateDebuggee: true}` —— 两条路都是"把目标进程结束掉"。
     // 无论哪条路，调用方仍应在回调里 `shutdown()` 收摊。

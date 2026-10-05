@@ -10,7 +10,7 @@
 // 认不回来的块（用户已经改了查询词/取消了）直接丢掉 —— 与 `src/bridge.ts` 里那两个世代计数器
 // 同一种纪律：**迟到的答案不许覆盖更新的结果**。
 import { reactive } from 'vue'
-import type { SearchPreviewMatch } from './bridge'
+import type { SearchPreviewMatch } from './bridge.ts'
 
 /** 搜索块的流状态（面板读它来增量渲染）。 */
 export const searchStream = reactive<{

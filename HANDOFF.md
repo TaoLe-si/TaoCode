@@ -1,15 +1,231 @@
-# 交接说明（顶部状态更新于 2026-10-04；下面「本轮」段是 2026-09-27 的历史存档）
+# 交接说明（顶部状态更新于 2026-10-05 B12 非 lp/ 子族续做轮；下面「本轮」段是 2026-09-27 的历史存档）
 
-## 当前状态：全绿
+> ⚠️ **2026-10-05 晚，两轮独立验收指出下面那句 `npm test 2455/2455` 已过期，别直接信。**
+> 现树 `tests/` 下 **459 个**文件、静态 `test()` 调用 **3891** 个。
+> 取基线用 `npx vue-tsc -b --force`（不带 `--force` 是增量构建，会给你假阴性）。
+> `tests/analysis-ignore-project-file.test.mjs` 那 5 条（依赖一个 `bridge.ts` 里**根本不存在**的
+> `__setBridgeTransportForTests` 钩子 —— 上一轮代理凭空发明的）**已修**：改成依赖注入
+> `setAnalysisIgnoreHost`，并顺带挖出 `refreshProjectAnalysisIgnore()` **从不真正重读盘**的真 bug。
+> 四档计数（2026-10-05 21:55 重算）：`platform_rest [~] 5423 · execution [~] 978 · xdebugger [~] 338 ·
+> projectviews [~] 574 · daemon [~] 349` —— 下面正文里那句「四档计数未变」已不成立。
+> 另：**「上游缺 `platform/keymaps` 目录」是错的** —— 它存在
+> （`platform/platform-resources/src/keymaps/` 10 个文件、`$default.xml` 1308 行、
+> `platform-impl/.../keymap/impl/ui/` 27 个文件、`plugins/keymaps/` 10 目录 26 XML）。
+> 这条假规约已生产过假的「无法核实」判词，详见 `docs/agent-playbook-parity.md` §1.6。
+
+## B12 非 `lp/` 子族续做（2026-10-05，本文件顶部这一节）
+
+只动 `scripts/verdict_table.py` 的**非 `lp/` 族判词**、`src/*.ts`（禁改文件除外）、`tests/*.test.mjs`；未改 native。
+门禁实测：`py_compile` 通过 · 五域生成成功 · `node --test tests/verdict-generated.test.mjs` **5/5** · `npx vue-tsc --noEmit` **0 错** · `npm test` **2455/2455**。四档计数未变（本批是**在已判 `[~]` 的族里补实现/把判词改准**，没有整族翻档）：
+`platform_rest [~] 5434 · execution [~] 977 · xdebugger [~] 338 · projectviews [~] 574 · daemon [~] 328`。
+
+本批新落实现（各自带判据）：
+
+| 族 | 落点 | 判据 |
+|---|---|---|
+| `dm/problems-view` | 问题面板新增「按来源（检查器）分组」：`src/problemsView.ts` 的 `source` 档 + 空来源占位组；`ProblemsPanel.vue` 下拉项 | `tests/problems-view.test.mjs` |
+| `pf/action-macro` | 宏步骤**上移/下移**：`src/macros.ts` 的 `moveMacroStep`（越界原样、不就地改）、`src/macroHost.ts` 写回并持久化、`MacrosDialog.vue` 两个按钮、App 模板 `@move-step` | `tests/macros.test.mjs` |
+| `ls/code-lens` | 命令校验：`codeLensItemProblem`/`codeLensArgumentsProblem`（命令非空且 ≤256；参数必须是 JSON 值数组，函数/循环/NaN/数组内 undefined 拦下），渲染过滤与点击路径共用 | `tests/code-lens-command.test.mjs`（新） |
+| `ls/hierarchy` | 节点级 children 缓存 `src/hierarchyCache.ts`（形状+节点键、256 FIFO、换根/方向清空）接进 `src/hierarchyView.ts` | `tests/hierarchy-cache.test.mjs`（新） |
+| `ls/features` | 能力降级表 `src/lspFeatureMatrix.ts`（kind → provider → 落点 → hide/local/notice + `unsupportedFeatureMessage`） | `tests/lsp-feature-matrix.test.mjs`（新） |
+| `pf/file-types` | 内容探测**接进编辑器语言判定**：`resolveEditorLanguage` 接入 App 的 `associationOf(path, tab.content)`（关联 > 探测 > undefined，只覆盖 java/cpp/typescript） | `tests/file-type-detection.test.mjs` |
+
+判词改准（实现已在上一轮落地、判词仍写「缺」的）：`pf/plugins`、`ic/plugins`（依赖解析：原生递归启用/停用 + 前端 broken/`pluginCanToggle`/依赖摘要，缺的只是**市场**）、`ex/terminal-actions`（终端内搜索已有 SearchAddon + 面板搜索条）、`ex/terminal`（标签内两栏分屏已有）、`pf/clipboard`（历史环与 `PasteHistoryDialog` 已接）、`se/providers`（四个供给者名字写错，已改）。
+
+**剩余清单（按「缺什么」排序，仍是 `[~]`）**：① 插件市场（`pf/plugins` 265 类 / `ic/plugins` 5）；② 动作注册表与键位冲突检查（`pf/actions` 259、`pf/keymap` 53 —— 键位仍写死在 `src/keymap.ts` 的 if 链里，没有共享注册表可查冲突）；③ 多协议 VFS / 多窗格项目视图（`pf/vfs` 148、`pv/project-view` 41）；④ 运行器专用过滤器与进程树增强（`exec/filters` 64、`exec/run-instances` 的远程/提权/端口监视器）；⑤ 调试器：按类型分组的树节点与 XValue 节点动作（`dbg/frames-vars` 129）、多行求值对话框（`dbg/evaluate` 27）；⑥ 语言服务：跨请求 resolve 缓存与多服务合并（`ls/completion` 7，跨请求不缓存是**有意**的，见 `src/lspCompletion.ts:93-95` 的注释）、语言服务输出窗口（`ls/platform` 39）；⑦ 结构搜索模板合法性/$Args$（`ss/matcher` 84）；⑧ 全局最近文件与最大数设置（`rf/core` 50）、编辑器多窗口（`pf/file-editor` 125）、跨窗口拖放（`pf/dnd` 12 / `ic/dnd` 9）；⑨ 终端上下分屏与配色方案（`ex/terminal` 32）；⑩ `pf/trusted` 的受信任位置清单与文件级信任（24）。
+
+## 当前状态（本轮续做后实测）
 
 | 检查 | 结果 | 备注 |
 |---|---|---|
-| `npx vue-tsc --noEmit` | 0 错 | 2026-10-02 复跑 |
-| `npm test` | **1812/1812** | 2026-10-04；新增 `diff-smart-lines` 13 条（第一百一十六批）+ 既有 `editor-find` 16、`diff-words` 21、`tab-strip-rows` 15、`search-everywhere-empty` 9、`search-everywhere-scope` 9、`status-bar-lifecycle` 13、`popup-detail` 19、`tool-window-pane-state` 13、`bookmark-order` 12、`commit-checks-progress` 10、`compare-files` 12 条。本轮之前：最近一批新增 `ui-text-selection` 5 条、`popup-anchor` 5 条、`external-libraries` 7 条（上一批：`sfc-single-root` 4 条、`ui-motion` 11 条、`ui-icons` 16 条、`settings-keys-parity` 5 条、`menu-placement` 8 条、`diff-align` 13 条、`b7-verdict` 8 条） |
-| `npx vite build` | ✓（`npm run build` 写的是 `dist/`） | **exe 吃的是 `build/ui/`**，只有 `npm run build:native` 会同步过去（它同时跑 36 个 ctest）。改完 UI 只见不到效果，先查这里，别去删 WebView2 缓存 |
-| `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 已顶到 2000 行硬上限（新能力拆 `native/xxx.cpp`：近期拆出 `file_queries.cpp` / `library_sources.cpp`） |
-| `ctest` | **36/36** | 2026-10-02；新增 `lsp_config_file`、`library_sources`。`ctest.exe` 不在 PATH，用 `scripts\run-ctest.bat` |
-| 真机取证 | **同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定 `%LOCALAPPDATA%\TaoCode`）；探针的 `build/TaoCode.lsp.json` 用完立刻删，别留在用户正在用的 exe 旁边 | 姿势与脚本见 `scripts/_cdp_step.py` |
+| `npx vue-tsc --noEmit` | 0 错 | 2026-10-04 续做轮复跑 |
+| `npm test` | **1856/1856** | 2026-10-04 续做轮；较上一轮 1812 增 37（本批新增 `debug-frame-context` 5、`bidi-notification` 4、`macro-session` 3、`run-configuration-schema` 5、`gradle-host` 7 等） |
+| `npx vite build` | ✓ | 2026-10-04 续做轮 |
+| `scripts\build-native-locked.bat` | RC 0 / **0 warning** | main.cpp 仍是 2000 行上限；本轮新能力都在既有模块内，未新增 native 文件 |
+| `ctest` | **36/36** | 2026-10-04 续做轮（`projects_test` 新增复合配置与「只有程序」的往返用例） |
+| 打开 AE2 崩溃（2026-10-04） | **已修复 + 真机验证 + 有能变红的门禁** | 根因：`native/gradle.cpp` 的 `start_sync` 用 `[&emit]` 捕获调用方**临时**回调，处理器返回后悬空；后台线程推第一批输出即 `std::bad_function_call` → terminate → `0xC0000409`。改成 `[sink = emit]` 后：同一工作区稳定运行（45s+ 无崩溃）。门禁 `tests/native-callback-capture.test.mjs`（2 条）——把捕获改回 `[&emit]` 时**实测会红** |
+| 三项真机取证（2026-10-04） | **完成** | ① 双向文本提示：往编辑器输入 RTL 字符 → 面板出现，文案与上游一致（「双向文本的显示布局取决于基础方向（视图 › 文本方向）」）+ 方向选择 + 隐藏提示/不再显示（`build/evidence-bidi.png`）；② Gradle 工具窗口：真点左活动条 → 工具条五项齐全，正文「AE2VMAddon-1.7.10-gtnh · 已同步：1 个项目、127 个任务。」（多根模型真的在跑，`build/evidence-gradle.png`）；③ 宏录制：编辑 → 宏（子菜单四项与上游同序）→ 开始宏录制 → 状态栏出现「宏录制」chip（title 正在录制宏），点它弹出「宏录制已开始」+「停止宏录制」（`build/evidence-macro.png`） |
+| 复合配置真机取证 | **完成** | 真键鼠走「主菜单 → 运行 → 编辑配置…」：对话框类型下拉含 `shell/application/debug/compound`；「添加 ▾」hover 展开（display:flex）→ 真点「复合配置」→ 出现「成员配置」表，命令/程序/启动前步骤三块**同时隐藏**（`commandHidden=true, beforeHidden=true`）。截图 `build/realmachine-compound.png` |
+| 真机 CDP 取证 | **部分完成** | ui-parity-proj 上确认 bundle/树/编辑器/会话提示；AE2 上撞到可复现的 `0xC0000409` 崩溃（见文末「未完成」第 1 条） |
+
+
+
+### 文档核实与更正（2026-10-04）
+
+| 错/漏 | 更正 | 复算方式 |
+|---|---|---|
+| B1 标题写「`ui/tabs`（53）+ `ui/popup`（54）= 107 类」，后被当成「127 类」 | 规范类数是 **124**（63 + 61）；`ui.txt` 在这两个包下有 127 行，其中 **3 行是 `package-info.java`（包级文档桩，不是类）** | `tests/b1-verdict.test.mjs` 直接数 `ui.txt` 的行 |
+| B1 判决书**漏了 4 个类**（`ComponentPopupBuilderImpl` / `FileColorsOptionsTopHitProvider` / `ListPopupWrapper` / `TreePopupImpl`） | 已按源码逐个补判（都判 `[~]`，各自写清本仓落点与缺什么），并加门禁 | 同上：把 124 个类名逐个在判决书里找，少一个就红（**实测能红**） |
+| B2 §C 写「四个判 `[x]`…两个判 `[~]`」 | §G 真实是 **3 `[x]`（只读/编码/位置）+ 3 `[~]`（行尾/内存/语言服务）**，已按 §G 更正 | `tests/b2-verdict.test.mjs` + 逐行读 §G |
+| B3 §E 写「未移植 0 类、本域没有留白的 TODO」，而 §G 有一条 `[ ]` | 改成「1 类」并点名 `CommitChecksProgressIndicatorTooltip` | `tests/b3-verdict.test.mjs` |
+| B6 顶部写「部分移植 36 条、未移植 6 条」，与表尾的 40 / 2 矛盾 | 顶部改成 40 / 2 | `tests/b6-verdict.test.mjs` |
+| `docs/inventory/_platform.json` 的 `covered` 写成 10 400，与 `platform_total − rest` 对不上（`enumerate_inventory.py --check` 一直报「机器摘要内容不一致」） | 重新生成（`covered = 9092`），并在 `docs/class-parity-todo.md` §0' 写明三个数各自的含义（`covered` 是**平台里**落在 7 域的类数，不等于 7 域合计 10 400） | `python scripts/enumerate_inventory.py --check` → **全部一致** |
+| `docs/class-parity-todo.md` §4/§6 的 B1 进度（107/107）与「B3..B12 起点 0/4944」 | 改成 124/124 与「B3–B7 已判决并各有门禁；B8–B12 仍 `[ ]`」 | 同上 |
+
+### 折叠那条抖动 —— 已定位并修掉（是**产品缺陷**，不是测试不稳）
+
+现象：`tests/editor-folding.test.mjs` 的「套在外面的语法块按最内层往外排（enclosingAreas）」偶发失败
+（`祖先链上应有 while / if / function 三层，实际 0`）。
+
+根因：`enclosingAreas` 直接读 `syntaxTree(state)`，而 CodeMirror 的增量解析是**按时间片**做的 ——
+机器忙（全量测试并发跑）或文件大时，树可能还没解析到光标的位置，`resolveInner` 只能摸到 doc 节点，
+祖先链就是空的。**这正是本函数当初要修的那个真机症状**（"光标在块中间按 Ctrl+- 一动不动"）：
+当时只归因到"没接语言服务"，其实"树没解析到"是同一个结果的另一半。
+
+修法：`src/editorFolding.ts` 的 `enclosingAreas` 先用 `ensureSyntaxTree(state, pos, 200)` 把树推到光标
+（不需要 view，与 `forceParsing` 是同一件事），超时才退回现有的树。修完连跑 3 遍折叠套件都是 20/20，
+全量 1856/1856。
+
+顺带修一条被这次改动打断的**接线判据**：`tests/editor-folding.test.mjs` 原先硬匹配
+`/import \{ foldable, foldedRanges/`（要求这两个名字排在行首且相邻），往那条 import 里加
+`ensureSyntaxTree` 就会红 —— 判据不该锁死同一行里的相邻顺序，已改成按"从哪个包导入了这两个符号"匹配。
+
+### 复合配置的**运行**链路：抽出纯驱动 + 判据（2026-10-04）
+
+原先这段顺序逻辑埋在 `src/runActions.ts` 的宿主里（依赖 request/notify/workspace），一条判据都写不出来。
+现在抽到 **`src/runCompound.ts`**：`planCompoundRun`（整组预检，不启动任何东西）+ `runCompound`（依次启动、
+失败只回滚**本次启动**的实例）。宿主只把"启动一个成员""停一个实例"两件事交给它。
+
+判据 `tests/run-compound.test.mjs` 7 条：成员缺失/环/debug 成员/坏环境变量都在启动前被拦下、
+嵌套复合配置摊平成叶子且共享成员只出现一次、按成员表顺序启动且每个成员带**自己**的 args/启动前链、
+失败只回滚本次启动的两个实例并点名失败的成员、`run.stop` 抛异常（成员已自行退出）被吞掉、
+工作区中途被换掉就停止往下启动且不算失败、预检失败时一个成员都不启动。
+
+**真机端到端（2026-10-04 补完）**：在真 exe 里用真键鼠 —— 运行菜单 → 编辑配置… → 「添加 → Shell 命令」建两条（`echo A` / `echo B`）→「添加 → 复合配置」勾两个成员 → 保存 → 关对话框 → **Shift+F10**。
+结果：运行工具窗口里**两个实例标签**（`新配置ck-a exit 0`、`新配置ck-b exit 0`），控制台按成员顺序输出，`==> 新配置ck-b <==` 之后打印 `B`、进程退出码 0（`build/evidence-compound-run.png`）。
+⇒ 「宿主真的发出两次 run.start、且每个成员各自一个实例」有实测证据了。取证用的三条配置已从沙箱项目删掉，`lastProject` 已还原为用户的项目。
+
+### 真机取证的三个坑（2026-10-04 实测）
+
+1. **合成事件推不动 Vue**：`element.click()` / `dispatchEvent(new MouseEvent(...))` 在真 exe 里毫无反应（点左侧条、点运行面板都不动）。必须走 CDP `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` / `Input.insertText`（`scripts/realdbg.py` 就是这套）。
+2. **视口外的坐标点不中**：对话框比窗口高时，控件可能在 `y > innerHeight`（AE2 上「添加」在 y=742、窗口只有 603），hover 与点击都落空 —— 先 `scrollIntoView({block:'center'})` 再算坐标。
+3. **`.rc-add` 的下拉是 CSS `:hover` 展开**，不是点击展开；且菜单在 DOM 里恒在（`display:none`），靠 `getBoundingClientRect().width>0` 判断"此刻能不能点"。
+
+### AE2 大工程上的复验（2026-10-04，修复之后）
+
+- 打开 AE2 **不再崩溃**（此前 1–2 秒必崩）；日志：`java lsp 配置：链接工程 1 个、源根 4 条（AE2VMAddon-1.7.10-gtnh/src/main/java）、类路径兜底 4 条、导入 开`。
+- 通知中心里拿到 **「Gradle 同步完成（用时 17 秒）100%」** —— 多根同步链路在大工程上真的跑完了（这条同时也验证了本轮修的 Gradle 回调悬空：崩溃就是在那条路径上）。
+- 状态栏：0 错误 / 0 警告。
+- **顺带修回一处环境回归**：我先前反复备份/还原 `%LOCALAPPDATA%\TaoCode\projects.json` 时把 AE2 的 `buildTools.gradle.linkedProjects` 弄空了（日志一度显示"链接工程 0 个"），已写回 `["AE2VMAddon-1.7.10-gtnh"]` 并复验。
+- **已核（见下节）**：路线图第 72 行那条「大工程的语义结果取决于 JDT 能不能把工程导入做完」—— 2026-10-04 夜间复验取到了完整读数，结论是**可用，只是被 JDT 自己的导入期挡住**。
+
+### AE2 大工程上的复验 · 语义结果（2026-10-04 22:34–22:56，定论）
+
+**结论先行：大工程上语义能力可用**；不可用的窗口就是 JDT 启动导入期（本机 22:37–22:46，约 9.5 分钟）。导入没跑完时 `documentSymbol`/`foldingRange` 一律 60s `TIMEOUT`（诊断 0、无语义着色、结构视图空）；导入跑到该工程后同一批请求 6–11ms 回包，诊断/符号/语义着色全在。**卡的是 JDT 自己的工程导入，不是网络代理、也不是我们这一侧没发请求**（两者都已排除，见下）。
+
+**读数（时间点 + 数值）**（文件 `AE2VMAddon-1.7.10-gtnh/src/main/java/com/ae2vm/addon/AE2VMAddon.java`，22:37:2x 用项目树双击打开）
+
+| 时刻（启动 22:34:04 之后） | `.status-smart` | `.status-problems` | `.cm-sem-*` | `.outline-row` |
+|---|---|---|---|---|
+| 22:37:36（+3.5 分） | 「语言服务未就绪」 | 0 错误 / 0 警告 | 0 | —（未读） |
+| 22:39:22（+5.3 分） | 无 chip（`lspRunning` 已 true） | 0 / 0 | 0 | 0（「此文件没有符号」） |
+| 22:40:57（+6.9 分） | 无 chip | 0 / 0 | 0 | 0 |
+| 22:47:19（+13.2 分） | 无 chip | **2580 / 2542** | 0（旧标签不重取，见下） | 0（面板未刷新，见下） |
+| 22:48:47（重进「结构」活动条后） | 无 chip | 2580 / 2542 | 0 | **18 行**（类 · com.ae2vm.addon 1:1、方法 · AE2VMAddon 52:14、常量 · MOD_ID 53:32…） |
+| 22:53:26（新开 `PatternCompiler.java`） | 无 chip | 1537 / 2432（22:47 一度 2580/2542，随各子工程复验上下浮动） | **15**（namespace 4 / modifier 9 / keyword 2 / mod-documentation 2） | 18 行 |
+
+协议层直采（CDP 里用应用自己的桥 `window.chrome.webview` 发 `lsp.request`，与 UI 同一条路、同一份原生实现）：
+
+- 22:45:45（导入中）：`documentSymbol` **60016ms → LSP_FAILED / TIMEOUT**；`foldingRange` **60015ms → TIMEOUT**。
+- 22:47:19（导入跑到本工程后）：`documentSymbol` **6ms / 18 个符号**；`status` → `{configured:true, language:"java", ready:true, running:true}`。
+- 22:54:19：`semanticTokens` **6ms / 935 个整数**；`foldingRange` **11ms / 117 段**；pull 的 `diagnostic` 8ms 回 `LSP_FAILED / Internal error.` —— JDT 走推送（通知中心 22:46:52「Publish Diagnostics 已完成」），而 pull 失败时前端不落 pull 标（`src/bridge.ts` 的 `setPullDiagnostics` 只在成功路径调用，失败走 `catch`），所以推送照常进面板；这不是缺陷。
+
+**两侧证据**
+
+- 我们这一侧（`TAOCODE_LSP_TRACE=%LOCALAPPDATA%\TaoCode\log\lsp-trace-ae2.log`，副本 `build/ae2ev/lsp-trace-ae2.log`）：该发的全发了 —— `initialize` → `initialized` → `workspace/didChangeConfiguration` → `textDocument/didOpen`(15436B) → `documentSymbol`/`documentHighlight`/`inlayHint`/`inlineCompletion`/`diagnostic`/`didChange`/`foldingRange`/`semanticTokens/full`/`documentLink`/`codeLens`；728 条 READ，服务器一直在回包（回的是等待/拒绝，不是没人问）。
+- JDT 这一侧（`%LOCALAPPDATA%\TaoCode\jdtls-workspace\453a2f4170706c69656420456e657267697374696373203220416363656c65726174696f6e\.metadata\.log`）：22:37:17 `>> initialized` + `Importing Gradle project(s)`，然后**逐个**重同步历史工作区里其它版本的工程（`ae2vm-1.10.2-…`、`1.15.2`、`1.16.1`…，实测每个 17–66 秒），10 个工程同步失败（`Synchronize project AE2VMAddon-1.1x.x failed due to an error in the referenced Gradle build`，例如 `Could not find net.minecraftforge:forge:1.16.1-32.0.108_mapped_official_1.16.1`，只在本地缓存里找）。**链接工程 `AE2VMAddon-1.7.10-gtnh` 不在失败名单里**（本会话日志 0 次提到 1.7.10 —— 它不需要重同步）。22:46:51–52 日志出现 `15 problems reported for /AE2VMAddon.java` 与 `Validated 1. Took 745 ms` —— 语义就在这一刻开始可用。
+- 进程：22:34:04 启动 → 22:56:17 主动 taskkill，存活 22 分钟，`taocode.log` 本会话 **0 条崩溃**；启动日志有 `java lsp 配置：链接工程 1 个、源根 4 条（AE2VMAddon-1.7.10-gtnh/src/main/java）、类路径兜底 4 条、导入 开`。
+
+**顺带实测到两处刷新时机问题（本批只记录，未改代码；都不是「语义不可用」）**
+
+1. 导入期打开的标签（`AE2VMAddon.java`）在语义可用后**不会自己补色**：`.cm-sem-*` 仍是 0。查 `src/components/CodeEditor.vue`：`scheduleSemanticTokens` 只在打开文件与 `docChanged` 时调度，`runSemanticTokens` 失败被 `catch` 吞掉、没有重试 —— 编辑一次或重开文件才回来。
+2. 结构视图同理：`refreshOutline` 只在换文件（`watch(activePath)`）或重新进入「结构」视图时触发，导入期取回的空结果会一直挂在面板上（22:47:19 仍显示「此文件没有符号」，重进一次活动条即变 18 行）。对照 IDEA 是 daemon 的 `DaemonCodeAnalyzer` 事件驱动重跑。
+
+**取证姿势（本轮新增，下一次直接用）**：项目树行是 `.explorer-panel button.tree-entry`，标题在 `title`（相对路径）；**单击 `.tree-expander` 展开目录**（比 ArrowRight 可靠，ArrowRight 实测不动）；文件用「单击行（真点击聚焦）+ Enter」或**双击行**打开；**新展开的目录有 1–2 秒懒加载延迟**，紧接着的 `eval` 会看不到子行，等 1.5–2s 再读。
+
+**证据文件**：`build/ae2ev/step9-after-sync.png`（结构面板 0 行 + 2580/2542 + 通知中心 Publish Diagnostics 已完成）、`build/ae2ev/step15-second-file.png`（`PatternCompiler.java` 有语义着色 + 1537/2432）、`build/ae2ev/step12-semantic.png`、`build/ae2ev/lsp-trace-ae2.log`。
+
+### 崩溃取证方法（可复用）
+
+- 进程内在 `native/crash_log.cpp` 装了 terminate / SIGABRT / SEH 钩子：崩了就往 `taocode.log` 追一行「崩溃 · …」，并写一份 `%LOCALAPPDATA%\TaoCode\crash.dmp`（**栈还完整时抓拍**；`CaptureStackBackTrace` 在 abort 路径上会返回 0 帧，别再用它）。
+- 离线符号化：`scripts/dump_fault.py <dmp>` 看异常码/线程；`scripts/symbolize_rva.py <exe> 0xRVA…` 用 PDB 还原函数与行号。Release 构建默认**不带 PDB**，需要符号时用 `build/_sym_vs.bat`（VS 生成器 + RelWithDebInfo → `build-symvs/`）。
+- 本次结论链：`runner.cpp:250 reader_loop` → `gradle.cpp:75` → `std::_Xbad_function_call` → `terminate` → `abort`。
+- **仍缺**：这条崩溃的**单测级回归**（`gradle_test` 里补一条"临时回调返回后仍要能收到 gradle.exit"）没写 —— 现有 2 条 gradle 原生用例覆盖不到 `start_sync` 的捕获语义。
+
+## B8–B12 判决（2026-10-04 第三次会话）—— 生成型判决表
+
+四个没判过的域**全部有了逐类判决表**（共 24231 类），做法与 B1–B7 不同、但口径一致：
+
+| 域 | 类数 | `[x]` | `[~]` | `[ ]` | `[-]` | 判决书 / 逐类表 |
+|---|---:|---:|---:|---:|---:|---|
+| `execution`（B8） | 1608 | 0 | 918 | 167 | 523 | `docs/inventory/verdict-execution.md` + `execution_verdict_table.md` |
+| `xdebugger`（B8） | 635 | 0 | 338 | 0 | 297 | `docs/inventory/verdict-xdebugger.md` |
+| `projectviews`（B9） | 755 | 0 | 578 | 0 | 177 | `docs/inventory/verdict-projectviews.md` |
+| `daemon`（B11） | 659 | 0 | 328 | 0 | 331 | `docs/inventory/verdict-daemon.md` |
+| `platform_rest`（B12） | 20574 | 0 | 0 | **8336** | 12238 | `docs/inventory/verdict-platform_rest.md` |
+
+**为什么是"生成型"**：2243 类（B8）手抄判词必然漏、也没法复算。所以：
+族判词**手写**（`scripts/verdict_table.py` 的 `FAMILIES` / `MODULE_HEAP`，逐族读过源码，判词里点出本仓落点与缺什么），
+逐类覆盖**机械生成**（族档位 → 每个类，再叠两条机械规则：上游**测试源码**里的类判 `[-]`；族判 `[~]` 但类本身是
+**Swing 组件本体**的降为 `[-]`）。机械信号来自 `scripts/verdict_signals.py`，每个类的档位都能复算。
+
+门禁 `tests/verdict-generated.test.mjs` 5 条：规模 = 枚举行数、逐类覆盖不重复、四档之和自洽且**文档里印的数字**与
+JSON 一致、`[x]`/`[~]` 族必须点出**真实存在**的本仓文件（写错路径当场红）、`[-]` 族必须给得出依据、
+Swing 降级规则确在生效。**这五条在写的过程中各抓到过真问题**（`dbg/settings` 没写落点、`bookmarks-alias` 只说"见 B5"、
+`util`/`remote-core`/`settings-sync-core` 等 30 余条判词太短或点不出上游类名、平台路径错配到别的域的族）。
+
+**B12 的诚实边界**：20574 类只做到**模块级**分堆 —— A 堆（用户可见实现体：`lang-impl` 3012、`platform-impl` 2554、
+`analysis-impl` 355、`vcs-impl` 251…）判 `[ ]` 并写明"逐类判定待办"，B/C 堆逐模块给了可移植性理由（`[-]`）。
+所以 B12 **没有判完**，缺的是 A 堆 8336 类的逐类判定。
+
+## 子代理并行推进（2026-10-04 第四次会话）—— 判决清零 + 三条协议缺口 + 两处真实现
+
+四条线并行、由我统一复核（不采信汇报，跑门禁为准）。**全部门禁实测**：
+`npm test` **1887/1887** · `npx vue-tsc --noEmit` 0 错 · `vite build` 成功 · `ctest` **36/36** ·
+原生构建 RC 0 / 0 warning · 判决与不变量专项 **58/58**。
+
+| 线 | 结果 |
+|---|---|
+| **B12 A 堆细分** | `platform_rest` 的 A 堆从「模块级 `[ ]` 8336」细分成 **197 条子族判词**（`lp/completion` 124、`lp/refactoring` 275、`pf/plugins` 265、`es/*`、`vc/*`、`se/*`、`ls/*`…）：`[~]` 4867 / `[ ]` **1115** / `[-]` 14592。剩下的 1115 = 结构化搜索整族 144 + 具名子族里「本仓没有、可移植待办」884 + 231 个未归族的 A 堆兜底 |
+| **B7 的 455 条 `[ ]`** | **归零**：`[~]` +286、`[-]` +161、`[x]` +8。其中**真做了两族**：① 保留大小写（`src/preserveCase.ts` 逐字移植 `PreserveCaseUtil`，查找栏替换行加开关）；② 差异导航（`src/diffNavigation.ts` 按 `PrevNextDifferenceIterableBase` 的两端禁用/不回绕语义，`DiffView.vue` 加按钮 + F7/Shift+F7）。判据 `tests/preserve-case.test.mjs`、`tests/diff-nav.test.mjs`，`b7-verdict` 门禁加了两条硬判据（四档计数冻结 + 每条 `[-]` 必须带上游 `文件:行号`） |
+| **B1/B2/B3/B6 的 `[ ]`** | **归零**：B3 那条 tooltip → `[~]`（面板内进度行已有，缺的是点击弹出的浮层）；B6 两条 SE 类目 → `[~]`（`CLASS_KINDS`+`class` 档已有，缺 SE 里独立 Classes 档与 `Foo#member`）；B1 最后 20 类 → 11 `[~]` + 9 `[-]`（Swing/AWT）；B2 39 条 → 2 `[x]`（列选择/省电 widget 真接线）+ 7 `[~]`（六个标题分段 provider + 工具栏快捷动作）+ 30 `[-]`（焦点 7 + tabInEditor 20 + 3）。四个门禁同步改了四档计数 |
+| **DAP 三条协议缺口** | 六条新请求全部落地并**闭环 `docs/enum-lsp-dap.md` §D = 0**：`loadedSources`/`modules`（按需重取）、`stepBack`/`reverseContinue`、`readMemory`/`disassemble`。新文件 `native/dap_inspect.cpp`（请求+能力位+整形）、`native/dap_routes.cpp`（把 `dap.*` 分派从 main.cpp 搬出：1998 → **1820** 行）、`src/debugSources.ts`；`DebugPanel.vue` 加反向调试按钮与内存/反汇编面板（能力缺失时不渲染假控件）。前端判据 15 条（`dap-sources`/`dap-memory`/`dap-capabilities`），native `dap_client` 新增 4 组。`native/dap.cpp` 上限按「拆一次降一次」1800 → 1790 |
+
+**我自己这一轮的收尾**：`src/components/CodeEditor.vue` 一度 1149 行顶破上限（1147），已靠合并 import/注释回到 1147；
+`module-size` 与 `routing-parity` 一并复绿。
+
+**仍然没做完（如实）**：
+1. `platform_rest` 里 **1115 条 `[ ]`** 与各域合计 **约 2400 条 `[~]`** 的功能明细 —— 这是真正的开发量（每行都写了缺什么）。
+2. 路线图第 72 行那条「大工程 JDT 导入能否跑完」仍未取到真机证据（本轮只拿到「Gradle 同步完成（17 秒）100%」与 LSP 配置三段算出）。route: 打开一个 Java 文件看诊断/符号。
+3. 真机只复验了本轮的改动（崩溃/复合运行/双向文本/Gradle 多根/宏录制/编辑器与树）；更早批次的能力没回扫。
+
+## 本轮续做（2026-10-04 第二次会话）做了什么
+
+**已实现并各自带可运行判据**（`npm test` 从 1812 → 1844，`ctest` 仍 36/36）：
+
+| 主题 | 落点 | 判据 |
+|---|---|---|
+| `ToolWindowView` 的 Gradle 回调签名与多根工具窗口对齐（`directory?` 参数、依赖懒加载按目录） | `src/components/ToolWindowView.vue`、`src/toolViewContext.ts`（`runConfigDebugAdapter` 注入） | `tests/gradle.test.mjs` 43 条全绿 |
+| 调试面板按**选中帧**求值/监视/作用域，带请求代次防旧响应覆盖；修复根容器被误判循环引用 | `src/components/DebugPanel.vue`、`src/bridge.ts` 的 `dapSelectThread` | `tests/debug-frame-context.test.mjs` 5 条（含真实异步竞态用例） |
+| 双向文本提示（`BidiContentNotificationProvider.java:31-65`）：按**实时文档**检测、选择方向写设置、隐藏/不再显示 | `src/bidiNotification.ts`、`src/editorBidiNotification.ts`、`CodeEditor.vue` 的 `bidiDirection` 事件 | `tests/bidi-notification.test.mjs` 4 条 |
+| 宏录制指示器（`ActionMacroManager.Widget`）+ 回放等待异步动作 + 重名循环追问不丢录制 | `src/components/MacroRecordingChip.vue`、`src/macroHost.ts` | `tests/macro-session.test.mjs` 3 条 |
+| 运行配置**复合配置**（IDEA `CompoundRunConfiguration`）：类型/成员表全链路、原生整组校验（缺失/自引/重复/循环）、只有程序的普通配置合法 | `src/runConfigurationSchema.ts`、`native/settings_schema.cpp`、`src/bridge.ts`、`src/components/RunConfigurationsDialog.vue` | `tests/run-configuration-schema.test.mjs` 5 条 + `projects_test` 新增往返/拒绝用例 |
+| 行级两步比对补齐 `optimizeLineChunks`、`correctChangesSecondStep`、字符级 `DefaultCharChangeCorrector` | `src/diffSmartLines.ts`、`src/diffChars.ts`、`src/diffWords.ts`、`src/diffChunks.ts` | `tests/diff-smart-lines.test.mjs`、`tests/diff-chunks.test.mjs`、`tests/diff-words.test.mjs` |
+| 粘性行默认层数**订正回上游的 5**（`EditorSettingsExternalizable.java:94`） | `src/settingsModel.ts`、`native/settings_schema.cpp` | `tests/bidi-notification.test.mjs` 第 4 条 |
+| 预览态设置校验补齐枚举（`bidiTextDirection` / `reformatOnPaste` / `breadcrumbsPlacement`）与字号域 4..40 | `src/previewSettings.ts` | `tests/run-configuration-schema.test.mjs` 第 5 条 |
+
+**文档口径更正**：`docs/settings-parity.md:53` 记的 `stickyLinesLimit` 3 vs 上游 5 的「已知偏离」已消除（两处都改回 5）。
+
+**本轮未完成（如实登记，不是"不做"）**：
+
+1. **真机 CDP 取证只跑成了前半段，并且撞到一个真崩溃**（2026-10-04 续做轮实测）：
+   - `TAOCODE_DEBUG_PORT` 启动 `build/TaoCode.exe`，工作区 `D:/TaoCode/.tools/ui-parity-proj` ⇒ 进程存活、CDP page target 可用；已取证：bundle `assets/index-CfxjZu0j.js`、状态栏、左活动条 7 个按钮、项目树 8 行、`CMakeLists.txt` 双击进编辑器（`.cm-editor` 真渲染）、「恢复上次会话？」提示的「放弃草稿」可点掉。
+   - **换回 `E:/Applied Energistics 2 Acceleration` 后进程在打开工作区 1 秒内以 `0xC0000409`（STATUS_STACK_BUFFER_OVERRUN）退出**，日志停在 `java lsp 配置：链接工程 1 个…` 那行；同一份 exe 在 ui-parity-proj 上不崩，所以**不是"debug 端口起不来"**，而是大工程打开路径上的崩溃。**本轮没查到根因**（AE2 的 `runConfigs` 为空、`buildTools.gradle.linkedProjects = ["AE2VMAddon-1.7.10-gtnh"]`，与本轮新增的复合配置校验无关；怀疑与「打开工程即自动 Gradle 同步 + JDT LS 同时在跑」那条并发路径有关，未证实）。
+   - **复现命令**：`powershell -NoProfile -Command "$env:TAOCODE_DEBUG_PORT='9353'; Start-Process D:\TaoCode\build\TaoCode.exe -WorkingDirectory D:\TaoCode\build"`，等 10-25 秒看 `Get-Process TaoCode`；日志在 `%LOCALAPPDATA%\TaoCode\log	aocode.log`。
+   - **与历史缺陷同码，但不是同一条**：HANDOFF 底部「踩过的坑」表里那条 `0xC0000409` 是 Git 递归加锁（已修）；本轮这条在**打开工作区**路径上，且 AE2 的 `runConfigs` 为空、没有复合配置数据，所以与本轮新增的复合校验无关。排查起点建议：`native/main.cpp` 的 `workspace.open` 之后、`native/lsp_config.cpp` 的 `java_lsp_settings`（日志停在这一句）与 `src/gradleHost.ts` 的 `openWorkspace` 自动同步这两条并发路径。
+   - 新增取证工具 `scripts/realdbg-click.py`（真 `Input.dispatchMouseEvent` 点击 —— 合成 click 在真机里推不动 Vue 事件链，实测过）。
+2. `docs/inventory/verdict-*.md` 里的 `[ ]`/`[~]` 仍然按类逐条存在（B1 107 口径与 127 类的差额、B2 §C 的 3+3、B3 最后一条 tooltip、B6 顶部旧计数），本轮**没有改判决文档**；`scripts/enumerate_inventory.py --check` 报 `_platform.json` 的机器摘要不一致，也未修。
+3. 复合配置的**运行**链路（`runActions.ts` 的分派与 `runConfigTree.ts` 的整组校验）已有实现与测试，但"多成员并行/串行顺序、失败回滚"在真机上没有实测。
 
 **本轮十批（第八十八～九十七批）** —— 一次把 B1/B2/B6/B7 四个判决里"能做但没做"的族清掉：
 

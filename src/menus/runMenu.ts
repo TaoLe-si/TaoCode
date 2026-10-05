@@ -21,6 +21,8 @@ export interface RunMenuContext {
   showOutput: (id: any) => any
   /** 打开「运行/调试配置」对话框（IDEA RunConfigurationsDialog）。 */
   openRunConfigurations: () => void
+  /** 打开 Run Anything 弹层（上游 `RunAnythingAction`，默认手势 = 双击 Ctrl）。 */
+  openRunAnything: () => void
   /**
    * 打开「查看断点…」对话框（IDEA `ViewBreakpointsAction` → `BreakpointsDialog`）。
    * 上游那个对话框就是 `com.intellij.ui.popup.util` 那一族（主从详情面板）唯一的消费者。
@@ -36,6 +38,9 @@ export function createRunMenuRows(ctx: RunMenuContext): MenuRow[] {
     { id: 'run.start', title: '运行', keys: 'Shift F10', keywords: 'run build execute task 运行', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && !ctx.runState.running, run: () => void ctx.runSelectedConfig(false) },
     { id: 'run.debug', title: '调试', keys: 'Shift F9', keywords: 'debug start breakpoint dap 调试', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && !ctx.dapState.running, run: () => void ctx.runSelectedConfig(true) },
     { id: 'run.debugContext', title: '调试当前上下文配置', keywords: 'debug contextual configuration 调试上下文', enabled: () => ctx.isDesktop && Boolean(ctx.active.value) && !ctx.dapState.running, run: () => void ctx.runContextConfiguration(true) },
+    // Run Anything（上游 `RunAnythingAction`，键位是双击 Ctrl 的手势，见 src/keymap.ts）：
+    // 候选 = 运行配置 + 原始命令行，逻辑在 src/runAnything.ts + RunAnythingDialog.vue。
+    { id: 'run.runAnything', title: 'Run Anything…', keys: 'Ctrl Ctrl', keywords: 'run anything command execute 运行任何 命令', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value), run: () => ctx.openRunAnything() },
     // IDEA Run 菜单里的 RunToCursor / ForceRunToCursor（`$default.xml:990-995`：Alt+F9 / Ctrl+Alt+F9）。
     // DAP 没有"强制"语义，两条走同一条 gotoTargets+goto，标题如实区分。
     { id: 'run.toCursor', title: '运行到光标处', keys: 'Alt F9', keywords: 'run to cursor gotoTargets 运行到光标处', enabled: () => ctx.isDesktop && Boolean(ctx.workspace.value) && ctx.dapState.running && ctx.dapState.paused, run: () => void ctx.runToCursor() },

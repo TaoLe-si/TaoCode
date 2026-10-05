@@ -12,8 +12,8 @@
 // 分栏又会改标签归属，拆开就是两份互相写对方状态的代码。
 // 崩溃恢复（src/sessionSnapshot.ts）的装配夹在中间，但它属于另一个域，留在宿主。
 import { computed, reactive, ref, type Ref } from 'vue'
-import { closeTabInPane, splitTabOutIn, tabClosingOrder, unsplitAllModel, unsplitModel, type Pane, type SplitModel } from './editorGroups'
-import { editorTabDoubleClickAction } from './editorTabDoubleClick'
+import { closeTabInPane, splitTabOutIn, tabClosingOrder, unsplitAllModel, unsplitModel, type Pane, type SplitModel } from './editorGroups.ts'
+import { editorTabDoubleClickAction } from './editorTabDoubleClick.ts'
 import type { EditorSettings } from './bridge'
 import type { Tab } from './editorTab'
 

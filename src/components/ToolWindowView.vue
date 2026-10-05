@@ -13,7 +13,7 @@ import TestRunnerPanel from './TestRunnerPanel.vue'
 import SourceControl from './SourceControl.vue'
 import VcsLog from './VcsLog.vue'
 import GradlePanel from './GradlePanel.vue'
-import NoticeList from './NoticeList.vue'
+import EventLogPanel from './EventLogPanel.vue'
 import FileTree from './FileTree.vue'
 import ProjectViewSortSettings from './ProjectViewSortSettings.vue'
 import type { getProjectTreeState } from '../projectTreeState'
@@ -60,6 +60,7 @@ export interface ToolWindowViewContext {
   runConfigProgram: any
   // 复杂内部类型先用 any，随后续批次收紧。
   runConfigCwd: any
+  runConfigDebugAdapter: string
   // 复杂内部类型先用 any，随后续批次收紧。
   evaluateRequest: any
   // 复杂内部类型先用 any，随后续批次收紧。
@@ -77,14 +78,14 @@ export interface ToolWindowViewContext {
   /** 已链接的 Gradle 工程目录（`''` = 工作区根）；工具窗口的可用性判据就是它非空。 */
   gradleLinkedProjects: string[]
   onGradleDetect: () => void
-  onGradleUnlinkProject: () => void
+  onGradleUnlinkProject: (directory?: string) => void
   onGradleSync: () => void
   onGradleCancel: () => void
-  onGradleRunTask: (task: string) => void
-  onGradleRefreshProject: () => void
-  onGradleLoadDependencies: () => void
-  onGradleOpenConfig: () => void
-  onGradleSaveRunConfig: (task: string) => void
+  onGradleRunTask: (task: string, directory?: string) => void
+  onGradleRefreshProject: (directory?: string) => void
+  onGradleLoadDependencies: (directory?: string) => void
+  onGradleOpenConfig: (directory?: string) => void
+  onGradleSaveRunConfig: (task: string, directory?: string) => void
   /** 只有这两页是合法的落点（IDEA 的 `ShowCommonSettings` / `ShowSettings`）。 */
   onGradleOpenSettings: (section: 'build.tools' | 'reference.settingsdialog.project.gradle') => void
   onSearchOpen: (path: string) => void
@@ -104,6 +105,8 @@ export interface ToolWindowViewContext {
   bookmarkLists?: { name: string; isDefault: boolean; entries: unknown[] }[]
   onHistoryRevert: (payload: unknown) => void
   onTreeContext: (payload: any) => void
+  /** Shift+F6 = `RenameElement`（`$default.xml:996-998`）：给焦点那一行改名。 */
+  onTreeRename: (entry: unknown) => void
   onTreeOpen: (path: string, preview: boolean) => void
   onTreeError: (message: string) => void
   bindSearchPanel: (instance: unknown) => void
@@ -124,6 +127,8 @@ export interface ToolWindowViewContext {
   vcsLogShowRootNames?: boolean
   /** 命名作用域（IDEA project.scopes）：Find in Files 的范围下拉用它。 */
   scopes?: any
+  /** 调试器数据视图（XDebuggerDataViewSettings：隐藏 null / 按名排序）→ DebugPanel 的变量树。 */
+  debugView?: any
   /** 单隐式模块名（工作区目录名）：作用域里的 `file[模块名]:…` 用它。 */
   moduleName?: string
   /** 「与某分支比较」的目标（分支弹窗 → 比较）。 */
@@ -163,10 +168,10 @@ const props = defineProps<{
 
 <template>
   <SearchPanel v-if="view === 'search'" :ref="(instance: any) => ctx.bindSearchPanel(instance)" :root="ctx.root" :active="active" :scopes="(ctx.scopes ?? []) as any" :module-name="ctx.moduleName ?? ''" @open="(payload: any) => ctx.onSearchOpen(payload)" @replaced="ctx.onSearchReplaced as any" />
-  <TodoPanel v-else-if="view === 'todo'" :root="ctx.root" :active="active" :patterns="ctx.todoPatterns as any" :source="ctx.todoSource" @open="(payload: any) => ctx.onSearchOpen(payload)" />
-  <OutlinePanel v-else-if="view === 'outline'" :path="ctx.activeTabPath" :symbols="ctx.outline" :available="ctx.lspReady" @jump="({ line, character }: { line: number; character: number }) => ctx.onReveal({ path: ctx.activePath, line, column: (character ?? 0) + 1 })" />
+  <TodoPanel v-else-if="view === 'todo'" :root="ctx.root" :active="active" :patterns="ctx.todoPatterns as any" :source="ctx.todoSource" :scopes="(ctx.scopes ?? []) as any" :module-name="ctx.moduleName ?? ''" @open="(payload: any) => ctx.onSearchOpen(payload)" />
+  <OutlinePanel v-else-if="view === 'outline'" :path="ctx.activeTabPath" :symbols="ctx.outline" :available="ctx.lspReady" :source="ctx.todoSource" @jump="({ line, character }: { line: number; character: number }) => ctx.onReveal({ path: ctx.activePath, line, column: (character ?? 0) + 1 })" />
   <BookmarksPanel v-else-if="view === 'bookmarks'" :entries="ctx.sortedBookmarks as any" :active-path="ctx.activePath" :settings="(ctx.bookmarksView ?? {}) as any" :lists="(ctx.bookmarkLists ?? []) as any" @jump="(entry: { path: string; line?: number }) => entry.line === undefined ? ctx.onBookmarkOpen?.(entry.path) : ctx.onReveal({ path: entry.path, line: entry.line - 1 })" @remove="ctx.onBookmarkRemove" @assign="ctx.onBookmarkAssign" @update-settings="(patch: any) => ctx.onUpdateBookmarksView?.(patch)" @bookmark-tabs="ctx.onBookmarkTabs?.()" @edit="(entry: any) => ctx.onBookmarkEdit?.(entry)" @sort-group="(path: string) => ctx.onBookmarkSortGroup?.(path)" />
-  <DebugPanel v-else-if="view === 'debug'" :active-path="ctx.activePath" :ready="ctx.isDesktop && Boolean(ctx.workspace)" :evaluate-request="ctx.evaluateRequest" :program="ctx.runConfigProgram" :cwd="ctx.runConfigCwd" />
+  <DebugPanel v-else-if="view === 'debug'" :active-path="ctx.activePath" :ready="ctx.isDesktop && Boolean(ctx.workspace)" :root="ctx.root" :evaluate-request="ctx.evaluateRequest" :program="ctx.runConfigProgram" :cwd="ctx.runConfigCwd" :adapter-kind="ctx.runConfigDebugAdapter" :data-view="ctx.debugView" @jump="target => ctx.onReveal({ path: target.path ?? ctx.activePath, line: Math.max(0, target.line - 1) })" />
   <SourceControl v-else-if="view === 'git'" :root="ctx.root" :active="active" :analyzing="Boolean(ctx.activeTabPath) && Boolean(ctx.activeConfigured) && !ctx.activeLspRunning" :todo-patterns="ctx.todoPatterns as any" :commit-settings="ctx.commitSettings" :diff-context-lines="ctx.diffContextLines" :compare-with="ctx.gitCompareWith ?? ''" :dirty-paths="ctx.dirtyPaths" :save-path="ctx.savePath" :show-tool-window="ctx.showToolWindow" @notify="ctx.notifyFromPanel" />
   <VcsLog v-else-if="view === 'vcslog'" :root="ctx.root" :active="active" :show-tag-names="ctx.vcsLogShowTagNames" :show-root-names="ctx.vcsLogShowRootNames" @set-tag-names="ctx.onSetVcsLogTagNames?.($event)" />
   <GradlePanel v-else-if="view === 'gradle'"
@@ -181,8 +186,11 @@ const props = defineProps<{
     @open-config="ctx.onGradleOpenConfig" @save-run-config="ctx.onGradleSaveRunConfig"
     @open-settings="ctx.onGradleOpenSettings" />
   <!-- IDEA 的 Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，`anchor="right"`）：
-       复用状态栏那份通知列表 —— 两个入口看到的是同一批 notices。 -->
-  <NoticeList v-else-if="view === 'notifications'" :entries="(ctx.noticeLog ?? []) as any" label="通知" @clear="ctx.onClearNotices" @close="() => {}" @expire="ctx.onExpireNotice?.($event)" @run="ctx.onRunNoticeAction?.($event)" />
+       复用状态栏那份通知列表 —— 两个入口看到的是同一批 notices。
+       工具窗口这一侧是 `NotificationsPanel`：建议/时间线两段 + 搜索 + 每行一个 ⋮ 菜单
+       （`NotificationsPanel.kt:538-613` / `:1106-1153`）；状态栏弹层仍是那张单列
+       `NoticeList`。 -->
+  <EventLogPanel v-else-if="view === 'notifications'" :entries="(ctx.noticeLog ?? []) as any" :root="ctx.root" @clear="ctx.onClearNotices" @expire="ctx.onExpireNotice?.($event)" @run="ctx.onRunNoticeAction?.($event)" />
   <template v-else>
     <!-- ProjectViewToolbar is a tool-window TITLE action group.
          原来这里用 Teleport 把动作行搬进 dock 的标题栏（`#project-title-actions-left`），
@@ -222,7 +230,7 @@ const props = defineProps<{
       <div v-if="gearOpen" class="view-gear-backdrop" @click="gearOpen = false" />
     </div>
     <div class="tree-scroll" @keydown.f5.prevent="ctx.onRefreshTree()">
-      <FileTree v-if="ctx.workspace" :ref="(instance: any) => ctx.bindFileTree(instance)" :key="ctx.root" :entries="ctx.treeEntries" :active="ctx.activePath" :synthetic="ctx.syntheticNodes" :indent-guides="ctx.indentGuides" :compact-indents="ctx.compactIndents" :expand-with-single-click="ctx.expandWithSingleClick" :workspace-key="ctx.root" :project-name="ctx.workspace.name" :file-color="ctx.projectViewFileColor" :sort-settings="ctx.projectTreeState.state" @context="ctx.onTreeContext" @open="(path: string, preview: boolean) => ctx.onTreeOpen(path, preview)" @error="ctx.onTreeError" />
+      <FileTree v-if="ctx.workspace" :ref="(instance: any) => ctx.bindFileTree(instance)" :key="ctx.root" :entries="ctx.treeEntries" :active="ctx.activePath" :synthetic="ctx.syntheticNodes" :indent-guides="ctx.indentGuides" :compact-indents="ctx.compactIndents" :expand-with-single-click="ctx.expandWithSingleClick" :workspace-key="ctx.root" :project-name="ctx.workspace.name" :file-color="ctx.projectViewFileColor" :sort-settings="ctx.projectTreeState.state" @context="ctx.onTreeContext" @rename="ctx.onTreeRename" @open="(path: string, preview: boolean) => ctx.onTreeOpen(path, preview)" @error="ctx.onTreeError" />
       <div v-else class="explorer-empty"><p>尚未打开工作区</p></div>
     </div>
   </template>

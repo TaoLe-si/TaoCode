@@ -49,8 +49,9 @@ const DRIVE_LETTER = /^[A-Za-z]:[\\/]/
 const FRAGMENT_LINE = /^#?L(\d+)/i
 
 /**
- * 把 `file:` URI 还原成路径。只处理最常见的 `file:///C:/...` / `file:///home/...` 形式；
- * 解不出来时返回空串（调用方据此降级成"点不动"，而不是去打开一个猜出来的路径）。
+ * 把 `file:` URI 还原成路径。处理 `file:///C:/...`（Windows 盘符）、`file:///home/...`（Unix）
+ * 与 `file://<主机>/<共享>`（UNC 共享，还原成 `\\主机\共享\...`）；解不出来时返回空串
+ * （调用方据此降级成"点不动"，而不是去打开一个猜出来的路径）。
  */
 export function filePathFromUri(target: string): { path: string; line: number } {
   if (!target.toLowerCase().startsWith('file:')) return { path: '', line: 0 }
@@ -66,8 +67,20 @@ export function filePathFromUri(target: string): { path: string; line: number } 
   }
   const query = body.indexOf('?')
   if (query >= 0) body = body.slice(0, query)
-  let path = body
-  try { path = decodeURIComponent(body) } catch { /* 不是合法转义就按原样用 */ }
+  // `//` 之后的第一段是**主机位**（空 / `localhost` = 本机；其余 = UNC 共享）。
+  // 不还原 UNC 的话，`file://server/share/x` 会变成 `server/share/x` —— 一个看似工作区内的
+  // 相对路径，Ctrl+Click 会打开一个完全不相干的位置（本仓是 Windows 宿主，UNC 是真实形态）。
+  const firstSlash = body.indexOf('/')
+  const rawAuthority = firstSlash === -1 ? body : body.slice(0, firstSlash)
+  const decode = (value: string) => { try { return decodeURIComponent(value) } catch { return value } }
+  if (rawAuthority && rawAuthority.toLowerCase() !== 'localhost') {
+    const authority = decode(rawAuthority)
+    const tail = firstSlash === -1 ? '' : decode(body.slice(firstSlash + 1))
+    return { path: `\\\\${authority}${tail ? '\\' + tail.replace(/\//g, '\\') : ''}`, line }
+  }
+  // 本机：`localhost` 前缀是 URI 写法里多出来的主机位，路径从它后面的斜杠开始。
+  let path = rawAuthority.toLowerCase() === 'localhost' && firstSlash >= 0 ? body.slice(firstSlash) : body
+  path = decode(path)
   // `/C:/x` 是 Windows 盘符形式，开头的斜杠必须去掉，否则会变成一个不存在的路径。
   if (/^\/[A-Za-z]:/.test(path)) path = path.slice(1)
   return { path, line }

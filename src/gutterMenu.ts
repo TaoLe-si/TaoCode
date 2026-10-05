@@ -18,7 +18,7 @@
 //
 // 这一模块是纯逻辑 + 状态：给"在某一行上点了右键"算出菜单行，动作由宿主注入。
 import { computed, ref } from 'vue'
-import type { MenuRow } from './menus/types'
+import type { MenuRow } from './menus/types.ts'
 import type { Bookmark, EditorSettings, ProjectSettings } from './bridge'
 
 export interface GutterMenuTarget { path: string; line: number; x: number; y: number }

@@ -1,5 +1,6 @@
 // 诊断支持实现（见 diagnostics.hpp 的源码对照）。
 #include "diagnostics.hpp"
+#include "crash_log.hpp"
 
 #include <utility>
 #include <vector>
@@ -79,6 +80,8 @@ std::string ui_bundle(const std::filesystem::path& ui_dir) {
 
 void init(const std::filesystem::path& profile, const std::string& version, const std::filesystem::path& ui_dir) {
     if (profile.empty()) return;
+    // 崩溃现场记录：装钩子本身不写盘，只有真崩了才会往 taocode.log 追一行（见 crash_log.hpp）。
+    install_crash_log(profile);
     std::lock_guard guard(log_mutex());
     std::error_code error;
     std::filesystem::create_directories(log_dir(profile), error);

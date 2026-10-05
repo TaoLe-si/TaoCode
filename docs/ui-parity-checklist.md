@@ -69,7 +69,7 @@
 - [x] **已补完（第六十九批）** 上一条的**端到端复验**跑完，而且**更深根因定死了**：不是锁死，是**出站帧的阻塞写落在语言服务线程上**（`WriteFile` 到不读 stdin 的 JDT + 4KB 管道），线程一停，`status`/`open`/诊断/折叠全部排队 —— 这才是「语言服务没响应」的真身。已改：出站帧走**专写线程**（调用方只入队）、两条管道 4KB→1MB、弃养的一代按代号收掉它的服务器进程（`native/lsp_children.*`）。红/绿判据 `lsp_host_test`（`--stall-stdin=3000`：旧行为堵 3006ms / 新行为 <500ms 且帧仍送达）+ `lsp_children_test`；真机复验（同一个 3GB 工程）：状态查询 259–265ms 全回包、页面零「没有响应」提示、全程 1 次 `initialize`、握手后第一帧是 85KB 的 `didOpen`、请求全部出帧、退出无孤儿 java.exe。取证与数字见审计 §BP。
 - [x] **已补完（第七十一批）** 书签的**自动描述**（书签面板那一行显示什么）与它顺带暴露的真缺陷：`text`（第六十七批加的行文本锚）没进原生校验白名单，**带锚的书签一律存不进去**（`Unknown field: text` → 弹「书签未能保存」，项目设置里 `bookmarks` 一直是空的）。修完的面板行按 2026.2 的 `ui/tree/LineNode.kt:20-31` 渲染成 `行号: 那一行原文`；真机取证（F11 → 无失败提示 → 项目设置里有 `text` → **重启后照旧**）与上游规则更正（截断长度是 50 不是 200、`getAutoDescription` 在快照里是死代码）写在 `docs/inventory/verdict-bookmarks.md` §C①。
 - [x] **已补（第七十五批）** 书签装订线那一侧：悬停文本按上游 `GutterLineBookmarkRenderer.getTooltipText:56-72` 拼（`书签 [助记键][: 描述][ (键)]`）、图标可点（点击 = ToggleBookmark）、**中键 = EditBookmark**（新增「书签描述」对话框，预填当前描述、清空即回到"用行原文"）。真机取证：三个图标的悬停文本分别是 `书签 A` / `书签: Small scratch…` / `书签: 940`；中键弹的对话框预填 `940`，改成「改过的描述」点确定 → 持久化 `{"description":"改过的描述","line":6,…}` 且悬停文本立刻跟着变；左键点图标 → 弹「已取消书签 README.md:2」、图标少一个。
-- [ ] **待查（第六十九批遗留，非本仓缺陷）** 大工程上的**语义结果**仍取决于 JDT 自己能不能把工程导入做完：该工程的 `AE2-refs/*` 有十几个 Gradle 子工程，机器代理没开时 buildship 逐个同步失败（`.metadata/.log` 里成片 `ForgeGradle … Connect to 127.0.0.1:7890 failed`），导入未完时 JDT 对 `foldingRange`/`documentSymbol` 就是不回答（客户端 60s 期限如实回 `TIMEOUT`）。要在**能联网/Gradle 能同步**的工程上再验一遍语义结果（补全/跳转/诊断）。
+- [x] **已定论（2026-10-04 夜间 AE2 真机复验）** 大工程上**语义能力可用**，被挡住的只是 JDT 自己的导入期：导入中（本机 22:37–22:46，约 9.5 分钟）`documentSymbol`/`foldingRange` 一律 60s `TIMEOUT`、诊断 0、无语义着色、结构视图空；导入跑到该工程后同一批请求 6–11ms 回包（`documentSymbol` 18 个符号、`semanticTokens` 935 个整数、`foldingRange` 117 段），问题面板 2580 错误 / 2542 警告、结构视图 18 行、新开文件 15 处 `.cm-sem-*`（namespace/modifier/keyword/mod-documentation）。卡的是 JDT 逐工程重同步（10 个**别的版本**工程同步失败，链接工程 `AE2VMAddon-1.7.10-gtnh` 不在失败名单、本会话日志 0 次提到它），**不是网络代理、也不是我们没发请求**（`TAOCODE_LSP_TRACE` 里 `didOpen`/`documentSymbol`/`foldingRange`/`semanticTokens` 全发出，728 条 READ）。读数与两侧证据见 `HANDOFF.md` §「AE2 大工程上的复验 · 语义结果」；顺带记录两处**刷新时机**（导入期打开的标签不补色、结构面板不自动刷新，需编辑/重进视图），都不是「语义不可用」。
 - [x] **已定论并修掉（第七十批）** 撤销（Ctrl+Z）**会**触发内容变更通知 —— 挡住的不是撤销，是 `CodeEditor` 里一道闸门：`emit('change')` 被 `if (!dirty)` 包着，只在"变脏那一拍"发一次，于是**第二次以后的编辑**（撤销只是最容易看见的那种）就再也不通知宿主，挂在 `change` 上的东西全部静默：书签对账（上游 BookmarkManager 监听的是每个文档变更）、断点位置缓存失效、最近更改位置、markdown 预览刷新、草稿与自动保存重排。证据两面：① 撤销本身是带 changes 的事务 —— CodeMirror 6.11.1 的 history `pop` 派发 `state.update({changes: event.changes, …, userEvent: "undo"})`（`node_modules/@codemirror/commands/dist/index.js:548-556`），所以 `update.docChanged` 为真；② 真机复验（探针记 `reconcile` 调用，跑完已撤）：打开 8 行的 README.md → 第 3 行 F11 → `Ctrl+Y` 两次 → `Ctrl+Z`，对账记录 **3 条**（8→7 行、7→6 行、撤销回 7 行）—— 修之前只有第一条。**改动**：闸门去掉、`emit('change')` 每次变更都发；组件里那个只服务于闸门的 `dirty` 与 `markSaved`（宿主两处调用点 + `EditorTab.ts` 的接口成员）一并删除。判据 `tests/editor-change-notify.test.mjs`（4 条：闸门绝迹、撤销事务形状、宿主侧按文件+行去重、程序化替换不通知）。
   另外记两条**探针姿势**（这一轮踩了很久，已写进 memory）：工具窗口的活动条**合成 `MouseEvent` 点不动，要 `el.click()`**；连点两次会把它关掉 —— 判断"要不要点"必须先读 `.explorer-panel` 的 `clientHeight`。**新增两条**：项目树的行是 `.explorer-panel button.tree-entry`（路径在 `title`，不是 `[data-path]`），且**展开根节点要先把按钮 `focus()` 再发 → 键**；markdown 文件上 `elementFromPoint` 命中的是预览层的 `<p>`，**点击进不了编辑器** —— 键盘取证一律走 `document.querySelector('.cm-content').focus()` + `Input.dispatchKeyEvent`（Ctrl+Home/方向键定位光标）。
 - [x] **已起域（第六十六批）** B5 = `ide/bookmarks` 5 类：判决 `docs/inventory/verdict-bookmarks.md` + 门控 `tests/b5-verdict.test.mjs`（覆盖率从扫描件重推、引用要落在真文件上）。五条全 `[~]`，缺口按 §G 行内逐条写明（编辑后重锚 / 描述与书签类型 / 列表项富渲染），§C 三条是下一批。
@@ -1137,9 +1137,14 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **② Search Everywhere 的 LSP 符号供给者：本来就有（更正 HANDOFF 的"仍未做"）**：
   `src/searchEverywhereHost.ts` 按查询词（≥2 字、120ms 防抖）发 `workspace/symbol`，`symbols`
   同时喂 All 与 Project tab，结果带行/列预览；`tests/search-everywhere.test.mjs` 逐条锁住
-  （关窗/切工作区/文件变化各自作废在途请求）。**真正没做的**是 `IDE`/`Autocompletion` 两个 tab：
-  `searcheverywhere.ide.search.tab.name` 在参考树里**只有资源串、没有任何代码用它**（grep 全树 0 命中），
-  `Autocompletion` 是搜索框的查询命令补全（`AutoCompletionProvider.java:40-100`），本仓的搜索框没有查询语言。
+  （关窗/切工作区/文件变化各自作废在途请求）。
+  **2026-10-05 再核实：上一条把 `IDE`/`Autocompletion` 记成"真正没做的"，是错的 —— 两者都不是缺口。**
+  · `IDE`：`searcheverywhere.ide.search.tab.name`（`IdeBundle.properties:1117`）在参考树里
+    **只有资源串、没有任何代码用它**（`{kt,java,xml}` 全树 0 命中，只在 Grazie 的 i18n 测试数据里出现）。
+  · `Autocompletion`：`AutoCompletionProvider.java:27-29` 整个类标了
+    `@Deprecated`（原话 "The functionality is redundant."）且是包级私有 `final class`（`:30`），
+    `AutoCompletionContributor`/`AutoCompletionCommand`（`lang-api/.../searcheverywhere/`）两个接口
+    **全树零实现、零引用** —— 上游自己已经把它废了。上一条引的 `:40-100` 只是那个死类的方法体。
 
   **③ 「快速定义」`QuickImplementations`（Ctrl+Shift+I，`$default.xml:162-164`）+ 库类型源码**：
   探针在 AE2 工程上取到原始事实 —— JDT 的 hover 能解析库类型并带 javadoc，但
@@ -1301,6 +1306,58 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **口径修正**：上一轮记的引用 `SeFuzzyFileSearchProviderFactory.kt:31-33` 是错的，
   `if (!Registry.is(…))` 实际在 **:29**（区间应为 **28-31**），已按文件改正 6 处。
 
+- [x] **已补（收口批·补全弹层与 Search Everywhere）** 逐行核实上游引用 + 补 Search Everywhere 的 tab 缺口。
+  **① 补全弹层的上游行号复核（`src/completionUi.ts`）—— 14 条引用逐条打开文件核对，全部仍准确，一个字没改**：
+  `LookupCellRenderer.kt` 的 `bodyInsets=4`（**:209** `JBUI.insets("CompletionPopup.Body.insets", JBUI.insets(4))`）、
+  `setIconTextGap(scale(4))`（**:105**）、`setBorder(JBUI.Borders.emptyRight(10))`（**:113/:119**）、
+  `getIconInsets(): JBUI.insetsLeft(6)`（**:958**）、`selectionInsets()` 走 `selectionInnerInsets()`（**:960-964**）
+  外加 `JBUI.java:1455-1456` 的 `insets(2)`；`getPreferredSize()` 调 `UIUtil.updateListRowHeight`（**:718**）
+  而 `util/ui/.../UIUtil.java:3079-3082` 是 `Math.max(size.height, UIManager.getInt("List.rowHeight"))` ——
+  **下限而非定高**，注释里"大字号会长高"的说法成立；`LookupUi.java:345-356` 确实用
+  `lookup.cellRenderer.getTextIndent()`（`LookupCellRenderer.kt:681` = `panel.insets.left + ipad.left + 空图标宽 + iconTextGap`）
+  把**文字**而不是图标对齐到 lookupStart；`LookupImpl.java:248` 确实是 `list.setFocusable(false)`
+  （拿焦点的只有 `:1159 list.requestFocus()` 与 `:1162 editorComponent.requestFocus()`）；
+  `UISettingsState.kt`（`platform/editor-ui-api/.../ide/ui/`）**不在** `lang-api/core-api/ide-impl` 里，
+  实际在 **`:197 maxLookupWidth = 500`** 与 **`:199 maxLookupListHeight = 11`**，两处都对；
+  `$default.xml`（`platform/platform-resources/src/keymaps/`，不是 `platform/ide/keymaps/`）四条也对：
+  `CodeCompletion` control SPACE（**:732-734**）、`SmartTypeCompletion` control shift SPACE（**:909-911**）、
+  `HippieCompletion` alt SLASH / `HippieBackwardCompletion` alt shift SLASH（**:735-739**）、
+  `EditorChooseLookupItemReplace` TAB（**:111-113**）。
+  **② 一条被反复复述的错误前提，已就地改正**：任务交底说"颜色已按 `expUI_lightScheme.xml:28` /
+  `expUI_darkScheme.xml:35` 与 `expUI_*.theme.json:557/:546` 取值，注释已写明来源"——
+  **代码里根本没有这样的注释，而且取值也不是原样抄写**。逐条核：
+  `expUI_lightScheme.xml:28` `LOOKUP_COLOR=ffffff`（亮，与 `--m-pop-bg` 同值）、
+  `expUI_darkScheme.xml:35` `LOOKUP_COLOR=2b2d30`（深，我们是 `#1b2331`，**不是**原值）；
+  `expUI_light.theme.json:557-559` 的 `CompletionPopup.foreground/matchForeground` = Gray2 `#27282E` /
+  Blue4 `#3574F0`（调色板在 `:10`/`:28`），`expUI_dark.theme.json:546-548` = Gray10 `#B4B8BF` /
+  Blue8 `#548AF7`（`:18`/`:31`）—— 本仓四个值**全都不是原值**，是按"浮层族共用一套"另取的蓝灰一档
+  （这是 `tokens.css` 早就写下的设计决定，不是抄错）。**没有另起一套**，只在 `--m-pop-bg` 旁把这条
+  来源关系写清，并把 `--popup-row-h: 24px` 的依据补成 `expUI_light/dark.theme.json:376/378`
+  （`List.rowHeight = 24`，两档都是 24）。
+  **③ Search Everywhere 的 tab 行按上游注册表重排（`src/searchEverywhere.ts`）**：
+  新 SE 的 tab 由扩展点 `searchEverywhere.tabFactory` 列出，本树里
+  `platform/searchEverywhere/frontend/resources/intellij.platform.searchEverywhere.frontend.xml:64-69`
+  **正好六个** —— All / Classes / Files / Symbols / Actions / Text，顺序按各 tab 的 `priority` 降序
+  （`SeAllTab.kt:89` MAX、`SeClassesTab.kt:50` 950、`SeFilesTab.kt:52` 900、`SeSymbolsTab.kt:50` 850、
+  `SeActionsTab.kt:56` 800、`SeTextTab.kt:56` 250）。本仓原来那行是 `All / Project / Classes / Commands /
+  Run Configurations`，三处对不上：
+  · **`Commands` → `Actions`**：`SeActionsTab.kt:54` 的名字是 `search.everywhere.group.name.actions`
+    （`IdeBundle.properties:1811` = `Actions`）；`searcheverywhere.commands.tab.name` 只被**旧** SE 用
+    （`SearchEverywhereUI.java:2042`），而旧体系已被 `ContributorDefinedTabsCustomizationStrategy.kt` 标
+    `@Deprecated` sunset。副标签 `searchEverywhereSourceLabel('commands')` 一并改成 `Actions`。
+  · **补 `Symbols` 档**（上游 850 那一档，`SeSymbolsTab.kt:47,50`，名字取 `IdeBundle.properties:1814`）——
+    我们本来就有真实供给者（LSP `workspace/symbol`），只是没单列。
+  · **顺序改成 priority 降序**：原来 `project` 排在 `classes` 之前，与文件头自己写的
+    "tab 顺序按 priority 降序"自相矛盾（Classes 950 > Files 900）。
+  **`Project` 与 `Run Configurations` 是有意偏离、不是漏抄**（写进文件头与用例）：上游根本没有 Project 这一 tab
+  （我们把"项目文件 + 项目符号"合成一档，取 Files 的位次）；`RunConfigurationsSEContributor.java:76-83`
+  在上游只给 `getGroupName()` 与 `getSortWeight()=350`、`showInFindResults()=false`，即它只是 All 里的一个
+  贡献者、不是独立 tab，我们单列一档是为了直接可用。`Text` 不渲染（本仓全文搜索在独立的工程内搜索面板，
+  空态已给「在文件中查找」的出路）。
+  **④ 顺带更正两处散落的"Commands 档"措辞**：`src/fileColorsOptions.ts:11`、`src/statusWidgets.ts:184`。
+  判据：`tests/search-everywhere.test.mjs`（tab 集合/名称/顺序、`Actions` 更名、Symbols 档的供给者隔离与空档不进 tab 行）、
+  `tests/search-everywhere-classes.test.mjs`（有结果档位表的顺序随之更新）。
+
 | 检查 | 结果 |
 |---|---|
 | `npx vue-tsc --noEmit -p tsconfig.json` | exit 0，0 错误 |
@@ -1362,6 +1419,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 
 
 - [ ] **LSP「解析外部」这条线（进行中）** —— 目标是让 JDT 拿到外部类路径与源根，等价于 IDEA「已导入的模型」。
+  **2026-10-04 复验（AE2 真机）**：`java lsp 配置` 已经是「链接工程 1 个、源根 4 条（`AE2VMAddon-1.7.10-gtnh/src/main/java`）、类路径兜底 4 条（`AE2VMAddon-1.7.10-gtnh/build/rfg/**/*.jar`）、导入 开」——链接工程/源根/类路径三段都真的算出来了；同一次运行里通知中心报「Gradle 同步完成（用时 17 秒）100%」。**仍然待核的是第 72 行那条**：JDT 自己的导入能不能跑完（需要打开一个 Java 文件看诊断/符号），本轮没取到那一步的截图/读数。
   已落地（`0a76a4d` / `a2a329d`）：`default_referenced_libraries`（`build/rfg/**/*.jar`、`build/libs/**`、`lib/**`
   等磁盘上真实存在的产物）+ `default_source_paths`（链接子工程的 `src/main/java` 等）+ `window/showMessage`
   转发（导入失败在界面上看得见）。都有 `projects_test` / `lsp_host_test` 判据。
@@ -2565,7 +2623,7 @@ B7 判决里 `CompareFilesAction` 那条 `[~]`（"本仓没有任选两个文件
 
 | 上游 | 本仓 |
 |---|---|
-| `TypedCharImpl.java:31-47` 的 `COMPLEX_CHARS`（`\n \t ( ) < > [ ] { } " '`）：这些字符**永不覆盖** | `shouldOverwrite` 逐字照抄这个集合（打 `(` 吃掉右边那个配对括号是典型的错法） |
+| `TypedCharImpl.java:23` 的 `COMPLEX_CHARS`（`\n \t ( ) < > [ ] { } " '`）、`:31-33` 的两道守卫：这些字符**永不覆盖** | `shouldOverwrite` 逐字照抄这个集合（内容与书写顺序都照抄，打 `(` 吃掉右边那个配对括号是典型的错法） |
 | 代理对 / 多字符输入（粘贴、输入法）不走覆盖路径 | 同上（`length !== 1` 与 0xD800-0xDFFF 都放行） |
 | 行尾只能追加 | `overwriteChange` 在 `head >= line.to` 时返回 null（放行默认插入） |
 | 每编辑器一个开关（`EditorEx.myInsertMode`） | CodeMirror `StateField` |
@@ -3061,12 +3119,13 @@ native RC 0 / 0 warning、ctest 36/36、模块尺寸门禁 5/5（App.vue 2720 �
 | 候选 | 核实结论（上游原文） | 处置 |
 |---|---|---|
 | `ChangesViewPopupMenu` 里也挂 `CopyReferencePopupGroup` | `VcsActions.xml:185-197`：提交面板变更行的右键菜单里，该组在「跳转到源」之后、删除之前 | **缺口如实记**：本仓变更行**没有右键菜单**（动作是行内按钮 + 点行开 diff）。要接这一组得先建 `ChangesViewPopupMenu` 本身（显示差异/跳转到源/回滚/删除…），属于下一批的整块活 |
-| `MainToolbarQuickActions`（B2 §C 第 18 条剩下的那项） | `PlatformActions.xml:1337-1345` + `intellij.platform.ide.impl.xml:1594-1601`：内容只有三条 —— `BackForwardQuickAction`（后退/前进）、`BuildQuickAction`（构建）、`SaveAllQuickAction`（全部保存） | **不做**：这三样本仓顶栏/菜单里都已经各有一处（后退/前进箭头、构建、全部保存），再做一个"…"只是把它们复制第二遍。判 `[ ]` 但理由改写成"内容已被别处覆盖" |
+| `MainToolbarQuickActions`（B2 §C 第 18 条剩下的那项） | `PlatformActions.xml:1337-1345`：组里只有三个**子组引用** `MainToolbarQuickActions.General` / `.Run` / `.GeneralLast`（`popup="true"`）—— **内容不在这个文件里**。内容在 `intellij.platform.ide.impl.xml:1596-1601` 的三个 `toolbarQuickAction`：`BackForwardQuickAction`（后退/前进）、`BuildQuickAction`（构建）、`SaveAllQuickAction`（全部保存） | **不做**：这三条本仓顶栏/菜单里都已经各有一处（后退/前进箭头 `App.vue:2183-2184`、构建 `src/menus/buildMenu.ts` + `App.vue:1637`、全部保存 Ctrl+S），再做一个"…"只是把它们复制第二遍。判 `[ ]` 但理由改写成"内容已被别处覆盖" |
 | `TabInfo` 的 alert（闪烁提醒） | `TabInfo.kt:294-316`（`setAlertIcon` → `isAlertRequested`）+ `TabLabel.kt:662-682`（`maxInitialBlinkCount=5`、`maxReFireBlinkCount=7`，闪几次后常亮）+ **全树只有两个 setter**：`RunnerContentUi.java:595`（把 content 的图标抄给标签）与协作工具 `CodeReviewTabs.kt:47`；平台侧**没有任何"什么情况下该提醒"的触发点** | **不做**：机制在，触发者在平台里几乎不存在 —— 本仓若自己发明"哪个工具窗口什么时候闪"，那是发明不是移植。已在 B1 的 `TabInfo` 行注明 |
 | `ClosableByLeftArrow`（左箭头关弹层） | 实现者只有 `LookupActionsStep`（补全列表右侧"动作"那一步）与"有父弹层时"（`ListPopupImpl.java:428-429`）；F6 在 263 的 `$default.xml:627` 是 `Move` 重构，不是焦点循环 | **不做**：两者在本仓都没有对应形态（补全弹层是 CodeMirror 的、没有嵌套弹层；也没有 F6 焦点循环这条键位） |
-| `IdeFocusManager` 族（B2 §C 第 15 条） | 上游是通用焦点管理器；可见入口只有"工具窗口间焦点转移"，而 263 的默认键位表里没有 F6 那类循环键 | 维持 `[ ]`，理由改为"没有用户可见的入口键位" |
+| `IdeFocusManager` 族（B2 §C 第 15 条） | 上游是通用焦点管理器；可见入口只有"工具窗口间焦点转移"。**⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（**10 个文件**，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**），`plugins/keymaps/`（10 目录 / 26 XML）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 维持 `[ ]`，理由改为"没有用户可见的入口键位"。**「本树无法核实」那条标注已撤销** —— 键位表是能引的；`$default.xml:279-281`/`:368-370`/`:627`/`:732-734`/`:846-851`/`:870-872`/`:885-887`/`:909-911` 均为逐行核对过的真坐标。动作系统那批据此把本该写「无法核实」的键位活**全做了** |
 
 **顺带记一条给下一位的**：`F6` 在 2026.2 是 `Move`（移动重构）—— 不是焦点循环，别照旧印象写进判据。
+**（其行号依据 `$default.xml:627`，2026-10-05 独立验收逐行核实为真；早先"本树内无法核实"的括注是错的，已删。）**
 
 ## 第一百一十一批验证记录（提交面板变更行的右键菜单 —— 上游 `ChangesViewPopupMenu`）
 
@@ -3347,3 +3406,32 @@ before: if (x) {    after: if (x) {
 
 `vue-tsc` 0 错、`npm test` **1812/1812**（+13）、`vite build` 成功、`build-native-locked.bat` RC 0、
 `ctest` 36/36、冒烟存活 15 秒。判决书 `verdict-find-diff.md` 页脚 `[~]` 76→77 / `[ ]` 456→455（`b7-verdict` 门禁过）。
+
+## 第一百一十七批验证记录（编辑体验类的 `[ ]` 逐条复核 —— 结论是「没有可做的编辑类 `[ ]`」，外加两处行号纠错）
+
+本批先做了一件统计：**全文真正以 `- [ ]` 开头的编辑类条目只有四条**，其余 22 处 `[ ]` 都是正文里引用
+判决档位的文字。于是逐条开原文核：
+
+| 条目 | 状态 | 上游依据 | 说明 |
+|---|---|---|---|
+| 插入/覆盖模式 `COMPLEX_CHARS`（L2569） | **已落地，本批复核** | `TypedCharImpl.java:23` 定义集合、`:31-33` 两道守卫；唯一调用点 `TypedHandler.java:110` | 集合**内容与书写顺序**与上游 `Set.of('\n','\t','(',')','<','>','[',']','{','}','"','\'')` 逐字一致。**纠错**：原文写的 `TypedCharImpl.java:31-47` 指错了 —— 集合在 `:23`，守卫在 `:31-33` |
+| 覆盖模式里 CR/BEL 不覆盖 | **本批删掉** | `TypedCharImpl.java:31-33` 只有两道守卫，`TypedHandler.java` 全文也没有 `isISOControl` 之类的过滤 | 原来 `shouldOverwrite` 里有第三道 `code < 0x20 \|\| code === 0x7f` 的控制字符守卫 —— **上游没有，属无据发明**，本批删除（CM6 的 `inputHandler` 只在真键盘输入时触发，单字符粘贴走 `EditorView.paste` 的 `dispatch`，够不到这条路径，所以删除对真机行为是 no-op） |
+| `MainToolbarQuickActions`（L3065） | **维持不做** | `PlatformActions.xml:1337-1345` 只有三个**子组引用**（`.General`/`.Run`/`.GeneralLast`），内容在 `intellij.platform.ide.impl.xml:1596-1601` | **纠错**：原文引的 `1594-1601` 前两行是无关注释行（`projectService`/`updateSettingsProvider`），三个 `toolbarQuickAction` 实际是 `1596-1601`。三条内容本仓已有（`App.vue:2183-2184` 后退/前进、`src/menus/buildMenu.ts` 构建、Ctrl+S 全部保存） |
+| `IdeFocusManager` 族（L3068） | **维持 `[ ]`，理由改写** | **⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（10 个文件，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**，`KeymapPanel.java` 1138 行）、`plugins/keymaps/`（10 个插件目录 / 26 个 scheme XML）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move `:627`、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 「263 默认键位表里没有 F6 循环键」这条**现在可核实且为真**（`$default.xml:627` 就是 `Move`）；维持 `[ ]` 的理由只剩「没有用户可见的入口键位」这一条。**「本树无法核实」的旧标注已撤销** |
+| LSP「解析外部」（L1364 / L1379） | **不做，确认不冲突** | 落点在 native 侧（`buildTools.gradle` 的 `java.import.gradle.enabled` / `lsp_config.cpp`） | 与本批唯一的产品改动 `src/editorOverwrite.ts` 完全不相交，LSP 侧一行未动 |
+
+### 判据
+
+`tests/editor-overwrite.test.mjs` 15 条（+1）：新增一条
+`COMPLEX_CHARS is copied verbatim from upstream, in order` —— 用**不排序**的 `deepEqual` + `size === 12`
+把集合的**内容与顺序**一起钉死（原来的 `deepEqual([...].sort())` 只管内容，顺序改了不红）。
+删除控制字符那两条断言（测的是已删的发明），代理对补了低端码元 `\udf00` 一例。
+
+**红得动的实证**：往 `COMPLEX_CHARS` 里塞一个 `,` 之后该条转红（`pass 14 / fail 1`，退出码 1），
+随后源码回滚到原样 —— 也就是"集合内容变了测试要红"这条要求本身是被验过的，不是推断。
+
+### 门禁
+
+`vue-tsc -b` 0 错（改前改后各跑一次）；`node --test` 跑
+`editor-overwrite` / `status-bar-widgets` / `completion-insert-handlers` / `module-size` 共 **35/35**
+（`module-size` 4/4 行数门禁在内，本批只改注释与删两行，`CodeEditor.vue` 仍是 1035 行未动）。

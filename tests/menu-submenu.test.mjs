@@ -103,7 +103,8 @@ test('the view appearance group is a submenu and does not duplicate Zen Mode', (
   assert.match(app, /id: 'view\.appearanceGroup', title: '[^']*', keywords: '[^']*', children: \[/)
   const count = (app.match(/id: 'view\.zenMode'/g) ?? []).length
   assert.equal(count, 1, 'Zen Mode 只应出现一次（收进子菜单后不能留顶层副本）')
-  const body = app.slice(app.indexOf("id: 'view.appearanceGroup'"), app.indexOf("id: 'view.appearanceGroup'") + 2000)
+  // 切片到下一个顶层行（`view.powerSave`）为止 —— 组内注释一长，固定 2000 字符窗口就会截断（踩过）。
+  const body = app.slice(app.indexOf("id: 'view.appearanceGroup'"), app.indexOf("id: 'view.powerSave'"))
   assert.match(body, /id: 'view\.presentation'/, 'TogglePresentationMode 是子项')
   assert.match(body, /id: 'view\.compactMode'/, 'ToggleCompactMode 是子项（TaoCode 用 compactMode 设置落点）')
   assert.match(body, /id: 'view\.ruleAppearance', rule: true/, '内联组用分隔线表达')

@@ -11,6 +11,8 @@
 #include <bcrypt.h>
 #include <shellapi.h>
 
+#include "workspace_detail.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -22,18 +24,19 @@
 #include <vector>
 
 namespace taocode {
-namespace {
-namespace fs = std::filesystem;
-// Hard safety bound for a single text file: large enough to open real source/data
-// files smoothly, small enough that a pathological file can never exhaust memory.
-constexpr std::size_t max_bytes = 16 * 1024 * 1024;
-constexpr std::size_t max_entries = 2000;
 
+// 2026-10-05 拆出「递归遍历一棵树并删除/复制它」（native/workspace_tree_ops.cpp）之后，
+// 下面这几个跨 TU 用的内部工具从匿名命名空间搬进 `detail`：声明在 native/workspace_detail.hpp，
+// 定义仍然只有本文件这一份（Win32 错误码映射复制一份就会漂移）。它们与留在匿名命名空间里的
+// 其它 helper 互不影响。
+namespace detail {
 [[noreturn]] void fail(const char* code, const std::string& message) {
     throw WorkspaceError(code, message);
 }
 
-[[noreturn]] void win_error(const std::string& message, DWORD error = GetLastError()) {
+// `error` 的默认值（GetLastError()）搬进了 native/workspace_detail.hpp：默认实参写死在调用点，
+// 而 workspace_tree_ops.cpp 里是按一个参数调 win_error 的（那一行原样搬过来，没改成显式传参）。
+[[noreturn]] void win_error(const std::string& message, DWORD error) {
     const char* code = "IO_ERROR";
     switch (error) {
     case ERROR_FILE_NOT_FOUND:
@@ -50,6 +53,40 @@ constexpr std::size_t max_entries = 2000;
     }
     fail(code, message + "（Windows 错误 " + std::to_string(error) + "）");
 }
+
+std::string utf8_path(const std::filesystem::path& path) {
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+}
+
+std::wstring api_path(const std::filesystem::path& path) {
+    const auto native = path.native();
+    if (native.starts_with(L"\\\\?\\")) return native;
+    if (native.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + native.substr(2);
+    return L"\\\\?\\" + native;
+}
+
+}  // namespace detail
+
+// 下面这个匿名命名空间原来整个包着本文件；2026-10-05 把「递归遍历一棵树并删除/复制它」拆到
+// native/workspace_tree_ops.cpp 之后，跨 TU 用的那几个（fail / win_error / utf8_path /
+// api_path，以及那边定义、这边调用的 remove_tree / copy_tree）搬进 `detail`（声明见
+// native/workspace_detail.hpp，定义仍然只有各自那一个 TU 里的一份）。下面这排 using 让本文件
+// 与拆出去的那个 TU 里的调用保持原样，不必改成 detail::xxx(...)；它必须排在匿名命名空间**之前**，
+// 因为匿名命名空间里的 helper 也在调它们。
+using detail::api_path;
+using detail::copy_tree;
+using detail::fail;
+using detail::remove_tree;
+using detail::utf8_path;
+using detail::win_error;
+
+namespace {
+namespace fs = std::filesystem;
+// Hard safety bound for a single text file: large enough to open real source/data
+// files smoothly, small enough that a pathological file can never exhaust memory.
+constexpr std::size_t max_bytes = 16 * 1024 * 1024;
+constexpr std::size_t max_entries = 2000;
 
 template <class Operation>
 auto boundary(Operation&& operation) -> decltype(operation()) {
@@ -90,11 +127,6 @@ public:
 private:
     HANDLE value_;
 };
-
-std::string utf8_path(const fs::path& path) {
-    const auto text = path.generic_u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
-}
 
 bool valid_utf8(const std::string& text) {
     if (text.empty()) return true;
@@ -305,13 +337,6 @@ fs::path plain_path(std::wstring path) {
     while (result.has_relative_path() && result.filename().empty())
         result = result.parent_path();
     return result;
-}
-
-std::wstring api_path(const fs::path& path) {
-    const auto native = path.native();
-    if (native.starts_with(L"\\\\?\\")) return native;
-    if (native.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + native.substr(2);
-    return L"\\\\?\\" + native;
 }
 
 bool within(const fs::path& path, const fs::path& root) {
@@ -666,7 +691,7 @@ void replace_safely(const fs::path& target, TemporaryFile& replacement, Temporar
     win_error("安全替换文件失败，未保存新内容", error);
 }
 
-} // namespace
+}  // namespace
 
 WorkspaceError::WorkspaceError(std::string code, std::string message)
     : std::runtime_error(std::move(message)), code(std::move(code)) {}
@@ -1091,98 +1116,6 @@ Json Workspace::rename(const std::string& from, const std::string& to) {
         return {{"path", utf8_path(destination)}, {"renamed", true}};
     });
 }
-
-namespace {
-
-// Recursive remove for IDEA's $Delete on a populated directory: the tree is walked
-// with the same FindFirstFileW enumeration the listing uses, refusing reparse
-// points and bounded so a pathological tree can never loop the caller. Excluded
-// names (node_modules, .git) are NOT pruned — IDEA's delete removes everything
-// under the selection; exclusions only affect listing and indexing.
-void remove_tree(const fs::path& directory, const fs::path& root, std::size_t& budget) {
-    WIN32_FIND_DATAW data{};
-    const HANDLE search = FindFirstFileW(api_path(directory / L"*").c_str(), &data);
-    if (search == INVALID_HANDLE_VALUE) {
-        const auto error = GetLastError();
-        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES)
-            win_error("无法枚举要删除的目录", error);
-        return;
-    }
-    struct FindGuard { HANDLE handle; ~FindGuard() { FindClose(handle); } } guard{search};
-    std::vector<fs::path> nested;
-    do {
-        const std::wstring_view name(data.cFileName);
-        if (name == L"." || name == L"..") continue;
-        const auto child = directory / data.cFileName;
-        if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-            fail("REPARSE_POINT", "不允许删除重解析点。");
-        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) nested.push_back(child);
-        else {
-            if (budget-- == 0) fail("TOO_MANY_FILES", "目录内容过多，删除已中止。");
-            // A file whose read-only bit cannot be cleared would fail DeleteFileW
-            // with a misleading "access denied"; report the real reason instead.
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY &&
-                !SetFileAttributesW(api_path(child).c_str(), data.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY))
-                fail("IO_ERROR", "无法解除只读属性，删除已中止（Windows 错误 " +
-                                     std::to_string(GetLastError()) + "）：" + utf8_path(child));
-            if (!DeleteFileW(api_path(child).c_str())) win_error("无法删除文件");
-        }
-    } while (FindNextFileW(search, &data));
-    for (const auto& child : nested) {
-        if (budget-- == 0) fail("TOO_MANY_FILES", "目录内容过多，删除已中止。");
-        remove_tree(child, root, budget);
-        if (!RemoveDirectoryW(api_path(child).c_str())) win_error("无法删除目录");
-    }
-}
-
-// Recursive copy for the project-view Paste: content-identical copy of a file or
-// tree. CopyFileW preserves attributes, so the read-only bit is cleared afterwards
-// — IDEA's pasted copies stay editable.
-void copy_tree(const fs::path& source, const fs::path& target, const fs::path& root,
-               std::size_t& budget) {
-    const auto attributes = GetFileAttributesW(api_path(source).c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES) win_error("无法读取要复制的项目属性");
-    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
-        fail("REPARSE_POINT", "不允许复制符号链接或联接点。");
-    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
-        if (!CreateDirectoryW(api_path(target).c_str(), nullptr)) {
-            const auto error = GetLastError();
-            if (error == ERROR_ALREADY_EXISTS) fail("EXISTS", "同名目录已存在。");
-            win_error("无法创建复制目标目录", error);
-        }
-        WIN32_FIND_DATAW data{};
-        const HANDLE search = FindFirstFileW(api_path(source / L"*").c_str(), &data);
-        if (search == INVALID_HANDLE_VALUE) {
-            const auto error = GetLastError();
-            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES)
-                win_error("无法枚举要复制的目录", error);
-            return;
-        }
-        struct FindGuard { HANDLE handle; ~FindGuard() { FindClose(handle); } } guard{search};
-        do {
-            const std::wstring_view name(data.cFileName);
-            if (name == L"." || name == L"..") continue;
-            if (budget-- == 0) fail("TOO_MANY_FILES", "复制内容过多，操作已中止。");
-            copy_tree(source / name, target / name, root, budget);
-        } while (FindNextFileW(search, &data));
-        return;
-    }
-    if (budget-- == 0) fail("TOO_MANY_FILES", "复制内容过多，操作已中止。");
-    if (!CopyFileW(api_path(source).c_str(), api_path(target).c_str(), TRUE)) {
-        const auto error = GetLastError();
-        if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) fail("EXISTS", "同名文件已存在。");
-        win_error("无法复制文件", error);
-    }
-    // The copy is promised writable (workspace.hpp): if the bit cannot be cleared,
-    // the caller must hear about it instead of getting a "copied: true" that is
-    // read-only on disk.
-    if (attributes & FILE_ATTRIBUTE_READONLY &&
-        !SetFileAttributesW(api_path(target).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY))
-        fail("IO_ERROR", "副本仍带只读属性，无法清除（Windows 错误 " + std::to_string(GetLastError()) +
-                             "）：" + utf8_path(target));
-}
-
-}  // namespace
 
 Json Workspace::copy(const std::string& from, const std::string& to) {
     return boundary([&]() -> Json {

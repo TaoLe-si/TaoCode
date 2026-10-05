@@ -9,11 +9,21 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, shouldBeAvailable, toolWindowMnemonic, type ToolWindowId } from './toolWindowMeta.ts'
 import {
-  DEFAULT_PROJECT_FRAME_PROFILE, contentUiTypeOf, hasExplicitVisibility, layoutMigrationKey, resolveProjectLayout,
-  stripeButtonShown, visibleWindowIds, windowInfoOf,
-  type LegacyMachineLayout, type StoredProjectLayout, type WindowInfo,
+  DEFAULT_PROJECT_FRAME_PROFILE, autoHideOf, contentUiTypeOf, floatingBoundsOf, hasExplicitVisibility, layoutMigrationKey,
+  resolveProjectLayout, stripeButtonShown, toolWindowTypeOf, visibleWindowIds, windowInfoOf,
+  type LegacyMachineLayout, type StoredProjectLayout, type ToolWindowType, type WindowInfo,
 } from './toolLayoutProfiles.ts'
 import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
+import { dockOf } from './toolWindowDocks.ts'
+import { popupHasFocusWithin } from './popupStack.ts'
+// 统一门面：本工厂是它的**唯一安装点**（`ToolWindowManager.kt:30` 的 `getInstance(project)` 同义）。
+// `registerToolWindowId` 是门面那份注册表的运行期入口（上游 `ToolWindowManager.kt:99-108` 的
+// `registerToolWindow`/`unregisterToolWindow` 那一对的本仓等价物）：底部那几格固定内容
+// （output/run/problems/references/hierarchy/terminal）**不在出厂锚点表里**，
+// 但上游它们各自就是工具窗口、一样有 `WindowInfo`（见下面 `extraContentIds` 那条注释），
+// 所以从项目布局里读到就要登记，否则门面的 `getToolWindow('output')` 只在"开着"的那一刻答得出。
+import { installToolWindowManager, registerToolWindowId, resetRegisteredToolWindowIds } from './toolWindowManager.ts'
+import { applyViewMode, shouldHideOnFocusLoss, viewModeOf, type ViewMode, type WindowTypeState } from './toolWindowViewMode.ts'
 // 侧条按钮的挂/摘配对契约 + 分栏比例的哨兵（上游 `ToolWindowEntry` / `ToolWindowPaneState`）。
 import { attachStripeButton, detachStripeButton } from './toolWindowPaneState.ts'
 import { STRIPE_NAMES_DEFAULT_WIDTH, clampStripeWidth, stripeWidthsAfterShowNames, type StripeSide } from './stripeResize.ts'
@@ -48,7 +58,7 @@ export interface ToolWindowStripesDeps {
   lspReady: { readonly value: boolean }
   /** 当前项目是不是 Gradle 项目（Gradle 工具窗口的可用性）。同上，惰性传入。 */
   gradleAvailable: { readonly value: boolean }
-  /** 「项目视图是否显示」—— 把一个窗口挪到某一侧时要顺手打开它，否则窗口会看不见。 */
+  /** 「项目视图是否显示」—— 承载侧栏那条 dock 的 `isVisible`（换锚点时按可见性搬运，见 `setToolAnchor`）。 */
   explorer: Ref<boolean>
   /**
    * 当前显示的窗口（宿主的 `leftView`）。除了读它的**锚点**，还要按项目的
@@ -179,7 +189,7 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     extraContentIds.clear()
     for (const [id, info] of Object.entries(layout.windows ?? {})) {
       if (info.contentUiType === 'tabbed' || info.contentUiType === 'combo') contentUiTypes[id] = info.contentUiType
-      if (!Object.hasOwn(toolAnchors, id)) extraContentIds.add(id)
+      if (!Object.hasOwn(toolAnchors, id)) { extraContentIds.add(id); registerToolWindowId(id) }
     }
   }
   /** 某个内容此刻的内容条形态（上游 `ToolWindowImpl.kt:521` 读的就是 `windowInfo.contentUiType`）。 */
@@ -189,6 +199,102 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   /** `ToggleContentUiTypeAction.setSelected` 的落地：改的是**这一个**内容的记录，并落盘。 */
   function setContentUiType(id: string, type: ToolWindowContentUiType) {
     contentUiTypes[id] = resolveContentUiType(type)
+    saveLayout()
+  }
+
+  // --- 视图模式（`ToolWindowViewModeAction$ViewMode` = `WindowInfoImpl.type` + `isAutoHide`）------
+  /**
+   * 每个窗口的 (type, autoHide) 二元组。**存进项目布局的那条记录里**（上游就是把它们存在
+   * `<window_info type="..." auto_hide="..."/>` 上：`WindowInfoImpl.kt:46-47`、`:74`），
+   * 所以"这个窗口的视图模式"和"停在哪一侧"一样是**每工程**的状态。
+   * 没写过的窗口 = 出厂默认 DOCKED + autoHide=false（同 `WindowInfoImpl` 的默认值）。
+   */
+  const windowTypes = reactive<Record<string, { type: ToolWindowType; autoHide: boolean }>>({})
+  /** 读这一个窗口的视图模式状态（默认档不写进表，避免每条存档都拖一份全量）。 */
+  function windowTypeState(id: string): { type: ToolWindowType; autoHide: boolean } {
+    return windowTypes[id] ?? { type: 'docked', autoHide: false }
+  }
+  function viewModeOfId(id: string) { return viewModeOf(windowTypeState(id)) }
+  /**
+   * 选一档视图模式（`ToolWindowViewModeAction.setSelected`，`:127-135`：已经是这一档就什么都不做）。
+   * 上游 `setToolWindowType`（`ToolWindowManagerImpl.kt:1759-1769`）与 `setToolWindowAutoHide`
+   * （`:1742-1757`）两条都带"同值直接 return"的闸，这里同一条：值没变就不写盘、也不重开面板。
+   */
+  function setViewMode(id: string, mode: ViewMode): boolean {
+    const next = applyViewMode(mode)
+    const current = windowTypeState(id)
+    if (current.type === next.type && current.autoHide === next.autoHide) return false
+    windowTypes[id] = next
+    saveLayout()
+    // 上游改类型时会把面板按新类型重开一次并要焦点（`setToolWindowTypeImpl`，`:1785-1791`）：
+    // 从浮形态改回停靠/dock 时若窗口还开着，要让它回到自己那一侧，否则"看不见却还占着可见状态"。
+    if (visibleIds.value.includes(id) && next.type === 'docked') showAfterTypeChange(id)
+    return true
+  }
+  /**
+   * 改完类型后按**新**位置把它亮出来（`showView` 走 `activationTarget` ⇒ 只看锚点，不看种类）。
+   * 宿主没传 `showView` 时（单测夹具）退化成"只保证那一侧的 dock 开着"。
+   */
+  function showAfterTypeChange(id: string) {
+    const anchor = toolAnchors[id as ToolWindowId] ?? 'left'
+    if (anchor === 'bottom') {
+      bottomTabRef.value = id
+      bottomRef.value = true
+      return
+    }
+    deps.activeView.value = id as ToolWindowId
+    deps.explorer.value = true
+  }
+  /**
+   * **自动隐藏**（上游的 FOCUS_LOST 处理链，`ToolWindowManagerLifecycle.kt:55-138`）。
+   * 本仓没有 AWT 事件队列，等价的事件是 document 上的 `focusin` —— 它的 `target` 就是上游
+   * `FocusEvent.getOppositeComponent()` 的"真的拿到焦点的那个组件"（`:62` 排除的 temporary /
+   * 不可见那两种情况在 DOM 里由 focusin 自己保证：焦点没落到任何元素上就不产生 focusin）。
+   * 逐条判据在 `shouldHideOnFocusLoss`（纯函数，可单测），这里只负责把 DOM 翻译成它的输入。
+   */
+  function hideAutoHideWindowsOnFocusChange(focused: Element | null) {
+    const dock = dockOf(focused)
+    for (const id of visibleIds.value) {
+      // 不在锚点表里的可见内容（output/run/problems/references/hierarchy/terminal）在上游
+      // 各自也是一个工具窗口，默认就停在底部。
+      const anchor = toolAnchors[id as ToolWindowId] ?? 'bottom'
+      const shownInDock: 'side' | 'bottom' | null = anchor === 'bottom' ? 'bottom' : 'side'
+      // 焦点还在**这一侧 dock** 里 ⇒ 该窗口没真的丢焦点（`:129-130` 的"焦点仍在同一工具窗口"）。
+      // 注意用的是 dock 而不是 id：本仓一个 dock 同时只显示一个窗口，dock 就是那个窗口的容器。
+      const stillInside = dock === shownInDock
+      if (shouldHideOnFocusLoss({
+        visible: true,
+        state: windowTypeState(id),
+        focusedWindowId: stillInside ? id : null,
+        windowId: id,
+        focusGoesToPopup: popupHasFocusWithin(focused),
+        focusGoesToDialog: Boolean(focused?.closest('dialog, [role="dialog"], .modal-backdrop')),
+      })) {
+        if (shownInDock === 'bottom') bottomRef.value = false
+        else deps.explorer.value = false
+      }
+    }
+  }
+  function onDocumentFocusIn(event: FocusEvent) {
+    hideAutoHideWindowsOnFocusChange(event.target as Element | null)
+  }
+  /**
+   * 「浮动」那一档下每个窗口的矩形（`WindowInfo.floatingBounds`，`WindowInfoImpl.kt:24/49-53`）。
+   * 上游由浮层装饰器在拖动/缩放结束时写回（`saveFloatingOrWindowedState`，
+   * `ToolWindowManagerLifecycle.kt:190-192`），本仓同样只记一份、按项目落盘。
+   */
+  const floatingBounds = reactive<Record<string, { x: number; y: number; width: number; height: number } | null>>({})
+  function restoreFloatingBounds(layout: StoredProjectLayout) {
+    for (const key of Object.keys(floatingBounds)) delete floatingBounds[key]
+    for (const [id, info] of Object.entries(layout.windows ?? {})) {
+      const bounds = floatingBoundsOf(info)
+      if (bounds) floatingBounds[id] = bounds
+    }
+  }
+  function floatingBoundsOfId(id: string) { return floatingBounds[id] ?? null }
+  /** 拖动/缩放结束时记一次（写回项目布局，和 type/autoHide 同一条 `<window_info>`）。 */
+  function setFloatingBounds(id: string, bounds: { x: number; y: number; width: number; height: number }) {
+    floatingBounds[id] = bounds
     saveLayout()
   }
 
@@ -217,7 +323,17 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     hiddenStripeButtons.clear()
     for (const id of Object.keys(toolAnchors) as ToolWindowId[])
       if (!stripeButtonShown(windowInfoOf(layout, id))) hiddenStripeButtons.add(id)
+    // 门面那份注册表也一起换项目：上一条记录里登记的内容 id 不算这个项目注册过的
+    //（`unregisterToolWindow`，`ToolWindowManager.kt:107-108` 的本仓等价物）。
+    resetRegisteredToolWindowIds()
     refreshContentUiTypes(layout)
+    // 视图模式（type/autoHide）跟着那条记录一起回来 —— 上游也是存在同一个 `<window_info>` 上。
+    for (const key of Object.keys(windowTypes)) delete windowTypes[key]
+    for (const [id, info] of Object.entries(layout.windows ?? {})) {
+      if (info.type !== undefined || info.autoHide !== undefined)
+        windowTypes[id] = { type: toolWindowTypeOf(info), autoHide: autoHideOf(info) }
+    }
+    restoreFloatingBounds(layout)
   }
   /** 锚点可能已保存而目标顺序缺失（旧版移动只写锚点）；每一侧都补齐自己的窗口。 */
   function normalizeOrder() {
@@ -296,6 +412,22 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   }
 
   /**
+   * 视图模式往那条记录里写的那几栏。**只写与默认不同的**（上游同一条规矩：
+   * `WindowInfoImpl.kt:44/47/74/95` 的属性都带 `skipIfEquals` 式的默认值谓词，
+   * `ToolWindowManagerState.kt:86-87` 更是显式"只有不是 LEFT 才写"）。
+   * 这样旧存档 / 新项目读出来仍然是"没写过 = DOCKED + 不自动隐藏"，加字段也不会把
+   * 用户现有布局判成损坏。
+   */
+  function windowTypePatch(id: string): WindowInfo {
+    const stored = windowTypes[id]
+    if (!stored) return floatingBounds[id] ? { floatingBounds: floatingBounds[id] } : {}
+    const patch: WindowInfo = {}
+    if (stored.type !== 'docked') patch.type = stored.type
+    if (stored.autoHide) patch.autoHide = true
+    if (floatingBounds[id]) patch.floatingBounds = floatingBounds[id]
+    return patch
+  }
+  /**
    * 当前项目的整套布局落盘：**每窗口一条记录**（上游 `ToolWindowManagerState` 存的就是一串
    * `<window_info>`）。三张运行时表由这些记录派生 —— 写回时把当前值原样折回去，外加已存的
    * `contentUiType`（那是直接躺在项目布局里的，见 `setContentUiType`）。
@@ -313,31 +445,53 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
         showStripeButton: !hiddenStripeButtons.has(id),
         contentUiType: contentUiTypes[id],
         visible: visibleIds.value.includes(id),
+        ...windowTypePatch(id),
       }
     }
     // 内容条形态与可见性的键不止工具窗口：底部那几格固定内容（output/run/problems/…）也各有这两种
     // 状态（上游它们各自就是工具窗口，WindowInfo 里一样有 `contentUiType`/`isVisible`），单独并进来。
-    for (const id of new Set([...extraContentIds, ...Object.keys(contentUiTypes), ...visibleIds.value])) {
+    for (const id of new Set([...extraContentIds, ...Object.keys(contentUiTypes), ...visibleIds.value, ...Object.keys(windowTypes)])) {
       if (Object.hasOwn(toolAnchors, id)) continue
       windows[id] = {
         ...(windows[id] ?? {}),
         ...(contentUiTypes[id] ? { contentUiType: contentUiTypes[id] } : {}),
         visible: visibleIds.value.includes(id),
+        ...windowTypePatch(id),
       }
     }
     writeJson(projectLayoutKey(root), { windows } satisfies StoredProjectLayout)
   }
   function saveToolAnchors() { saveLayout() }
+  /**
+   * 换锚点的唯一入口（标题栏「移动到…」、条纹拖放、底部 dock 的锚点菜单都走这里）。
+   *
+   * 可见性是**搬着走**的，上游 `hideIfNeededAndShowAfterTask`（`ToolWindowManagerImpl.kt:1700-1726`）
+   * 就是这条规则的原文：搬之前先记下窗口是不是开着（`:1706` `wasVisible = …isVisible`），
+   * 先收起来（`:1708-1710`），搬（`:1712`），搬完若原来开着就**在新位置重新显示**
+   * （`:1714-1719` `info.isVisible = true` + `doShowWindow`）。搬动不改变"开着还是收着"。
+   *
+   * 本仓两条 dock 各自的可见窗口只有一个（`currentVisibleIds`：侧栏是 `leftView`，底部是 `bottomTab`），
+   * 照抄时有一处**形态差异**必须说清楚：底部 dock 的条纹（那排标签）长在 dock **里面**
+   * （`App.vue` 的 `v-if="bottom"`），侧栏条纹则一直可见。所以搬到底部要**一定**把 dock 打开并选中它
+   * —— 否则新位置根本没有入口（这也是 `src/toolWindowActions.ts` 的 `moveAnchorTo` 早就跟着 `showView` 的原因）；
+   * 搬去左/右侧则按上游：原来开着才跟着亮，原来收着就还收着。
+   */
   function setToolAnchor(id: ToolWindowId, anchor: Anchor) {
+    const wasVisible = currentVisibleIds().includes(id)
     toolAnchors[id] = anchor
     for (const side of ['left', 'right', 'bottom'] as const) {
       if (side !== anchor) toolOrder.value[side] = toolOrder.value[side].filter(item => item !== id)
     }
     if (!toolOrder.value[anchor].includes(id)) toolOrder.value[anchor].push(id)
+    if (anchor === 'bottom') {
+      bottomRef.value = true
+      bottomTabRef.value = id
+    } else if (wasVisible) {
+      deps.explorer.value = true
+      deps.activeView.value = id
+    }
     saveToolAnchors()
     saveToolOrder()
-    // Moving to a side the panel is not shown on would leave it invisible.
-    if (anchor !== 'bottom') deps.explorer.value = true
   }
   const activeAnchor = computed<Anchor>(() => toolAnchors[deps.activeView.value] ?? 'left')
   // IDEA's AbstractDroppableStripe lets a stripe button be dragged to another stripe
@@ -503,6 +657,33 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   // 该窗口当前的停靠边（`activeAnchor` 只回答"激活中的那个"，这里回答任意一个）。
   function anchorOf(id: ToolWindowId): Anchor { return toolAnchors[id] ?? 'left' }
 
+  /**
+   * 命名布局（`ToolWindowDefaultLayoutManager`）存取快照时的两个"每窗口"字段：
+   * `isShowStripeButton` 与 `contentUiType`。恢复布局 = 把这两个也写回去，所以这里给出
+   * 一次性原子替换（`ToolWindowManagerImpl.setLayout` 也是直接改 `WindowInfo`，
+   * 不走 `RemoveStripeButtonAction`/`ToggleContentUiTypeAction` 的单窗口路径）。
+   */
+  function explicitContentUiTypes(): Record<string, ToolWindowContentUiType> {
+    const out: Record<string, ToolWindowContentUiType> = {}
+    for (const [id, type] of Object.entries(contentUiTypes)) out[id] = resolveContentUiType(type)
+    return out
+  }
+  /** 替换整张显式形态表（快照是完整状态：没列出的内容回到"没显式设过"）。 */
+  function applyContentUiTypes(types: Record<string, ToolWindowContentUiType>) {
+    for (const key of Object.keys(contentUiTypes)) delete contentUiTypes[key]
+    for (const [id, type] of Object.entries(types)) contentUiTypes[id] = resolveContentUiType(type)
+    saveLayout()
+  }
+  /** 按快照设置侧条按钮的显隐（列进 `hidden` 的摘掉，其余挂回）；只写一次盘。 */
+  function applyStripeButtons(hidden: readonly string[]) {
+    const want = new Set(hidden.filter(id => Object.hasOwn(toolAnchors, id)))
+    for (const id of Object.keys(toolAnchors) as ToolWindowId[]) {
+      if (want.has(id)) hiddenStripeButtons.add(id)
+      else hiddenStripeButtons.delete(id)
+    }
+    saveHiddenStripeButtons()
+  }
+
   // 建模块时按**当前项目**装配一次（`workspace` 在宿主里声明得比这里早，所以读它是安全的；
   // `lspReady` / `gradleAvailable` 那类更晚声明的只在函数体里用，不走这条路）。
   applyProjectLayout(deps.workspace.value?.root ?? null)
@@ -513,9 +694,79 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
   // `leftView`）—— 非 immediate 的 watch 建时会求值一次，晚了会撞 TDZ，所以宿主那边把它们挪到了前面。
   watch([deps.explorer, bottomRef, () => bottomTabRef.value, () => deps.activeView.value], () => saveVisibility())
 
+  // 自动隐藏的焦点监听：浏览器里才装（SSR/Node 下没有 document）。
+  // 上游挂在 AWT 事件队列上（`ToolWindowManagerLifecycle.kt:167-168`），本仓的等价物是
+  // document 上的 focusin（冒上来的"谁拿到了焦点"= 上游 FOCUS_LOST 的 oppositeComponent）。
+  if (typeof document !== 'undefined') document.addEventListener('focusin', onDocumentFocusIn)
+
+  activeLayoutState = {
+    hiddenStripeButtons, explicitContentUiTypes, applyContentUiTypes, applyStripeButtons,
+    windowTypeState, viewModeOfId, setViewMode, floatingBoundsOfId, setFloatingBounds,
+  }
+
+  // 统一门面（`ToolWindowManager.kt:120-144` + `ToolWindowManagerEx.kt:19-50` + `WindowInfo.kt:9-50`）：
+  // 把散在本工厂闭包里的七八个 getter 收成一个可查询的聚合对象，组件读一次就够
+  // （`src/toolWindowManager.ts`；消费方 `src/components/ToolWindowHeader.vue` 的视图模式那一组）。
+  // 一个进程一份窗口状态，所以后建的实例覆盖先建的（与上面 `activeLayoutState` 同一条纪律）。
+  installToolWindowManager({
+    // 门面的查询面按 `string` 收 id（底部那几格内容不在出厂 id 联合里，见上面 `registerToolWindowId`
+    // 那条注释），本工厂的窄类型在这里按调用点各收一次口。
+    anchorOf: id => anchorOf(id as ToolWindowId),
+    idsOn: side => toolOrder.value[side].filter(id => (toolAnchors[id as ToolWindowId] ?? 'left') === side),
+    visibleIds: () => visibleIds.value,
+    stripeButtonHidden: id => hiddenStripeButtons.has(id as ToolWindowId),
+    contentUiType,
+    // 侧条宽度是**按侧**的（`src/stripeResize.ts`），底部那一格没有宽度这一位。
+    stripeWidth: id => (anchorOf(id as ToolWindowId) === 'bottom' ? 0 : stripeWidth(anchorOf(id as ToolWindowId) as StripeSide)),
+    typeState: windowTypeState,
+    viewModeOf: viewModeOfId,
+    floatingBoundsOf: floatingBoundsOfId,
+    toolDisabled: id => toolDisabled(id as ToolWindowId),
+    setViewMode,
+    // `isEditorComponentActive`（`ToolWindowManager.kt:112-115`）上游问的是**焦点主人**
+    //（`ToolWindowManagerState.kt:52-55` 的 `getParentOfType(EditorsSplitters, focusOwner) != null`），
+    // 与"有没有窗口开着"无关。本仓的同一问法就是那张 dock 选择器表（`src/toolWindowDocks.ts`）：
+    // 焦点主人不在侧栏也不在底部 ⇒ 在编辑器。没有 DOM（SSR / 单测）时返回 undefined，
+    // 门面退回它原来那条保守近似，不假装答得出。
+    editorComponentActive: () => (typeof document === 'undefined' ? undefined
+      : dockOf(document.activeElement) === 'editor'),
+  })
+
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
            removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,
            stripeWidths, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows,
-           moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType,
+           moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType, explicitContentUiTypes,
+           applyContentUiTypes, applyStripeButtons,
+           windowTypeState, viewModeOfId, setViewMode, floatingBoundsOfId, setFloatingBounds,
+           hideAutoHideWindowsOnFocusChange,
            visibleIds, saveVisibility }
 }
+
+/**
+ * 活着的工具窗口状态实例（同 `macroHost` 的 `activeSession` 手法）：命名布局的拍快照/恢复
+ * （`src/toolLayouts.ts`）要读「摘掉的按钮」与「显式设过的标签形态」，这两项住在工厂闭包里，
+ * 宿主又不给 `createToolLayouts` 传它们（那是另一个域的依赖表），所以这里留一个同性质的指针。
+ * 一个进程只有一份窗口状态；测试里后建的实例覆盖先建的。
+ */
+export interface ToolWindowLayoutState {
+  /** `WindowInfo.isShowStripeButton === false` 的那些窗口。 */
+  hiddenStripeButtons: ReadonlySet<string>
+  /** 显式设过 `contentUiType` 的内容 → 形态（含底部固定内容；没设过的不出现）。 */
+  explicitContentUiTypes: () => Record<string, ToolWindowContentUiType>
+  /** 用一份快照替换整张显式形态表。 */
+  applyContentUiTypes: (types: Record<string, ToolWindowContentUiType>) => void
+  /** 用一份快照替换侧条按钮的显隐集。 */
+  applyStripeButtons: (hidden: readonly string[]) => void
+  /** 某个窗口此刻的视图模式状态（`WindowInfoImpl.type` + `isAutoHide`）。 */
+  windowTypeState: (id: string) => WindowTypeState
+  /** 某个窗口此刻是哪一个视图模式（`ViewMode.fromWindowInfo`）。 */
+  viewModeOfId: (id: string) => ViewMode
+  /** 选一档（`ToolWindowViewModeAction.setSelected`）；值没变返回 false（上游同值直接 return）。 */
+  setViewMode: (id: string, mode: ViewMode) => boolean
+  /** 「浮动」那一档记住的矩形（`WindowInfo.floatingBounds`）；没存过 = null。 */
+  floatingBoundsOfId: (id: string) => { x: number; y: number; width: number; height: number } | null
+  /** 记一次浮层矩形（拖动/缩放结束时）。 */
+  setFloatingBounds: (id: string, bounds: { x: number; y: number; width: number; height: number }) => void
+}
+let activeLayoutState: ToolWindowLayoutState | null = null
+export function activeToolWindowLayoutState(): ToolWindowLayoutState | null { return activeLayoutState }

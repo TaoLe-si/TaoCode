@@ -8,7 +8,7 @@
 // 纯逻辑，可单独测（`tests/plugin-commands.test.mjs`）。
 import type { MenuRow } from './menus/types'
 import type { PluginCommand, PluginInfo } from './pluginGroups'
-import { compareText } from './pluginGroups.ts'
+import { compareText, pluginIsLoadable } from './pluginGroups.ts'
 
 /** 命令没有写 `group` 时的默认分组（`native/plugins.cpp` 里 `Command::group` 的初值）。 */
 export const DEFAULT_PLUGIN_COMMAND_GROUP = '插件'
@@ -17,11 +17,12 @@ export const DEFAULT_PLUGIN_COMMAND_GROUP = '插件'
 export const PLUGIN_MENU_LABEL = '插件'
 
 /**
- * 能贡献命令的插件：**启用的**且清单读得出来的。
- * 对照 `MyPluginModel`：只有加载成功的插件才会注册它的扩展点。
+ * 能贡献命令的插件：**启用的**、清单读得出来的，且依赖齐的。
+ * 对照 `MyPluginModel`：只有加载成功的插件才会注册它的扩展点 —— 依赖不满足的插件
+ * 在原生侧带 `broken`，IDEA 同样不加载它，它贡献的命令也不该出现在菜单里。
  */
 export function enabledPlugins(plugins: readonly PluginInfo[]): PluginInfo[] {
-  return plugins.filter(plugin => plugin.enabled && !plugin.error)
+  return plugins.filter(pluginIsLoadable)
 }
 
 export interface PluginCommandEntry {
@@ -35,14 +36,17 @@ export interface PluginCommandEntry {
 /** 把启用插件贡献的命令摊平（一个插件多条命令时逐条列出）。 */
 export function pluginCommandEntries(plugins: readonly PluginInfo[]): PluginCommandEntry[] {
   const entries: PluginCommandEntry[] = []
+  // 菜单行 id 就是 `plugin.<插件 id>.<命令 id>`，同一 id 出现两行在 Vue 的 key 与
+  // 「查找操作」里都是同一个 bug。原生解析已经对同一插件内的重复命令 id 取了第一条
+  // （`native/plugins.cpp` 的 read_commands），这里再兜一层：手改过的清单、或将来换了
+  // 数据来源，也不会把重复行漏到菜单里。
+  const seen = new Set<string>()
   for (const plugin of enabledPlugins(plugins)) {
     for (const command of plugin.commands) {
-      entries.push({
-        id: `plugin.${plugin.id}.${command.id}`,
-        pluginId: plugin.id,
-        pluginName: plugin.name || plugin.id,
-        command,
-      })
+      const id = `plugin.${plugin.id}.${command.id}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      entries.push({ id, pluginId: plugin.id, pluginName: plugin.name || plugin.id, command })
     }
   }
   return entries

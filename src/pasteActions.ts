@@ -12,8 +12,8 @@
 //     交给谁重新缩进/格式化（规则见 src/pasteOptions.ts）
 // 历史环本身在 src/clipboard.ts（`CopyPasteManagerWithHistory` 的对应物）。
 import { ref } from 'vue'
-import { clipboardRing, promoteClipboardEntry, readClipboardHistory, removeClipboardEntry, type ClipboardEntry } from './clipboard'
-import { PASTE_REFORMAT_NONE, indentPlainTextBlock, isPasteReformatMode, pasteReformatAction } from './pasteOptions'
+import { clipboardRing, promoteClipboardEntry, readClipboardHistory, removeClipboardEntry, type ClipboardEntry } from './clipboard.ts'
+import { PASTE_REFORMAT_NONE, indentPlainTextBlock, isPasteReformatMode, pasteReformatAction } from './pasteOptions.ts'
 import type { PasteInsertion } from './editorPaste'
 import type { LspRange } from './bridge'
 import type { Tab } from './editorTab'

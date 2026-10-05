@@ -30,8 +30,9 @@ const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]{1,}:/
 // moment the link is clicked.
 
 // Resolve a Markdown target ('./a', '../b', '/c') to a workspace path, or null when
-// it escapes the workspace root.
-function workspacePath(basePath: string | undefined, target: string): string | null {
+// it escapes the workspace root. Exported for the literal preview (src/literalPreview.ts),
+// which resolves an image literal against the containing file the same way.
+export function workspacePath(basePath: string | undefined, target: string): string | null {
   const segments = (target.startsWith('/') ? [] : (basePath ?? '').split('/').filter(Boolean)).concat(target.split('/'))
   const resolved: string[] = []
   for (const segment of segments) {

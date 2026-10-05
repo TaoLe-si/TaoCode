@@ -13,7 +13,7 @@
 //              `Vcs.ShowDiffWithLocal` 与本地比较                               ❌ 同上（`git.showCommit` 只出单侧内容）
 //              ─
 //   [git]      `Git.Reset.In.Log` 将当前分支重置到此处…                        ✅ `git.reset`（模式照上游那三档）
-//              `Git.Revert.In.Log` 还原提交                                    ❌ 本仓的 `git.revert` 是"丢弃工作区改动"（IDEA 的 Rollback），没有 `git revert <commit>`
+//              `Git.Revert.In.Log` 还原提交                                    ✅ `git.revertCommit`（新方法，`git revert --no-edit <hash>`）
 //              `Git.Uncommit` 撤消提交…                                        ✅ `git.reset --soft HEAD~1`；**只对当前分支最后一个提交可用**（`GitUncommitAction.update` 的 `isHeadCommit()`）
 //              ─
 //              `Git.Reword.Commit` / `Git.Fixup.To.Commit` / `Git.Squash.Into.Commit` /
@@ -26,6 +26,14 @@
 //   [platform] `Vcs.Log.GoToChild` / `Vcs.Log.GoToParent` 跳到子/父提交         ❌ 本仓的导航是"后退/前进"历史（`canBack`/`travel`），不是图的父子
 //
 // 文案全部取随 IDE 发货的中文包（key 见每条常量），逐条可核。
+//
+// 另两条**空状态**文案也在这一族里（`VcsLogBundle.properties:151-152`）：
+// `vcs.log.no.commits.matching.status` = 没有与筛选器匹配的提交，
+// `vcs.log.reset.filters.status.action` = 重置筛选器。
+/** `vcs.log.no.commits.matching.status` = 没有与筛选器匹配的提交。 */
+export const LOG_NO_MATCHING_COMMITS = '没有与筛选器匹配的提交'
+/** `vcs.log.reset.filters.status.action` = 重置筛选器。 */
+export const LOG_RESET_FILTERS = '重置筛选器'
 export interface LogMenuCommit {
   hash: string
   shortHash: string

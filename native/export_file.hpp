@@ -25,8 +25,8 @@
 namespace taocode {
 namespace export_file {
 
-/** 允许导出的扩展名（小写、带点）。加新格式时**同时**改这里与前端 `src/htmlExport.ts` 的提示。 */
-inline constexpr std::string_view kAllowedExtensions[] = {".html", ".htm"};
+/** 允许导出的扩展名（小写、带点）。加新格式时**同时**改这里与前端 `src/htmlExport.ts`/`src/errorTree.ts` 的提示。 */
+inline constexpr std::string_view kAllowedExtensions[] = {".html", ".htm", ".txt"};
 
 /** 这条通道一次最多写多少个文件（目录范围导出用；IDEA 用进度条跑任意多个，我们设一个上限并如实报错）。 */
 inline constexpr std::size_t kMaxFiles = 2000;

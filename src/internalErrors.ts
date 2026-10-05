@@ -9,10 +9,12 @@
 //
 // 本仓的对应：宿主 `native/diagnostics.cpp` 的 `event(..., "ERROR", ...)` 顺手记一笔，
 // `app.internalErrors` 报出 `{ count, latest }`。前端只在 `count > 0` 时显示芯片，
-// 点开列出最近几条 + 一个「显示日志」。
+// 点开是**错误对话框**（`src/components/InternalErrorsDialog.vue`，上游 `IdeErrorsDialog` 的等价物），
+// 簇与文案在 `src/errorReport.ts`。
 //
-// 没有做的事（如实）：上游点开会**重建错误对话框**（带异常栈与提交反馈入口）；
-// 本仓列的是"时间 + 消息"两列 + 打开日志 —— 没有栈可看（宿主是 C++，且这些是运行期错误不是异常）。
+// 没有做的事（如实，详见 src/errorReport.ts 的头注）：没有异常栈（宿主是 C++，账本里只有一行消息；
+// 崩溃栈在 `taocode.log` 里，不进这张账）、没有插件归因、没有提交报告的入口
+// —— 本仓没有上报渠道，芯片点开只有「复制」与「显示日志」。
 
 /** 上游 `status.bar.fatal.error.widget.name`（中文包取值）。 */
 export const INTERNAL_ERROR_WIDGET_NAME = '内部错误'

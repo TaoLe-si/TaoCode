@@ -3,10 +3,13 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { getProjectTreeState } from '../projectTreeState'
 import { Archive, ChevronRight, Coffee, FileCode2, FileText, Folder, Package, NotebookPen } from 'lucide-vue-next'
 import { isSyntheticLibraryRow, SDK_ENTRY_PATH } from '../externalLibraries'
-import type { Entry } from '../bridge'
+import { lspDiagnostics, type Entry } from '../bridge'
 import { createProjectTreeModel, type ProjectTreeRow, type SyntheticNode } from '../projectTreeModel'
 import type { ProjectTreeSortSettings } from '../projectTreeSort'
+import { decorationClass, decorationOf, decorationTitle, severityCounts, type TreeDecoration } from '../projectTreeDecorations'
 import { treeClickOpensFile, treeOpenUsesPreviewTab, type ProjectViewBehavior } from '../projectViewBehavior'
+import { getCommandProcessor } from '../pvCommandProcessor.ts'
+import { reportText } from '../pvFileUndoProvider.ts'
 import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
 import SpeedSearchBar from './SpeedSearchBar.vue'
 import { iconSize } from '../uiIcons'
@@ -21,22 +24,32 @@ const props = defineProps<{
   /** 项目视图自己的三条行为（IDEA `additionalGearActions` 那一组）。 */
   behavior?: ProjectViewBehavior
 }>()
-const emit = defineEmits<{ open: [path: string, preview: boolean]; error: [message: string]; context: [payload: { entry: Entry; x: number; y: number }] }>()
+const emit = defineEmits<{ open: [path: string, preview: boolean]; error: [message: string]; context: [payload: { entry: Entry; x: number; y: number }]; rename: [entry: Entry] }>()
 // A flattened visible tree uses one shared model for every depth. Directory rows
 // no longer instantiate independent caches/selection models, so toolbar actions
 // and keyboard navigation address exactly the rows rendered here.
 const sharedSortSettings = computed(() => props.sortSettings ?? getProjectTreeState(props.workspaceKey ?? '').state)
+// 嵌套规则与「压缩目录」的开关住在同一个宿主里（`getProjectTreeState` 那份设置）：
+// 上游也是同一份 `ProjectViewState`（`ProjectViewState.kt:36` compactDirectories、`:49` useFileNestingRules），
+// 设置改了要整树重建（`ConfigureFilesNestingAction.kt:58` 的 `updateFromRoot(true, SETTINGS)`）。
+const treeHost = computed(() => getProjectTreeState(props.workspaceKey ?? ''))
 const model = createProjectTreeModel({
   entries: () => props.entries,
   synthetic: () => props.synthetic ?? [],
   depth: () => props.depth ?? 0,
   projectName: () => props.projectName,
   sortSettings: () => sharedSortSettings.value,
+  // 上游 `ProjectViewSettings.isUseFileNestingRules()`（`ProjectViewSettings.java:29-31`）关掉时
+  // `NestingTreeStructureProvider` 整条不套 —— 本仓就是给一张空规则表。
+  nestingRules: () => treeHost.value.nesting.enabled ? treeHost.value.nesting.rules : [],
+  compactDirs: () => sharedSortSettings.value.compactDirectories ?? false,
   error: message => emit('error', message),
 })
 const { rows, expanded, selected, selection, loading, tabStop } = model
 watch(() => props.workspaceKey, () => model.reset(), { flush: 'sync' })
 watch(() => [props.entries, props.synthetic], () => { void model.refresh() }, { flush: 'pre' })
+watch(() => [sharedSortSettings.value.compactDirectories ?? false, treeHost.value.nesting.enabled, treeHost.value.nesting.rules],
+  () => { void model.refresh() }, { flush: 'pre' })
 onBeforeUnmount(model.dispose)
 const step = () => (props.compactIndents ? 11 : 15)
 const base = () => (props.compactIndents ? 10 : 12)
@@ -64,6 +77,32 @@ function rowTitle(row: ProjectTreeRow): string {
   if (isSyntheticLibraryRow(row.entry.path)) return row.entry.path.slice(row.entry.path.indexOf(':') + 1)
   return row.entry.path === '' ? props.workspaceKey ?? row.entry.name : row.entry.path
 }
+/**
+ * 节点装饰（上游 `ProjectViewNodeDecorator` 的 "Highlight files with errors"）：
+ * `lspDiagnostics` 里有错误/警告的文件在树里换色，title 补上计数。
+ * 只装饰真实文件行 —— 目录与合成行（NUL 前缀）不参与。
+ */
+const decorations = computed(() => {
+  const map = new Map<string, { kind: TreeDecoration; title: string }>()
+  for (const [path, items] of lspDiagnostics) {
+    const counts = severityCounts(items)
+    const kind = decorationOf(counts.errors, counts.warnings)
+    if (kind !== 'none') map.set(path, { kind, title: decorationTitle(counts.errors, counts.warnings) })
+  }
+  return map
+})
+function decorationOfRow(row: ProjectTreeRow) {
+  if (row.synthetic || row.entry.kind !== 'file' || row.entry.path.startsWith('\u0000')) return undefined
+  return decorations.value.get(row.entry.path)
+}
+function titleOf(row: ProjectTreeRow): string {
+  const decoration = decorationOfRow(row)
+  return rowTitle(row) + (decoration ? decoration.title : '')
+}
+function rowClassOf(row: ProjectTreeRow): string {
+  const decoration = decorationOfRow(row)
+  return decoration ? decorationClass(decoration.kind) : ''
+}
 function activate(entry: Entry, event: MouseEvent) {
   model.select(entry.path, event)
   void model.focus(entry.path)
@@ -82,6 +121,44 @@ function doubleClick(entry: Entry) {
   if (entry.kind === 'directory') { if (!props.expandWithSingleClick) model.toggle(entry); return }
   if (entry.path.startsWith('\u0000')) return
   if (treeClickOpensFile(behavior(), 'file', 2) === 'open') emit('open', entry.path, treeOpenUsesPreviewTab(behavior()))
+}
+/**
+ * 键盘那条路：`RenameElement` 绑的是 **Shift+F6**（`$default.xml:996-998`，动作本体
+ * `RenameElementAction` = `intellij.platform.lang.impl.actions.xml:216`），它按数据上下文里选中的
+ * 那个 VirtualFile 找可用的 renamer（`RenameElementAction.java:130-131`），所以在项目视图里
+ * 按下就是给这一行改名 —— 与右键菜单里的「重命名…」同一个对话框。
+ * 其余按键照旧交给 `navigate`（上下左右 / Home / End / Enter / 空格 / Ctrl+A）。
+ */
+/**
+ * 文件级撤销/重做（`$Undo` / `$Redo`，键位 `Ctrl+Z` / `Ctrl+Shift+Z`，
+ * `$default.xml:232-235` / `:685-688`）。上游这两个键是**全局**的：焦点在项目视图里按 Ctrl+Z
+ * 撤的就是上一次文件操作（`UndoAction` 按当前 FileEditor 取范围，`UndoManagerImpl:104-115`）。
+ * 本仓的范围 = 树里当前选中的那些路径；没有选中时按空范围问（只有跨文件的全局组可撤，
+ * 与 `CommandMerger.isUndoAvailable` 的同一判据）。
+ * 被拒绝时把上游那份报告原文交出去（`emit('error')`），成功时什么都不弹（上游也不弹）。
+ */
+function undoRedoFileOperation(kind: 'undo' | 'redo') {
+  const processor = getCommandProcessor(props.workspaceKey ?? '')
+  const scope = [...selection]
+  void processor[kind](scope).then(result => {
+    if (!result.ok && result.report) emit('error', reportText(result.report))
+  })
+}
+function onRowKeydown(entry: Entry, event: KeyboardEvent) {
+  if (event.key === 'Z' && event.ctrlKey && !event.altKey && !event.metaKey) {
+    // Ctrl+Shift+Z = 重做，Ctrl+Z = 撤销（两个键位都在上游键位表里，没有第三种组合）。
+    event.preventDefault()
+    undoRedoFileOperation(event.shiftKey ? 'redo' : 'undo')
+    return
+  }
+  if (event.key === 'F6' && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (entry.path.startsWith('\u0000')) return
+    event.preventDefault()
+    model.select(entry.path, event)
+    emit('rename', entry)
+    return
+  }
+  void model.navigate(event, entry, path => emit('open', path, treeOpenUsesPreviewTab(behavior())))
 }
 /**
  * 三条行为的当前值。来源是**项目视图设置**（`props.sortSettings`，宿主两处都传了
@@ -108,7 +185,7 @@ function showMenu(entry: Entry, event: MouseEvent) {
   // Synthetic library descriptors are not real filesystem context targets.
   if (!entry.path.startsWith('\u0000')) emit('context', { entry, x: event.clientX, y: event.clientY })
 }
-const { collapseAll, expandAll, reveal, expandRecursively, getSelectedEntries, canExpandRecursively } = model
+const { collapseAll, expandAll, reveal, expandRecursively, getSelectedEntries, canExpandRecursively, hasNested } = model
 // 速度搜索（IDEA 的 `SpeedSearch`，项目视图装的是 `TreeSpeedSearch`）：Ctrl+F 在树上打开搜索框，
 // 输入即选中第一条命中，上下键在命中项之间走，Enter/Esc 收起搜索框。
 // 匹配（驼峰子序列）与按键归属都在 src/speedSearch.ts，这里只管 DOM 与焦点。
@@ -169,9 +246,9 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
         <button
           :ref="element => bindRow(row.entry.path, element)"
           class="tree-entry" role="treeitem"
-          :class="{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }"
+          :class="[{ selected: selection.has(row.entry.path), 'indent-guides': indentGuides, 'tree-synthetic': !!row.synthetic }, rowClassOf(row)]"
           :style="[indentStyle(row.level), indentGuides ? guideStyle() : undefined, { '--tree-file-color': !row.synthetic && !row.entry.path.startsWith('\u0000') ? fileColor?.(row.entry.path, row.entry.kind === 'directory') ?? undefined : undefined }]"
-          :title="rowTitle(row)"
+          :title="titleOf(row)"
           :aria-level="row.level + 1"
           :aria-expanded="row.entry.kind === 'directory' ? expanded.has(row.entry.path) : undefined"
           :aria-selected="selection.has(row.entry.path)"
@@ -182,10 +259,10 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
           @click="activate(row.entry, $event)"
           @dblclick="doubleClick(row.entry)"
           @contextmenu="showMenu(row.entry, $event)"
-          @keydown="model.navigate($event, row.entry, path => emit('open', path, treeOpenUsesPreviewTab(behavior())))"
+          @keydown="onRowKeydown(row.entry, $event)"
           @keyup.space.prevent
         >
-          <span v-if="row.entry.kind === 'directory'" class="tree-expander" @click.stop="toggleChevron(row.entry)" @dblclick.stop>
+          <span v-if="row.entry.kind === 'directory' || hasNested(row.entry.path)" class="tree-expander" @click.stop="toggleChevron(row.entry)" @dblclick.stop>
             <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: expanded.has(row.entry.path) }" />
           </span>
           <span v-else class="tree-spacer" />
@@ -213,5 +290,8 @@ defineExpose({ collapseAll, expandAll, reveal, expandRecursively, getSelectedEnt
 .synthetic-icon { color: var(--syntax-meta); flex-shrink: 0; }
 .tree-expander { display: inline-flex; flex-shrink: 0; }
 .tree-entry:not(.selected):not(:hover) { background-color: var(--tree-file-color, transparent); }
+/* 节点装饰（ProjectViewNodeDecorator 的 "Highlight files with errors"）：错误/警告只改文件名颜色。 */
+.tree-decoration-error .tree-name { color: var(--error); }
+.tree-decoration-warning .tree-name { color: var(--warning); }
 .tree-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
 </style>

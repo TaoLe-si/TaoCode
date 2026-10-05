@@ -11,9 +11,14 @@ namespace taocode::git {
 std::string log_command(const std::filesystem::path& repo, const std::vector<std::string>& args);
 
 // logFull: limit (default 200, capped 1000), offset (default 0), refs: string[],
-// author/text: literal case-sensitive substrings, since/until: YYYY-MM-DD,
+// author: literal substring, text: grep pattern, since/until: YYYY-MM-DD,
 // path: literal repository-relative file/directory. Empty filters are ignored.
 // refs selects the union of reachable histories; absent/empty refs means --all.
+// textRegex/matchCase are the log text-filter toggles (Vcs.Log.EnableFilterByRegexAction /
+// Vcs.Log.MatchCaseAction): both false by default, so the default is a literal,
+// case-insensitive grep. sort ("date" | "topological"), firstParent and noMerges are
+// the graph-options entries (PermanentGraph.Options / VcsLogFilterObject.noMerges);
+// absent sort means git's own date order, matching PermanentGraph.Options.Default.
 Json log_full(const std::filesystem::path& repo, const Json& params);
 Json commit_details(const std::filesystem::path& repo, const std::string& revision);
 Json commit_changes(const std::filesystem::path& repo, const std::string& revision);

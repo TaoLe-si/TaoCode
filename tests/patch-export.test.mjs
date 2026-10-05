@@ -1,6 +1,8 @@
 // 本地更改的补丁导出（上游 `ChangesView.CreatePatch` / `CreatePatchToClipboard`）。
 //
-// 上游要点：`:127` 「从本地更改创建补丁…」、`:131` 「作为补丁复制到剪贴板」（`ActionsBundle.properties`）；
+// 上游要点：`platform/platform-resources-en/src/messages/ActionsBundle.properties:1564` 「Create Patch from Local Changes…」、`:1583`
+// 「Copy as Patch to Clipboard」（同名文件在 devkit 的 testData 里还有一份，引用指
+// `platform/platform-resources-en/src/messages/` 那一份）；
 // 补丁文本 = 本地更改的 `git diff`。本仓用 `git diff HEAD`（**暂存 + 未暂存一起** ——
 // 单跑 `git diff` 只有未暂存那一半），落盘走 `dialog.saveFile` + `app.writeExportFiles`。
 //
@@ -13,8 +15,8 @@ import { CREATE_PATCH_TEXT, PATCH_FILTERS, PATCH_TO_CLIPBOARD_TEXT, copyPatchToC
 const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 
 test('the labels and the save filter match upstream', () => {
-  assert.equal(CREATE_PATCH_TEXT, '从本地更改创建补丁…', 'ActionsBundle.properties:127')
-  assert.equal(PATCH_TO_CLIPBOARD_TEXT, '作为补丁复制到剪贴板', ':131')
+  assert.equal(CREATE_PATCH_TEXT, '从本地更改创建补丁…', 'platform/platform-resources-en/src/messages/ActionsBundle.properties:1564 action.ChangesView.CreatePatch.text')
+  assert.equal(PATCH_TO_CLIPBOARD_TEXT, '作为补丁复制到剪贴板', ':1583 action.ChangesView.CreatePatchToClipboard.text')
   assert.deepEqual(PATCH_FILTERS, [{ name: '补丁文件', pattern: '*.patch' }], '上游 FILE_EXTENSION = "patch"')
 })
 

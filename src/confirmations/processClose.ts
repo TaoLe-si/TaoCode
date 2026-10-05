@@ -5,10 +5,10 @@
 // 纯决策函数（resolveProcessClose 等）在 `src/processClose.ts` 并有独立测试；
 // 这里只承载带状态的流程。从 App.vue 拆出，依赖经 ctx 注入。
 import { ref, type Ref } from 'vue'
-import { request } from '../bridge'
+import { request } from '../bridge.ts'
 import type { GeneralSettingsState } from '../bridge'
-import { errorMessage } from '../errors'
-import { confirmationResult, rememberedSetting, resolveProcessClose, TERMINAL_CAN_DISCONNECT, type ProcessCloseChoice, type ProcessCloseConfirmation, type ProcessCloseResult } from '../processClose'
+import { errorMessage } from '../errors.ts'
+import { confirmationResult, rememberedSetting, resolveProcessClose, TERMINAL_CAN_DISCONNECT, type ProcessCloseChoice, type ProcessCloseConfirmation, type ProcessCloseResult } from '../processClose.ts'
 
 export interface ProcessCloseContext {
   generalSettings: Ref<GeneralSettingsState>

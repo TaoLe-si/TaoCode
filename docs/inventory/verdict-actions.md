@@ -4,7 +4,7 @@
 
 四档（同 B1–B5）：`[x]` 已移植 · `[~]` 部分 · `[ ]` 未移植（TODO）· `[-]` 不适用（附理由）
 
-> **本文档对 317 类逐条给判决**：§A 讲已移植的 12 条，§B 讲部分移植 36 条，§C 讲未移植 6 条，§D 讲不适用 263 条，§G 是**逐条总表**（317 行，机检对齐）。四档合计 12 + 36 + 6 + 263 = 317。
+> **本文档对 317 类逐条给判决**：§A 讲已移植的 13 条，§B 讲部分移植 39 条，§C 讲未移植 2 条，§D 讲不适用 263 条，§G 是**逐条总表**（317 行，机检对齐）。四档合计 13 + 39 + 2 + 263 = 317。
 >
 > 本域是 `openapi/actionSystem`（171 类）+ `ide/actions/searcheverywhere`（146 类）两个包的合集。
 > 判决按「**行为是否落地**」给，不按类名 —— 落地形态可以不含类名（例：`ActionPlaces` 判 `[x]`，
@@ -30,7 +30,7 @@
 > 既有判 `[~]` 的（`AnAction`、`Presentation`、`ActionGroup` —— 行为落了但名字只出现在注释里），
 > 也有判 `[-]` 的（`ActionMenu`、`MacOtherAction`）。§G 每一行都写明依据落在哪个真实文件。
 
-## A. 已移植（`[x]`，12 类）
+## A. 已移植（`[x]`，13 类）
 
 ### A-1 动作系统的三个骨架类（3）
 
@@ -99,7 +99,13 @@
 |---|---|---|
 | `SearchEverywhereFeature` | `platform/lang-impl/.../SearchEverywhereFeature.kt` | feature 门控 + 预热那一层：`src/searchEverywhereHost.ts` 的 `SEARCH_EVERYWHERE_SYMBOL_MIN` 门槛与两处防抖（符号 120ms / 文件刷新 200ms）即为等价行为 —— 上游用 feature flag 决定要不要预热，本仓数据都是本地同步的（文件清单、菜单表、运行配置表），预热没有可等的对象 |
 
-## B. 部分移植（`[~]`，36 类）
+### A-6 动作执行前后的广播（1，2026-10-06 从 `[~]` 订正上来）
+
+| 类 | 源码 | 落点 |
+|---|---|---|
+| `AnActionListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/AnActionListener.java` | `src/actionEvents.ts:30-51`：`AnActionListener`（`beforeActionPerformed`/`afterActionPerformed` 两个回调）+ `addActionListener`（返回注销函数，等价上游 `MessageBusConnection.disconnect()`）+ `fireBeforeActionPerformed`/`fireAfterActionPerformed` 两圈广播；宏录制 `src/macros.ts` 的 `recordActionStep` 是它的消费点。原来记 `[~]` 的理由是「只落了宏录制那一半、没有全量广播」，广播那半已补齐 ⇒ 按口径升 `[x]`。 |
+
+## B. 部分移植（`[~]`，39 类；下面的 B-1…B-9 分组表逐条列的是本域复核过的部分，条数与档位一律以 §G 为准）
 
 逐条写「已有」与「还差」。**每一行的 `src/` 都是真实文件**（`tests/b6-verdict.test.mjs` 机检 §F-2）。
 
@@ -140,11 +146,10 @@
 | `ActionToolbarImpl` | 同上 | 1850 行里的布局策略族、自绘、按钮外观（`ActionButtonLook` 三档） |
 | `ActionButton` | `src/toolWindowStripes.ts` + `src/components/ToolWindowView.vue` 的 stripe 按钮（含数字角标 Alt+1..9、悬停激活） | 三档外观（`ActionButtonLook`）、按住拖出、`ActionButtonWithText` 的文字变体 |
 
-### B-5 动作通知与数据键（2）
+### B-5 动作通知与数据键（1）
 
 | 类 | 已有 | 还差 |
 |---|---|---|
-| `AnActionListener` | `src/macros.ts` 的 `recordActionStep` 记录动作步骤（宏回放依赖它） | `beforeActionPerformed`/`afterActionPerformed` 的全量广播 |
 | `PlatformDataKeys` | `src/menus/toolWindowGear.ts` 与 `src/explorerActions.ts` 的动作直接读当前选中的路径/文件 | 键名表本身（等价于取值，但无 `DataKey` 抽象） |
 
 ### B-6 弹出动作（1）
@@ -281,7 +286,7 @@
 | `TimerListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/TimerListener.java` | `[-]` | 计时器监听：本仓用 `setTimeout` 直接调，无监听器协议 |
 | `UpdateInBackground` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/UpdateInBackground.java` | `[-]` | BGT 更新标记注解：同上 |
 | `UpdateSession` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/UpdateSession.java` | `[-]` | 更新会话（编辑器/文档）：`src/editorCommands.ts` 的命令各自读当前 tab，无会话对象 |
-| `AnActionListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/AnActionListener.java` | `[~]` | 动作执行前后通知：`src/macros.ts` 的 `recordActionStep` 记录动作步骤（宏回放依赖它）；还差上游的 `beforeActionPerformed`/`afterActionPerformed` 全量广播 |
+| `AnActionListener` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/AnActionListener.java` | `[x]` | 动作执行前后通知的全量广播已落地：`src/actionEvents.ts:30-51` 有 `AnActionListener`（before/after 两个回调）+ `addActionListener`（返回注销函数）+ `fireBeforeActionPerformed`/`fireAfterActionPerformed` 两圈广播；宏录制 `src/macros.ts` 的 `recordActionStep` 是它的消费点（2026-10-06 从 `[~]` 订正：原判词说「还差全量广播」，那半条管道已在 `actionEvents.ts` 补齐） |
 | `CustomComponentAction` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/CustomComponentAction.java` | `[-]` | 在菜单里塞 Swing 组件的动作：菜单项是文本行，不支持自定义组件渲染 |
 | `MainMenuPresentationAware` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/ex/MainMenuPresentationAware.java` | `[-]` | 主菜单呈现感知：主菜单行就是 `MenuRow`，无此接口 |
 | `ActionRemoteBehavior` | `platform/editor-ui-api/src/com/intellij/openapi/actionSystem/remoting/ActionRemoteBehavior.kt` | `[-]` | 远程开发（Gateway/remote dev）那套：本仓是纯本地单窗口宿主，无远程后端 ⇒ 无对应物 |
@@ -566,7 +571,7 @@
 | `ActionSystemScope` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/ActionSystemScope.kt` | `[-]` | 动作系统的 coroutine scope：无协程层 |
 | `package-info` | `platform/platform-impl/src/com/intellij/openapi/actionSystem/util/package-info.java` | `[-]` | 包说明文件：非类，无行为 |
 
-> **四档合计**：`[x]` 12 + `[~]` 40 + `[ ]` 2 + `[-]` 263 = **317**
+> **四档合计**：`[x]` 13 + `[~]` 39 + `[ ]` 2 + `[-]` 263 = **317**
 >
 > **第九十一批的变化**：`[ ]` → `[~]` 四类（`ScopeChooserAction` / `ScopeSupporting` / `PreviewAction` /
 > `SearchEverywhereEmptyTextProvider`）；`[ ]` → `[-]` 一类（`SearchEverywhereReorderingService` ——

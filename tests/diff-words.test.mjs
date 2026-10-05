@@ -8,6 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { charMarks, marksFor, tokenizeLine, wordMarks } from '../src/diffWords.ts'
+import { compareCharChanges, trimSpaceChanges } from '../src/diffChars.ts'
 import { comparisonKey, comparisonKeys, COMPARISON_POLICY_LABELS, DEFAULT_COMPARISON_POLICY, DEFAULT_COMPARISON_POLICY as _d, shouldTrimChunks, whitespaceOnlyDifference } from '../src/diffComparison.ts'
 import { buildDiffRows } from '../src/diffText.ts'
 
@@ -15,20 +16,21 @@ const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 
 // —— ① 词法切分 ——
 
-// 规则必须与 `native/history.cpp:809-830` 的 tokenize 逐条一致：字母数字下划线一段、
-// 空白一段、其余各自一段。
-test('tokenize follows the same rule as the native side', () => {
+// `ByWordRt.getInlineChunks`（`ByWordRt.kt:638-683`）：只有**词 / 连续文字 / 换行**进 chunk 表，
+// 标点与空白是隐含在相邻 chunk 之间的空隙，交给 `matchAdjustmentDelimiters` 与 whitespace 那一层。
+// （下划线按 `TrimUtil.kt:24-26` 的 isAlpha = 非空白且非标点算词内字符。）
+test('tokenize keeps only word runs and continuous-script characters, like upstream', () => {
   const tokens = tokenizeLine('foo_bar = 12 + x;')
-  assert.deepEqual(tokens.map(t => t.text), ['foo_bar', ' ', '=', ' ', '12', ' ', '+', ' ', 'x', ';'])
-  assert.deepEqual(tokens.map(t => t.start), [0, 7, 8, 9, 10, 12, 13, 14, 15, 16])
+  assert.deepEqual(tokens.map(t => t.text), ['foo_bar', '12', 'x'])
+  assert.deepEqual(tokens.map(t => t.start), [0, 10, 15])
 })
 
-test('tabs and spaces form one whitespace token', () => {
-  assert.deepEqual(tokenizeLine('a \t b').map(t => t.text), ['a', ' \t ', 'b'])
-})
-
-test('a line of only whitespace is a single token', () => {
-  assert.deepEqual(tokenizeLine('   ').map(t => t.text), ['   '])
+test('punctuation and whitespace between words stay outside the chunk table', () => {
+  assert.deepEqual(tokenizeLine('a, b').map(t => t.text), ['a', 'b'])
+  // 连续文字：每个字各自一个 chunk（`ByWordRt.kt:667-669` 的 isContinuousScript 分支）。
+  assert.deepEqual(tokenizeLine('中文').map(t => t.text), ['中', '文'])
+  // 纯空白的行没有任何 chunk —— 它的差异完全由 whitespace 那一层表达。
+  assert.deepEqual(tokenizeLine('   \t '), [])
 })
 
 test('an empty line yields no tokens', () => {
@@ -45,12 +47,19 @@ test('a changed word is the only thing marked', () => {
   assert.equal('const bar = 1'.slice(marks.right[0][0], marks.right[0][0] + marks.right[0][1]), 'bar')
 })
 
-// 纯新增：只圈新增的词，不把前面的空格一起圈进去（上下游都这么做：`hello` → `hello world`）。
-test('an appended word does not drag the leading space into the mark', () => {
+// 纯新增：`DefaultCorrector`（`ByWordRt.kt:880-895`，`expandWhitespacesBackward` 在 `:890`、
+// `expandWhitespacesForward` 在 `:893`）先向后让、再向前让。两个让白函数都带
+// `while (start1 < end1 && start2 < end2)` 的守卫（`TrimUtil.kt:401` 与 `:418`），
+// 而纯插入的改动块**左半边是空的**（`hello` 只有 5 个字符）⇒ 两个让白都一步都走不了，
+// 那个没被标点匹配吃掉的空格（`ByCharRt.kt:259-270` 只收 isPunctuation，空格不是标点）
+// 就留在改动块里 ⇒ mark 是 `' world'` 而不是 `'world'`。
+// （`ByWordRt.kt:610-630` 那一段是 `isTrailingSpace`，只被 `TrimSpacesCorrector`
+// `ByWordRt.kt:989-1028` 用，与默认档无关 —— 独立验收 H2 就是这条引用漂了 270 行。）
+test('an appended word takes the leading space, as the default corrector expands backward', () => {
   const marks = wordMarks('hello', 'hello world')
   assert.equal(marks.left.length, 0, '左侧没有改动')
   assert.equal(marks.right.length, 1)
-  assert.equal('hello world'.slice(marks.right[0][0], marks.right[0][0] + marks.right[0][1]), 'world')
+  assert.equal('hello world'.slice(marks.right[0][0], marks.right[0][0] + marks.right[0][1]), ' world')
 })
 
 // 纯缩进改动：整段都是空白，这时**保留标记**，否则用户看不到改动（native 同款处置）。
@@ -87,6 +96,28 @@ test('char level marks both sides of a substitution', () => {
   const marks = charMarks('axc', 'ayc')
   assert.deepEqual(marks.left, [[1, 1]])
   assert.deepEqual(marks.right, [[1, 1]])
+})
+
+// —— ②.5 标点调整组与字符级三档（`ByWordRt.matchAdjustmentDelimiters` / `ByCharRt` 三条路）——
+
+// `AdjustmentPunctuationMatcher`（`ByWordRt.kt:54,464-471`，类体在 `:695-860`）：标点只在**未匹配词之间的空隙**里配对，
+// 所以 `a.b` vs `a,b` 只圈那一个点/逗号，词本身不算改动。
+test('punctuation between matched words is matched by the adjustment matcher', () => {
+  assert.deepEqual(wordMarks('a.b', 'a,b'), { left: [[1, 1]], right: [[1, 1]] })
+  assert.deepEqual(wordMarks('foo(bar)', 'foo[bar]').left, [[3, 1], [7, 1]])
+  assert.deepEqual(wordMarks('x=1', 'x==1').right, [[2, 1]], '多出来的 `=` 是改动')
+})
+
+// 字符级三条路对应 `ByCharRt.compareTwoStep` / `compareTrimWhitespaces` / `compareIgnoreWhitespaces`：
+// 非空白码点先跑、空隙里过 `DefaultCharChangeCorrector`；trim 归一后仍有内部空白差异；ignore 全消。
+test('char comparison has the three ByCharRt lanes', () => {
+  assert.deepEqual(charMarks('axc', 'ayc'), { left: [[1, 1]], right: [[1, 1]] })
+  const spaces = charMarks('a b', 'ab')
+  assert.ok(spaces.left.length > 0, 'default 档把空格算改动')
+  assert.ok(trimSpaceChanges([{ a: { start: 0, end: 3 }, b: { start: 0, end: 2 } }], 'a b', 'ab').length >= 1)
+  assert.deepEqual(compareCharChanges('x = 1', 'x=1', 'ignoreWhitespaces'), [], 'ignore 档只剩空白差异 ⇒ 无改动')
+  assert.ok(compareCharChanges('x = 1', 'x=1', 'trimWhitespaces').length > 0, 'trim 档不删内部空白差异')
+  assert.match(read('src/diffChars.ts'), /DefaultCharChangeCorrector/)
 })
 
 // —— ③ 档位 ——

@@ -14,13 +14,17 @@
 //   analysis-api/.../packageSet/AbstractPackageSet.java                  Invalid 的优先级 = 1
 //
 // 与 IDEA 的差异（都是本架构没有对应物，不是省事）：
-//   * 没有模块（IDEA 的 Module）：本仓是单隐式模块，名字取工作区目录名，见 `ScopeContext.moduleName`。
+//   * 没有模块实体（IDEA 的 Module）：本仓是单隐式模块，名字取工作区目录名，见 `ScopeContext.moduleName`。
 //     证据 `ProjectPatternProvider.createPackageSet`（:82-121）用 `module.getName()` 生成模块模式，
 //     而 `PatternBasedPackageSet.matchesModule`（:44-58）在模块模式为空时恒真、不匹配时恒假。
-//   * 没有库（Libraries）：`ext:` 作用域要求文件**不在** content 内（`FilePatternPackageSet:60`），
-//     项目文件永远在 content 内 → `ext:` 恒不匹配。
+//   * 库判定由 `src/moduleScopes.ts` 的 `ScopeFileSystem` 提供：`ext:` 作用域要求文件**不在** content 内
+//     （`FilePatternPackageSet:55-71`），模块模式此时匹配**库名**（`PatternBasedPackageSet.matchesLibrary:87-115`），
+//     文件模式匹配「相对库根路径」（`getLibRelativePath`）。没传 `ScopeFileSystem` 的调用方
+//     （老宿主/测试）沿用兜底：`ext:` 恒假。
 //   * Java 插件注册的 `PatternPackageSetParserExtension`（`java/java-impl/.../PatternPackageSetParserExtension.java:14-50`，
 //     作用域 id `src`/`test`/`lib`/`problem` + AspectJ 包模式）走 PSI，本仓用 LSP，故不注册该扩展。
+
+import type { ScopeFileSystem } from './moduleScopes.ts'
 
 /** 词法单元。`_ScopesLexer.flex:20-46` 的返回类型逐一对应。 */
 export type ScopeTokenKind =
@@ -365,6 +369,12 @@ export interface ScopeContext {
   moduleName?: string
   /** `$name` 的解析表：作用域名 → 表达式。 */
   lookup?: (name: string) => ScopeSet | null
+  /**
+   * 内容根/库/SDK 的文件系统视图（`src/moduleScopes.ts` 的 `scopeFileSystem`）。
+   * 传了才能求值 `file[库名, ext:...]` 与「相对内容根」的路径；不传时 `ext:` 恒假、
+   * content 内路径按工作区相对路径匹配（单内容根 `''` 时的等价行为）。
+   */
+  fileSystem?: ScopeFileSystem
 }
 
 /**
@@ -380,12 +390,26 @@ export function scopeMatches(
     case 'complement': return !scopeMatches(set.set, path, isDirectory, context, seen)
     case 'union': return set.sets.some(inner => scopeMatches(inner, path, isDirectory, context, seen))
     case 'intersection': return set.sets.every(inner => scopeMatches(inner, path, isDirectory, context, seen))
-    // FilePatternPackageSet.java:49-71：先判 content，再取相对内容根的路径，目录补 `/`，最后整串匹配。
+    // FilePatternPackageSet.java:49-71：先判 content（`isInContent(file) != myProjectFiles` 为假即出局），
+    // 再取相对内容根（或相对库根）的路径，目录补 `/`，最后整串匹配。
     case 'file': {
-      if (!set.projectFiles) return false            // `ext:` 要求不在 content 内 → 本仓不成立
-      if (path === '') return false
-      if (!moduleMatches(set.modulePattern, context)) return false
-      const relative = isDirectory ? `${path}/` : path
+      const fileSystem = context.fileSystem
+      if (set.projectFiles) {
+        if (path === '') return false
+        if (fileSystem && !fileSystem.isInContent(path)) return false
+        if (!moduleMatches(set.modulePattern, context)) return false
+        // 没有 fileSystem 时路径本身就是内容根相对路径（本仓单内容根 = 工作区根）。
+        const relativePath = fileSystem?.contentRelativePath(path) ?? path
+        const relative = isDirectory ? `${relativePath}/` : relativePath
+        return full(convertToRegexp(set.pattern)).test(relative)
+      }
+      // `ext:`：文件必须在 content **外**，模块模式匹配库名/SDK 名，文件模式匹配相对库根路径。
+      if (!fileSystem) return false                 // 没有内容根/库视图的调用方：兜底恒假
+      if (path === '' || fileSystem.isInContent(path)) return false
+      if (!libraryMatches(set.modulePattern, path, fileSystem)) return false
+      const libraryRelative = fileSystem.libraryRelativePath(path)
+      if (libraryRelative === null) return false     // 不在任何已知库根里：上游 getRelativePath 给 ""，同样不匹配
+      const relative = isDirectory ? `${libraryRelative}/` : libraryRelative
       return full(convertToRegexp(set.pattern)).test(relative)
     }
     // ProjectPathPatternPackageSet.kt:16-22：去掉前导 `/` 后按同一套通配符匹配项目基准目录相对路径。
@@ -410,6 +434,18 @@ function moduleMatches(modulePattern: string | null, context: ScopeContext): boo
   if (!modulePattern) return true
   if (context.moduleName === undefined) return false
   return full(convertModulePattern(modulePattern)).test(context.moduleName)
+}
+
+/**
+ * `PatternBasedPackageSet.matchesLibrary`（:87-115）：content 外的文件按**库名**匹配
+ * （库没有名字时上游退到 presentable name 的文件名；本仓的库名就是那条 glob 模式），
+ * 文件在 SDK 根里时按 JDK 名匹配。
+ */
+function libraryMatches(modulePattern: string | null, path: string, fileSystem: ScopeFileSystem): boolean {
+  if (!modulePattern) return true
+  const name = fileSystem.libraryNameOf(path) ?? fileSystem.jdkName
+  if (name === null) return false
+  return full(convertModulePattern(modulePattern)).test(name)
 }
 
 // ---------------------------------------------------------------- Include / Exclude 按钮的合并

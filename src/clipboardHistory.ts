@@ -103,20 +103,26 @@ export const CLIPBOARD_RETURN_SYMBOL = '⏎'
 export const CLIPBOARD_PREVIEW_CHARS = 80
 
 /**
- * `ContentChooser.Item.getShortText`（:419-441）：取前 `maxChars` 个字符，
- * **换行符统一显示成 `⏎`**（这样一行能看全多行内容），被截断时补省略号。
- * 源码对含 `\r` 的文本多取一倍再截，是为了让 CRLF 在折算成 `⏎` 后长度不超标 —— 这里同样处理。
+ * `ContentChooser.Item.getShortText`（:419-441）的逐句复刻（纯函数：源码里那段缓存只影响
+ * 后续调用，这里每次从头算，结果一致）。
+ *
+ * 三个容易看漏的点：
+ *   · 判 CR 的是 `StringUtil.indexOf(longText, '\r', 0, min(len, maxChars*2+1)) > 0` ——
+ *     **下标 0 的 CR 不算**（`> 0` 不是 `>= 0`），首字符就是 CR 的文本走"无 CR"那一支；
+ *   · 两支都是**先截断、后**把换行折成 `⏎`，所以第 80 个字符是换行时输出会短一个可见字符；
+ *   · 截断记号是 `StringUtil.first(s, n, true)` 的 `"..."`（三个点，总长 = maxChars + 3，
+ *     见 `StringUtil.java:2012-2014`），不是单个 `…`。
  */
 export function clipboardPreview(text: string, maxChars = CLIPBOARD_PREVIEW_CHARS): string {
-  const hasSlashR = text.slice(0, maxChars * 2 + 1).includes('\r')
-  if (!hasSlashR) return firstChars(text.replace(/\r\n|\r|\n/g, CLIPBOARD_RETURN_SYMBOL), maxChars)
-  const expanded = text.slice(0, maxChars * 2 + 1).replace(/\r\n|\r|\n/g, CLIPBOARD_RETURN_SYMBOL)
+  const hasSlashR = text.slice(0, maxChars * 2 + 1).indexOf('\r') > 0
+  if (!hasSlashR) return firstChars(text, maxChars).replace(/\r\n|\r|\n/g, CLIPBOARD_RETURN_SYMBOL)
+  const expanded = firstChars(text, maxChars * 2 + 1, false).replace(/\r\n|\r|\n/g, CLIPBOARD_RETURN_SYMBOL)
   return firstChars(expanded, maxChars)
 }
 
-/** `StringUtil.first(s, n, true)`：超长时截断并补 `…`。 */
-function firstChars(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : text.slice(0, Math.max(0, maxChars - 1)) + '…'
+/** `StringUtil.first`：超长时取前 n 个字符；`ellipsis` 为真再补 `"..."`（不是把 n 挤成 n-1）。 */
+function firstChars(text: string, maxChars: number, ellipsis = true): string {
+  return text.length > maxChars ? text.slice(0, maxChars) + (ellipsis ? '...' : '') : text
 }
 
 /** `MyListCellRenderer.customizeCellRenderer`（:392-400）：序号右对齐到总位数，后接两个空格。 */

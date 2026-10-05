@@ -182,10 +182,11 @@ test('解析 /xxx：支持 /downloaded 别名与大小写，属性与关键字�
   assert.deepEqual(parsed.options, ['enabled', 'userInstalled'])
   assert.equal(parsed.keyword, 'foo bar')
   assert.equal(parsed.attributes, true)
-  // /outdated、/bundled 本仓没有数据源：解析出来但不参与过滤，如实报给 UI
+  // /bundled 本仓没有数据源：解析出来但不参与过滤，如实报给 UI；/outdated 已有真实数据源
+  // （市场页的本地仓库目录，见 tests/plugin-market.test.mjs 与 matchesInstalledQuery 的 updateIds）。
   const unsupported = parseInstalledQuery('/outdated /bundled alpha')
-  assert.deepEqual(unsupported.options, [])
-  assert.deepEqual(unsupported.unsupported, ['needUpdate', 'bundled'])
+  assert.deepEqual(unsupported.options, ['needUpdate'])
+  assert.deepEqual(unsupported.unsupported, ['bundled'])
   assert.equal(unsupported.attributes, true)
   // 认不出的 /xyz 既不报错也不当关键字
   const unknown = parseInstalledQuery('/nope alpha')
@@ -231,8 +232,8 @@ test('过滤：属性是与关系，关键字匹配名称/id/描述/类目', () 
   assert.deepEqual(ids([enabled, disabled].filter(item => matchesInstalledQuery(item, parseInstalledQuery('/disabled beta')))), ['beta'])
 })
 
-test('本仓有真实数据源的搜索选项只有 4 个，其余三个登记为待办', () => {
-  assert.deepEqual(SUPPORTED_SEARCH_OPTIONS, ['userInstalled', 'enabled', 'disabled', 'invalid'])
+test('本仓有真实数据源的搜索选项：四项本机状态 + needUpdate（市场清单），余两项登记为待办', () => {
+  assert.deepEqual(SUPPORTED_SEARCH_OPTIONS, ['userInstalled', 'needUpdate', 'enabled', 'disabled', 'invalid'])
   const todo = read('docs/class-parity-todo.md')
   assert.match(todo, /插件/)
 })

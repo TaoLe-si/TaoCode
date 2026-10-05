@@ -16,11 +16,16 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "zipstore.hpp"
+
+#include "file_queries.hpp"
+#include "workspace.hpp"
+#include "workspace_detail.hpp"
 
 namespace {
 namespace fs = std::filesystem;
@@ -44,6 +49,30 @@ void install_sources_jar(const fs::path& root) {
     const std::string source = "package com.example;\n\npublic class Greeter {\n    public String hello() { return \"hi\"; }\n}\n";
     const std::vector<taocode::zip::MemoryEntry> entries{{"com/example/Greeter.java", source}};
     check(taocode::zip::write_archive(root / L"lib" / L"demo-sources.jar", entries) == 1, "写出 sources jar");
+}
+
+/** 造一个带**目录条目**的 `lib/demo.jar`（尾斜杠那种，`-tf` 会原样列出来）。 */
+void install_listing_jar(const fs::path& root) {
+    fs::create_directories(root / L"lib");
+    const std::vector<taocode::zip::MemoryEntry> entries{
+        {"META-INF/", ""},
+        {"META-INF/MANIFEST.MF", "Manifest-Version: 1.0"},
+        {"com/", ""},
+        {"com/example/", ""},
+        {"com/example/Greeter.class", "CAFEBABE"},
+        {"com/example/Greeter.java", "package com.example;"},
+    };
+    check(taocode::zip::write_archive(root / L"lib" / L"demo.jar", entries) == entries.size(), "写出 demo.jar");
+}
+
+/** 走桥的那条分派：`file.archiveEntries` 归 native/file_queries.cpp 认领。 */
+Json ask_archive_entries(const std::string& path) {
+    taocode::Workspace workspace;
+    const Json params{{"path", path}};
+    Json result;
+    const bool claimed = taocode::dispatch_file_query("file.archiveEntries", params, workspace, result);
+    check(claimed, "分派器应当认领 file.archiveEntries");
+    return result;
 }
 
 std::string read_all(const fs::path& file) {
@@ -114,6 +143,48 @@ int main() {
               "命中要有四个字段");
         const Json miss = taocode::library_source_json(taocode::find_library_source(root, L"cache", "nope"));
         check(miss.at("available") == false, "未命中 available=false");
+    });
+
+    run("宿主通道：bsdtar -tf 列出归档条目，路径恒用斜杠", [&] {
+        const auto root = fresh_root();
+        install_listing_jar(root);
+        const auto answer = ask_archive_entries(taocode::detail::utf8_path(root / L"lib" / L"demo.jar"));
+        check(answer.at("available") == true, "应当列出条目：" + answer.value("reason", std::string()));
+        check(answer.at("truncated") == false, "六个条目不至于截断");
+        const auto lines = answer.at("lines").get<std::vector<std::string>>();
+        check(lines.size() == 6, "六个条目，实得 " + std::to_string(lines.size()));
+        const auto has = [&](const std::string& want) {
+            return std::find(lines.begin(), lines.end(), want) != lines.end();
+        };
+        check(has("com/example/Greeter.class"), "类条目要在");
+        check(has("com/example/Greeter.java"), "源码条目要在");
+        check(has("META-INF/MANIFEST.MF"), "清单条目要在");
+        check(has("com/example/"), "目录条目带尾斜杠（是不是目录交给呈现层判，同一份规则只有一份）");
+        for (const auto& line : lines) {
+            check(line.find('\\') == std::string::npos, "档案内路径不出现反斜杠：" + line);
+            check(line.rfind("./", 0) != 0, "去掉 ./ 前缀：" + line);
+            check(!line.empty(), "不交空行");
+        }
+        check(answer.at("archive").get<std::string>().find("demo.jar") != std::string::npos, "回显是哪个归档");
+    });
+
+    run("拿不到就如实说拿不到：不给 lines 字段（前端据此整块不渲染）", [&] {
+        const auto root = fresh_root();
+        install_listing_jar(root);
+        std::ofstream(root / L"lib" / L"notes.txt") << "not an archive";
+        for (const auto* bad : {"", "lib/demo.jar", "C:/no/such/dir/none.jar"})
+            check(ask_archive_entries(bad).at("available") == false, std::string("应当拿不到：") + bad);
+        const auto wrong_type = ask_archive_entries(taocode::detail::utf8_path(root / L"lib" / L"notes.txt"));
+        check(wrong_type.at("available") == false, "非归档扩展名要拒");
+        check(!wrong_type.contains("lines"), "拒的时候不能带 lines —— 否则前端会把空清单当真实数据画出来");
+        check(!wrong_type.value("reason", std::string()).empty(), "要说清为什么拿不到");
+    });
+
+    run("未知方法不归这条分派表管（按整名匹配，不能前缀命中）", [&] {
+        taocode::Workspace workspace;
+        Json result;
+        check(!taocode::dispatch_file_query("file.archiveEntriesTypo", Json{{"path", "x.jar"}}, workspace, result),
+              "只认 file.archiveEntries 这一个名字");
     });
 
     std::cout << passed << " passed, " << failures << " failed\n";

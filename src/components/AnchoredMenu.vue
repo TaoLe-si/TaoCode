@@ -14,6 +14,13 @@ import { usePopupAnchor } from '../popupAnchor'
 const props = defineProps<{ x: number; y: number }>()
 const box = ref<HTMLElement>()
 const { style } = usePopupAnchor(box, () => ({ x: props.x, y: props.y }))
+/**
+ * 把这一层的 DOM 根节点露给宿主：全局弹层栈（`src/popupStack.ts` 的 `usePopupLayer`）要拿它
+ * 量矩形（`StackingPopupDispatcherImpl.java:116-164` 判"落点在哪一层里面"）也判
+ * 「焦点进了弹层没有」（`ToolWindowManagerLifecycle.kt:131` 的 `getParentBalloonFor`，
+ * 本仓 `popupHasFocusWithin`）。不露出来，宿主就只能自己再包一层 div —— 那等于同一层量两次矩形。
+ */
+defineExpose({ box })
 </script>
 
 <template>

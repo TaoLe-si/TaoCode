@@ -1,7 +1,7 @@
 import { EditorView, GutterMarker, gutter } from '@codemirror/view'
 import type { Extension, Range } from '@codemirror/state'
 import { RangeSet, StateEffect, StateField } from '@codemirror/state'
-import type { BlameAnnotation } from './blameAnnotations'
+import type { BlameAnnotation } from './blameAnnotations.ts'
 
 export type { BlameAnnotation } from './blameAnnotations'
 

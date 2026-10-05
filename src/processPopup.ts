@@ -15,7 +15,8 @@ export interface RunningTask<C = unknown> {
   /**
    * 0-100 的完成度；`null`/缺省 = **不确定式**（上游那条判据：`ExternalSystemTaskProgressIndicatorUpdater.kt`
    * 的 `if (total <= 0) indicator.setIndeterminate(true)` —— 拿不到总数就不画百分比，而不是编一个）。
-   * 弹窗里每行本身就是一条进度条（`ProcessPopup.java:331` 遍历的行里有 `JProgressBar`）。
+   * 弹窗里每行本身就是一条进度条（`ProgressComponent.kt:55`/`:66` 的 `progress: JProgressBar`，
+   * 不确定式 vs 确定式由 `ProgressComponent.kt:190-198` 决定）。
    */
   percent?: number | null
 }

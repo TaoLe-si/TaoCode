@@ -9,7 +9,28 @@ export interface GitLog { commits: GitCommit[] }
 export interface GitRef { name: string; type: 'local' | 'remote' | 'tag' | 'head' }
 export interface GitFullCommit { hash: string; shortHash: string; author: string; date: string; subject: string; parents: string[]; refs: GitRef[] }
 export interface GitFullLog { commits: GitFullCommit[]; offset: number; limit: number; hasMore: boolean }
-export interface GitLogQuery { limit?: number; offset?: number; refs?: string[]; author?: string; text?: string; since?: string; until?: string; path?: string }
+/** 提交图排序档（`PermanentGraph.SortType`）：`topological` = 拓扑序，`date` = 按提交日期。 */
+export type GitLogSort = 'date' | 'topological'
+export interface GitLogQuery {
+  limit?: number
+  offset?: number
+  refs?: string[]
+  author?: string
+  text?: string
+  since?: string
+  until?: string
+  path?: string
+  /** `Vcs.Log.EnableFilterByRegexAction`（正则表达式）：`text` 按正则而不是字面量匹配。缺省 false。 */
+  textRegex?: boolean
+  /** `Vcs.Log.MatchCaseAction`（区分大小写）：缺省 false，即默认忽略大小写。 */
+  matchCase?: boolean
+  /** 图选项的排序档（`graph.sort.standard` / `graph.sort.off`）。缺省 `date`。 */
+  sort?: GitLogSort
+  /** `graph.options.first.parent`（第一个父项）。缺省 false。 */
+  firstParent?: boolean
+  /** `vcs.log.filter.no.merges`（无合并）：只留非合并提交。缺省 false。 */
+  noMerges?: boolean
+}
 export interface GitCommitDetails {
   revision: string; hash: string; shortHash: string; author: string; authorEmail: string; date: string
   committer: string; committerEmail: string; committerDate: string; parents: string[]; message: string; containingBranches: string[]

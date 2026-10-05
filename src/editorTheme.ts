@@ -10,6 +10,7 @@ import { EditorView } from '@codemirror/view'
 import { EditorState, type Extension } from '@codemirror/state'
 import { tags } from '@lezer/highlight'
 import { semanticHighlightThemeRules } from './editorSemanticColors.ts'
+import { lineNumerationExtension, type LineNumeration } from './editorLineNumbers.ts'
 
 /** 词法着色（`HighlightStyle`）：九档色相，全部走 tokens.css 的 `--syntax-*`。 */
 export const syntaxColors = HighlightStyle.define([
@@ -48,7 +49,14 @@ export function editorTheme({ fontSize, lineNumbers, dark }: EditorThemeOptions)
     '.cm-gutter-icon.clickable': { cursor: 'pointer' },
     '.cm-line.cm-debug-line': { backgroundColor: 'var(--debug-line)' },
     '.cm-lsp-highlight': { backgroundColor: 'var(--symbol-highlight)', borderRadius: '2px' },
+    // 「高亮用法」的临时高亮（`src/usageHighlightExtension.ts`，上游 `HighlightUsagesAction`）：
+    // 与 LSP documentHighlight 同一档底色，光标所在那条再叠一圈强调色。
+    '.cm-usageHighlight': { backgroundColor: 'var(--symbol-highlight)', borderRadius: '2px' },
+    '.cm-usageHighlight-current': { backgroundColor: 'var(--accent-soft)', outline: '1px solid var(--accent)' },
     '.cm-lsp-inlay': { color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.92em' },
+    // 行内调试值（`src/editorInlineValues.ts`，上游 `InlineDebugRenderer`）：值的小字比
+    // inlay 再淡一档，不抢代码的阅读。
+    '.cm-inline-value': { color: 'var(--muted)', fontStyle: 'italic', fontSize: '0.9em', opacity: '0.9' },
     '.cm-selectionBackground': { backgroundColor: 'var(--selection-inactive)' },
     '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
     '&.cm-focused': { outline: 'none' },
@@ -63,19 +71,28 @@ export function editorTheme({ fontSize, lineNumbers, dark }: EditorThemeOptions)
   }, { dark })
 }
 
-export interface EditorOptionInput { tabSize: number; indentUnit: string; wordWrap: boolean; lineNumbers: boolean; showWhitespaces: boolean }
+export interface EditorOptionInput { tabSize: number; indentUnit: string; wordWrap: boolean; lineNumbers: boolean; showWhitespaces: boolean; lineNumeration: LineNumeration }
 
 /**
  * 编辑器的那几条状态扩展（制表符/换行/行号/空白可视化）。
  * 从 `CodeEditor.vue` 拆出来（那个文件贴着机检上限）；`EditorState`/`indentUnit` 的用法与
  * 组件里那处逐字相同 —— 只是参数从 props 变成了入参。
+ *
+ * 行号排法（`lineNumeration`）里的相对/混合两档不改进内建 gutter 的格式，而是换一棵
+ * `.cm-relative-line-numbers`（见 `src/editorLineNumbers.ts` 头部的取舍说明），
+ * 所以这里要同时控制两棵 gutter 的显隐。
  */
 export function editorOptionExtensions(input: EditorOptionInput, heavy: boolean, whitespaceLayer: Extension): Extension[] {
+  const relative = input.lineNumeration !== 'absolute'
   return [
     EditorState.tabSize.of(input.tabSize),
     indentUnit.of(input.indentUnit),
     input.wordWrap && !heavy ? EditorView.lineWrapping : [],
-    EditorView.theme({ '.cm-lineNumbers': { display: input.lineNumbers ? 'flex' : 'none' } }),
+    EditorView.theme({
+      '.cm-lineNumbers': { display: input.lineNumbers && !relative ? 'flex' : 'none' },
+      '.cm-relative-line-numbers': { display: input.lineNumbers && relative ? 'flex' : 'none' },
+    }),
+    relative ? lineNumerationExtension(input.lineNumeration) : [],
     // "Show whitespaces": every space becomes a faint dot and every tab an arrow.
     input.showWhitespaces ? whitespaceLayer : [],
   ]

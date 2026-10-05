@@ -37,7 +37,9 @@
 #include "run_host.hpp"
 #include "search.hpp"
 #include "dap.hpp"
+#include "dap_routes.hpp"
 #include "terminal.hpp"
+#include "trusted_paths.hpp"
 #include "history.hpp"
 #include "history_store_key.hpp"
 #include "session.hpp"
@@ -109,7 +111,7 @@ void check(HRESULT result, const char* operation) {
     if (FAILED(result)) throw std::runtime_error(std::string(operation) + " failed (HRESULT " + std::to_string(static_cast<unsigned long>(result)) + ")");
 }
 
-struct App {
+struct App : taocode::dap::RouteHost {
     HWND window{};
     fs::path ui;
     fs::path profile;
@@ -341,8 +343,18 @@ struct App {
         catch (const Json::exception&) { dap_config = Json::object(); }
     }
 
+    // 应用级设置里的 `general` 段（受信任清单就在里面）。每次现读：设置可能刚被前端改过，
+    // 执行侧的判定必须用最新一份（`ProjectStore` 每次操作都在进程锁下重读状态文件）。
+    Json general_settings() {
+        Json state = projects->state();
+        if (state.is_object() && state.contains("general") && state.at("general").is_object()) return state.at("general");
+        return Json::object();
+    }
+
     taocode::dap::Client& require_dap() {
         if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+        // 调试会真的执行目标程序，所以未信任项目在这里就被拦住（上游对执行侧的统一做法）。
+        taocode::trusted::require_trusted(general_settings(), current_root, "调试");
         if (!dap) {
             load_dap_config();
             dap = std::make_unique<taocode::dap::Client>();
@@ -356,6 +368,20 @@ struct App {
         }
         dap->set_root(fs::path(wide(current_root)));
         return *dap;
+    }
+
+    // `dap.*` 一族的分派体在 native/dap_routes.cpp（main.cpp 贴着 2000 行硬上限）——
+    // 这里只把路由函数要的宿主面接上，逻辑仍是本类原有的那几个方法。
+    taocode::dap::Client& route_client() override { return require_dap(); }
+    Json route_registry() override { load_dap_config(); return dap_config; }
+    std::string route_root() const override { return current_root; }
+    void route_reply(Json id, Json result, Json error) override {
+        dap_reply(std::move(id), std::move(result), std::move(error));
+    }
+    void route_stop() noexcept override { stop_dap(); }
+    Json route_breakpoints() override { return dap ? dap->breakpoint_map() : Json::object(); }
+    taocode::dap::Client::EventCb route_event_sink() override {
+        return [this](Json event) { queue_dap({{"event", "dap.event"}, {"payload", std::move(event)}}); };
     }
 
     // NOTE: `workspace/applyEdit` is implemented inside taocode::lsp::Session
@@ -814,7 +840,13 @@ struct App {
             if (clone_active && (method == "workspace.open" || method == "workspace.close" || method == "project.create" || method == "project.clone" || method == "project.settings.update" || method == "file.create" || method == "file.rename" || method == "file.delete"))
                 throw taocode::WorkspaceError("BUSY", "请先等待克隆完成或取消克隆。");
             Json result;
-            if (auto it = routes.find(method); it != routes.end()) result = it->second(params);
+            // `dap.*` 一族（含 loadedSources/modules 的按需重取、反向调试、内存/反汇编）在
+            // native/dap_routes.cpp —— main.cpp 贴着 2000 行硬上限，新能力一律抽模块
+            // （与 native/file_queries.cpp 同一种拆法；异步答复已由宿主回调送出，这里直接 return）。
+            const auto dap_route = taocode::dap::dispatch_dap_route(method, params, request["id"], *this, result);
+            if (dap_route == taocode::dap::RouteOutcome::answered_async) return;
+            if (dap_route != taocode::dap::RouteOutcome::unhandled) {}  // result 已由 dap 路由填好
+            else if (auto it = routes.find(method); it != routes.end()) result = it->second(params);
             // 文件/系统侧的只读查询（七条）在 native/file_queries.cpp —— main.cpp 贴着 2000 行上限。
             else if (workspace && taocode::dispatch_file_query(method, params, *workspace, result)) {}
             else switch (fnv1a(method)) {
@@ -913,8 +945,15 @@ struct App {
                     // JDT LS 用它去起 Gradle 同步（缺了它，老 Gradle 在服务器的 JRE 21 上起不来）。
                     const auto java = result.at("settings").value("java", Json::object());
                     const auto build_tools = result.at("settings").value("buildTools", Json::object());
-                    lsp_worker->post([this, java, build_tools] {
-                        if (lsp) lsp->set_configuration("java", taocode::java_lsp_settings(java, build_tools, taocode::default_referenced_libraries(current_root, build_tools.value("gradle", Json::object())), taocode::import_exclusions(current_root, build_tools.value("gradle", Json::object())), taocode::default_source_paths(current_root, build_tools.value("gradle", Json::object()))));
+                    // 根目录**按值**带走：`current_root` 是 UI 线程写的，在这里读是数据竞争
+                    // （换项目与改设置并发时会拿错根，把别处的 jar 物化成 Eclipse 工程）。
+                    const auto root = current_root;
+                    lsp_worker->post([this, root, java, build_tools] {
+                        // 走同一个 java_lsp_model：把「关掉 Gradle 导入」这个开关在设置页上翻过来时，
+                        // Eclipse 工程（`.project`/`.classpath`）也得当场物化出来 —— 那是"解析外部"
+                        // 真正落地的东西（workspace folder 属于 initialize 参数，要重开会话，见
+                        // src/components/GradleSettingsPage.vue 里那一行提示）。
+                        if (lsp) lsp->set_configuration("java", taocode::java_lsp_model(fs::path(wide(root)), java, build_tools).settings);
                     });
                 }
                 break;
@@ -1064,6 +1103,8 @@ struct App {
             }
             case "run.start"_h: {
                 if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
+                // 未信任项目的硬边界：构建 / 运行 / 外部工具 / 复合配置全走这一条。
+                taocode::trusted::require_trusted(general_settings(), current_root, "构建 / 运行");
                 // 参数解析、Before launch 链、多实例与 `isAllowRunningInParallel` 语义都在
                 // native/run_host.cpp —— 这一层只把结果（实例 id）回给前端。
                 result = runs->start(params, fs::path(wide(current_root)));
@@ -1160,6 +1201,7 @@ struct App {
             case "git.branch.create"_h: { taocode::git::create_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>(), params.value("checkout", false)); result = {{"ok", true}}; } break;
             case "git.branch.delete"_h: { taocode::git::delete_branch(fs::path(wide(require_repo_root())), params.at("name").get<std::string>()); result = {{"ok", true}}; } break;
             case "git.revert"_h: { taocode::git::revert(fs::path(wide(require_repo_root())), params.at("path").get<std::string>()); result = {{"ok", true}}; } break;
+            case "git.revertCommit"_h: { taocode::git::revert_commit(fs::path(wide(require_repo_root())), params.at("commit").get<std::string>()); result = {{"ok", true}}; } break;
             case "git.reset"_h: {
                 result = taocode::git::reset(fs::path(wide(require_repo_root())), params.at("target").get<std::string>(), params.value("mode", std::string("mixed")));
                 break;
@@ -1318,207 +1360,9 @@ struct App {
                 });
                 return;  // asynchronous; delivered by drain_search
             }
-            case "dap.start"_h: {
-                if (current_root.empty()) throw taocode::WorkspaceError("NOT_OPEN", "请先打开项目。");
-                load_dap_config();
-                auto& client = require_dap();
-                client.shutdown();  // restart semantics: reap any prior adapter first
-                const auto kind = params.value("kind", std::string("cppvsdbg"));
-                const Json entry = dap_config.is_object() ? dap_config.value(kind, Json::object()) : Json::object();
-                auto command = params.value("command", std::string());
-                if (command.empty()) command = entry.value("command", std::string());
-                if (command.empty()) throw taocode::WorkspaceError("DAP_NO_ADAPTER", "未找到调试适配器：请在 exe 旁的 TaoCode.dap.json 为 kind \"" + kind + "\" 配置 command。");
-                std::vector<std::wstring> arguments;
-                const Json args_src = params.contains("args") ? params.at("args") : (entry.contains("args") ? entry.at("args") : Json::array());
-                if (args_src.is_array()) for (const auto& item : args_src) if (item.is_string()) arguments.push_back(wide(item.get<std::string>()));
-                auto cwd = params.value("cwd", std::string());
-                if (cwd.empty()) cwd = entry.value("cwd", std::string());
-                if (cwd.empty()) cwd = current_root;
-                Json configuration{{"name", "TaoCode"}, {"kind", kind},
-                                   {"request", entry.value("request", std::string("launch"))},
-                                   {"program", params.value("program", std::string())}, {"cwd", cwd},
-                                   {"stopOnEntry", params.value("stopOnEntry", false)}};
-                if (params.contains("args")) configuration["args"] = params.at("args");
-                if (params.contains("env")) configuration["env"] = params.at("env");
-                if (params.contains("configuration") && params.at("configuration").is_object())
-                    for (auto& item : params.at("configuration").items()) configuration[item.key()] = item.value();
-                const auto id = request["id"];
-                client.start(wide(command), arguments, fs::path(wide(cwd)),
-                             [this](Json event) { queue_dap({{"event", "dap.event"}, {"payload", std::move(event)}}); });
-                client.start_debugging(kind, std::move(configuration), [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;  // async; delivered through drain_dap
-            }
-            case "dap.setBreakpoints"_h: {
-                auto& client = require_dap();
-                if (!params.contains("breakpoints") || !params.at("breakpoints").is_array())
-                    throw taocode::WorkspaceError("INVALID_REQUEST", "breakpoints 必须是数组（{line, condition?…}）。");
-                for (const auto& point : params.at("breakpoints")) {
-                    if (!point.is_object() || !point.contains("line") || !point.at("line").is_number_integer())
-                        throw taocode::WorkspaceError("INVALID_REQUEST", "断点必须带有整数 line。");
-                    }
-                const auto id = request["id"];
-                client.set_breakpoints(params.at("path").get<std::string>(), params.at("breakpoints"),
-                                       [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;
-            }
-            case "dap.continue"_h: case "dap.pause"_h: case "dap.next"_h: case "dap.stepIn"_h: case "dap.stepOut"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto thread = static_cast<long>(params.value("threadId", 1));
-                const auto id = request["id"];
-                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
-                if (method == "dap.continue") client.continue_execution(thread, params.value("all", false), cb);
-                else if (method == "dap.pause") client.pause(thread, cb);
-                else if (method == "dap.next") client.next(thread, cb);
-                else if (method == "dap.stepIn") client.step_in(thread, cb);
-                else client.step_out(thread, cb);
-                return;
-            }
-            case "dap.stackTrace"_h: case "dap.scopes"_h: case "dap.variables"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
-                if (method == "dap.stackTrace") client.stack_trace(static_cast<long>(params.value("threadId", 1)), cb);
-                else if (method == "dap.scopes") client.scopes(static_cast<long>(params.value("frameId", 0)), cb);
-                else client.variables(static_cast<long>(params.value("reference", 0)), cb);
-                return;
-            }
-            // IDEA 的 XValue.setValue（Variables 树里改值）与 Watches 视图的「Set Value」。
-            case "dap.setVariable"_h: case "dap.setExpression"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
-                const auto value = params.value("value", std::string());
-                if (method == "dap.setVariable") {
-                    const auto name = params.value("name", std::string());
-                    if (name.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "setVariable 需要变量名。");
-                    client.set_variable(static_cast<long>(params.value("reference", 0)), name, value, cb);
-                }
-                else {
-                    const auto expression = params.value("expression", std::string());
-                    if (expression.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "setExpression 需要表达式。");
-                    client.set_expression(expression, value, static_cast<long>(params.value("frameId", 0)), cb);
-                }
-                return;
-            }
-            case "dap.evaluate"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
-                client.request("evaluate", {{"expression", params.value("expression", std::string())},
-                                            {"context", params.value("context", std::string("hover"))},
-                                            {"frameId", params.value("frameId", 0)}}, cb);
-                return;
-            }
-            case "dap.breakpoints"_h: { result = {{"breakpoints", dap ? dap->breakpoint_map() : Json::object()}}; } break;
-            case "dap.setExceptionBreakpoints"_h: {
-                require_dap().set_exception_breakpoints(params.at("filters"), [this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;  // async; delivered through drain_dap
-            }
-            case "dap.breakpointLocations"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto path = params.value("path", std::string());
-                // 空路径会被 `to_uri("")` 解释成工作区根目录，适配器只能答"没有位置" ——
-                // 那不是"这一行不能放断点"，而是调用方忘了传。别让它伪装成前者。
-                if (path.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "断点位置预览需要一个文件路径。");
-                const auto id = request["id"];
-                client.breakpoint_locations(path, static_cast<long>(params.value("line", 0)),
-                                            static_cast<long>(params.value("endLine", 0)),
-                                            static_cast<long>(params.value("column", 0)),
-                                            static_cast<long>(params.value("endColumn", 0)),
-                                            [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-            } break;
-            case "dap.completions"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto text = params.value("text", std::string());
-                if (text.empty()) throw taocode::WorkspaceError("INVALID_REQUEST", "补全需要一段表达式文本。");
-                const auto id = request["id"];
-                // 规范里 `column` 是 **1 基**（"The position within `text` ... (1-based)"），
-                // 所以缺省值是"光标在末尾"= length + 1，不是 length。
-                client.completions(text, static_cast<long>(params.value("column", text.size() + 1)),
-                                   static_cast<long>(params.value("frameId", 0)),
-                                   static_cast<long>(params.value("line", 0)),
-                                   [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-            } break;
-            case "dap.exceptionInfo"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                const auto cb = [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); };
-                client.exception_details(static_cast<long>(params.value("threadId", 1)), cb);
-            } break;
-            case "dap.threads"_h: {
-                require_dap().threads([this, id = request["id"]](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;  // async; delivered through drain_dap
-            }
-            // IDEA 的「运行到光标处」（Alt+F9）：先 gotoTargets 问目标，再 goto 跳过去。
-            case "dap.gotoTargets"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                client.goto_targets(params.value("path", std::string()), static_cast<long>(params.value("line", 1)),
-                                    static_cast<long>(params.value("column", 0)),
-                                    [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;
-            }
-            case "dap.goto"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                client.goto_target(static_cast<long>(params.value("threadId", 1)),
-                                   static_cast<long>(params.value("targetId", 0)),
-                                   [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;
-            }
-            // IDEA Frames 视图的「丢弃帧」。
-            case "dap.restartFrame"_h: {
-                auto& client = require_dap();
-                if (!client.running()) throw taocode::WorkspaceError("DAP_NOT_RUNNING", "调试会话未运行。");
-                const auto id = request["id"];
-                client.restart_frame(static_cast<long>(params.value("frameId", 0)),
-                                     [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;
-            }
-            // IDEA 的「停止」：先让适配器 terminate（不支持该请求的适配器退化成
-            // disconnect{terminateDebuggee:true}），**回调里**再收摊 —— 以前两个方法都只是
-            // stop_dap()，等于从不发 DAP 的 terminate/disconnect，目标进程的去留全靠杀 job。
-            case "dap.terminate"_h: {
-                auto& client = require_dap();
-                const auto id = request["id"];
-                client.terminate([this, id](Json, Json error) {
-                    stop_dap();
-                    dap_reply(id, Json{{"ok", true}}, error);
-                });
-                return;
-            }
-            // IDEA 的「断开」：`terminate: false` 只断开、留着目标进程继续跑（远程附加的常见诉求）；
-            // 缺省 true 与「停止」一致。断开后客户端被丢弃，下一次 start 会拿到全新的适配器。
-            case "dap.disconnect"_h: {
-                auto& client = require_dap();
-                const auto id = request["id"];
-                const bool terminate_debuggee = params.value("terminate", true);
-                client.disconnect(terminate_debuggee, [this, id](Json, Json error) {
-                    stop_dap();
-                    dap_reply(id, Json{{"ok", true}}, error);
-                });
-                return;
-            }
-            // IDEA 的「重新运行」（Ctrl+F5）：适配器声明了 supportsRestartRequest 就原地重启，
-            // 否则回 DAP_UNSUPPORTED，调用方退化成"停止 + 重新启动"。
-            case "dap.restart"_h: {
-                auto& client = require_dap();
-                const auto id = request["id"];
-                Json arguments = params.contains("arguments") && params.at("arguments").is_object()
-                                     ? params.at("arguments") : Json::object();
-                client.restart(std::move(arguments), [this, id](Json r, Json e) { dap_reply(id, std::move(r), std::move(e)); });
-                return;
-            }
             case "term.create"_h: {
+                // 未信任项目的硬边界：终端会执行磁盘上的任何东西（上游把终端归在执行侧门控里）。
+                taocode::trusted::require_trusted(general_settings(), current_root, "打开终端");
                 // The cwd defaults to the workspace root when the caller omits it
                 // (IDEA's "Open Terminal Here" needs a per-directory cwd).
                 std::wstring cwd;
@@ -1683,7 +1527,7 @@ struct App {
             "git.user", "git.authors", "git.diff", "git.patch", "git.diffHunks", "git.diffSides", "git.compare", "git.applyHunks",
             "git.log", "git.logFull", "git.commitDetails", "git.commitChanges", "git.commitFileDiff", "git.showCommit", "git.blame", "git.fileHistory",
             "git.checkout", "git.branch.create", "git.branch.delete", "git.merge",
-            "git.revert", "git.reset",
+            "git.revert", "git.revertCommit", "git.reset",
             "git.tags", "git.tag.create", "git.tag.delete", "git.ignore",
             "git.fetch", "git.pull", "git.push", "git.aheadBehind",
             "git.stash", "git.stash.save", "git.stash.pop",

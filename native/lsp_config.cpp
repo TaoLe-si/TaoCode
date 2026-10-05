@@ -70,42 +70,15 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
         const auto gradle = settings.value("buildTools", Json::object()).value("gradle", Json::object());
         const auto libraries = default_referenced_libraries(project_root, gradle);
         const auto sources = default_source_paths(project_root, gradle);
-        // 排除模式只在**导入开着**时才发：它的用途是"别去同步那些没链接的 Gradle 工程"
-        // （Buildship 反正也不理它），而关掉导入之后它只会多一层风险 —— JDT 的普通文件夹扫描
-        // 会不会被自己的排除模式挡掉，这一条在真机上还没排除干净（"non-project file" 那个诊断）。
-        const auto excluded = gradle.value("enabled", true) ? import_exclusions(project_root, gradle)
-                                                            : std::vector<std::string>();
-        // 关掉 Gradle 导入时，把"已算好的模型"物化成 Eclipse 工程交给 JDT 自带的
-        // EclipseProjectImporter（真机诊断：不这么做，源根在子工程里的文件永远只是
-        // "non-project file"，语义一律不解析）。只写缺失的文件，绝不覆盖既有配置。
-        int materialized = 0;
-        if (!gradle.value("enabled", true)) {
-            const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
-            if (linked.is_array())
-                for (const auto& entry : linked)
-                    if (entry.is_string())
-                        materialized += materialize_eclipse_project(project_root / from_utf8(entry.get<std::string>()),
-                                                                   sources, libraries);
-        }
-        servers.at("java").settings = java_lsp_settings(java, settings.value("buildTools", Json::object()), libraries,
-                                                       excluded, sources);
-        // 关掉 Gradle 导入时，LSP 的 workspace folder **只声明链接的子工程**（源根/类路径兜底的第一段）：
-        // 声明工作区根会让 JDT 把根下每个带 `.project` 的目录都当工程导入（真机实测：6 个工程、
-        // 2100+ 批诊断、typeDefinition 超时）；`java.import.exclusions` 对那条导入路径不生效，
-        // `changeImportedProjects` 的移除档也停不下它们的编译（两条都实测过）。
-        if (!gradle.value("enabled", true)) {
-            std::vector<std::string> tops;
-            const auto push_top = [&tops](const std::vector<std::string>& list) {
-                for (const auto& entry : list) {
-                    const auto slash = entry.find_first_of("/\\");
-                    const auto top = slash == std::string::npos ? entry : entry.substr(0, slash);
-                    if (!top.empty() && std::find(tops.begin(), tops.end(), top) == tops.end()) tops.push_back(top);
-                }
-            };
-            push_top(sources);
-            push_top(libraries);
-            if (!tops.empty()) servers.at("java").workspace_folders = std::move(tops);
-        }
+        // 「让语言服务看到外部」只有这一条路：类路径/源根/导入排除的算法与 Eclipse 工程的物化都在
+        // java_lsp_model 里（设置变更那条路也调它，见 native/main.cpp 的 `project.settings.update`）。
+        const auto model = taocode::java_lsp_model(project_root, java, settings.value("buildTools", Json::object()));
+        servers.at("java").settings = model.settings;
+        // 关掉 Gradle 导入时，workspace folder 只留**建了 Eclipse 工程的那几个目录**：声明工作区根
+        // 会让 JDT 把根下每个带 `.project` 的目录都当工程导入（真机实测：6 个工程、2100+ 批诊断、
+        // typeDefinition 超时）；`java.import.exclusions` 对那条导入路径不生效，`changeImportedProjects`
+        // 的移除档也停不下它们的编译（两条都实测过）。子工程就是根时（`project_dirs` 为空）保持默认。
+        if (!model.project_dirs.empty()) servers.at("java").workspace_folders = model.project_dirs;
         // 把"实际发给语言服务的那份"记进诊断日志（`TAOCODE_LSP_TRACE` 只记方法名，不记 body）——
         // "外部的类解析不了"这类问题第一步就要看它：源根/类路径到底有没有、链接工程读没读到。
         taocode::diagnostics::event(local_data_root(), "INFO",
@@ -113,7 +86,7 @@ std::map<std::string, Session::ServerConfig> resolve_servers(
             " 个、源根 " + std::to_string(sources.size()) + " 条" + (sources.empty() ? std::string() : "（" + sources.front() + "）") +
             "、类路径兜底 " + std::to_string(libraries.size()) + " 条" + (libraries.empty() ? std::string() : "（" + libraries.front() + "）") +
             "、导入 " + (gradle.value("enabled", true) ? "开" : "关") +
-            (materialized ? "、物化 Eclipse 工程 " + std::to_string(materialized) + " 个文件" : ""));
+            (model.files ? "、物化 Eclipse 工程 " + std::to_string(model.files) + " 个文件" : ""));
     }
     return servers;
 }

@@ -172,6 +172,20 @@ export type GradleRunSettings = BuildToolsGradleSettings
 export const GRADLE_USE_PROJECT_JDK = '#USE_PROJECT_JDK'
 
 /**
+ * 「Gradle JVM」的第二档 —— `ExternalSystemJdkUtil.USE_JAVA_HOME`（`ExternalSystemJdkUtil.java:53`）：
+ * **用环境变量 `JAVA_HOME`**（上游 `matchJdkName` 的第二分支，没设就抛 `UndefinedJavaHomeException`）。
+ *
+ * 本仓的等价物不需要额外通道：宿主起子进程时**先继承父进程整个环境块**再盖上覆盖项
+ * （`native/runner.cpp:28-69` 的 `environment_block`），所以「不覆盖 `JAVA_HOME`」就是
+ * 「用环境变量 `JAVA_HOME`」—— 覆盖表里没有这一项，子进程就沿用宿主自己的那个值。
+ * 上游那条 `UndefinedJavaHomeException`（宿主没设 `JAVA_HOME` 时报错）本仓**无法核实**：
+ * 宿主没有读环境变量的通道（`native/main.cpp` 的 Method 清单里只有 `app.jdks`，没有 env 读取），
+ * 所以这里只能让 Gradle 自己按继承来的环境变量走，报不报由 Gradle 决定，不在这里编一个判断。
+ */
+export const GRADLE_USE_JAVA_HOME = '#JAVA_HOME'
+
+
+/**
  * 「构建并运行使用」的默认档 —— `GradleProjectSettings.java:40` `DEFAULT_DELEGATE = true`
  * （`:67` 构造时赋这个值，`:164` 读取时也用 `notNull(…, DEFAULT_DELEGATE)` 兜底）。
  * 也就是：**默认把构建与运行都交给 Gradle**。
@@ -295,21 +309,26 @@ export function parseGradleTasks(output: string): GradleTaskNode[] {
   const tasks: GradleTaskNode[] = []
   const lines = output.split(/\r?\n/)
   let group = 'Other tasks'
+  let inTasks = false
   for (let index = 0; index < lines.length; ++index) {
     const line = lines[index]!
     const next = lines[index + 1] ?? ''
     // 分组标题：下一行是纯 `-----`（长度不限，至少 3 个）
     if (line.trim() && /^-{3,}\s*$/.test(next.trim()) && /^[A-Z][A-Za-z ]*$/.test(line.trim())) {
-      group = line.trim()
+      inTasks = / tasks$/i.test(line.trim())
+      if (inTasks) group = line.trim()
       ++index
       continue
     }
-    const match = /^([A-Za-z][\w:.-]*)\s+-\s+(.+)$/.exec(line.trim())
+    if (/^(?:BUILD |To see |Rules$)/.test(line.trim())) inTasks = false
+    if (!inTasks) continue
+    const match = /^(:?[A-Za-z][\w:.-]*)(?:\s+-\s+(.+))?$/.exec(line.trim())
     if (!match) continue
     const name = match[1]!
     // `help -` 这类空描述、以及 `gradle tasks` 自己输出的表格线都不算任务
-    if (GRADLE_PSEUDO_TASKS.has(name)) continue
-    tasks.push({ name, description: match[2]!.trim(), group })
+    if (GRADLE_PSEUDO_TASKS.has(name) || /^(?:BUILD|Deprecated|Rules|To|For|Configuration)$/.test(name)) continue
+    if (tasks.some(task => task.name === name)) continue
+    tasks.push({ name, description: (match[2] ?? '').trim(), group })
   }
   return tasks
 }
@@ -380,6 +399,20 @@ export interface GradleSyncResult {
   error: string
   /** 毫秒时间戳（0 = 还没同步过）。 */
   at: number
+  /** Frontend-owned models; the native CLI/event schema remains unchanged. */
+  linkedProjects?: GradleLinkedProject[]
+  workspaceRoot?: string
+  busy?: boolean
+}
+
+export interface GradleLinkedProject {
+  directory: string
+  detection: GradleDetection | null
+  detectionError: string
+  result: GradleSyncResult
+  dependencies: GradleDependencyScope[]
+  dependenciesLoaded: boolean
+  message: string
 }
 
 export const EMPTY_GRADLE_SYNC: GradleSyncResult = { projects: [], tasks: [], command: '', error: '', at: 0 }
@@ -538,6 +571,80 @@ export function tasksByGroup(tasks: readonly GradleTaskNode[]): { group: string;
 /** 跑一个 Gradle 任务时的命令行（任务树双击 = IDEA 的 `GradleRunConfiguration`，这里走 run 通道）。 */
 export function gradleTaskCommand(detection: GradleDetection, settings: GradleRunSettings, task: string): string {
   return gradleCommand(detection, settings, task)
+}
+
+/** CLI names app:build and :app:build both belong to :app; unqualified names belong to :. */
+export function gradleTaskProject(name: string): string {
+  const parts = name.replace(/^:/, '').split(':')
+  return parts.length > 1 ? `:${parts.slice(0, -1).join(':')}` : ':'
+}
+
+/**
+ * 任务名的**短名**（`:app:build` → `build`，`app:build` → `build`，`build` → `build`）。
+ * 上游 `TaskData.getName()` 就是短名，运行配置名里用的也是它（`generateName` 拼的是 taskNames）。
+ */
+export function gradleTaskShortName(task: string): string {
+  const parts = task.replace(/^:/, '').split(':').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : task
+}
+
+/**
+ * 任务所属工程的**显示名**（`:app:build` → `app`，`:sub:app:build` → `app`，根工程 → 链接目录名或「根项目」）。
+ * 等价上游 `ExternalSystemUiAware.getProjectRepresentationName(project, externalProjectPath, rootProjectPath)`。
+ */
+export function gradleTaskProjectDisplayName(task: string, directory = ''): string {
+  const path = gradleTaskProject(task)
+  const segments = path.replace(/^:/, '').split(':').filter(Boolean)
+  if (segments.length) return segments[segments.length - 1]
+  return directory || '根项目'
+}
+
+export interface GradleProjectTreeNode {
+  project: GradleProjectNode
+  taskGroups: ReturnType<typeof tasksByGroup>
+  scopes: GradleDependencyScope[]
+}
+
+/** Each linked build owns its own ':' namespace; never merge two builds by project/task name. */
+export function gradleProjectTree(result: GradleSyncResult, scopes: readonly GradleDependencyScope[]): GradleProjectTreeNode[] {
+  const projects = [...result.projects]
+  const ensure = (path: string) => {
+    if (!projects.some(project => project.path === path))
+      projects.push({ path, name: path === ':' ? '根项目' : path.slice(1), depth: path === ':' ? 0 : path.split(':').length - 1 })
+  }
+  for (const task of result.tasks) ensure(gradleTaskProject(task.name))
+  for (const scope of scopes) ensure(scope.project.startsWith(':') ? scope.project : ':')
+  return projects.map(project => ({
+    project,
+    taskGroups: tasksByGroup(result.tasks.filter(task => gradleTaskProject(task.name) === project.path)),
+    scopes: scopes.filter(scope => (scope.project.startsWith(':') ? scope.project : ':') === project.path),
+  }))
+}
+
+/** Search the visible dependency text; retain ancestors so a hit never loses its tree context. */
+export function filterGradleDependencies(scopes: readonly GradleDependencyScope[], query: string): GradleDependencyScope[] {
+  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return [...scopes]
+  const matches = (text: string) => words.every(word => text.toLocaleLowerCase().includes(word))
+  return scopes.flatMap(scope => {
+    if (matches(`${scope.project} ${scope.configuration} ${scope.description}`)) return [scope]
+    const keep = new Set<number>()
+    const parents: number[] = []
+    scope.dependencies.forEach((dependency, index) => {
+      while (parents.length && scope.dependencies[parents[parents.length - 1]!]!.depth >= dependency.depth) parents.pop()
+      if (matches(`${dependency.name} ${dependency.resolved}`)) {
+        keep.add(index)
+        parents.forEach(parent => keep.add(parent))
+      }
+      parents.push(index)
+    })
+    return keep.size ? [{ ...scope, dependencies: scope.dependencies.filter((_, index) => keep.has(index)) }] : []
+  })
+}
+
+/** Console/save callbacks currently accept command only: scope the CLI rather than change the host schema. */
+export function gradleDirectoryTask(task: string, directory: string): string {
+  return directory ? `-p "${directory}" ${task}` : task
 }
 
 // ---------------------------------------------------------------------------

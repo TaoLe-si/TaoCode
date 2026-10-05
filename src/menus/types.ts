@@ -16,6 +16,14 @@ export interface MenuRow {
   title?: string | (() => string)
   keywords?: string
   keys?: string
+  /**
+   * 图标名（lucide 图标名口径，对应上游 `Presentation.getIcon()` 的槽位）。
+   *
+   * 数据侧已通：`src/actionRegistry.ts` 的 `ActionDescriptor.icon` 由 `actionRow()` 落到这里。
+   * **渲染层还没接** —— `src/menuUi.ts` 的行模板里没有图标位（它不在本 lane 的文件清单里），
+   * 所以填了也暂时看不见；图标名取值必须来自 `src/uiIcons.ts` 的阶梯，不许在菜单里写死尺寸。
+   */
+  icon?: string
   section?: string
   rule?: boolean
   recent?: boolean

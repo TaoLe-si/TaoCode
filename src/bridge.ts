@@ -7,6 +7,8 @@ import { fromBase64, toBase64 } from './base64.ts'
 import { handleGradleEvent } from './gradleEvents.ts'
 import { handleSearchChunk } from './searchStream.ts'
 import { previewSettingsError } from './previewSettings.ts'
+import { normalizeRunConfigurations } from './runConfigurationSchema.ts'
+import { validateTodoPatterns } from './todoPatterns.ts'
 import { handleLspProgressEvent } from './lspProgress.ts'
 import { decodeRunChunk, flushRunDecoder, handleRunExit, handleRunOutput, handleRunStarted } from './runInstances.ts'
 import { deliverTermOutput, emitTermExit, subscribeTerm, subscribeTermExit, type TermCreateResult } from './terminalEvents.ts'
@@ -14,6 +16,7 @@ export { fromBase64, toBase64 } from './base64.ts'
 export { GRADLE_OUTPUT_LIMIT, gradleSync } from './gradleEvents.ts'; export { lspProgressInterrupted, lspProgressTasks, runningLspTasks, type LspProgressTask } from './lspProgress.ts'
 export { subscribeTerm, subscribeTermExit, type TermCreateResult } from './terminalEvents.ts'
 import { EDITOR_LANGUAGES } from './languages.ts'
+import { normalizeTrustedPath } from './trustedProjects.ts'
 import type { Bookmark } from './bookmarks'
 import type { DapExceptionInfo } from './exceptionInfo'
 import type { DapBreakpointLocations } from './breakpointLocations'
@@ -22,6 +25,13 @@ import type { TemplateSettings } from './templates'
 // 构建工具组的项目级状态（`build.tools`）与三档自动重载语义都在 src/gradle.ts —— 只有那一份定义。
 import type { AutoReloadType, BuildToolsGradleSettings, BuildToolsSettings } from './gradle'
 import { DEFAULT_BUILD_TOOLS } from './gradle.ts'
+// 桥接的错误类型与「浏览器预览内存桩」各属一个职责域，都已拆出去（2026-10-05 模块化体检）：
+//   · src/bridgeError.ts   —— 桥上的错误类型，桥的两侧（宿主 / 预览桩）都要用；
+//   · src/bridgePreview.ts —— 浏览器预览的内存示例（不 postMessage，见那里的说明）。
+// BridgeError 原样转出，scratchFiles / DebugPanel / TerminalPanel 的 import 路径不变。
+import { BridgeError } from './bridgeError.ts'
+import { previewRequest } from './bridgePreview.ts'
+export { BridgeError } from './bridgeError.ts'
 
 // 异常信息的类型与判定规则属于 `exceptionInfo.ts`（一个文件一个职责域），
 // 这里只做转出，调用方不用记两处路径。
@@ -63,9 +73,10 @@ export type {
 } from './settingsModel.ts'
 export { defaultEditorSettings, defaultGeneralSettings, defaultJavaProjectSettings, defaultProjectSettings } from './settingsModel.ts'
 import {
-  defaultEditorSettings, defaultExportToHtmlSettings, defaultGeneralSettings, defaultJavaProjectSettings,
+  defaultEditorSettings, defaultGeneralSettings, defaultJavaProjectSettings,
   defaultProjectSettings,
-  type AppState, type BookmarksViewState, type EditorSettings, type ExportToHtmlSettings,
+  // `defaultExportToHtmlSettings` 与 `ExportToHtmlSettings` 随预览桩一起搬去了 bridgePreview.ts。
+  type AppState, type BookmarksViewState, type EditorSettings,
   type GeneralSettingsState, type JavaProjectSettings, type NamedScopeSetting, type ProjectForm,
   type ProjectSettings, type RunConfig, type RunStartParams, type RecentProject, type TodoPattern,
 } from './settingsModel.ts'
@@ -95,15 +106,16 @@ export function normalizeEditorSettings(settings: EditorSettings): EditorSetting
   return { ...settings, showBreadcrumbs: false, breadcrumbsPlacement: 'bottom' }
 }
 
-export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.patch' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.internalErrors' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
-export type { GitChange, GitUser, GitStatus, GitDiff, GitCommit, GitLog, GitRef, GitFullCommit, GitFullLog, GitLogQuery, GitCommitDetails, GitCommitChange, GitCommitComparison, GitCommitChanges, GitCommitFileDiff, GitStashEntry, GitStash, GitAheadBehind, GitHunk, GitHunks, GitTags, GitCompareFile, GitCompare, GitBlameLine, GitBlame } from './vcsLogTypes'
+export type Method = 'app.state' | 'app.quit' | 'dialog.pickDirectory' | 'workspace.open' | 'workspace.close' | 'workspace.list' | 'workspace.files' | 'file.read' | 'file.write' | 'file.create' | 'file.readOnly' | 'file.lineSeparators' | 'file.rename' | 'file.delete' | 'file.copy' | 'file.reveal' | 'shell.reveal' | 'shell.openUrl' | 'file.readBinary' | 'file.usages' | 'file.librarySource' | 'file.archiveEntries' | 'session.save' | 'session.load' | 'session.clear' | 'project.create' | 'project.clone' | 'project.clone.cancel' | 'projects.forget' | 'projects.forgetMany' | 'settings.update' | 'settings.general.update' | 'project.settings.get' | 'project.settings.update' | 'lsp.open' | 'lsp.change' | 'lsp.close' | 'lsp.request' | 'lsp.stop' | 'lsp.cancelProgress' | 'run.start' | 'run.write' | 'run.stop' | 'run.instances' | 'git.status' | 'git.diff' | 'git.patch' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.log' | 'git.logFull' | 'git.commitDetails' | 'git.commitChanges' | 'git.commitFileDiff' | 'git.pull' | 'git.fetch' | 'git.push' | 'git.rebase' | 'git.cherryPick' | 'git.stash' | 'git.stash.save' | 'git.stash.pop' | 'git.branch.create' | 'git.branch.delete' | 'git.revert' | 'git.revertCommit' | 'git.reset' | 'git.merge' | 'git.tags' | 'git.tag.create' | 'git.tag.delete' | 'git.ignore' | 'git.user' | 'git.authors' | 'git.aheadBehind' | 'git.blame' | 'git.diffSides' | 'git.diffHunks' | 'git.applyHunks' | 'git.compare' | 'git.fileHistory' | 'git.showCommit' | 'git.worktree.list' | 'git.worktree.add' | 'git.worktree.remove' | 'git.submodules' | 'git.submodule.update' | 'git.cancel' | 'search.run' | 'search.preview' | 'search.replace' | 'search.replaceSelected' | 'search.cancel' | 'dap.start' | 'dap.setBreakpoints' | 'dap.setExceptionBreakpoints' | 'dap.threads' | 'dap.continue' | 'dap.pause' | 'dap.next' | 'dap.stepIn' | 'dap.stepOut' | 'dap.stackTrace' | 'dap.scopes' | 'dap.variables' | 'dap.evaluate' | 'dap.setVariable' | 'dap.setExpression' | 'dap.restart' | 'dap.gotoTargets' | 'dap.goto' | 'dap.restartFrame' | 'dap.exceptionInfo' | 'dap.breakpointLocations' | 'dap.completions' | 'dap.terminate' | 'dap.disconnect' | 'dap.breakpoints' | 'dap.loadedSources' | 'dap.modules' | 'dap.stepBack' | 'dap.reverseContinue' | 'dap.readMemory' | 'dap.disassemble' | 'term.create' | 'term.write' | 'term.resize' | 'term.kill' | 'term.list' | 'history.list' | 'history.content' | 'history.diff' | 'history.diffSides' | 'plugin.list' | 'plugin.setEnabled' | 'plugin.install' | 'plugin.uninstall' | 'app.memory' | 'app.fullScreen' | 'app.setFullScreen' | 'app.info' | 'app.jdks' | 'app.logPaths' | 'app.internalErrors' | 'app.specialPaths' | 'app.collectLogs' | 'app.troubleshooting' | 'dialog.pickImage' | 'app.readImage' | 'gradle.sync' | 'gradle.cancel' | 'gradle.state' | 'app.exportSettings' | 'app.readSettingsArchive' | 'app.importSettings' | 'app.resetSettings' | 'dialog.pickFile' | 'dialog.saveFile' | 'app.writeExportFiles'
+export type { GitChange, GitUser, GitStatus, GitDiff, GitCommit, GitLog, GitRef, GitFullCommit, GitFullLog, GitLogQuery, GitLogSort, GitCommitDetails, GitCommitChange, GitCommitComparison, GitCommitChanges, GitCommitFileDiff, GitStashEntry, GitStash, GitAheadBehind, GitHunk, GitHunks, GitTags, GitCompareFile, GitCompare, GitBlameLine, GitBlame } from './vcsLogTypes'
 import type { GitCommit } from './vcsLogTypes'
 // One aligned row of the side-by-side viewer. Marks are [start, length] byte ranges
 // into that side's own text, so a change highlights only the words that differ.
 export interface DiffCell { no: number; text: string }
 export interface DiffRow { kind: 'equal' | 'insert' | 'delete' | 'change'; left?: DiffCell; right?: DiffCell; leftMarks?: [number, number][]; rightMarks?: [number, number][] }
 export interface DiffSides { rows: DiffRow[]; truncated: boolean }
-export interface LspDiagnostic { line: number; character: number; endLine?: number; endCharacter?: number; severity: number; message: string; source?: string }
+// `code`/`tags` 由 `native/lsp_support.cpp:148-149` 原样透传（上游靠 `tags` 判 Unnecessary/Deprecated 两档外观，`LspDiagnosticsCustomizer.kt:93-96`）。`code` 两种形状都合法，消费侧用 `String(code)` 归一。
+export interface LspDiagnostic { line: number; character: number; endLine?: number; endCharacter?: number; severity: number; message: string; source?: string; code?: string | number; tags?: number[] }
 // LSP `textDocument/diagnostic`（pull 模型）：`kind='full'` 带 items（与推送同一套形状），
 // `kind='unchanged'` 表示可以沿用上一次的结果；`supported=false` 说明服务器只有推送。
 export interface LspDiagnosticReport { available: boolean; supported: boolean; kind?: 'full' | 'unchanged'; resultId?: string; items?: LspDiagnostic[] }
@@ -155,7 +167,11 @@ export interface LspSelectionRangeResult { available: boolean; ranges?: LspRange
 // item that the follow-up requests must echo back.
 export interface LspHierarchyItem { name: string; kind: number; path: string; detail?: string; line?: number; character?: number; callLine?: number; callChar?: number; raw?: unknown }
 export interface LspHierarchyResult { available: boolean; items?: LspHierarchyItem[]; calls?: LspHierarchyItem[] }
-export interface LspInlayHint { line: number; character: number; label: string; paddingLeft?: boolean; paddingRight?: boolean; kind?: number }
+// `command` / `tooltip` are LSP `InlayHint.command` / `InlayHint.tooltip`; the host only forwards
+// them after validating the command name and unwrapping MarkupContent tooltips
+// (`native/lsp_session_kinds.cpp`, inlayHint branch). Consumers: `src/inlayHints.ts`
+// (`inlayHintCommand` / `inlayHintTooltip`) via `src/editorInlayHints.ts`.
+export interface LspInlayHint { line: number; character: number; label: string; paddingLeft?: boolean; paddingRight?: boolean; kind?: number; command?: { command: string; arguments?: unknown[] }; tooltip?: string }
 export interface LspInlayHintResult { available: boolean; hints?: LspInlayHint[] }
 export type LspRequestKind = 'hover' | 'definition' | 'completion' | 'completionItemResolve' | 'diagnostic' | 'workspaceDiagnostic' | 'rename' | 'prepareRename' | 'foldingRange' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'signatureHelp' | 'codeAction' | 'codeActionResolve' | 'executeCommand' | 'willRenameFiles' | 'formatting' | 'rangeFormatting' | 'implementation' | 'typeDefinition' | 'documentHighlight' | 'selectionRange' | 'inlayHint' | 'semanticTokens' | 'inlineCompletion' | 'prepareCallHierarchy' | 'callHierarchyIncoming' | 'callHierarchyOutgoing' | 'prepareTypeHierarchy' | 'typeHierarchySupertypes' | 'typeHierarchySubtypes'
 export interface HistoryEntry { id: string; reason: string; bytes: number; timeMillis: number; time: string }
@@ -486,7 +502,7 @@ export const dapBreakpoints = reactive(new Map<string, DapBreakpoint[]>())  // r
 // events build up. They are separate from `dapState` because they are collections
 // the panel renders as rows, not fields of the session.
 export interface DapProgress { id: string; requestId: string | null; title: string; message: string; percentage: number | null }
-export interface DapModule { id: string; name: string; type?: string; sourceReference?: number; path?: string }
+export interface DapModule { id: string; name: string; type?: string; sourceReference?: number; path?: string; version?: string; symbolStatus?: string; addressRange?: string; isOptimized?: boolean; isUserCode?: boolean; symbolFilePath?: string; dateTimeStamp?: string }
 export interface DapLoadedSource { key: string; name: string; sourceReference?: number; path?: string }
 export const dapProgress = reactive<DapProgress[]>([])
 export const dapModules = reactive<DapModule[]>([])
@@ -654,6 +670,8 @@ export function applyDapEvent(event: DapEvent) {
     }
     case 'terminated': {
       dapState.running = false; dapState.paused = false; dapState.reason = null; dapState.currentLocation = null
+      // 会话结束，能力位跟着作废：新入口的门控不能停留在上一个适配器的声明上。
+      dapRememberCapabilities(undefined)
       const closed = (event as { connectionClosed?: boolean }).connectionClosed
       if (!closed) { dapConsole.push({ category: 'console', text: '调试会话已结束。' }); }
       return
@@ -694,6 +712,7 @@ export function applyDapEvent(event: DapEvent) {
 
 export async function dapStart(params: DapStartParams): Promise<DapStartResult> {
   const result = await request<DapStartResult>('dap.start', { ...params })
+  dapRememberCapabilities(result.capabilities)
   dapState.running = true; dapState.paused = false; dapState.reason = null; dapState.program = params.program
   // A new session starts from a clean slate: the previous run's exit code, any
   // progress an adapter left open, and the breakpoint ids it handed out before
@@ -733,6 +752,7 @@ export async function dapSetBreakpoints(path: string, breakpoints: DapBreakpoint
 }
 export const dapStep = (kind: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut', all = false) =>
   request<DapOk>(`dap.${kind}`, all && kind === 'continue' ? { all: true } : { threadId: dapCurrentThread() })
+export function dapSelectThread(threadId: number) { if (Number.isInteger(threadId) && threadId > 0) { dapThreadId = threadId; dapState.threadId = threadId } }
 export const dapStackTrace = (threadId = dapCurrentThread()) => request<{ frames: DapFrame[]; totalFrames: number }>('dap.stackTrace', { threadId })
 export const dapThreads = () => request<{ threads: DapThread[] }>('dap.threads')
 export const dapSetExceptionBreakpoints = (filters: string[]) => request<DapOk>('dap.setExceptionBreakpoints', { filters })
@@ -786,6 +806,37 @@ export const dapCompletions = (text: string, column: number, frameId = 0, line =
 export const dapBreakpointLocations = (path: string, line: number,
   span?: { endLine?: number; column?: number; endColumn?: number }) =>
   request<DapBreakpointLocations>('dap.breakpointLocations', { path, line, ...span })
+// DAP `loadedSources` / `modules` 的**按需重取**：`dapLoadedSources` / `dapModules` 是事件
+// （loadedSource/module）喂起来的累计列表，这两个请求拉整份清单把它重同步 —— 规范里那两种事件
+// 没有 list 语义，UI 想重取只能再问一次。两个能力位默认 false，没声明回 DAP_UNSUPPORTED。
+export interface DapLoadedSourceItem { name?: string; path?: string; sourceReference?: number; origin?: string; presentationHint?: string }
+export interface DapModuleItem { id: string | number; name: string; path?: string; type?: string; version?: string; symbolStatus?: string; addressRange?: string; isOptimized?: boolean; isUserCode?: boolean; symbolFilePath?: string; dateTimeStamp?: string }
+export const dapLoadedSourcesRequest = () =>
+  request<{ available: boolean; sources: DapLoadedSourceItem[] }>('dap.loadedSources')
+export const dapModulesRequest = (startModule = 0, moduleCount = 0) =>
+  request<{ available: boolean; modules: DapModuleItem[]; totalModules?: number }>('dap.modules', { startModule, moduleCount })
+// DAP `stepBack` / `reverseContinue`（反向调试）：共用 `supportsStepBack`（默认 false）。
+export const dapStepBack = (threadId = dapCurrentThread()) => request<DapOk>('dap.stepBack', { threadId })
+export const dapReverseContinue = (threadId = dapCurrentThread()) => request<DapOk>('dap.reverseContinue', { threadId })
+// DAP `readMemory` / `disassemble`（内存与反汇编视图）：能力位默认 false。
+// `readMemory` 的字节过桥是 base64（`dataB64`）；十六进制/ASCII 的渲染在 src/debugSources.ts。
+export interface DapReadMemoryResult { available: boolean; address?: string; dataB64?: string; offset?: number; unreadableBytes?: number }
+export const dapReadMemory = (memoryReference: string, count: number, offset = 0) =>
+  request<DapReadMemoryResult>('dap.readMemory', { memoryReference, count, offset })
+export interface DapInstruction { address: string; instruction: string; instructionBytes?: string; symbol?: string; path?: string; line?: number; column?: number; endLine?: number; endColumn?: number }
+export interface DapDisassembleResult { available: boolean; instructions: DapInstruction[]; offset?: number; unreadableBytes?: number }
+export const dapDisassemble = (memoryReference: string, instructionCount: number,
+  options: { offset?: number; instructionOffset?: number; resolveSymbols?: boolean } = {}) =>
+  request<DapDisassembleResult>('dap.disassemble', { memoryReference, instructionCount, ...options })
+// 适配器在 initialize 响应里声明的能力（原样转发）。新增入口全部由能力位门控 ——
+// 规范里 supportsStepBack / supportsReadMemoryRequest / supportsDisassembleRequest /
+// supportsLoadedSourcesRequest / supportsModulesRequest 都**默认 false**，面板据此不渲染入口。
+export const dapCapabilities = reactive<Record<string, unknown>>({})
+export const dapCapability = (name: string) => dapCapabilities[name] === true
+export function dapRememberCapabilities(capabilities: Record<string, unknown> | undefined) {
+  for (const key of Object.keys(dapCapabilities)) delete dapCapabilities[key]
+  Object.assign(dapCapabilities, capabilities ?? {})
+}
 // IDEA's breakpoint view reads the adapter's own remembered list; loading it keeps the
 // gutter in step with a session that was started outside this panel.
 export async function dapLoadBreakpoints(): Promise<Record<string, DapBreakpoint[]>> {
@@ -820,332 +871,6 @@ export const term = {
     webview.postMessage({ id: ++nextId, method: 'term.write', params: { id, dataB64: toBase64(bytes) } })
   },
   list: () => request<TerminalList>('term.list'),
-}
-
-export class BridgeError extends Error {
-  code: string
-  constructor(code: string, message: string) { super(message); this.code = code }
-}
-
-const previewRoot = '内存示例 / 不访问本地磁盘'
-const samples = new Map<string, string>([
-  ['src/main.cpp', '#include <iostream>\n#include "workspace.hpp"\n\nint main() {\n    taocode::Workspace workspace;\n\n    // 浏览器示例：编辑仅保存在内存，不会写入磁盘。\n    std::cout << "Welcome to TaoCode" << std::endl;\n    return 0;\n}\n'],
-  ['src/workspace.hpp', '#pragma once\n\nnamespace taocode {\n\nclass Workspace {\npublic:\n    void open();\n};\n\n}\n'],
-  ['CMakeLists.txt', 'cmake_minimum_required(VERSION 3.24)\nproject(taocode_preview LANGUAGES CXX)\n\nset(CMAKE_CXX_STANDARD 20)\nadd_executable(preview src/main.cpp)\n'],
-])
-const versions = new Map([...samples.keys()].map(path => [path, 1]))
-const previewState: AppState = { recentProjects: [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: '', available: true }], settings: { ...defaultEditorSettings }, general: { ...defaultGeneralSettings }, lastProject: null, gitAvailable: false, defaultParent: '' }
-let previewProjectSettings: ProjectSettings = structuredClone(defaultProjectSettings)
-function previewEntries(path: string): Entry[] {
-  const prefix = path ? `${path}/` : ''
-  const entries = new Map<string, Entry>()
-  for (const file of samples.keys()) {
-    if (!file.startsWith(prefix)) continue
-    const rest = file.slice(prefix.length)
-    const name = rest.split('/')[0]!
-    if (rest.includes('/') && previewProjectSettings.excludedDirs.includes(name)) continue
-    entries.set(name, { name, path: prefix + name, kind: rest.includes('/') ? 'directory' : 'file' })
-  }
-  return [...entries.values()].sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name))
-}
-async function previewRequest(method: Method, params: Record<string, unknown>): Promise<unknown> {
-  if (method.startsWith('lsp.')) throw new BridgeError('LSP_UNAVAILABLE', '浏览器预览无语言服务，请在桌面端使用。')
-  if (method.startsWith('run.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能运行命令，请在桌面端使用。')
-  if (method.startsWith('git.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能操作 Git，请在桌面端使用。')
-  if (method.startsWith('search.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能全局搜索，请在桌面端使用。')
-  if (method.startsWith('dap.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能启动调试器，请在桌面端使用。')
-  if (method.startsWith('term.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能开本地终端，请在桌面端使用。')
-  if (method.startsWith('history.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览没有本地历史，请在桌面端使用。')
-  if (method.startsWith('plugin.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能读写本机插件目录，请在桌面端使用。')
-  if (method.startsWith('gradle.')) throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能运行 Gradle 同步，请在桌面端使用。')
-  if (method === 'dialog.pickFile' || method === 'dialog.saveFile' || method === 'app.exportSettings' || method === 'app.readSettingsArchive' || method === 'app.importSettings' || method === 'app.resetSettings' || method === 'app.writeExportFiles') throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能打开系统文件对话框、读写设置归档或导出文件，请在桌面端使用。')
-  if (method === 'file.create' || method === 'file.rename' || method === 'file.delete' || method === 'file.copy' || method === 'file.reveal' || method === 'shell.reveal' || method === 'file.readOnly' || method === 'file.lineSeparators' || method.startsWith('session.'))
-    throw new BridgeError('DESKTOP_REQUIRED', '浏览器预览不能改动磁盘文件树，请在桌面端使用。')
-  const path = String(params.path ?? '')
-  switch (method) {
-    case 'app.state': return structuredClone(previewState)
-    case 'workspace.open': {
-      if (path && path !== previewRoot) throw new BridgeError('DESKTOP_REQUIRED', '浏览器只能打开内存示例；请使用桌面端访问本地项目。')
-      previewState.lastProject = previewRoot
-      previewState.recentProjects = [{ name: 'TaoCode 内存示例', path: previewRoot, lastOpened: new Date().toISOString(), available: true }]
-      return { name: 'taocode-preview', root: previewRoot, entries: previewEntries('') }
-    }
-    case 'workspace.close': previewState.lastProject = null; return { closed: true }
-    case 'app.internalErrors': return { count: 0, latest: [] }
-    case 'workspace.list': return previewEntries(path)
-    // The browser sample has no disk walk; the in-memory sample map *is* the project
-    // tree, so the same "excluded directory" rule as previewEntries produces it.
-    case 'workspace.files': {
-      const files = [...samples.keys()].filter(file =>
-        !file.split('/').slice(0, -1).some(part => previewProjectSettings.excludedDirs.includes(part))).sort()
-      return { files, truncated: false }
-    }
-    case 'projects.forget': previewState.recentProjects = previewState.recentProjects.filter(project => project.path !== path); return structuredClone(previewState)
-    case 'projects.forgetMany': {
-      const set = new Set(Array.isArray(params?.paths) ? params.paths as string[] : [])
-      previewState.recentProjects = previewState.recentProjects.filter(project => !set.has(project.path))
-      return structuredClone(previewState)
-    }
-    case 'project.settings.get': return structuredClone(previewProjectSettings)
-    case 'project.settings.update': {
-      const next = { ...previewProjectSettings }
-      if (params.excludedDirs !== undefined) {
-        const excludedDirs = params.excludedDirs
-        if (!Array.isArray(excludedDirs) || excludedDirs.some(name => typeof name !== 'string' || !name || name === '.' || name === '..' || /[\\/:]/.test(name))) throw new BridgeError('INVALID_SETTINGS', '排除项必须是单独的目录名。')
-        next.excludedDirs = [...new Set(excludedDirs as string[])]
-      }
-      if (params.todoPatterns !== undefined) {
-        const patterns = params.todoPatterns as TodoPattern[]
-        const malformed = !Array.isArray(patterns) || patterns.length > 20 || patterns.some(entry =>
-          !entry || typeof entry.pattern !== 'string' || !entry.pattern.trim() || entry.pattern.length > 200 || /[\r\n\u0000-\u001f]/.test(entry.pattern)
-          || typeof entry.description !== 'string' || !entry.description.trim() || entry.description.length > 60
-          || (entry.caseSensitive !== undefined && typeof entry.caseSensitive !== 'boolean')
-          || patterns.some(other => other !== entry && other.pattern === entry.pattern))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', 'TODO 模式要写成非空且不重复的 {pattern, description}，最多 20 条。')
-        // caseSensitive 是可选的：原生 validate_todo_patterns 只在**给出时**校验类型、不补默认值，
-        // 所以这里也不能凭空插一个 false（否则预览与桌面端存下来的形状就不一样了）。
-        next.todoPatterns = patterns.map(entry => entry.caseSensitive === undefined
-          ? { pattern: entry.pattern.trim(), description: entry.description.trim() }
-          : { pattern: entry.pattern.trim(), description: entry.description.trim(), caseSensitive: entry.caseSensitive })
-      }
-      // 书签两段的形状校验在 src/bookmarkSettings.ts（桥接文件贴着机检上限；那边也能单测）。
-      if (params.bookmarks !== undefined) {
-        try {
-          next.bookmarks = normalizeBookmarks(params.bookmarks)
-        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
-      }
-      if (params.bookmarkLists !== undefined) {
-        try {
-          next.bookmarkLists = normalizeBookmarkLists(params.bookmarkLists)
-        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
-      }
-      if (params.bookmarksView !== undefined) {
-        try {
-          next.bookmarksView = { ...(next.bookmarksView ?? defaultProjectSettings.bookmarksView!), ...normalizeBookmarksView(params.bookmarksView) }
-        } catch (error) { throw new BridgeError('INVALID_SETTINGS', errorMessage(error)) }
-      }
-      if (params.fileAssociations !== undefined) {
-        const value = params.fileAssociations as Record<string, unknown>
-        const languages = ['java', 'cpp', 'typescript', 'other']
-        const malformed = !value || typeof value !== 'object' || Array.isArray(value) || Object.entries(value).some(([key, language]) =>
-          !/^[a-z0-9]{1,16}$/.test(key) || typeof language !== 'string' || !languages.includes(language))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '文件类型关联要写成 扩展名 -> java/cpp/typescript/other。')
-        next.fileAssociations = Object.fromEntries(Object.entries(value).map(([key, language]) => [key, language as string]))
-      }
-      // 命名作用域：与原生 `validate_scopes` 同一套形状规则。模式语法**故意不校验** ——
-      // IDEA 也允许存下解析不了的模式（NamedScopesHolder.readScope :137-142）。
-      if (params.scopes !== undefined) {
-        const list = params.scopes as NamedScopeSetting[]
-        const encoder = new TextEncoder()
-        const keys = ['name', 'pattern', 'shared']
-        const malformed = !Array.isArray(list) || list.length > 64 || list.some(entry =>
-          !entry || typeof entry !== 'object' || Array.isArray(entry)
-          || Object.keys(entry).some(key => !keys.includes(key))
-          || typeof entry.name !== 'string' || !entry.name || /[\r\n\t]/.test(entry.name) || encoder.encode(entry.name).length > 80
-          || typeof entry.pattern !== 'string' || encoder.encode(entry.pattern).length > 1024
-          || typeof entry.shared !== 'boolean')
-          || new Set(list.map(entry => entry.name)).size !== list.length
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '作用域要写成 {name, pattern, shared}：名称非空且不重名，模式不超过 1024 字节。')
-        next.scopes = list.map(entry => ({ name: entry.name, pattern: entry.pattern, shared: entry.shared }))
-      }
-      for (const key of ['fileColors', 'localFileColors'] as const) {
-        const value = params[key]
-        if (value === undefined) continue
-        const malformed = !Array.isArray(value) || value.length > 64 || normalizeFileColors(value).length !== value.length ||
-          value.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry) ||
-            Object.keys(entry).some(key => key !== 'scope' && key !== 'color') ||
-            typeof entry.scope !== 'string' || !entry.scope || new TextEncoder().encode(entry.scope).length > 80 ||
-            /[\r\n\t]/.test(entry.scope) || normalizeFileColor(entry.color) === null) ||
-          new Set(value.map(entry => entry.scope)).size !== value.length
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', `无效文件颜色：${key}`)
-        next[key] = normalizeFileColors(value)
-      }
-      if (params.templates !== undefined) {
-        const value = params.templates as Partial<TemplateSettings>
-        const encoder = new TextEncoder()
-        const text = (value: unknown, max: number) => typeof value === 'string' && value.length > 0 && encoder.encode(value).length <= max
-        const overrides = value?.overrides === undefined ? previewProjectSettings.templates.overrides : value.overrides
-        const customs = value?.customs === undefined ? previewProjectSettings.templates.customs : value.customs
-        const bad = !value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['overrides', 'customs'].includes(key))
-          || !Array.isArray(overrides) || !Array.isArray(customs)
-          || overrides.length > 400 || overrides.some(entry => !entry || Object.keys(entry).some(key => !['pattern', 'disabled'].includes(key))
-            || !text(entry.pattern, 300) || typeof entry.disabled !== 'boolean')
-          || new Set(overrides.map(entry => entry.pattern)).size !== overrides.length
-          || customs.length > 100 || customs.some(entry => !entry || Object.keys(entry).some(key => !['key', 'body', 'description', 'languages'].includes(key))
-            || typeof entry.key !== 'string' || !/^[A-Za-z][A-Za-z0-9]*$/.test(entry.key)
-            || !text(entry.body, 8000) || !text(entry.description, 120)
-            || !Array.isArray(entry.languages) || entry.languages.some(language => !['java', 'cpp', 'typescript', 'other'].includes(language)))
-          || new Set(customs.map(entry => entry.key)).size !== customs.length
-        if (bad) throw new BridgeError('INVALID_SETTINGS', '模板设置要写成 { overrides:[{pattern,disabled}], customs:[{key,body,description,languages}] }。')
-        next.templates = {
-          overrides: overrides.map(entry => ({ pattern: entry.pattern, disabled: entry.disabled })),
-          customs: customs.map(entry => ({ key: entry.key, body: entry.body, description: entry.description, languages: [...entry.languages] })),
-        }
-      }
-      if (params.java !== undefined) {
-        const raw = params.java as Partial<JavaProjectSettings> | null | undefined
-        const relative = (path: unknown, glob = false) => typeof path === 'string' && path.length > 0 && path.length <= 512 && !path.startsWith('/') &&
-          !/[\\:<>"\u0000-\u001f]/.test(path) && (glob || !/[*?]/.test(path)) &&
-          path.split('/').every(part => part && part !== '..')
-        const parseJava = (): JavaProjectSettings | null => {
-          if (!raw || Array.isArray(raw) || Object.keys(raw).some(key => !['jdkHome', 'jdkName', 'sourcePaths', 'outputPath', 'referencedLibraries'].includes(key))) return null
-          if (typeof raw.jdkHome !== 'string' || raw.jdkHome.length > 1024 || /[\u0000-\u001f]/.test(raw.jdkHome) ||
-            (raw.jdkHome && !/^[A-Za-z]:[\\/]|^\\\\/.test(raw.jdkHome))) return null
-          if (typeof raw.jdkName !== 'string' || !/^(1\.[1-8]|[1-9][0-9](-ea)?|JavaSE-1\.8|JavaSE-(9|[1-9][0-9]))$/.test(raw.jdkName)) return null
-          if (typeof raw.outputPath !== 'string' || (raw.outputPath && !relative(raw.outputPath))) return null
-          const list = (paths: unknown, glob: boolean) => {
-            if (!Array.isArray(paths) || paths.length > 64 || !paths.every(path => relative(path, glob))) return null
-            const unique = [...new Set(paths.filter(Boolean))]
-            return unique.length === paths.length ? unique as string[] : null
-          }
-          const sourcePaths = list(raw.sourcePaths, false)
-          const libraries = list(raw.referencedLibraries, true)
-          return sourcePaths && libraries ? { jdkHome: raw.jdkHome, jdkName: raw.jdkName, sourcePaths, outputPath: raw.outputPath, referencedLibraries: libraries } : null
-        }
-        const java = parseJava()
-        if (!java) throw new BridgeError('INVALID_SETTINGS', 'Java 设置需要绝对 JDK 路径（可留空）、JavaSE 环境名和工作区内路径。')
-        next.java = java
-      }
-      if (params.runConfigs !== undefined) {
-        const configs = params.runConfigs as RunConfig[]
-        const text = (value: unknown, limit: number) => typeof value === 'string' && value.length <= limit
-        const list = (value: unknown, limit: number, itemLimit: number) =>
-          Array.isArray(value) && value.length <= limit && value.every(entry => text(entry, itemLimit))
-        // The whole run-configuration shape is stored, not just name+command: dropping
-        // program/args/cwd/env/beforeLaunch is what made the editor decorative.
-        const malformed = !Array.isArray(configs) || configs.length > 40 || configs.some((config, index) =>
-          !config || typeof config.name !== 'string' || !config.name || typeof config.command !== 'string' || !config.command
-          || configs.findIndex(other => other.name === config.name) !== index
-          || (config.type !== undefined && config.type !== 'shell' && config.type !== 'application' && config.type !== 'debug')
-          || (config.program !== undefined && !text(config.program, 1024))
-          || (config.cwd !== undefined && !text(config.cwd, 1024))
-          || (config.args !== undefined && !list(config.args, 256, 1024))
-          || (config.env !== undefined && !list(config.env, 256, 1024))
-          || (config.beforeLaunch !== undefined && (!Array.isArray(config.beforeLaunch) || config.beforeLaunch.length > 16
-            || config.beforeLaunch.some((step: unknown) => !step || typeof (step as { name?: unknown }).name !== 'string'
-              || !(step as { name?: string }).name || typeof (step as { command?: unknown }).command !== 'string'
-              || !(step as { command?: string }).command)))
-          || (config.adapter !== undefined && !text(config.adapter, 64))
-          // 左树文件夹名（RunConfigurable.kt:180 的 FOLDER 节点）：≤80、单行。
-          || (config.folder !== undefined && (!text(config.folder, 80) || /[\r\n\t]/.test(config.folder)))
-          // 「允许并行运行多个实例」= IDEA RunConfigurationOptions.kt:54-56（布尔，默认 false）。
-          || (config.allowRunningInParallel !== undefined && typeof config.allowRunningInParallel !== 'boolean'))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '运行配置要写成名字唯一、命令非空的 {name, command, type?, program?, args?, cwd?, env?, beforeLaunch?, adapter?, folder?}，最多 40 个。')
-        next.runConfigs = configs.map(config => ({
-          name: config.name,
-          command: config.command,
-          ...(config.type ? { type: config.type } : {}),
-          ...(config.program ? { program: config.program } : {}),
-          ...(config.args ? { args: [...config.args] } : {}),
-          ...(config.cwd ? { cwd: config.cwd } : {}),
-          ...(config.env ? { env: [...config.env] } : {}),
-          ...(config.beforeLaunch ? { beforeLaunch: config.beforeLaunch.map(step => ({ ...step })) } : {}),
-          ...(config.adapter ? { adapter: config.adapter } : {}),
-          ...(config.folder ? { folder: config.folder } : {}),
-          ...(config.allowRunningInParallel !== undefined ? { allowRunningInParallel: config.allowRunningInParallel } : {}),
-        }))
-      }
-      // 构建工具（IDEA `build.tools` 组 + Gradle 页）。**项目级**：IDEA 的
-      // `ExternalSystemGroupConfigurable` 是 projectConfigurable，Gradle 三项在 `GradleSettings`
-      // （`.idea/gradle.xml`）。校验口径与 native `validate_build_tools` 完全一致。
-      if (params.buildTools !== undefined) {
-        const raw = params.buildTools as (Partial<BuildToolsSettings> & { gradle?: Partial<BuildToolsGradleSettings> }) | null | undefined
-        const reloadTypes: readonly AutoReloadType[] = ['ALL', 'SELECTIVE', 'NONE']
-        const distributions: readonly BuildToolsGradleSettings['useGradleFrom'][] = ['wrapper', 'local', 'path']
-        const rawGradle = raw && !Array.isArray(raw) ? raw.gradle : undefined
-        const pathField = (value: unknown) => typeof value === 'string' && value.length <= 512 && !/[\u0000-\u001f]/.test(value)
-        const malformed = !raw || typeof raw !== 'object' || Array.isArray(raw)
-          || Object.keys(raw).some(key => !['autoReloadType', 'previousAutoReloadType', 'gradle'].includes(key))
-          || (raw.autoReloadType !== undefined && !reloadTypes.includes(raw.autoReloadType as AutoReloadType))
-          || (raw.previousAutoReloadType !== undefined && !reloadTypes.includes(raw.previousAutoReloadType as AutoReloadType))
-          || (rawGradle !== undefined && (!rawGradle || typeof rawGradle !== 'object' || Array.isArray(rawGradle)
-            || Object.keys(rawGradle).some(key => !['enabled', 'useGradleFrom', 'gradlePath', 'gradleUserHome', 'offline'].includes(key))
-            || (rawGradle.useGradleFrom !== undefined && !distributions.includes(rawGradle.useGradleFrom as BuildToolsGradleSettings['useGradleFrom']))
-            || (rawGradle.gradlePath !== undefined && !pathField(rawGradle.gradlePath))
-            || (rawGradle.gradleUserHome !== undefined && !pathField(rawGradle.gradleUserHome))
-            || (rawGradle.offline !== undefined && typeof rawGradle.offline !== 'boolean')
-            || (rawGradle.enabled !== undefined && typeof rawGradle.enabled !== 'boolean')))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '构建工具设置要写成 {autoReloadType, previousAutoReloadType, gradle: {useGradleFrom, gradlePath, gradleUserHome, offline}}。')
-        const base = next.buildTools ?? structuredClone(DEFAULT_BUILD_TOOLS)
-        next.buildTools = { ...base, ...raw, gradle: { ...base.gradle, ...(rawGradle ?? {}) } }
-      }
-      // 导出到 HTML（IDEA `ExportToHTMLSettings`，项目级）：范围只允许 0/1/2/4，其余字段各有类型。
-      if (params.exportToHtml !== undefined) {
-        const raw = params.exportToHtml as Partial<ExportToHtmlSettings> | null | undefined
-        const scopes = [0, 1, 2, 4]
-        const malformed = !raw || typeof raw !== 'object' || Array.isArray(raw)
-          || Object.keys(raw).some(key => !['scope', 'includeSubdirectories', 'printLineNumbers', 'openInBrowser', 'outputDirectory'].includes(key))
-          || (raw.scope !== undefined && !scopes.includes(Number(raw.scope)))
-          || (raw.includeSubdirectories !== undefined && typeof raw.includeSubdirectories !== 'boolean')
-          || (raw.printLineNumbers !== undefined && typeof raw.printLineNumbers !== 'boolean')
-          || (raw.openInBrowser !== undefined && typeof raw.openInBrowser !== 'boolean')
-          || (raw.outputDirectory !== undefined && (typeof raw.outputDirectory !== 'string' || raw.outputDirectory.length > 512))
-        if (malformed) throw new BridgeError('INVALID_SETTINGS', '导出到 HTML 的设置要写成 {scope: 0|1|2|4, includeSubdirectories, printLineNumbers, openInBrowser, outputDirectory}。')
-        next.exportToHtml = { ...(next.exportToHtml ?? defaultExportToHtmlSettings), ...raw }
-      }
-      previewProjectSettings = params.foldingState === undefined ? next : { ...next, foldingState: params.foldingState as ProjectSettings['foldingState'] }  // 折叠状态只透传（形状/上限在原生）
-      return { settings: structuredClone(previewProjectSettings), entries: previewEntries('') }
-    }
-    // Source: GeneralSettings.kt:227-266 — the same fields the native side
-    // validates in validate_general_patch; the preview keeps one state object
-    // like GeneralSettings.getInstance() does.
-    case 'settings.general.update': {
-      const patch = (params.general ?? {}) as Record<string, unknown>
-      if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
-      for (const [key, value] of Object.entries(patch)) {
-        const accepted = key === 'defaultProjectDirectory' || key === 'reopenLastProject' ||
-          key === 'deleteToBin' || key === 'autoSyncFiles' || key === 'backgroundSyncFiles' ||
-          key === 'autoSaveFiles' || key === 'autoSaveIfInactive' || key === 'isUseSafeWrite' ||
-          key === 'confirmExit' || key === 'isShowWelcomeScreen' || key === 'confirmOpenNewProject2' ||
-          key === 'processCloseConfirmation' || key === 'inactiveTimeout' || key === 'supportScreenReaders' ||
-          key === 'autoShowProcessPopup' || key === 'fuzzyFileSearch' || key === 'foldConsoleLines' || key === 'foldExceptions' || key === 'diffContextLines' || key === 'externalTools' || key === 'showStickyLines' || key === 'stickyLinesLimit'
-        if (!accepted) throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
-        if (key === 'inactiveTimeout') {
-          // UINumericRange(15, 1, 300): values outside the range snap to the bounds.
-          if (!Number.isInteger(value)) throw new BridgeError('INVALID_SETTINGS', 'inactiveTimeout 必须是整数')
-        } else if (key === 'confirmOpenNewProject2') {
-          if (value !== null && ![-1, 0, 1, 2].includes(Number(value))) throw new BridgeError('INVALID_SETTINGS', '无效设置：confirmOpenNewProject2')
-        } else if (key === 'processCloseConfirmation') {
-          if (!['ASK', 'TERMINATE', 'DISCONNECT'].includes(String(value))) throw new BridgeError('INVALID_SETTINGS', '无效设置：processCloseConfirmation')
-        } else if (key === 'defaultProjectDirectory') {
-          if (typeof value !== 'string' || value.length > 512) throw new BridgeError('INVALID_SETTINGS', '无效设置：defaultProjectDirectory')
-        } else if (typeof value !== 'boolean') throw new BridgeError('INVALID_SETTINGS', `无效设置：${key}`)
-      }
-      const merged = { ...defaultGeneralSettings, ...previewState.general, ...patch } as GeneralSettingsState
-      // GeneralSettings.inactiveTimeout clamps through SAVE_FILES_AFTER_IDLE_SEC.fit (kt:193-202).
-      merged.inactiveTimeout = Math.min(300, Math.max(1, merged.inactiveTimeout))
-      previewState.general = merged
-      return structuredClone(merged)
-    }
-    case 'settings.update': {
-      const patch = params.settings as Record<string, unknown>
-      if (!patch || typeof patch !== 'object') throw new BridgeError('INVALID_SETTINGS', '设置必须是对象')
-      // 预览态的键表与取值校验在 src/previewSettings.ts（同一条规则的第二道关卡，
-      // 桌面端真源是 native/settings_schema.cpp；tests/settings-keys-parity.test.mjs 读的正是那里）。
-      for (const [key, value] of Object.entries(patch)) {
-        const invalid = previewSettingsError(key, value, EDITOR_LANGUAGES)
-        if (invalid) throw new BridgeError('INVALID_SETTINGS', invalid)
-      }
-      Object.assign(previewState.settings, patch)
-      return { ...previewState.settings }
-    }
-    case 'file.read': {
-      if (!samples.has(path)) throw new BridgeError('NOT_FOUND', '示例文件不存在')
-      // The in-memory samples are plain text: encoding is reported so the desktop and
-      // preview shapes stay interchangeable for the UI.
-      return { path, content: samples.get(path), version: String(versions.get(path)), encoding: 'utf-8', bom: false }
-    }
-    case 'file.write': {
-      if (!samples.has(path)) throw new BridgeError('NOT_FOUND', '示例文件不存在')
-      if (params.expectedVersion !== String(versions.get(path))) throw new BridgeError('CONFLICT', '文件已改变，请重新打开')
-      const content = String(params.content)
-      samples.set(path, content)
-      const version = versions.get(path)! + 1
-      versions.set(path, version)
-      return { version: String(version), bytes: new TextEncoder().encode(content).length }
-    }
-    default: throw new BridgeError('DESKTOP_REQUIRED', '此操作需要 C++ 桌面端，浏览器预览不会创建项目或克隆仓库。')
-  }
 }
 
 export async function request<T>(method: Method, params: Record<string, unknown> = {}): Promise<T> {

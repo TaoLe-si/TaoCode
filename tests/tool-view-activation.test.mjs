@@ -38,6 +38,10 @@ async function received(view, active, contextActive) {
   const app = createSSRApp({ render: () => h(component, { view, active, ctx: ctx(contextActive) }) })
   app.mixin({
     beforeCreate() {
+      // 被测件自己不算「子组件」：ToolWindowView 的 `active` 就是宿主传进来的那个值，
+      // 把它记进来只会污染「面板真正收到的值」这条判据（2026-10-06 核实：这条 mixin 是全局的，
+      // 被测件本身也声明了 active prop，原先没有排除）。
+      if (this.$?.type === component) return
       if (!this.$options?.props || !('active' in this.$options.props)) return
       const name = this.$.type?.name || this.$.type?.__name || 'anonymous'
       seen.set(name, this.$.props.active)

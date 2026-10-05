@@ -8,11 +8,16 @@
 //
 // **用户不可开关**是上游的规定（`isConfigurable() = false` 且 `canBeEnabledOn(statusBar) = false`），
 // 所以它不进状态栏的勾选清单，只按"有没有错误"自己显形。
+//
+// 点开的是**错误对话框**（上游 `IdeErrorsDialog`，见 src/components/InternalErrorsDialog.vue +
+// src/errorReport.ts 的逐条对照），不是一行弹层 —— 上游那个芯片点开就是重建整个对话框
+// （`FatalErrorWidgetFactory` → `IdeErrorsDialog`）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { TriangleAlert } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { request } from '../bridge'
 import { INTERNAL_ERROR_WIDGET_NAME, internalErrorLabel, latestInternalError, shouldShowInternalErrors, type InternalErrors } from '../internalErrors'
+import InternalErrorsDialog from './InternalErrorsDialog.vue'
 
 const props = defineProps<{
   /** 有没有打开工作区（没有就不必问宿主）。 */
@@ -42,15 +47,9 @@ onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
     v-if="visible" class="status-chip status-internal-errors"
     :title="`${INTERNAL_ERROR_WIDGET_NAME}：${latestInternalError(errors)}`"
     aria-label="内部错误" :aria-expanded="open"
-    @click.stop="open = !open; void refresh()"
+    @click.stop="open = true; void refresh()"
   >
     <TriangleAlert :size="iconSize.dense" />{{ internalErrorLabel(errors!.count) }}
   </button>
-  <div v-if="open && visible" class="status-widget-menu internal-errors-menu" role="menu" aria-label="内部错误">
-    <span class="status-widget-title">{{ INTERNAL_ERROR_WIDGET_NAME }}</span>
-    <p v-for="(row, i) in errors?.latest ?? []" :key="i" class="internal-error-row"><span class="internal-error-time">{{ row.time }}</span><span>{{ row.message }}</span></p>
-    <div class="menu-rule" role="separator" />
-    <button class="menu-button status-widget-item" role="menuitem" @click="open = false; void showLog()"><span class="menu-item-icon" /><span>显示日志</span></button>
-  </div>
-  <div v-if="open && visible" class="status-widget-backdrop" @click="open = false" @contextmenu.prevent="open = false" />
+  <InternalErrorsDialog v-if="open && visible && errors" :errors="errors" :show-log="showLog" @close="open = false" />
 </template>

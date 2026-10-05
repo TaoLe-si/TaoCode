@@ -77,8 +77,12 @@ test('检查这一族在代码菜单里，位置紧跟补全组', () => {
 
 test('两条动作的文案与快捷键照上游，缺实现的那几条不放', () => {
   // 只看**行标题**：文件头的注释本来就要写出"哪几条没放、为什么"。
+  // 2026-10-05：`检查配置档` 由检查档桶加进 `src/menus/analyzeMenu.ts`（上游
+  // `InspectionProfileManager.setRootProfile` 的选择面），它有真后端
+  // （`src/inspectionProfile.ts` + `ProblemsPanel.vue` / `InspectionProfileSwitcher.vue` 消费），
+  // 所以按「守意图不守形状」把它补进期望序列；下面「没有实现就不放」的白名单照样守。
   const titles = [...analyze.matchAll(/title: '([^']+)'/g)].map(match => match[1])
-  assert.deepEqual(titles, ['检查代码…', '按名称运行检查…', 'Analyze Code'])
+  assert.deepEqual(titles, ['检查代码…', '按名称运行检查…', '分析依赖…', '检查配置档', 'Analyze Code'])
   assert.match(analyze, /title: '按名称运行检查…', keys: 'Ctrl Shift Alt I'/,
     'RunInspection = IdeBundle:1041 + keymaps/$default.xml:276-278')
   assert.match(analyze, /title: 'Analyze Code'/, 'group.AnalyzeActionsPopup.text（ActionsBundle:1765）')

@@ -5,17 +5,18 @@
 //     默认 **4**（`:59`），-1 = 禁用（中文包 `DiffBundle.properties:75` = 禁用）；
 //   · 每一段未更改的行按 shift = range / 2×range / 4×range 生成三层候选（`FoldingModelSupport.java:1234-1241`），
 //     **藏起来不足 2 行就不生成折叠区**（`:310` 的 `ends - starts < 2`）；
-//   · 默认展开（`TextDiffSettingsHolder.kt:64` 的 `EXPAND_BY_DEFAULT = true`）；
+//   · 默认展开（`TextDiffSettingsHolder.kt:59` 的 `EXPAND_BY_DEFAULT = true`）；
 //   · 开关 `collapse.unchanged.fragments`（中文包 `:63` = 收起未更改的片段）在上下文范围 = 禁用时
 //     **整个不可见**（`TextDiffViewerUtil.java:455`）。
 //
-// 本仓只做"展开 / 折叠"两态，所以只保留上游三层里折叠时实际可见的那一层（最外层，见 `foldForRun`）。
+// 折叠区点一次只往里展开**一层**（上游 `ExpandSuggester` 的三层候选，`:403/:418/:455`），
+// 点到底层才整段露出来 —— `foldCandidates` / `foldRows(…, levels)` / `foldCanStepDeep` 那一组。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   COLLAPSE_UNCHANGED_TEXT, CONTEXT_RANGE_DISABLED, CONTEXT_RANGE_LABELS, CONTEXT_RANGE_MODES, DEFAULT_CONTEXT_RANGE,
-  allFoldKeys, diffFolds, foldForRun, foldKey, foldLabel, foldRows, unchangedRuns,
+  allFoldKeys, diffFolds, foldCanStepDeep, foldCandidates, foldForRun, foldKey, foldLabel, foldRows, rangeShift, unchangedRuns,
 } from '../src/diffFold.ts'
 
 const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
@@ -167,7 +168,7 @@ test('the fold controls never wrap their labels, the toolbar wraps instead', () 
 test('the viewer renders folds and routes the toggle', () => {
   const view = read('src/components/DiffView.vue')
   assert.match(view, /import \{[^}]*foldRows[^}]*\} from '\.\.\/diffFold'/, '折叠逻辑要走模块')
-  assert.match(view, /const items = computed\(\(\) => foldRows\(effectiveRows\.value, contextRange\.value, collapsed\.value\)\)/)
+  assert.match(view, /const items = computed\(\(\) => foldRows\(effectiveRows\.value, contextRange\.value, collapsed\.value, foldLevels\.value\)\)/)
   assert.match(view, /foldLabel\(item\.hidden\)/, '标记上要写清藏了多少行')
   assert.match(view, /@click="toggleFold\(foldKey\(item\.fold\)\)"/, '点标记展开')
   assert.match(view, /@click="toggleAll"/, '开关是折叠/展开全部')
@@ -182,8 +183,10 @@ test('the toggle disappears when the context range is disabled, as upstream', ()
 
 test('changing the range or the rows drops the fold state', () => {
   const view = read('src/components/DiffView.vue')
-  assert.match(view, /watch\(contextRange, \(\) => \{ collapsed\.value = new Set\(\) \}\)/)
-  assert.match(view, /watch\(effectiveRows, \(\) => \{ collapsed\.value = new Set\(\) \}\)/)
+  // 意图 = 换了档位或换了差异，折叠集合**和已展开的层数**一起作废（层数是按行下标记的，
+  // 只清集合会让下一份差异在某处直接以最里层呈现）。
+  assert.match(view, /watch\(contextRange, \(\) => \{ foldLevels\.value = new Map\(\); collapsed\.value = new Set\(\) \}\)/)
+  assert.match(view, /watch\(effectiveRows, \(\) => \{ foldLevels\.value = new Map\(\); collapsed\.value = new Set\(\) \}\)/)
 })
 
 test('the fold row lines up with the diff rows it replaces', () => {
@@ -200,4 +203,66 @@ test('the marker carries the first hidden line number, not the run start', () =>
   assert.match(view, /effectiveRows\.value\[fold\.hiddenFrom\]\?\.left\?\.no \?\? ''/)
   assert.match(view, /hiddenLine\(item\.fold\)/)
   assert.ok(!view.includes('item.fold.runStart + 1'), '标记行不能再用片段起点当行号')
+})
+
+// —— 三层候选的逐级展开（本轮补的缺口，`FoldingModelSupport.java:1234-1241` + `:289-298`）——
+
+/** 一段 30 行的未更改区间（两端各有一条改动，`unchangedRuns` 才认它）。 */
+const longRun = rows('change', ...Array(30).fill('equal'), 'change')
+
+test('rangeShift is the upstream three depths and -1 past them', () => {
+  assert.deepEqual([0, 1, 2, 3].map(d => rangeShift(4, d)), [4, 8, 16, -1],
+    '照 `case 0 -> range; case 1 -> range * 2; case 2 -> range * 4; default -> -1`')
+})
+
+test('a run yields its candidate layers from most-hidden inwards, each at least two rows', () => {
+  const run = unchangedRuns(longRun)[0]
+  const layers = foldCandidates(run, 4)
+  assert.equal(layers.length, 2, '30 行的段在 range=4 下只有两层还藏得住 ≥2 行（第三层 16 > 30-16）')
+  assert.deepEqual(layers.map(f => [f.hiddenFrom, f.hiddenTo, f.hiddenTo - f.hiddenFrom]), [[5, 27, 22], [9, 23, 14]],
+    '行数组第 0 行是改动，所以未更改段从下标 1 起：range=4 ⇒ 藏 [5,27)')
+  assert.ok(layers[1].hiddenFrom > layers[0].hiddenFrom && layers[1].hiddenTo < layers[0].hiddenTo,
+    '内层必须嵌在外层里（上游那三层是嵌套的块，不是并列的）')
+  assert.deepEqual(foldCandidates(run, 8).map(f => f.hiddenTo - f.hiddenFrom), [14], 'range=8：只有第一层藏得住 ≥2 行')
+  assert.deepEqual(foldCandidates(run, -1), [], '禁用档没有候选层')
+})
+
+test('collapsed state renders the outermost layer until told otherwise', () => {
+  const collapsed = new Set([1])
+  const items = foldRows(longRun, 4, collapsed)
+  const fold = items.find(i => i.kind === 'fold')
+  assert.equal(fold.hidden, 22, '默认（level 缺省 = 0）藏的是最外那层')
+  assert.equal(fold.depth, 0)
+  assert.equal(fold.layers, 2)
+})
+
+test('one step of expansion reveals exactly one candidate layer', () => {
+  const collapsed = new Set([1])
+  const once = foldRows(longRun, 4, collapsed, new Map([[1, 1]]))
+  const fold = once.find(i => i.kind === 'fold')
+  assert.equal(fold.hidden, 14, '展开一层 = 露出 8 行，剩下的还是折叠标记')
+  assert.equal(fold.depth, 1)
+  const visible = once.filter(i => i.kind === 'row').length
+  assert.equal(visible, longRun.length - 14, '其余行照常可见（2 条改动 + 26 行未更改）')
+})
+
+test('stepping stops at the innermost layer instead of vanishing', () => {
+  const collapsed = new Set([1])
+  const over = foldRows(longRun, 4, collapsed, new Map([[1, 9]]))
+  assert.equal(over.find(i => i.kind === 'fold').depth, 1, '超出层数就停在这一族真实存在的最后一层')
+  assert.equal(foldCanStepDeep(1, 4, longRun, 0), true)
+  assert.equal(foldCanStepDeep(1, 4, longRun, 1), false, '最后一层再点就整段展开')
+  assert.equal(foldCanStepDeep(0, 4, longRun, 0), false, '不是折叠起点的键不该被当成一处折叠')
+})
+
+// 新门禁的反向验证：这条判据必须真的拦得住"退回两态"的写法。
+test('the viewer steps fold levels instead of collapsing everything at once', () => {
+  const view = read('src/components/DiffView.vue')
+  assert.match(view, /const foldLevels = ref<Map<number, number>>\(new Map\(\)\)/)
+  assert.match(view, /foldRows\(effectiveRows\.value, contextRange\.value, collapsed\.value, foldLevels\.value\)/)
+  assert.match(view, /if \(foldCanStepDeep\(key, contextRange\.value, effectiveRows\.value, level\)\)/)
+  assert.doesNotMatch(view, /if \(next\.has\(key\)\) next\.delete\(key\); else next\.add\(key\)/,
+    '老的两态写法回来了 = 点一次就整段展开，逐级那三层又没人消费了')
+  const fold = read('src/diffFold.ts')
+  assert.match(fold, /if \(depth === 2\) return range \* 4/, 'rangeShift 的第三档必须在')
 })

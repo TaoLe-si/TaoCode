@@ -17,6 +17,10 @@
 //      `ponytail:` 不为预览再起一个编辑器实例；文件真大时升级路径是给窗口外面补虚拟化滚动。
 //   2. `several.occurrences.selected` 在本仓用不上：结果列表是**单选**（光标），不存在"跨文件多选"这个状态。
 //      真出现"没有可预览的行"时用 `usage.preview.isnt.available` 那一句。
+//
+// 命中高亮（`previewSegments`）：上游是 `UsagePreviewPanel.kt:503-546` 给命中区间加
+// `SEARCH_RESULT_ATTRIBUTES` 高亮，本仓画成 `<mark class="fs-preview-hit">`。
+import { collectSearchMatches, type SearchOptions } from './editorSearch.ts'
 
 /** 命中行上下各留多少行（上游预览体高度是 15 行；本仓取 40 行一屏半，够看清上下文）。 */
 export const PREVIEW_CONTEXT_LINES = 40
@@ -70,4 +74,38 @@ export function previewLines(content: string, window: PreviewWindow): string[] {
 export function previewHeader(path: string, line: number, totalLines: number): { name: string; detail: string } {
   const name = path.split('/').pop() ?? path
   return { name, detail: `行 ${line} / 共 ${totalLines}` }
+}
+
+/** 预览里一行切出来的段：`hit` 为真的一段在界面上画命中底色。 */
+export interface PreviewSegment {
+  text: string
+  hit: boolean
+}
+
+/** 单行最多标多少处（病态查询/超长行时兜住渲染量）。 */
+export const PREVIEW_HITS_PER_LINE = 50
+
+/**
+ * 把预览里的一行切成普通段/命中段 —— 上游 `UsagePreviewPanel` 给命中区间加
+ * `EditorColors.SEARCH_RESULT_ATTRIBUTES` 的 EXACT_RANGE 高亮（`UsagePreviewPanel.kt:503-546`），
+ * 本仓用 `<mark>` 表达同一件事。
+ *
+ * 匹配语义直接复用查找栏那一套（`src/editorSearch.ts` 的 `collectSearchMatches`）：大小写 / 全词 /
+ * 正则（结构化模板传进来的是**编译后的正则**）与本次搜索逐条一致，不会出现"结果表里有、预览里没标"。
+ * 零宽匹配（`^` / `x*`）没有可画的文本，跳过；一处都画不出来时按整行普通文本返回。
+ */
+export function previewSegments(line: string, query: string, options: SearchOptions): PreviewSegment[] {
+  const plain: PreviewSegment[] = line ? [{ text: line, hit: false }] : []
+  if (!line || !query) return plain
+  const hits = collectSearchMatches(line, query, options, PREVIEW_HITS_PER_LINE).filter(match => match.to > match.from)
+  if (!hits.length) return plain
+  const out: PreviewSegment[] = []
+  let at = 0
+  for (const match of hits) {
+    if (match.from > at) out.push({ text: line.slice(at, match.from), hit: false })
+    out.push({ text: line.slice(match.from, match.to), hit: true })
+    at = match.to
+  }
+  if (at < line.length) out.push({ text: line.slice(at), hit: false })
+  return out
 }

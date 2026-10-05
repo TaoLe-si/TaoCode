@@ -3,7 +3,7 @@
 // 模板里的浮层 Teleport 到 body —— 父级 motion.div 的动画会留下 transform，transformed 祖先
 // 会让 position:fixed 退化成相对弹层定位，浮层必须挂在 document.body 上。
 import { ref } from 'vue'
-import type { MenuRow } from './types'
+import type { MenuRow } from './types.ts'
 
 export interface SubmenuStyle { left: string; top?: string; bottom?: string; maxHeight: string }
 

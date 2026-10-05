@@ -101,19 +101,23 @@ test('删除与提升：删表头后系统剪贴板要回落到新表头', () =>
   assert.deepEqual(texts(moveClipboardContentToTop(ring, -1)), ['a', 'b', 'c'])
 })
 
-test('选择器行文本：前 80 字符、换行折成 ⏎、截断加省略号', () => {
+test('选择器行文本：先截断后折行、截断补 "..."、超长时按源码的两倍取', () => {
   // `ContentChooser.RETURN_SYMBOL`（:70）
   assert.equal(CLIPBOARD_RETURN_SYMBOL, '⏎')
   assert.equal(clipboardPreview('a\nb'), `a${CLIPBOARD_RETURN_SYMBOL}b`)
   // CRLF 也折成一个符号（源码 :429-437 专门处理含 \r 的情况）
   assert.equal(clipboardPreview('a\r\nb'), `a${CLIPBOARD_RETURN_SYMBOL}b`)
+  // 截断记号是 `StringUtil.first(s, n, true)` 的 "..."，总长 = 80 + 3（StringUtil.java:2012-2014）
   const long = 'x'.repeat(120)
   const short = clipboardPreview(long)
-  assert.equal(short.length, 80)
-  assert.ok(short.endsWith('…'))
-  assert.equal(short, 'x'.repeat(79) + '…')
+  assert.equal(short.length, 83)
+  assert.equal(short, 'x'.repeat(80) + '...')
   // 正好 80 字符不截断
   assert.equal(clipboardPreview('y'.repeat(80)), 'y'.repeat(80))
+  // 先截断后折行：换行在第 2 个字符时，第 80 个可见字符仍是正文（"..." 是截断记号）
+  assert.equal(clipboardPreview('a\n' + 'b'.repeat(200)), `a${CLIPBOARD_RETURN_SYMBOL}` + 'b'.repeat(78) + '...')
+  // 首字符就是 CR 时 `indexOf(..., '\r', ...) > 0` 为假 ⇒ 走"无 CR"那一支，CRLF 折成一个 ⏎
+  assert.equal(clipboardPreview('\r\n' + 'x'.repeat(200)), CLIPBOARD_RETURN_SYMBOL + 'x'.repeat(78) + '...')
 })
 
 test('选择器行号右对齐到总位数（源码 :394-398）', () => {

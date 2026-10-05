@@ -50,11 +50,13 @@ export interface EmptySearchOptions {
 /**
  * 该 tab 有没有"文本搜索"那一类供给者。上游按 `SearchEverywhereEmptyTextProvider` 的
  * **实现者**判（`SearchEverywhereUI.java:1932-1935`）—— 本树里只有 `TextSearchContributor`
- * 实现了它，而那个贡献者正是 All/Project 两档的内容来源（文字搜索 + 文件名）。
- * Commands / Run Configurations 两档没有实现者 ⇒ 走通用分支。
+ * 实现了它，而那个贡献者正是文件那一档的内容来源（文字搜索 + 文件名）。
+ * Classes / Symbols / Actions / Run Configurations 几档没有实现者 ⇒ 走通用分支。
  */
 export function tabHasTextSearch(tab: SearchEverywhereTab): boolean {
-  return tab === 'all' || tab === 'project'
+  // Text 档（`SeTextTab.kt:52` 的 id = `TextSearchContributor`）就是那个实现者本人的档；
+  // All / Project 两档的内容里也含文件行 —— 上一版没有 text 这一档，所以只列了两个。
+  return tab === 'all' || tab === 'project' || tab === 'text'
 }
 
 export interface EmptyText {

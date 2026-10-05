@@ -90,8 +90,14 @@ test('帮助菜单的源码字符串不会漂移成「谁都能改的空壳」',
 test('「关于」带构建号：界面是哪一版必须能自证（IDEA About 的 `Build #` 那一行）', () => {
   // 起因：前端改了但 exe 没重链时（原生层没改就不会重链），"exe 的时间戳"证明不了界面新旧。
   // 可靠的证据只有页面**真正引用**的那个入口包文件名 —— 它由宿主写进日志、由界面写进「关于」。
+  //
+  // 锚点随实现搬家（不是放松断言）：这一列的行定义上一轮从 `AboutDialog.vue` 的手写 `<dt>/<dd>`
+  // 搬进了 `src/aboutInfo.ts` 的 `aboutRows()`（显示与复制同源），所以「构建」那一行的精确正则
+  // 现在指 `src/aboutInfo.ts`；对话框那一侧继续核「渲染的就是这张表」与「入口包名是运行时读的」。
   const about = readFileSync('src/components/AboutDialog.vue', 'utf8')
-  assert.match(about, /<dt>构建<\/dt><dd>\{\{ entryScript \|\| '—' \}\}/, '「关于」没有构建号这一行')
+  const rows = readFileSync('src/aboutInfo.ts', 'utf8')
+  assert.match(rows, /\{ label: '构建', value: entryScript \|\| NO_VALUE \}/, '「关于」没有构建号这一行')
+  assert.match(about, /aboutRows\(props\.info, entryScript\)/, '「关于」画的就是那张含构建号的表')
   assert.match(about, /document\.querySelector<HTMLScriptElement>\('script\[src\]'\)/,
     '构建号必须是运行时读到的入口脚本，不是写死的常量')
   // 反例：把某个具体哈希写进源码（那等于假装自己是新版本）。

@@ -7,23 +7,56 @@
 // （`IdeStatusBarImpl.kt:313-323,863-872,952-962`），左右键在可见且启用的组件间走并两端环绕，
 // Escape 回到进入前的组件；规则在 src/statusBarNav.ts，本模块只做 DOM 与注册。
 // 两者同处是因为「通知中心」本身就是状态栏里的一个组件，它们的开关状态（`noticeOpen` / `statusMenu`）互相牵制。
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onScopeDispose, ref, watch } from 'vue'
 import { focusActiveEditor } from './editorFocus.ts'
 import { placeMenu } from './menuPlacement.ts'
 import { pushNotice, upsertNotice, type NoticeAction, type NoticeEntry } from './notices.ts'
+import { playNotificationSound } from './notificationBeeper.ts'
+import { armRemindLater, canShowNotice } from './notificationDoNotAsk.ts'
+import { balloonFadeoutMs, noticeGroup, showsBalloon, type NotificationDisplayType } from './notificationGroups.ts'
 import { clearNoticeStatus, setNoticeStatus } from './statusBarText.ts'
 import { focusableWidgets, navigateWidget, resolveRestoreTarget, shouldFocusFirstWidget, type NavDirection } from './statusBarNav.ts'
 import { wireLspProgressNotices } from './progressNotices.ts'
+// 省电模式那一拍：通知（`PowerSaveModeNotifier`）与后台任务队列的挂起是同一条语义，
+// 规则和文案在 src/notificationPowerSave.ts，本模块只做挂载。
+import { backgroundTaskQueue } from './backgroundTasks.ts'
+import {
+  POWER_SAVE_DISPLAY_ID, POWER_SAVE_SUSPEND_REASON, powerSaveNotice, powerSaveNoticeSuppressed,
+  powerSaveTransition, suppressPowerSaveNotice,
+} from './notificationPowerSave.ts'
 
 export interface NotificationsDeps {
   /** 一闪而过的消息（宿主自持的可写 computed，模板直接绑定）。 */
   notice: { value: string }
   noticeError: { value: boolean }
   noticeAction: { value: (() => void) | null }
+  /**
+   * 当前工作区根 —— 「不再为此项目显示」写的是**项目级**那张表
+   * （`DoNotAskProjectManager`，`DoNotAskManager.kt:29-34`），判定时必须一起查
+   * （`Notification.isDoNotAskFor:465-467` 是"项目级 或 应用级"）。
+   * 不给就等于没有项目，只查应用级那一张。
+   */
+  projectRoot?: () => string
+  /**
+   * 省电模式（`editorSettings.powerSaveMode`）的镜像与关闭通道。
+   * 上游的两个触发点都在这里合成了一拍：项目打开时已经是省电档 ⇒ 补发一条
+   * （`PowerSaveModeNotifier.kt:17-22` 的 ProjectActivity），动作里切换档 ⇒ 发/收
+   * （`TogglePowerSaveAction.java:20-25`）。不给这一项就等于本仓没有这个开关，什么都不发。
+   */
+  powerSave?: { enabled: () => boolean; turnOff?: () => void }
+  /**
+   * 气球的存在时长（毫秒）从哪来。默认走通知组的 `displayType`
+   * （`notificationGroups.ts` 的 `balloonFadeoutMs`：BALLOON 10 秒、STICKY_BALLOON 300 秒，
+   * 上游同一处是 `NotificationsManagerImpl.java:446-449` 的
+   * `int delay = displayType == STICKY_BALLOON ? 300000 : 10000; startSmartFadeoutTimer(delay)`）。
+   * 判据注入替身可以把 10 秒压成几十毫秒。
+   */
+  balloonDelayMs?: (displayType: NotificationDisplayType) => number | undefined
 }
 
 export function createNotifications(deps: NotificationsDeps) {
   const { notice, noticeError, noticeAction } = deps
+  const projectRoot = deps.projectRoot ?? (() => '')
 // IDEA keeps every notification in a log the status-bar widgets and the welcome screen's
 // notification toolbar list (Notifications widget / `createNotificationToolbar`): the transient
 // balloon is not the only place a message lives. `notice` stays the balloon; `noticeLog` is that
@@ -31,19 +64,37 @@ export function createNotifications(deps: NotificationsDeps) {
 const noticeLog = ref<NoticeEntry[]>([])
 let noticeSeq = 0
 function notify(message: string, error = false, onClick?: () => void, detail?: string[], displayId?: string, actions?: NoticeAction[]) {
-  notice.value = message
-  noticeError.value = error
-  noticeAction.value = onClick ?? null
-  noticeActions.value = actions ?? null
+  // 「不再显示」的判定点在上游是 `Notification.canShowFor`（`Notification.java:193-202`）——
+  // 命中就不发这条，而不是发了再藏。抑制表见 src/notificationDoNotAsk.ts；
+  // 查的是**项目级 + 应用级**两张表（`Notification.isDoNotAskFor:465-467`），
+  // 所以这里必须把工作区根递进去，否则用户在通知中心点的「不再为此项目显示」不会生效。
+  const root = projectRoot()
+  if (!canShowNotice({ message, displayId }, root)) return
   const entry: NoticeEntry = { id: ++noticeSeq, message, error, at: new Date().toLocaleTimeString('zh-CN', { hour12: false }), detail, displayId, actions }
-  noticeEntryId.value = entry.id
+  // 通知组决定这一条要不要占用那个一闪而过的气球（`NotificationGroup.displayType`：
+  // NONE / TOOL_WINDOW 只进通知中心，见 NotificationsAnnouncer.kt:85-87）。本仓的生产方
+  // 落在 `src/notificationGroups.ts` 那张表里；未分组的照旧弹。
+  const group = noticeGroup(entry)
+  const balloon = !group || showsBalloon(group.displayType)
+  if (balloon) {
+    notice.value = message
+    noticeError.value = error
+    noticeAction.value = onClick ?? null
+    noticeActions.value = actions ?? null
+  }
+  noticeEntryId.value = balloon ? entry.id : null
+  // 气球的存在时长归通知组管（未分组按 BALLOON 那一档，与上游"注册项决定显示方式"一致）。
+  if (balloon) armBalloonFadeout(entry.id, group?.displayType ?? 'BALLOON')
   // `pushNotice` carries IDEA's `expirePreviousAndNotify` rule (ShowNotificationCommitResultHandler
   // .kt:97): the notification with the same display id is expired first, so repeated commits replace
   // one entry instead of filling the notification centre with history.
   noticeLog.value = pushNotice(noticeLog.value, entry)
   // 通知进状态栏那一段文字（IDEA `ApplicationNotificationsModel` 推 statusMessage，由
   // `StatusPanel.updateText` 显示并**带相对时间**）。`stamp` 用真实 epoch：上游拿它算"刚刚/N 分钟前"。
-  setNoticeStatus({ message, stamp: Date.now() })
+  if (balloon) setNoticeStatus({ message, stamp: Date.now() })
+  // `NotificationsBeeper.kt:12-16`：本组开着「播放声音」就响一声（按组、默认关，规则与
+  // 存储在 src/notificationBeeper.ts）。响不出声不报错，也不影响上面任何一步。
+  playNotificationSound(entry)
 }
 // The commit panel reports its result through `notify` with a display id, so its handler ignores
 // the channel's transient-click action. `actions` 是面板给通知带的那几个按钮（上游
@@ -53,6 +104,7 @@ function notifyFromPanel(message: string, error = false, displayId?: string, det
 }
 // 进度型通知：同一个 displayId 就地刷新（跑完由调用方把 percent 收成数字或 null，行就留在列表里）。
 function notifyProgress(entry: Omit<NoticeEntry, 'id' | 'at'>) {
+  if (!canShowNotice(entry, projectRoot())) return
   const at = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   // id 与气球那条共用一个序列：`upsertNotice` 命中同 displayId 时会沿用旧 id，所以这里给新号即可。
   noticeLog.value = upsertNotice(noticeLog.value, { ...entry, id: ++noticeSeq, at })
@@ -64,6 +116,59 @@ wireLspProgressNotices(notifyProgress)
 const noticeActions = ref<NoticeAction[] | null>(null)
 // 气球显示的就是列表里最新那一条：记住它的 id，点动作时才能把**这一条**收掉（下面 `runBalloonAction`）。
 const noticeEntryId = ref<number | null>(null)
+// --- 气球的存在时长（`NotificationsManagerImpl.java:446-449`）--------------------------------
+// 上游那一行给的是「气球活多久」的唯一判据：`int delay = displayType == STICKY_BALLOON ? 300000 : 10000;`
+// 然后 `((BalloonImpl) balloon).startSmartFadeoutTimer(delay)`。两个细节都照抄：
+//   · **"smart"**：指针停在气球上时不 fade（`BalloonImpl.startSmartFadeoutTimer` 的语义）⇒ 到点先看一眼
+//     元素是不是 `:hover`，是就过 1 秒再看，直到指针离开；
+//   · **窗口在前台才起表**：外层那个 `frameActivateBalloonListener`（`:445-450`，实现 `:461-463`
+//     `if (ApplicationManager.getApplication().isActive()) callback.run()`）⇒ 本仓用 `document.hidden`
+//     当同一个探针，界面在后台时不倒计时，回到前台才起表。
+// 气球消失**不等于**通知被收掉：那条还留在通知中心（`noticeLog` 不动），与上游"气球 fade、
+// 通知进 Event Log"同一形状。
+const BALLOON_SELECTOR = '.notice.workspace-notice'
+const BALLOON_HOVER_RECHECK_MS = 1000
+let balloonFadeoutTimer: ReturnType<typeof setTimeout> | null = null
+let balloonVisibilityListener: (() => void) | null = null
+function clearBalloonFadeout() {
+  if (balloonFadeoutTimer !== null) { clearTimeout(balloonFadeoutTimer); balloonFadeoutTimer = null }
+  if (balloonVisibilityListener !== null && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', balloonVisibilityListener)
+    balloonVisibilityListener = null
+  }
+}
+function armBalloonFadeout(id: number, displayType: NotificationDisplayType) {
+  clearBalloonFadeout()
+  const delay = (deps.balloonDelayMs ?? balloonFadeoutMs)(displayType)
+  if (typeof delay !== 'number' || !Number.isFinite(delay) || delay <= 0) return
+  const fadeOrRetry = () => {
+    // 已经被下一条顶替、或者用户自己点掉了：这一拍什么都不做。
+    if (noticeEntryId.value !== id || !notice.value) { clearBalloonFadeout(); return }
+    const balloonElement = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>(BALLOON_SELECTOR)
+    if (balloonElement?.matches(':hover')) {
+      balloonFadeoutTimer = setTimeout(fadeOrRetry, BALLOON_HOVER_RECHECK_MS)
+      return
+    }
+    notice.value = ''
+    noticeError.value = false
+    noticeAction.value = null
+    noticeActions.value = null
+    balloonFadeoutTimer = null
+  }
+  const start = () => { balloonFadeoutTimer = setTimeout(fadeOrRetry, delay) }
+  if (typeof document !== 'undefined' && document.hidden) {
+    // 上游的 frameActivateBalloonListener：窗口不在前台就不起表。
+    balloonVisibilityListener = () => {
+      if (document.hidden) return
+      balloonVisibilityListener = null
+      start()
+    }
+    document.addEventListener('visibilitychange', balloonVisibilityListener)
+    return
+  }
+  start()
+}
+onScopeDispose(clearBalloonFadeout)
 function runNoticeAction(action: NoticeAction) {
   noticeActions.value = null
   notice.value = ''
@@ -163,6 +268,45 @@ function closeFirstNotification() {
   noticeLog.value = noticeLog.value.slice(1)
   if (!noticeLog.value.length) { noticeOpen.value = false; clearNoticeStatus() }
 }
+// 「明天提醒我」的到点调度（上游 `RemindLaterManager`）分两支，本仓现在两支都接上了：
+//   · 启动那一支 `initializeComponent:177-212` —— 存着的每条走一遍，`delay > 0` 继续等、
+//     `delay <= 0` 立刻 `execute(element)`（`:119-171`，把同一条通知重新 notify 一遍）；
+//   · 运行中那一支 `schedule(element, delay)`（`:115-117`，`addSimpleNotification:66` 排完就定好时）
+//     —— 之前**只有**启动那一支，于是"明天提醒我"在本次运行里永远不会响。
+// `armRemindLater` 把两支合成一件事（见 src/notificationDoNotAsk.ts 的那一节），
+// 并在事件作用域结束时撤掉定时器。
+const cancelRemindLaterAlarm = armRemindLater({
+  onDue: records => { for (const record of records) notify(record.message, record.error, undefined, record.detail, record.displayId) },
+})
+onScopeDispose(cancelRemindLaterAlarm)
+  // --- 省电模式（`PowerSaveModeNotifier` + `TogglePowerSaveAction.java:20-25`）----------------------------
+  // 上游这一拍做三件事，本仓逐条对上：
+  //   ① 开档时发那条 WARNING 通知（`TogglePowerSaveAction.java:22` 只在 `state == true` 时发；
+  //      `PowerSaveModeNotifier.kt:17-22` 是项目打开时的 ProjectActivity ⇒ 本仓用 `immediate: true` 的首拍）；
+  //   ② `ignore.power.save.mode` 命中就整个不发（`PowerSaveModeNotifier.kt:30-32`）；
+  //   ③ 模式再变就把气球收掉（`:52-56` 那条 `PowerSaveMode.TOPIC` 监听）⇒ 关档那一拍走 `expireNotice`。
+  // 另外正文那句「代码洞察和后台任务已禁用」在本仓是**真做**的：队列挂起（`setSuspended`），
+  // 不是取消；理由与差别写在 src/notificationPowerSave.ts 的头注。
+  const powerSave = deps.powerSave
+  if (powerSave) {
+    let previous: boolean | null = null
+    const stopPowerSaveWatch = watch(() => powerSave.enabled(), on => {
+      const first = previous === null
+      const step = powerSaveTransition(previous, on)
+      previous = on
+      // 首拍且是关档：上游启动时没有"恢复队列"这一说，别去动它（也不会有人看见）。
+      if (!first || on) backgroundTaskQueue.setSuspended(on ? POWER_SAVE_SUSPEND_REASON : null)
+      if (step === 'expire') {
+        const stale = noticeLog.value.find(entry => entry.displayId === POWER_SAVE_DISPLAY_ID)
+        if (stale) expireNotice(stale.id)
+        return
+      }
+      if (step !== 'notify' || powerSaveNoticeSuppressed()) return
+      const notice = powerSaveNotice(powerSave.turnOff ?? null, () => { suppressPowerSaveNotice() })
+      notify(notice.message, notice.error, undefined, undefined, notice.displayId, notice.actions)
+    }, { immediate: true })
+    onScopeDispose(stopPowerSaveWatch)
+  }
   return {
     noticeLog, noticeOpen, notify, notifyFromPanel, notifyProgress, noticeActions, runNoticeAction, runBalloonAction, expireNotice, statusBarRef, statusWidgets, focusStatusBar,
     restoreFocusFromStatusBar, onStatusBarKeydown, statusMenu, openStatusMenu, clearNotices, closeFirstNotification,

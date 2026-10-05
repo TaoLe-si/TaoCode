@@ -7,7 +7,16 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { RangeSetBuilder } from '@codemirror/state'
 
 class WhitespaceWidget extends WidgetType {
-  constructor(readonly tab: boolean) { super() }
+  // 注意：这里**不能**写 `constructor(readonly tab: boolean)` —— 参数属性是 TS 的类型扩展语法，
+  // Node 22 直跑 .ts 用 strip-only 擦除，遇到它会抛 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`
+  // （症状是整个测试文件加载失败）。显式字段即可。
+  private readonly tab: boolean
+
+  constructor(tab: boolean) {
+    super()
+    this.tab = tab
+  }
+
   eq(other: WhitespaceWidget) { return other.tab === this.tab }
   toDOM() {
     const span = document.createElement('span')
@@ -40,8 +49,14 @@ function buildWhitespace(view: EditorView): DecorationSet {
 
 export const whitespaceLayer = [
   ViewPlugin.fromClass(class {
+    // 同样是显式字段（参数属性禁令，见 WhitespaceWidget 上面的说明）。
+    private readonly view: EditorView
     decorations: DecorationSet
-    constructor(readonly view: EditorView) { this.decorations = buildWhitespace(view) }
+
+    constructor(view: EditorView) {
+      this.view = view
+      this.decorations = buildWhitespace(view)
+    }
     update(update: ViewUpdate) { if (update.docChanged || update.viewportChanged) this.decorations = buildWhitespace(update.view) }
   }, { decorations: plugin => plugin.decorations }),
   EditorView.theme({

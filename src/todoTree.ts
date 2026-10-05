@@ -4,7 +4,16 @@
 // (platform/todo TodoPanelSettings + TodoTreeBuilder). Kept pure so the grouping rules
 // are unit-testable (tests/todo-tree.test.mjs).
 
-export interface TodoItem { path: string; line: number; text: string; kind: string }
+export interface TodoItem {
+  path: string
+  line: number
+  text: string
+  kind: string
+  /** 标记在行内的起始列（0 基，`SearchMatch.column`），多行 TODO 用它定续行的列。 */
+  column?: number
+  /** 多行 TODO 的续行（`src/todoMultiLine.ts` 的判定结果；没开多行时是空）。 */
+  additional?: string[]
+}
 export interface TodoFileNode { kind: 'file'; id: string; label: string; path: string; items: TodoItem[] }
 export interface TodoPackageNode { kind: 'package'; id: string; label: string; path: string; children: TodoNode[] }
 export type TodoNode = TodoFileNode | TodoPackageNode

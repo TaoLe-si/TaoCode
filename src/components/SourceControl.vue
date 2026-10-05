@@ -5,16 +5,20 @@ import DiffView from './DiffView.vue'
 import ChangedHunks from './ChangedHunks.vue'
 import AnchoredMenu from './AnchoredMenu.vue'
 import { classifyLegend, legendGroups, legendText } from '../commitLegend'
-import { commitBlockMessage, commitBlockReason } from '../commitCheck'
 import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
   EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../commitPanelStrings'
 import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
-import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, COMMIT_ACTION_TEXT, SHOW_DETAILS_TEXT, checksFailedTitle, commitAnywayLabel,
-  checksProgress as checksProgressOf, indexingWarningVisible, NOT_AVAILABLE_DURING_INDEXING, CHECKS_CANCEL_TEXT,
-  commitCheckReport, failuresRowText, saveDuringCommitQuestion, type CommitCheckReport } from '../commitChecks'
-import { changesMenuRows, type ChangesMenuTarget } from '../changesMenuActions'
+import { RERUN_CHECKS_TOOLTIP, NOT_AVAILABLE_DURING_INDEXING, failuresRowText, saveDuringCommitQuestion } from '../commitChecks'
+import { changesMenuRows, isConflictedStatus, type ChangesMenuTarget } from '../changesMenuActions'
+import { scanTodoHits } from '../todoScan'
 import { copyPatchToClipboard, createPatchFile } from '../patchExport'
+import { applyPatchFromClipboard, applyPatchFromFile } from '../patchApplyHost'
+import { acceptConflictSide, applyNonConflictingChanges, resolveSimpleConflicts } from '../mergeResolveHost'
+import { legendNeedsCompactForm, observeResize } from '../legendFit'
+import { readCommitOptions, saveCommitOptions } from '../commitOptions'
 import { CHANGES_GROUP_BY_LABELS, GROUP_BY_LABEL, groupChanges, type ChangesGroupBy } from '../changesGrouping'
+import { changesViewSettingsKey, defaultChangesViewSettings, groupByOfKeys, keysOfGroupBy, parseChangesViewSettings, serializeChangesViewSettings } from '../changesViewSettings'
+import { createCommitChecks } from '../sourceControlCommitChecks'
 
 // 「忽略的文件」那一档的文案（`VcsBundle.properties`：`:9` 是短名、`:8` 是说明）。
 const SHOW_IGNORED_TEXT = '忽略的文件'
@@ -24,7 +28,11 @@ import { copyToClipboard } from '../clipboard.ts'
 import { setStatusText } from '../statusBarText'
 import type { NoticeAction } from '../notices'
 import { COMMIT_CANCELED, COMMIT_NOTIFICATION_ID, commitNotificationRows, commitNotificationTitle, countCommittedPaths } from '../commitNotification'
-import { authorEmailPart, authorNamePart, extendsBeyondDefault, fullName, knownAuthors, readSavedAuthors, saveUsedAuthor as saveUsedAuthorIn, shortName, splitAuthorInput, type CommitAuthor } from '../commitAuthor'
+// 提交信息 MRU（上游 `VcsConfiguration.saveCommitMessage/getRecentMessages` + `ShowMessageHistoryAction`）：
+// 会话内按 25 上限去重追加，弹层里 MRU 新→旧排在最前，`git log` 主题兜底。
+import { loadMessageHistory, messageHistoryPreviewLine, saveRecentMessage } from '../commitMessageHistory'
+import { fullName, shortName, type CommitAuthor } from '../commitAuthor'
+import { createCommitAuthorSection } from '../commitAuthorSection'
 import {
   addBlankLineAfterSubject,
   exceedingText,
@@ -40,7 +48,6 @@ import {
 } from '../commitMessageInspection'
 import { request, type SearchResult, type DiffRow, type DiffSides, type GitAheadBehind, type GitChange, type GitCommitDetails, type GitCompare, type GitCompareFile, type GitHunks, type GitLog, type GitStatus, type TodoPattern } from '../bridge'
 import { iconSize } from '../uiIcons'
-
 const props = defineProps<{
   root: string
   active: boolean
@@ -75,7 +82,6 @@ interface DiffState { path: string; staged: boolean; base: string; text: string;
 const diff = ref<DiffState | null>(null)
 const compareTo = ref('')
 const compared = ref<GitCompareFile[]>([])
-
 const changes = computed(() => status.value.changes ?? [])
 const staged = computed(() => changes.value.filter(change => change.staged))
 const unstaged = computed(() => changes.value.filter(change => !change.staged))
@@ -91,25 +97,19 @@ const legendRows = computed(() => legendGroups(legendCounts.value))
 const legendFullText = computed(() => legendText(legendRows.value, false))
 // adjustLegendToFitPanel (:63-78) switches to the compact legend once the full string
 // stops fitting the width the panel gives it, and re-checks after every resize
-// (componentResized listener, :33-37).
+// (componentResized listener, :33-37). 测量本身拆在 src/legendFit.ts。
 const legendRef = ref<HTMLElement | null>(null)
 const legendProbe = ref<HTMLElement | null>(null)
 const legendCompact = ref(false)
-let legendObserver: ResizeObserver | null = null
+let stopLegendFit: (() => void) | null = null
 function measureLegend() {
-  const wrapper = legendRef.value
-  const probe = legendProbe.value
-  if (!wrapper || !probe) return
-  const style = getComputedStyle(wrapper)
-  const available = wrapper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
-  if (available <= 0) return
-  legendCompact.value = probe.getBoundingClientRect().width > available
+  const compact = legendNeedsCompactForm(legendRef.value, legendProbe.value)
+  if (compact !== null) legendCompact.value = compact
 }
 const ahead = ref<GitAheadBehind>({ available: false, ahead: 0, behind: 0 })
 // Secondary reads (remote status, hunk list) must not fail the
 // whole panel, but they must not fail silently either.
 const extrasError = ref('')
-
 function errorText(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
 // Every status read carries a token: another project taking over mid-request makes
 // the answer stale, and applying it would show a foreign repository's changes here.
@@ -153,12 +153,27 @@ const emit = defineEmits<{ notify: [message: string, error?: boolean, displayId?
 // 位置用视口坐标 —— 浮层是 `position: fixed`（`src/popupAnchor.ts`），放在滚动容器里也不会被裁。
 // 「忽略的文件」（上游 `ChangesView.ShowIgnored`，文案取 `VcsBundle.properties:9`）：默认**关**，
 // 开着时 `git status --ignored=matching` 会把被 .gitignore 忽略的文件也列出来。
+// 这两项跟着**工程**走（上游 `ChangesViewSettings`，`:27` 的
+// `@State(name = "ChangesViewManager", storages = [Storage(StoragePathMacros.WORKSPACE_FILE)])`）：
+// 关掉再打开同一个工程，分组方式与「显示忽略的文件」还在。换工作区要读回那一档的存档。
 const showIgnored = ref(false)
-watch(showIgnored, () => { void load() })
 const groupBy = ref<ChangesGroupBy>('none')
+const viewSettingsKey = computed(() => changesViewSettingsKey(props.root))
+watch(viewSettingsKey, key => {
+  let stored = defaultChangesViewSettings()
+  try { stored = parseChangesViewSettings(localStorage.getItem(key)) } catch { /* Session-only. */ }
+  groupBy.value = groupByOfKeys(stored.groupingKeys)
+  showIgnored.value = stored.showIgnored
+}, { immediate: true })
+function persistViewSettings() {
+  const raw = serializeChangesViewSettings({ groupingKeys: keysOfGroupBy(groupBy.value), showIgnored: showIgnored.value })
+  try { localStorage.setItem(viewSettingsKey.value, raw) } catch { /* Session-only preferences. */ }
+}
+watch(showIgnored, () => { persistViewSettings(); void load() })
+watch(groupBy, persistViewSettings)
 const stagedGroups = computed(() => groupChanges(staged.value, groupBy.value))
 const unstagedGroups = computed(() => groupChanges(unstaged.value, groupBy.value))
-const rowMenu = ref<{ x: number; y: number; change: { path: string; staged: boolean; untracked?: boolean; ignored?: boolean } } | null>(null)
+const rowMenu = ref<{ x: number; y: number; change: ChangesMenuTarget & { path: string; staged: boolean } } | null>(null)
 const copyOpen = ref(false)
 const rowMenuRows = computed(() => (rowMenu.value ? changesMenuRows(rowMenu.value.change) : []))
 const rowCopyRows = computed(() => copyPathMenuRows({
@@ -166,10 +181,13 @@ const rowCopyRows = computed(() => copyPathMenuRows({
   root: () => props.root,
   copy: (text: string) => void copyToClipboard(text),
 }))
-function openRowMenu(event: MouseEvent, change: { path: string; staged: boolean; untracked?: boolean; ignored?: boolean }) {
+function openRowMenu(event: MouseEvent, change: ChangesMenuTarget & { path: string; staged: boolean; indexStatus?: string; workStatus?: string }) {
   copyOpen.value = false
-  rowMenu.value = { x: event.clientX, y: event.clientY, change }
+  // 「未合并」（UU/AU/…）要在菜单里多出冲突那一档：判定表在 `src/changesMenuActions.ts`（照 git4idea）。
+  rowMenu.value = { x: event.clientX, y: event.clientY, change: { ...change, conflicted: isConflictedStatus(change.indexStatus ?? '', change.workStatus ?? '') } }
 }
+/** 合并那几条动作的依赖（通知 + 写完刷新变更列表）。 */
+const mergeDeps = () => ({ notify: (message: string, error?: boolean) => emit('notify', message, error), onApplied: () => void load() })
 /** 菜单里选了一条：`copyPath.*` 归复制那一组，其余按 id 分派到面板已有的处理函数。 */
 function pickRowMenu(row: { id: string }) {
   const menu = rowMenu.value
@@ -184,6 +202,12 @@ function pickRowMenu(row: { id: string }) {
     return
   }
   switch (row.id) {
+    // 冲突那一档（上游 git4idea 的 `Git.ChangesView.Conflicts`，只有未合并的变更才有）：
+    // 整文件接受一侧 + 合并窗口工具栏那两个「自动合」。落盘链在 `src/mergeResolveHost.ts`。
+    case 'acceptTheirs': return void acceptConflictSide(path, 'right', mergeDeps())
+    case 'acceptYours': return void acceptConflictSide(path, 'left', mergeDeps())
+    case 'resolveConflicts': return void resolveSimpleConflicts(path, mergeDeps())
+    case 'applyNonConflicts': return void applyNonConflictingChanges(path, mergeDeps())
     case 'diff': return showDiff({ path, staged: menu.change.staged })
     case 'revert': return rollbackConfirm(path)
     case 'stage': return void stage(path)
@@ -192,6 +216,11 @@ function pickRowMenu(row: { id: string }) {
     case 'ignore': return void ignore(path)
     case 'patch': return void createPatchFile({ notify: (message, error) => emit('notify', message, error), copy: copyToClipboard })
     case 'patchClipboard': return void copyPatchToClipboard({ notify: (message, error) => emit('notify', message, error), copy: copyToClipboard })
+    // 「应用补丁…」/「从剪贴板应用补丁」（上游 `ChangesView.ApplyPatch` / `ApplyPatchFromClipboard`）：
+    // 解析 → 逐文件核对（纯规则在 src/patchApply.ts）→ 落盘（宿主链在 src/patchApplyHost.ts），
+    // 进度走状态栏文字、结果走通知；成功后刷新变更列表。
+    case 'applyPatch': return void applyPatchFromFile({ root: props.root, notify: (message, error) => emit('notify', message, error), setStatus: (text) => setStatusText(text, null), onApplied: () => void load() })
+    case 'applyPatchClipboard': return void applyPatchFromClipboard({ root: props.root, notify: (message, error) => emit('notify', message, error), setStatus: (text) => setStatusText(text, null), onApplied: () => void load() })
     case 'refresh': return void load()
   }
 }
@@ -235,171 +264,16 @@ function rollbackConfirm(path: string) {
 未暂存的修改将丢失，无法撤销。`)) rollback(path)
 }
 const unstage = (path: string) => act(() => request('git.unstage', { path }))
-// IDEA's commit check (NonModalCommitWorkflowHandler.checkCommit, :177-184) records which
-// precondition is missing and CommitProgressPanel.buildErrorText() (:321-328) prints that
-// reason right above the commit actions. The Commit button itself only needs a VCS and no
-// running commit (isReady(), :156-159), so it stays clickable and the reason appears on the
-// click — see src/commitCheck.ts for the grouping rules.
-const commitCheckError = ref('')
-// 提交前检查报出来的问题（上游 `FailuresPanel`，`CommitProgressPanel.kt:394`）：**它跟上面那条错误行
-// 不是同一处 UI** —— 错误行说的是"为什么这次不能提交"（空判），这一行说的是"检查发现了什么"。
-// 行只在有 failure 时可见（`isVisible = false` 起步，`:430`；`addFailure` 才显示，`:441`），
-// 行上是：警告图标 + 各条 failure 的文本 + 跑「重新运行提交检查」的刷新按钮（`:492-521`）。
-const checksFailures = ref<string[]>([])
-const checksBusy = ref(false)
-/** `willSkipCommitChecks()`（`NonModalCommitWorkflowHandler.kt:229-233`）：上一轮检查已经失败 ⇒ 提交时跳过检查、按钮改叫「仍然提交」。 */
-const checksSkipped = computed(() => checksFailures.value.length > 0)
-const commitButtonLabel = computed(() => `${checksSkipped.value ? commitAnywayLabel() : COMMIT_ACTION_TEXT}(${staged.value.length})`)
-const commitBlockReasonNow = computed(() => commitBlockReason({
-  hasStagedChanges: staged.value.length > 0,
-  hasMessage: message.value.trim().length > 0,
-  amend: amend.value,
-}))
-// CommitProgressPanel.clearError() (:316-319) drops the label as soon as the message or the
-// inclusion change (:146-156 installs the document and inclusion listeners that call it).
-// `resetCommitChecksResult()` (:240-243) does the same for the *check results* on a document
-// change (the listener at :216-226) — so the failures row and the "Commit Anyway" button name
-// go back to normal as soon as the user edits the message or changes what is included.
-watch(message, () => { commitCheckError.value = ''; checksFailures.value = [] })
-watch(() => staged.value.length, () => { commitCheckError.value = ''; checksFailures.value = [] })
-function passedCommitCheck(): boolean {
-  const reason = commitBlockReasonNow.value
-  commitCheckError.value = reason ? commitBlockMessage(reason) : ''
-  return reason === null
-}
 // IDEA's CommitAuthorComponent (vcs/commit/CommitAuthorComponent.kt:38-121) sits between the
 // commit checks panel and the action buttons (NonModalCommitPanel.kt:76-79) and shows
 // "By <author>" — but only while an author is actually set (:73-77 `userViewer.isVisible =
 // userViewer.user != null`; the value starts as the change list's author, i.e. usually null).
 // The *input* belongs to the commit options popup instead: GitCommitOptionsUi.kt:136-153 puts
 // `row(commit.author)` first, above the amend / sign-off / renames rows.
-const repositoryAuthor = ref<CommitAuthor>({ name: '', email: '' })
-const authorOverride = ref<CommitAuthor | null>(null)
-const authorDraft = reactive<CommitAuthor>({ name: '', email: '' })
-const effectiveAuthor = computed(() => authorOverride.value ?? repositoryAuthor.value)
-// GitCommitOptionsUi.kt:259 — the field completes over `getAllUsers(project) + settings.commitAuthors`,
-// i.e. the authors the log has seen plus the ones saved from earlier commits.
-const knownAuthorEntries = ref<string[]>([])
-function saveUsedAuthor(entry: string) {
-  saveUsedAuthorIn(props.root, entry)
-  knownAuthorEntries.value = knownAuthors(knownAuthorEntries.value, [entry])
-}
-// The two fields replace IDEA's single "Name <email>" text field, so the log's exact strings
-// are split back into the halves the inputs edit (VcsUserUtil.getString :24-28).
-const knownNames = computed(() => [...new Set(knownAuthorEntries.value.map(authorNamePart).filter(Boolean))])
-const knownEmails = computed(() => [...new Set(knownAuthorEntries.value.map(authorEmailPart).filter(Boolean))])
-async function loadAuthor() {
-  try {
-    const user = await request<CommitAuthor>('git.user')
-    repositoryAuthor.value = { name: user.name ?? '', email: user.email ?? '' }
-  } catch { repositoryAuthor.value = { name: '', email: '' } }
-  knownAuthorEntries.value = knownAuthors([], readSavedAuthors(props.root))
-  try {
-    const listed = await request<{ authors?: string[] }>('git.authors')
-    knownAuthorEntries.value = knownAuthors(listed.authors ?? [], readSavedAuthors(props.root))
-  } catch { /* completion is a convenience: a repo without a log just has none */ }
-}
-// The options popup owns the input, so opening it seeds the draft the way setAuthor (:205-213)
-// does: from the current author, empty when there is none (it is deliberately not pre-filled
-// with the repository default — IDEA leaves the field blank until you type something).
-function openOptions() {
-  optionsOpen.value = true
-  authorDraft.name = authorOverride.value?.name ?? ''
-  authorDraft.email = authorOverride.value?.email ?? ''
-}
-// Enter applies, exactly like the popup's VcsUserEditor keyboard action (:111-113).
-function applyAuthorEditor() {
-  const draft = splitAuthorInput(authorDraft.name, authorDraft.email)
-  // GitCommitOptionsUi.kt:205-213 — a null or default author leaves the field empty, so
-  // re-entering the repository's own person (in any casing) is not an override.
-  authorOverride.value = extendsBeyondDefault(draft, repositoryAuthor.value) ? draft : null
-  if (authorOverride.value) saveUsedAuthor(fullName(authorOverride.value))
-}
-// GitCommitOptionsUi.kt:238-251 raises a warning when the author is set and differs from the
-// default (GitBundle.properties:50 "Author differs from default").
-const authorWarning = computed(() => extendsBeyondDefault(authorOverride.value, repositoryAuthor.value))
-// VcsDateViewer's close button removes the author and the date again (:117-120).
-function clearAuthorOverride() {
-  authorOverride.value = null
-  authorDraft.name = ''
-  authorDraft.email = ''
-}
-/**
- * 提交前的检查 —— **一处来源**：`commit` / `commitAndPush` / 「运行提交检查」三条路都走它
- * （上游 `checkCommit() → beforeCommitChecks → （只在通过时）performCommit`，见 `src/commitChecks.ts`）。
- * 原先 TODO 预检在 `commit` 与 `commitAndPush` 里各写了一遍。
- */
-async function collectCommitChecks(): Promise<CommitCheckReport> {
-  const reason = commitBlockReason({
-    hasStagedChanges: staged.value.length > 0, hasMessage: message.value.trim().length > 0, amend: amend.value,
-  })
-  let hits = 0
-  if (checkTodoBeforeCommit.value) {
-    todoCheckBusy.value = true
-    try { hits = await todoHits() } finally { todoCheckBusy.value = false }
-  }
-  const stagedPaths = new Set(staged.value.map(change => change.path))
-  return commitCheckReport({
-    blockReason: reason, todoHits: hits, messageProblems: messageProblems.value,
-    unsaved: dirtyPaths().filter(path => stagedPaths.has(path)),
-  })
-}
-/**
- * 「运行提交检查」（`Vcs.RunCommitChecks`，`RunCommitChecksExecutor.kt`）：跑**同一条**检查链但不提交。
- * 上游**没有**常显按钮：用户能看到的那一处是失败行上的刷新按钮（`RerunCommitChecksAction`，
- * `CommitProgressPanel.kt:492-521`，工具提示 `tooltip.rerun.commit.checks` = 重新运行提交检查），
- * 而失败行本身只在检查报出 failure 之后才出现 —— 所以这里也只在 `checksFailures` 非空时才有这个按钮。
- * 进度那句话用状态栏文字通道（`commit.checks.only.progress.text` = 正在运行提交检查…）。
- *
- * 结果怎么落地也照上游：空判没过 ⇒ 只有面板错误行（上游这次会话是 `Cancelled`，不发通知，`:562-564`）；
- * 检查报出 failure ⇒ 失败行 + 一条标题为 `{0} 检查失败` 的通知（`:284-291`）；全过了 ⇒ 什么都不发、失败行消失。
- */
-function applyChecksReport(report: CommitCheckReport, commitActions = false) {
-  commitCheckError.value = report.blockMessage
-  checksFailures.value = report.failures
-  if (report.failures.length === 0) return
-  // 动作照上游 `appendShowDetailsNotificationActions`（NonModalCommitWorkflowHandler.kt:302-316）：
-  // 「显示详细信息」= 激活提交工具窗口（`showCommitCheckFailuresPanel`，:317-321）；
-  // 「仍然{0}」只在提交路径那条通知上（`commit.checks.failed.notification.commit.anyway.action`）。
-  const actions: NoticeAction[] = [{ label: SHOW_DETAILS_TEXT, run: () => props.showToolWindow?.('git') }]
-  if (commitActions) actions.push({ label: commitAnywayLabel(), run: () => commit() })
-  emit('notify', checksFailedTitle(), true, undefined, report.failures, actions)
-}
-// IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）在面板里挂的那一行：
-// 标题 + 两档正文 + 取消。`checksProgress()` 的 `running` 参数就是"这一行此刻该不该在"。
-const checksProgress = computed(() => checksProgressOf(true, null, checksBusy.value))
-/** 「项目分析期间某些提交检查不可用」（`CommitProgressPanel.kt:310`）；跑检查时让位给进度行。 */
-const indexingWarning = computed(() => indexingWarningVisible(Boolean(props.analyzing), checksBusy.value))
-/** 取消那一轮检查（上游 `ProgressIndicator.cancel()`）：这一轮的结果回来时不再落地。 */
-function cancelCommitChecks() {
-  if (!checksBusy.value) return
-  ++checksToken
-  checksBusy.value = false
-  setStatusText(null, null)
-  emit('notify', CHECKS_CANCEL_TEXT)
-}
-let checksToken = 0
-function runCommitChecks() {
-  if (checksBusy.value) return
-  const token = ++checksToken
-  checksBusy.value = true
-  setStatusText(RUNNING_CHECKS_TEXT, null)
-  void act(async () => {
-    try {
-      const report = await collectCommitChecks()
-      // 用户按了取消（`cancelCommitChecks` 会 ++checksToken）：这一轮的结果不落地 ——
-      // 上游 `ProgressIndicator.cancel()` 之后那个任务的结果同样不会被采纳。
-      if (token === checksToken) applyChecksReport(report)
-    } finally {
-      checksBusy.value = false
-      setStatusText(null, null)
-    }
-  }, failure => {
-    checksBusy.value = false
-    setStatusText(null, null)
-    throw failure
-  })
-}
+// 作者一节的状态（仓库作者/覆盖/草稿/候选）拆在 src/commitAuthorSection.ts。
+const authorSection = createCommitAuthorSection({ root: () => props.root, onOpenOptions: () => { optionsOpen.value = true } })
+const { authorOverride, authorDraft, effectiveAuthor, knownNames, knownEmails, knownAuthorEntries,
+        saveUsedAuthor, loadAuthor, openOptions, applyAuthorEditor, authorWarning, clearAuthorOverride } = authorSection
 /**
  * 提交期间保存文件（上游 `SaveCommittingDocumentsVetoer.confirmSave`：标题「在提交期间保存文件」、
  * 按钮「立即保存」/「延迟保存」）。选"延迟保存"就照常提交磁盘上的版本 —— 上游也是这个意思。
@@ -411,8 +285,15 @@ async function confirmSaveDuringCommit(stagedPaths: readonly string[]) {
   if (!window.confirm(saveDuringCommitQuestion(unsaved))) return
   for (const path of unsaved) await savePath(path)
 }
-
-const commit = () => {
+// The two actions in `ChangesViewCommitPanel`: commit the included changes, and — as the second —
+// commit and then push the branch in the same gesture. Everything up to the push is one body, so
+// it lives here once instead of being copied per action.
+/**
+ * @param push 提交之后再推一次（第二个动作；`ChangesViewCommitPanel` 的那一条）。
+ *   推失败仍然走 act()，但**不能**当成"提交失败"报出去 —— 那是另一个操作
+ *   （上游推送走 git 插件自己的动作），它保留通用的错误通知，所以用 `committed` 区分。
+ */
+const runCommit = (push: boolean) => {
   // Ctrl+Enter reaches here even while the button is disabled, so say why nothing
   // happened instead of silently doing nothing.
   if (!passedCommitCheck()) return
@@ -420,43 +301,15 @@ const commit = () => {
   // `changesCommitted = changes - failedToCommitChanges` (ShowNotificationCommitResultHandler.kt:42-43):
   // the count is taken from what was included in this commit, before the tree reloads.
   const stagedPaths = staged.value.map(change => change.path)
-  void act(async () => {
-    // 上一轮检查已经失败 ⇒ 这次不再跑检查，直接提交（`willSkipCommitChecks()` 那条路：
-    // 按钮此时写的是「仍然提交」）。
-    const report = checksSkipped.value ? null : await collectCommitChecks()
-    if (report && !report.ok) {
-      // 上游 `CommitProgressPanel.buildErrorText`：理由写在面板那条错误行上，提交不跑。
-      applyChecksReport(report, true)
-      return
-    }
-    commitCheckError.value = ''
-    await confirmSaveDuringCommit(stagedPaths)
-    await request('git.commit', {
-      message: text, amend: amend.value, signoff: signoff.value,
-      // An override only rides this commit; native refuses it without an e-mail
-      // (git commit --author needs "Name <email>").
-      author: authorOverride.value?.name ?? '', authorEmail: authorOverride.value?.email ?? '',
-    })
-    reportCommitResult(text, stagedPaths, [])
-    message.value = ''
-    amend.value = false
-    // 提交会话结束 ⇒ `CommitStateCleaner.resetState()`（:634-641）里的 `resetCommitChecksResult()`。
-    checksFailures.value = []
-  }, failure => reportCommitResult(text, stagedPaths, [failure]))
-}
-// IDEA's second action in ChangesViewCommitPanel: commit the included changes, then
-// push the branch in the same gesture. A push failure still surfaces through act().
-const commitAndPush = () => {
-  if (!passedCommitCheck()) return
-  const text = message.value.trim()
-  const stagedPaths = staged.value.map(change => change.path)
-  // The commit result notification belongs to the *commit* half; a later push failure is a separate
-  // operation (IDEA pushes through the git plugin's own action), so it must not be reported as a
-  // failed commit — it keeps the generic error notification instead.
   let committed = false
   void act(async () => {
-    const report = checksSkipped.value ? null : await collectCommitChecks()
-    if (report && !report.ok) { applyChecksReport(report, true); return }
+    // 这一轮检查（上游 `doExecuteSession` 把它包在 `runWithProgress(isOnlyRunCommitChecks = false)` 里）：
+    // 会话开头先 `resetCommitChecksResult()` + 清失败行，然后按状态跳过**已经失败过的相位**
+    // （`willSkipEarlyCommitChecks` / `willSkipModificationCommitChecks`，`:337-340`），
+    // 空判照旧要跑 —— 「仍然提交」时没有暂存文件也得听见那句「选择要提交的文件」。
+    const report = await runCommitChecksRound()
+    // 上游 `CommitProgressPanel.buildErrorText`：理由写在面板那条错误行上，提交不跑。
+    if (!report.ok) { applyChecksReport(report, true); return }
     commitCheckError.value = ''
     await confirmSaveDuringCommit(stagedPaths)
     await request('git.commit', {
@@ -466,13 +319,19 @@ const commitAndPush = () => {
       author: authorOverride.value?.name ?? '', authorEmail: authorOverride.value?.email ?? '',
     })
     committed = true
-    checksFailures.value = []
+    // 提交成功 ⇒ 上游 `CheckinProjectPanel` 的收尾会把信息存进 MRU（VcsConfiguration:169-177）。
+    recentMessages.value = saveRecentMessage(recentMessages.value, text)
     reportCommitResult(text, stagedPaths, [])
     message.value = ''
     amend.value = false
-    await request('git.push')
+    // 提交会话结束 ⇒ `CommitStateCleaner.resetState()`（:634-641）里的 `resetCommitChecksResult()`。
+    checksFailures.value = []
+    runPostCommitChecks()
+    if (push) await request('git.push')
   }, failure => { if (!committed) reportCommitResult(text, stagedPaths, [failure]) })
 }
+const commit = () => runCommit(false)
+const commitAndPush = () => runCommit(true)
 // The changes list collapses like IDEA's commit tab: the tree header carries 展开 on the right.
 // 折叠的是分组里的行（组节点「已暂存 N / 更改 N」留着），对应上游把树的子节点收起来。
 const changesCollapsed = ref(false)
@@ -555,44 +414,57 @@ watch(message, value => {
 // a pre-commit TODO scan that reuses the project's own TODO patterns.
 const optionsOpen = ref(false)
 const todoCheckBusy = ref(false)
-// IDEA's "commit checks" run before the commit is created; this one reuses the
-// project's own TODO patterns through the real Find in Files engine.
-async function todoHits(): Promise<number> {
-  let total = 0
-  for (const entry of props.todoPatterns) {
-    try {
-      const result = await request<SearchResult>('search.run', {
-        query: entry.pattern, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '',
-      })
-      total += result.matches?.length ?? 0
-    } catch (caught) { error.value = errorText(caught) }
-  }
-  return total
-}
+// IDEA's "commit checks": the TODO scan reuses the project's own TODO patterns (Find in Files).
+const todoHits = (): Promise<number> => scanTodoHits(
+  pattern => request<SearchResult>('search.run', { query: pattern, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '' }), props.todoPatterns, caught => { error.value = errorText(caught) })
 const signoff = ref(false)
 const checkTodoBeforeCommit = ref(false)
-// IDEA's commit message history: previous subjects, click to reuse one.
+// 选项的存档（上游 `VcsConfiguration` 的项目级配置 + `CommitOptions.saveState/restoreState`）。
+// 存档层在 src/commitOptions.ts，按工作区根分键；改动即存，切换项目时重读。
+const storedCommitOptions = readCommitOptions(props.root)
+signoff.value = storedCommitOptions.signoff
+checkTodoBeforeCommit.value = storedCommitOptions.checkTodoBeforeCommit
+/** 「提交完成后再运行高级检查」（上游 `settings.commit.postpone.slow.checks`，默认开）。 */
+const postponeSlowChecks = ref(storedCommitOptions.postponeSlowChecks)
+watch([signoff, checkTodoBeforeCommit, postponeSlowChecks], () => {
+  saveCommitOptions(props.root, { signoff: signoff.value, checkTodoBeforeCommit: checkTodoBeforeCommit.value, postponeSlowChecks: postponeSlowChecks.value })
+})
+// 提交检查这一族（空判 / 失败行 / 进度行 / 取消 / 提交后那一轮 / 跑一次检查）拆在
+// src/sourceControlCommitChecks.ts —— 工厂放在提交选项之后：检查链要读那三个选项 ref。
+const {
+  commitCheckError, checksFailures, checksBusy, commitButtonLabel, commitAndPushLabel, passedCommitCheck,
+  applyChecksReport, showFailureDetails, checksProgress, checksPopupOpen, checksPopup, runCommitChecksRound,
+  indexingWarning, cancelCommitChecks, commitOptionsNow, runPostCommitChecks, runCommitChecks,
+} = createCommitChecks({
+  props, emit, act, commit, staged, changes, message, amend, checkTodoBeforeCommit, todoCheckBusy, todoHits,
+  messageProblems, signoff, postponeSlowChecks, dirtyPaths,
+})
+
+// IDEA's commit message history: session MRU first (newest first), git log subjects as fallback;
+// hovering a row previews it in the box, leaving restores the draft, clicking keeps it.
 const messageHistoryOpen = ref(false)
 const messageHistory = ref<string[]>([])
 const messageHistoryLoading = ref(false)
+const recentMessages = ref<string[]>([])
+let historyPreviewDraft: string | null = null
 const toggleMessageHistory = () => {
   messageHistoryOpen.value = !messageHistoryOpen.value
   if (!messageHistoryOpen.value) return
   messageHistoryLoading.value = true
-  void (async () => {
-    try {
-      const log = await request<GitLog>('git.log')
-      // Keep it a message history: subjects only, newest first, duplicates dropped.
-      const seen = new Set<string>()
-      messageHistory.value = log.commits.map(entry => entry.subject).filter(subject => {
-        if (!subject || seen.has(subject)) return false
-        seen.add(subject)
-        return true
-      }).slice(0, 12)
-    } catch (caught) { error.value = errorText(caught) }
-    finally { messageHistoryLoading.value = false }
-  })()
+  void loadMessageHistory(async () => (await request<GitLog>('git.log')).commits.map(entry => entry.subject), recentMessages.value)
+    .then(rows => { messageHistory.value = rows })
+    .catch(caught => { error.value = errorText(caught) })
+    .finally(() => { messageHistoryLoading.value = false })
 }
+const previewHistory = (subject: string) => {
+  if (historyPreviewDraft === null) historyPreviewDraft = message.value
+  message.value = subject
+}
+function endHistoryPreview() {
+  if (historyPreviewDraft !== null && messageHistoryOpen.value) message.value = historyPreviewDraft
+  historyPreviewDraft = null
+}
+const pickHistory = (subject: string) => { historyPreviewDraft = null; message.value = subject; messageHistoryOpen.value = false }
 const checkout = (branch: string) => act(() => request('git.checkout', { branch }))
 // `Vcs.UpdateProject`（与 `Vcs.Push` 同在 `VcsToolbarActions`，VcsActions.xml:416-425）：
 // 先刷新远端（fetch）再做整合（pull）—— 与 Git 菜单那条宿主实现（`src/vcsActions.ts`）同义。
@@ -645,7 +517,6 @@ function clearCompare() {
   compared.value = []
   compareTo.value = ''
 }
-
 // `ToggleAmendCommitOption.kt:19` gives the amend checkbox the mnemonic `KeyEvent.VK_M`, and
 // `:23` its tooltip (`VcsBundle.properties:1163
 // commit.tooltip.merge.this.commit.with.the.previous.one`). A Swing mnemonic fires while the
@@ -666,14 +537,11 @@ onMounted(() => {
   // Re-measure the legend once it is in the DOM, then on every size change and every
   // time the counts change (the inclusion listener of the source fires updateLegend).
   measureLegend()
-  if (typeof ResizeObserver !== 'undefined' && legendRef.value) {
-    legendObserver = new ResizeObserver(() => measureLegend())
-    legendObserver.observe(legendRef.value)
-  }
+  stopLegendFit = observeResize(legendRef.value, () => measureLegend())
 })
 onBeforeUnmount(() => {
-  legendObserver?.disconnect()
-  legendObserver = null
+  stopLegendFit?.()
+  stopLegendFit = null
   window.removeEventListener('keydown', onAmendMnemonic)
 })
 watch(legendFullText, () => void nextTick(measureLegend))
@@ -691,11 +559,15 @@ watch(() => [props.root, props.active] as const, () => {
   authorDraft.name = ''
   authorDraft.email = ''
   optionsOpen.value = false
+  // 提交选项按工作区根分开存：换项目重新读回（上游 `VcsConfiguration` 是项目级配置）。
+  const reloaded = readCommitOptions(props.root)
+  signoff.value = reloaded.signoff
+  checkTodoBeforeCommit.value = reloaded.checkTodoBeforeCommit
+  postponeSlowChecks.value = reloaded.postponeSlowChecks
   void loadAuthor()
   void load()
 })
 </script>
-
 <template>
   <div class="sc-panel">
     <div class="sc-header">
@@ -725,7 +597,9 @@ watch(() => [props.root, props.active] as const, () => {
           <p v-if="messageHistoryLoading" class="sc-empty-line">正在读取历史提交信息…</p>
           <p v-else-if="!messageHistory.length" class="sc-empty-line">暂无历史提交信息。</p>
           <template v-else>
-            <button v-for="subject in messageHistory" :key="subject" class="sc-msg-row" :title="`使用这条提交信息：${subject}`" @click="message = subject; messageHistoryOpen = false">{{ subject }}</button>
+            <button v-for="subject in messageHistory" :key="subject" class="sc-msg-row"
+                    :title="`使用这条提交信息：${subject}`"
+                    @mouseenter="previewHistory(subject)" @mouseleave="endHistoryPreview" @click="pickHistory(subject)">{{ messageHistoryPreviewLine(subject, props.commitSettings.subjectRightMargin) }}</button>
           </template>
         </div>
       </div>
@@ -792,10 +666,10 @@ watch(() => [props.root, props.active] as const, () => {
       </div>
       <!-- IDEA 的 `CommitChecksProgressIndicator`（`CommitProgressPanel.kt:108-130`）：跑检查时那一行
            （标题 + 两档正文 + 取消），任务结束整行收掉（可见性由 `checksProgress(..., running)` 给）。 -->
-      <div v-if="checksProgress.visible" class="sc-checks-progress" role="status">
+      <div v-if="checksProgress.visible" class="sc-checks-progress" role="status" @click="checksPopupOpen = !checksPopupOpen">
         <span class="sc-checks-progress-text"><strong>{{ checksProgress.title }}</strong>{{ checksProgress.text }}</span>
         <span v-if="checksProgress.detail" class="sc-checks-progress-detail">{{ checksProgress.detail }}</span>
-        <button v-if="checksProgress.cancellable" class="sc-tool" :disabled="!checksBusy" @click="cancelCommitChecks">{{ checksProgress.cancelText }}</button>
+        <button v-if="checksProgress.cancellable" class="sc-tool" :disabled="!checksBusy" @click.stop="cancelCommitChecks">{{ checksProgress.cancelText }}</button><div v-if="checksPopup.visible" class="sc-checks-popup" role="dialog" aria-label="提交检查进度"><span>{{ checksPopup.title }}：{{ checksPopup.text }}</span><span class="sc-checks-bar" role="progressbar" aria-label="提交检查进行中" /></div>
       </div>
       <!-- 项目分析期间那条警告（`:310`）：不在分析中、或者正在跑检查时都不出现。 -->
       <p v-if="indexingWarning" class="sc-checks-indexing" role="status">{{ NOT_AVAILABLE_DURING_INDEXING }}</p>
@@ -803,10 +677,22 @@ watch(() => [props.root, props.active] as const, () => {
       <!-- IDEA's FailuresPanel (CommitProgressPanel.kt:394-471): the commit-check failures live on
            their own row — warning icon + the failure texts + the "Rerun commit checks" toolbar
            button (:492-521, `AllIcons.General.InlineRefresh`, tooltip.rerun.commit.checks). The row
-           is hidden until a check actually reports a failure (:430 `isVisible = false`). -->
-      <div v-if="checksFailures.length" class="sc-check-failures" role="status" aria-label="提交检查失败">
+           is hidden until a check actually reports a failure (:430 `isVisible = false`).
+           各条 failure 之间是 `<br/><br/>`（`:465` 的 `appendWithSeparators(HtmlChunk.raw("<br/><br/>"), …)`）
+           ⇒ 一条一行。带详情动作的那一条（`CommitProblemWithDetails`，`CommitCheck.kt:162-176`）
+           **整条文字就是那个链接** —— `showDetailsLink` 为默认的 null 时上游就是这么渲染的
+           （`:456-458`）；点它 = `problem.showDetails(project)`（`NonModalCommitWorkflowHandler.kt:523`），
+           TODO 预检那一条打开的是 TODO 工具窗口（`TodoCheckinHandler.showTodoItems`，`:144-168`）。 -->
+      <div v-if="checksFailures.length" class="sc-check-failures" role="status" :aria-label="failuresRowText(checksFailures)">
         <TriangleAlert :size="iconSize.menu" class="sc-check-failures-icon" />
-        <span class="sc-check-failures-text">{{ failuresRowText(checksFailures) }}</span>
+        <span class="sc-check-failures-text">
+          <template v-for="(failure, index) in checksFailures" :key="`${failure.text}:${index}`">
+            <br v-if="index" />
+            <button v-if="failure.details" type="button" class="sc-check-failure-link" :title="failure.details"
+                    @click="showFailureDetails(failure)">{{ failure.text }}</button>
+            <template v-else>{{ failure.text }}</template>
+          </template>
+        </span>
         <button class="icon-button sc-rerun-checks" :disabled="busy || checksBusy" :title="RERUN_CHECKS_TOOLTIP"
                 :aria-label="RERUN_CHECKS_TOOLTIP" @click="runCommitChecks">
           <RefreshCw :size="iconSize.dense" :class="{ 'status-spin': checksBusy }" />
@@ -822,7 +708,7 @@ watch(() => [props.root, props.active] as const, () => {
       <div class="sc-actions">
         <button class="primary-button sc-commit-button" :disabled="busy" :title="`${commitButtonLabel}（Ctrl+Enter）`" @click="commit">{{ commitButtonLabel }}</button>
         <button class="sc-tool sc-options-button" :class="{ on: optionsOpen }" :aria-expanded="optionsOpen" title="提交选项" aria-label="提交选项" @click.stop="openOptions"><Settings :size="iconSize.menu" /></button>
-        <button class="sc-tool sc-push-button" :disabled="busy" title="提交并推送（Ctrl+Shift+Enter）" @click="commitAndPush">提交并推送(P)<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>
+        <button class="sc-tool sc-push-button" :disabled="busy" :title="`${commitAndPushLabel}（Ctrl+Shift+Enter）`" @click="commitAndPush">{{ commitAndPushLabel }}<span v-if="ahead.available && ahead.ahead" class="sc-badge">{{ ahead.ahead }}</span></button>
       </div>
       <!-- IDEA's CommitOptionsPanel (:62-95) stacks the options in titled groups: one per VCS
            (`group(vcs.displayName)`), one for the pre-commit checks (`commit.checks.group={0} Checks`,
@@ -849,6 +735,9 @@ watch(() => [props.root, props.active] as const, () => {
         <label class="sc-amend"><input v-model="signoff" type="checkbox" /><span>提交签名（--signoff）</span></label>
         <p class="sc-options-group">提交检查</p>
         <label class="sc-amend"><input v-model="checkTodoBeforeCommit" type="checkbox" :disabled="todoCheckBusy || !todoPatterns.length" /><span>{{ todoCheckBusy ? '正在检查 TODO…' : '提交前检查 TODO' }}</span></label>
+        <!-- 上游 `CommitOptionsPanel.kt:110-118` 的 `settings.commit.postpone.slow.checks`
+             「Run advanced checks after a commit is done」（说明句「检查失败不会阻止提交」）。 -->
+        <label class="sc-amend" title="检查失败不会阻止提交"><input v-model="postponeSlowChecks" type="checkbox" /><span>提交完成后再运行检查</span></label>
         <p class="sc-empty-line">{{ todoPatterns.length ? `使用本项目的 ${todoPatterns.length} 条 TODO 模式扫描整个工作区（不是仅本次变更）。` : '当前项目没有配置 TODO 模式，无法执行提交前检查。' }}</p>
       </div>
     </template>
@@ -884,10 +773,14 @@ watch(() => [props.root, props.active] as const, () => {
 <style scoped>
 .sc-warning { margin: 0 12px; color: var(--warning); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .sc-hunk-error { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--warning-bg); }
-/* 面板内的检查进度行（上游 `CommitProgressPanel.kt:108-130`）：一行文字 + 可选的取消。 */
-.sc-checks-progress { display: flex; align-items: center; gap: var(--space-2); margin: 4px 12px 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--panel); color: var(--text); font-size: 11px; }
+/* 面板内的检查进度行（上游 `CommitProgressPanel.kt:108-130`）：一行文字 + 可选的取消；整行可点，点上方的放大浮层。 */
+.sc-checks-progress { position: relative; cursor: pointer; display: flex; align-items: center; gap: var(--space-2); margin: 4px 12px 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--panel); color: var(--text); font-size: 11px; }
 .sc-checks-progress-text { flex: 1 1 auto; min-width: 0; display: inline-flex; gap: var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-checks-progress-detail { color: var(--muted); }
+/* 浮层（`PopupCommitChecksProgressIndicator`）：贴在指示器上方 `scale(8)`；进度条无档位（本仓检查不确定进度）。 */
+.sc-checks-popup { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; display: flex; flex-direction: column; gap: 4px; min-width: 200px; padding: 6px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); cursor: default; }
+.sc-checks-bar { height: 3px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sc-checks-slide var(--dur-spin) var(--ease-linear) infinite; }
+@keyframes sc-checks-slide { from { background-position: -60% 0; } to { background-position: 160% 0; } }
 .sc-checks-indexing { margin: 4px 12px 0; color: var(--muted); font-size: 11px; }
 /* 「分组依据」下拉（上游 `ChangesView.GroupBy`）与目录组头。 */
 .sc-groupby { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 11px; }

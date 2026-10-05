@@ -71,7 +71,9 @@ test('the default predicate is "everything in scope"', () => {
 
 test('the dialog offers the scope selector only when there is a choice', () => {
   const dialog = read('src/components/SearchEverywhereDialog.vue')
-  assert.match(dialog, /v-if="scopeOptions\.length > 1"/, '只有一个候选时不渲染那个下拉')
+  // 头部动作按上游顺序 [作用域, 预览, 类型] 渲染（`SeTargetsFilterEditor.kt:72-74`），
+  // 作用域那一格仍然只在真有第二个候选时才出现。
+  assert.match(dialog, /action === 'scope' && scopeOptions\.length > 1/, '只有一个候选时不渲染那个下拉')
   assert.match(dialog, /v-model="scopeName"/)
   assert.match(dialog, /scopeChoices\(props\.scopes \?\? \[\]\)/)
 })

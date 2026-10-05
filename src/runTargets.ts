@@ -12,7 +12,42 @@
 //
 // 纯逻辑（零宿主依赖，输入是文件清单 + 少数文件内容），`node --test` 可直接测。
 import { hasMainMethod, javaRunCommand, javaRunArgs, javaExecutable, mainClassFor } from './javaRun.ts'
-import { GRADLE_BUILD_FILES } from './gradle.ts'
+import { GRADLE_BUILD_FILES, GRADLE_RUN_DEFAULTS, detectGradle, gradleCommand } from './gradle.ts'
+import type { RunConfig } from './bridge'
+
+/** Frontend-only producer metadata. Never send these fields to project.settings.update. */
+export interface RuntimeRunConfig extends RunConfig {
+  temporary?: boolean
+  sourceTarget?: { kind: RunTargetKind; source: string }
+}
+export const TEMPORARY_RUN_CONFIG_LIMIT = 5 // intellij.platform.ide.impl.xml:1476
+
+export function runTargetConfiguration(target: RunTarget): RuntimeRunConfig {
+  return { name: target.name, type: target.program ? 'application' : 'shell', command: target.command,
+    ...(target.program ? { program: target.program } : {}), ...(target.args ? { args: [...target.args] } : {}),
+    ...(target.cwd ? { cwd: target.cwd } : {}), temporary: true, sourceTarget: { kind: target.kind, source: target.source } }
+}
+
+/** RunManagerImpl.refreshUsagesList/checkRecentsLimit: most recently selected temporary first. */
+export function rememberTemporary(configs: readonly RuntimeRunConfig[], config: RuntimeRunConfig): RuntimeRunConfig[] {
+  return [{ ...cloneRunConfig(config), temporary: true }, ...configs.filter(entry => entry.name !== config.name)].slice(0, TEMPORARY_RUN_CONFIG_LIMIT)
+}
+
+/** Vue drafts can be proxies, so copy the structured fields instead of structuredClone(proxy). */
+export function cloneRunConfig(config: RuntimeRunConfig): RuntimeRunConfig {
+  return { ...config,
+    ...(config.args !== undefined ? { args: [...config.args] } : {}),
+    ...(config.env !== undefined ? { env: [...config.env] } : {}),
+    ...(config.beforeLaunch !== undefined ? { beforeLaunch: config.beforeLaunch.map(step => ({ ...step })) } : {}),
+    ...(config.configurations !== undefined ? { configurations: [...config.configurations] } : {}),
+    ...(config.sourceTarget ? { sourceTarget: { ...config.sourceTarget } } : {}),
+  }
+}
+
+export function stableRunConfig(config: RuntimeRunConfig): RunConfig {
+  const { temporary: _temporary, sourceTarget: _source, ...stable } = cloneRunConfig(config)
+  return stable
+}
 
 export type RunTargetKind = 'java' | 'cmake' | 'node' | 'python' | 'gradle' | 'maven'
 
@@ -25,6 +60,7 @@ export interface RunTarget {
   /** 结构化字段：调试（DAP）要用它们，不能靠再切一次命令行（路径里的空格会被切坏）。 */
   program?: string
   args?: string[]
+  cwd?: string
   /** 为什么它会是候选（界面上如实显示来源）。 */
   reason: string
   /** 源码里发现它的那个文件（工作区相对路径）。 */
@@ -133,8 +169,9 @@ export function discoverRunTargets(inputs: RunTargetInputs): RunTarget[] {
     if (!path.toLowerCase().endsWith('package.json')) continue
     for (const script of packageScripts(content))
       targets.push({
-        name: `npm run ${script.name}`, kind: 'node',
-        command: `npm run ${script.name}`, reason: 'package.json 里的 scripts 条目', source: path,
+        name: `npm run ${script.name}${path.includes('/') ? `（${path.slice(0, path.lastIndexOf('/'))}）` : ''}`, kind: 'node',
+        command: `npm run ${script.name}`, cwd: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.',
+        reason: 'package.json 里的 scripts 条目', source: path,
       })
   }
 
@@ -153,9 +190,13 @@ export function discoverRunTargets(inputs: RunTargetInputs): RunTarget[] {
     if (!GRADLE_BUILD_FILES.some(name => path.toLowerCase().endsWith(name))) continue
     const task = gradleApplicationTask(content)
     if (!task) continue
+    const directory = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+    const names = inputs.files.filter(file => directory ? file.startsWith(`${directory}/`) : true)
+      .map(file => directory ? file.slice(directory.length + 1) : file)
     targets.push({
-      name: `Gradle：${task}`, kind: 'gradle',
-      command: `gradlew.bat --console=plain ${task}`, reason: `构建脚本里声明了 ${task} 任务`, source: path,
+      name: `Gradle：${task}${directory ? `（${directory}）` : ''}`, kind: 'gradle', cwd: directory || '.',
+      command: gradleCommand(detectGradle(names), GRADLE_RUN_DEFAULTS, task),
+      reason: `构建脚本里声明了 ${task} 任务`, source: path,
     })
   }
 

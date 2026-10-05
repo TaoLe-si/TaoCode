@@ -3,9 +3,9 @@
 // 「不再询问」勾选会把 GeneralSettings.confirmExit 写回 false（:1012-1018 的 setToBeShown）。
 // 逻辑从 App.vue 拆出，依赖通过 ctx 注入（App 保留模板绑定所需的同名变量）。
 import { ref, type Ref } from 'vue'
-import { request } from '../bridge'
+import { request } from '../bridge.ts'
 import type { GeneralSettingsState } from '../bridge'
-import { errorMessage } from '../errors'
+import { errorMessage } from '../errors.ts'
 
 export interface ExitConfirmationContext {
   generalSettings: Ref<GeneralSettingsState>

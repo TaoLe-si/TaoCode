@@ -7,16 +7,21 @@
 // 见 `tests/settings-keys-parity.test.mjs` 的文件头），所以那条门禁读的正是本文件。
 //
 // 返回 `null` = 通过；否则返回给用户看的那一句话（调用方负责包成 `BridgeError`）。
+import { MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE } from './editorFontSize.ts'
+import { isBidiDirection } from './bidiTextDirection.ts'
+
 export function previewSettingsError(key: string, value: unknown, languages: readonly string[]): string | null {
   const accepted = key === 'fontSize' || key === 'tabSize' || key === 'wordWrap' ||
       key === 'lineNumbers' ||
-      key === 'showIndentGuides' || key === 'bracketMatching' || key === 'tabLimit' || key === 'tabsInOneRow' || key === 'hideTabsIfNeeded' || key === 'sortBookmarks' ||
+      key === 'showIndentGuides' || key === 'bracketMatching' || key === 'lineNumeration' || key === 'tabLimit' || key === 'tabsInOneRow' || key === 'hideTabsIfNeeded' || key === 'sortBookmarks' ||
       key === 'useTabCharacter' || key === 'showWhitespaces' || key === 'formatOnSave' ||
       key === 'uiZoomPercent' || key === 'compactMode' || key === 'fullPathsInWindowHeader' ||
       key === 'showTreeIndentGuides' || key === 'compactTreeIndents' ||
-      key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' ||
+      key === 'showBreadcrumbs' || key === 'breadcrumbsPlacement' || key === 'breadcrumbsLanguages' || key === 'showMembersInNavigationBar' ||
       key === 'collapseImports' || key === 'collapseCustomRegions' || key === 'showStickyLines' || key === 'stickyLinesLimit' || key === 'diffContextLines' ||
       key === 'showDiagnostics' || key === 'showErrorStripe' || key === 'reformatOnPaste' || key === 'bidiTextDirection' || key === 'showGutterIcons' || key === 'fileColorsEnabled' || key === 'fileColorsForTabs' || key === 'fileColorsForProjectView' || // 文件颜色两层开关见 IDEA `FileColorManagerImpl`（FileColorsEnabled / FileColorsForTabsEnabled）
+      // InlaySettingsConfigurable（`inlay.hints`）：按 LSP `kind` 分的三档（Type / Parameter / 其它）。
+      key === 'showTypeInlayHints' || key === 'showParameterInlayHints' || key === 'showOtherInlayHints' ||
       key === 'smoothScrolling' || key === 'showIconsInMenus' ||
       key === 'rememberSizeForEachToolWindow' || key === 'showToolWindowNames' || key === 'showToolWindowBars' ||
       key === 'leftSideBySide' || key === 'wideScreenSupport' || key === 'rightSideBySide' ||
@@ -28,7 +33,7 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       key === 'showStatusBar' || key === 'rightMargin' ||
       key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick' || key === 'maximizeEditorOnTabDoubleClick' || key === 'pinnedTabsInSeparateRow'
     if (!accepted) return `无效设置：${key}`
-    if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < 10 || Number(value) > 32
+    if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < MIN_EDITOR_FONT_SIZE || Number(value) > MAX_EDITOR_FONT_SIZE
       : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'
       : key === 'tabLimit' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
       : key === 'uiZoomPercent' ? !Number.isInteger(value) || Number(value) < 50 || Number(value) > 400
@@ -42,6 +47,10 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       : key === 'colorBlindness' ? !['none', 'deuteranopia', 'protanopia', 'tritanopia'].includes(String(value))
       : key === 'stickyLinesLimit' ? !Number.isInteger(value) || Number(value) < 0 || Number(value) > 10
       : key === 'diffContextLines' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
+      : key === 'bidiTextDirection' ? !isBidiDirection(value)
+      : key === 'reformatOnPaste' ? !['none', 'indentBlock', 'indentEachLine', 'reformatBlock'].includes(String(value))
+      : key === 'breadcrumbsPlacement' ? !['top', 'bottom'].includes(String(value))
+      : key === 'lineNumeration' ? !['absolute', 'relative', 'hybrid'].includes(String(value))
       // 与原生 validate_language_flags 同一套规则：键必须是已知语言 id，值是布尔。
       : key === 'breadcrumbsLanguages' ? !value || typeof value !== 'object' || Array.isArray(value) ||
         Object.entries(value).some(([id, flag]) => !(languages as readonly string[]).includes(id) || typeof flag !== 'boolean')

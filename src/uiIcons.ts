@@ -49,7 +49,7 @@ export const ICON_SIZE = {
   /** 控件内的通用动作图标（新建、刷新、删除、搜索、方向箭头…）。这一档占了全仓最多
    *  的用例（95 处），它是"按钮里那个图标"的默认尺寸。
    *  上游 `ActionButton` 的动作图标是 16px（`IntUiBridgeMenu.kt:107`），New UI 的运行/停止
-   *  这一对有意压到 14（`style.css:235`）—— 本仓跟着压，于是 14 与 16 的分工是：
+   *  这一对有意压到 14（模板声明 `MainToolbar.vue:196/198` 的 `iconSize.control`）—— 本仓跟着压，于是 14 与 16 的分工是：
    *  **密集工具条用 14、对话框/弹层用 16**。 */
   control: 14,
   /** 复选框。上游 `CheckboxIcon.kt:42` `iconSize = 14`，`StructureFilterPopupComponent.java:72`
@@ -86,7 +86,7 @@ export const ICON_SIZE_PROVENANCE: Record<IconRole, { from: 'upstream' | 'local'
   inline: { from: 'local', why: '上游的行内次级记号走 16px 那套（IntUiBridgeMenu.kt:107），11px 是本仓为密排行高定的' },
   dense: { from: 'local', why: '折叠箭头在上游是 16px 一族；12px 对应本仓 11px 行高的密排列表' },
   menu: { from: 'upstream', at: 'vcs-log/impl/src/com/intellij/vcs/log/ui/details/commit/CommitDetailsPanel.kt:382 ROOT_ICON_SIZE = 13' },
-  control: { from: 'upstream', at: 'style.css:235 显式把运行/停止图标压到 14px，与 New UI 运行 widget 一致' },
+  control: { from: 'upstream', at: 'MainToolbar.vue:196/198 模板声明 iconSize.control（14），style.css:276 的同名规则只给非 lucide 手写 svg 兜底、不再决定尺寸；与 New UI 运行 widget 一致' },
   checkbox: { from: 'upstream', at: 'platform/platform-api/src/com/intellij/util/ui/CheckboxIcon.kt:42 iconSize = 14' },
   toolbar: { from: 'upstream', at: 'vcs-log/impl/src/com/intellij/vcs/log/ui/filter/StructureFilterPopupComponent.java:72 CHECKBOX_ICON_SIZE = 15' },
   action: { from: 'upstream', at: 'jewel/ide-laf-bridge/.../IntUiBridgeMenu.kt:107 iconSize = 16.dp' },
@@ -159,5 +159,12 @@ export const FORBIDDEN_ICON_GLYPHS: ReadonlyArray<{ glyph: string; use: string }
   { glyph: '▾', use: '展开箭头 → lucide `ChevronDown`（`.tree-chevron`，见 `FileTree.vue:172`）' },
   { glyph: '▸', use: '折叠箭头 → lucide `ChevronRight`（同 `FileTree.vue:172`）' },
   { glyph: '×', use: '关闭记号 → lucide `X`（`DiffView.vue:49` 的既有写法）' },
+  { glyph: '✕', use: '同上（U+2715 的叉号，与 U+00D7 的乘号不是同一个字形）。`ExternalTasksActivationDialog.vue` 的「移除」原先用它 —— 上游那一族是横杠不是叉，见 `uiIcons.test.mjs` 的纯图标按钮那条' },
   { glyph: '●', use: '"正在运行"记号 → `src/components/RunningDot.vue`（lucide `Circle` 填色 + `--accent`）。字体里的实心点大小由**字体**决定、换字体就变，而且和旁边的数字同色，读起来就是"又一个数字"' },
+  // ↑ (U+2191) / ↓ (U+2193) **刻意不在这张表里**：正文里它们是合法的键盘提示文字
+  // （`App.vue:2085`「↑↓ 选择 · Enter 运行 · Esc 取消」、`SearchEverywhereDialog.vue:249`
+  // 「Tab 切换 · ↑↓ 选择 · 回车打开」），全仓禁用会误伤一大片文案。
+  // 它们作为**图标**的判据走另一条门禁（`tests/ui-icons.test.mjs`「纯图标按钮不许只渲染一个字符」）：
+  // 按钮子树里既没有 `<svg>` 也没有组件、只剩文本节点 ⇒ 该用矢量图却用了字形；
+  // 文字段落 / 提示行里的 ↑↓ 一律放行。
 ]

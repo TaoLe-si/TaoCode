@@ -61,11 +61,15 @@ void expect_code(const char* code, const std::function<void()>& body) {
 }  // namespace
 
 int main() {
-    run("扩展名白名单：只有 .html/.htm（大小写不敏感）", [] {
+    run("扩展名白名单：只有 .html/.htm/.txt（大小写不敏感）", [] {
         check(taocode::export_file::allowed_extension("index.html"), "index.html 应放行");
         check(taocode::export_file::allowed_extension("Main.CPP.HTML"), "大写也要放行");
         check(taocode::export_file::allowed_extension("a.htm"), ".htm 也要放行");
+        // .txt：错误树/消息视图的文本导出（IDEA Messages 窗口的 Export to text file）。
+        check(taocode::export_file::allowed_extension("error-report-20261004-1530.txt"), ".txt 也要放行");
+        check(taocode::export_file::allowed_extension("REPORT.TXT"), ".txt 大写也放行");
         check(!taocode::export_file::allowed_extension("main.cpp.html.bak"), "末段不是白名单就不放行");
+        check(!taocode::export_file::allowed_extension("notes.md"), "只有白名单里的那几种扩展名");
         check(!taocode::export_file::allowed_extension("main.cpp"), "源码本身不能走这条通道");
         check(!taocode::export_file::allowed_extension("index"), "没有扩展名不放行");
         check(!taocode::export_file::allowed_extension(""), "空名字不放行");

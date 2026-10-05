@@ -1,6 +1,6 @@
 // 差异块的再优化（上游 `ChunkOptimizer`，`platform/util/diff/src/com/intellij/diff/comparison/ChunkOptimizer.kt`）。
 //
-// 上游在两个方法上写了**判据本身**（`WordChunkOptimizer` 的类注释，`:100-110`）：
+// 上游在两个方法上写了**判据本身**（`ChunkOptimizer` 的 `WordChunkOptimizer` 类注释，`:90-98`）：
 //   1. 最少块数： 好 `"AX[AB]"` / `"[AB]"`；差 `"[A]XA[B]"` / `"[A][B]"`
 //   2. 最少被改的"句子"（句子 = 空白分隔的一串词）：
 //      好 `"[AX] [AZ]"` / `"[AX] AY [AZ]"`；差 `"[AX A][Z]"` / `"[AX A]Y A[Z]"`
@@ -69,7 +69,14 @@ test('upstream case 1: the chunks are merged into one instead of two', () => {
   const left = 'AX AB'
   const right = 'AB'
   const { left: l, right: r } = wordMarks(left, right)
-  assert.deepEqual(marked(left, l), ['AX'], `左侧只该圈住 AX，实际 ${JSON.stringify(marked(left, l))}`)
+  // `DefaultCorrector`（`ByWordRt.kt:880-895`：`:890` 先 `expandWhitespacesBackward`、
+  // `:893` 再 `expandWhitespacesForward`）把改动前后的公共空白让进来，但让白函数的
+  // `start1 < end1 && start2 < end2` 守卫（`TrimUtil.kt:401`/`:418`）在**右侧为空**时一步都走不了，
+  // 而那个空隙里的空格又不是标点（`ByCharRt.kt:259-270` 的 `getPunctuationChars`），
+  // 所以左侧的块是 `AX ` 而不是 `AX` —— 这不是多圈，是与上游一致的边界。
+  // （原先这里引的 `ByWordRt.kt:610-630` 是 `isTrailingSpace`，只服务 `TrimSpacesCorrector`
+  // `ByWordRt.kt:989-1028` ⇒ 独立验收 H2 的 270 行漂移，已订正。）
+  assert.deepEqual(marked(left, l), ['AX '], `左侧只该圈住 AX 与它前面的空白，实际 ${JSON.stringify(marked(left, l))}`)
   assert.deepEqual(marked(right, r), [], '右侧没有新增的任何词')
 })
 
@@ -95,15 +102,17 @@ test('the optimizer never produces more chunks than it was given', () => {
   }
 })
 
-// 上游 case 2 那份输入（版本号）：标记必须**落在词边界上**，不许从词中间劈开。
-test('every mark starts and ends on a token boundary', () => {
+// 上游 case 2 那份输入（版本号）：标记的两端不许**从词中间劈开** —— 端点在词边界上，
+// 或者落在两个词之间的空白里（那条空隙本来就属于两次比较之间的边界，`ByWordRt` 也这么圈）。
+test('no mark cuts through the middle of a word', () => {
   for (const [left, right] of [['1.0.123 1.0.155', '1.0.123 1.0.134 1.0.155'], ['aa.bb cc', 'aa.dd cc']]) {
     for (const [line, marks] of [[left, wordMarks(left, right).left], [right, wordMarks(left, right).right]]) {
       const tokens = tokenizeLine(line)
-      const bounds = new Set(tokens.map(t => t.start))
-      bounds.add(line.length)
-      for (const [start, length] of marks)
-        assert.ok(bounds.has(start) && bounds.has(start + length), `标记 ${start}+${length} 没落在词边界上：${line}`)
+      const cutsWord = offset => tokens.some(t => offset > t.start && offset < t.start + t.text.length)
+      for (const [start, length] of marks) {
+        assert.ok(!cutsWord(start), `标记起点 ${start} 落在词中间：${line}`)
+        assert.ok(!cutsWord(start + length), `标记终点 ${start + length} 落在词中间：${line}`)
+      }
     }
   }
 })
@@ -152,7 +161,9 @@ test('identical lines produce no marks at all', () => {
 
 test('tokenizeLine and the shift rule agree on where words are', () => {
   const tokens = tokenizeLine('aa.bb cc')
-  assert.deepEqual(tokens.map(t => t.text), ['aa', '.', 'bb', ' ', 'cc'])
+  // `getInlineChunks` 只收词与连续文字：点号与空格不在表里（它们是相邻 chunk 之间的空隙）。
+  assert.deepEqual(tokens.map(t => t.text), ['aa', 'bb', 'cc'])
+  assert.deepEqual(tokens.map(t => t.start), [0, 3, 6])
   const shift = wordShift(tokens, tokens, 'aa.bb cc', 'aa.bb cc')
   assert.equal(shift('a', 1, 1, { a: { start: 0, end: 2 }, b: { start: 0, end: 2 } }, { a: { start: 2, end: 5 }, b: { start: 2, end: 5 } }), 0,
     '两侧一样的文本没有任何可挪的')
@@ -161,10 +172,27 @@ test('tokenizeLine and the shift rule agree on where words are', () => {
 // —— 接线 ——
 
 test('the word diff runs the optimizer on the match spans', () => {
+  // 接线判据是**可执行的行为判据**，而且钉的是等式不是上界（`<= 2` 那种写法在"优化器根本没接、
+  // LCS 恰好也 <=2"时同样绿 —— 独立验收 S4）。两条输入就是上游 `ChunkOptimizer.kt:90-98` 的两条例子：
+  //   case 1 最少块数 好 `"AX[AB]"` - `"[AB]"` ⇒ 左侧一整块 `AX `，右侧 0 块；
+  //   case 2 最少被改的句子 好 `"[AX] [AZ]"` - `"[AX] AY [AZ]"` ⇒ 左侧 0 块，右侧恰好是插入的那一句
+  //          ` 1.0.134`（连它前面的分隔符一起，`DefaultCorrector` `ByWordRt.kt:880-906` 在空半边让不动）；
+  //          差的形态 `"[AX A][Z]"` 会把 `1.0.134 1.0` 这种跨句的片段圈进来 —— 那正是这里不许出现的。
+  const cases = [
+    ['AX AB', 'AB', ['AX '], []],
+    ['1.0.123 1.0.155', '1.0.123 1.0.134 1.0.155', [], [' 1.0.134']],
+  ]
+  for (const [left, right, wantLeft, wantRight] of cases) {
+    const marks = wordMarks(left, right)
+    assert.deepEqual(marked(left, marks.left), wantLeft, `${left} -> ${right} 左侧块数/边界与上游注释不符`)
+    assert.deepEqual(marked(right, marks.right), wantRight, `${left} -> ${right} 右侧块数/边界与上游注释不符`)
+  }
+  // 优化器确实接在词级比较上（判 import 是否来自 diffChunks，而不是它是不是某一行字面量）。
   const words = read('src/diffWords.ts')
-  assert.match(words, /import \{ optimizeSpans, wordShift, type MatchSpan \} from '\.\/diffChunks\.ts'/)
-  assert.match(words, /const optimized = optimizeSpans\(runs\.matches, a\.length, b\.length, \(i, j\) => a\[i\]!\.text === b\[j\]!\.text, wordShift\(a, b, left, right\)\)/)
-  assert.match(words, /spansToRuns\(optimized, a\.length, b\.length\)/)
+  assert.match(words, /import \{[^}]*optimizeSpans[^}]*\} from '\.\/diffChunks\.ts'/)
+  assert.match(words, /import \{[^}]*wordShift[^}]*\} from '\.\/diffChunks\.ts'/)
+  assert.match(words, /optimizeSpans\(matches, a\.length, b\.length, \(i, j\) => a\[i\]!\.text === b\[j\]!\.text, wordShift\(a, b, left, right\)\)/,
+    '优化器必须在 matches 上真跑起来')
 })
 
 test('the optimizer keeps upstream\u2019s early exit for non-LCS input', () => {

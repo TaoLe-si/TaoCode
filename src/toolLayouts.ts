@@ -11,8 +11,9 @@
 import { nextTick, ref } from 'vue'
 // 顺序表与底部标签表的**唯一来源**（原先在四个文件里各抄了一份、内容还不一致）。
 import { BOTTOM_TABS, DEFAULT_TOOL_ANCHORS, DEFAULT_TOOL_ORDER, type BottomTabId } from './toolWindowMeta.ts'
+import { activeToolWindowLayoutState } from './toolWindowStripes.ts'
 import { FACTORY_LAYOUT_NAME, deleteLayout, emptyLayoutStore, normalizeLayoutStore, normalizeToolLayout, renameLayout, resolveLayout,
-         saveLayout, setActiveLayout, type ToolLayout, type ToolLayoutStore, type ToolWindowSide } from './toolLayout'
+         saveLayout, setActiveLayout, type ToolLayout, type ToolLayoutStore, type ToolWindowSide } from './toolLayout.ts'
 /** 宿主侧的两个视图 id 联合类型（`typeof leftView.value` / `typeof bottomTab.value`）；
  *  本模块只把它们当字符串用，所以在这里退化成 `string`。 */
 type LeftViewId = string
@@ -62,6 +63,9 @@ function factoryToolLayout(): ToolLayout {
     anchors: { ...DEFAULT_TOOL_ANCHORS },
     order: { left: [...DEFAULT_TOOL_ORDER.left], right: [...DEFAULT_TOOL_ORDER.right], bottom: [...DEFAULT_TOOL_ORDER.bottom] },
     sizes: { explorer: 240, trace: 300, output: 180 },
+    // 出厂默认里所有侧条按钮都在、没有内容有显式形态（`WindowInfoImpl` 的默认值）。
+    hidden: [],
+    uiTypes: {},
   }
 }
 const toolLayoutStore = ref<ToolLayoutStore>(loadToolLayoutStore())
@@ -78,6 +82,11 @@ function captureToolLayout(): ToolLayout {
     const side = toolAnchors[id]
     if (side === 'left' || side === 'right' || side === 'bottom') anchors[id] = side
   }
+  // 每窗口的两个字段（`WindowInfo.isShowStripeButton` / `contentUiType`）住在工具窗口状态域里；
+  // 拿不到实例时（还没装配）就当"没有摘掉的按钮、没有显式形态"，与出厂默认同义。
+  const layoutState = activeToolWindowLayoutState()
+  const hidden = layoutState ? (Object.keys(toolAnchors) as LeftViewId[]).filter(id => layoutState.hiddenStripeButtons.has(id)) : []
+  const uiTypes = layoutState ? layoutState.explicitContentUiTypes() : {}
   return {
     explorer: explorer.value,
     bottom: bottom.value,
@@ -86,6 +95,8 @@ function captureToolLayout(): ToolLayout {
     anchors,
     order: { left: [...toolOrder.value.left], right: [...toolOrder.value.right], bottom: [...toolOrder.value.bottom] },
     sizes: { ...panelSizes },
+    hidden,
+    uiTypes,
   }
 }
 /** `ToolWindowManagerEx.setLayout` — write a snapshot back, ignoring ids that no longer exist. */
@@ -111,6 +122,13 @@ function applyToolLayout(layout: ToolLayout) {
   for (const panel of ['explorer', 'trace', 'output'] as const) {
     const size = layout.sizes[panel]
     if (typeof size === 'number' && size > 0) setPanelSize(panel, size)
+  }
+  // 快照里的每窗口状态也要写回（`WindowInfo.isShowStripeButton` / `contentUiType`）：
+  // 上游 `setLayout` 替换的就是整份 WindowInfo，不只是锚点与顺序。
+  const layoutState = activeToolWindowLayoutState()
+  if (layoutState) {
+    layoutState.applyStripeButtons(layout.hidden)
+    layoutState.applyContentUiTypes(layout.uiTypes)
   }
 }
 /** `activeLayoutName = name` + `setLayout(getLayoutCopy())` (`CustomLayoutsActionGroup` Apply). */

@@ -13,6 +13,8 @@ third_party/
 build-validation/
 build-baseline/
 build-dbg/
+build-sym/
+build-symvs/
 dist-validation/
 *.obj
 *.lib
@@ -31,3 +33,7 @@ nul
 *.bak[0-9][0-9]*
 split-backups/
 src/_*.txt
+tsc.txt
+ms.txt
+rv.txt
+debug-tmp.mjs

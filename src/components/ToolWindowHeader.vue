@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
-import { Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
+import { nextTick, computed, ref } from 'vue'
+import { Check, Maximize2, Minimize2, MoreVertical, PanelBottom, PanelLeft, PanelRight, X } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import { headerAction } from '../toolWindowHeader'
 import { usePopupAnchor } from '../popupAnchor'
+import { toolWindowManager, windowInfo } from '../toolWindowManager.ts'
+import { usePopupLayer } from '../popupStack.ts'
+import { VIEW_MODE_GROUP_TITLE, viewModeCapabilityFromDom, viewModeRows } from '../toolWindowViewMode.ts'
+import type { MenuRow } from '../menus/types'
 import { iconSize } from '../uiIcons'
 
 // IDEA's ToolWindowHeader (platform/platform-impl/src/com/intellij/toolWindow/ToolWindowHeader.kt):
@@ -86,6 +90,40 @@ function toggleMenu() {
 function closeMenu() {
   if (props.menuOpen) emit('menu', false)
 }
+// 这一层菜单也压进**全局弹层栈**（`src/popupStack.ts`，上游 `PopupDispatcher.java:36-37` 那条全局链）：
+// 齿轮菜单与底部标签的「移动到…」是**同一条 ResizeActionGroup 的两种入口**，两层会同时开着
+//（先开侧栏齿轮、再右键底部标签）。原先两边各有一条自己的收层路径，于是一次点外面能把两层一起收掉，
+// 而 auto-hide 的面板问「焦点进了弹层没有」（`ToolWindowManagerLifecycle.kt:131`）时也答不上来 ——
+// **没注册的层等于没有层**。`menuOpen` 是 prop（状态在宿主），这里包一层 computed 喂给栈的 watch。
+const menuShown = computed(() => props.menuOpen)
+usePopupLayer(menu, menuShown, closeMenu, { cancelOnClickOutside: true })
+// --- 视图模式（`TW.ViewModeGroup`）-----------------------------------------------------------
+// 上游这一组是 `ToolWindowViewModeAction$Group`（`intellij.platform.ide.impl.actions.xml:479`，
+// `popup="true"`），在齿轮组里排在**切换标签形态之后、移动组之前**（`ToolWindowImpl.kt:880-882`）——
+// 本仓的头部菜单里"移动组"就是下面那三条「移动到…」，所以这一组正好插在它们前面，相对次序一致。
+// 状态读/写走**统一门面** `src/toolWindowManager.ts`（上游 `ToolWindowManager.kt:30` 的
+// `getInstance(project)` + `WindowInfo.kt:9-50` 的那份每窗口聚合对象）：
+// 一个进程一份窗口状态（安装点在 `src/toolWindowStripes.ts` 的工厂末尾），宿主不必为此加一行。
+// 原先这里连读了三份 store 指针（`activeToolWindowLayoutState()` 的 windowTypeState / setViewMode /
+// 以及 props 传进来的 anchor+maximized），判词 §B-1 的 `WindowInfo`「缺：每窗口聚合对象」说的就是这种散。
+const manager = toolWindowManager()
+const viewModeState = () => {
+  const info = windowInfo(props.id)
+  return info ? { type: info.type, autoHide: info.isAutoHide } : null
+}
+const viewModeRowsOfWindow = computed<MenuRow[]>(() => {
+  if (!windowInfo(props.id)) return []
+  return viewModeRows({
+    state: viewModeState,
+    capability: viewModeCapabilityFromDom(typeof document === 'undefined' ? null : document),
+    // `setSelected`（`ToolWindowViewModeAction.java:127-135`）：选中即改 (type, autoHide) 并落盘。
+    apply: mode => manager.setViewMode(props.id, mode),
+  })
+})
+function pickViewMode(row: MenuRow) {
+  row.run?.()
+  focusHeader()
+}
 // 选完一条就把焦点还给标题栏（键盘上下一步 Esc / 方向键还在头部）。
 function pickExtra(row: any) {
   emit('pickExtra', row)
@@ -131,6 +169,20 @@ function focusHeader() {
         <span class="menu-item-title">{{ maximized ? '恢复工具窗口大小' : '最大化工具窗口' }}</span>
       </button>
       <div class="menu-rule" role="separator" />
+      <!-- `TW.ViewModeGroup`：五个模式里"本仓现在真能兑现的"那几档（浮层容器没接上时「浮动」整行不给，
+           「窗口」要第二个原生窗口 ⇒ 永远不给）。单选态用 radio + aria-checked，与上游
+           `DumbAwareToggleAction` 在菜单里的形态一致。 -->
+      <template v-if="viewModeRowsOfWindow.length">
+        <span class="menu-section-label" role="presentation">{{ VIEW_MODE_GROUP_TITLE }}</span>
+        <button
+          v-for="row in viewModeRowsOfWindow" :key="row.id" type="button" class="menu-button tool-menu-item"
+          role="menuitemradio" :aria-checked="row.checked ? row.checked() : false"
+          :title="typeof row.title === 'string' ? row.title : undefined" @click="pickViewMode(row)"
+        >
+          <span class="menu-item-icon"><Check v-if="row.checked?.()" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ row.title }}</span>
+        </button>
+        <div class="menu-rule" role="separator" />
+      </template>
       <button type="button" class="menu-button tool-menu-item" role="menuitem" :disabled="anchor === 'left'" @click="emit('move', 'left'); focusHeader()">
         <span class="menu-item-icon"><PanelLeft :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">移动到左侧</span>
       </button>

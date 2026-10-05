@@ -27,13 +27,20 @@ test('editor 是分组的子页，不是顶层页（原先多插了一层 editor
   assert.equal(isParentOnly('editor'), false, 'editor 自己是有内容的页（同时带子页）')
   // 中间那层已消失
   assert.equal(byKey('editor.general'), undefined, '`editor.general` 这一层已合并掉')
-  // `preferences.editor` 的子页有两类（都有 EP 依据）：`editorOptionsProvider` 提供的
+  // `preferences.editor` 的子页有三类（都有 EP 依据）：`editorOptionsProvider` 提供的
   // `editor.preferences.*`（`intellij.platform.lang.impl.xml:1181-1223`），以及
   // `parentId="preferences.editor"` 的 `editor.breadcrumbs` / `editor.stickyLines`
   // （`intellij.platform.ide.impl.xml:1231/1236`）、`Console`（`:983`）。
+  // 第三类：**上游自己的 `parentId` 就写 `editor`（不是 `preferences.editor`）** 的一页 ——
+  // `inlay.hints`（`intellij.platform.lang.impl.xml:935-941`
+  // `<projectConfigurable provider="…InlaySettingsConfigurableProvider" id="inlay.hints" parentId="editor" …/>`），
+  // 它挂的是 `editor` **分组**，所以在 IDEA 的树里它与「常规」同层而不是「常规」的子页。
+  const editorChildren = new Set(['Console', 'inlay.hints'])
   for (const child of SETTINGS_NODES.filter(node => node.parent === 'editor'))
-    assert.ok(child.key.startsWith('editor.preferences.') || child.key.startsWith('editor.') || child.key === 'Console',
-      `editor 的子页应当是 IDEA 里 parentId=preferences.editor 的那些：${child.key}`)
+    assert.ok(child.key.startsWith('editor.preferences.') || child.key.startsWith('editor.') || editorChildren.has(child.key),
+      `editor 的子页应当是 IDEA 里挂在 editor 下的那些：${child.key}`)
+  // 反向：挂在 editor 下的 `inlay.hints` 不许被误当成 `group:editor` 的直属页。
+  assert.equal(byKey('inlay.hints')?.parent, 'editor', 'inlay.hints 的 parentId 是 editor（:937），不是 group:editor')
 })
 
 test('直属 groupId="editor" 的页挂在分组下，不是挂在 editor 页下', () => {

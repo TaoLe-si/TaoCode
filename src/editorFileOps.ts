@@ -10,10 +10,12 @@
 // 所以它们共享 `editorFor` / `request` 这两条链路，合成一域。
 import { nextTick, ref } from 'vue'
 import { encodingLabels, request, type DiffRow, type DocumentData, type EncodingKey, type LspHoverResult,
-         type LspSymbolsResult } from './bridge'
-import { buildDiffRows, generateUnifiedDiff } from './diffText'
-import { copyToClipboard } from './clipboard'
-import { errorMessage } from './errors'
+         type LspSymbolsResult } from './bridge.ts'
+import { buildDiffRows, generateUnifiedDiff } from './diffText.ts'
+import { copyToClipboard } from './clipboard.ts'
+import { createHoverCache } from './hoverDocumentation.ts'
+import { createQuickDocHost } from './quickDocHost.ts'
+import { errorMessage } from './errors.ts'
 import type { EditorHandle, Tab } from './editorTab'
 
 export interface EditorFileOpsDeps {
@@ -33,11 +35,15 @@ export interface EditorFileOpsDeps {
   buffer: () => any
   /** 文件树右键菜单坐标（由文件树模块自持），只读它的 entry。 */
   treeMenu: { value: any }
+  /** 快速文档弹层的内部链接导航（与 `App.vue` 的 `openDocumentLink` 同一条链）。 */
+  revealLocation?: (target: { path: string; line: number }) => unknown
+  /** 工作区根（内部链接的绝对路径要落回相对路径；落在外面就如实说明）。 */
+  workspaceRoot?: () => string | undefined
 }
 
 export function createEditorFileOps(deps: EditorFileOpsDeps) {
   const { notify, isDesktop, active, findTab, editorFor, request, menu, editorSettings, bufferEpoch, lspReady,
-          toggleReadOnly, treeMenu } = deps
+          toggleReadOnly, treeMenu, revealLocation, workspaceRoot } = deps
 const conflictPrompt = ref<{ path: string } | null>(null)
 // IDEA's conflict dialog shows what actually differs before you choose; this
 // preview is the disk version (left) against the live buffer (right).
@@ -78,22 +84,29 @@ function resolveConflictKeep() {
 // IDEA's Quick Documentation (Ctrl+Q): fetches hover at the caret and shows it in a
 // persistent popup instead of the transient tooltip. The popup closes on Escape or
 // any click outside, matching IDEA's own dismiss behavior.
-const quickDoc = ref<{ contents: string; x: number; y: number } | null>(null)
-async function showQuickDoc() {
-  const tab = active.value
-  if (!tab || !lspReady.value) { notify('请先打开一个有语言服务的文件。', true); return }
-  menu.value = null
-  const editor = editorFor(tab.path)
-  if (!editor) return
-  const pos = editor.getCursor()
-  try {
-    const result = await request<LspHoverResult>('lsp.request', { kind: 'hover', path: tab.path, line: pos.line, character: pos.ch })
-    if (!result.available || !result.contents) { notify('此处没有文档。', true); return }
-    const rect = editorFor(tab.path)?.getCursorCoords()
-    quickDoc.value = { contents: result.contents, x: rect?.left ?? 200, y: rect?.bottom ?? 200 }
-  } catch (error) { notify(errorMessage(error), true) }
-}
-function closeQuickDoc() { quickDoc.value = null }
+//
+// 取文档与弹层状态整块交给 `src/quickDocHost.ts`（签名/描述整形 → 区块/分节/链接/图片 →
+// 前进后退历史 → 外部文档动作），这里只建宿主并把它的出口原样转发出去 —— 键位表
+// （`src/keymap.ts:365` 的 `docs.quickDoc`）与代码菜单（`src/menus/codeMenu.ts:103`）
+// 依赖的就是这组名字。渲染在 `src/components/QuickDocPopup.vue`。
+//
+// hover 结果的每文件缓存（HoverResultCache 的等价物，见 src/hoverDocumentation.ts）：
+// 同一位置重复 Ctrl+Q 不再往返；文档版本变化或转脏时整文件失效（标记里带「版本:脏」）。
+// 这张缓存建在这里再注入宿主（不建两张）—— tests/hover-documentation.test.mjs 钉着这一行。
+const hoverCache = createHoverCache()
+const quickDocHost = createQuickDocHost({
+  notify, isDesktop, active, lspReady, menu,
+  editorFor, request: request as EditorFileOpsDeps['request'],
+  // 宿主没接这两条时如实降级：工作区根取不到 = 绝对路径按原样试（不硬转），
+  // 导航回调缺失 = 弹层里的内部链接给一句「本宿主不支持跳转」而不是静默无反应。
+  // 正常装配时 `App.vue` 会传真实实现（见报告里的接线请求）。
+  revealLocation: revealLocation ?? (() => notify('本宿主没有接上内部链接跳转。', true)),
+  workspaceRoot: workspaceRoot ?? (() => undefined),
+  hoverCache,
+})
+const quickDoc = quickDocHost.quickDoc
+const showQuickDoc = quickDocHost.showQuickDoc
+const closeQuickDoc = quickDocHost.closeQuickDoc
 // IDEA's Copy Reference (Ctrl+Alt+Shift+C): copies the qualified name of the symbol
 // at the caret when LSP provides it, otherwise copies the file path.
 async function copyReference() {
@@ -214,5 +227,15 @@ function applyEncodingChoice() {
     quickDoc, showQuickDoc, closeQuickDoc, copyReference, showFileProperties,
     convertIndents, convertLineSeparators, encodingPrompt, encodingSelect, openEncoding,
     reloadWithEncoding, applyEncodingChoice,
+    // 快速文档弹层的新出口（前进/后退、外部文档动作、内部链接、图片解析）。
+    // 转发宿主而不是让 App.vue 直接建宿主，是为了 `showQuickDoc` 仍只有一处装配。
+    quickDocGoBackward: quickDocHost.goBackward,
+    quickDocGoForward: quickDocHost.goForward,
+    quickDocCanBackward: quickDocHost.canGoBackward,
+    quickDocCanForward: quickDocHost.canGoForward,
+    quickDocOpenExternal: quickDocHost.openExternalDoc,
+    quickDocCanOpenExternal: quickDocHost.canOpenExternalDoc,
+    quickDocFollowLink: quickDocHost.followInternalDocLink,
+    quickDocResolveImage: quickDocHost.resolveImage,
   }
 }

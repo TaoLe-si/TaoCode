@@ -4,15 +4,17 @@
 // 拦下用户输入的那一笔事务，把"插入"改写成"替换下一个字符"。
 //
 // 上游的分档（逐条核过）：
-//   · `ToggleInsertStateAction`（`openapi/editor/actions/ToggleInsertStateAction.java:23-27`）：
-//     `editorex.setInsertMode(!editorex.isInsertMode())` —— 每编辑器一个布尔，Insert 键是唯一入口
-//     （`$default.xml:457-459` 的 `EditorToggleInsertState`）。
+//   · `ToggleInsertStateAction`（`platform/platform-impl/src/com/intellij/openapi/editor/actions/
+//     ToggleInsertStateAction.java:26`，Handler `:22-28`）：`editorex.setInsertMode(!editorex.isInsertMode())`
+//     —— 每编辑器一个布尔。（键位是 263 打包键位表里的 INSERT，但**本仓的上游树里没有 `platform/keymaps`**，
+//     `platform-resources/src/idea/DefaultKeymap.xml` 只有 5 行占位，所以那条键位行号**无法核实**。）
 //   · `TypedHandler.java:180-183`：`if (!editor.isInsertMode()) { TypedCharImpl.typeChar(...); return }`
 //     —— **非插入模式**走的是另一条打字路径。
-//   · `TypedCharImpl.java:31-47` 的 `beforeCharTyped` 有两道守卫：
-//     ① `COMPLEX_CHARS`（`\n \t ( ) < > [ ] { } " '`）**永不覆盖** —— 它们照常插入，
+//   · `platform/lang-impl/src/com/intellij/codeInsight/editorActions/TypedCharImpl.java:31-33`
+//     的 `beforeCharTyped`（唯一调用点 `TypedHandler.java:110`）只有**两道**守卫：
+//     ① `COMPLEX_CHARS`（`:23` 定义，`\n \t ( ) < > [ ] { } " '`）**永不覆盖** —— 它们照常插入，
 //        否则打一个 `(` 会吃掉右边的字符；
-//     ② 代理对（surrogate）也不走这条路径；多字符输入（粘贴、输入法上屏）同理。
+//     ② `Character.isSurrogate(ch)`（代理对）也不走这条路径；多字符输入（粘贴、输入法上屏）同理。
 //   · 可见指示不是状态栏组件（CE 里 `InsertOverwrite` 那个工厂 id 其实是**列选择**组件，
 //     见 `intellij.platform.ide.impl.xml:1627`）—— 是**块状光标**：
 //     `ImmediatePainter.java:164` 的 `isBlockCursor = editor.isInsertMode() == settings.isBlockCursor()`。
@@ -22,22 +24,28 @@ import { StateEffect, StateField, type ChangeSpec, type EditorState, type Extens
 import { EditorView } from '@codemirror/view'
 
 /**
- * `TypedCharImpl.COMPLEX_CHARS`（`:31`）：这些字符在覆盖模式下**照常插入**，不覆盖右边的字符。
- * 逐字照抄 —— 它们是结构性字符，吃掉右边那个往往正好是括号/引号的配对。
+ * `TypedCharImpl.COMPLEX_CHARS`（`platform/lang-impl/src/com/intellij/codeInsight/editorActions/
+ * TypedCharImpl.java:23`）：这些字符在覆盖模式下**照常插入**，不覆盖右边的字符。
+ * 逐字照抄（集合内容与书写顺序都与上游一致）—— 它们是结构性字符，吃掉右边那个往往正好是括号/引号的配对。
  */
 export const COMPLEX_CHARS = new Set(['\n', '\t', '(', ')', '<', '>', '[', ']', '{', '}', '"', "'"])
 
-/** 覆盖模式下要不要把这一笔输入改写成替换。 */
+/**
+ * 覆盖模式下要不要把这一笔输入改写成替换。
+ *
+ * 三道判定与上游的对应关系（`TypedCharImpl.java:31-33` 只有前两道）：
+ *   ① `length !== 1` —— 上游那一层的入参本来就是 `char`（单个 UTF-16 码元），
+ *      多字符输入（粘贴、输入法上屏）根本进不来；本仓的 `inputHandler` 拿的是字符串，补这道。
+ *   ② `COMPLEX_CHARS` —— 上游 `:31` 第一道守卫，逐字照抄（见上）。
+ *   ③ `Character.isSurrogate` —— 上游 `:31` 第二道守卫。Java 的 `isSurrogate` 定义就是
+ *      `0xD800..0xDFFF`，这里按同一区间写。
+ */
 export function shouldOverwrite(inserted: string): boolean {
-  // 只有"刚好一个普通字符"才覆盖：多字符（粘贴/输入法）与结构性字符一律插入。
   if (inserted.length !== 1) return false
   const ch = inserted
   if (COMPLEX_CHARS.has(ch)) return false
-  // 代理对（星形平面）单个 code unit 会落在 0xD800-0xDFFF 区间，照上游一样不覆盖。
   const code = ch.charCodeAt(0)
   if (code >= 0xd800 && code <= 0xdfff) return false
-  // 控制字符（含 \r）不覆盖。
-  if (code < 0x20 || code === 0x7f) return false
   return true
 }
 

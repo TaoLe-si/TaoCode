@@ -1,19 +1,44 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { Columns2, Pencil, Plus, RotateCw, Search, SquareTerminal, X } from 'lucide-vue-next'
+// 终端面板：ConPTY 窗格 + 标签 + 工具条 + 窗格右键菜单。
+//
+// 2026-10-06（桶 10b）把原先零消费方的四个纯模块接成真实链路，用户可见的那一面是：
+//   · `src/terminalTitle.ts` —— 标签文字 = `buildTerminalTitle`（重命名 > shell 标题 > 「终端 N」> Unnamed），
+//     tooltip = `buildTerminalFullTitle`（不截断、不拼 tag）；shell 的 OSC 0/2 由 xterm 的
+//     `onTitleChange` 上报，就是上游的 `TerminalApplicationTitleListener`
+//     （`platform/execution-impl/src/com/intellij/terminal/TerminalTitle.kt:125-137`）。
+//   · `src/terminalClipboard.ts` —— 窗格右键菜单 `Terminal.OutputContextMenu`
+//     （`plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:225-230`）的复制/粘贴/从历史粘贴，
+//     以及 `attachCustomKeyEventHandler` 上那四组键（Ctrl+C/Ctrl+Insert 复制、Ctrl+V/Shift+Insert 粘贴）；
+//     没有选区时 Ctrl+C 交回 PTY（`TerminalCtrlCActionsPromoter.kt:8-18`）。
+//   · `src/terminalFontSize.ts` —— Ctrl+滚轮缩放（`JBTerminalPanel.java:381-390`：越界这次滚动什么都不做，
+//     且不再滚缓冲区）与工具条的放大/缩小/复位；缩放是会话内临时的，不写设置。
+//   · `src/terminalSplits.ts` —— 右侧/下侧分屏、取消分屏、窗格间跳转，窗格数不再有本仓自己加的上限
+//     （`TerminalToolWindowManager.java:431-434` 的 `canSplit` 只问动作可用性）。
+// 布局：窗格按 `terminalGridSize()` 排成 CSS 网格（上游是 splitter 树，架构不等价 ⇒ 取同一件可见的事）。
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { ChevronLeft, ChevronRight, Columns2, Pencil, Plus, RotateCcw, RotateCw, Rows2, Search, Shrink, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { BridgeError, isDesktop, subscribeTerm, subscribeTermExit, term } from '../bridge'
 import { iconSize } from '../uiIcons'
+import { copyToClipboard, readClipboardHistory, readClipboardText } from '../clipboard'
+import { resolveTerminalThemeName, terminalPalette, terminalXtermTheme } from '../terminalColors'
+import { createTerminalActions, terminalAction, terminalActionTitle, type TerminalActionContext, type TerminalActionId } from '../terminalActions'
+import { canTerminalSplit, nextTerminalPaneCell, paneIndexAfterSplit, terminalGridSize, type TerminalPaneCell, type TerminalSplitOrientation } from '../terminalSplits'
+import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, resetTerminalFontSize, TERMINAL_BASE_FONT_SIZE, terminalFontSizeForWheel, terminalFontSizeTitle, terminalWheelZoomApplies } from '../terminalFontSize'
+import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalHistoryEntries, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
+import { buildTerminalFullTitle, buildTerminalTitle, renameTerminal, setApplicationTitle, titleChanged, type TerminalTitleState } from '../terminalTitle'
+import AnchoredMenu from './AnchoredMenu.vue'
 
 const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
 const emit = defineEmits<{ focusTerminal: [] }>()
 
 interface Pane {
   id: number
-  label: string
+  /** 标签标题的四份数据（上游 `TerminalTitle.State`）；可见文字由 `buildTerminalTitle` 算。 */
+  title: TerminalTitleState
   view: HTMLDivElement
   instance: Terminal
   fit: FitAddon
@@ -23,6 +48,8 @@ interface Pane {
   group: number
   exited: boolean
   exitCode: number | null
+  /** 会话内临时字号（上游 `TerminalFontSizeProvider` 的 temporary zoom，不写设置）。 */
+  fontSize: number
 }
 
 const stage = ref<HTMLDivElement>()
@@ -37,10 +64,69 @@ const searchOpen = ref(false)
 const searchText = ref('')
 const searchInput = ref<HTMLInputElement>()
 const searchMiss = ref(false)
+// 复制/粘贴与分屏的当下状态（右键菜单与工具条都问这里，不再各写一遍表达式）。
+const hasSelection = ref(false)
+const historyEntries = ref<TerminalHistoryEntry[]>([])
+const menuOpen = ref(false)
+const menuPoint = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+/** 每个标签（group）实际的两个方向的分屏次数 ⇒ 网格的列数/行数（`terminalGridSize`）。 */
+const splitCounts = new Map<number, { rights: number; downs: number }>()
+/**
+ * 上游那台总闸是 `EditorSettingsExternalizable.isWheelFontChangeEnabled()`
+ * （`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:1043`，
+ * Settings › Editor › General › 「Change font size with Ctrl+Mouse Wheel」）。
+ * 本仓设置页没有这一格（`src/settingsModel.ts` 是保留文件）⇒ 先按上游的「开着」处理，
+ * 设置项本身已写进接线请求（docs/wiring-requests-2026-10-06-bucket10b.md）。
+ */
+const WHEEL_FONT_ZOOM_ENABLED = true
+
+/**
+ * 工具栏每个按钮的启用/可见都问这张表，不再各写一遍 `:disabled` 表达式
+ * （上游 `TerminalBaseContextAction.update` 的 `setEnabledAndVisible(terminal != null)`，
+ * `TerminalActionUtil.createTerminalAction` 的登记规则）。
+ */
+function actionContext(): TerminalActionContext {
+  const current = selected.value
+  return {
+    hasTerminal: Boolean(current),
+    running: Boolean(current) && !current!.exited,
+    desktop: isDesktop,
+    busy: busy.value,
+    groupSize: current ? groupPanes(current).length : 0,
+    searchOpen: searchOpen.value,
+    searchHasText: searchText.value.trim().length > 0,
+    paneCount: panes.value.length,
+    exited: Boolean(current?.exited),
+    hasSelection: hasSelection.value,
+    historyCount: historyEntries.value.length,
+    fontSize: current?.fontSize ?? TERMINAL_BASE_FONT_SIZE,
+    baseFontSize: TERMINAL_BASE_FONT_SIZE,
+  }
+}
+const registry = computed(() => createTerminalActions(actionContext()))
+const action = (id: TerminalActionId) => terminalAction(registry.value, id)
+const can = (id: TerminalActionId) => Boolean(action(id)?.enabled)
+const shownAs = (id: TerminalActionId) => Boolean(action(id)?.visible)
+const why = (id: TerminalActionId, fallback: string) => terminalActionTitle(action(id), fallback)
 let observer: ResizeObserver | undefined
+let themeObserver: MutationObserver | undefined
 let counter = 0
 let groups = 0
 let disposed = false
+
+// 标签可见文字/tooltip 都走 `src/terminalTitle.ts`（重命名压过 shell 标题，shell 标题压过默认标题）。
+const paneLabel = (pane: Pane) => buildTerminalTitle(pane.title)
+const paneTooltip = (pane: Pane) => buildTerminalFullTitle(pane.title)
+const paneCell = (pane: Pane): TerminalPaneCell => ({ id: pane.id, origin: pane.group })
+const groupPanes = (pane: Pane) => panes.value.filter(other => other.group === pane.group)
+function countsOf(group: number) { return splitCounts.get(group) ?? { rights: 0, downs: 0 } }
+
+/** 写标题状态：内容没变就不重绘（上游 `TerminalTitle.kt:26-41` 的 `change {}` 同一条）。 */
+function setPaneTitle(pane: Pane, next: TerminalTitleState) {
+  if (!titleChanged(pane.title, next)) return
+  pane.title = next
+  panes.value = [...panes.value]
+}
 
 function visible(pane: Pane) {
   const current = selected.value
@@ -55,19 +141,38 @@ function refit() {
   }
 }
 
+/**
+ * 布局 = `terminalGridSize(rights, downs)` 的网格：右侧分屏加一列、下侧分屏加一行。
+ * 上游那棵 splitter 树会把新格子嵌在被分的那一格位置上（`InternalDecoratorImpl.kt:376-410`）；
+ * 本仓压成网格后，最后一行的空格由最末那个窗格横跨补上（不留空洞）。
+ */
 function layout() {
   const shown = panes.value.filter(visible)
+  const counts = selected.value ? countsOf(selected.value.group) : { rights: 0, downs: 0 }
+  const grid = terminalGridSize(counts.rights, counts.downs)
+  if (stage.value) {
+    stage.value.style.gridTemplateColumns = `repeat(${grid.columns}, 1fr)`
+    stage.value.style.gridTemplateRows = `repeat(${grid.rows}, 1fr)`
+  }
   for (const pane of panes.value) {
-    pane.view.hidden = !shown.includes(pane)
+    const slot = shown.indexOf(pane)
+    pane.view.hidden = slot < 0
+    if (slot < 0) continue
+    const column = slot % grid.columns
+    const row = Math.floor(slot / grid.columns)
+    const isLast = slot === shown.length - 1
+    pane.view.style.gridColumn = `${column + 1} / span ${isLast ? grid.columns - column : 1}`
+    pane.view.style.gridRow = `${row + 1}`
     pane.view.classList.toggle('terminal-split', shown.length > 1)
-    pane.view.classList.toggle('terminal-split-right', shown.length > 1 && shown.indexOf(pane) === 1)
+    pane.view.classList.toggle('terminal-edge-right', shown.length > 1 && column < grid.columns - 1 && !isLast)
+    pane.view.classList.toggle('terminal-edge-bottom', shown.length > 1 && row < grid.rows - 1)
   }
   refit()
 }
 
-async function spawn(group?: number, cwdOverride?: string) {
-  if (!isDesktop) { note.value = '浏览器预览不能开本地终端，请运行桌面端。'; return }
-  if (busy.value) return
+async function spawn(group?: number, cwdOverride?: string): Promise<Pane | null> {
+  if (!isDesktop) { note.value = '浏览器预览不能开本地终端，请运行桌面端。'; return null }
+  if (busy.value) return null
   busy.value = true
   note.value = ''
   // IDE-03's "Open Terminal Here": cwd falls back to the prop, then the bridge
@@ -78,30 +183,59 @@ async function spawn(group?: number, cwdOverride?: string) {
   let pane: Pane | undefined
   try {
     id = (await term.create(80, 24, requested)).id
-    if (disposed) { await term.kill(id); return }
+    if (disposed) { await term.kill(id); return null }
     counter = Math.max(counter, id)
-    pane = attachPane(id, `终端 ${++counter}`)
+    pane = attachPane(id, `终端 ${++counter}`, group)
+    return pane
   } catch (error) {
     if (pane) { pane.off(); pane.offExit(); pane.view.remove(); pane.instance.dispose(); panes.value = panes.value.filter(other => other !== pane) }
     if (selected.value === pane) selected.value = panes.value[0] ?? null
     if (id) void term.kill(id).catch(() => undefined)
     note.value = error instanceof BridgeError ? `${error.code}: ${error.message}` : '终端启动失败。'
+    return null
   } finally {
     busy.value = false
   }
 }
 
-// Split: a second shell next to the selected one. A group holds at most two panes,
-// which keeps the layout a plain two-column flex row.
-async function split() {
+/**
+ * 分屏：新格子排在被分窗格的右侧（同列序）或下侧（下一行首列）。
+ * 上游 `TerminalSplitAction.kt:12-35` 一个类管两个方向，`canSplit` 只问动作可用性
+ * （`TerminalToolWindowManager.java:431-434`）⇒ 本仓也没有窗格数上限，只有宿主前提。
+ */
+async function split(orientation: TerminalSplitOrientation) {
   const current = selected.value
   if (!current) { await spawn(); return }
-  if (panes.value.filter(pane => pane.group === current.group).length >= 2) { note.value = '每个标签最多并排两个终端。'; return }
-  await spawn(current.group)
+  const group = groupPanes(current)
+  const verdict = canTerminalSplit(orientation, { desktop: isDesktop, busy: busy.value, count: group.length })
+  if (!verdict.enabled) { note.value = verdict.reason; return }
+  const counts = countsOf(current.group)
+  const after = orientation === 'right'
+    ? { rights: counts.rights + 1, downs: counts.downs }
+    : { rights: counts.rights, downs: counts.downs + 1 }
+  const grid = terminalGridSize(after.rights, after.downs)
+  const target = paneIndexAfterSplit(group.map(paneCell), group.indexOf(current), orientation, grid.columns)
+  const created = await spawn(current.group)
+  if (!created) return
+  splitCounts.set(current.group, after)
+  movePaneInGroup(created, target)
+  layout()
+}
+
+/** 把新建的窗格挪到组内该占的槽位（上游 `splitWithContent` 的落点：被分格子的右侧/下侧）。 */
+function movePaneInGroup(pane: Pane, target: number) {
+  const rest = panes.value.filter(other => other !== pane)
+  const slots: number[] = []
+  rest.forEach((other, index) => { if (other.group === pane.group) slots.push(index) })
+  const at = Math.max(0, Math.min(slots.length, target))
+  const insertAt = at < slots.length ? slots[at] : (slots.length ? slots[slots.length - 1] + 1 : rest.length)
+  rest.splice(insertAt, 0, pane)
+  panes.value = rest
 }
 
 function select(pane: Pane) {
   selected.value = pane
+  hasSelection.value = pane.instance.hasSelection()
   layout()
   pane.instance.focus()
 }
@@ -116,20 +250,168 @@ async function openIn(dir: string) {
 // A terminal created by someone else (the debug adapter's runInTerminal) must become
 // visible in this panel: adopt() attaches a pane to an id that already exists, so the
 // session the debugger opened is the same one the user sees.
-function attachPane(id: number, label: string): Pane {
+// 终端配色（上游 `JBTerminalSchemeColorPalette`）：默认前景/背景与 ANSI 16 色都从当前配色方案取。
+// 本仓的「配色方案」是 tokens.css 的月相变量（`--text`/`--editor`）+ `src/terminalColors.ts` 的两套 ANSI 表；
+// `data-theme` 一切换终端跟着换面 —— 对应上游 palette 随 `EditorColorsScheme` 取值的链路。
+function currentPalette() {
+  if (typeof document === 'undefined') return terminalPalette('light')
+  const root = getComputedStyle(document.documentElement)
+  const theme = resolveTerminalThemeName(document.documentElement.dataset.theme)
+  return terminalPalette(theme, root.getPropertyValue('--text').trim(), root.getPropertyValue('--editor').trim())
+}
+function applyPalette() {
+  const theme = terminalXtermTheme(currentPalette())
+  for (const pane of panes.value) pane.instance.options.theme = theme
+}
+function setFontSize(pane: Pane, size: number) {
+  if (size === pane.fontSize) return
+  pane.fontSize = size
+  pane.instance.options.fontSize = size
+  panes.value = [...panes.value]
+  refit()
+}
+/** 工具条上那格字号读数（临时缩放时 title 会说「临时缩放」，上游 `TerminalFontSizeProvider` 的语义）。 */
+const fontSizeShown = computed(() => selected.value?.fontSize ?? TERMINAL_BASE_FONT_SIZE)
+function stepFontSize(id: TerminalActionId) {
+  const pane = selected.value
+  if (!pane) return
+  const step = id === 'terminal.font.increase' ? FONT_SIZE_STEP_UP : FONT_SIZE_STEP_DOWN
+  setFontSize(pane, changeTerminalFontSize(pane.fontSize, step))
+}
+function resetFontSize() {
+  const pane = selected.value
+  if (!pane) return
+  setFontSize(pane, resetTerminalFontSize(TERMINAL_BASE_FONT_SIZE))
+}
+
+/**
+ * Ctrl+滚轮 = 缩放，且这次滚动**不再滚缓冲区**（`JBTerminalPanel.java:381-390` 那条分支直接 return）；
+ * 新字号越界就保持原值（`:384-386`）。总闸关着时什么都不拦，照常滚缓冲区。
+ */
+function onWheel(pane: Pane, event: WheelEvent) {
+  if (!terminalWheelZoomApplies(event, WHEEL_FONT_ZOOM_ENABLED)) return
+  event.preventDefault()
+  const next = terminalFontSizeForWheel(pane.fontSize, event.deltaY)
+  if (next === pane.fontSize) return
+  setFontSize(pane, next)
+}
+
+// 复制/粘贴：右键菜单与那四组键共用这套实现。
+async function copySelection() {
+  const pane = selected.value
+  if (!pane || !pane.instance.hasSelection()) return
+  await copyToClipboard(pane.instance.getSelection())
+  hasSelection.value = pane.instance.hasSelection()
+}
+async function pasteFromClipboard() {
+  const pane = selected.value
+  if (!pane || pane.exited) return
+  const text = await readClipboardText()
+  if (text) pane.instance.paste(text)
+}
+async function pasteHistoryEntry(entry: TerminalHistoryEntry) {
+  const pane = selected.value
+  if (!pane || pane.exited) return
+  pane.instance.paste(entry.text)
+  closeMenu()
+}
+async function refreshHistory() {
+  try { historyEntries.value = terminalHistoryEntries(await readClipboardHistory()) }
+  catch { historyEntries.value = [] }
+}
+function clipboardContext(): TerminalClipboardContext {
+  const current = selected.value
+  return {
+    hasTerminal: Boolean(current),
+    hasSelection: hasSelection.value,
+    running: Boolean(current) && !current!.exited,
+    historyCount: historyEntries.value.length,
+  }
+}
+const clipboardActions = computed(() => terminalClipboardActions(clipboardContext()))
+function runClipboard(id: string) {
+  if (id === 'terminal.copy') void copySelection()
+  else if (id === 'terminal.paste') void pasteFromClipboard()
+  void closeMenu()
+}
+function gotoPane(forward: boolean) {
+  const current = selected.value
+  if (!current) return
+  const next = nextTerminalPaneCell(groupPanes(current), current, forward)
+  if (next) select(next)
+  void closeMenu()
+}
+/** Terminal.SelectAll（`plugin.xml:137-141` 的 `setSelection(0, textLength)` 等价物）。 */
+function selectAll() {
+  const pane = selected.value
+  closeMenu()
+  if (pane) pane.instance.selectAll()
+}
+/**
+ * Terminal.ClearBuffer（`intellij.terminal.frontend.xml:132-135`）：清掉这个窗格的视口与回滚缓冲。
+ * 上游那条「命令在跑就不给清」的判定依赖 OSC 133，本仓裸 ConPTY 没有这个信号（见 terminalActions 的 hint）。
+ */
+function clearBuffer() {
+  const pane = selected.value
+  closeMenu()
+  if (!pane) return
+  pane.instance.clear()
+  note.value = `已清空「${paneLabel(pane)}」的终端缓冲区。`
+}
+/** 取消分屏（`TW.Unsplit`）：关掉当前这格，回到同组剩下的那一格。 */
+function unsplit() {
+  const current = selected.value
+  void closeMenu()
+  if (current) void close(current)
+}
+function openMenu(pane: Pane, event: MouseEvent) {
+  // 右键哪一格就作用到哪一格（上游的 OutputContextMenu 也总是当前那个终端编辑器）。
+  if (selected.value !== pane) select(pane)
+  event.preventDefault()
+  menuPoint.value = { x: event.clientX, y: event.clientY }
+  menuOpen.value = true
+  void refreshHistory()
+}
+function closeMenu() { menuOpen.value = false }
+
+/** attachPane 里挂 xterm 的四个回调：选区、shell 标题（OSC 0/2）、按键、滚轮。 */
+function attachHandlers(pane: Pane, instance: Terminal) {
+  instance.onSelectionChange(() => { if (selected.value === pane) hasSelection.value = instance.hasSelection() })
+  instance.onTitleChange(raw => setPaneTitle(pane, setApplicationTitle(pane.title, raw)))
+  instance.attachCustomKeyEventHandler(event => {
+    const intent = terminalClipboardKeyFor(event)
+    if (intent === null) return true
+    if (intent === 'copy') {
+      // 没选区的 Ctrl+C 交回 PTY，让 shell 收到 ^C 自己中断（TerminalCtrlCActionsPromoter.kt:8-18）。
+      if (!terminalCopyOnCtrlC(instance.hasSelection())) return true
+      if (event.type === 'keydown') void copySelection()
+      return false
+    }
+    if (pane.exited) return true
+    if (event.type === 'keydown') void pasteFromClipboard()
+    return false
+  })
+  pane.view.addEventListener('wheel', (event) => onWheel(pane, event as WheelEvent), { passive: false })
+}
+
+function attachPane(id: number, defaultTitle: string, group?: number): Pane {
   const view = document.createElement('div')
   view.className = 'terminal-view'
   view.hidden = true
   stage.value!.appendChild(view)
-  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: 13, scrollback: 5000 })
+  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: TERMINAL_BASE_FONT_SIZE, scrollback: 5000, theme: terminalXtermTheme(currentPalette()) })
   const fit = new FitAddon()
   const search = new SearchAddon()
   instance.loadAddon(fit)
   instance.loadAddon(search)
   instance.open(view)
-  const created: Pane = { id, label, view, instance, fit, search,
-    off: () => undefined, offExit: () => undefined, group: ++groups, exited: false, exitCode: null }
-  view.addEventListener('focusin', () => { selected.value = created })
+  const created: Pane = {
+    id, title: { defaultTitle }, view, instance, fit, search,
+    off: () => undefined, offExit: () => undefined, group: group ?? ++groups, exited: false, exitCode: null,
+    fontSize: TERMINAL_BASE_FONT_SIZE,
+  }
+  view.addEventListener('focusin', () => { selected.value = created; hasSelection.value = created.instance.hasSelection() })
+  view.addEventListener('contextmenu', event => openMenu(created, event as MouseEvent))
   instance.onData(data => { if (!created.exited) term.write(id, data) })
   instance.onResize(({ cols, rows }) => void term.resize(id, cols, rows).catch(() => undefined))
   created.off = subscribeTerm(id, bytes => created.instance.write(bytes))
@@ -141,6 +423,7 @@ function attachPane(id: number, label: string): Pane {
     panes.value = [...panes.value]
     created.instance.writeln(`\r\n[进程已退出，代码 ${code}。按 ↻ 重启该终端。]`)
   })
+  attachHandlers(created, instance)
   panes.value = [...panes.value, created]
   select(created)
   layout()
@@ -161,19 +444,22 @@ async function close(pane: Pane) {
   // process with ALWAYS_USE_DEFAULT_STOPPING_BEHAVIOUR_KEY (TerminalTabCloseListener.kt:87 ->
   // TerminalCloseConfirmation.kt:19), which is what makes canDisconnect false and leaves the
   // dialog with Terminate/Cancel. An already-exited terminal closes without a word.
-  if (!pane.exited && props.confirmClose && !(await props.confirmClose(pane.label))) return
+  if (!pane.exited && props.confirmClose && !(await props.confirmClose(paneLabel(pane)))) return
   await disposePane(pane)
 }
 
 async function disposePane(pane: Pane) {
   const rest = panes.value.filter(other => other !== pane)
   panes.value = rest
+  const group = pane.group
+  if (!rest.some(other => other.group === group)) splitCounts.delete(group)
   pane.off()
   pane.offExit()
   pane.instance.dispose()
   pane.view.remove()
   if (renaming.value === pane) renaming.value = null
-  if (selected.value === pane) selected.value = rest.find(other => other.group === pane.group) ?? rest[0] ?? null
+  if (menuOpen.value && selected.value === pane) menuOpen.value = false
+  if (selected.value === pane) selected.value = rest.find(other => other.group === group) ?? rest[0] ?? null
   if (selected.value) select(selected.value); else layout()
   await term.kill(pane.id).catch(() => undefined)
 }
@@ -181,15 +467,16 @@ async function disposePane(pane: Pane) {
 // Restart keeps the label, group and scroll position in place; only the shell is new.
 async function restart(pane: Pane) {
   if (busy.value || !isDesktop) return
-  const { group, label } = pane
+  const { group, title } = pane
   const wasSelected = selected.value === pane
   // Only an exited terminal shows the restart button, so there is nothing running to confirm.
   await disposePane(pane)
-  const before = panes.value.length
-  await spawn(group)
-  const created = panes.value[panes.value.length - 1]
-  if (created && panes.value.length !== before) { created.label = label; panes.value = [...panes.value] }
-  if (wasSelected && created) select(created)
+  const created = await spawn(group)
+  if (created) {
+    created.title = { ...title }
+    panes.value = [...panes.value]
+    if (wasSelected) select(created)
+  }
 }
 
 // Reap: drop the local panes whose native session is gone. `term.list` is the
@@ -207,13 +494,13 @@ async function reapExited() {
 
 function beginRename(pane: Pane) {
   renaming.value = pane
-  renameText.value = pane.label
+  renameText.value = paneLabel(pane)
   void nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
 }
 function commitRename() {
   const pane = renaming.value
-  const label = renameText.value.trim()
-  if (pane && label) { pane.label = label.slice(0, 40); panes.value = [...panes.value] }
+  // 重命名写的是 `userDefinedTitle`（`renameTerminal`），空标题 = 取消重命名回到 shell 标题/默认标题。
+  if (pane) setPaneTitle(pane, renameTerminal(pane.title, renameText.value))
   renaming.value = null
 }
 
@@ -236,18 +523,22 @@ function clearSearch() {
   selected.value?.instance.focus()
 }
 
-const isSplit = (pane: Pane) => panes.value.filter(other => other.group === pane.group).length > 1
+const isSplit = (pane: Pane) => groupPanes(pane).length > 1
 
 onMounted(async () => {
   await spawn()
   if (disposed) return
   observer = new ResizeObserver(() => refit())
   if (stage.value) observer.observe(stage.value)
+  // 主题切换（`documentElement.dataset.theme`）时把新配色应用到所有窗格 —— 上游 palette 是活的。
+  themeObserver = new MutationObserver(() => applyPalette())
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 watch(() => props.active, value => { if (value) refit() })
 onBeforeUnmount(() => {
   disposed = true
   observer?.disconnect()
+  themeObserver?.disconnect()
   for (const pane of panes.value) { pane.off(); pane.offExit(); pane.instance.dispose(); void term.kill(pane.id).catch(() => undefined) }
   panes.value = []
   selected.value = null
@@ -259,29 +550,51 @@ onBeforeUnmount(() => {
     <div class="terminal-bar">
       <div class="terminal-tabs">
         <div v-for="pane in panes" :key="pane.id" class="terminal-tab" :class="{ selected: selected === pane, exited: pane.exited }">
-          <button class="terminal-select" :title="`${pane.label}（双击重命名）`" @click="select(pane)" @dblclick.stop="beginRename(pane)">
-            <SquareTerminal :size="iconSize.dense" /><span>{{ pane.label }}</span><Columns2 v-if="isSplit(pane)" :size="iconSize.dense" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
+          <button class="terminal-select" :title="`${paneTooltip(pane)}（双击重命名）`" @click="select(pane)" @dblclick.stop="beginRename(pane)">
+            <SquareTerminal :size="iconSize.dense" /><span>{{ paneLabel(pane) }}</span><Columns2 v-if="isSplit(pane)" :size="iconSize.dense" /><span v-if="pane.exited" class="terminal-exit">exit {{ pane.exitCode }}</span>
           </button>
-          <button v-if="pane.exited" class="icon-button" title="重启该终端" :aria-label="`重启 ${pane.label}`" @click="restart(pane)"><RotateCw :size="iconSize.dense" /></button>
-          <button class="icon-button" title="关闭终端" :aria-label="`关闭 ${pane.label}`" @click="close(pane)"><X :size="iconSize.dense" /></button>
+          <button v-if="pane.exited && shownAs('terminal.restart')" class="icon-button" :title="why('terminal.restart', '重启该终端')" :aria-label="`重启 ${paneLabel(pane)}`" @click="restart(pane)"><RotateCw :size="iconSize.dense" /></button>
+          <button class="icon-button" title="关闭终端" :aria-label="`关闭 ${paneLabel(pane)}`" @click="close(pane)"><X :size="iconSize.dense" /></button>
         </div>
       </div>
       <input v-if="renaming" ref="renameInput" v-model="renameText" class="terminal-rename" aria-label="终端名称" maxlength="40" @keydown.enter.prevent="commitRename" @keydown.esc.stop.prevent="renaming = null" @blur="commitRename" />
-      <button class="icon-button" title="重命名当前终端" aria-label="重命名当前终端" :disabled="!selected" @click="selected && beginRename(selected)"><Pencil :size="iconSize.menu" /></button>
-      <button class="icon-button" :class="{ active: searchOpen }" title="在终端中查找" aria-label="在终端中查找" :disabled="!selected" @click="toggleSearch"><Search :size="iconSize.control" /></button>
-      <button class="icon-button" title="回收已退出的终端" aria-label="回收已退出的终端" :disabled="!isDesktop || !panes.length" @click="reapExited"><RotateCw :size="iconSize.menu" /></button>
-      <button class="icon-button" title="分屏：在右侧再开一个终端" aria-label="分屏终端" :disabled="!isDesktop || busy || !selected" @click="split"><Columns2 :size="iconSize.control" /></button>
-      <button class="icon-button" title="新建终端" aria-label="新建终端" :disabled="!isDesktop || busy" @click="spawn()"><Plus :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.rename')" class="icon-button" :title="why('terminal.rename', '重命名当前终端')" :aria-label="why('terminal.rename', '重命名当前终端')" :disabled="!can('terminal.rename')" @click="selected && beginRename(selected)"><Pencil :size="iconSize.menu" /></button>
+      <button v-if="shownAs('terminal.search')" class="icon-button" :class="{ active: searchOpen }" :title="why('terminal.search', '在终端中查找')" :aria-label="why('terminal.search', '在终端中查找')" :disabled="!can('terminal.search')" @click="toggleSearch"><Search :size="iconSize.control" /></button>
+      <span v-if="shownAs('terminal.font.reset')" class="terminal-font" :title="terminalFontSizeTitle(fontSizeShown, TERMINAL_BASE_FONT_SIZE)">{{ fontSizeShown }}px</span>
+      <button v-if="shownAs('terminal.font.decrease')" class="icon-button" :title="why('terminal.font.decrease', '缩小终端字号')" :aria-label="why('terminal.font.decrease', '缩小终端字号')" :disabled="!can('terminal.font.decrease')" @click="stepFontSize('terminal.font.decrease')"><ZoomOut :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.font.increase')" class="icon-button" :title="why('terminal.font.increase', '放大终端字号')" :aria-label="why('terminal.font.increase', '放大终端字号')" :disabled="!can('terminal.font.increase')" @click="stepFontSize('terminal.font.increase')"><ZoomIn :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.font.reset')" class="icon-button" :title="why('terminal.font.reset', '复位终端字号')" :aria-label="why('terminal.font.reset', '复位终端字号')" :disabled="!can('terminal.font.reset')" @click="resetFontSize"><RotateCcw :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.reap')" class="icon-button" :title="why('terminal.reap', '回收已退出的终端')" :aria-label="why('terminal.reap', '回收已退出的终端')" :disabled="!can('terminal.reap')" @click="reapExited"><RotateCw :size="iconSize.menu" /></button>
+      <button v-if="shownAs('terminal.split')" class="icon-button" :title="why('terminal.split', '右侧分屏')" :aria-label="why('terminal.split', '右侧分屏')" :disabled="!can('terminal.split')" @click="split('right')"><Columns2 :size="iconSize.control" /></button>
+      <button v-if="shownAs('terminal.split.down')" class="icon-button" :title="why('terminal.split.down', '下侧分屏')" :aria-label="why('terminal.split.down', '下侧分屏')" :disabled="!can('terminal.split.down')" @click="split('down')"><Rows2 :size="iconSize.control" /></button>
+      <button class="icon-button" :title="why('terminal.new', '新建终端')" :aria-label="why('terminal.new', '新建终端')" :disabled="!can('terminal.new')" @click="spawn()"><Plus :size="iconSize.control" /></button>
     </div>
     <div v-if="searchOpen" class="terminal-search">
       <input ref="searchInput" v-model="searchText" class="terminal-search-input" aria-label="终端查找内容" placeholder="在终端缓冲区中查找" @keydown.enter.prevent="runSearch(true)" @keydown.esc.stop.prevent="toggleSearch" />
-      <button class="subtle-button" :disabled="!searchText" @click="runSearch(false)">上一个</button>
-      <button class="subtle-button" :disabled="!searchText" @click="runSearch(true)">下一个</button>
-      <button class="subtle-button" @click="clearSearch">清除</button>
+      <button class="subtle-button" :disabled="!can('terminal.search.previous')" :title="why('terminal.search.previous', '上一个')" @click="runSearch(false)">上一个</button>
+      <button class="subtle-button" :disabled="!can('terminal.search.next')" :title="why('terminal.search.next', '下一个')" @click="runSearch(true)">下一个</button>
+      <button class="subtle-button" :disabled="!can('terminal.search.clear')" :title="why('terminal.search.clear', '清除')" @click="clearSearch">清除</button>
       <span v-if="searchMiss" class="terminal-search-miss">没有更多匹配。</span>
     </div>
     <div ref="stage" class="terminal-stage" />
     <p v-if="note" class="terminal-note">{{ note }}</p>
+    <!-- 窗格右键菜单：上游 `Terminal.OutputContextMenu`（复制/粘贴/从历史粘贴）+ TW.Unsplit / 窗格跳转。 -->
+    <div v-if="menuOpen" class="terminal-menu-backdrop" @pointerdown="closeMenu" @contextmenu.prevent="closeMenu">
+      <AnchoredMenu :x="menuPoint.x" :y="menuPoint.y">
+        <button v-for="row in clipboardActions" :key="row.id" class="terminal-menu-row" :disabled="!row.enabled" :title="row.enabled ? `${row.label}（${row.keys.join('、')}）` : row.reason" @click="row.id === 'terminal.paste.fromHistory' ? closeMenu() : runClipboard(row.id)">
+          {{ row.label }}<span v-if="row.keys.length" class="terminal-menu-keys">{{ row.keys.join('、') }}</span>
+        </button>
+        <div v-if="historyEntries.length" class="terminal-menu-group">
+          <p class="terminal-menu-caption">从历史粘贴</p>
+          <button v-for="(entry, index) in historyEntries" :key="index" class="terminal-menu-row" :disabled="!clipboardContext().running" :title="entry.text" @click="pasteHistoryEntry(entry)">{{ entry.text }}</button>
+        </div>
+        <button v-if="shownAs('terminal.select.all')" class="terminal-menu-row" :disabled="!can('terminal.select.all')" :title="why('terminal.select.all', '全选')" @click="selectAll">全选</button>
+        <button v-if="shownAs('terminal.clear.buffer')" class="terminal-menu-row" :disabled="!can('terminal.clear.buffer')" :title="why('terminal.clear.buffer', '清空终端缓冲区')" @click="clearBuffer">清空终端缓冲区</button>
+        <button v-if="shownAs('terminal.unsplit')" class="terminal-menu-row" :disabled="!can('terminal.unsplit')" :title="why('terminal.unsplit', '取消分屏')" @click="unsplit">取消分屏</button>
+        <button v-if="shownAs('terminal.pane.previous')" class="terminal-menu-row" :disabled="!can('terminal.pane.previous')" :title="why('terminal.pane.previous', '跳到上一个窗格')" @click="gotoPane(false)"><ChevronLeft :size="iconSize.dense" />上一个窗格</button>
+        <button v-if="shownAs('terminal.pane.next')" class="terminal-menu-row" :disabled="!can('terminal.pane.next')" :title="why('terminal.pane.next', '跳到下一个窗格')" @click="gotoPane(true)"><ChevronRight :size="iconSize.dense" />下一个窗格</button>
+      </AnchoredMenu>
+    </div>
   </div>
 </template>
 
@@ -303,9 +616,18 @@ onBeforeUnmount(() => {
 .terminal-search-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .terminal-search-miss { color: var(--muted); font-size: 11px; }
 .terminal-bar > .icon-button.active { color: var(--accent); }
-.terminal-stage { flex: 1; min-width: 0; min-height: 0; position: relative; }
-.terminal-stage :deep(.terminal-view) { position: absolute; inset: 0; padding: 6px 10px; }
-.terminal-stage :deep(.terminal-view.terminal-split) { right: 50%; border-right: 1px solid var(--line); }
-.terminal-stage :deep(.terminal-view.terminal-split-right) { left: 50%; right: 0; border-right: 0; }
+.terminal-font { min-width: 3.2em; color: var(--muted); font: 11px var(--font-mono); text-align: right; }
+.terminal-stage { flex: 1; min-width: 0; min-height: 0; display: grid; }
+.terminal-stage :deep(.terminal-view) { min-width: 0; min-height: 0; padding: 6px 10px; }
+.terminal-stage :deep(.terminal-view.terminal-split) { overflow: hidden; }
+.terminal-stage :deep(.terminal-view.terminal-edge-right) { border-right: 1px solid var(--line); }
+.terminal-stage :deep(.terminal-view.terminal-edge-bottom) { border-bottom: 1px solid var(--line); }
 .terminal-note { margin: 0; padding: var(--space-2) var(--space-4); color: var(--muted); font-size: 12px; }
+.terminal-menu-backdrop { position: fixed; inset: 0; z-index: 30; }
+.terminal-menu-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ctrl-height-sm); padding: 0 var(--space-2); border: 0; background: transparent; color: var(--text); font: 12px var(--font-mono); text-align: left; white-space: nowrap; overflow: hidden; }
+.terminal-menu-row:hover:not(:disabled) { background: var(--hover); }
+.terminal-menu-row:disabled { color: var(--muted); }
+.terminal-menu-keys { margin-left: auto; color: var(--muted); font-size: 11px; }
+.terminal-menu-group { border-top: 1px solid var(--line); margin-top: var(--space-1); padding-top: var(--space-1); }
+.terminal-menu-caption { margin: 0; padding: 0 var(--space-2); color: var(--muted); font-size: 11px; }
 </style>

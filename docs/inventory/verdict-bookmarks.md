@@ -135,12 +135,10 @@
    名字取项目名（迁移规则），命名列表来自 `projectSettings.bookmarkLists`；分段与"按文件分组"
    是两层（列表 → 文件 → 行，与上游树同形）。真机取证：面板显示
    `ui-parity-proj 默认 2` 段头，下面是 `CMakeLists.txt` 与 `README.md 1` 两个文件段。
-   **还没接**：
-   `GroupCreateDialog`/`GroupRenameDialog`/`GroupSelectDialog` 三个对话框、齿轮的
-   `askBeforeDeletingLists`（有了列表它才有落点），以及依赖列表的两个动作：
-   `AddAnotherBookmark`（`AddAnotherBookmarkAction`）与 `BookmarkOpenTabs`
-   （`BookmarkOpenTabsAction`，文案「书签打开标签页…」，它先弹「选择/创建书签列表」）。
-   这些是**下一批**（76b/76c）。
+   **本轮复核（2026-10-04）**：上面这段列的"还没接"已经接完 —— 三个对话框由 `src/components/BookmarkListDialog.vue`
+   合成（`listDialog` 的 create/rename/select/delete 四态，`finishListDialog`/`confirmDeleteList` 收口）、
+   齿轮的 `askBeforeDeletingLists` 在面板里、`AddAnotherBookmark` 是行右键第一格（只对文件书签可见）、
+   `BookmarkOpenTabs` 是标题栏第二个按钮；`BookmarkManager` 行因此改判 `[x]`。
 ③ **列表项的富渲染 —— 大部分已做**（面板在第七十一/七十三批：图标 + 描述 + `行号: 那一行原文`
    + 助记键气泡 + 两种形状照 `ui/tree/LineNode.kt:20-31` 与 `BookmarkNode.kt:64-83`）；
    **装订线那一侧在第七十五批补齐**：悬停文本逐条照 `GutterLineBookmarkRenderer.getTooltipText:56-72`
@@ -152,16 +150,31 @@
    **第七十六批收尾**：`updateAccessoryView`（`:92-99`）落地——助记键从行首挪到**行尾的附件位**
    （`margin-left: auto` 顶到右侧，与 IDEA 把编号写进树的 accessory 同形）；
    `footerText`（`:109` 的 presentable URL）本仓用行的 `title` 给 `路径:行` ✓ 近似；
-   `speedSearchText`（`:104`）登记为**无落点**（本仓面板没有快速搜索/`SpeedSearch` 那套基建）。
+   `speedSearchText`（`:104`）**2026-10-04 本轮落地**：`src/bookmarks.ts` 的 `bookmarkSpeedSearchText`
+   + 面板就地的速度搜索（`SpeedSearchBar`，判据 `tests/bookmark-item.test.mjs`）。
+   **`getBookmarkFont`（`:95`）本轮落地**：带编号的书签在面板里用粗体（行与文件书签组头都落
+   `.bookmark-bold`，判据 `tests/bookmark-font.test.mjs`）。
 
 ## G. 逐条总表（5 类，与 `docs/inventory/bookmarks.txt` 一一对齐）
 
 | 类 | 源码 | 判决 | 依据（有实现点的指到真实 `src/` 文件） |
 |---|---|---|---|
-| `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | `[~]` | 本仓的 `src/bookmarks.ts` 有 `Bookmark{path, line?, mnemonic?, text?, description?}`（`line` 缺省 = 文件书签；`mnemonic` 是单个 0-9/A-Z 字符 = 上游 `BookmarkType`；`text` = 行原文锚；`description` = 自定义描述）（`Navigatable` 那一面 = 面板/动作跳到 `path:line`；`Comparable` 那一面 = `sortedBookmarks` 按路径+行）；`description` 已有（本仓 `Bookmark.description`：选中文字再 F11 时记下，持久化字段名与上游一致）、`BookmarkType`（`:181`，行/文件书签）、`getBookmarkFont`（`:95`，编号书签的粗体）、`release`/`updateHighlighter`（`:118-126`，高亮器生命周期 —— 本仓的图标由 `src/editorGutterIcons.ts` 统一重算，没有"每条书签自己持一个高亮器"的形态） |
-| `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | `[~]` | 资源包只是取文案的机制（`:21-28` 的 `message`/`messagePointer`）；本仓的对应物是面板与动作里的字面量（文案逐条核过本机 IDEA 2026.2 中文包），见 `src/components/BookmarksPanel.vue`；**缺** `messagePointer` 那半（延迟取文案的 `Supplier` 形态 —— 本仓直接取字符串，没有它要解决的问题） |
-| `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | `[~]` | 列表项在 `src/components/BookmarksPanel.vue`（编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查）；`setupRenderer` 的描述+行文本、`footerText`（行的 `title` 给 `路径:行`）、`updateAccessoryView`（助记键在**行尾附件位**）都已做（第七十一/七十三/七十六批）；**缺** `speedSearchText`（`:104` —— 无落点，本仓没有 SpeedSearch 基建）与 `allowedToRemove`/`removed`（`:119-127`，类型化书签才有的"许可删除"） |
-| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[~]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）；编辑后重锚/查重、自动描述（按 2026.2 的 `createDescription`）、文件书签都已做（第六十七/七十一/七十四批）。**第九十五批补上排序口径**：`getValidBookmarks`（`:140-150`）的两支现在都有了 —— `orderedBookmarks(list, sortByPosition)`（真 = 按位置、假 = 按加入顺序），默认取 `UISettingsState.kt:249` 的 **false**（原先本仓只有按位置一支，与上游默认**不一致**）；组内排序由 `sortGroupBookmarks` + `SortGroupBookmarksAction` 的落点（`BookmarksPanel` 组头的「按类型和名称对书签进行排序」，文案取 `ActionsBundle.properties:76`）承担，排序**写回存档**。**仍缺**：命名书签列表的 UI 那一半（模型 + 持久化 + 面板分段已做，三个对话框与列表上的动作未接，见 §C②） |
+| `Bookmark` | `platform/bookmarks/src/com/intellij/ide/bookmarks/Bookmark.java` | `[x]` | 本仓的 `src/bookmarks.ts` 有 `Bookmark{path, line?, mnemonic?, text?, description?}`（`line` 缺省 = 文件书签；`text` = 行原文锚；`description` = 自定义描述）（`Navigatable` 那一面 = 面板/动作跳到 `path:line`；`Comparable` 那一面 = `sortedBookmarks` 按路径+行）。**`BookmarkType` 是助记键枚举**（§C② 的更正），落成 `mnemonic` 字段 + `BOOKMARK_MNEMONICS`/`normalizeMnemonic`；**`getBookmarkFont`（`:95`，编号书签的粗体）本轮落地** = `bookmarkFontBold` + `src/components/BookmarksPanel.vue` 的行与文件书签组头两处 `.bookmark-bold`（判据 `tests/bookmark-font.test.mjs`）。`release`/`updateHighlighter`（`:118-126`，每条书签自持高亮器的生命周期）在本仓是**形态差异**：装订线图标由 `src/editorGutterIcons.ts` 统一重算，没有"每条书签自己持一个高亮器"这层，不为它造对象。 |
+| `BookmarkBundle` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkBundle.java` | `[~]` | 资源包只是取文案的机制（`:21-28` 的 `message`/`messagePointer`）；本仓的对应物是面板与动作里的字面量（文案逐条核过本机 IDEA 2026.2 中文包），见 `src/components/BookmarksPanel.vue`。**缺**的只有 `messagePointer` 那半：它是**惰性 Supplier**（`DynamicBundle.getLazyMessage`），而本仓每一处取文案都是一次性同步求值（面板渲染、对话框标题、气球），没有"先拿指针、稍后再取"的消费者 —— 造一个没人持有的 Supplier 包装只会是空壳（与 §D 的判法同一条理由，故不判 `[-]` 而是留 `[~]` 记明这一处形态差） |
+| `BookmarkItem` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkItem.java` | `[x]` | 列表项在 `src/components/BookmarksPanel.vue`（编号气泡 + 文件 + 行号 + 移除按钮 + 键盘走查）；`setupRenderer` 的描述+行文本、`footerText`（行的 `title` 给 `路径:行`）、`updateAccessoryView`（助记键在**行尾附件位**）都已做（第七十一/七十三/七十六批）。**2026-10-04 本轮补掉最后两处**：① `speedSearchText`（`:104`）= `文件名 + 描述`，落成 `src/bookmarks.ts` 的 `bookmarkSpeedSearchText`，面板的就地速度搜索（`SpeedSearchBar` + `src/speedSearch.ts` 的 MinusculeMatcher/走序）拿它当匹配对象 —— 打字即开、上下键走命中、Esc/回车收起；② `allowedToRemove`（`:119`，恒 true）落成 `bookmarkRemovable`，面板右键「移除书签」过它；`removed`（`:123-125`）落到已有的 `removeBookmark`。判据 `tests/bookmark-item.test.mjs`（6 条，含两条面板接线）。 |
+| `BookmarkManager` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` | `[x]` | 表与持久化：`ProjectSettings.bookmarks`（项目级）+ `src/bookmarks.ts` 的 `placeBookmark`（编号移动/取消）+ F11/Ctrl+F11（`src/keymap.ts`、`src/bookmarkActions.ts`）；编辑后重锚/查重、自动描述（按 2026.2 的 `createDescription`）、文件书签都已做（第六十七/七十一/七十四批）。**第九十五批补上排序口径**：`getValidBookmarks`（`:140-150`）的两支现在都有了 —— `orderedBookmarks(list, sortByPosition)`（真 = 按位置、假 = 按加入顺序），默认取 `UISettingsState.kt:249` 的 **false**（原先本仓只有按位置一支，与上游默认**不一致**）；组内排序由 `sortGroupBookmarks` + `SortGroupBookmarksAction` 的落点（`BookmarksPanel` 组头的「按类型和名称对书签进行排序」，文案取 `ActionsBundle.properties:76`）承担，排序**写回存档**。**2026-10-04 本轮复核：命名书签列表的 UI 那一半也已接** —— 面板分段与标题栏按钮（创建列表、书签打开的标签页）在 `src/components/BookmarksPanel.vue`，行右键的「添加另一书签…」（`AddAnotherBookmarkAction`，只对文件书签可见）/「编辑描述」/「转到」/「移除」同处，三个对话框合成 `src/components/BookmarkListDialog.vue`（由 `ToolWindowView.vue` 的 `@bookmark-tabs`/`@edit`/`@sort-group` 与 App.vue 的 `BookmarkListDialog` 挂载点接住），齿轮的 `askBeforeDeletingLists`、重写确认与持久化在 `src/bookmarkListActions.ts` + `src/bookmarkSettings.ts`（判据 `tests/bookmark-lists.test.mjs`、`tests/bookmark-order.test.mjs`、`tests/bookmark-settings.test.mjs`）。 |
 | `BookmarksListener` | `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarksListener.java` | `[~]` | 事件面（`:10-16` 的 added/removed/changed/orderChanged）在本仓是 Vue 响应式：书签表一变，面板、装订线图标（`src/editorGutterIcons.ts`）与跳转动作自己跟着重算；**缺** 给他人用的监听接口（本仓没有插件，也没有第二个消费者需要订阅） |
 
-**四档合计**：`[x]` 0 + `[~]` 5 + `[ ]` 0 + `[-]` 0 = 5。
+**四档合计**：`[x]` 3 + `[~]` 2 + `[ ]` 0 + `[-]` 0 = 5。
+
+> **2026-10-04 本轮改判（第二次）**：`BookmarkItem` `[~]` → `[x]` —— `speedSearchText` 与
+> `allowedToRemove`/`removed` 三条落地（`src/bookmarks.ts` 的 `bookmarkSpeedSearchText`/
+> `bookmarkRemovable` + 面板速度搜索接线，判据 `tests/bookmark-item.test.mjs`）。
+> 四档因此从 2/3/0/0 变成 3/2/0/0。
+>
+> **2026-10-04 本轮改判**：`Bookmark` 与 `BookmarkManager` 两条 `[~]` → `[x]` ——
+> ① `getBookmarkFont`（编号书签粗体）落地为 `src/bookmarks.ts` 的 `bookmarkFontBold` +
+> `BookmarksPanel.vue` 的 `.bookmark-bold`（判据 `tests/bookmark-font.test.mjs`）；
+> ② 复核发现 `BookmarkManager` 记的"命名书签列表 UI 未接"已过时：面板行右键的「添加另一书签…」、
+> 三个列表对话框、`askBeforeDeletingLists` 与「书签打开的标签页」都已在 `src/components/BookmarksPanel.vue`
+> 与 `src/bookmarkListActions.ts` 接住。四档因此从 0/5/0/0 变成 2/3/0/0。

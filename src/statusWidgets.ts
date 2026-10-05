@@ -19,9 +19,12 @@
 //   1. `id` 用本仓既有的短键（`position`/`lineSeparator`…）：它就是"我们的扩展 id"，持久化键不能中途
 //      改名（否则用户的显隐设置会静默丢失）。上游的 id 记在 `upstreamId` 里，供审计对照与门控核对。
 //   2. 有四个条目**不是**工厂：`file`/`progress`/`bridge`/`problems`。上游对应物是直接画进状态栏面板的
-//      组件（`ToolWindowsWidget` 走 `IdeStatusBarImpl.kt:286-297` 的 leftPanel、`InfoAndProgressPanel`
+//      组件（`ToolWindowsWidget` 走 `IdeStatusBarImpl.kt:285-298` 的 leftPanel、`InfoAndProgressPanel`
 //      走 `:343` 的 centerPanel），**不经过工厂**。本仓把它们也列进勾选清单是既有行为（用户可隐藏），
 //      所以保留，但标成 `factory: false` —— 门控只对 `factory: true` 的条目核上游 id/默认值。
+//      ⚠️ 这四条里 `bridge` 目前**没有消费者**（状态栏模板里没有 `showWidget('bridge')`），
+//      勾掉它不改变任何东西 = 假控件；门禁 tests/statusbar-popup-motion-parity.test.mjs 把这条
+//      记成显式的 KNOWN_GAPS，新增死条目会当场红。
 import { ref } from 'vue'
 import {
   configurableFactories, migrateHiddenKeys, shouldCreateWidget, widgetEnabled, widgetToggleEnabled, withWidgetEnabled,
@@ -57,6 +60,22 @@ export interface StatusBarWidget extends StatusBarWidgetFactory {
  * `NotificationWidgetFactory`/git 的 `GitBranchWidget.Factory`）都是**直接实现**接口，没有这一层。
  */
 export const STATUS_WIDGETS: StatusBarWidget[] = [
+  // 上游已注册、本仓没有的 EP 工厂（逐条核过 `statusBarWidgetFactory` 扩展点下的全部注册处）。
+  // 按「本仓形态下该不该有」分类，不是一律补：
+  //   · `WriteThread`（`intellij.platform.ide.impl.xml:1635`，`WriteThreadIndicatorWidgetFactory`）：
+  //     上游是「有写线程 / 派发更新中」的**性能提示**。本仓没有那条 EDT 派发链，无从触发 ⇒ 不建。
+  //   · `EditorAnimationCacheStatistics`（`:1639`）：`@ApiStatus.Internal` 的调试统计 ⇒ 不建。
+  //   · `IndexesAndVfsFlushIndicator`（`:1643`）：与本仓的 `smartMode`（`LanguageServiceStatusBarWidget`）
+  //     说的是同一件事（"后台还在算"），两个都画会重复 ⇒ 合并进 `smartMode`。
+  //   · `settingsEntryPointWidget`（`:1644`，`SettingsEntryPointAction$StatusBarManager`）：齿轮入口。
+  //     本仓设置在主工具栏右侧常驻，状态栏再放一个就是重复入口 ⇒ 不建。
+  //   · `inspectionProfileWidget`（`intellij.platform.lang.impl.xml:1519`）：inspection 配置档选择器。
+  //     本仓没有 inspection 配置档这个概念 ⇒ 不建。
+  //   · `largeFileEncodingWidget`（`intellij.platform.lang.impl.xml:1515`）与各 `light.edit.*`
+  //     （同文件 `:1608`、git `intellij.vcs.git.backend.xml:944`）：LightEdit 专用，
+  //     本仓的大文件模式走编辑器内横幅 ⇒ 不建。
+  //   · 非 IDEA 本体插件（数据库 `GridAggregator`/`GridPosition`、`JSONSchemaSelector`、
+  //     `McpServerStatusBarWidget`、hg 的三个、vcs-impl 的 `IncomingChanges`）不在本仓范围。
   { id: 'file', displayName: '当前文件', factory: false },
   { id: 'progress', displayName: '后台任务', factory: false },
   { id: 'bridge', displayName: '桥接状态', factory: false },
@@ -71,7 +90,9 @@ export const STATUS_WIDGETS: StatusBarWidget[] = [
   { id: 'notices', displayName: '通知中心', factory: true, upstreamId: 'Notifications' },
   // `VfsRefreshIndicatorWidgetFactory.java:53-59`：显示名取 `status.bar.vfs.refresh.widget.name`
   // （中文包 =「文件系统同步」）、`isEnabledByDefault() = false`（用户要去勾选清单里打开）、
-  // 空闲时那个 JLabel 是**空图标**，只在同步期间转起来（`:96-110` 的 start/stop）。
+  // 空闲时那个 JLabel 是**空图标**（`:100` `EmptyIcon.ICON_16`），只在同步期间换成 `AnimatedIcon.FS`
+  // 转起来（`:109-119` 的 start/stop）。上游那整个类是 `@ApiStatus.Internal`（`:27`），组件还
+  // `setEnabled(false)`（`:106`）—— 它本来就**不可点**，所以本仓落成一个只读的 span 而不是假按钮。
   { id: 'vfsRefresh', displayName: '文件系统同步', factory: true, upstreamId: 'VfsRefresh', enabledByDefault: false },
   { id: 'memory', displayName: '内存', factory: true, upstreamId: 'Memory', enabledByDefault: false },
   { id: 'powerSave', displayName: '省电模式', factory: true, upstreamId: 'PowerSaveMode', enabledByDefault: false },
@@ -160,7 +181,7 @@ export function showAllWidgets() {
  * （`IdeBundle.properties:2402` = 「显示 {0}」，中文包同 key `:1403`）的**搜索命中**，
  * 于是用户在「查找操作 / 随处搜索」里搜组件名就能开关它 —— 与右键勾选那份状态是**同一份**。
  *
- * 本仓的落点就是 `src/menuUi.ts` 的动作索引（查找操作与 SE 的 Commands 档都吃它）。
+ * 本仓的落点就是 `src/menuUi.ts` 的动作索引（查找操作与 SE 的 Actions 档都吃它）。
  * `matcher.matches(name)` 那一句由 `rankCommands` 承担，所以这里只负责"有哪些行、点了做什么"。
  *
  * 可点性用**与右键勾选同一条**判据（`widgetToggleEnabled`，对应上游的 `canBeEnabledOnStatusBar`）——

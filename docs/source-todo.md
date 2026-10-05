@@ -263,8 +263,17 @@
 
 还差的（判决表 `docs/inventory/verdict-vcs-commit.md` §G 里对应的行仍记 `[~]`）：
 
-- 失败行上的**「显示详细信息 / 查看详情」链接动作**（上游 `CommitCheckFailure.WithDetails` 那一档：
-  `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板上）——本仓的失败行是纯文本。
+- [x] 失败行上的**「显示详细信息 / 查看详情」链接动作**（上游 `CommitCheckFailure.WithDetails` 那一档：
+      `NonModalCommitWorkflowHandler.kt:508-525` 产出、`:302-316` 挂到通知与面板上）——
+      **第七十批已落**：本仓唯一够得着的 `CommitProblemWithDetails` 是**提交前的 TODO 预检**
+      （`TodoCommitProblem`，`TodoCheckinHandler.kt:50-63`），所以 `src/commitChecks.ts` 的
+      `CommitCheckFailure` 带了 `details`（= `showDetailsAction`），面板按条渲染，
+      带 `details` 的那条**整条文字就是链接**（`showDetailsLink` 为默认 null 时上游就是这么渲染的，
+      `CommitProgressPanel.kt:456-458`），点它打开 **TODO 工具窗口**（`TodoCheckinHandler.showTodoItems`，
+      `:144-168`）。见审计 §BR。
+      **仍不做**的两条（不编链接、不编落点）：提交信息检查（上游是消息编辑器里的 inspection，
+      `BaseCommitMessageInspection.kt:46,97`，不是 `CommitCheck`）、rebase/分离 HEAD
+      （`GitCheckinHandlerFactory.kt:364,401` 的上游落点是**浏览器打开帮助链接**，本仓没这条通道）。
 - [x] **面板内的检查进度**（`CommitChecksProgressIndicator`，`CommitProgressPanel.kt:108-130`）：
       **第九十六批已做**（面板内那条）：`src/commitChecks.ts` 的 `checksProgress` + `fixDoubleEllipsis`
       （照 `CommitChecksTaskInfo:18-23` 与 `StatusBarProgressIndicator.setText:105-125`、`:71-86`），

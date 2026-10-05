@@ -46,10 +46,10 @@ Json write_all(const std::vector<Entry>& entries) {
         if (!path.is_absolute()) fail("INVALID_PATH", "导出路径必须是绝对路径。");
         std::error_code error;
         // 「是不是目录」先于「扩展名」判：把一个目录当导出目标时报的应当是路径错误，
-        // 而不是"只允许 .html"（后者会让人以为只是扩展名写错了）。
+        // 而不是"只允许 .html/.txt"（后者会让人以为只是扩展名写错了）。
         if (fs::is_directory(path, error)) fail("INVALID_PATH", "导出路径是一个目录：" + entry.path);
         if (!allowed_extension(entry.path))
-            fail("INVALID_EXTENSION", "只允许导出 .html / .htm 文件：" + entry.path);
+            fail("INVALID_EXTENSION", "只允许导出 .html / .htm / .txt 文件：" + entry.path);
         if (!fs::is_directory(path.parent_path(), error))
             fail("NOT_FOUND", "导出目录不存在：" + utf8(path.parent_path().native()));
         // 与其他写路径一致：解析到重解析点的目标可能完全在别处，拒绝。

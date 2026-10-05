@@ -55,16 +55,19 @@ export const COMPARISON_POLICY_GROUP = '忽略差异'
  * · `ignoreWhitespaces` = 再把中间所有空白整个删掉（上游 `ComparisonUtil.isEqualTexts`
  *   在 `IGNORE_WHITESPACES` 档下用 `TrimUtil` 的忽略型比较，等价于"去掉全部空白再比"）。
  *
- * 用的是全文空白（含全角空格与 Unicode 空白），不是只认 ASCII —— 上游 `isWhiteSpaceCodePoint`
- * 同样按 code point 判（`TrimUtil.kt:31-33`）。行内没有换行（行是切好的），所以无需处理 `\n`。
+ * 上游只忽略空格、制表符、LF（`TrimUtil.kt:29-31,583`「from Strings.isWhiteSpace」；
+ * `platform/util/base/src/com/intellij/openapi/util/text/Strings.java:729-730`——同名文件在
+ * `plugins/maven/` 下还有一份，引用指前者）。
+ * CR、NBSP、全角空格不是可忽略字符。
  */
 export function comparisonKey(line: string, policy: ComparisonPolicy): string {
   if (policy === 'default') return line
-  if (policy === 'trimWhitespaces') return line.replace(/^\s+|\s+$/g, '')
-  // `ignoreWhitespacesChunks` 与 `ignoreWhitespaces` 折出来的键**一样** —— 上游
-  // `IgnorePolicy.getComparisonPolicy()` 把这两项都折成 `IGNORE_WHITESPACES`，
-  // 第四档多出来的是剪边界（`shouldTrimChunks`），不是比较方式。
-  return line.replace(/\s+/g, '')
+  if (policy === 'trimWhitespaces') return line.replace(/^[ \t\n]+|[ \t\n]+$/g, '')
+  return line.replace(/[ \t\n]+/g, '')
+}
+
+export function isDiffWhitespace(ch: string): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\n'
 }
 
 /**
@@ -72,6 +75,37 @@ export function comparisonKey(line: string, policy: ComparisonPolicy): string {
  */
 export function shouldTrimChunks(policy: ComparisonPolicy): boolean {
   return policy === 'ignoreWhitespacesChunks'
+}
+
+/**
+ * 上游 `IgnorePolicy` 的三条派生语义（`IgnorePolicy.java:29-43`）合成一张表。
+ *
+ * 界面上是一个六项枚举，但下游只用三条派生属性：
+ *   · `comparison` = `getComparisonPolicy()`（`IgnorePolicy.java:29-35`）：三种比较策略的折叠，
+ *     `IGNORE_WHITESPACES_CHUNKS` 与 `IGNORE_WHITESPACES` 同档；
+ *   · `squash` = `isShouldSquash()`（`IgnorePolicy.java:37-39`）：六项里只有
+ *     `IGNORE_LANGUAGE_SPECIFIC_CHANGES` 为 false，本仓选择器里的四项全 true；
+ *   · `trimChunks` = `isShouldTrimChunks()`（`IgnorePolicy.java:41-43`）：只有 `IGNORE_WHITESPACES_CHUNKS` 为 true。
+ *
+ * `squash` 的消费者是 `diffWords.shouldSquashFragments`（与 `HighlightPolicy.isShouldSquash()`
+ * 相与，`TwosideTextDiffProviderBase.java:75`）。本仓是"逐行一张标记表"，相邻行本来就各渲染
+ * 各的行内标记，没有上游那种跨 LineFragment 拼接内部片段的动作 —— 所以这一条在当前渲染模型里
+ * 是**结构等价**的：判定表齐全（哪一档允许合并），只是没有一条会产生不同像素的路径。
+ */
+export function ignorePolicyDerivatives(policy: ComparisonPolicy): {
+  comparison: ComparisonPolicy
+  squash: boolean
+  trimChunks: boolean
+} {
+  return { comparison: policy, squash: true, trimChunks: policy === 'ignoreWhitespacesChunks' }
+}
+
+/**
+ * 上游 `IgnorePolicy.isShouldSquash()`（`IgnorePolicy.java:37-39`）：本仓选择器里的四项全为 true
+ * （唯一为 false 的 `IGNORE_LANGUAGE_SPECIFIC_CHANGES` 不列，因为它没有语言侧规则可跑）。
+ */
+export function ignorePolicyShouldSquash(_policy: ComparisonPolicy): boolean {
+  return true
 }
 
 /** 按策略折整个数组，用于行级对齐。 */

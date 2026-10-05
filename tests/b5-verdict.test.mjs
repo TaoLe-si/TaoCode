@@ -75,12 +75,14 @@ test('[x]/[~] 行的依据必须指到真实存在的文件', () => {
 test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 0)
-  assert.equal(count('[~]'), 5)
+  // 2026-10-04 本轮第二次：BookmarkItem 从 [~] 改判 [x]（speedSearchText / allowedToRemove /
+  // removed 三条落地，判据 tests/bookmark-item.test.mjs）。
+  assert.equal(count('[x]'), 3)
+  assert.equal(count('[~]'), 2)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 0)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 5)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 0 \+ `\[~\]` 5 \+ `\[ \]` 0 \+ `\[-\]` 0 = 5/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 3 \+ `\[~\]` 2 \+ `\[ \]` 0 \+ `\[-\]` 0 = 5/,
     '表尾的和数要与逐条表一致')
 })
 

@@ -94,6 +94,28 @@ test('四档算术与页脚一致', () => {
   )
 })
 
+// 455 条 `[ ]` 已在第一百一十七批逐族清扫完毕（`[ ]` 归零）；本轮又把 9 条 `[~]` 判成 `[x]`（§A9–A14），
+// 2026-10-04 再改判 `FindInPathAction`：入口（Edit 菜单 Ctrl+Shift+F → 搜索工具窗）与最近搜索
+// （`src/findInProjectRecents.ts`）两条缺口都已落地，`[~]` → `[x]`（30 + 353）。
+// 2026-10-04 VCS lane 再改判 `CombinedDiffSearch`：差异视图内部查找整条落地
+// （`src/diffSearch.ts` + `src/components/DiffView.vue`，判据 `tests/diff-search.test.mjs`），
+// `[~]` → `[x]`（31 + 352）。
+// 这组数是此刻的账。以后改判必然要动这里 —— 这正是这条断言存在的意义：改判是动作，不是漂移。
+test('本轮清扫后的四档计数已冻结', () => {
+  const count = v => rows.filter(r => r.verdict === v).length
+  assert.deepEqual(
+    [count('[x]'), count('[~]'), count('[ ]'), count('[-]')],
+    [31, 352, 0, 247],
+    '四档与清扫结果不一致：改了判决就把这组数与页脚一起改'
+  )
+})
+
+// `[-]` 不能是一句「平台专属」了事：理由里必须有上游 文件:行号 与那一行的符号。
+test('每条 [-] 都带上游 文件:行号 依据', () => {
+  const bad = rows.filter(r => r.verdict === '[-]' && !/`[^`]+\.(java|kt):\d+`/.test(r.why))
+  assert.deepEqual(bad.map(r => r.name), [], '这些 [-] 行没有上游 file:line 依据：%r', bad.map(r => r.name))
+})
+
 test('src/diffAlign.ts 引的上游行号没有漂', () => {
   const align = read('src/diffAlign.ts')
   const cited = [

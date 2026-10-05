@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Braces, FileText, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { templatePattern, customPattern, templates as builtinLive, postfixTemplates as builtinPostfix, type CustomTemplate, type TemplateSettings } from '../templates'
 import { iconSize } from '../uiIcons'
+import FileTemplatesSettingsPage from './FileTemplatesSettingsPage.vue'
 
-const props = defineProps<{ settings: TemplateSettings; language: string; busy: boolean }>()
+const props = defineProps<{ settings: TemplateSettings; language: string; busy: boolean; projectRoot?: string | null; projectName?: string }>()
 const emit = defineEmits<{ change: [settings: TemplateSettings] }>()
+
+// 上游这两个域在设置树里是**两页**（`AllFileTemplatesConfigurable` 管文件模板、
+// `TemplateSettingsConfigurable` 管实时模板），本仓共用 `editing.templates` 这一个节点，
+// 所以在这里给一个子页切换。
+const tab = ref<'live' | 'file'>('live')
 
 const query = ref('')
 const scope = ref('all')
@@ -142,6 +148,21 @@ function toggleLanguage(language: string) {
 
 <template>
   <div class="lt-page">
+    <div class="lt-tabs" role="tablist" aria-label="模板类型">
+      <button class="lt-tab" :class="{ 'lt-tab-on': tab === 'live' }" role="tab" :aria-selected="tab === 'live'" @click="tab = 'live'">
+        <Braces :size="iconSize.menu" />实时模板
+      </button>
+      <button class="lt-tab" :class="{ 'lt-tab-on': tab === 'file' }" role="tab" :aria-selected="tab === 'file'" @click="tab = 'file'">
+        <FileText :size="iconSize.menu" />文件模板
+      </button>
+    </div>
+    <FileTemplatesSettingsPage
+      v-if="tab === 'file'"
+      :project-root="projectRoot ?? null"
+      :project-name="projectName ?? ''"
+      :busy="busy"
+    />
+    <template v-else>
     <div class="lt-toolbar">
       <input v-model="query" class="lt-search" aria-label="搜索模板" placeholder="搜索缩写、说明或内容…" spellcheck="false" />
       <select v-model="scope" class="lt-scope" aria-label="模板语言范围">
@@ -194,11 +215,17 @@ function toggleLanguage(language: string) {
         <button type="button" class="subtle-button" :disabled="busy" @click="cancel">取消</button>
       </div>
     </form>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .lt-page { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.lt-tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--line); }
+.lt-tab { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.lt-tab svg { flex-shrink: 0; }
+.lt-tab:hover { color: var(--secondary); }
+.lt-tab-on { color: var(--text); border-bottom-color: var(--accent); }
 .lt-toolbar { display: flex; align-items: center; gap: var(--space-2); }
 .lt-search { flex: 1; min-width: 0; min-height: var(--ctrl-height-lg); padding: var(--space-1) var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 12px; }
 .lt-scope { min-height: var(--ctrl-height-lg); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--editor); color: var(--secondary); font-size: 11px; }

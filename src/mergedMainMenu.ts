@@ -6,7 +6,8 @@
 //   · 藏项   :92-103 预算为负 → 从末尾逐个 `addInvisibleItem` + `remove`，`rootMenuItems.size <= 1` 就停（**至少留一项**）
 //   · 回补   :104-117 预算有余 → 从头把藏项 `add` 回来，`availableWidth - itemWidth < widthLimit` 就停
 //   · 按钮   :67/:119 `menuButton.isVisible = toolbarMainMenu.hasInvisibleItems(...)`；:142 图标换成 `AllIcons.General.ChevronRight`
-//   · 宽度缓存 MergedMainMenu.kt:171-176 注释原文 "Cache the item's width as its real size cannot be
+//   · 宽度缓存 MainMenuWithButton.kt:170-176（`class MergedMainMenu` 在 `:170`，注释原文在 `:172`：
+//              "Cache the item's width as its real size cannot be
 //              obtained when it is not painted" —— 与本仓 `display:none` 之后 offsetWidth 归零是同一个问题，
 //              所以这里同样按项缓存最后一次量到的宽度（:199-212 `addInvisibleItem`）。
 // 上游每次宽度事件只走一步（:104/:152/:352 各触发一次 `recalculateWidth`），本模块一次算到它要收敛的那个不动点。
@@ -74,7 +75,7 @@ export function useMergedMainMenu(options: {
   const visibleCount = ref(ALL)
   const overflow = ref(false)
   const menuButtonVisible = ref(false)
-  /** 每个顶层菜单项最后一次量到的宽度（藏起来之后 offsetWidth 是 0，见文件头 MergedMainMenu.kt:171-176）。 */
+  /** 每个顶层菜单项最后一次量到的宽度（藏起来之后 offsetWidth 是 0，见文件头 MainMenuWithButton.kt:170-176）。 */
   const widths: number[] = []
   let observer: ResizeObserver | null = null
   let bound: HTMLElement[] = []

@@ -1,23 +1,55 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, History, Search, SlidersHorizontal, X } from 'lucide-vue-next'
 import { isDesktop, request, type NamedScopeSetting, type SearchOptions, type SearchPreviewMatch, type SearchPreviewResult, type SearchReplaceResult } from '../bridge'
-import { compileScopeText, scopeLookup, scopeMatches, type ScopeContext, type ScopeSet } from '../scopes'
+import { scopeLookup, scopeMatches, type ScopeContext, type ScopeSet } from '../scopes'
 import { iconSize } from '../uiIcons'
 // 分块发布（上游 `SearchResults` 的 chunk 流）：累积与认领在 src/searchStream.ts。
 import { beginSearchStream, endSearchStream, searchStream } from '../searchStream'
 // 结果预览面板（上游 FindPopupPanel 里的 UsagePreviewPanel）：窗口计算与文案在 src/searchPreview.ts。
-import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewWindow } from '../searchPreview'
+import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewSegments, previewWindow } from '../searchPreview'
 // 结果右键菜单（上游 `FindInFiles.Results.ContextMenu` → 「复制路径/引用…」那一组）。
 import { COPY_REFERENCE_GROUP, FIND_COPY_ACTIONS, findResultClipboardText, type FindCopyActionId, type FindResultTarget } from '../copyPathActions'
+// 结果面板键盘选择（上游 `FindPopupPanel.java:830,842-856` 的 ScrollingUtil 与 F3 两条）。
+import { navTarget, RESULT_ROW_HEIGHT, resultsNavKeyOf, type ResultsNavKey } from '../findResultsNav'
+// 最近搜索（上游 `FindInProjectSettingsBase`：find/replace 两张表，上限 300，最新在末尾）。
+import { addRecent, formatRecents, mostRecent, parseRecents, RECENTS_STORAGE_KEY, type FindInProjectRecents } from '../findInProjectRecents'
+// 作用域下拉的边界（名字失配回落「项目」、坏模式给提示）。
+import { resolveScopeSelection, scopeWarningText } from '../findScopeSelection'
 import EditorPopupMenu from './EditorPopupMenu.vue'
 import { copyToClipboard } from '../clipboard.ts'
+// 结构化搜索/替换（上游 `platform/structuralsearch` 的 PSI 模板匹配）的**文本子集**：
+// 编译器在 src/structuralSearch.ts，面板侧的装配（编译 → 校验 → 折叠替换串 → 命中复核）在
+// src/structuralSearchPanelModel.ts，这里只把它接进既有的搜索/替换通道（正则走原生 search.run/replace）。
+import { createStructuralSearchModel } from '../structuralSearchPanelModel'
+// 面板级修饰符开关的档与默认值（上游 `MatchOptions` 的 boolean 位）：规则在 src/structuralSearchModifiers.ts。
+import { defaultMatcherSwitches } from '../structuralSearchModifiers.ts'
+import StructuralSearchFilters from './StructuralSearchFilters.vue'
+// 结构化模板的收藏/最近/内置/变量补全（上游 ConfigurationManager、ExistingTemplatesComponent、
+// StructuralSearchTemplatesCompletionContributor 的文本子集）：纯规则在 src/structuralSearchConfigs.ts。
+import {
+  BUILTIN_STRUCTURAL_TEMPLATES, configurationName, loadRecentConfigurations, loadSavedConfigurations,
+  pushRecentConfiguration, removeConfiguration, saveConfiguration, variableCompletionValues,
+  type StructuralSearchConfig, type StructuralTemplate,
+} from '../structuralSearchConfigs'
+// 工程排除目录并入搜索排除（原生扫描只认面板两个过滤框 + 自带默认表，见 src/searchExclusions.ts）。
+import { excludedDirsOf, mergeSearchExclude, projectExclusionPatterns } from '../searchExclusions'
+import type { ProjectSettings } from '../bridge'
 
 // `scopes` / `moduleName` 来自项目设置：IDEA 的 Find in Path 对话框带一个 ScopeChooserCombo
 // （`FindPopupScopeUIImpl.java:59,137`），选中哪个作用域就只在那个范围里找。
 const props = defineProps<{ root: string; active: boolean; scopes: NamedScopeSetting[]; moduleName: string }>()
 const replaceInput = ref<HTMLInputElement>()
 defineExpose({ focusReplace: () => replaceInput.value?.focus() })
+// 工程结构里排除的目录（`ProjectSettings.excludedDirs`，编辑面在 ProjectStructurePane）：打开/切换
+// 项目时读一次并折成排除模式，搜索参数拼上它 —— 原生扫描只认面板两个过滤框与自带默认表。
+const projectExcludedDirs = ref<string[]>([])
+watch(() => props.root, async root => {
+  projectExcludedDirs.value = []
+  if (!root || !isDesktop) return
+  try { projectExcludedDirs.value = excludedDirsOf(await request<ProjectSettings>('project.settings.get')) }
+  catch { projectExcludedDirs.value = [] }
+}, { immediate: true })
 // `open` jumps the editor to an occurrence; `replaced` carries the files a replace
 // just rewrote, so the shell re-reads them and an open buffer stops showing old text.
 const emit = defineEmits<{ open: [payload: { path: string; line: number }]; replaced: [payload: { paths: string[] }] }>()
@@ -29,9 +61,36 @@ const query = ref('')
 const replacement = ref('')
 const include = ref('')
 const exclude = ref('')
+// 结构化模式读的那两个档的初始值取自上游 `MatchOptions` 的默认值（`MATCHER_SWITCHES`）：两者上游默认都是
+// false —— `MatchOptions.java:58-63` 的构造器没给 `caseSensitiveMatch` 赋过值，`wholeWordsOnly` 只有 `regexw`
+// 会置它（`StringToConstraintsTransformer.java:427-429`）。「正则表达式」按钮属另一族，不从这张表取。
 const regex = ref(false)
-const caseSensitive = ref(false)
-const wholeWord = ref(false)
+const caseSensitive = ref(defaultMatcherSwitches().caseSensitive)
+const wholeWord = ref(defaultMatcherSwitches().wholeWords)
+// 结构化模板模式（`$Var$` 变量）：与「正则」互斥 —— 模板自己编译成正则，那个开关在打开时被清掉，
+// 免得出现"看起来生效、实际被忽略"的假状态。「全词」**不清掉**：它作为整模板档的修饰符写进每个变量的
+// `wholeWordsOnly`（`plugin/ui/filters/FilterPanel.java:291,339`），生效点是 `compileStructuralPattern`
+// 的第二参数；宿主那一侧仍传 false，免得同一件事做两遍（宿主再包一次 `\b` 会把 `get$x$` 误杀）。
+const structural = ref(false)
+// 结构化模板的收藏与最近使用（上游 `ConfigurationManager`，最近上限 30）。
+const savedTemplates = ref(loadSavedConfigurations())
+const recentTemplates = ref(loadRecentConfigurations())
+const templateOpen = ref(false)
+// 模板里的 `$Var$` 变量补全候选（上游 `StructuralSearchTemplatesCompletionContributor`）：
+// 用原生 datalist 挂到搜索框上（先例：DebugPanel 的 DAP 补全）。
+const variableCandidates = computed(() => (structural.value ? variableCompletionValues(query.value) : []))
+type TemplateRow = StructuralTemplate & { saved?: boolean; recent?: boolean }
+const templateSections = computed<Array<{ title: string; items: TemplateRow[] }>>(() => [
+  { title: '内置模板', items: BUILTIN_STRUCTURAL_TEMPLATES },
+  {
+    title: '我的模板',
+    items: savedTemplates.value.map(config => ({ name: config.name, description: config.query, query: config.query, replacement: config.replacement, saved: true })),
+  },
+  {
+    title: '最近',
+    items: recentTemplates.value.map(config => ({ name: config.name, description: config.query, query: config.query, replacement: config.replacement, recent: true })),
+  },
+])
 const filtersOpen = ref(false)
 // '' = 「项目」（IDEA 的默认范围，不限定）。
 const scopeName = ref('')
@@ -51,6 +110,73 @@ const skipped = reactive(new Set<string>())
 const confirmAll = ref(false)
 const cursor = ref(-1)
 const listRef = ref<HTMLDivElement>()
+// 最近搜索（上游 `FindInProjectSettingsBase`）：find / replace 两张表各 300 上限、最新在末尾；
+// 打开面板时用 `getMostRecentFindString()` 预填（`FindPopupPanel.java:1237`），执行一次查找/替换后追加
+// （`FindManagerImpl.changeGlobalSettings`，`:116-125`）。落盘键与 `taocode.findHistory` 同族。
+const recents = reactive<FindInProjectRecents>({ finds: [], replaces: [] })
+const historyOpen = ref<'find' | 'replace' | null>(null)
+try {
+  const loaded = parseRecents(localStorage.getItem(RECENTS_STORAGE_KEY))
+  recents.finds = loaded.finds
+  recents.replaces = loaded.replaces
+} catch { /* 读不到就当空表 */ }
+function persistRecents() {
+  try { localStorage.setItem(RECENTS_STORAGE_KEY, formatRecents(recents)) } catch { /* 存不下不影响本次会话 */ }
+}
+function rememberRecent(kind: 'find' | 'replace', value: string) {
+  const text = value.trim()
+  if (!text) return
+  const key = kind === 'find' ? 'finds' : 'replaces'
+  recents[key] = addRecent(recents[key], text)
+  persistRecents()
+}
+/** 下拉里的顺序：最新在最前（上游那几处 list 都是倒着填进组合框的）。 */
+function recentRows(list: readonly string[]): string[] { return [...list].reverse() }
+function pickRecent(kind: 'find' | 'replace', value: string) {
+  historyOpen.value = null
+  if (kind === 'find') query.value = value
+  else replacement.value = value
+}
+// ── 结构化模板的收藏/最近/内置（规则在 src/structuralSearchConfigs.ts）──────────────
+function currentStructuralConfig(): StructuralSearchConfig {
+  return {
+    name: configurationName(query.value),
+    query: query.value,
+    replacement: replacement.value,
+    structural: structural.value,
+    caseSensitive: caseSensitive.value,
+    wholeWord: wholeWord.value,
+    regex: regex.value,
+    scope: scopeName.value,
+    created: Date.now(),
+  }
+}
+/** 应用一份模板/收藏：结构化模式打开，「正则」互斥地关掉（与 `$` 按钮同一口径）；
+ *  「全词」保持用户当前状态 —— 它在结构化模式下是**真的有生效点**的那一档。 */
+function applyTemplate(template: TemplateRow) {
+  templateOpen.value = false
+  query.value = template.query
+  replacement.value = template.replacement
+  structural.value = true
+  regex.value = false
+}
+/** 保存当前模板（同名覆盖；名字默认取模板前 40 字符，可在提示框里改）。 */
+function saveCurrentTemplate() {
+  templateOpen.value = false
+  const name = window.prompt('模板名称', configurationName(query.value))?.trim()
+  if (!name) return
+  savedTemplates.value = saveConfiguration({ ...currentStructuralConfig(), name })
+  note.value = `已保存模板「${name}」，可从「模板」下拉里再次选用。`
+}
+function deleteTemplate(name: string) {
+  savedTemplates.value = removeConfiguration(name)
+  recentTemplates.value = loadRecentConfigurations()
+}
+/** 每次结构化搜索记一条最近（上游 `ConfigurationManager.addHistoryConfiguration` 在搜索时调用）。 */
+function rememberStructuralSearch() {
+  if (!structural.value || !query.value.trim()) return
+  recentTemplates.value = pushRecentConfiguration(currentStructuralConfig())
+}
 // 结果右键菜单：位置 + 点在哪一条上（上游右键菜单里只有「复制路径/引用…」这一组）。
 const resultMenu = ref<{ x: number; y: number; target: FindResultTarget } | null>(null)
 const resultMenuRows = computed(() => [{
@@ -93,18 +219,26 @@ const liveMatches = computed(() => {
   return live.length ? live : matches.value
 })
 
-// NamedScopesHolder.getScope 的等价物：名字查不到时返回 null（不限定）。
-// 找到但模式解析不了的条目**不返回 null** —— 它就是一个 InvalidPackageSet，
-// 按源码语义恒不匹配（宁可显示 0 命中，也不能悄悄退回"全项目"）。
-const scopeSet = computed<ScopeSet | null>(() => {
-  const entry = props.scopes.find(item => item.name === scopeName.value)
-  return entry ? compileScopeText(entry.pattern).set : null
-})
+// NamedScopesHolder.getScope 的等价物（解析在 src/findScopeSelection.ts）：名字查不到 ⇒ 回落「项目」；
+// 找到但模式解析不了 ⇒ InvalidPackageSet（按源码语义恒不匹配，宁可 0 命中也不悄悄退回"全项目"），
+// 错误消息留给下面那行提示。
+const scopeResolution = computed(() => resolveScopeSelection(scopeName.value, props.scopes))
+const scopeSet = computed<ScopeSet | null>(() => scopeResolution.value.set)
+const scopeWarning = computed(() => (scopeName.value ? scopeWarningText(scopeResolution.value) : ''))
+// 作用域被删/改名后下拉不能停在旧名字上（`NamedScopesHolder.getScope` 查不到 ⇒ 空选择 = 项目）。
+watch(scopeResolution, resolution => { if (resolution.name !== scopeName.value) scopeName.value = resolution.name })
 const scopeContext = computed<ScopeContext>(() => ({ moduleName: props.moduleName, lookup: scopeLookup(props.scopes) }))
 const busy = computed(() => running.value || replacing.value)
+// 结构化模板的编译/校验/替换串折叠/命中复核全部在 src/structuralSearchPanelModel.ts。
+// 编译失败就**不搜**（宁可报错，也不把 `$x$` 当成字面文本发出去 —— 那会让用户以为"没有匹配"）。
+// 逐变量替换定义那张表由模型持有（`structuralModel.definitions`），编辑面在 StructuralSearchFilters。
+const structuralModel = createStructuralSearchModel({ enabled: structural, template: query, replacement, caseSensitive, wholeWord })
+const structuralError = computed(() => structuralModel.error.value)
+const activeQuery = computed(() => structuralModel.activeQuery.value)
+const activeReplacement = computed(() => structuralModel.activeReplacement.value)
 const total = computed(() => matches.value.length)
 const pendingCount = computed(() => matches.value.filter(pending).length)
-const canSearch = computed(() => isDesktop && Boolean(props.root) && query.value.length > 0)
+const canSearch = computed(() => isDesktop && Boolean(props.root) && query.value.length > 0 && !structuralError.value)
 const showed = computed(() => Boolean(replacement.value))
 
 const groups = computed<Group[]>(() => {
@@ -134,12 +268,13 @@ function pending(match: SearchPreviewMatch) {
 }
 function params() {
   return {
-    query: query.value,
-    regex: regex.value,
+    query: activeQuery.value,
+    regex: structural.value ? true : regex.value,
     caseSensitive: caseSensitive.value,
-    wholeWord: wholeWord.value,
+    wholeWord: structural.value ? false : wholeWord.value,
     include: include.value.trim(),
-    exclude: exclude.value.trim(),
+    // 工程排除目录折成的模式与用户写的排除规则并成一个字符串（原生 `parse_patterns` 按逗号/空白切）。
+    exclude: mergeSearchExclude(exclude.value.trim(), projectExclusionPatterns(projectExcludedDirs.value)),
   } satisfies SearchOptions
 }
 function errorText(caught: unknown) { return caught instanceof Error ? caught.message : String(caught) }
@@ -151,14 +286,17 @@ let searchToken = 0
 let replaceToken = 0
 function fetchPreview() {
   // streamId 让每一块能认回是哪一次搜索（并发/被取代时尤其重要）。
-  return request<SearchPreviewResult>('search.preview', { ...params(), replacement: replacement.value, streamId: streamSeq })
+  return request<SearchPreviewResult>('search.preview', { ...params(), replacement: activeReplacement.value, streamId: streamSeq })
 }
 // 作用域在**结果**上求值。原生扫描只吃一个 include 列表，无法同时表达
 // 「作用域 ∩ 文件掩码」的交集，所以掩码走原生、作用域在这里精确过滤。
 function narrow(list: SearchPreviewMatch[]): SearchPreviewMatch[] {
+  // 先按 `路径:行:列` 去重并做修饰符/匹配范围的命中后复核（上游 `DuplicateFilteringResultSink`
+  // + `MatchPredicate` 那两层的文本等价物），再套作用域：作用域管"哪些文件"，复核管"哪一处"。
+  const verified = structuralModel.refine(list, match => ({ path: match.path, line: match.line, column: match.column, text: match.preview }))
   const scope = scopeSet.value
-  if (!scope) return list
-  return list.filter(match => scopeMatches(scope, match.path, false, scopeContext.value))
+  if (!scope) return verified
+  return verified.filter(match => scopeMatches(scope, match.path, false, scopeContext.value))
 }
 function applyResult(result: SearchPreviewResult) {
   endSearchStream()
@@ -181,6 +319,7 @@ function applyResult(result: SearchPreviewResult) {
   schedulePreview()
 }
 async function refresh() {
+  rememberRecent('find', query.value)
   beginSearchStream(++streamSeq)
   const token = ++searchToken
   try {
@@ -191,6 +330,8 @@ async function refresh() {
 }
 async function runSearch() {
   if (!canSearch.value) return
+  rememberRecent('find', query.value)
+  rememberStructuralSearch()
   beginSearchStream(++streamSeq)
   const token = ++searchToken
   running.value = true
@@ -224,6 +365,7 @@ async function cancelSearch() {
 }
 async function replaceOccurrences(list: SearchPreviewMatch[]) {
   if (!list.length || !canSearch.value || busy.value) return
+  rememberRecent('replace', replacement.value)
   const token = ++replaceToken
   const keys = new Set(list.map(keyOf))
   const paths = [...new Set(list.map(match => match.path))]
@@ -233,7 +375,7 @@ async function replaceOccurrences(list: SearchPreviewMatch[]) {
   try {
     const result = await request<SearchReplaceResult>('search.replaceSelected', {
       ...params(),
-      replacement: replacement.value,
+      replacement: activeReplacement.value,
       matches: list.map(match => ({ path: match.path, line: match.line, column: match.column })),
     })
     if (token !== replaceToken) return
@@ -277,6 +419,7 @@ function toggle(match: SearchPreviewMatch) {
 // workspace, including ones a truncated result never showed, so it needs a confirm.
 async function replaceAllOnDisk() {
   if (!canSearch.value || busy.value) return
+  rememberRecent('replace', replacement.value)
   // 选了范围时，原生 `search.replace` 的 include 只能写一个列表，表达不了
   // 「作用域 ∩ 文件掩码」。与其冒着改写范围外文件的风险，不如明确只替换本次
   // 作用域内**已列出**的那些处 —— 用户看得见它们，而且每一处都在范围内。
@@ -301,7 +444,7 @@ async function replaceAllOnDisk() {
   error.value = ''
   confirmAll.value = false
   try {
-    const result = await request<SearchReplaceResult>('search.replace', { ...params(), replacement: replacement.value })
+    const result = await request<SearchReplaceResult>('search.replace', { ...params(), replacement: activeReplacement.value })
     if (token !== replaceToken) return
     const warning = incompleteNote(result)
     note.value = `已替换 ${result.replacements ?? 0} 处，涉及 ${result.files ?? 0} 个文件。`
@@ -334,6 +477,8 @@ function reset() {
   clearResults()
   query.value = ''
   replacement.value = ''
+  // 定义表跟着模板走：换了模板还留着旧定义，会出现"定义指向模板里不存在的变量"那种假错误。
+  structuralModel.definitions.value = []
 }
 function toggleGroup(path: string) {
   if (collapsed.has(path)) collapsed.delete(path)
@@ -387,25 +532,59 @@ async function loadPreview() {
   }
 }
 watch(previewMatch, () => { schedulePreview() })
+/**
+ * 预览行的命中高亮（上游 `UsagePreviewPanel.kt:503-546` 给命中区间加 `SEARCH_RESULT_ATTRIBUTES`）；
+ * 匹配语义与本次搜索**同一套**：结构化模板时 `activeQuery` 已经是编译后的正则，所以三档选项照它给。
+ */
+function previewSegmentsOf(text: string) {
+  return previewSegments(text, activeQuery.value, {
+    caseSensitive: caseSensitive.value,
+    wholeWords: structural.value ? false : wholeWord.value,
+    regex: structural.value ? true : regex.value,
+    inSelection: false,
+  })
+}
 
-// Enter / Shift+Enter walk the occurrences (IDEA's Find in Files). Navigation
-// expands a collapsed file instead of skipping past it.
+// Enter / Shift+Enter 走一圈（回绕，本仓既有）；Home/End/PageUp/PageDown/Up/Down 与 F3/Shift+F3
+// 照上游（`FindPopupPanel.java:830,842-856`：到端不动、翻页步长 = 可见行数 - 1），语义在
+// src/findResultsNav.ts，这里只负责滚动与展开被折叠的文件。
+function visibleRows(): number {
+  return Math.max(1, Math.floor((listRef.value?.clientHeight ?? 0) / RESULT_ROW_HEIGHT))
+}
+async function moveTo(index: number) {
+  const list = flat.value
+  if (!list.length) return
+  cursor.value = index
+  collapsed.delete(list[index]!.path)
+  await nextTick()
+  listRef.value?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
+}
 async function move(delta: number) {
   const list = flat.value
   if (!list.length) return
   const next = cursor.value < 0 ? (delta > 0 ? 0 : list.length - 1) : (cursor.value + delta + list.length) % list.length
-  cursor.value = next
-  collapsed.delete(list[next]!.path)
-  await nextTick()
-  listRef.value?.querySelector<HTMLElement>(`[data-index="${next}"]`)?.scrollIntoView({ block: 'nearest' })
+  await moveTo(next)
+}
+function stepResults(key: ResultsNavKey) {
+  const next = navTarget(key, cursor.value, flat.value.length, visibleRows())
+  if (next !== null) void moveTo(next)
 }
 function onPanelKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.isComposing) return
   const target = event.target as HTMLElement | null
   // Inside a field Enter submits; on a row it opens that occurrence.
   if (target?.closest('input, textarea, select, button, [contenteditable]')) return
+  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void move(event.shiftKey ? -1 : 1); return }
+  const key = resultsNavKeyOf(event)
+  if (!key) return
   event.preventDefault()
-  void move(event.shiftKey ? -1 : 1)
+  stepResults(key)
+}
+// 搜索框 / 替换框上的键：上游把 FindNext / FindPrevious 也注册在这两个组件与按钮上
+// （`FindPopupPanel.java:842-856`），最近搜索下拉与 `SearchTextArea` 的历史同一形态（Alt+Down）。
+function onFieldKeydown(event: KeyboardEvent, kind: 'find' | 'replace') {
+  if (event.key === 'ArrowDown' && event.altKey) { event.preventDefault(); historyOpen.value = historyOpen.value === kind ? null : kind; return }
+  if (event.key === 'Escape' && historyOpen.value) { historyOpen.value = null; return }
+  if (event.key === 'F3') { event.preventDefault(); stepResults(event.shiftKey ? 'FindPrevious' : 'FindNext') }
 }
 function parts(match: SearchPreviewMatch): Part[] {
   const line = match.preview ?? ''
@@ -418,7 +597,16 @@ function parts(match: SearchPreviewMatch): Part[] {
   return list
 }
 
-watch(() => props.active, active => { if (active && query.value.length > 0 && !searched.value && !busy.value) void runSearch() })
+watch(() => props.active, active => {
+  if (!active) return
+  // 打开面板预填最近一次（`FindPopupPanel.java:1237`：模型里没有查询词就用 `getMostRecentFindString()`）：
+  // 只在字段为空时填，且**不**因为这次预填自动执行搜索（那是用户按 Enter 的事）。
+  let prefilled = false
+  if (!query.value) { const recent = mostRecent(recents.finds); if (recent) { query.value = recent; prefilled = true } }
+  if (!replacement.value) { const recent = mostRecent(recents.replaces); if (recent) replacement.value = recent }
+  if (prefilled) return
+  if (query.value.length > 0 && !searched.value && !busy.value) void runSearch()
+})
 // 换范围（或作用域定义被改过）之后，已列出的结果就不再成立：重新搜一遍而不是
 // 就地过滤旧结果 —— 旧结果本来就没覆盖新范围里的文件。
 watch(scopeSet, () => { if (searched.value && query.value.length > 0 && !busy.value) void refresh() })
@@ -439,11 +627,43 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 
     <div class="fs-form">
       <div class="fs-row">
-        <input v-model="query" class="fs-input" type="text" placeholder="搜索全部文件" aria-label="搜索内容" spellcheck="false" @keydown.enter.prevent="runSearch" />
+        <div class="fs-input-wrap">
+          <input v-model="query" class="fs-input" type="text" placeholder="搜索全部文件" aria-label="搜索内容" spellcheck="false" :list="structural ? 'ssr-variable-completions' : undefined" @keydown.enter.prevent="runSearch" @keydown="onFieldKeydown($event, 'find')" />
+          <!-- 结构化模板的变量补全候选（原生 datalist，先例：DebugPanel 的 DAP 补全）。 -->
+          <datalist v-if="structural" id="ssr-variable-completions">
+            <option v-for="value in variableCandidates" :key="value" :value="value" />
+          </datalist>
+          <!-- 最近搜索下拉（上游 `SearchTextArea` 的历史；Alt+Down 打开，`FindPopupPanel.java:1237` 的预填用同一张表）。 -->
+          <button v-if="recents.finds.length" class="icon-button fs-history-toggle" type="button" title="搜索历史记录" aria-label="搜索历史记录" :aria-expanded="historyOpen === 'find'" @click="historyOpen = historyOpen === 'find' ? null : 'find'"><History :size="iconSize.control" /></button>
+          <div v-if="historyOpen === 'find'" class="find-history" role="listbox" aria-label="搜索历史记录">
+            <button v-for="row in recentRows(recents.finds)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('find', row)">{{ row }}</button>
+          </div>
+        </div>
         <div class="fs-toggles">
           <button class="fs-toggle" :class="{ on: caseSensitive }" title="区分大小写" aria-label="区分大小写" :aria-pressed="caseSensitive" @click="caseSensitive = !caseSensitive">Aa</button>
           <button class="fs-toggle" :class="{ on: regex }" title="正则表达式" aria-label="正则表达式" :aria-pressed="regex" @click="regex = !regex">.*</button>
           <button class="fs-toggle" :class="{ on: wholeWord }" title="全词匹配" aria-label="全词匹配" :aria-pressed="wholeWord" @click="wholeWord = !wholeWord">词</button>
+          <!-- 结构化搜索/替换（上游 `SearchStructurallyAction`/`ReplaceStructurallyAction`）：
+               本仓没有 PSI，落点是 src/structuralSearch.ts 的文本子集编译器。 -->
+          <button class="fs-toggle" :class="{ on: structural }" title="结构化模板（$x$ 是变量，同名变量必须匹配同一段文本）" aria-label="结构化模板" :aria-pressed="structural" @click="structural = !structural; if (structural) regex = false">$</button>
+          <!-- 模板下拉（上游 ExistingTemplatesComponent 的模板树 + ConfigurationManager 的收藏）：
+               内置/我的/最近三段，点一行填进搜索与替换框；「存为模板」走提示框取名。 -->
+          <div class="fs-template-wrap">
+            <button class="fs-toggle" :class="{ on: templateOpen }" title="结构化模板库（内置 / 我的 / 最近）" aria-label="模板库" :aria-expanded="templateOpen" @click="templateOpen = !templateOpen">模板</button>
+            <div v-if="templateOpen" class="fs-template-menu">
+              <template v-for="section in templateSections" :key="section.title">
+                <p class="fs-template-head"><span>{{ section.title }}</span><span class="fs-template-count">{{ section.items.length }}</span></p>
+                <p v-if="!section.items.length" class="fs-template-empty">（空）</p>
+                <div v-for="item in section.items" :key="`${section.title}:${item.name}`" class="fs-template-row">
+                  <button class="fs-template-pick" :title="item.description" @click="applyTemplate(item)">
+                    <strong>{{ item.name }}</strong><span class="fs-template-query">{{ item.query }}</span>
+                  </button>
+                  <button v-if="item.saved" class="fs-template-remove" title="删除这个模板" aria-label="删除模板" @click="deleteTemplate(item.name)"><X :size="iconSize.control" /></button>
+                </div>
+              </template>
+              <button class="fs-template-save" :disabled="!query.trim()" @click="saveCurrentTemplate">存为模板…</button>
+            </div>
+          </div>
         </div>
         <button class="icon-button" title="搜索 (Enter)" aria-label="搜索" :disabled="!canSearch || replacing" @click="runSearch"><Search :size="iconSize.control" /></button>
       </div>
@@ -454,13 +674,29 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         <label class="fs-filter"><span>范围</span><select v-model="scopeName" aria-label="搜索范围"><option value="">项目</option><option v-for="entry in scopes" :key="entry.name" :value="entry.name">{{ entry.name }}</option></select></label>
       </div>
       <div class="fs-row">
-        <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" />
+        <div class="fs-input-wrap">
+          <input ref="replaceInput" v-model="replacement" class="fs-input" type="text" placeholder="替换为" aria-label="替换内容" spellcheck="false" @keydown.enter.ctrl.prevent="replaceAllOnDisk" @keydown="onFieldKeydown($event, 'replace')" />
+          <button v-if="recents.replaces.length" class="icon-button fs-history-toggle" type="button" title="替换历史记录" aria-label="替换历史记录" :aria-expanded="historyOpen === 'replace'" @click="historyOpen = historyOpen === 'replace' ? null : 'replace'"><History :size="iconSize.control" /></button>
+          <div v-if="historyOpen === 'replace'" class="find-history" role="listbox" aria-label="替换历史记录">
+            <button v-for="row in recentRows(recents.replaces)" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickRecent('replace', row)">{{ row }}</button>
+          </div>
+        </div>
         <button class="fs-replace" :class="{ 'fs-confirm': confirmAll }" :disabled="!canSearch || busy" :title="confirmAll ? '再次点击以确认替换工作区内全部匹配' : '替换工作区内全部匹配（Ctrl+Enter）'" @click="replaceAllOnDisk">{{ confirmAll ? '确认全部替换' : '全部替换' }}</button>
       </div>
     </div>
 
     <p v-if="!isDesktop" class="fs-warn">浏览器预览不能全局搜索，请在桌面端使用。</p>
     <p v-else-if="!root" class="fs-warn">尚未打开项目。</p>
+    <!-- 结构化模板的语法说明：只说这个子集真的支持什么，不做 PSI 那套（见 src/structuralSearch.ts 头部）。 -->
+    <p v-if="structural" class="fs-note">结构化模板：<code>$x$</code> 匹配一个标识符（字母/数字/_/$），同名 <code>$x$</code> 必须匹配同一段文本；替换串里的 <code>$x$</code> 会带回捕获。列表变量写量词（<code>$x$+</code> / <code>$x${0,}</code>，按逗号分隔）——上游的 <code>$Args$</code> 就是"0 到不限次"那一条约束，不是另一种模型。</p>
+    <!-- 修饰符面板（上游 `plugin/ui/filters/FilterPanel`+`FilterTable` 的文本层等价物）：
+         模板编不动时不画（错误已经摆在下一行，别再叠一层能改却改不出结果的控件）。 -->
+    <StructuralSearchFilters v-if="structural && !structuralError" :template="query" :scope="structuralModel.scope.value" :definitions="structuralModel.definitions.value" :replaceable="Boolean(replacement)" @update:template="query = $event" @update:scope="structuralModel.scope.value = $event" @update:definitions="structuralModel.definitions.value = $event" />
+    <p v-if="structuralError" class="fs-error">{{ structuralError }}</p>
+    <!-- 命中后复核的口径要说清：被修饰符/匹配范围剔除的是哪些、有多少是复核不上（宿主与 JS 文法差异）。 -->
+    <p v-if="structuralModel.note.value" class="fs-note">{{ structuralModel.note.value }}</p>
+    <!-- 作用域模式的边界（上游 InvalidPackageSet 的等价物）：坏模式要明说为什么是 0 命中。 -->
+    <p v-if="scopeWarning" class="fs-warn">{{ scopeWarning }}</p>
     <p v-if="error" class="fs-error">{{ error }}</p>
     <p v-if="note" class="fs-note">{{ note }}</p>
     <div v-if="searched || running" class="fs-status">
@@ -516,11 +752,12 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         </section>
       </template>
       <div v-else-if="searched" class="fs-empty">没有匹配的结果。</div>
-      <div v-else class="fs-empty">输入关键词后按 Enter 搜索；Enter / Shift+Enter 在结果间移动，勾选后逐条替换。</div>
+      <div v-else class="fs-empty">输入关键词后按 Enter 搜索；Enter / Shift+Enter 在结果间移动，Home / End / PageUp / PageDown / F3 跳转（见 src/findResultsNav.ts），勾选后逐条替换。</div>
     </div>
 
     <!-- 预览面板（上游 `FindPopupPanel` 的 `UsagePreviewPanel` + `myUsagePreviewTitle`）：
-         标题是"文件名 + 行位置"，正文是命中行上下若干行，命中行高亮。 -->
+         标题是"文件名 + 行位置"，正文是命中行上下若干行，命中行与行内命中都高亮
+         （行内高亮 = `UsagePreviewPanel.kt:503-546` 的 EXACT_RANGE 标记，见 `previewSegments`）。 -->
     <div class="fs-preview" role="region" :aria-label="PREVIEW_TITLE" :data-preview-status="preview.status">
       <div class="fs-preview-head">
         <span class="fs-preview-title">{{ PREVIEW_TITLE }}</span>
@@ -536,8 +773,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
         <pre v-else class="fs-preview-text"><span
           v-for="(text, index) in preview.lines" :key="index"
           class="fs-preview-line" :class="{ current: index === preview.window.matchIndex }"
-        >{{ text }}
-</span></pre>
+        ><template v-for="(segment, at) in previewSegmentsOf(text)" :key="at"><mark v-if="segment.hit" class="fs-preview-hit">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></span></pre>
       </div>
     </div>
 
@@ -570,11 +806,18 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 .fs-preview-text { margin: 0; padding: 0 var(--space-2) var(--space-2); background: var(--editor); font: 12px/1.6 var(--font-mono); color: var(--text); white-space: pre; }
 .fs-preview-line { display: block; }
 .fs-preview-line.current { background: var(--accent-soft); color: var(--bright); }
+/* 行内命中（上游给命中区间加 SEARCH_RESULT_ATTRIBUTES）：`<mark>` 的浏览器默认底色要盖掉，
+   底色取"选中"档，与整行的 current 档分开，两层同时出现时也读得出命中在哪一段。 */
+.fs-preview-hit { background: var(--selected); color: var(--bright); border-bottom: 1px solid var(--accent); }
 .fs-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); height: var(--tab-h); min-height: var(--tab-h); padding: 0 var(--space-1) 0 var(--space-3); border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 11px; }
 .fs-heading > span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .fs-heading > span > svg { flex-shrink: 0; color: var(--muted); }
 .fs-form { display: flex; flex-direction: column; gap: var(--space-1); flex-shrink: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .fs-row { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+/* 最近搜索下拉：浮层样式复用全局 `.find-history`（src/style.css:506），这一层只负责定位。 */
+.fs-input-wrap { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
+.fs-input-wrap .fs-input { flex: 1; }
+.fs-history-toggle { flex-shrink: 0; margin-left: 2px; }
 .fs-input { flex: 1; min-width: 0; min-height: 26px; padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 12px/1.5 var(--font-mono); }
 .fs-input::placeholder { color: var(--muted); font-family: var(--font-ui); }
 .fs-input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -582,6 +825,21 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
 .fs-toggle { width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); padding: 0; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--muted); font: 11px/1 var(--font-mono); }
 .fs-toggle:hover { background: var(--hover); color: var(--bright); }
 .fs-toggle.on { color: var(--accent); background: var(--selected); border-color: var(--line-strong); }
+/* 模板库下拉（内置 / 我的 / 最近）：浮层挂在「模板」按钮下方，样式与最近搜索下拉同族。 */
+.fs-template-wrap { position: relative; }
+.fs-template-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; width: 280px; max-height: 320px; overflow: auto; padding: var(--space-1) 0; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); box-shadow: 0 6px 18px rgb(0 0 0 / 35%); }
+.fs-template-head { display: flex; justify-content: space-between; margin: 0; padding: var(--space-1) var(--space-2) 0; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.fs-template-count { color: var(--muted); }
+.fs-template-empty { margin: 0; padding: 0 var(--space-2) var(--space-1); color: var(--muted); font-size: 11px; }
+.fs-template-row { display: flex; align-items: center; }
+.fs-template-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1; min-width: 0; padding: 2px var(--space-2); border: 0; background: transparent; color: var(--text); text-align: left; font-size: 11px; }
+.fs-template-pick:hover { background: var(--hover); }
+.fs-template-pick strong { color: var(--bright); font-weight: 500; }
+.fs-template-query { max-width: 100%; color: var(--muted); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-template-remove { flex-shrink: 0; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--muted); font-size: 12px; }
+.fs-template-remove:hover { color: var(--error); }
+.fs-template-save { display: block; width: calc(100% - var(--space-2) * 2); margin: var(--space-1) var(--space-2) 0; padding: 2px var(--space-2); color: var(--accent); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
+.fs-template-save:disabled { color: var(--muted); opacity: .55; }
 .fs-replace { flex-shrink: 0; min-height: 26px; padding: 3px var(--space-2); color: var(--secondary); background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font-size: 11px; }
 .fs-replace:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .fs-replace:disabled { color: var(--muted); opacity: .55; }

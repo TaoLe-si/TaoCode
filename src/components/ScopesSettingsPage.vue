@@ -12,6 +12,8 @@
 //   ScopeConfigurable.java:33-176           明细页：通过 VCS 共享 + 模式
 //   ScopeEditorPanel.java:126-1035          模式框、错误位置、匹配计数、文件树、四个按钮、图例
 //   ScopeEditorPanel.java:583-609 / :545-574   Include / Exclude 的集合合并（在 ../scopes.ts 里）
+//   BaseAnalysisActionDialog.java:100-102 / :204-222   页面底部的「分析」一节（范围单选 + 包含测试代码），
+//     状态与判定在 src/analysisScope.ts，消费者是 src/workspaceInspection.ts（整工程检查）。
 //
 // 与 IDEA 的差异（属于单隐式模块带来的映射，不是省事）：
 //   * 模块只有隐式一个，名字取工作区目录名；Include/Exclude 生成的模式里带 `[模块名]`
@@ -23,10 +25,16 @@ import { computed, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, Copy, FileText, Folder, Plus, Save, Trash2,
 } from 'lucide-vue-next'
-import { request, type NamedScopeSetting, type ProjectFileList } from '../bridge'
+import { request, type NamedScopeSetting, type ProjectFileList, type ProjectSettings } from '../bridge'
 import {
   compileScopeText, excludeFrom, includeInto, scopeLookup, scopeMatches, scopeText, type ScopeContext, type ScopeSet,
 } from '../scopes'
+import { moduleScopeModel, scopeFileSystem, type ScopeFileSystem } from '../moduleScopes'
+import { matchedJars } from '../externalLibraries'
+import {
+  analysisScope, analysisUiOptions, scopeSummary, setAnalysisScopeNamed, setAnalysisScopeNamedScopes,
+  setAnalysisUiOption,
+} from '../analysisScope'
 
 import { iconSize } from '../uiIcons'
 const props = defineProps<{
@@ -47,6 +55,7 @@ const snapshot = ref('')
 const note = ref('')
 const files = ref<string[]>([])
 const filesNote = ref('')
+const javaSettings = ref<ProjectSettings['java'] | null>(null)
 const chosen = ref<Set<string>>(new Set())
 const open = ref<Set<string>>(new Set())
 let filesToken = 0
@@ -63,32 +72,59 @@ function fillFrom(next: NamedScopeSetting[] | null) {
   chosen.value = new Set()
 }
 
-watch(() => [props.scopes, props.root] as const, ([next, root]) => {
+watch(() => [props.scopes, props.root, props.moduleName] as const, ([next, root]) => {
   fillFrom(next)
   selected.value = 0
   if (root) void loadFiles()
-  else { files.value = []; filesNote.value = '' }
+  else { files.value = []; filesNote.value = ''; javaSettings.value = null }
 }, { immediate: true })
 
 async function loadFiles() {
   const token = ++filesToken
   filesNote.value = ''
   try {
-    const result = await request<ProjectFileList>('workspace.files')
+    // 模块/库/内容根模型（`ScopeEditorPanel` 的命中计数与文件树标记要用到库判定）：
+    // 内容根是本仓的隐式单根 `''`，源根/库/SDK 来自项目设置（`JavaProjectSettings`）。
+    const [listing, settings] = await Promise.all([
+      request<ProjectFileList>('workspace.files'),
+      request<ProjectSettings>('project.settings.get').catch(() => null),
+    ])
     if (token !== filesToken) return
-    files.value = result.files
-    if (result.truncated) filesNote.value = '项目文件过多，清单被截断，下面的计数是下限。'
+    files.value = listing.files
+    javaSettings.value = settings?.java ?? null
+    if (listing.truncated) filesNote.value = '项目文件过多，清单被截断，下面的计数是下限。'
   } catch (error) {
     if (token !== filesToken) return
     files.value = []
+    javaSettings.value = null
     filesNote.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 // ---------------------------------------------------------------- 求值
 
+// 内容根/库/SDK 的文件系统视图：`ext:` 与「相对内容根」路径按 `src/moduleScopes.ts` 的模型求值
+// （没有它时 `ext:` 恒假，见 scopes.ts 文件头）。
+const fileSystem = computed<ScopeFileSystem | null>(() => {
+  const java = javaSettings.value
+  if (!java) return null
+  const libraries = java.referencedLibraries
+    .map(pattern => ({ name: pattern, files: matchedJars(files.value, [pattern]) }))
+    .filter(library => library.files.length > 0)
+  return scopeFileSystem(moduleScopeModel({
+    moduleName: props.moduleName,
+    contentRoots: [''],
+    sourcePaths: java.sourcePaths,
+    libraries,
+    jdk: java.jdkHome ? { name: java.jdkName, home: java.jdkHome } : null,
+  }))
+})
 // `$名字` 引用另一个命名作用域（NamedPackageSetReference.java:19-44）；找不到就恒假。
-const context = computed<ScopeContext>(() => ({ moduleName: props.moduleName, lookup: scopeLookup(draft.value) }))
+const context = computed<ScopeContext>(() => ({
+  moduleName: props.moduleName,
+  lookup: scopeLookup(draft.value),
+  fileSystem: fileSystem.value ?? undefined,
+}))
 // `ScopeEditorPanel.onTextChange`（:432-452）：解析失败时当前集合就是一个 InvalidPackageSet，
 // 而不是「保留上一次的集合」——所以后面的 Include/Exclude 走的是源码里那条 invalid 分支。
 const compiled = computed(() => compileScopeText(current.value?.pattern ?? ''))
@@ -307,6 +343,52 @@ function apply() {
 function reset() {
   fillFrom(props.scopes)
 }
+
+// ---------------------------------------------------------------- 分析（Analyze › Inspect Code 的范围面）
+//
+// 上游那一组控件长在分析对话框里（platform/lang-impl/src/com/intellij/analysis/BaseAnalysisActionDialog.java）：
+//   :100-102   「包含测试代码」复选框 —— 文案 = platform/lang-api/resources/messages/CodeInsightBundle.properties:474
+//              `scope.option.include.test.sources`（Include &test sources），初值 = `ANALYZE_TEST_SOURCES`
+//   :204-206   rememberScope 时把选中那档写回 `SCOPE_TYPE`，CUSTOM 档再记 `CUSTOM_SCOPE_NAME`
+//              （platform/lang-impl/src/com/intellij/analysis/AnalysisUIOptions.java:42-43）——
+//              存的是**作用域名**，与本仓 `namedScope` 同义
+//   :218-222   `scope.setIncludeTestSource(...)`：这一档属于**范围本身**，不是结果列表的显示过滤
+//   :105       `myAnalyzeInjectedCode.setVisible(false)` ⇒ `ANALYZE_INJECTED_CODE` 上游默认就不显示，
+//              本仓也没有注入语言的 PSI 片段可查 ⇒ 不放这个控件（放了就是没有消费者的假控件）
+// 本仓没有那个模态对话框（没有对话框宿主），于是单选组与复选框挂在同一份作用域数据的设置页底部：
+// 状态在 `src/analysisScope.ts`，消费者是 `src/workspaceInspection.ts`（整工程检查写诊断表前按范围过滤）。
+/** 问题面板那两行 include/exclude（`kind === 'custom'`）在单选组里没有对应项 ⇒ 谁都不选中。 */
+const CUSTOM_CHOICE = 'custom'
+
+/** 已应用（真的存在项目设置里）的作用域：分析范围不能选还在草稿里的名字。 */
+const appliedScopes = computed(() => props.scopes ?? [])
+
+/** 单选组的当前值：`''` = 全部项目；其余 = 命名作用域名（= 序列化 id，见 `src/analysisScope.ts` 文件头）。 */
+const analysisChoice = computed<string>({
+  get: () => analysisScope.value.kind === 'named'
+    ? analysisScope.value.namedScope ?? ''
+    : analysisScope.value.kind === 'custom' ? CUSTOM_CHOICE : '',
+  set: name => { if (name !== CUSTOM_CHOICE) setAnalysisScopeNamed(name) },
+})
+
+/** 选中的作用域被改名/删掉 ⇒ 范围里一个文件都找不到（上游 `preselectButton` :128-146 找不到就退回默认档）。 */
+const analysisChoiceKnown = computed(() => analysisScope.value.kind !== 'named'
+  || appliedScopes.value.some(entry => entry.name === (analysisScope.value.namedScope ?? '')))
+
+const analysisKind = computed(() => analysisScope.value.kind)
+const analysisSummary = computed(() => scopeSummary())
+
+/** 「包含测试代码」那一档（`BaseAnalysisActionDialog.java:100-101` + `:218-222`）。 */
+const includeTestSources = computed<boolean>({
+  get: () => analysisUiOptions.value.analyzeTestSources,
+  set: value => { setAnalysisUiOption('analyzeTestSources', value) },
+})
+
+// 范围求值是同步的（`src/analysisScope.ts` 发不了请求），命名作用域表由这一页在设置变化时注入。
+watch(appliedScopes, next => {
+  setAnalysisScopeNamedScopes(next.map(entry => ({ name: entry.name, pattern: entry.pattern })))
+}, { immediate: true })
+
 defineExpose({ dirty, getDraft })
 </script>
 <template>
@@ -430,6 +512,35 @@ defineExpose({ dirty, getDraft })
       </div>
     </div>
 
+    <!-- 分析范围（BaseAnalysisActionDialog.java:100-102 / :204-206 / :218-222）：命名作用域单选 + 那一档开关 -->
+    <div class="analysis-box">
+      <h4 class="analysis-title">分析</h4>
+      <p class="field-hint">
+        整工程检查（Analyze › Inspect Code 在本仓的等价物）只在选中的范围里找问题。当前范围：{{ analysisSummary }}。
+      </p>
+      <div class="analysis-radios" role="radiogroup" aria-label="分析范围">
+        <!-- 上游这一档 = scope.option.whole.project（中文包 messages/CodeInsightBundle.properties:468「整个项目(&P)」）。
+             本仓沿用「全部项目」：`scopeSummary()` 与 `src/components/ProblemsPanel.vue:484` 的重置按钮都是这句。 -->
+        <label class="analysis-radio">
+          <input v-model="analysisChoice" type="radio" name="analysis-scope" value="" :disabled="!root" />
+          <span>全部项目</span>
+        </label>
+        <label v-for="entry in appliedScopes" :key="`analysis-${entry.name}`" class="analysis-radio">
+          <input v-model="analysisChoice" type="radio" name="analysis-scope" :value="entry.name" :disabled="!root" />
+          <span>作用域“{{ entry.name }}”</span>
+        </label>
+      </div>
+      <p v-if="!appliedScopes.length" class="field-hint">还没有已应用的作用域：先添加并应用，才能把它选成分析范围。</p>
+      <p v-if="analysisKind === 'named' && !analysisChoiceKnown" class="field-hint bad">
+        当前分析范围引用的作用域已经不在项目里，整工程检查会一个文件都找不到。
+      </p>
+      <!-- scope.option.include.test.sources（CodeInsightBundle.properties:474）：上游它是范围本身的一档（:222），不是结果列表的过滤 -->
+      <label class="analysis-radio">
+        <input v-model="includeTestSources" type="checkbox" :disabled="!root" />
+        <span>包含测试代码</span>
+      </label>
+    </div>
+
     <div class="scope-footer">
       <button type="button" class="primary" :disabled="!root || busy || !dirty" @click="apply()">应用</button>
       <button type="button" :disabled="!root || busy || !dirty" @click="reset()">重置</button>
@@ -476,7 +587,13 @@ defineExpose({ dirty, getDraft })
 .scope-caret { width: 14px; border: 0; background: transparent; color: inherit; padding: 0; display: inline-flex; align-items: center; }
 .scope-buttons { display: flex; flex-direction: column; gap: 4px; }
 .scope-legend { display: flex; align-items: center; gap: 6px; }
-.field-hint.bad { color: #c0392b; }
+/* 分析那一节：单选组 + 复选框（BaseAnalysisActionDialog 的范围面）。 */
+.analysis-box { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.analysis-title { margin: 0; font-size: 13px; }
+.analysis-radios { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.analysis-radio { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.analysis-radio input { flex-shrink: 0; }
+.analysis-radio input:disabled + span { color: var(--muted); }
 .scope-pos { margin-left: 6px; opacity: 0.75; }
 .scope-footer { display: flex; align-items: center; gap: 8px; }
 </style>

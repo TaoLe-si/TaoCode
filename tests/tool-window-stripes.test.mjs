@@ -102,6 +102,28 @@ test('dragging across stripes still honors the requested insertion position', t 
   assert.deepEqual(host().stripeOrder.value('right'), ['files', 'gradle', 'notifications'])
 })
 
+// 真 bug 回归：标签条拖放的落点 id 就是被拖的按钮自己时，旧实现把它从表里摘掉再 `indexOf(id)`
+// （必然 -1）⇒ 一路 push 到末尾。于是手一抖在自家按钮上松手，窗口就跳到侧条最后。
+test('dropping a window onto its own button keeps the stripe order', t => {
+  storage(t)
+  const h = host()
+  const drag = createToolStripeDrag({
+    toolAnchors: () => h.toolAnchors, toolOrder: () => h.toolOrder,
+    setToolAnchor: h.setToolAnchor, saveToolOrder: h.saveToolOrder,
+  })
+  const before = [...h.stripeOrder.value('left')]
+  const filesAt = before.indexOf('files')
+  drag.onToolDragStart('files', {})
+  drag.onToolDrop('left', 'files', { preventDefault() {} })
+  assert.deepEqual(h.stripeOrder.value('left'), before, '原地松手不该换次序')
+  assert.equal(h.stripeOrder.value('left').indexOf('files'), filesAt)
+  // 落点仍在左侧表尾（before=null）且已经排在那时也不该重排名次
+  const tail = h.stripeOrder.value('left').at(-1)
+  drag.onToolDragStart(tail, {})
+  drag.onToolDrop('left', null, { preventDefault() {} })
+  assert.deepEqual(h.stripeOrder.value('left'), before, '落在尾部时位置没变，次序也不变')
+})
+
 // 真 bug 回归：项目树/结构被 Move to Bottom 搬到底部后**再也切不回来**。
 // 成因是宿主的 activate 先写了 files/outline 两个专属分支再判断锚点，而 setToolAnchor
 // 同时把它们从左栏顺序里摘掉 —— 左栏没入口、点击路径又只走 leftView/explorer，两侧失联。

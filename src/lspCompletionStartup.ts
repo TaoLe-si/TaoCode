@@ -1,4 +1,5 @@
 import type { LspOpenResult } from './bridge'
+import { noteDocumentOpened, recordSessionStatus, resetLspSession } from './lsSessionHost.ts'
 
 // Extra native status fields are kept local until bridge.ts's shared contract is
 // updated; the transport is still the existing lsp.request route.
@@ -30,6 +31,15 @@ export async function startCompletionSession(tab: TabState, deps: StartupDeps, a
   tab.lspRunning = false
   try {
     let status = await deps.request<CompletionSessionStatus>('lsp.open', { path: tab.path, text: tab.content })
+    // **回包即状态**（`LspServerState.kt:10-12`：`Initializing` 只有收到 initialize 回包才变 `Running`）。
+    // 这两行是本仓 `lspSessionStates` 与前端文档账**唯一的生产写入方** —— 宿主不推状态变化事件
+    // （`src/bridge.ts` 的 lsp 事件只有 diagnostics/progress/message/edited），所以这张表只能由
+    // 读回包的地方记。记完之后 `src/lsFeaturesWidget.ts`（状态面）、`src/quickDocHost.ts`
+    // （「服务器正在启动」提示）与状态栏才查得到真状态，而不是各自抄一份。
+    // 文档账那条对应宿主的 `Session::open`（`native/lsp_session.cpp:84-92`：建文档、`version = 1`，
+    // 握手 ready 之后才 `opened = true`）—— 这里记的是**前端这一份可对账的镜像**。
+    noteDocumentOpened(tab.path, status.running === true && status.ready === true, status.language)
+    recordSessionStatus(status, tab.path)
     const deadline = Date.now() + 65_000 // native initialize has a 60s request deadline
     while (deps.current() && status.running && status.ready === false && !status.error) {
       tab.lspConfigured = status.configured === true
@@ -40,6 +50,7 @@ export async function startCompletionSession(tab: TabState, deps: StartupDeps, a
         status = await withTimeout(
           deps.request<CompletionSessionStatus>('lsp.request', { kind: 'status', path: tab.path }),
           LSP_STATUS_TIMEOUT_MS, NO_RESPONSE)
+        recordSessionStatus(status, tab.path)
       } catch (error) {
         // 语言服务线程没响应（而不是"答了一个错"）：`lsp.stop` 现在**不排那条队列**，
         // 它在原生里会把卡住的线程收掉、换一条新的、并重配服务器（见 main.cpp 的 recover_lsp_now）。
@@ -47,6 +58,9 @@ export async function startCompletionSession(tab: TabState, deps: StartupDeps, a
         const message = error instanceof Error ? error.message : String(error)
         if (attempt === 0 && deps.current()) {
           deps.notify(`${tab.path}：语言服务没有响应，正在重启语言服务…`)
+          // 换进程 = **新的客户端对象**（`LspClientImpl.kt:83-84`：停机态是终态，终态之后不会自己活）。
+          // 不清这张表的话，新会话的第一份回包会被状态闸拒掉，状态面永远停在「已终止」。
+          resetLspSession(typeof status.language === 'string' ? status.language : undefined)
           try { await withTimeout(deps.request('lsp.stop', {}), 15_000, NO_RESPONSE) } catch { /* 收不掉也照旧往下报 */ }
           // 递归这一下要 `await` 并**接住它自己的报错**（它有自己那份 catch 会 notify）：
           // 直接 `return` 这个 promise 的话，第二次的错误会绕开两边的 catch 变成未处理的 rejection。

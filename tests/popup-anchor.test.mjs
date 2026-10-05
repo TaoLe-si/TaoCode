@@ -64,7 +64,8 @@ test('四张弹层都接上了按实测尺寸的落位，没有一个还写死�
   assert.ok(app.includes('<AnchoredMenu :x="treeMenu.x" :y="treeMenu.y"'), '项目树右键菜单没走 AnchoredMenu')
   // 标签页右键菜单 2026-10-04 搬进了 src/components/TabContextMenu.vue —— 它内部仍用 AnchoredMenu（同一口径）。
   const tabsMenu = read('src/components/TabContextMenu.vue')
-  assert.ok(tabsMenu.includes('<AnchoredMenu :x="x" :y="y"'), '标签页右键菜单没走 AnchoredMenu')
+  assert.ok(/<AnchoredMenu ref="menu" :x="x" :y="y"/.test(tabsMenu),
+    '标签页右键菜单没走 AnchoredMenu（或没接住它露出来的根节点 ref）')
 
   const editor = read('src/components/EditorPopupMenu.vue')
   assert.ok(editor.includes('usePopupAnchor'), '编辑器菜单没接 usePopupAnchor')

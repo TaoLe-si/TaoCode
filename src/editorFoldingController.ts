@@ -17,8 +17,8 @@
 //   · 整段管道**必须串行**：两轮并存时，后一轮会在前一轮"折好默认、还没恢复覆盖"的中间态上存档，
 //     把"用户展开过"记成"折着"（真机上就是这么丢的）。
 import type { EditorView } from '@codemirror/view'
-import { applyFoldPlan, candidatesOf, foldKinds, foldedAreasOf, setFoldingRanges } from './editorFolding'
-import { captureFoldState, dropStaleFolds, flushFoldState, rememberCandidates, restorePlan, savedFoldState, signatureAt } from './editorFoldingState'
+import { applyFoldPlan, candidatesOf, foldDefaultCollapsed, foldKinds, foldedAreasOf, localRegionFolds, mergeFoldRanges, setFoldingRanges } from './editorFolding.ts'
+import { captureFoldState, dropStaleFolds, flushFoldState, rememberCandidates, restorePlan, savedFoldState, signatureAt } from './editorFoldingState.ts'
 import type { LspFold } from './editorFolding'
 
 export interface FoldingControllerDeps {
@@ -50,11 +50,17 @@ export function createFoldingController(deps: FoldingControllerDeps) {
     flushFoldState()
   }
 
-  /** ④ 按设置把"默认该折着"的那几族折起来，关掉的那几族展开（设置一改就重算）。 */
+  /**
+   * ④ 按设置把"默认该折着"的那几族折起来，关掉的那几族展开（设置一改就重算）；
+   * 再补一条**逐区域**的默认：开始标记自带 `defaultstate="collapsed"` 的区域，
+   * 全局 `collapseCustomRegions` 关着也折（`NetBeansCustomFoldingProvider.java:46-48`，
+   * 上游是 `CustomFoldingBuilder.java:131-142` 对每条区间单独问一次 provider）。
+   */
   function applyDefaults() {
     const view = deps.view()
     if (!view) return
     for (const entry of deps.foldingKinds()) foldKinds(view, [entry.kind], entry.collapse)
+    foldDefaultCollapsed(view)
   }
 
   /** ⑥ 恢复存档（偏移+签名对得上就放回；区间被编辑推走的按签名认回）。 */
@@ -84,8 +90,11 @@ export function createFoldingController(deps: FoldingControllerDeps) {
       const ranges = await deps.fetchRanges()
       const target = deps.view()
       if (!target) return
+      // 本地 `//<region>` / `//region` 标记并进服务端区间（服务端同起止的优先，见 editorFolding.ts
+      // 的 `mergeFoldRanges`）：服务端不发 region kind 或没接语言服务时，标记照样能折。
+      const merged = mergeFoldRanges(ranges, localRegionFolds(target.state.doc.toString()))
       capture()
-      target.dispatch({ effects: setFoldingRanges.of(ranges) })
+      target.dispatch({ effects: setFoldingRanges.of(merged) })
       rememberCandidates(deps.path(), candidatesOf(target.state).map(candidate => ({ ...candidate, signature: signatureAt(target.state.doc, candidate) })))
       applyDefaults()
       dropStale()

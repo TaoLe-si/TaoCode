@@ -7,7 +7,7 @@
 //
 // 本模块只依赖 npm 包与 @vue，**不被测试直接 import**（要定时器与 DOM）。
 import { ref, watch, type Ref } from 'vue'
-import { request, type GitAheadBehind, type GitChange, type GitStatus, type Workspace } from './bridge'
+import { request, type GitAheadBehind, type GitChange, type GitStatus, type Workspace } from './bridge.ts'
 
 export interface GitWidgetDeps {
   isDesktop: boolean

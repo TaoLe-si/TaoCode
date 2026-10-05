@@ -8,8 +8,9 @@
 // `onStageDragLeave` 的存在是因为子元素会冒泡 dragleave，否则预览会闪。
 // 标签条的**单行布局**（谁被挤到"…"里）是另一个域：src/tabStripLayout.ts + App.vue 里的测量循环。
 import { ref } from 'vue'
-import { dropTabOnGroup, swapGroups, type Pane, type SplitModel } from './editorGroups'
-import { dropSideFor, dropSidePutsNewGroupFirst, splitOrientationForSide, updateBoundsWithDropSide, type DropSide } from './tabDragSplit'
+import { acceptDrop, beginDrag, dropActionForEvent } from './dndModel.ts'
+import { dropTabOnGroup, swapGroups, type Pane, type SplitModel } from './editorGroups.ts'
+import { dropSideFor, dropSidePutsNewGroupFirst, splitOrientationForSide, updateBoundsWithDropSide, type DropSide } from './tabDragSplit.ts'
 import type { EditorSettings } from './bridge'
 import type { Tab } from './editorTab'
 
@@ -35,13 +36,13 @@ function onTabDragStart(pane: Pane, tab: Tab, event: DragEvent) {
     return
   }
   dragTab.value = { pane, path: tab.path }
-  event.dataTransfer?.setData('text/plain', tab.path)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  // 统一 DnD 模型（`src/dndModel.ts`）：标签拖拽只允许 MOVE（上游 `TabsUtil.reorder`），
+  // 载荷是路径文本 —— 写 effectAllowed 与 setData 的规则都在模型里，不再各处手写。
+  beginDrag(event, { text: tab.path, action: 'move' })
 }
 function onTabDragOver(pane: Pane, event: DragEvent) {
   if (!dragTab.value) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  acceptDrop(event, dropActionForEvent(event) ?? 'move')
 }
 // IDEA's drag-to-split (TabsUtil.java:54-111): a tab dropped on the editor *area* near an
 // edge splits it, and the side is decided by which trapezoid the pointer sits in. The
@@ -51,8 +52,7 @@ function onStageDragOver(pane: Pane, event: DragEvent) {
   if (!dragTab.value) return
   const target = event.currentTarget as HTMLElement | null
   if (!target) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  acceptDrop(event, dropActionForEvent(event) ?? 'move')
   const box = target.getBoundingClientRect()
   const bounds = { x: 0, y: 0, width: box.width, height: box.height }
   const side = dropSideFor({ x: event.clientX - box.left, y: event.clientY - box.top }, bounds)

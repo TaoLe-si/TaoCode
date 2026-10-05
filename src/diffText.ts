@@ -10,8 +10,8 @@
 // 这里保留 `computeLCS` 这个名字与 `{from,to}` 形状 —— 它是这个模块的既有对外契约。
 import type { DiffRow } from './bridge'
 import { alignLines } from './diffAlign.ts'
-import { comparisonKeys, DEFAULT_COMPARISON_POLICY, shouldTrimChunks, whitespaceOnlyDifference, type ComparisonPolicy } from './diffComparison.ts'
-import { smartLineMatch } from './diffSmartLines.ts'
+import { DEFAULT_COMPARISON_POLICY, shouldTrimChunks, whitespaceOnlyDifference, type ComparisonPolicy } from './diffComparison.ts'
+import { compareLineMatch } from './diffSmartLines.ts'
 import { DEFAULT_HIGHLIGHT_POLICY, marksFor, type HighlightPolicy } from './diffWords.ts'
 
 /** `buildDiffRows` 的两个档位（上游 `TextDiffSettingsHolder.PlaceSettings` 的 `IGNORE_POLICY` + `HIGHLIGHT_POLICY`）。 */
@@ -25,38 +25,19 @@ export interface DiffOptions {
 // Line-level diff rows shared by the clipboard compare and the save-conflict
 // preview (left/right aligned, change/delete/insert/equal kinds).
 //
-// `options` 是本批新加的（默认值 = 上游默认：`IgnorePolicy.DEFAULT` + `HighlightPolicy.BY_WORD`），
-// 不传时行为与之前**逐字节相同** —— 三个调用点（`src/vcsActions.ts:122`、
-// `src/editorFileOps.ts:54`、`src/components/DiffView.vue` 的父级）因此一行都不用改。
+// 默认值 = 上游默认：`IgnorePolicy.DEFAULT` + `HighlightPolicy.BY_WORD`。
+// 既有调用点通过同一入口消费完整的行级修正链。
 export function buildDiffRows(beforeLines: string[], afterLines: string[], options: DiffOptions = {}): DiffRow[] {
   const comparison = options.comparison ?? DEFAULT_COMPARISON_POLICY
   const highlight = options.highlight ?? DEFAULT_HIGHLIGHT_POLICY
-  // 对齐按**折过的**行做（上游同样如此：比的是 comparison policy 看到的东西），
-  // 但渲染与词级高亮用的是**原文**。
-  //
-  // 对齐用**两步比对**（上游 `ByLineRt.compareSmart` + `SmartLineChangeCorrector`，见
-  // `src/diffSmartLines.ts`）：先钉住"大行"（非空白字符 > 3 的行），再在两条大行之间的空隙里
-  // 做一次局部 LCS。全局 LCS 在并列最优时会随便挑一种配法，短行（括号/空行）就可能配错位置；
-  // 两步比对让大行的配对稳定下来（实测：`if (x) { / a(); / }` 那组里它会认"括号挪了"，
-  // 而 LCS 会认成"语句挪了"）。
-  //
-  // **保底一条**：上游在这之后还有 `optimizeLineChunks` 与 `expandRanges` /
-  // `correctChangesSecondStep` 两道修补，本仓没做 —— 所以这里加一条"配对数不许比普通 LCS 少"
-  // 的判据（少配一定更差，多配/同样多则取语义更好的那一种）。
-  const keysBefore = comparison === 'default' ? beforeLines : comparisonKeys(beforeLines, comparison)
-  const keysAfter = comparison === 'default' ? afterLines : comparisonKeys(afterLines, comparison)
-  const plain = comparison === 'default'
-    ? computeLCS(beforeLines, afterLines)
-    : alignLines(keysBefore, keysAfter)
-  const smart = smartLineMatch(keysBefore, keysAfter, beforeLines, afterLines)
-  const lcs = smart.length >= plain.length ? smart : plain
+  const lcs = compareLineMatch(beforeLines, afterLines, comparison)
   const rows: DiffRow[] = []
   let bi = 0, ai = 0, li = 0
   while (bi < beforeLines.length || ai < afterLines.length) {
     if (li < lcs.length && bi < lcs[li].from && ai < lcs[li].to) {
       const left = { no: bi + 1, text: beforeLines[bi]! }
       const right = { no: ai + 1, text: afterLines[ai]! }
-      const marks = marksFor(highlight, left.text, right.text)
+      const marks = marksFor(highlight, left.text, right.text, comparison)
       const row: DiffRow = { kind: 'change', left, right }
       if (marks.left.length) row.leftMarks = marks.left
       if (marks.right.length) row.rightMarks = marks.right

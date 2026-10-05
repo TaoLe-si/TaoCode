@@ -77,18 +77,38 @@ test('12 个 testSources 类必须判 [-]', () => {
   }
 })
 
-test('四档计数自洽，且与表尾那句一致', () => {
+test('四档计数自洽：§G 实数 == 头部那句 == 表尾那句，且和数凑满 317', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
-  // 第八十九批把四类从 `[ ]` 改判到 `[~]`/`[-]`（随处搜索的空态文案、作用域选择、预览开关，
-  // 以及一个复核发现上游根本没有实现的重排服务），数字随判决一起更新。
-  assert.equal(count('[x]'), 12)
-  assert.equal(count('[~]'), 40)
-  assert.equal(count('[ ]'), 2)
-  assert.equal(count('[-]'), 263)
-  assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 317)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 12 \+ `\[~\]` 40 \+ `\[ \]` 2 \+ `\[-\]` 263 = \*\*317\*\*/,
-    '表尾的和数要与逐条表一致')
+  const x = count('[x]'), partial = count('[~]'), todo = count('[ ]'), na = count('[-]')
+  assert.equal(x + partial + todo + na, 317, `四档相加 ${x + partial + todo + na} != 317`)
+  // 原来这里把四档写死成 13/41/0/263（那是 2026-10-04 的一版计划），文档没跟着动 ⇒ 门禁与文档
+  // 一起失真，而头部那句「12 + 36 + 6 + 263 = 317」四档分布全错却照样凑满总数（audit-docs 复核
+  // 报的就是这一类）。现在实数由 §G 反推，再要求头部与表尾两处散文**逐档**等于实数：
+  // 「分布谎报、总数自洽」从此拦得住（反向验证：把头部任一数字 ±1 → 本用例红）。
+  const head = verdict.match(/§A 讲已移植的 (\d+) 条，§B 讲部分移植 (\d+) 条，§C 讲未移植 (\d+) 条，§D 讲不适用 (\d+) 条[^\n]*?四档合计 (\d+) \+ (\d+) \+ (\d+) \+ (\d+) = (\d+)/)
+  assert.ok(head, '头部缺「§A 讲已移植的 a 条…四档合计 a + b + c + d = 317」那句')
+  assert.deepEqual([+head[1], +head[2], +head[3], +head[4]], [x, partial, todo, na],
+    `头部 §A–§D 的条数与 §G 实数不符：头部 ${head[1]}/${head[2]}/${head[3]}/${head[4]}，实为 ${x}/${partial}/${todo}/${na}`)
+  assert.deepEqual([+head[5], +head[6], +head[7], +head[8]], [x, partial, todo, na],
+    `头部「四档合计」那串与 §G 实数不符：${head[5]}+${head[6]}+${head[7]}+${head[8]} vs ${x}+${partial}+${todo}+${na}`)
+  assert.equal(+head[9], 317, `头部总数写的是 ${head[9]}，本域是 317 类`)
+  const tail = verdict.match(/四档合计\*\*：`\[x\]` (\d+) \+ `\[~\]` (\d+) \+ `\[ \]` (\d+) \+ `\[-\]` (\d+) = \*\*(\d+)\*\*/)
+  assert.ok(tail, '表尾缺「四档合计：`[x]` a + …」那句')
+  assert.deepEqual([+tail[1], +tail[2], +tail[3], +tail[4]], [x, partial, todo, na],
+    `表尾的和数没跟着逐类表改：表尾 ${tail[1]}+${tail[2]}+${tail[3]}+${tail[4]}，实为 ${x}+${partial}+${todo}+${na}`)
+  assert.equal(+tail[5], 317, '表尾总数不是 317')
+  // 2026-10-04 那条「AnActionListener 从 [~] 改判 [x]」的意图改成按类锚定（ aggregate 数字拦不住它）：
+  // before/after 的全量广播确实已在 `src/actionEvents.ts:30-51` 落地（接口 + 注册/注销 + 两圈 fire）。
+  const listener = rows.find(row => row.name === 'AnActionListener')
+  assert.ok(listener, '§G 缺 AnActionListener 行')
+  assert.equal(listener.verdict, '[x]', 'AnActionListener 的 before/after 广播管道已落地，必须是 [x]')
+  assert.match(listener.why, /`src\/actionEvents\.ts/, 'AnActionListener 的 [x] 依据必须指到 src/actionEvents.ts')
+  assert.ok(existsSync(join(root, 'src/actionEvents.ts')), 'src/actionEvents.ts 不在磁盘上')
+  // 每个 [ ] 都要写清缺哪一环：原来断的是 `count('[ ]') === 0`（过期口径 —— 本域现有 2 条真未移植，
+  // 死数 0 只会拦住诚实判词）。改成逐行验内容，拦截面比「必须为 0」更大。
+  const thin = rows.filter(row => row.verdict === '[ ]' && !/缺|没有|要做得先有|暂不做|无 /.test(row.why)).map(row => row.name)
+  assert.deepEqual(thin, [], `这些 [ ] 行没写清缺哪一环：${thin.join('、')}`)
 })
 
 test('Smith-Waterman 的四个上游常量不许漂移', () => {
@@ -106,6 +126,8 @@ test('native 两侧都登记了 fuzzyFileSearch（跨语言边界的新设置必
     'GENERAL_SETTING_KEYS 缺 fuzzyFileSearch，apply 会被判 INVALID_SETTINGS')
   assert.match(read('native/settings_schema.cpp'), /\{"fuzzyFileSearch", false\}/,
     'general_defaults_impl 缺 fuzzyFileSearch 的默认值')
-  assert.match(read('src/bridge.ts'), /key === 'fuzzyFileSearch'/,
+  // 2026-10-05 模块化体检：这段 general 补丁白名单随「浏览器预览内存桩」搬到了
+  // src/bridgePreview.ts（bridge.ts 贴着机检上限）。查的键一个字没变，只换了锚点。
+  assert.match(read('src/bridgePreview.ts'), /key === 'fuzzyFileSearch'/,
     'bridge 的 general 补丁白名单漏了这个键')
 })

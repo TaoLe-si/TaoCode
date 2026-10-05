@@ -36,7 +36,7 @@ export function createMacrosMenuRows(ctx: MacrosMenuContext): MenuRow[] {
       // `PlaybackLastMacroAction`：没有录过/回放过任何宏时按 IDEA 的样子禁用（标题固定，不猜名字）。
       { id: 'edit.playbackLastMacro', title: '回放上一个宏', keywords: 'playback last macro 回放 上一个宏', enabled: () => Boolean(ctx.lastMacro.value) && !ctx.playing.value, run: () => void ctx.playLastMacro() },
       // `StartStopMacroRecordingAction`：一个动作两种文本（IDEA 的 ToggleAction）。
-      { id: 'edit.startStopMacroRecording', title: ctx.recording.value ? '停止宏录制' : '开始宏录制', keywords: 'start stop macro recording 开始 停止 录制 宏', run: () => void ctx.toggleMacroRecording() },
+      { id: 'edit.startStopMacroRecording', title: ctx.recording.value ? '停止宏录制' : '开始宏录制', keywords: 'start stop macro recording 开始 停止 录制 宏', enabled: () => !ctx.playing.value, run: () => void ctx.toggleMacroRecording() },
       { id: 'edit.macroRule1', rule: true },
       { id: 'edit.editMacros', title: '编辑宏…', keywords: 'edit macros 编辑宏', run: () => void ctx.openMacrosDialog() },
       { id: 'edit.playSavedMacros', title: '已保存的宏', keywords: 'play saved macros 已保存 宏', enabled: () => savedRows().length > 0, childrenOf: savedRows },

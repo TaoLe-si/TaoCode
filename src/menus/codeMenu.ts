@@ -2,9 +2,9 @@
 // 一组一文件（桃 2026-09-26：模块化）；依赖经 ctx 注入。
 // 成员先用 any（参数逆变 + 内部类型未提取），随批次收紧。
 import type { MenuRow } from './types'
-import { createInspectCodeInCodeMenuRows, type AnalyzeGroupContext } from './analyzeMenu'
+import { createInspectCodeInCodeMenuRows, type AnalyzeGroupContext } from './analyzeMenu.ts'
 // 「比较对象…」的标题常量（上游 `action.compare.with.text`，中文包取值）。
-import { COMPARE_WITH_TEXT } from '../compareFiles'
+import { COMPARE_WITH_TEXT } from '../compareFiles.ts'
 
 export interface CodeMenuContext extends AnalyzeGroupContext {
   hasEditor: () => boolean
@@ -31,6 +31,10 @@ export interface CodeMenuContext extends AnalyzeGroupContext {
 export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
   return [
     ctx.editable('completion', '代码补全', 'Ctrl Space', 'completion autocomplete suggest 补全'),
+    // CodeCompletionGroup（`intellij.platform.lang.impl.actions.xml:133-147`）：补全 → 智能类型补全 →
+    // EditorCompleteStatement → …。本仓有补全与「完成当前语句」；键位（Ctrl+Shift+Enter）在
+    // CodeEditor.vue 的 keymap 里，那一处本批冻结，所以这里不公布键位（菜单可达、键位未接）。
+    ctx.editable('statement.complete', '完成当前语句', '', 'complete current statement smart enter 完成语句'),
     // 检查这一族在主菜单里的落点：`InspectCodeInCodeMenuGroup`，上游位置就是紧跟
     // `CodeCompletionGroup`、在 `InsertLiveTemplate` 之前（`LangActions.xml:238-259` 与
     // `actionGroupStructure.txt` 的 CodeMenu 段）。
@@ -38,6 +42,10 @@ export function createCodeMenuRows(ctx: CodeMenuContext): MenuRow[] {
     ctx.editable('template.expand', '展开实时模板', 'Ctrl Alt J', 'live template postfix expand 模板'),
     { id: 'code.templateChooser', title: '实时模板列表…', keys: 'Ctrl J', keywords: 'live template list chooser insert 模板列表', enabled: ctx.hasEditor, run: ctx.openTemplateChooser },
     { id: 'code.surround', title: '用模板包裹选中代码', keys: 'Ctrl Alt T', keywords: 'surround wrap try if block 包裹 模板', enabled: ctx.hasEditor, run: ctx.openSurround },
+    // `Unwrap`（上游 `UnwrapAction`，$default.xml:917-920 = Ctrl+Shift+Delete）：去掉最内层
+    // 可拆的 if/for/while/… 包裹；PSI 版本在 lang-impl/codeInsight/unwrap，本仓是文本子集
+    // （src/unwrap.ts，正文回缩一层；try/catch、do/while 这类拆了会破坏语法的直接拒绝）。
+    ctx.editable('unwrap', 'Unwrap/Remove', 'Ctrl Shift Delete', 'unwrap remove braces 拆开 包裹 去括号'),
     { id: 'code.generate', title: '生成…', keys: 'Alt Insert', keywords: 'generate constructor getter setter toString override 生成 构造器', enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value, run: ctx.openGeneratePopup },
     // ActionsBundle: ShowIntentionActions is "Show Context Actions" (Alt+Enter).
     ctx.semantic('codeAction', '显示上下文操作', 'Alt Enter', 'intent quick fix refactor code action 意图 上下文操作'),

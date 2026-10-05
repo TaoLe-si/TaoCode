@@ -255,18 +255,31 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 /* 主工具栏里的图标按钮 = 30x30（--toolbar-btn-size，上游 experimentalToolbarMinimumButtonSize）。
    通用 .icon-button 仍是 28x28，那是对话框/面板里的控件尺寸；用在工具栏上整行偏矮 2px。 */
 .topbar .icon-button, .topbar-menubar-row .icon-button { width: var(--toolbar-btn-size); height: var(--toolbar-btn-size); }
-/* 工具栏图标统一 20px = JBUI.java:1286 `MainToolbar.Button.iconSize`（New UI 的
-   HeaderToolbarButtonLook.kt:56 消费该值）。组件里曾逐个写死 14 / 17 px，整行图标大小不一 ——
-   这里按上游统一。`.topbar` 之外的图标（面板、对话框）不受影响。 */
-.topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); flex-shrink: 0; }
-/* 停止/运行态的实心方块是状态指示而非主图标；下拉箭头同理 —— 保持小一号，
-   放在统一规则之后以覆盖它。 */
-.topbar .run-button > svg, .topbar .stop-button > svg { width: var(--icon-size-control); height: var(--icon-size-control); flex-shrink: 0; }
-.topbar .project-widget-caret, .topbar-menubar-row .project-widget-caret { width: 12px; height: 12px; }
-/* 运行配置名后面的下拉箭头也归"小一号"这一档 —— 它是 `header-widget` 的直接子 svg，
-   会被上面 :232 那条统一规则捞去 20px，和旁边 11px 的配置名不成比例（这个箭头原来是
-   行内 `▾` 文本，所以一直没进过这条规则；换成图标之后必须显式豁免）。 */
-.topbar .run-caret-glyph { width: 12px; height: 12px; }
+/* 工具栏图标的几何由**模板的 `:size`** 说了算（`iconSize.rail` = 20 =
+   JBUI.java:1286 `MainToolbar.Button.iconSize`，New UI 的 HeaderToolbarButtonLook.kt:56
+   消费该值）。这条 CSS 只做两件不越权的事：`flex-shrink: 0`（WebView2 里 svg 是 flex 项，
+   默认 `flex-shrink: 1`，30px 定尺盒会把它挤扁，见下面 `.activity-button` 那段），以及给
+   **非 lucide** 的手写 `<svg>` 兜底 20px。
+   为什么不能无条件写 `width`：lucide 把尺寸渲染成 `width`/`height` **属性**
+   （`node_modules/lucide-vue-next/dist/esm/Icon.js` 的 `width: size || 24`），而 CSS 的
+   `width` 永远赢过呈现属性 —— 于是模板里 `:size="iconSize.dense"`(12)、`:size="iconSize.action"`(16)
+   全被压成 20px，源码在骗人（`MainToolbar.vue` 的运行仪表盘/搜索/设置三处就是这么活下来的）。
+   `.lucide` 类同样出自那个文件（`class: ["lucide", "lucide-<kebab>"]`），所以 `:not(.lucide)`
+   正好是"模板没声明"的那一支。`tests/ui-icons.test.mjs` 的「CSS 不许覆盖模板声明的图标尺寸」
+   守着这条界线。 */
+.topbar .header-widget > svg, .topbar .icon-button > svg, .topbar-menubar-row .menu-button > svg { flex-shrink: 0; }
+.topbar .header-widget > svg:not(.lucide), .topbar .icon-button > svg:not(.lucide), .topbar-menubar-row .menu-button > svg:not(.lucide) { width: var(--toolbar-icon-size); height: var(--toolbar-icon-size); }
+/* 停止/运行态的实心方块是状态指示而非主图标 —— 小一号（`--icon-size-control` = 14，
+   与 `IntUiBridgeMenu.kt:107` 那一族同档）。同样只兜底不覆盖：模板写的是
+   `:size="iconSize.control"`，CSS 不再有权把它改成别的数。 */
+.topbar .run-button > svg, .topbar .stop-button > svg { flex-shrink: 0; }
+.topbar .run-button > svg:not(.lucide), .topbar .stop-button > svg:not(.lucide) { width: var(--icon-size-control); height: var(--icon-size-control); }
+/* 项目 widget 里的下拉箭头（`--icon-size-dense` = 12）：模板声明的是 `iconSize.dense`，
+   这里只给非 lucide 的手写 svg 兜底，不再覆盖。 */
+.topbar .project-widget-caret, .topbar-menubar-row .project-widget-caret { width: var(--icon-size-dense); height: var(--icon-size-dense); }
+/* 运行配置名后面的下拉箭头同样归 `dense` 一档 —— 它是 `header-widget` 的直接子 svg，
+   挨着 11px 的配置名，20px 那一档跟它不成比例。 */
+.topbar .run-caret-glyph { width: var(--icon-size-dense); height: var(--icon-size-dense); }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .theme-toggle { color: var(--text); }
 .preview-banner { min-height: 29px; flex-shrink: 0; padding: var(--space-1) var(--space-3); display: flex; align-items: center; gap: var(--space-2); background: var(--warning-bg); border-bottom: 1px solid var(--line); color: var(--warning); font-size: 11px; }
@@ -305,11 +318,13 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
    图标渲染成 18×20 而不是 20×20（CDP 取证：svg width 算出 18px，height 20px）。
    `flex-shrink: 0` 是同一件事的第二道保险 —— 尺寸不能被兄弟节点挤掉。 */
 .activity-button { position: relative; height: 30px; width: 30px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 0; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted); transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease); }
-/* 活动条的图标：20px 盒（--toolbar-icon-size，与 JBUI.java:1297/:1313/:1337 三个入口
-   一致）。stroke 跟全仓其它 lucide 图标一样是 2 —— 原来这里写死 1.7，20px 配 1.7 换算
-   是 0.085em，而其余图标（13px 配 lucide 默认 2）是 0.154em，轨道上的笔画细了近一倍，
-   两边不像同一套图标。 */
-.activity-button > svg { width: 20px; height: 20px; flex-shrink: 0; stroke-width: 2; }
+/* 活动条的图标：20px 盒 = `--icon-size-rail`（与 JBUI.java:1297/:1313/:1337 三个入口一致，
+   也与 `.topbar` 那一族同值）。`flex-shrink: 0` 与 `stroke-width: 2` 对 lucide 图标仍然有效 ——
+   20px 配 1.7 换算是 0.085em，而其余图标（13px 配 lucide 默认 2）是 0.154em，轨道上的笔画
+   细了近一倍，两边不像同一套图标。`width`/`height` 只兜底非 lucide 的手写 svg：
+   lucide 把尺寸渲染成属性（`lucide-vue-next/dist/esm/Icon.js`），CSS 写上去就会覆盖模板的 `:size`。 */
+.activity-button > svg { flex-shrink: 0; stroke-width: 2; }
+.activity-button > svg:not(.lucide) { width: var(--icon-size-rail); height: var(--icon-size-rail); }
 .activity-button::before { content: ''; position: absolute; left: -5px; width: 2px; height: 16px; border-radius: 2px; background: var(--accent); opacity: 0; transform: scaleY(.4); transition: transform var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease); }
 .activity-button:hover { color: var(--text); background: var(--hover); }
 .activity-button.active { color: var(--accent); background: var(--selected); }
@@ -443,6 +458,21 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .breadcrumbs > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .breadcrumb-file { display: flex; gap: var(--space-1); align-items: center; color: var(--secondary); }
 .breadcrumb-file > svg { flex-shrink: 0; }
+/* 面包屑条内部（`src/components/BreadcrumbsBar.vue`）。下面是该组件输出的类名第一次进 style.css：
+   `breadcrumb-chain` / `breadcrumb-slot` / `breadcrumb-seg` 三条是它自己的骨架，`crumb-bg-*` 四条是
+   `src/navToolbarCrumbs.ts:54-59` 的 `CRUMB_TOKEN_CLASS` 产出的**背景四档**。
+   四档的判定顺序照抄上游 `BreadcrumbsComponent.java:639-648`（`ButtonSettings.getBackgroundColor`）：
+   hovered > selected > (light && !navigationCrumb) > DEFAULT —— `navigationCrumb` 只影响 INACTIVE 那一档。
+   呈现由 `crumbStates(...)` 算好后挂类名，所以这里**不再补 `:hover` 规则**（两套状态会互相打架）。
+   颜色是本仓的令牌映射，不是上游配色方案的键值（跨架构只照抄「选哪一档」）。 */
+.breadcrumb-chain { display: flex; align-items: center; min-width: 0; }
+.breadcrumb-slot { display: flex; align-items: center; min-width: 0; }
+.breadcrumb-seg { padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.breadcrumb-seg:focus-visible { outline: none; box-shadow: var(--ring); }
+.crumb-bg-hovered { background: var(--hover); }
+.crumb-bg-current { background: var(--accent-soft); color: var(--accent); }
+.crumb-bg-inactive { color: var(--muted); }
+.crumb-bg-default { background: transparent; }
 .editor-save-state { margin-left: auto; padding-left: 10px; color: var(--muted); font-size: 10px; }
 .editor-stage { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 /* 编辑器双向文本方向（IDEA View › 「文本方向」子菜单，对应 EditorSettingsExternalizable.BIDI_TEXT_DIRECTION）。
@@ -473,6 +503,10 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 /* 查找栏与编辑器是同一根 div 里的上下两块（CodeMirror 把 .cm-editor 挂进根容器），
    所以根成了列向 flex，编辑器占满剩余高度。 */
 .code-editor > .cm-editor { flex: 1 1 auto; min-height: 0; }
+/* 大文件模式提示条（上游 `LargeFileNotificationProvider`）：常驻在编辑器顶部，直到文件关闭或用户隐藏。 */
+.editor-large-banner { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-3); background: var(--elevated); color: var(--secondary); border-bottom: 1px solid var(--line); font-size: 11px; }
+.editor-large-banner > span { flex: 1 1 auto; }
+.editor-large-banner > .subtle-button { padding: 1px var(--space-2); font-size: 11px; }
 /* 编辑器内查找栏（上游 `SearchReplaceComponent`，由 `EditorSearchSession` 驱动 —— 不是工程内的
    `FindPopupPanel`）。紧凑面板：字段无边框、聚焦才画圈；开关是图标按钮，选中 = 主题色。
    行高用 --ctrl-height-sm，与全仓控件同一档（紧凑模式跟着收）。 */
@@ -491,6 +525,8 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 .find-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--ctrl-height-sm); height: var(--ctrl-height-sm); padding: 0; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); }
 .find-toggle:hover { background: var(--hover); color: var(--bright); }
 .find-toggle.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+/* 文字型开关（「保留大小写」那个 Aa）：按内容放宽，不占图标位。 */
+.find-toggle-text { width: auto; min-width: var(--ctrl-height-sm); padding: 0 var(--space-1); font: 11px var(--font-mono); }
 .find-sep { flex: 0 0 auto; width: 1px; height: 16px; margin: 0 var(--space-1); background: var(--line-strong); }
 /* 合并冲突导航条（上游 `MergeThreesideViewer` 顶部那条工具带的落点）。
    与查找栏同高同一档控件，贴在编辑器上方、有冲突时才在。 */
@@ -505,6 +541,12 @@ html[data-main-menu='separate'] .topbar-toolbar { padding: 0 0 0 var(--toolbar-r
 /* IDEA's lightweight information hint (HintManagerImpl / GotoNextErrorHandler:138): a label
    above the caret line, dismissed by the next key, a text change or a scroll. */
 .editor-hint { position: absolute; z-index: 40; max-width: 70%; padding: 4px 8px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--text); font-size: 12px; box-shadow: var(--popup-shadow); pointer-events: none; }
+/* 字面量预览（ImageOrColorPreviewService）：Shift + 悬停在颜色/图片字面量上时贴出的小卡片。 */
+.literal-preview { position: absolute; z-index: 41; padding: 6px; border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); box-shadow: var(--popup-shadow); pointer-events: none; }
+.literal-preview-color { display: flex; align-items: center; gap: 6px; }
+.literal-preview-chip { width: 28px; height: 18px; border: 1px solid var(--completion-border); border-radius: 3px; }
+.literal-preview-label { color: var(--muted); font: 11px var(--font-mono); }
+.literal-preview-image { display: block; max-width: 220px; max-height: 160px; image-rendering: pixelated; }
 .welcome-screen { margin: auto; width: 100%; max-width: 520px; max-height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; }
 .workbench-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .back-to-projects { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-4); color: var(--muted); }
@@ -526,6 +568,16 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .output-tabs { height: 100%; display: flex; flex-shrink: 1; min-width: 0; gap: var(--space-4); overflow-x: auto; }
 .output-tabs > button { height: 100%; padding: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .output-tabs > button.selected { color: var(--text); border-bottom-color: var(--accent); }
+/* `TabContentLayout` 的「…」：放不下/滚出可视区的标签列在这里（本仓取滚动，见 src/toolContentTabs.ts）。 */
+.output-tabs-more { position: relative; display: inline-flex; align-items: center; }
+.output-tabs-more-toggle { height: 100%; padding: 0 2px; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.output-tabs-more-toggle:hover, .output-tabs-more-toggle[aria-expanded=true] { color: var(--text); }
+.output-tabs-more-backdrop { position: fixed; inset: 0; z-index: 30; }
+/* 浮层自带前景色（`tests/popup-foreground.test.mjs`）：这两个菜单画了 `--elevated` 底却不写
+   `color:`，字色会从宿主继承 —— 顶栏是 `--m-chrome` 那族浅色字，浅字落白底上就读不清。
+   取 `--popup-foreground`，与本域其余浮层（.status-widget-menu / .select-in / .choose-target）同族。 */
+.output-tabs-more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 31; min-width: 180px; max-height: 320px; overflow: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.output-tabs-more-row { display: block; width: 100%; white-space: nowrap; }
 /* 引用那一格的每条 content（IDEA 的 Find 窗口）：标签 + 钉住 + 关闭，后两个只在悬停/选中时露出来，
    与工具窗口标签的关闭按钮一致（`TabbedPaneImpl`/`ContentTabLabel` 的那套 hover 行为）。 */
 .output-tab-closeable { height: 100%; display: inline-flex; align-items: center; gap: 2px; }
@@ -537,9 +589,27 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .output-tab-pin.pinned { opacity: 1; color: var(--accent); }
 .output-tab-close:hover, .output-tab-pin:hover { background: var(--selected); color: var(--text); }
 .count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 16px; padding: 0 5px; margin-left: 5px; background: var(--selected); color: var(--secondary); border-radius: var(--radius-pill); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 标签提醒（`TabInfo.fireAlert`）：亮/灭由 src/tabAlerts.ts 的 250ms 帧驱动（不是 CSS 动画，
+   照 `TabLabel.repaintAttraction` 逐帧开/关图标层）；预算用完常亮，选中该标签即消失。 */
+/* 内存部件的两段条（`MemoryUsagePanel.paintComponent:170-177`）：allocated 垫底、used 叠在上面。 */
+.memory-gauge { display: inline-flex; position: relative; width: 30px; height: 8px; margin-right: 5px; border-radius: 2px; overflow: hidden; background: var(--selected); }
+.memory-gauge > i { position: absolute; top: 0; bottom: 0; left: 0; }
+.memory-gauge-allocated { background: var(--line-strong); }
+.memory-gauge-used { background: var(--accent); }
+.tab-alert { flex-shrink: 0; margin-left: 4px; color: var(--accent); }
 /* COMBO content UI (`ToggleContentUiTypeMode`, `ContentComboLabel.java`): the same list of contents
    as the tab strip above, presented as one combo box instead. */
 .output-content-select { height: 20px; max-width: 260px; min-width: 90px; flex-shrink: 1; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--elevated); color: var(--text); font-size: 11px; }
+/* `ContentComboLabel.java`：图标 + 名称 + 箭头；单击弹内容列表（`toggleContentPopup`）。 */
+.content-combo { position: relative; display: inline-flex; min-width: 0; }
+.content-combo-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.content-combo-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content-combo-backdrop { position: fixed; inset: 0; z-index: 30; }
+.content-combo-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 31; min-width: 190px; max-height: 320px; overflow: auto; padding: var(--space-1); border: var(--popup-border); border-radius: var(--popup-radius); background: var(--elevated); color: var(--popup-foreground); box-shadow: var(--popup-shadow); }
+.content-combo-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; white-space: nowrap; }
+.content-combo-row.is-active { background: var(--hover); color: var(--bright); }
+.content-combo-row[aria-selected=true] { color: var(--text); }
+.content-combo-empty { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2); color: var(--muted); font-size: 11px; }
 .small-muted { color: var(--muted); font-size: 10px; }
 .output-heading .heading-actions { min-width: 28px; flex-shrink: 1; }
 .output-heading .small-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); letter-spacing: .6px; margin-right: 5px; white-space: nowrap; }
@@ -600,6 +670,11 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .sc-check-failures { display: flex; align-items: flex-start; gap: 5px; padding: var(--space-1) var(--space-3); font-size: 11px; line-height: 1.5; }
 .sc-check-failures-icon { flex: 0 0 auto; margin-top: 2px; color: var(--warning); }
 .sc-check-failures-text { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+/* A CommitProblemWithDetails failure whose showDetailsLink is null: the whole text IS the link
+   (CommitProgressPanel.kt:456-458), so it wears the link colour and underlines on hover like the
+   other inline links in the panel (`.sc-author-link`). */
+.sc-check-failure-link { padding: 0; border: 0; background: none; font: inherit; color: var(--accent); text-align: left; cursor: pointer; }
+.sc-check-failure-link:hover { text-decoration: underline; }
 /* RerunCommitChecksAction (CommitProgressPanel.kt:492-521) — the icon-only button on that row. */
 .sc-rerun-checks { flex: 0 0 auto; width: 18px; height: 18px; padding: 0; }
 /* CommitAuthorComponent (vcs/commit/CommitAuthorComponent.kt:124-137): the inactive "By"
@@ -680,7 +755,7 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .capabilities > div > span.capability-ready { color: var(--success); background: var(--success-bg); border-radius: var(--radius-xs); padding: var(--space-1); }
 /* 状态栏高度不是拍脑袋的常数，IDEA 是算出来的（platform-impl/.../status/）：
      :266  getTopWidth()   = JBUI.getInt("StatusBar.topBorderWidth", 1)        → 顶边框 1px
-     :169  minIconHeight   = JBUIScale.scale(18 + 1 + 1)                       → 20
+     :169-170 minIconHeight = JBUIScale.scale(18 + 1 + 1)                       → 20
      TextPanel.kt:65 computeTextHeight() = 一个 "XXX" JLabel 的 preferredSize.height（跟着 UI 字号/缩放走）
      IdeStatusBarImpl.kt:803 preferredTextHeight = computeTextHeight() + Widget.border() 上下内边距
      IdeStatusBarImpl.kt:351 minHeight = insets.top + insets.bottom + max(minIconHeight, preferredTextHeight)
@@ -693,8 +768,8 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-left, .status-right { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-width: 0; min-height: calc(var(--statusbar-height) - 1px); }
 .status-left > span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .status-brand { display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); width: 30px; height: calc(var(--statusbar-height) - 1px); }
-/* IDEA's ToolWindowsWidget (status/ToolWindowsWidget.java:62-299) sits in the status
-   bar's left panel (IdeStatusBarImpl.kt:286-297): an icon-only stripe toggle whose
+/* IDEA's ToolWindowsWidget (status/ToolWindowsWidget.java:62-300) sits in the status
+   bar's left panel (IdeStatusBarImpl.kt:285-298): an icon-only stripe toggle whose
    hover list carries the tool windows and their Alt+<digit> mnemonics. */
 .status-toolwindows { display: flex; align-items: center; justify-content: center; width: 24px; height: calc(var(--statusbar-height) - 1px); border: 0; background: none; color: var(--secondary); cursor: pointer; }
 .status-toolwindows:hover { background: var(--hover); color: var(--bright); }
@@ -773,14 +848,18 @@ kbd { font: 10px var(--font-mono); color: var(--muted); white-space: nowrap; }
 .status-progress-row { display: flex; flex-direction: column; gap: 1px; margin: 0; }
 .status-progress-row strong { color: var(--text); font-size: 11px; font-weight: 600; }
 .status-progress-row span { color: var(--secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 确定式进度：上游 ProcessPopup 的每一行本身就是一条 JProgressBar（ProcessPopup.java:331 遍历的行里
-   有它），而"有没有百分比"由任务自己说了算 —— `total <= 0` 时上游是 setIndeterminate(true)，
+/* 确定式进度：上游每个任务行本身就是一条 JProgressBar（`ProgressComponent.kt:55` 的 `progress` 字段、
+   `:66` `progress = JProgressBar(SwingConstants.HORIZONTAL)`），
+   而"有没有百分比"由任务自己说了算 —— 绘制时才判 `updateProgressNow`（`ProgressComponent.kt:190-198`）：
+   不确定式走 `setIndeterminate(true)`，确定式才 setValue。判据是
+   `isPaintingIndeterminate`（`ProgressComponent.kt:269-270` = `indicatorModel.isIndeterminate() || fraction == 0.0`），
+   不是"总数 <= 0"（那只是外部系统任务喂数的那一处：`ExternalSystemTaskProgressIndicatorUpdater.kt:62-63`）。
    所以这里只在 row.percent 不为 null 时画条，不确定式那一行仍然只有转圈的图标。 */
 .status-progress-track { align-self: stretch; width: 100%; height: 3px; margin-top: 2px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .status-progress-track > i { display: block; height: 100%; background: var(--accent); }
 /* IDEA ProcessPopup: every row ends in a real cancel button. */
 .status-progress-cancel { display: inline-flex; align-items: center; gap: 3px; align-self: flex-end; margin-top: 2px; padding: 1px var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font-size: 10px; }
-.status-progress-cancel:hover { background: var(--error-bg, transparent); color: var(--error); border-color: var(--error); }
+.status-progress-cancel:hover { background: var(--error-bg); color: var(--error); border-color: var(--error); }
 /* SeparatorDecorator.kt:31-43 — the separator is drawn only when the component *before* the
    indicator was an indicator too, so the first running task (and the "all tasks finished" label,
    TasksFinishedDecorator.kt:42) never carries one. */
@@ -1102,6 +1181,8 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .tree-menu { position: fixed; min-width: 168px; padding: 4px; background: var(--elevated); border: var(--popup-border); border-radius: var(--popup-radius); color: var(--popup-foreground); box-shadow: var(--popup-shadow); display: flex; flex-direction: column; transform-origin: top left; }
 .tree-menu > button { text-align: left; background: transparent; border: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-xs); color: var(--text); font-size: 12px; }
 .tree-menu > button:hover { background: var(--hover); color: var(--bright); }
+/* 键盘导航的活动行（`EditorPopupMenu` 的 ↑↓/→← 走查，见 src/menuKeyboard.ts）：与悬停同一观感。 */
+.tree-menu > button.is-active { background: var(--hover); color: var(--bright); }
 .tree-menu .menu-danger { color: var(--error); }
 /* 编辑器右键浮层的勾选列（`EditorPopupMenu.vue` 用，它没有自己的 <style>，所以规则在这）。
    此前 `.menu-check` **一条 CSS 都没有** —— 是个纯行内 span，勾选列的宽度随内容变，
@@ -1224,6 +1305,12 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .status-chip { padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status-chip:hover:not(:disabled) { background: var(--hover); color: var(--bright); }
 .status-locked { display: inline-flex; align-items: center; gap: 3px; color: var(--warning); }
+/* 检查配置档切换器（上游 InspectionProfileManager.setRootProfile 的状态栏落点）。 */
+.status-inspection-profile { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.status-inspection-profile-label { color: var(--muted); }
+.status-inspection-profile-select { max-width: 140px; padding: 0 2px; color: var(--secondary); background: transparent; border: 0; font: 11px var(--font-mono); transition: color var(--dur-1) var(--ease); }
+.status-inspection-profile-select:hover { color: var(--bright); }
+.status-inspection-profile-lock { color: var(--warning); flex-shrink: 0; }
 .status-problems { display: flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--secondary); font: 11px var(--font-mono); cursor: pointer; }
 .status-problems:hover { background: var(--hover); }
 .dialog-hint { margin: 0 0 var(--space-2); color: var(--muted); font-size: 11px; line-height: 1.6; }
@@ -1234,6 +1321,54 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
 .quickdoc-popup { position: fixed; z-index: 900; width: 460px; max-height: 300px; display: flex; flex-direction: column; background: var(--panel); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow) 30%, transparent); }
 .quickdoc-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .quickdoc-body { margin: 0; padding: var(--space-2) var(--space-3); overflow: auto; flex: 1; font: 12px var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+/* 弹层**内部**的分块。`QuickDocPopup.vue` 没有 <style> 块，class 名照抄上游 DocumentationMarkup 的四块
+   （DocumentationMarkup.java:13-31），对应的 CSS 规则即 DocumentationHtmlUtil.getDocumentationPaneAdditionalCssRules
+   （DocumentationHtmlUtil.kt:116-138）的翻译：definition = 签名（等宽）、content = 正文、
+   sections = 分节表、bottom = 面板底部那一行的外部文档链接（ExternalDocumentationHandler.java:31-40）。
+   `.quickdoc-body` 整块是等宽 + pre-wrap，所以下面每块该换字族/该重置 pre-wrap 的地方都单独写回来。 */
+.quickdoc-title { font: 600 11px var(--font-ui); color: var(--bright); }
+.quickdoc-origin { font: 11px var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 签名 = 上游 getStyledSignatureFragment（LspDocumentationData.kt:85-88）：独立一块，与正文分开。 */
+.quickdoc-definition { margin: 0 0 var(--space-2); padding: var(--space-1) var(--space-2); background: var(--hover); border-radius: var(--radius-xs); }
+.quickdoc-definition pre { margin: 0; font: 12px var(--font-mono); color: var(--bright); white-space: pre-wrap; }
+.quickdoc-content { margin: 0 0 var(--space-2); }
+.quickdoc-content.is-text { font: 12px var(--font-ui); color: var(--text); white-space: normal; }
+.quickdoc-content.is-code { font: 12px var(--font-mono); color: var(--text); }
+/* 标题回到 UI 字族并压掉 body 的 pre-wrap —— 上游是 HTML 标题，本仓 body 是 pre 容器，只能在这里掰回来。 */
+.quickdoc-content.is-heading { font: 600 12px var(--font-ui); color: var(--bright); white-space: normal; }
+.quickdoc-content.is-heading h4 { margin: 0; font: inherit; }
+/* 分节表：左格灰化不换行、右格顶对齐（DocumentationHtmlUtil.kt:28-31）。 */
+.quickdoc-sections { width: 100%; margin: 0 0 var(--space-2); border-collapse: collapse; font: 12px var(--font-ui); white-space: normal; }
+.quickdoc-section { padding: var(--space-1) var(--space-2) var(--space-1) 0; color: var(--muted); white-space: nowrap; vertical-align: top; }
+.quickdoc-section-body { padding: var(--space-1) 0; color: var(--text); vertical-align: top; }
+.quickdoc-links { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); }
+.quickdoc-link { display: inline-flex; align-items: center; gap: var(--space-1); padding: 1px var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--accent); font: 11px var(--font-ui); text-align: left; cursor: pointer; }
+.quickdoc-link:hover { background: var(--hover); color: var(--accent-hover); }
+.quickdoc-link svg { flex-shrink: 0; }
+/* 链接现在会长在句子里（上游正文就是一段 HTML，`a` 在行内标签白名单里：
+   `platform/markdown-utils/src/com/intellij/markdown/utils/doc/DocMarkdownToHtmlConverter.kt:68`）
+   ⇒ 字号跟着正文走；上面那条 11px 只该管底部清单（`.quickdoc-links`）。 */
+.quickdoc-content .quickdoc-link,
+.quickdoc-section-body .quickdoc-link { font: inherit; }
+/* 正文段落：`p` 吃 UA 默认的 `margin: 1em 0`（`src/style.css:3` 只有 `* { box-sizing }`，全站没有 margin 复位），
+   会把上游 4px 的段前/段后撑成 16px（`DocumentationHtmlUtil.kt:53`、`:56` → `JBHtmlPaneStyleConfiguration`）。 */
+.quickdoc-content.is-text p { margin: 0 0 var(--space-1); }
+.quickdoc-content.is-text p:last-child { margin-bottom: 0; }
+/* 正文里的代码块同样吃 UA 的 `pre { margin: 1em 0 }`（上面 `.quickdoc-definition pre` 只复位了签名那一块）。 */
+.quickdoc-content.is-code pre,
+.quickdoc-content.is-code code { margin: 0; font: inherit; }
+/* 分节右格现在也可能是分段渲染的 HTML（`DocumentationMarkup.java:29` 的 `td[valign='top']`）⇒ 不留段距。 */
+.quickdoc-section-body p { margin: 0; }
+.quickdoc-figure { margin: 0 0 var(--space-2); }
+.quickdoc-figure img { max-width: 100%; border-radius: var(--radius-xs); }
+.quickdoc-figure figcaption { font: 11px var(--font-ui); color: var(--muted); }
+.quickdoc-bottom { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-1) 0 0; padding-top: var(--space-1); border-top: 1px solid var(--line); }
+/* 调试器悬停值提示（`src/quickEvaluateHint.ts`，上游 `XDebuggerTextPopup`）。宽度/高度不写死 ——
+   尺寸由 `quickEvaluatePopupSize` 按屏幕比例算完写进内联 style，这里只管外观。
+   工具条那一块**故意没有规则**：`QUICK_EVALUATE_TOOLBAR` 的四个动作还差一个值输入界面，
+   按 agent-playbook §3 不画点不动的按钮，所以这里也没有为它留位置。 */
+.quick-eval-hint { padding: var(--space-1) var(--space-2); background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); overflow: hidden; }
+.quick-eval-value { font: 12px var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; }
 
 /* Signature help (参数信息) — IDEA's parameter info panel with overload navigation */
 .signature-popup { position: fixed; z-index: 900; width: 500px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; background: var(--elevated); color: var(--popup-foreground); border: var(--popup-border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); outline: none; }
@@ -1375,7 +1510,15 @@ html[data-presentation='on'] .statusbar, html[data-presentation='on'] .preview-b
   to { clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y)); }
 }
 
-/* 也覆盖动画播放期间系统设置发生改变的情况。 */
+/* 也覆盖动画播放期间系统设置发生改变的情况。应用内省电模式走同一条语义
+   （`html[data-motion='reduced']`，`appearanceActions.ts:224` 写这个属性）—— 水纹是
+   startViewTransition 驱动的一次全屏 clip-path 揭示，省电就该停它；`src/themeRipple.ts` 的
+   `prefersReducedMotion()` 认同一份属性，两边不留"CSS 停了 JS 还在跑"的缝。 */
 @media (prefers-reduced-motion: reduce) {
   :root.theme-transition::view-transition-new(root) { animation: none; }
 }
+/* 上面那条全局降级（`html[data-motion='reduced'] *`）只覆盖元素与 `*::before/::after`，
+   **不含** `::view-transition-*` 这组视图过渡伪元素，所以水纹要单独点名。
+   `html` 就是 `:root`，`.theme-transition` 也挂在它身上（`src/themeRipple.ts` 的 `root.classList`），
+   两者是同一个元素，不能写成后代选择器（`html … :root` 永远不匹配）。 */
+html[data-motion='reduced'].theme-transition::view-transition-new(root) { animation: none; }

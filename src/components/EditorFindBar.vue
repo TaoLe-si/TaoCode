@@ -9,18 +9,23 @@
 //   状态文案 · 上一个 · 下一个 · 过滤组（在所选内容中搜索 打头）· 更多 · 关闭
 // 第二行只在替换模式出现（`SwitchToReplace`），左侧是替换输入框，右侧是替换 / 全部替换
 // （字段顺序照 `FindPopupPanel.java:786/791`：搜索框那侧是「区分大小写 / 单词 / 正则」，
-//   替换框那侧是「保留大小写」—— 保留大小写只作用于替换结果，本仓的替换走字面量保留原样，
-//   所以那一档在下面以**禁用态不出现在栏里**，而不是做成点了没反应的开关）。
+//   替换框那侧是「保留大小写」—— 保留大小写只作用于替换结果，算法在 `src/preserveCase.ts`，
+//   开关取随 IDE 发货的中文包 `find.options.replace.preserve.case`「保留大小写」）。
 //
 // 文案全部取本机随 IDE 发货的中文语言包（`plugins/localization-zh/lib/localization-zh.jar`
 // 的 `messages/FindBundle.properties`），不是自己译的：
 //   区分大小写(&C) `:10` · 关闭 `:11` · 正则表达式(&X) `:65` · 搜索历史记录 `:96` ·
-//   在所选内容中搜索 `:101` · 单词(&W) `:124`
+//   替换历史记录 `:77` · 在所选内容中搜索 `:101` · 单词(&W) `:124`
 // 导航两条取 `ActionsBundle.properties`：下一个匹配项(_X) `:1398` · 上一个匹配项(_O) `:1497`。
+//
+// 替换历史（`find.replace.history`）是上游 `SearchTextArea.ShowHistoryAction` 按输入框模式取的
+// 另一张表（`SearchTextArea.java:397-413`）：与查找历史各管各（`getRecentReplaceStrings`），
+// 本仓落在 `src/findReplaceHistory.ts`（本地键 `taocode.findReplaceHistory`，上限 20 与查找历史同）。
 import { CaseSensitive, ChevronDown, ChevronUp, CornerDownLeft, History, Regex, Replace, ReplaceAll, Search, TextSelect, WholeWord, X } from 'lucide-vue-next'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { ICON_STROKE, iconSize } from '../uiIcons'
 import type { SearchOptions } from '../editorSearch'
+import { pushReplaceHistory, readReplaceHistory, writeReplaceHistory } from '../findReplaceHistory'
 
 const props = defineProps<{
   query: string
@@ -32,6 +37,8 @@ const props = defineProps<{
   /** 替换模式（`SwitchToReplace`）：多出第二行。 */
   replaceMode: boolean
   replaceText: string
+  /** 「保留大小写」：替换时套用命中文本的形态（只作用于替换结果）。 */
+  preserveCase: boolean
   /** 历史下拉的候选（上游 `FindInProjectSettings.getRecentFindStrings`，`SearchTextArea.java:408-409`）。 */
   history: string[]
 }>()
@@ -46,11 +53,43 @@ const emit = defineEmits<{
   /** 切换「在所选内容中搜索」（Ctrl+Alt+E，栏里与编辑器里各有一条键位）。 */
   toggleInSelection: []
   replaceOne: []; replaceAll: []
+  /** 「保留大小写」开关（替换行那侧）。 */
+  togglePreserveCase: []
 }>()
 
 const searchInput = ref<HTMLInputElement | null>(null)
 const replaceInput = ref<HTMLInputElement | null>(null)
 const historyOpen = ref(false)
+// 替换历史（上游 `find.replace.history`，`SearchTextArea.java:397-413`）：与查找历史**各管一张表**
+// （上游读的是 `getRecentReplaceStrings()`），本仓按同一族做法存本地一份（`src/findReplaceHistory.ts`）。
+// 组件自己读写：它没有查找历史那种"宿主传进来"的 prop（宿主是 CodeEditor.vue 的查找控制器），
+// 而替换词只有本组件在 `替换 / 全部替换` 那一刻知道。
+const replaceHistory = ref<string[]>(readReplaceHistory())
+const replaceHistoryOpen = ref(false)
+function recordReplace() {
+  const next = pushReplaceHistory(replaceHistory.value, props.replaceText)
+  if (next.length === replaceHistory.value.length && next[0] === replaceHistory.value[0]) return
+  replaceHistory.value = next
+  writeReplaceHistory(next)
+}
+function pickReplaceHistory(value: string) {
+  replaceHistoryOpen.value = false
+  emit('replace', value)
+  replaceInput.value?.focus()
+}
+/**
+ * 开替换历史下拉前**重读一次存档**：一个窗口可以有两个编辑器分栏，各自一条查找栏，
+ * 另一条记下的替换词不该等到组件重挂才看得见（同一次会话内也即时）。
+ */
+function openReplaceHistory() {
+  replaceHistory.value = readReplaceHistory()
+  historyOpen.value = false
+  replaceHistoryOpen.value = true
+}
+function toggleReplaceHistory() {
+  if (replaceHistoryOpen.value) replaceHistoryOpen.value = false
+  else openReplaceHistory()
+}
 // 打开栏即把光标放进搜索框（上游 SearchReplaceComponent 的输入框是 main-field）。
 watch(() => props.replaceMode, async mode => {
   await nextTick()
@@ -70,22 +109,33 @@ function onSearchKeydown(event: KeyboardEvent) {
   // keymap 只管 `.cm-editor` 内部，焦点在搜索框时按它等于没按（真机实测过）。
   if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'e') { event.preventDefault(); emit('toggleInSelection'); return }
   // Alt+Down 开搜索历史（`ShowSearchHistory` = alt DOWN，`$default.xml:1205-1206`）。
-  if (event.key === 'ArrowDown' && event.altKey) { event.preventDefault(); historyOpen.value = true; return }
+  if (event.key === 'ArrowDown' && event.altKey) { event.preventDefault(); replaceHistoryOpen.value = false; historyOpen.value = true; return }
   // Esc 两段式（上游 `SearchReplaceComponent.CloseAction` + `EscapeHandler`）：先收历史下拉，
   // 再关整条栏。输入框里的 Esc 由组件自己处理，不会冒泡到窗口级的其他 Esc 语义。
   if (event.key === 'Escape') {
     event.preventDefault()
-    if (historyOpen.value) historyOpen.value = false
+    if (replaceHistoryOpen.value) replaceHistoryOpen.value = false
+    else if (historyOpen.value) historyOpen.value = false
     else emit('close')
   }
 }
 function onReplaceKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter') { event.preventDefault(); emit('replaceOne'); return }
+  if (event.key === 'Enter') { event.preventDefault(); recordReplace(); emit('replaceOne'); return }
+  // Alt+Down 在替换框里开的是**替换历史**（上游两个动作各读各的表，`SearchTextArea.java:412-413`）。
+  if (event.key === 'ArrowDown' && event.altKey) { event.preventDefault(); openReplaceHistory(); return }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    if (replaceHistoryOpen.value) replaceHistoryOpen.value = false
+    else if (historyOpen.value) historyOpen.value = false
+    else emit('close')
+    return
+  }
   // 替换框里 F3 同样是"下一个匹配"（与搜索框、编辑器同一个语义）。
   onSearchKeydown(event)
 }
 function pickHistory(value: string) {
   historyOpen.value = false
+  replaceHistoryOpen.value = false
   emit('query', value)
   searchInput.value?.focus()
 }
@@ -135,18 +185,33 @@ function pickHistory(value: string) {
     </div>
     <div v-if="replaceMode" class="find-row find-replace-row">
       <span class="find-icon" aria-hidden="true"><Replace :size="iconSize.control" :stroke-width="ICON_STROKE" /></span>
-      <input
-        ref="replaceInput"
-        class="find-field find-replace-field"
-        type="text"
-        aria-label="替换为"
-        placeholder="替换为"
-        :value="replaceText"
-        @input="emit('replace', ($event.target as HTMLInputElement).value)"
-        @keydown="onReplaceKeydown"
-      />
-      <button class="find-icon-button" type="button" title="替换 (Enter)" aria-label="替换" @click="emit('replaceOne')"><CornerDownLeft :size="iconSize.control" :stroke-width="ICON_STROKE" /></button>
-      <button class="find-icon-button" type="button" title="全部替换" aria-label="全部替换" @click="emit('replaceAll')"><ReplaceAll :size="iconSize.control" :stroke-width="ICON_STROKE" /></button>
+      <div class="find-field-wrap">
+        <input
+          ref="replaceInput"
+          class="find-field find-replace-field"
+          type="text"
+          aria-label="替换为"
+          placeholder="替换为"
+          :value="replaceText"
+          @input="emit('replace', ($event.target as HTMLInputElement).value)"
+          @keydown="onReplaceKeydown"
+        />
+        <button
+          v-if="replaceHistory.length"
+          class="find-icon-button"
+          type="button"
+          title="替换历史记录"
+          aria-label="替换历史记录"
+          :aria-expanded="replaceHistoryOpen"
+          @click="toggleReplaceHistory()"
+        ><History :size="iconSize.menu" :stroke-width="ICON_STROKE" /></button>
+        <div v-if="replaceHistoryOpen" class="find-history" role="listbox" aria-label="替换历史记录">
+          <button v-for="row in replaceHistory" :key="row" class="menu-button find-history-row" role="option" :aria-selected="false" @click="pickReplaceHistory(row)">{{ row }}</button>
+        </div>
+      </div>
+      <button class="find-toggle find-toggle-text" type="button" :class="{ active: preserveCase }" title="保留大小写" aria-label="保留大小写" :aria-pressed="preserveCase" @click="emit('togglePreserveCase')">Aa</button>
+      <button class="find-icon-button" type="button" title="替换 (Enter)" aria-label="替换" @click="recordReplace(); emit('replaceOne')"><CornerDownLeft :size="iconSize.control" :stroke-width="ICON_STROKE" /></button>
+      <button class="find-icon-button" type="button" title="全部替换" aria-label="全部替换" @click="recordReplace(); emit('replaceAll')"><ReplaceAll :size="iconSize.control" :stroke-width="ICON_STROKE" /></button>
     </div>
   </div>
 </template>

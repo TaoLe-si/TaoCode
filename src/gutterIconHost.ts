@@ -7,7 +7,7 @@
 // 为什么单独成模块：App.vue 已到机检上限，而这一域（图标合成 + 点击分派）自洽，
 // 宿主只留一行装配。
 import { computed } from 'vue'
-import { collectGutterIcons, type GutterBookmark, type GutterIcon } from './gutterIcons'
+import { collectGutterIcons, type GutterBookmark, type GutterIcon } from './gutterIcons.ts'
 import type { LspDiagnostic } from './bridge'
 import type { Tab } from './editorTab'
 

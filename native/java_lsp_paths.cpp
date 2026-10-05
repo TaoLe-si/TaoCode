@@ -6,6 +6,7 @@
 #include <set>
 
 #include "fsops.hpp"
+#include "projects.hpp"  // java_lsp_settings（settings 的合成；声明在这边，参数由本文件派生）
 #include "text.hpp"
 
 namespace taocode {
@@ -24,15 +25,73 @@ Json library_list(const Json& java, const std::vector<std::string>& extra) {
     return list;
 }
 
+namespace {
+
+namespace fs = std::filesystem;
+
 /**
- * 导入范围：IDEA 只导入**链接的**子工程（项目 `.idea/gradle.xml` 里 `linkedProjects` 那几个），
- * 而 JDT 的 Buildship 会把工作区根下**所有** Gradle 工程都拉进来同步 —— 在"一个仓库里几十个
- * 子工程"的形状下，这既慢（每次同步 ~75s）又会把无关工程（参考源码副本）的失败堆进日志。
- * 这里按未链接的顶层目录派生 `java.import.exclusions`（键名在随发行那份 JDT 1.44.0 的
- * `Preferences` 常量里核对过：`java.import.exclusions`），语义就是 IDA 的那句"只导入链接的工程"。
- *
- * 没填 `linkedProjects` 时**不排除任何东西**（保持服务器自己的扫描行为，不擅自缩小范围）。
+ * 类路径兜底要看的目录，**按链接的子工程**与**按工作区根**两条派生共用同一张表
+ * （以前根那条只判 `build` 与 `lib`，单模块工程连 `build/classes`、`run` 都看不到）。
  */
+const std::vector<std::string>& library_candidates() {
+    static const std::vector<std::string> table{
+        "build/rfg/**/*.jar",   // ForgeGradle 的 Minecraft/Forge 反混淆产物
+        "build/libs/**/*.jar",  // 本工程构建产物
+        "build/classes/**",     // 增量编译输出（类目录 JDT 也认）
+        "lib/**/*.jar",
+        "run/**/*.jar",
+    };
+    return table;
+}
+
+/** glob 里 `**` 之前的那一段（起始目录）：以 `build/rfg` 之类目录为前缀的 jar 模式 → `build/rfg`。 */
+std::string glob_base(const std::string& glob) { return glob.substr(0, glob.find("**")); }
+
+// 收集某个 glob 前缀目录下所有 .jar 的绝对路径（glob 形如 `build/rfg/**/*.jar`：
+// 取 `build/rfg` 这一段作为起始目录，递归找 .jar）。
+std::vector<std::string> jars_under(const fs::path& root, const std::string& glob) {
+    std::vector<std::string> jars;
+    const auto base = root / from_utf8(glob_base(glob));
+    std::error_code code;
+    if (!fs::is_directory(base, code) || code) return jars;
+    for (fs::recursive_directory_iterator it(base, code), end; it != end && !code; it.increment(code)) {
+        if (!it->is_regular_file(code) || code) continue;
+        if (it->path().extension() != L".jar") continue;
+        if (jars.size() >= 400) break;
+        jars.push_back(utf8_path(it->path()));
+    }
+    std::sort(jars.begin(), jars.end());
+    return jars;
+}
+
+std::string xml_escape(const std::string& value) {
+    std::string out;
+    for (const char ch : value) {
+        switch (ch) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+std::vector<std::string> linked_project_dirs(const Json& gradle) {
+    std::vector<std::string> dirs;
+    const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
+    if (!linked.is_array()) return dirs;
+    for (const auto& entry : linked) {
+        if (!entry.is_string()) continue;
+        const auto text = entry.get<std::string>();
+        if (!text.empty() && std::find(dirs.begin(), dirs.end(), text) == dirs.end()) dirs.push_back(text);
+    }
+    return dirs;
+}
+
 /**
  * 源根：IDEA 的源根是 Gradle 导入算出来的；我们没有可用导入时，就从**磁盘布局**推一把 ——
  * 链接的子工程里真实存在的 `src/main/java`、`src/test/java`、`src`（含资源目录）。
@@ -42,29 +101,38 @@ Json library_list(const Json& java, const std::vector<std::string>& extra) {
  */
 std::vector<std::string> default_source_paths(const fs::path& root, const Json& gradle) {
     std::vector<std::string> paths;
-    const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
-    if (!linked.is_array() || linked.empty()) return paths;
     static const char* suffixes[] = {"src/main/java", "src/test/java", "src/main/resources", "src"};
-    for (const auto& entry : linked) {
-        if (!entry.is_string()) continue;
-        const auto project = entry.get<std::string>();
+    for (const auto& project : linked_project_dirs(gradle))
         for (const auto* suffix : suffixes) {
-            const auto candidate = root / from_utf8(project) / from_utf8(std::string(suffix));
             std::error_code code;
-            if (fs::is_directory(candidate, code) && !code) paths.push_back(project + "/" + suffix);
+            if (fs::is_directory(root / from_utf8(project) / from_utf8(std::string(suffix)), code) && !code)
+                paths.push_back(project + "/" + suffix);
         }
+    return paths;
+}
+
+std::vector<std::string> root_source_paths(const fs::path& root) {
+    std::vector<std::string> paths;
+    static const char* suffixes[] = {"src/main/java", "src/test/java", "src/main/resources", "src"};
+    for (const auto* suffix : suffixes) {
+        std::error_code code;
+        if (fs::is_directory(root / from_utf8(std::string(suffix)), code) && !code) paths.emplace_back(suffix);
     }
     return paths;
 }
 
+/**
+ * 导入范围：IDEA 只导入**链接的**子工程（项目 `.idea/gradle.xml` 里 `linkedProjects` 那几个），
+ * 而 JDT 的 Buildship 会把工作区根下**所有** Gradle 工程都拉进来同步 —— 在"一个仓库里几十个
+ * 子工程"的形状下，这既慢（每次同步 ~75s）又会把无关工程（参考源码副本）的失败堆进日志。
+ * 这里按未链接的顶层目录派生 `java.import.exclusions`（键名在随发行那份 JDT 1.44.0 的
+ * `Preferences` 常量里核对过：`java.import.exclusions`），语义就是 IDA 的那句"只导入链接的工程"。
+ * 没填 `linkedProjects` 时**不排除任何东西**（保持服务器自己的扫描行为，不擅自缩小范围）。
+ */
 std::vector<std::string> import_exclusions(const fs::path& root, const Json& gradle) {
     std::vector<std::string> exclusions;
-    const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
-    if (!linked.is_array() || linked.empty()) return exclusions;
     std::set<std::string> linked_tops;
-    for (const auto& entry : linked) {
-        if (!entry.is_string()) continue;
-        const auto text = entry.get<std::string>();
+    for (const auto& text : linked_project_dirs(gradle)) {
         const auto slash = text.find_first_of("/\\");
         linked_tops.insert(slash == std::string::npos ? text : text.substr(0, slash));
     }
@@ -97,69 +165,19 @@ std::vector<std::string> default_referenced_libraries(const fs::path& root, cons
     std::vector<std::string> globs;
     // **按链接的子工程派生**（不是按工作区根）：这个仓库的形状是"根目录下一堆子工程，产物在
     // `<子工程>/build/rfg|libs`"。真机诊断抓到过按根判断的版本：`fs::exists(root/"build")` 为假
-    // ⇒ 一条都没挂上（日志里"类路径兜底 0 条"）。
-    const auto& linked = gradle.contains("linkedProjects") ? gradle.at("linkedProjects") : Json();
-    if (!linked.is_array() || linked.empty()) {
-        // 没链接信息：退回按工作区根判一次（单体工程仍然可用）。
-        std::error_code code;
-        if (fs::exists(root / L"build", code) && !code) globs.emplace_back("build/**/*.jar");
-        if (fs::exists(root / L"lib", code) && !code) globs.emplace_back("lib/**/*.jar");
-        return globs;
-    }
-    static const char* candidates[] = {
-        "build/rfg/**/*.jar",   // ForgeGradle 的 Minecraft/Forge 反混淆产物
-        "build/libs/**/*.jar",  // 本工程构建产物
-        "build/classes/**",     // 增量编译输出（类目录 JDT 也认）
-        "lib/**/*.jar",
-        "run/**/*.jar",
-    };
-    for (const auto& entry : linked) {
-        if (!entry.is_string()) continue;
-        const auto project = entry.get<std::string>();
-        for (const auto* candidate : candidates) {
-            const auto parent = root / from_utf8(project) / fs::path(candidate).begin()->wstring();
+    // ⇒ 一条都没挂上（日志里"类路径兜底 0 条"）。没链接信息时退回按工作区根判一次（单体工程）。
+    const auto dirs = linked_project_dirs(gradle);
+    const auto bases = dirs.empty() ? std::vector<std::string>{std::string()} : dirs;
+    for (const auto& base : bases) {
+        const auto relative = base.empty() ? std::string() : base + "/";
+        for (const auto& candidate : library_candidates()) {
             std::error_code code;
-            if (fs::exists(parent, code) && !code) globs.push_back(project + "/" + candidate);
+            if (fs::is_directory(root / from_utf8(relative) / from_utf8(glob_base(candidate)), code) && !code)
+                globs.push_back(relative + candidate);
         }
     }
     return globs;
 }
-
-namespace {
-
-// 收集某个 glob 前缀目录下所有 .jar 的绝对路径（glob 形如 `<sub>/build/rfg/**/*.jar`：
-// 取 `<sub>/build/rfg` 这一段作为起始目录，递归找 .jar）。
-std::vector<std::string> jars_under(const std::filesystem::path& root, const std::string& glob) {
-    std::vector<std::string> jars;
-    const auto prefix = glob.substr(0, glob.find("**"));
-    std::error_code code;
-    const auto base = root / from_utf8(prefix);
-    if (!std::filesystem::is_directory(base, code) || code) return jars;
-    for (std::filesystem::recursive_directory_iterator it(base, code), end; it != end && !code; it.increment(code)) {
-        if (!it->is_regular_file(code) || code) continue;
-        if (it->path().extension() != L".jar") continue;
-        if (jars.size() >= 400) break;
-        jars.push_back(utf8_path(it->path()));
-    }
-    std::sort(jars.begin(), jars.end());
-    return jars;
-}
-
-std::string xml_escape(const std::string& value) {
-    std::string out;
-    for (const char ch : value) {
-        switch (ch) {
-            case '&': out += "&amp;"; break;
-            case '<': out += "&lt;"; break;
-            case '>': out += "&gt;"; break;
-            case '"': out += "&quot;"; break;
-            default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
-
-}  // namespace
 
 int materialize_eclipse_project(const fs::path& project_dir, const std::vector<std::string>& source_paths,
                                const std::vector<std::string>& library_globs) {
@@ -176,30 +194,36 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
 
     const auto name = utf8_path(project_dir.filename());
     const auto prefix = name + "/";
+    // 条目是**工作区相对**的：带 `<工程名>/` 前缀的剥掉当工程内相对用（子工程），
+    // 不带的原样用（工程就是工作区根时，glob 本身就是根相对的）。以前这里对不带前缀的一律
+    // `continue` ⇒ 根工程的 `.classpath` 里一个 lib 条目都没有，外部类照旧解析不了。
+    const auto strip = [&prefix](const std::string& value) {
+        return value.rfind(prefix, 0) == 0 ? value.substr(prefix.size()) : value;
+    };
     const std::string quote(1, '"');
     const auto quoted = [&quote](const std::string& value) { return quote + value + quote; };
 
     int written = 0;
-    std::ofstream project_out(need_project ? project_file : fs::path(), std::ios::binary);
-    if (!need_project) { /* 已有的 .project 不动 */ }
-    else if (project_out) {
+    if (need_project) {
+        std::ofstream project_out(project_file, std::ios::binary);
+        if (!project_out) return 0;
         project_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
-    project_out << "<projectDescription>" << std::endl;
-    project_out << "  <name>" << xml_escape(name) << "</name>" << std::endl;
-    project_out << "  <comment>由 TaoCode 生成：Gradle 导入不可用时的外部类路径与源根（见 native/java_lsp_paths.cpp）</comment>" << std::endl;
-    project_out << "  <buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec>" << std::endl;
-    project_out << "  <natures><nature>org.eclipse.jdt.core.javanature</nature></natures>" << std::endl;
+        project_out << "<projectDescription>" << std::endl;
+        project_out << "  <name>" << xml_escape(name) << "</name>" << std::endl;
+        project_out << "  <comment>由 TaoCode 生成：Gradle 导入不可用时的外部类路径与源根（见 native/java_lsp_paths.cpp）</comment>" << std::endl;
+        project_out << "  <buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec>" << std::endl;
+        project_out << "  <natures><nature>org.eclipse.jdt.core.javanature</nature></natures>" << std::endl;
         project_out << "</projectDescription>" << std::endl;
         ++written;
     }
-
-    std::ofstream classpath_out(need_classpath ? classpath_file : fs::path(), std::ios::binary);
     if (!need_classpath) return written;  // 已有的 .classpath 不动
+
+    std::ofstream classpath_out(classpath_file, std::ios::binary);
     if (!classpath_out) return written;
     classpath_out << "<?xml version=" << quoted("1.0") << " encoding=" << quoted("UTF-8") << "?>" << std::endl;
     classpath_out << "<classpath>" << std::endl;
     for (const auto& source : source_paths) {
-        const auto relative = source.rfind(prefix, 0) == 0 ? source.substr(prefix.size()) : source;
+        const auto relative = strip(source);
         std::error_code exists_code;
         if (!fs::is_directory(project_dir / from_utf8(relative), exists_code) || exists_code) continue;
         classpath_out << "  <classpathentry kind=" << quoted("src") << " path=" << quoted(relative) << "/>" << std::endl;
@@ -208,16 +232,16 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
     // `*-sources.jar` 不当普通 lib（它里面是 .java，放类路径上只会添噪音），而是当同名 jar 的
     // `sourcepath`（Eclipse 的"源码附件"）—— JDT 有了源码附件，跳进 jar 里的类才能落到 .java 上，
     // 否则 `textDocument/definition` 对库里的类型给不出位置（真机：hover 已经解析出外部类型，
-    // 但 definition 空手而归）。
+    // 但 definition 空手而归）。上游同一件事的两条根类型：
+    // `platform/projectModel-api/.../OrderRootType.java:34`（CLASSES）与 `:44`（SOURCES），
+    // 配对形状见 `ModuleRootModificationUtil.java:40-52` 的 classesRootUrls + sourceRootUrls。
     std::vector<std::string> binaries, sources;
-    for (const auto& glob : library_globs) {
-        if (glob.rfind(prefix, 0) != 0) continue;
-        for (const auto& jar : jars_under(project_dir, glob.substr(prefix.size()))) {
-            const auto name = fs::path(from_utf8(jar)).filename().string();
-            if (name.find("-sources") != std::string::npos) sources.push_back(jar);
+    for (const auto& glob : library_globs)
+        for (const auto& jar : jars_under(project_dir, strip(glob))) {
+            const auto jar_name = fs::path(from_utf8(jar)).filename().string();
+            if (jar_name.find("-sources") != std::string::npos) sources.push_back(jar);
             else binaries.push_back(jar);
         }
-    }
     // 配对规则：① 同名优先（`x.jar` ↔ `x-sources.jar`）；② 否则按**共享词**配（取共享词最多的那个）——
     // ForgeGradle 的反混淆产物名字对不上（`srg_patched_minecraft-sources.jar` 对应的是
     // `srg_merged_minecraft.jar`、`mcp_patched_minecraft-sources.jar` 对应 `recompiled_minecraft-1.7.10.jar`），
@@ -257,6 +281,55 @@ int materialize_eclipse_project(const fs::path& project_dir, const std::vector<s
     classpath_out << "  <classpathentry kind=" << quoted("output") << " path=" << quoted("bin") << "/>" << std::endl;
     classpath_out << "</classpath>" << std::endl;
     return written + 1;
+}
+
+int materialize_eclipse_projects(const fs::path& root, const Json& gradle) {
+    const auto dirs = linked_project_dirs(gradle);
+    const auto libraries = default_referenced_libraries(root, gradle);
+    // 一个子工程都没链接 ⇒ **工作区根自己**就是那个工程。IDEA 里打开单模块工程时模块的内容根
+    // 就是项目目录（上游 `ModuleRootModificationUtil.addContentRoot`，:36-38），源根是它下面的
+    // SourceFolder（`ContentEntry.getSourceFolders()`，`ContentEntry.java:63`）。
+    // 以前这条形状压根不物化 ⇒ JDT 眼里根目录不是工程，`src/**` 全是"non-project file"。
+    if (dirs.empty()) {
+        const auto sources = root_source_paths(root);
+        // 源根与类路径都推不出来 ⇒ 这不是个 Java 工程，别在人家目录里丢两个 Eclipse 文件
+        // （空工程对 JDT 与"非工程文件"一样没用，只会让诊断措辞变掉）。
+        if (sources.empty() && libraries.empty()) return 0;
+        return materialize_eclipse_project(root, sources, libraries);
+    }
+    const auto sources = default_source_paths(root, gradle);
+    int written = 0;
+    for (const auto& dir : dirs) {
+        // `linkedProjects` 是项目设置里的一段文字，理论上能写出工作区之外（`../x`）——
+        // 读可以，写不行：`.project`/`.classpath` 只许落在工作区内。
+        const auto target = (root / from_utf8(dir)).lexically_normal();
+        const auto relative = target.lexically_relative(root.lexically_normal());
+        std::error_code code;
+        if (relative.empty() || *relative.begin() == L".." || fs::is_directory(target, code) == false || code) continue;
+        written += materialize_eclipse_project(target, sources, libraries);
+    }
+    return written;
+}
+
+JavaLspModel java_lsp_model(const fs::path& root, const Json& java, const Json& build_tools) {
+    const auto gradle = build_tools.value("gradle", Json::object());
+    const auto importing = gradle.value("enabled", true);
+    const auto libraries = default_referenced_libraries(root, gradle);
+    const auto sources = default_source_paths(root, gradle);
+    // `java.import.exclusions` 只在**导入开着**时才发：它的用途是"别去同步那些没链接的 Gradle
+    // 工程"（Buildship 反正也不理它），关掉导入之后它只会多一层风险。
+    const auto excluded = importing ? import_exclusions(root, gradle) : std::vector<std::string>();
+    JavaLspModel model;
+    model.settings = java_lsp_settings(java, build_tools, libraries, excluded, sources);
+    if (importing) return model;
+    model.files = materialize_eclipse_projects(root, gradle);
+    // workspace folder = **我们给它建了 Eclipse 工程的那几个目录**，逐字对应
+    // `Session::ServerConfig::workspace_folders`（见 native/lsp_session.hpp 的注释）。
+    // 以前这里按"源根/类路径的第一段"派生，而单模块工程的类路径兜底是根相对的
+    // （`build/libs/**/*.jar`）⇒ 第一段成了 `build`，LSP 的 `rootUri` 整个指到 `build/`，
+    // 工程自己的 `src/**` 反而全落在工作区之外。
+    model.project_dirs = linked_project_dirs(gradle);
+    return model;
 }
 
 }  // namespace taocode

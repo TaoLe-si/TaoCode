@@ -5,10 +5,14 @@
 // 复制路径、固定标签、关闭其它/左侧/右侧标签、以及"转到行/最近文件"两个弹窗。它们共享同一套
 // 菜单坐标状态（`treeMenu` / `tabMenu` / `goLinePrompt` / `recentPrompt`）。
 import { computed, nextTick, ref, type Ref } from 'vue'
-import { request, type Entry, type ProjectSettings, type Workspace } from './bridge'
-import { copyToClipboard } from './clipboard'
-import { errorMessage } from './errors'
-import { createTabEntryPoint } from './tabEntryPointMenu'
+import { request, type Entry, type ProjectSettings, type Workspace } from './bridge.ts'
+import { copyToClipboard } from './clipboard.ts'
+import { errorMessage } from './errors.ts'
+import { getCommandProcessor } from './pvCommandProcessor.ts'
+import { createFileUndoProvider, hostFileIo, recordFileCommand, reportText } from './pvFileUndoProvider.ts'
+import { createTabEntryPoint } from './tabEntryPointMenu.ts'
+import { addEvent, parseRecentFiles, recentFilesRows, RECENT_FILES_STORAGE_KEY, serializeRecentFiles,
+         type RecentFilesState } from './recentFilesModel.ts'
 import type { Tab } from './editorTab'
 
 export interface ExplorerActionsDeps {
@@ -56,6 +60,12 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
           closedTabsPerPane, reopenClosedTab, unsplit, unsplitAll, splitOrientation, changeSplitOrientation, openSettings,
           nameDialog, nameInput, renameEntryWithReferences, refreshTree, revealLocation, openFile } = deps
   const treeMenu = ref<{ entry: Entry; x: number; y: number } | null>(null)
+  /**
+   * 项目级命令栈（`UndoManagerImpl` 的等价物）与文件级可撤步骤（`FileUndoProvider` 的等价物）。
+   * 按工作区根取，换项目看到的是另一条历史；`workspaceKey` 就是 `getProjectTreeState` 用的那个身份。
+   */
+  const fileUndo = createFileUndoProvider(hostFileIo)
+  const commands = () => getCommandProcessor(workspace.value?.root ?? '')
   // IDEA's project-view popup nests groups (WeighingNewGroup, AssociateWithFileType,
   // VersionControlsGroup); the submenu id tracks which one is unfolded.
   const treeSubmenu = ref<'new' | 'filetype' | 'analyze' | null>(null)
@@ -86,8 +96,19 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
       const taken = (name: string) => siblings.some(entry => entry.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0)
       const finalName = copyCollisionName(taken, baseName(clip.entry.path))
       const destination = dir ? `${dir}/${finalName}` : finalName
-      if (clip.mode === 'copy') await request('file.copy', { from: clip.entry.path, to: destination })
-      else await renameEntryWithReferences(clip.entry.path, destination)
+      if (clip.mode === 'copy') {
+        await request('file.copy', { from: clip.entry.path, to: destination })
+        // 粘贴副本登记成一条可撤命令（上游 `FileUndoProvider.after` 对 `VFileCopyEvent` 的那一步，
+        // `FileUndoProvider.java:107-108` + `:116-124`）。
+        recordFileCommand(commands(), { name: '粘贴副本', groupId: 'paste', steps: [fileUndo.copyStep(clip.entry.path, destination)] })
+      } else {
+        await renameEntryWithReferences(clip.entry.path, destination)
+        // 剪切粘贴 = 移动：撤销是反着 rename 回去。引用改写不在这一层的覆盖范围里，
+        // 已登记接线请求（`docs/wiring-requests-2026-10-06-bucket14a.md` W3）。
+        // 订正（2026-10-06）：这里原先指向 `…bucket14.md` —— 那个文件没被写出来（上一轮代理被切断，
+        // 报告与接线请求都没落地），W3 这一条现在记在 14a 那份里。
+        recordFileCommand(commands(), { name: '移动', groupId: 'paste', steps: [fileUndo.moveStep(clip.entry.path, destination)] })
+      }
       await refreshTree()
       deps.notify(clip.mode === 'copy' ? `已粘贴为 ${destination}` : `已移动到 ${destination}`)
       if (clip.mode === 'cut') fileClipboard.value = null
@@ -114,6 +135,21 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
     try { await request('file.reveal', { path: entry.path }) }
     catch (error) { deps.notify(errorMessage(error), true) }
   }
+  /**
+   * 撤销/重做一次**文件级**操作（`$Undo` / `$Redo`，`PlatformActions.xml:447-448`，
+   * 键位 `Ctrl+Z` / `Ctrl+Shift+Z`，`$default.xml:232-235` / `:685-688`）。
+   * 上游成功时不弹提示，只有被拒绝时弹 `CannotUndoReportDialog` —— 本仓照这两条：
+   * 拒绝走 `notify(..., true)`，成功只刷新目录树（编辑器里的标签由宿主的 `fsChanges` 公告自己跟上）。
+   */
+  async function undoOrRedoFileOperation(kind: 'undo' | 'redo', scope: readonly string[]) {
+    const processor = commands()
+    const result = kind === 'undo' ? await processor.undo(scope) : await processor.redo(scope)
+    if (!result.ok && result.report) deps.notify(reportText(result.report), true)
+    else if (result.ok) await refreshTree()
+    return result
+  }
+  const undoFileOperation = (scope: readonly string[] = []) => undoOrRedoFileOperation('undo', scope)
+  const redoFileOperation = (scope: readonly string[] = []) => undoOrRedoFileOperation('redo', scope)
   // IDEA's EditorTabPopup (ActionsBundle "Close All but Pinned", tab pinning): right-
   // click on a tab opens the group-scoped actions for that tab.
   const tabMenu = ref<{ pane: any; path: string; x: number; y: number } | null>(null)
@@ -182,8 +218,26 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
       default: return '新建文件'
     }
   })
-  const recentFiles = ref<string[]>([])
-  function rememberRecent(path: string) { recentFiles.value = [path, ...recentFiles.value.filter(item => item !== path)].slice(0, 40) }
+  // 最近文件（Ctrl+E 面板的数据源）。上游形状是 `RecentFilesMutableState` 的三张表 +
+  // `FileSwitcherApi.SWITCHER_ELEMENTS_LIMIT = 30`，本仓把可移植的那部分放进
+  // `src/recentFilesModel.ts`，这里只做装配与落盘：
+  //   · **应用级、跨项目**：整表 JSON 存在 `taocode.recentFiles`，关掉应用再打开还在
+  //     （此前只有进程内一份，最大数写死 40）；
+  //   · 打开文件时走 `addEvent`：新路径置顶、旧表里的重复项先删，超过 30 从尾部丢。
+  function readRecentFilesState(): RecentFilesState {
+    try { return parseRecentFiles(window.localStorage.getItem(RECENT_FILES_STORAGE_KEY)) }
+    catch { return parseRecentFiles(null) }
+  }
+  const recentFilesState = ref<RecentFilesState>(readRecentFilesState())
+  const recentFiles = ref<string[]>(recentFilesRows(recentFilesState.value))
+  function rememberRecent(path: string) {
+    if (!path) return
+    const next: RecentFilesState = { ...recentFilesState.value, recentlyOpened: addEvent(recentFilesState.value.recentlyOpened, [path]) }
+    recentFilesState.value = next
+    recentFiles.value = recentFilesRows(next)
+    try { window.localStorage.setItem(RECENT_FILES_STORAGE_KEY, serializeRecentFiles(next)) }
+    catch { /* storage unavailable: session-only */ }
+  }
   const recentFiltered = computed(() => { const query = recentQuery.value.toLowerCase(); return recentFiles.value.filter(path => path.toLowerCase().includes(query)) })
   function openRecent(path: string) { recentPrompt.value = false; void openFile(path) }
   async function goToLine() {
@@ -214,6 +268,7 @@ export function createExplorerActions(deps: ExplorerActionsDeps) {
     tabEntryPointItems,
     nameDialogTitle, isLayoutDialog,
     treeMenu, treeSubmenu, fileClipboard, copyCollisionName, pasteFromClipboard, cutTreeEntry, copyTreeEntry, revealInExplorer,
+    undoFileOperation, redoFileOperation,
     tabMenu, onTabContext, togglePinTab, closeOtherTabsIn, closeAllTabsIn, closeUnpinnedTabsIn, closeTabsToRightIn,
     closeTabsToLeftIn, hasTabsToRight, hasTabsToLeft, copyPathOfTab,
     goLinePrompt, goLineValue, goLineInput, goToLine,

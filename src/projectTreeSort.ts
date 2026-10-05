@@ -14,6 +14,10 @@ export interface ProjectTreeSortSettings {
   autoscrollToSource: boolean
   autoscrollFromSource: boolean
   openInPreviewTab: boolean
+  // 「压缩目录」（IDEA `ProjectView.CompactDirectories`，`intellij.platform.projectView.xml:98-99`）：
+  // 只有一个子目录的目录与那个子目录并成一行。上游默认 **false**
+  // （`NodeOptions.java:41-43`），所以这里也是「缺字段 = 不压缩」。规则本体在 `src/projectTreeCompactDirs.ts`。
+  compactDirectories?: boolean
 }
 
 // Adapted from JetBrains NaturalComparator / FileNameComparator (Apache-2.0),

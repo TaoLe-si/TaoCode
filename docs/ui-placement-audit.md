@@ -208,7 +208,7 @@ Editor（preferences.editor）
 | 范围 | 现状 |
 |---|---|
 | 设置树的多层结构（Editor 之外） | `待核`：外观页的 15 个未定键；`Editor › Code Style` 系列；`Version Control` 系列；`Tools` 系列 |
-| **菜单的嵌套**（子菜单） | **已开始整改**。IDEA 的子菜单在动作 XML 里就是 `<group … popup="true">`；`platform/platform-impl/resources/idea/PlatformActions.xml` 里主菜单共有 **18 个**：`FilePropertiesGroup`(:400)、`ChangeLineSeparators`(:405)、`ExportImportGroup`(:419)、`FileExportGroup`(:432)、`PasteGroup`(:454)、`FindMenuGroup`(:465)、`ConvertIndentsGroup`(:500)、`Macros`(:506)、`ViewAppearanceGroup`(:523)、`EditorToggleActions`(:572)、`EditorBidiTextDirection`(:591)、`NavigateInFileGroup`(:620)、`LayoutsGroup`(:641)、`ResizeToolWindowGroup`(:680)、`EditorTabsGroup`(:688)、`Notifications`(:726)、`BackgroundTasks`(:731)、`HelpDiagnosticTools`(:764)。TaoCode 的 `MenuRow` **原本没有 children**，所以这 18 处**全部被拍平**。<br>**本轮已做**：① `MenuRow.children` + 子菜单渲染（父行右侧浮层、`position: fixed`、`▸` 提示、Esc 关闭、点击父行只切换展开、挑选子行才执行并关闭整条链）；② `窗口 › 布局` 收成一个 `children` 子菜单（对应 `LayoutsGroup` popup="true"）；③ 动作索引递归摊平（否则搬进 children 的动作会从「查找操作」里消失）；④ 汉堡面板按树展开（分组标题 + 缩进子行）；⑤ 又收拢四处：`窗口 › 调整工具窗口`（`ResizeToolWindowGroup` popup，:680-686，四个拉伸动作）与 `编辑 › 查找`（`FindMenuGroup` popup，:465-486）—— 这两处原来都是用 **section 标题**顶替的（注释里就写着 "TaoCode's menus are flat"），现在是真子菜单；⑥ `窗口 › 编辑器标签页`（`EditorTabsGroup` popup，:688-705 —— 其中 `CloseEditorsGroup` **不带** popup 是内联组，用分隔线表达同一层）；⑦ `文件 › 文件属性`（`FilePropertiesGroup` popup，:400-412，子项含 ChangeFileEncodingAction / ToggleReadOnlyAttribute），**其中再嵌一层** `文件属性 › 行分隔符`（`ChangeLineSeparators` 自己也是 popup="true"，:405-409）—— 这是本轮唯一的**两级子菜单**；⑧ `视图 › 外观`（`ViewAppearanceGroup` popup，:523-546 —— 内部 `ToggleFullScreenGroup` 与 `UIToggleActions` 都是**不带 popup 的内联组**，用分隔线表达），并把 `ToggleCompactMode` 补成真开关（落 `editorSettings.compactMode`）；`ToggleDistractionFreeMode` 与 `ToggleZenMode` 在 TaoCode 里是同一件事，**不重复放两行**；`ToggleFullScreen` 需要先给宿主加全屏通道，登记为待办。<br>**逐个核对后的两个例外（不改成子菜单，理由如下）**：① `BackgroundTasks`（:731-734）——IDEA 有两个子项，TaoCode 只有 `ShowProcessWindow` 一个有落点（另一个 `AutoShowProcessPopupAction` 是注册表键、无 UI，按规则不造假设置），**单项做成子菜单反而多一次点击**，保留 section；② `HelpDiagnosticTools`（:764-773）—— TaoCode **没有「帮助」菜单**（`menu` 联合类型里没有 help），它的父菜单不存在，无从收拢，除非先补一整个帮助菜单。<br>**18 处的最终分解（逐个核对完）**：已收拢 **5**（LayoutsGroup、ResizeToolWindowGroup、FindMenuGroup、EditorTabsGroup、FilePropertiesGroup›ChangeLineSeparators 两级）＋ ViewAppearanceGroup **6**（见⑧）；两个**有意例外**（BackgroundTasks 单子项、HelpDiagnosticTools 父菜单不存在）；其余（PasteGroup / ConvertIndentsGroup / Macros / EditorBidiTextDirection / NavigateInFileGroup / ExportImportGroup / FileExportGroup）在 TaoCode **暂无对应动作行** —— 按「全量移植」要求，它们是**待办**而不是放弃，已逐条登记进 `docs/class-parity-todo.md` §9（缺什么能力写得很具体，例如全屏通道、gutter 图标层、宏系统）；`Notifications` 已移植（`窗口 › 通知`）；唯一还**可做**的是 `EditorToggleActions`（:572-586：软换行 / 空白符号 / 行号 / 行内图标 / 缩进参考线 / 字号±）——TaoCode 有这些设置的落点（`wordWrap`/`showWhitespaces`/`lineNumbers`/`showIndentGuides`），只差把它们做成 View 菜单里的 **ToggleAction 行**，属于新增功能行而不是位置搬家。（`文件属性 › 行分隔符`、`编辑 › 查找`、`视图 › 外观`、`窗口 › 编辑器标签页`、`帮助 › 诊断工具` …），需要逐条核对后再改 |
+| **菜单的嵌套**（子菜单） | **已开始整改**。IDEA 的子菜单在动作 XML 里就是 `<group … popup="true">`；`platform/platform-impl/resources/idea/PlatformActions.xml` 里主菜单共有 **18 个**：`FilePropertiesGroup`(:400)、`ChangeLineSeparators`(:405)、`ExportImportGroup`(:419)、`FileExportGroup`(:432)、`PasteGroup`(:454)、`FindMenuGroup`(:465)、`ConvertIndentsGroup`(:500)、`Macros`(:506)、`ViewAppearanceGroup`(:523)、`EditorToggleActions`(:572)、`EditorBidiTextDirection`(:591)、`NavigateInFileGroup`(:620)、`LayoutsGroup`(:641)、`ResizeToolWindowGroup`(:680)、`EditorTabsGroup`(:688)、`Notifications`(:726)、`BackgroundTasks`(:731)、`HelpDiagnosticTools`(:764)。TaoCode 的 `MenuRow` **原本没有 children**，所以这 18 处**全部被拍平**。<br>**本轮已做**：① `MenuRow.children` + 子菜单渲染（父行右侧浮层、`position: fixed`、`▸` 提示、Esc 关闭、点击父行只切换展开、挑选子行才执行并关闭整条链）；② `窗口 › 布局` 收成一个 `children` 子菜单（对应 `LayoutsGroup` popup="true"）；③ 动作索引递归摊平（否则搬进 children 的动作会从「查找操作」里消失）；④ 汉堡面板按树展开（分组标题 + 缩进子行）；⑤ 又收拢四处：`窗口 › 调整工具窗口`（`ResizeToolWindowGroup` popup，:680-686，四个拉伸动作）与 `编辑 › 查找`（`FindMenuGroup` popup，:465-486）—— 这两处原来都是用 **section 标题**顶替的（注释里就写着 "TaoCode's menus are flat"），现在是真子菜单；⑥ `窗口 › 编辑器标签页`（`EditorTabsGroup` popup，:688-705 —— 其中 `CloseEditorsGroup` **不带** popup 是内联组，用分隔线表达同一层）；⑦ `文件 › 文件属性`（`FilePropertiesGroup` popup，:400-412，子项含 ChangeFileEncodingAction / ToggleReadOnlyAttribute），**其中再嵌一层** `文件属性 › 行分隔符`（`ChangeLineSeparators` 自己也是 popup="true"，:405-409）—— 这是本轮唯一的**两级子菜单**；⑧ `视图 › 外观`（`ViewAppearanceGroup` popup，:523-546 —— 内部 `ToggleFullScreenGroup` 与 `UIToggleActions` 都是**不带 popup 的内联组**，用分隔线表达），并把 `ToggleCompactMode` 补成真开关（落 `editorSettings.compactMode`）；`ToggleDistractionFreeMode` 与 `ToggleZenMode` 在 TaoCode 里是同一件事，**不重复放两行**；`ToggleFullScreen` 需要先给宿主加全屏通道，登记为待办。⑨ **重构/意图域这一批又收拢两处**（2026-10-05）：`重构 › 提取/引入`（`IntroduceActionsGroup` popup="true"，`platform/platform-impl/resources/idea/LangActions.xml:360-383` —— 注意 `RefactoringMenu` **不在** `PlatformActions.xml` 里，它定义在 `LangActions.xml:355-395`，`:394` 用 `add-to-group group-id="MainMenu" anchor="after" relative-to-action="CodeMenu"` 挂主菜单；解析后的权威清单见 `tests/main/testData/actionSystem/groupStructure/actionGroupStructure.txt:2797-2822`）与 `导航 › 在文件中导航`（`NavigateInFileGroup` popup，`PlatformActions.xml:620-629`）。前者原先把 提取变量/提取常量/提取方法 **拍平成三行**，且把 `ReformatCode` 也挂在重构菜单底部 —— 上游它属于 `CodeFormatGroup`（`LangActions.xml:314-322`，代码菜单），`src/menus/codeMenu.ts:108` 早已有落点，两边还都叫 `id: 'format'`（`semantic()` 的 id 取首参，`App.vue:1443-1445`）属**重号**，一并删掉。`NavigateInFileGroup` 两条成员 ≥ 已收拢各组的最少项数（`ResizeToolWindowGroup` 是四条），与两个有意例外（`BackgroundTasks` 单项、`HelpDiagnosticTools` 父菜单不存在）都不同，故照收拢。判据 `tests/refactor-menu-parity.test.mjs` 6 条。<br>**逐个核对后的两个例外（不改成子菜单，理由如下）**：① `BackgroundTasks`（:731-734）——IDEA 有两个子项，TaoCode 只有 `ShowProcessWindow` 一个有落点（另一个 `AutoShowProcessPopupAction` 是注册表键、无 UI，按规则不造假设置），**单项做成子菜单反而多一次点击**，保留 section；② `HelpDiagnosticTools`（:764-773）—— TaoCode **没有「帮助」菜单**（`menu` 联合类型里没有 help），它的父菜单不存在，无从收拢，除非先补一整个帮助菜单。<br>**18 处的最终分解（逐个核对完）**：已收拢 **5**（LayoutsGroup、ResizeToolWindowGroup、FindMenuGroup、EditorTabsGroup、FilePropertiesGroup›ChangeLineSeparators 两级）＋ ViewAppearanceGroup **6**（见⑧）；两个**有意例外**（BackgroundTasks 单子项、HelpDiagnosticTools 父菜单不存在）；其余（PasteGroup / ConvertIndentsGroup / Macros / EditorBidiTextDirection / NavigateInFileGroup / ExportImportGroup / FileExportGroup）在 TaoCode **暂无对应动作行** —— 按「全量移植」要求，它们是**待办**而不是放弃，已逐条登记进 `docs/class-parity-todo.md` §9（缺什么能力写得很具体，例如全屏通道、gutter 图标层、宏系统）；`Notifications` 已移植（`窗口 › 通知`）；唯一还**可做**的是 `EditorToggleActions`（:572-586：软换行 / 空白符号 / 行号 / 行内图标 / 缩进参考线 / 字号±）——TaoCode 有这些设置的落点（`wordWrap`/`showWhitespaces`/`lineNumbers`/`showIndentGuides`），只差把它们做成 View 菜单里的 **ToggleAction 行**，属于新增功能行而不是位置搬家。（`文件属性 › 行分隔符`、`编辑 › 查找`、`视图 › 外观`、`窗口 › 编辑器标签页`、`帮助 › 诊断工具` …），需要逐条核对后再改 |
 | **对话框内的分层**（标签页 / 分栏） | `待核`。已知两处可疑：运行配置编辑器（IDEA 是左右分栏 + 多标签）、`项目结构` 对话框（IDEA 是左侧多页 + 右侧详情） |
 | 工具窗口内的多层内容 | `待核`。IDEA 的工具窗口有条带 › 内容 › 内容的侧边组件三层 |
 | 编辑器右键菜单的分组 | 已有部分对标（`EditorTabPopupMenu` 曾逐行核过），`待核`其余 |
@@ -238,16 +238,25 @@ PropertiesComponent 的 `ExpandBeforeRunStepsPanel`），对话框宽 880 / 内�
 `RunConfig` 新增 `folder` 字段走全链路（native 白名单 + 校验 `≤80/单行/UTF-8` → `bridge.ts` 类型与预览校验 → 组件）。
 顺带修掉一个真 bug：浏览器预览的 `runConfigs` 映射**静默丢掉 `adapter`**（保存调试配置会丢适配器），现在 `adapter` 与 `folder` 都校验并保存。
 
-**仍未做（登记，不造假控件）**：
-* **Allow multiple instances**（`run.configuration.allow.running.parallel.tag`=ExecutionBundle:285）：
-  原生 runner 只有一个子进程（`native/main.cpp:376-418` 单个 `runner`），勾上也无处生效；
-  单实例守卫本来就一直生效（前端 `runState.running` + 原生 `BUSY`）。要真做得先把 runner 改成
-  多实例 + 每个实例一个控制台标签（IDEA 的 `RunContentDescriptor`）。
+**仍未做（登记，不造假控件）**（2026-10-05 复核，下面两条的现状都变了）：
+* **Allow multiple instances**（`run.configuration.allow.running.parallel.tag`=ExecutionBundle:285）：✅ **已实现**。
+  宿主改成了多实例 `Manager`（`native/run_host.hpp`/`.cpp`：每实例一个 `Runner` + **独立**的 before-launch 链 +
+  按实例的停止/写 stdin，事件都带 `instance` id），语义照 `ExecutionManagerImpl.kt:613-619`
+  （`allowRunningInParallel == false` 时先停同名实例，为真则并存，`native/run_host.cpp:363-367`），
+  前端是 `src/runInstances.ts` 的实例缓冲 + `RunConsole.vue` 的每实例一个标签，
+  复选框在对话框的「操作系统」组（`CommonTags.parallelRun():9-18`）。判据 `tests/run-instances.test.mjs`。
+  **唯一的映射差异**：上游把复选框**只放在模板上**（`ConfigurationSettingsEditorWrapper.java:73-74`
+  `setVisible(settings.isTemplate() && …)`），本仓**模板与配置上都有** —— 模板那份给新配置取初值
+  （`src/runConfigTemplates.ts` 的 `applyTemplate`），配置那份让已存配置能改；这是超集不是缺失。
 * **Store as project file**（`run.configuration.store.as.project.file`=ExecutionBundle:286）：
-  需要把配置写到项目目录的 `.idea/runConfigurations/*.xml`，而原生现在**按设计禁止在用户项目里建配置**
-  （`projects_test.cpp` 有断言锁住）。改成写项目目录是独立工程（含 XML 格式与读回）。
-* **Run on target**（`RunOnTargetPanel`）：只在模板配置上创建（wrapper `settings.isTemplate()`），
-  本仓没有模板配置体系。
+  仍然**不渲染**，理由不变且有据：它要把配置写成项目目录的 `.idea/runConfigurations/*.xml`，
+  而本仓按设计**不在用户项目里建配置**（`native/projects_test.cpp:281` `check(fs::is_empty(project),
+  "Configuration may not be stored in the user project")` 与 `:442-443`「只有显式颜色补丁写 `.idea` XML，
+  其余项目设置不产生 XML」两条断言锁住）。配置与模板都随应用状态文件 / localStorage 走。
+  真要接后端是独立工程：新增 native 模块（写 XML + 读回 + 回滚）→ `src/bridge.ts` 的 `Method` union
+  加新方法 → `native/main.cpp` 分派表加分支，两处本轮都冻结，且要推翻上面那两条设计断言。
+* **Run on target**（`RunOnTargetPanel`）：✅ **已实现**（仅模板，`src/executionTargets.ts`：本机 +
+  `app.jdks` 探测出的 JDK 目标，注册表开关 `RunTargetsEnabled`），判据 `tests/run-config-templates.test.mjs`。
 
 ---
 
@@ -2703,6 +2712,20 @@ B5 这一域没有 `[-]`/`[ ]`，所以门控没有 §D 那一组检查（对比
 **三、遗留待查**：撤销（Ctrl+Z）是否触发 `onEditorChange` 未定论 —— 带探针那轮里撤销没有产生 `reconcile`
 记录（停在删除那一轮），要等下一次内容变更才看到 `dropped 1 → 0` 的放回。姿势写在 checklist 里。
 
+> **三已结（2026-10-05 核实，结论：撤销**会**触发 `onEditorChange`，本仓无缺口）**：闸门在编辑器那一侧，
+> 不是对账逻辑。`src/components/CodeEditor.vue:908` 的 `if (update.docChanged && !replacing) { emit('change') … }`
+> 里原先还套着一层 `if (!dirty)`，**只在"变脏那一拍"发一次** —— 撤销时文档已脏，于是那一次通知被吞掉，
+> 挂在 `change` 上的书签对账自然不跑，要等下一次内容变更才看到 `dropped 1 → 0` 的放回。闸门已删，判据是
+> `tests/editor-change-notify.test.mjs`（5 条，含一条守住「闸门不许再出现」）。
+> 撤销本身**是**带 `changes` 的一次事务（CodeMirror 6.11.1 的 history `pop`：
+> `node_modules/@codemirror/commands/dist/index.js:548-556` 派发 `state.update({ changes: event.changes, …,
+> userEvent: "undo" })`），所以 `update.docChanged` 为真。另一半依据是上游那条本来就监听**每个**文档变更：
+> `platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java:433-446`（`beforeDocumentChange` 记
+> 原文）与 `:449-514`（`documentChanged` 丢/放回，`:506` 的 `bookmarkedText.equals(lineContent) && …`）。
+> 补充一条上游依据：`RenameElement` 绑 **Shift+F6**（`$default.xml:996-998`），所以项目树里 F2 是空键
+> （F2 在默认键位表里是 `GotoNextError`）—— 这一批已把 Shift+F6 接成树内改名，判据 `tests/tree-rename-key.test.mjs`。
+
+
 **四、B5 §C① 的面板级证据**（同批拿到）：`F11` 后面板出现「跳转到 src/bookmark-probe.ts 第 4 行」✓；
 一次删掉整行后（文档 3 行）面板变成「(无行)」✓。
 
@@ -2800,3 +2823,166 @@ failed: Connection refused`（时间戳 00:21→00:25 仍在往下走）。导�
 `foldingRange`/`documentSymbol` 就是不回答。**这一条要跟用户说清楚**：语言服务本身起来了、文档与请求
 都通了，语义结果取决于 JDT 能不能把这个工程的 Gradle 同步做完（离线/代理不通时会一直卡在导入）。
 
+
+## BQ. 2026-10-05 第七十批：工具窗口与主菜单 parity **收口**（四条线索逐条复核 + 一个真缺陷）
+
+这一批的输入是 §14（齿轮菜单）、§16（侧条）、§21（每窗口状态对象）、§22（每窗口可见性）四条线索。
+前面几十批已经把这一域基本做完了，所以这一批的主要产出是**按上游源码重新判定**，而不是加功能：
+能落地的一处真缺陷修掉，判定错的四格按源码更正，接不住的写明**确切**理由。
+
+### BQ.1 真缺陷：换锚点时**可见性没有跟着搬**（`ToolWindowManagerImpl.kt:1700-1726`）
+
+上游的规则就写在 `hideIfNeededAndShowAfterTask` 里，一句一句都能对上：
+
+| 上游 | 位置 | 做什么 |
+| :-- | :-- | :-- |
+| `val wasVisible = entry.readOnlyWindowInfo.isVisible` | `ToolWindowManagerImpl.kt:1706` | 搬之前先记下这个窗口是不是开着 |
+| `if (wasVisible) executeHide(...)` | `:1708-1710` | 开着就先收起来（搬的过程中别让它留在原地） |
+| `task()` | `:1712` | 真正搬（`doSetAnchor` / `setSideToolAndAnchor`，`:1676-1698`） |
+| `if (wasVisible) { … info.isVisible = true; doShowWindow(...) }` | `:1714-1719` | **搬完若原来开着，就在新位置重新显示** |
+| `if (wasFocused) requestFocusInWindow()` | `:1720-1722` | 原来还持有焦点的话把焦点还回去 |
+
+⇒ **搬动不改变"开着还是收着"**。`setSideToolAndAnchor` 的调用点就是移动组
+（`ToolWindowMoveAction.Anchor.applyTo` → `ToolWindowImpl.setSideToolAndAnchor`，`:114-122` + `:529-531`）。
+
+本仓旧实现的两个后果：
+
+1. **搬到底部 ⇒ 整个窗口从界面上消失**。`setToolAnchor` 只在 `anchor !== 'bottom'` 时开面板，
+   而底部 dock 只在 `bottom` 为真时渲染（`App.vue` 的 `<section v-if="bottom && !chromeHidden" class="output-panel">`）。
+   同时两个侧栏 aside 的条件是 `activeAnchor === 'left' / 'right'`，锚点一翻到 `'bottom'` 两边都不渲染
+   ⇒ 项目树被搬到底部后，侧栏没了、底部没开，窗口彻底不见。三个入口里**两个**中招：
+   侧栏标题栏的「移动到…」（`App.vue` 两个 aside 上的 `@move`）与条纹拖放（`src/toolStripeDrag.ts:38`）。
+   底部 dock 标签自己的锚点菜单（`src/toolWindowActions.ts:348-357`）没事 —— 它早就跟着 `showView` 了，
+   而且那一段的注释已经写着"换锚点后必须按**新**位置把它亮出来"。也就是说规则是对的，只是没放在唯一的写锚点那一处。
+2. **搬去左/右侧时把原来收着的窗口也点亮**，还顺手顶掉正在显示的那个（`activeView` 只有一份）——
+   与 `:1714` 的 `if (wasVisible)` 正好相反。
+
+修法：`src/toolWindowStripes.ts` 的 `setToolAnchor`（换锚点的唯一入口，三个调用方都走它）。
+先记 `wasVisible = currentVisibleIds().includes(id)`（每侧只有一个可见窗口，侧栏是 `leftView`、底部是 `bottomTab`），
+搬完再按新位置恢复。**一处形态差异必须在注释里说清楚**：底部 dock 的条纹（那排标签）长在 dock **里面**，
+侧栏条纹则一直可见 —— 所以搬到底部要**一定**把 dock 打开并选中它，否则新位置根本没有入口；
+搬去左/右侧则按上游，只在原来开着时才跟着亮。
+
+判据：`tests/tool-window-anchor-move.test.mjs`（5 条）。它与 `tests/tool-window-stripes.test.mjs`
+里「搬到底部后还能搬回来」那一条互补：那条管**入口**（`activationTarget` / `stripeOrder`），这条管
+**搬完那一瞬间它是不是看得见**。
+
+### BQ.2 §14 那一格里**判定错**的四处（按源码更正，不是加功能）
+
+| 原来写的 | 上游实际 | 依据 |
+| :-- | :-- | :-- |
+| `TW.ViewModeGroup`（Dock / Float / Window / Split） | 五个：`DockPinnedMode` / `DockUnpinnedMode` / `UndockMode` / `FloatMode` / `WindowMode`。**没有 Split** —— split 是 `ToolWindowMoveAction.Anchor.isSplit()` 那条正交的轴 | `intellij.platform.ide.actions.xml:479` 注册为 `ToolWindowViewModeAction$Group`（`popup="true"`）；成员 = `ViewMode.values()`：`ToolWindowViewModeAction.java:31-36`、`:170-177` |
+| 移动组「新 UI 一套 / 旧 UI 一套」（`:882` / `:885`） | 两个分支是**同一个类**。新 UI 的 `SquareStripeButton.createMoveGroup()` 就是 `return ToolWindowMoveAction.Group()` | `SquareStripeButton.kt:84`；`ToolWindowImpl.kt:881-886` |
+| 移动组只有 Left/Right/Bottom 三条 | New UI 下**有 6 条**：8 个 `Anchor` 里 `isAllowed` 滤掉 `TopLeft`/`TopRight`（无 `ToolWindowStripeExtension`），剩 6 条中 3 条是 `isSplit()` 变体。本仓那 3 条 = **非 split 子集** | `ToolWindowMoveAction.java:247-254`、`:89-91`、`:73-77` |
+| `ToggleContentUiTypeAction` 摊平显示"存疑" | **摊平是对的**，不必改成「视图选项」子菜单 | `ToggleToolbarAction.java:45-47`（组 = `OptionsGroup`）、`:213-225`+`:199`（只收**隐藏**工具条里的 `ToggleAction`）、`:55-67`（「显示工具条」2026.3 起是 no-op，"toolbars are always visible"）、`:183-185`（可见成员 >3 才开 popup ⇒ 剩 1 条就是内联） |
+
+### BQ.3 接不住的：写明**确切**的那一行是什么，而不是留一句"没有宿主"
+
+- **`problems` 的 `additionalGearActions`**（§17 那一行的收尾）：这一组**只有一条**
+  （`InspectionResultsView.java:274-277` → `GlobalInspectionContextImpl.java:299-301` →
+  `AutoScrollToSourceHandler.kt:187-200`），即「单击导航 / 自动滚动到源码」开关，文案取
+  `UIBundle.properties:23` `autoscroll.to.source.action.name = Navigate with Single Click`。
+  **不接**：本仓问题行是单击即跳转、没有选中态（`src/components/ProblemsPanel.vue:417`），开关无处可关 ——
+  与 `src/usageViewGear.ts` 里被否掉的第三条是**同一个 action、同一个理由**，不是两个独立缺口。
+- **`HelpAction`**（`:813`）：上游在拿不到 `helpId` 时**也是隐藏**（`:842-845`
+  `setEnabledAndVisible = getHelpId(...) != null`）⇒ 本仓整条不画与上游视觉一致，不是漏接。
+- **`TW.ViewModeGroup`**：前两条是 `DOCKED + autoHide` 的组合，后三条要 `SLIDING/FLOATING/WINDOWED`
+  三种宿主形态（`ToolWindowImpl.kt:541-545` 的 `setType`），本仓都没有；只留一条可点的又违反"单项不做子菜单"。
+
+### BQ.4 主菜单：复核后无差异，不动
+
+12 档与顺序、检查族在 `CodeMenu` 里的位置、`InspectCode…` 无默认键位 —— 已有判据
+`tests/main-menu-parity.test.mjs`（5 条），本轮把上游坐标重新读了一遍确认判据没跑偏：
+
+- `tests/main/testData/actionSystem/groupStructure/actionGroupStructure.txt:2444-2456`：`[group MainMenu]`
+  的 12 个直接子项按顺序是 FileMenu … VcsGroups / WindowMenu / **HelpMenu**（最后一项），确实没有 AnalyzeMenu；
+  与 `App.vue` 的静态 10 档 + `menuUi.ts` 在 Git 前后插入 Tools/Window 两档的装配顺序一致。
+- `PlatformActions.xml:764-773`：`HelpDiagnosticTools` 是 `HelpMenu` 里的 `popup="true"` 组
+  （8 个成员），`src/menus/helpMenu.ts:52-60` 已把它收成子菜单并落了能落地的成员。
+
+顺带更正两条**过期结论**：
+① 本文件早期那条"本仓**没有『帮助』菜单**（`menu` 联合类型里没有 help），`HelpDiagnosticTools` 的父菜单不存在，
+无从收拢"**已不成立** —— 帮助档既在 12 档里，那个组也已经收成子菜单了；
+② `src/menus/helpMenu.ts:52` 原先把这一组标成 `PlatformActions.xml:760-771`，实际是 `:764-773`，本批改正。
+
+
+### BQ.5 §16 / §21 / §22 复核后仍成立
+
+侧条拖宽与「更多」按钮、每窗口状态对象、每窗口可见性都逐条对过，没有新增差异；
+登记项保持原样：`ToolWindowButtonManager` / `ToolWindowPaneNewButtonManager` /
+`ToolWindowPaneOldButtonManager`、`StripeActionGroup`（无顶部条纹）、
+`WindowInfoImpl` 的 `weight`/`sideWeight`/`isSplit`。
+**一处**因 BQ.2 而更明确：移动组缺的 3 条 split 变体要的就是 `isSplit`，它已经在 §15 的待办里，
+不用另开一条。
+
+## BR. 2026-10-05 第七十批：**VCS 域收口复核** —— §17 五条线索全部已收口；这一批落到失败行上那条**详情链接**与两处编造文案
+
+这一批的任务是复核 Git / 提交 / 日志 / 文件颜色四块。**先扫文档再动手**的结果：
+
+| 交给这一批的线索 | 实际状态 |
+|---|---|
+| `VcsToolbarActions` 那一行 | **已收口**（§AY，第五十三批）—— 那一行只剩「更新项目」「推送」 |
+| 变更树头部那对动作 | **已收口**（§AZ）—— 全部展开 / 全部收起，可见性 = `hasGroups` |
+| 分支/比较那两行 | **已收口**（§AZ）—— 删掉面板里那两行，触发点回到分支弹窗 |
+| reformat 的键位 | **已收口**（§AZ）—— Alt+L 挂在提交信息框上 |
+| `FailuresPanel` 失败行 +「仍然提交」 | 失败行/「仍然提交」**已收口**（§AW/§BC），但**失败行上那条详情链接**（`docs/source-todo.md` §16 第一条）仍缺 |
+
+所以这一批只做那一条真正还没落的，外加复核中查出的两处**编造文案**。
+
+### 1. 失败行上的「查看详情」链接（`CommitProblemWithDetails` 那一档）
+
+§16 一直挂着这条。读完上游发现它**不是**一条独立的 UI 能力，而是失败项的一个**属性**：
+
+| 上游 | 位置 | 本仓 |
+|---|---|---|
+| `CommitCheckFailure` 三档：`Unknown` / `WithDescription` / `WithDetails`；后两档都带 `text`，只有 `WithDetails` 多一个 `viewDetailsAction` | `CommitProgressPanel.kt:370-381` | `src/commitChecks.ts` 的 `CommitCheckFailure { text, details }`（`details: null` = 纯文本那一档） |
+| `showDetailsLink` 为默认的 null 时，**整条 text 自己就是那个链接**（不另接一段链接文字） | `CommitCheck.kt:166` + `CommitProgressPanel.kt:456-458` | 面板按条渲染，带 `details` 的那条渲染成按钮（`.sc-check-failure-link`，穿 `--accent`） |
+| 本仓唯一够得着的 `CommitProblemWithDetails` = **TODO 预检**（`TodoCommitProblem`），`showDetails` 打开的是 **TODO 工具窗口** | `TodoCheckinHandler.kt:50-63`、`:144-168` | `showFailureDetails()` 只给这一条落点（`showToolWindow('todo')`），其余 failure 走不到这里 |
+
+**没有给别的 failure 编链接**：提交信息检查那几条在上游是**消息编辑器里的 inspection**
+（`BaseCommitMessageInspection.kt:46,97` 按 `CommitMessage.isCommitMessage(element)` 挂 PSI 上），
+不是 `CommitCheck` ⇒ 本仓给它们 `details: null`。（顺带记下：上游它们压根不进 `FailuresPanel`，
+本仓列在失败行上 —— 这一条留待下一批判，不在本次动。）
+**没有给 rebase/分离 HEAD 那两条编链接**：`GitRebaseCommitProblem` / `GitDetachedRootCommitProblem`
+（`GitCheckinHandlerFactory.kt:364,401`）的上游落点是**浏览器打开帮助链接**，本仓没有那一条通道。
+
+### 2. 查出的两处编造文案（按铁律"界面里每一句中文都要能指到包里的 key"）
+
+| 原来 | 上游出处 | 改成 |
+|---|---|---|
+| `工作区中仍有 N 处 TODO/FIXME（全工作区扫描）` | `TodoCommitProblem.text` = `label.todo.items.found`（`TodoCheckinHandler.kt:52`），中文包 = 「**{0} 个 TODO**」 | `N 个 TODO` |
+| `主题行不能超过 N 个字符` | `SubjectLimitInspection.kt:34` 取 `commit.message.inspection.message.subject.should.not.exceed.characters`，中文包 = 「**主题不能超过 {0} 个字符**」（**没有"行"字**） | `主题不能超过 N 个字符` |
+
+（另两条本来就对：`正文行不能超过 N 个字符` / `主题与正文之间缺少空行`；设置页那句提示也一并改掉。）
+
+### 3. 顺带：失败行一条一行
+
+上游把各条 failure 用 `<br/><br/>` 隔开（`CommitProgressPanel.kt:465` 的
+`appendWithSeparators(HtmlChunk.raw("<br/><br/>"), …)`），本仓原来用 `；` 拼成一句。
+既改成按条渲染，也才放得下那条详情链接。
+
+### 4. `SourceControl.vue` 贴门禁：920 → 898，**没登记**
+
+这一批给失败行加内容时撞上机检上限（`DEFAULT_LIMIT` 900，该文件未登记 ⇒ 上限只降不升）。
+按"能拆就拆"处理，**没有登记**：面板里 `commit()` 与 `commitAndPush()`（`ChangesViewCommitPanel`
+的两个动作）此前是**两份几乎逐行相同的函数**（65 行），抽成 `runCommit(push: boolean)` 一份，
+两个动作各自只留一行。`collectCommitChecks()` 的调用点由 4 处变 3 处 —— 判据里那条"检查链只有一处
+定义"的计数相应从 5 改成 4（`tests/commit-checks.test.mjs`，注释同步改了）。
+推失败仍走 `act()` 且**不**报成"提交失败"（`committed` 标志那一档照旧）。
+
+**判据**：`tests/commit-checks.test.mjs`（新增 2 条：failure 的 `details` 那一档、失败行按条渲染 +
+详情链接的落点）、`tests/commit-options.test.mjs`（TODO 文案）、`tests/commit-message-inspection.test.mjs`（逐条文案）。
+`tests/module-size.test.mjs` 转绿（5/5）。相关 13 个文件 **123 passed**。
+
+**没做 / 没法核实的**：
+① 「改某一次具体提交」（`CommitToAmend.Specific`）—— 上游那条下拉
+（`AmendCommitModeDropDownLink.kt:22-121`，注册键 `git.amend.specific.commit` **默认 true**，
+`intellij.vcs.git.backend.xml:786`）在本仓**不做**：它背后是
+`GitAmendSpecificCommitSquasher.squashAmendCommitIntoTarget`（`GitAmendSpecificCommitService` 旁的
+`GitAmendSpecificCommitSquasher.kt:36-76`）—— 一次**内存内 autosquash rebase**
+（`InMemoryRebaseOperations.squash` + `GitInteractiveRebaseEntriesProvider`，冲突还要 undo + 通知）。
+只做下拉而 `--amend` 仍旧打 HEAD，那就是硬规则 2 说的**假控件**，所以不落。
+② 失败行上 rebase/分离 HEAD 那两条详情链接：上游落点是**浏览器**，本仓没有该通道。
+③ `module-size` 之外的机检：`vue-tsc -b --force` 现在剩 3 个错，全在
+`CodeEditor.vue` / `InlayHintsSettingsPage.vue`（`EditorSettings` 缺索引签名）——
+**不属于本域**，是并行那条 inlay hints 工作在进行中的改动。

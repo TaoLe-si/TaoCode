@@ -1,5 +1,5 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
-import { ROW_H } from './vcsLogGraph'
+import { ROW_H } from './vcsLogGraph.ts'
 export function useLogViewport(element: Ref<HTMLElement | undefined>, count: Ref<number>, more: () => void) {
   const top = ref(0), height = ref(0), width = ref(0)
   const start = computed(() => Math.max(0, Math.min(count.value, Math.floor(top.value / ROW_H) - 8)))

@@ -1,9 +1,11 @@
 // 本地更改的**补丁导出**（上游 `ChangesView.CreatePatch` / `CreatePatchToClipboard`）。
 //
-// 上游那两条（`VcsActions.xml:208-211`，改动列表四项之后、Shelve 之前）：
-//   · `ChangesView.CreatePatch` = 「从本地更改创建补丁…」（`ActionsBundle.properties:127`）——
+// 上游那两条（`VcsActions.xml:212-214`，改动列表那四项 `:208-211` 之后、Shelve `:215` 之前）：
+//   · `ChangesView.CreatePatch` = 「从本地更改创建补丁…」（`platform/platform-resources-en/src/messages/ActionsBundle.properties:1564`
+//     `action.ChangesView.CreatePatch.text`）——
 //     弹一个"创建补丁"对话框（勾选要包含的更改 + 目标文件），落成 `.patch`；
-//   · `ChangesView.CreatePatchToClipboard` = 「作为补丁复制到剪贴板」（`:131`）—— 同一份文本进剪贴板。
+//   · `ChangesView.CreatePatchToClipboard` = 「作为补丁复制到剪贴板」（`platform/platform-resources-en/src/messages/ActionsBundle.properties:1583`
+//     `action.ChangesView.CreatePatchToClipboard.text`）—— 同一份文本进剪贴板。
 //
 // 本仓的实现口径：补丁文本来自宿主的 `git.patch` —— 里面是 **`git diff HEAD`**（暂存区与工作区一起；
 // 单跑 `git diff` 只有未暂存那一半）**再按"新文件"接上未跟踪的文件**

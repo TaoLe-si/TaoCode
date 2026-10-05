@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from 'vue'
-import type { EditorSettings, GeneralSettingsState, NamedScopeSetting } from './bridge'
+import type { EditorSettings, GeneralSettingsState, NamedScopeSetting } from './bridge.ts'
 import type { CommitMessageInspectionSettings } from './commitMessageInspection'
 import type { FileColorSetting } from './fileColors'
 

@@ -7,6 +7,7 @@
 #include "text.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
@@ -143,6 +144,18 @@ std::string output_of(Collector& collector, int instance) {
 int main() {
     // 无缓冲：测试若卡住，要能立刻看出卡在哪一条（有缓冲时被 kill 就什么都看不到）。
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    run("端口过滤：只保留实例进程树里的 LISTEN 端口，去重升序（execution/portsWatcher 的可见面）", [] {
+        using taocode::run_host::ListeningPort;
+        const std::vector<std::uint32_t> pids{100, 200};
+        const std::vector<ListeningPort> listeners{
+            {100, 8080}, {100, 8080}, {100, 3000}, {999, 9999}, {200, 9229},
+        };
+        const auto ports = taocode::run_host::ports_of(pids, listeners);
+        check(ports == std::vector<std::int64_t>({3000, 8080, 9229}),
+              "只保留本进程树的端口，去重升序");
+        check(taocode::run_host::ports_of({}, listeners).empty(), "空 pid 集合没有端口");
+        check(taocode::run_host::ports_of({42}, listeners).empty(), "没有监听记录的 pid 没有端口");
+    });
     run("起一个实例：事件都带 instance id", [] {
         const auto root = temp_root();
         Collector collector;
@@ -240,6 +253,47 @@ int main() {
         check(stopped.at("stopped") == 1, "只停了一个");
         check(manager.instances().size() == 1, "另一个还在清单里");
         check(manager.instances()[0].at("id").get<int>() == second, "留在清单里的是第二个");
+        manager.stop(0);
+    });
+
+    run("进程树：run.instances 回传后代的 {pid, parent, name}（含父子层级）", [] {
+        const auto root = temp_root();
+        Collector collector;
+        taocode::run_host::Manager manager(collector.emit());
+        // cmd.exe（Runner 的 shell）会再拉起 ping.exe 当子进程；ping 期间两代都活着，
+        // 所以这份快照一定看得到一层父子关系，而不是只有根进程。
+        // 注意 conhost.exe 会先出现（控制台宿主），所以轮询要等到 ping 本身，不能见到非空就停。
+        const int instance = manager.start(start_params("进程树", "ping -n 20 127.0.0.1 > nul", true), root)
+                                 .at("instance").get<int>();
+        Json row;
+        bool saw_ping = false;
+        auto upper = [](std::string text) {
+            for (auto& character : text)
+                character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
+            return text;
+        };
+        for (int attempt = 0; attempt < 500 && !saw_ping; ++attempt) {
+            for (const auto& candidate : manager.instances())
+                if (candidate.value("id", 0) == instance) row = candidate;
+            if (row.contains("pid") && row.contains("tree") && row.at("tree").is_array()) {
+                for (const auto& entry : row.at("tree")) {
+                    if (upper(entry.value("name", std::string())).find("PING") == std::string::npos) continue;
+                    check(entry.at("parent").get<std::int64_t>() == row.at("pid").get<std::int64_t>(),
+                          "ping 的父进程应当是实例根进程");
+                    saw_ping = true;
+                }
+            }
+            if (!saw_ping) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(row.contains("pid") && row.at("pid").get<std::int64_t>() > 0, "在跑的实例要有根 pid");
+        check(row.contains("tree") && row.at("tree").is_array(), "要回传进程树数组");
+        check(!row.at("tree").empty(), "cmd 拉起 ping 之后进程树里至少有一个后代");
+        for (const auto& entry : row.at("tree")) {
+            check(entry.contains("pid") && entry.at("pid").is_number(), "树项要有 pid");
+            check(entry.contains("parent") && entry.at("parent").is_number(), "树项要有 parent");
+            check(entry.contains("name") && entry.at("name").is_string(), "树项要有进程名");
+        }
+        check(saw_ping, "树里要有 ping.exe（带名字），实际树：" + row.at("tree").dump());
         manager.stop(0);
     });
 

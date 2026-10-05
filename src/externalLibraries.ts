@@ -19,8 +19,18 @@
 //
 // 之前这里直接把 glob 字符串本身当叶子显示（lib/**/*.jar），那既不是 jar、也不是库名，
 // 点不开也读不懂 —— 用户 2026-10-03 的原话是「外部库现在是空的，什么都没有」。
+//
+// **本轮接的线**（lp/roots ② 与 pm/roots ① 的缺口就是这个「库/SDK 实体无处可用」）：
+//   · jar 不再是裸字符串列表，先经 `libraryFromJars`（`src/libraryModel.ts`）落成
+//     `Library` 实体（`-sources.jar` 归 SOURCES 根、其余归 CLASSES 根），再按上游
+//     `ExternalLibrariesNode.java:101-104` 的**无名库摊平**渲染成叶子。
+//     将来有了具名库，`libraryPresentableName` 那一支直接建中间节点即可，不必改这里。
+//   · SDK 行不再自己拼标签，经 `rootsSdkTable.ts` 的 `createSdk` + `sdkPresentableName`
+//     （`OrderEntry.getPresentableName()` 的等价物）出文案。
 
 import { matchLibraryGlob } from './buildHost.ts'
+import { libraryFromJars } from './libraryModel.ts'
+import { createSdk, sdkPresentableName, JAVA_SDK_TYPE } from './rootsSdkTable.ts'
 import type { Entry } from './bridge'
 
 /**
@@ -59,14 +69,27 @@ export function externalLibraryEntries(input: ExternalLibrariesInput): Entry[] {
   const jdk = input.jdk
   if (jdk && (jdk.name || jdk.version || jdk.home)) {
     // 标签口径同 NamedLibraryElementNode.java:84-90 → OrderEntry.getPresentableName()：
-    // 有名字用名字；没有就用版本；都没有才退回家目录的最后一段。
-    // 家目录两种分隔符都要认（Windows 的 `\` 与清单里的 `/`），所以先切掉尾部分隔符再取最后一段。
-    const last = jdk.home.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    out.push({ name: jdk.name || (jdk.version ? `JDK ${jdk.version}` : last || 'JDK'), path: SDK_ENTRY_PATH, kind: 'file' })
+    // 有名字用名字；没有就用版本；都没有才退回家目录的最后一段（`sdkPresentableName` 就是这三条）。
+    out.push({ name: sdkPresentableName(createSdk(jdk.name, JAVA_SDK_TYPE, jdk.home, jdk.version)), path: SDK_ENTRY_PATH, kind: 'file' })
   }
-  for (const file of matchedJars(input.files, input.patterns))
+  for (const file of libraryRootPaths(input.files, input.patterns))
     out.push({ name: file.replace(/^.*\//, ''), path: OFF_DISK + 'lib:' + file, kind: 'file' })
   return out
+}
+
+/**
+ * 命中 jar → `Library` 实体的根路径列表（按路径排序）。
+ *
+ * 走 `libraryFromJars` 而不是直接把 `matchedJars` 的结果摊开，是为了让 `Library` 这层实体
+ * 真的在生产链路上（lp/roots ② 的缺口就是「识别出来的根无处存」）。`libraryFromJars` 建的
+ * 库 `name` 为 null，所以按上游 `ExternalLibrariesNode.java:101-104` 的无名库摊平，
+ * 根直接当叶子 —— 输出与旧的 `matchedJars` 逐条一致，只是多了一次实体化。
+ * 排序放在这里（不放在 `libraryFromJars` 里）是为了保住 `matchedJars` 只负责命中与排序的契约。
+ */
+export function libraryRootPaths(files: readonly string[], patterns: readonly string[]): string[] {
+  const library = libraryFromJars(matchedJars(files, patterns))
+  if (!library) return []
+  return library.roots.map(root => root.path).sort()
 }
 
 /** 按 glob 命中的 jar，按路径排序（上游子节点是字母序，ProjectViewNode.java:287）。 */

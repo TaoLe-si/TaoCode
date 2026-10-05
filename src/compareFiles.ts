@@ -10,12 +10,15 @@
 //   · `getOtherFile`（`:152-171`）：**记住上次用过的文件/目录**，存在 `PropertiesComponent`
 //     的 `two.files.diff.last.used.file` / `two.files.diff.last.used.folder`（项目级），
 //     下次打开选择器时默认定位到那里。
-//   · 文件选择器的标题是 `select.file.to.compare`（`DiffBundle.properties:252`，中文包 = 选择要比较的文件）。
+//   · 文件选择器的标题是 `select.file.to.compare`（`platform/diff-api/resources/messages/DiffBundle.properties:202`，中文包 = 选择要比较的文件）。
 //   · 菜单位置：`PlatformActions.xml:562-568` 的 `CompareActions` 组 ——
 //     `PairFileActions`（CompareTwoFiles 在前、CompareFileWithEditor 在后）+ `CompareClipboardWithSelection`。
 //     本仓原先只有最后那一条（「与剪贴板比较」），前两条缺。
 //
-// 文案一律取随 IDE 发货的中文包（`ActionsBundle.properties` / `DiffBundle.properties`）。
+// 文案一律取随 IDE 发货的中文包；键的位置在英文包
+// （`platform/platform-resources-en/src/messages/ActionsBundle.properties` 与
+//   `platform/diff-api/resources/messages/DiffBundle.properties`，同名文件在
+//   `plugins/devkit/intellij.devkit.i18n/testData/` 里还有一份测试数据，引用一律指前者）。
 
 /** `action.compare.with.text`（中文包 = 比较对象…）—— 选中一个文件时那一行的标题。 */
 export const COMPARE_WITH_TEXT = '比较对象…'
@@ -27,7 +30,7 @@ export const COMPARE_DIRS_TEXT = '比较目录'
 export const COMPARE_ARCHIVES_TEXT = '比较归档'
 /** `action.compare.text`（中文包 = 比较）—— 类型混杂时的兜底标题。 */
 export const COMPARE_TEXT = '比较'
-/** `select.file.to.compare`（`DiffBundle.properties:252`，中文包 = 选择要比较的文件）。 */
+/** `select.file.to.compare`（`platform/diff-api/resources/messages/DiffBundle.properties:202`，中文包 = 选择要比较的文件）。 */
 export const SELECT_FILE_TO_COMPARE = '选择要比较的文件'
 
 /** 上游 `CompareFilesAction.getType`（按 VFS 属性判）。 */

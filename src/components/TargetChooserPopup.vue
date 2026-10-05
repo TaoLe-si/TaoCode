@@ -15,6 +15,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FileCode2, Pin } from 'lucide-vue-next'
 import { filterChooseTargets, moveChooseTarget, type ChooseTargetRow } from '../chooseTarget'
 import { popupCancelKeyAction } from '../popupCancel'
+import { useBestPositionAnchor } from '../popupPlacement'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ title: string; rows: ChooseTargetRow[]; x?: number; y?: number; pinnable?: boolean }>()
@@ -47,17 +48,10 @@ function onKeydown(event: KeyboardEvent) {
   // 其余可打印字符进速度搜索（`SpeedSearchBase.java:55`：空串放行全部）。
   if (event.key.length === 1) { event.preventDefault(); filter.value += event.key }
 }
-const WIDTH = 420
-// `showInBestPositionFor(editor)`：编辑器有光标时钉在光标处，拿不到坐标就落到窗口上方居中。
-const anchor = computed(() => {
-  const innerWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
-  const innerHeight = typeof window === 'undefined' ? 800 : window.innerHeight
-  if (props.x === undefined || props.y === undefined) return { left: `${Math.round((innerWidth - WIDTH) / 2)}px`, top: '96px' }
-  return {
-    left: `${Math.max(4, Math.min(props.x, innerWidth - WIDTH - 8))}px`,
-    top: `${Math.max(4, Math.min(props.y, innerHeight - 40 - props.rows.length * 26))}px`,
-  }
-})
+// `showInBestPositionFor(editor)`（`AbstractPopup.java:974-993`）：编辑器有光标时钉在光标处，
+// 拿不到坐标就按实测尺寸居中（`showInFocusCenter`）。夹取在 src/popupPlacement.ts。
+const { style: anchor } = useBestPositionAnchor(list, () =>
+  props.x === undefined || props.y === undefined ? null : { x: props.x, y: props.y })
 // 点到弹窗外就收起（IDEA 的列表弹层同样在点外部时关闭）。
 function onPointerDown(event: PointerEvent) { if (!list.value?.contains(event.target as Node)) emit('close') }
 onMounted(() => window.addEventListener('pointerdown', onPointerDown, true))

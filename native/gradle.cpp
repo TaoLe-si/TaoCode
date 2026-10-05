@@ -69,13 +69,17 @@ Json start_sync(SyncSession& session, const std::string& fallback_root, const Js
     const auto command = params.value("command", std::string());
     if (root.empty() || command.empty()) throw WorkspaceError("INVALID_REQUEST", "缺少同步目录或命令。");
     emit({{"event", "gradle.started"}, {"command", command}});
+    // 这两个回调**按值**捕获 emit：它们会被后台线程在本函数返回之后调用，而 emit 是调用方的
+    // 临时 std::function（请求处理完就析构）——按引用捕获会调到一个已经死掉的对象上。
+    // 症状就是 std::bad_function_call → terminate → 进程以 0xC0000409 退出；真机取证见
+    // HANDOFF「打开 AE2 工作区即崩」那一条（scripts/dump_fault.py + PDB 还原出这条链）。
     session.start(root, command, params.value("env", std::vector<std::string>{}),
-                  [&emit](std::string_view chunk) {
+                  [sink = emit](std::string_view chunk) {
                       if (chunk.empty()) return;
-                      emit({{"event", "gradle.output"}, {"dataB64", base64_encode(chunk)}});
+                      sink({{"event", "gradle.output"}, {"dataB64", base64_encode(chunk)}});
                   },
-                  [&emit](int code, bool cancelled) {
-                      emit({{"event", "gradle.exit"}, {"code", code}, {"cancelled", cancelled}});
+                  [sink = emit](int code, bool cancelled) {
+                      sink({{"event", "gradle.exit"}, {"code", code}, {"cancelled", cancelled}});
                   });
     return {{"started", true}, {"command", command}};
 }

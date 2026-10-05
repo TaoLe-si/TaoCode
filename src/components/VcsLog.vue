@@ -3,7 +3,7 @@ import { computed, ref, toRef, watch } from 'vue'
 import { RefreshCw, PanelRight, ArrowLeft, ArrowRight, Settings2 } from 'lucide-vue-next'
 import { Check } from 'lucide-vue-next'
 import { copyToClipboard } from '../clipboard'
-import { isDesktop, type GitCommitChange } from '../bridge'
+import { isDesktop, type GitCommitChange, type GitLogQuery } from '../bridge'
 import VcsLogDiff from './VcsLogDiff.vue'
 import { useVcsLogData } from '../vcsLogData'
 import VcsLogTable from './VcsLogTable.vue'
@@ -11,9 +11,11 @@ import VcsLogSplitter from './VcsLogSplitter.vue'
 import VcsLogChanges from './VcsLogChanges.vue'
 import VcsLogDetails from './VcsLogDetails.vue'
 import VcsLogFilters from './VcsLogFilters.vue'
+import VcsLogGoToRef from './VcsLogGoToRef.vue'
 import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
+import { isEmptyLogQuery, logFilterStorageKey, parseLogQuery, serializeLogQuery } from '../vcsLogFilterStore'
 import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
-import { logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
+import { LOG_NO_MATCHING_COMMITS, LOG_RESET_FILTERS, logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
 import { logDate } from '../vcsLogGraph'
 import { iconSize } from '../uiIcons'
 
@@ -23,7 +25,18 @@ const emit = defineEmits<{ setTagNames: [value: boolean] }>()
 const { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
   canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick,
   resetTo, uncommit, createTagOn, deleteTag, scope } =
-  useVcsLogData(toRef(props, 'root'), toRef(props, 'active'))
+  useVcsLogData(toRef(props, 'root'), toRef(props, 'active'), () => {
+    try { return parseLogQuery(localStorage.getItem(logFilterStorageKey(props.root))) } catch { return {} }
+  })
+// 用户显式「应用」过滤才存档（上游 `VcsLogUiPropertiesImpl` 的过滤值持久化）：
+// 导航/历史回溯只改 query，不该把「跳到某个提交」当成过滤条件记下来。
+function applyLogFilter(value: GitLogQuery) {
+  applyQuery(value)
+  try { localStorage.setItem(logFilterStorageKey(props.root), isEmptyLogQuery(value) ? '' : serializeLogQuery(value)) } catch { /* Session-only. */ }
+}
+/** `vcs.log.reset.filters.status.action` 的入口：只有「有过滤却一条都没命中」时才出现。 */
+const filtersActive = computed(() => !isEmptyLogQuery(query.value))
+function resetLogFilter() { applyLogFilter({}) }
 const previewChange = ref<GitCommitChange | null>(null)
 // 提交行的右键菜单（`Vcs.Log.ContextMenu` 一族）：行模型与文案在 `src/vcsLogMenu.ts`。
 const panel = ref<HTMLElement>()
@@ -151,7 +164,7 @@ async function jump(hash: string) {
     <VcsLogSplitter :key="root" :storage-key="`${layoutKey}.changes.splitter.proportion`">
       <template #first>
         <div class="vcslog-toolbar" role="toolbar" aria-label="日志过滤与显示">
-          <VcsLogFilters :query="query" @apply="applyQuery" />
+          <VcsLogFilters :query="query" @apply="applyLogFilter" />
           <button class="icon-button" title="后退" aria-label="日志导航后退" :disabled="!canBack" @click="history('back')"><ArrowLeft :size="iconSize.control" /></button>
           <button class="icon-button" title="前进" aria-label="日志导航前进" :disabled="!canForward" @click="history('forward')"><ArrowRight :size="iconSize.control" /></button>
           <span class="count" :title="`已加载 ${commits.length} 条提交`">{{ commits.length }}{{ hasMore ? '+' : '' }}</span>
@@ -172,13 +185,23 @@ async function jump(hash: string) {
               </template>
             </form>
           </details>
+          <!-- `Vcs.Log.GoToRef`（`intellij.platform.vcs.log.impl.xml:290`，挂在
+               `Vcs.Log.Toolbar.RightCorner` 里、排在「视图选项」之后）。 -->
+          <VcsLogGoToRef :commits="commits" :navigating="navigating" @go-to="jump" />
         </div>
         <p v-if="!isDesktop" class="note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
         <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
-          <div v-else-if="!commits.length" class="empty">{{ loaded ? '没有匹配的提交。' : '打开 Git 仓库后显示提交图。' }}</div>
+          <!-- `vcs.log.no.commits.matching.status` + `vcs.log.reset.filters.status.action`
+               （`VcsLogBundle.properties:151-152`）：有过滤却一条都没命中时给一个真的重置入口，
+               不是一句死文案。 -->
+          <div v-else-if="!commits.length && loaded && filtersActive" class="empty">
+            <p>{{ LOG_NO_MATCHING_COMMITS }}</p>
+            <button class="load-more" @click="resetLogFilter">{{ LOG_RESET_FILTERS }}</button>
+          </div>
+          <div v-else-if="!commits.length" class="empty">{{ loaded ? LOG_NO_MATCHING_COMMITS : '打开 Git 仓库后显示提交图。' }}</div>
           <button v-if="hasMore" class="load-more" :disabled="loading" @click="load(true)">加载更多提交</button>
         </VcsLogTable>
       </template>

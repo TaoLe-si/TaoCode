@@ -11,6 +11,7 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Check } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { usePopupAnchor } from '../popupAnchor'
+import { nextMenuIndex, rowActivatable, visibleMenuRows } from '../menuKeyboard'
 
 const props = defineProps<{ rows: any[]; x: number; y: number; label?: string }>()
 const emit = defineEmits<{ (event: 'pick', row: any): void; (event: 'close'): void }>()
@@ -22,6 +23,26 @@ const box = ref<HTMLElement>()
 const { style: anchor, refresh } = usePopupAnchor(box, () => ({ x: props.x, y: props.y }))
 
 const open = ref<string | null>(null)
+// 键盘导航（上游 Swing 菜单的 MenuSelectionManager）：↑↓ 走行、Enter 执行、→ 展开子段 / ← 收起。
+// 活动项用 id 记（行表随 enabled() 重算，用下标会指错）。
+const activeId = ref<string | null>(null)
+function activeIndex(): number {
+  const rows = visibleMenuRows(props.rows, open.value)
+  const index = rows.findIndex(row => row.id === activeId.value)
+  return index
+}
+function moveActive(step: number) {
+  const rows = visibleMenuRows(props.rows, open.value)
+  const index = nextMenuIndex(rows.length, activeIndex(), step)
+  activeId.value = index >= 0 ? rows[index]!.id : null
+}
+function activateActive() {
+  const rows = visibleMenuRows(props.rows, open.value)
+  const row = rows.find(entry => entry.id === activeId.value)
+  if (!row) return
+  if (row.children) { toggle(row.id); return }
+  if (rowActivatable(row)) emit('pick', row)
+}
 function toggle(id: string) {
   open.value = open.value === id ? null : id
   // 子段是就地展开的（上游是嵌套 popup），高度变了要重新夹一次。
@@ -29,7 +50,26 @@ function toggle(id: string) {
 }
 function rowEnabled(row: any): boolean { return row.enabled ? row.enabled() : true }
 function onPointerDown(event: PointerEvent) { if (!(event.target as Element).closest('.editor-popup-menu')) emit('close') }
-function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape') emit('close') }
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') { emit('close'); return }
+  if (event.key === 'ArrowDown') { event.preventDefault(); moveActive(1); return }
+  if (event.key === 'ArrowUp') { event.preventDefault(); moveActive(-1); return }
+  if (event.key === 'ArrowRight') {
+    const row = visibleMenuRows(props.rows, open.value).find(entry => entry.id === activeId.value)
+    if (row?.children) { event.preventDefault(); if (open.value !== row.id) toggle(row.id) }
+    return
+  }
+  if (event.key === 'ArrowLeft') {
+    if (open.value) { event.preventDefault(); open.value = null; return }
+    if (activeId.value) { event.preventDefault(); activeId.value = null }
+    return
+  }
+  if (event.key === 'Enter') {
+    // 没走过键盘（无活动项）时不抢 Enter —— 编辑器里它还是换行。
+    if (activeIndex() < 0) return
+    event.preventDefault(); activateActive()
+  }
+}
 onMounted(() => {
   window.addEventListener('pointerdown', onPointerDown, true)
   window.addEventListener('keydown', onKeydown)
@@ -45,15 +85,15 @@ onUnmounted(() => {
     <template v-for="row in rows" :key="row.id">
       <div v-if="row.rule" class="menu-rule" />
       <template v-else-if="row.children">
-        <button type="button" class="has-sub" role="menuitem" :aria-expanded="open === row.id" @click="toggle(row.id)">{{ row.title }}</button>
+        <button type="button" class="has-sub" :class="{ 'is-active': activeId === row.id }" role="menuitem" :aria-expanded="open === row.id" @mouseenter="activeId = row.id" @click="toggle(row.id)">{{ row.title }}</button>
         <template v-if="open === row.id">
-          <button v-for="child in row.children" :key="child.id" type="button" class="sub-item" role="menuitem"
-                  :disabled="!rowEnabled(child)" @click="emit('pick', child)">
+          <button v-for="child in row.children" :key="child.id" type="button" class="sub-item" :class="{ 'is-active': activeId === child.id }" role="menuitem"
+                  :disabled="!rowEnabled(child)" @mouseenter="activeId = child.id" @click="emit('pick', child)">
             {{ typeof child.title === 'function' ? child.title() : child.title }}<kbd v-if="child.keys">{{ child.keys }}</kbd>
           </button>
         </template>
       </template>
-      <button v-else type="button" role="menuitem" :class="{ 'is-checked': row.checked?.() }" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @click="emit('pick', row)">
+      <button v-else type="button" role="menuitem" :class="{ 'is-checked': row.checked?.(), 'is-active': activeId === row.id }" :aria-checked="row.checked ? row.checked() : undefined" :disabled="!rowEnabled(row)" @mouseenter="activeId = row.id" @click="emit('pick', row)">
         <span v-if="row.checked" class="menu-check" aria-hidden="true"><Check :size="iconSize.menu" /></span>{{ typeof row.title === 'function' ? row.title() : row.title }}<kbd v-if="row.keys">{{ row.keys }}</kbd>
       </button>
     </template>

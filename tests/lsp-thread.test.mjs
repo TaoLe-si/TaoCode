@@ -81,7 +81,10 @@ test('文件变更与 Java 配置的通知也走投递', () => {
   assert.ok(announce.length > 40, `announce 切片只有 ${announce.length} 字符 —— 判据在空转`)
   assert.match(announce, /lsp_worker->post\(/, 'announce_file_change 在调用方线程上直接写服务器')
   assert.deepEqual(calls_before_post(announce), [], '投递之外还有同步调用')
-  assert.match(main, /lsp_worker->post\(\[this, java, build_tools\] \{/, 'project.settings.update 在 UI 线程上改语言服务配置')
+  // 捕获列表不钉死具体形状：2026-10-05 为修「跨线程读 current_root」的数据竞争加了 `root`
+  // （按值带走），钉死 `[this, java, build_tools]` 会让这类正确的加固变成红灯。
+  // 这里要守的是「配置变更必须投递到语言服务线程」，不是「捕获了哪几个变量」。
+  assert.match(main, /lsp_worker->post\(\[this,[^\]]*\bjava\b[^\]]*\] \{/, 'project.settings.update 在 UI 线程上改语言服务配置')
 })
 
 test('ready 回调只登记状态，补发 didOpen 交回语言服务线程', () => {

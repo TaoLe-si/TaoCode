@@ -46,21 +46,55 @@ const NATIVE_REGISTERED = new Map([
       + '拆进 native/lsp_config.cpp，降到 1923）；把 `lsp.request` 的两段纯整形（入参整体转发、回参包壳）搬进 lsp_capability_queries.cpp、请求边界追踪搬进 native/request_trace.cpp。2026-09-28 桃定死：**上限固定 2000 行**，新能力一律抽成 native/xxx.cpp，不再逐行抠上限。',
   }],
   ['native/lsp_session.cpp', {
-    limit: 1075,
-    note: 'LSP 会话：门控 + 每个 kind 的整形。工具与整形已拆到 lsp_support.hpp/.cpp，`Session::ensure()`（起服务器 + initialize + 三个回调 + 补发 didOpen，228 行）拆到 native/lsp_host_bootstrap.cpp（1317→1075）。'
-      + '能力判定拆到 lsp_capability_queries.cpp，代码操作一族拆到 lsp_code_actions.cpp —— '
-      + '上限跟着拆降（2026-09-27 从 1950 降到 1440，2026-09-28 再降到 1316）。',
+    limit: 475,
+    note: 'LSP 会话：门控 + 文档生命周期 + request()/semantic() 两个分派入口。工具与整形已拆到 lsp_support.hpp/.cpp，`Session::ensure()`（起服务器 + initialize + 三个回调 + 补发 didOpen，228 行）拆到 native/lsp_host_bootstrap.cpp。'
+      + '能力判定拆到 lsp_capability_queries.cpp，代码操作一族拆到 lsp_code_actions.cpp。'
+      + '2026-10-05 把 `semantic()` 门控之后的**每个 kind 怎么发、怎么整形**那整条 if 链'
+      + '（`position` / `relative` 两个局部量 + 约 30 个 kind + 末尾的 LSP_BAD_KIND 兜底，594 行）'
+      + '整段搬进 native/lsp_session_kinds.cpp（新的 `Session::dispatch_semantic_kind`，void 返回，'
+      + 'host/uri/language_name 由门控算好后传入）—— 本文件原来把「门控」与「整形」两件事挤在一起，'
+      + '这正是本条登记写的职责。链上每个分支的 `return;` 与全部注释逐字未改。上限 1075 降到 475。',
   }],
   ['native/dap.cpp', {
-    limit: 1800,
-    note: 'DAP 客户端：同上，按请求族拆。',
+    limit: 1480,
+    note: 'DAP 客户端：会话/管道/reader + 请求的构造与发信 + 回信怎么包（ok 壳 / allThreadsContinuation）。'
+      + '2026-10-04 补协议侧三条缺口（loadedSources/modules 按需重取、stepBack/reverseContinue、'
+      + 'readMemory/disassemble）时**按请求族拆出 native/dap_inspect.cpp**（请求 + 整形），'
+      + 'dap.* 的桥接分派拆到 native/dap_routes.cpp，上限跟着拆降（1800 → 1790）。'
+      + '2026-10-05 再把**响应整形族**（shape_event/frames/scopes/variables/exception_info/'
+      + 'breakpoint_locations/completions/goto_targets + verified_lines/normalize_breakpoints/'
+      + 'requested_lines/breakpoint_messages，317 行）整个搬进 native/dap_shaping.cpp —— '
+      + '那一族只管"响应长什么样"，不碰 socket 也不碰状态，搬走后上限 1790 → 1480。'
+      + '新请求族、新整形族一律进新文件。',
   }],
   ['native/workspace.cpp', {
-    limit: 1480,
-    note: '文件系统与工作区操作。helper 与新域应拆到 fsops/新文件。',
+    limit: 1385,
+    note: '文件系统与工作区操作：读写、编码、新建/改名、回收站、文本引用扫描、'
+      + '外部链接与「在资源管理器中显示」。helper 与新域应拆到 fsops/新文件。'
+      + '2026-10-05 把「递归遍历一棵树并删除/复制它」（remove_tree / copy_tree，87 行）整个搬进 '
+      + 'native/workspace_tree_ops.cpp —— 那一族只做 Win32 目录枚举 + 重解析点拒绝 + 条目预算，'
+      + '不读文件内容、不管编码、不碰 Workspace 的状态机，与留在本文件的单文件操作不共一个职责域；'
+      + 'fail / win_error / utf8_path / api_path 的**声明**随之搬进 native/workspace_detail.hpp'
+      + '（实现仍只有本文件这一份：Win32 错误码映射复制一份就会漂移），上限 1480 降到 1385。',
   }],
-  ['native/history.cpp', { limit: 1050, note: '本地历史。' }],
-  ['native/git.cpp', { limit: 1016, note: 'Git 只读视图。时间格式化已去重到 native/time_format.hpp（2026-09-27，与 diagnostics 的三份重复实现合并）。' }],
+  ['native/history.cpp', {
+    limit: 910,
+    note: '本地历史：快照落盘 / 版本索引 / 指纹 / 并排差异。'
+      + '2026-10-05 把「行级 unified diff 脚本」（切行 → LCS 出脚本 → 渲染 @@ 块，117 行）'
+      + '连同 diff_cell_budget / diff_context 两个常数搬进 native/history_diff.cpp —— '
+      + '那一段不碰目录、句柄与索引，是一个独立的算法域，与留在本文件的并排词级标注'
+      + '（tokenize / word_marks / side_rows）只共用 Row 与 split_lines，上限 1050 降到 910。',
+  }],
+  ['native/git.cpp', {
+    limit: 938,
+    note: 'Git 只读视图。时间格式化已去重到 native/time_format.hpp（2026-09-27，与 diagnostics 的三份重复实现合并）。'
+      + '2026-10-05 把「工作树 + 子模块」一族（worktree list/add/remove + submodule status/update，83 行）'
+      + '整段搬进 native/git_worktree.cpp —— 那一族只跑 `git worktree *` / `git submodule *` 并整形它们的 '
+      + 'porcelain 输出，与留在本文件的分支/标签/暂存/追溯/文件历史不共一个职责域。'
+      + 'run() / Result / require_ok / utf8_to_wide / split_lines / utf8_path 的**声明**随之搬进 '
+      + 'native/git_detail.hpp（实现仍只有本文件这一份：job object 与看门狗不能复制到第二个 TU），'
+      + '上限 1016 降到 938。',
+  }],
   ['native/git_clone.cpp', { limit: 880, note: '克隆流程。' }],
   ['native/projects.cpp', { limit: 950, note: '项目列表与最近项目。' }],
 ])
@@ -80,17 +114,23 @@ const REGISTERED = new Map([
       + '版本控制动作、编辑器文件级操作（冲突/文档/缩进/行尾/编码）、标签拖放、标签条单行布局、分栏与面板尺寸、生成/重构/文件移动、文件树操作、编辑区分栏与标签页开关、工具窗口命名布局、通知与状态栏键盘导航、编辑器侧视图与项目视图定位。',
   }],
   ['src/components/SettingsDialog.vue', {
-    limit: 1356,
+    limit: 1182,
     note: '设置树的宿主 + 各页的挂载点。页面本体已在 src/components/*Page.vue（Scopes/TodoPatterns/FileTypes/BuildTools/Gradle…），'
       + '树本身（页面键/分组/节点/随项目保存的页）在 src/settingsTreeMeta.ts —— 上限跟着拆降'
       + '（2026-09-27 接 Gradle 页时从 1450 降到 1380；接标签条排法时把「编辑器标签页」页拆到'
-      + 'EditorTabsSettingsPage.vue，降到 1356）。',
+      + 'EditorTabsSettingsPage.vue，降到 1356）。'
+      + '2026-10-05 把「设置树搜索」整块（查询历史弹层、DOM 选项扫描、粘贴路径解析、命中过滤、'
+      + 'spotlight、方向键顺序、onBeforeUnmount 的收摊）搬进 src/settingsSearchController.ts 的 '
+      + 'createSettingsSearch 工厂（它只认「一个查询把树过滤成什么样」一件事），上限 1356 降到 1182。',
   }],
   ['src/bridge.ts', {
-    limit: 1208,
+    limit: 905,
     note: '桥接的类型与封装（Method/LspRequestKind union 是机检锚点，必须留在这里）。纯逻辑应拆 src/xxx.ts —— '
       + 'base64 拆到 src/base64.ts、Gradle 同步通道拆到 src/gradleEvents.ts、终端订阅表拆到 src/terminalEvents.ts、'
-      + '插件清单类型拆到 src/pluginGroups.ts（2026-09-27 从 1450 降到 1208）。',
+      + '插件清单类型拆到 src/pluginGroups.ts（2026-09-27 从 1450 降到 1208）；'
+      + '2026-10-05 把「浏览器预览的内存示例」（previewRequest + 三个内存 Map + 各条 INVALID_SETTINGS 校验）'
+      + '整个搬进 src/bridgePreview.ts、错误类型搬进 src/bridgeError.ts（bridge.ts 原样转出），'
+      + '上限 1208 降到 905。',
   }],
   ['src/components/CodeEditor.vue', {
     limit: 1147,

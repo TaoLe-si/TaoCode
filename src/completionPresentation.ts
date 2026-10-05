@@ -15,11 +15,13 @@ export interface PresentedCompletion extends Completion {
 
 // IDEA platform/lsp/src/api/customization/LspCompletionCustomizer.kt:146-172.
 // A missing icon is intentional (not an invented glyph for an unsupported kind).
+// `command` 不是 LSP 条目种类：它是本仓**命令补全**条目的 kind，图标照上游
+// `CommandCompletionProvider.kt:392` 的 `IntentionBulbGrey`（见 src/completionIcons.ts 的 `intention`）。
 const icons: Record<string, string> = {
   text: 'word', method: 'method', function: 'function', constructor: 'class', field: 'field',
   variable: 'variable', class: 'class', interface: 'interface', property: 'property', enum: 'enum',
   snippet: 'template', color: 'colors', file: 'anyType', folder: 'folder', 'enum-member': 'enum',
-  constant: 'constant', struct: 'object', 'type-parameter': 'type',
+  constant: 'constant', struct: 'object', 'type-parameter': 'type', command: 'intention',
 }
 
 export function completionPresentation(item: Pick<LspCompletionItem, 'kind' | 'detail' | 'raw'>): CompletionPresentation {

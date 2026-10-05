@@ -74,10 +74,12 @@ test('a remembered path wins, otherwise the current file', () => {
 // —— 文案与顺序 ——
 
 test('the strings come from the shipped Chinese bundle', () => {
-  assert.equal(COMPARE_WITH_TEXT, '比较对象…', 'ActionsBundle.properties:2499')
-  assert.equal(COMPARE_FILES_TEXT, '比较文件', ':2497')
-  assert.equal(COMPARE_DIRS_TEXT, '比较目录', ':2496 同族')
-  assert.equal(SELECT_FILE_TO_COMPARE, '选择要比较的文件', 'DiffBundle.properties:252')
+  // 键的位置逐条开过 `platform/platform-resources-en/src/messages/ActionsBundle.properties`
+  // （上一版写的 `:2496-2499` 落在 `action.ExternalSystem.*` 那一段里，与本族无关）。
+  assert.equal(COMPARE_WITH_TEXT, '比较对象…', 'platform/platform-resources-en/src/messages/ActionsBundle.properties:2000 action.compare.with.text')
+  assert.equal(COMPARE_FILES_TEXT, '比较文件', ':1999 action.compare.files.text')
+  assert.equal(COMPARE_DIRS_TEXT, '比较目录', ':1998 action.CompareDirs.text')
+  assert.equal(SELECT_FILE_TO_COMPARE, '选择要比较的文件', 'DiffBundle.properties:202 select.file.to.compare')
 })
 
 // 上游那一组的顺序：PairFileActions（比较文件 / 与编辑器比较）在前，剪贴板那条在后。

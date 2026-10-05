@@ -30,6 +30,11 @@ std::vector<std::string> import_exclusions(const std::filesystem::path& root, co
 /** 链接子工程里存在的源根（`src/main/java`、`src/test/java`、`src/main/resources`、`src`）。 */
 std::vector<std::string> default_source_paths(const std::filesystem::path& root, const Json& gradle);
 
+/** 没填 `linkedProjects`（单模块工程）时**工作区根自己**的源根，工作区相对。 */
+std::vector<std::string> root_source_paths(const std::filesystem::path& root);
+/** 已链接的子工程目录（工作区相对，原样保留 `linkedProjects` 的写法）；没链接时为空。 */
+std::vector<std::string> linked_project_dirs(const Json& gradle);
+
 /**
  * 把"已算好的模型"物化成 **Eclipse 工程**（`.project` + `.classpath`），交给 JDT LS 自带的
  * `EclipseProjectImporter` 导入 —— 这是"IDEA 靠已导入的模型离线解析"在本仓的等价物：
@@ -38,9 +43,34 @@ std::vector<std::string> default_source_paths(const std::filesystem::path& root,
  *
  * 只在文件**不存在**时写（不覆盖用户自己的 Eclipse 配置），返回实际写的文件数（0 = 跳过）。
  * 源根用工程内相对路径，jar 用绝对路径（`kind="lib"`）。jar 由 glob 前缀目录递归枚举，上限 400 条。
+ * `source_paths` / `library_globs` 收**工作区相对**的条目（`<子工程>/src/main/java`、
+ * 以 `<子工程>/build/rfg` 之类目录为前缀的 jar 模式）；带 `<工程名>/` 前缀的剥掉后当工程内相对用，
+ * 不带的（工程就是工作区根）原样用。
+ * 已知限制：`linkedProjects` 写成嵌套路径（`group/mod-a`）时前缀按目录名对不上，jar 条目会落空。
  */
 int materialize_eclipse_project(const std::filesystem::path& project_dir,
                                const std::vector<std::string>& source_paths,
                                const std::vector<std::string>& library_globs);
+
+/**
+ * 关掉 Gradle 导入时为**该建工程的每个目录**物化 Eclipse 工程：已链接的子工程各一个；
+ * 一个都没链接（单模块工程）时就是**工作区根自己** —— 否则 JDT 眼里根目录不是工程，
+ * `src/**` 里的文件永远是"non-project file"。返回写出的文件数。
+ */
+int materialize_eclipse_projects(const std::filesystem::path& root, const Json& gradle);
+
+/**
+ * 「让语言服务看到外部」这一个问题的**唯一入口**（启动与设置变更两条路共用，见 native/lsp_config.cpp
+ * 与 native/main.cpp 的 `project.settings.update`）：算类路径/源根/导入排除，顺带物化 Eclipse 工程。
+ */
+struct JavaLspModel {
+    /** 下发给 `java` 服务器的 `settings`（`java.project.sourcePaths` / `referencedLibraries` / …）。 */
+    Json settings;
+    /** 要物化、也要声明成 LSP **workspace folder** 的目录（工作区相对）；空 = 用工作区根。 */
+    std::vector<std::string> project_dirs;
+    /** 物化出来的 Eclipse 工程文件数（诊断日志用）。 */
+    int files = 0;
+};
+JavaLspModel java_lsp_model(const std::filesystem::path& root, const Json& java, const Json& build_tools);
 
 }  // namespace taocode

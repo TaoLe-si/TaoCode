@@ -53,6 +53,10 @@ test('禁用/不可用的工具窗口不开菜单，菜单也只服务真有的�
   assert.match(actions, /const anchorMenu = ref<\{ id: string; x: number; y: number \} \| null>\(null\)/)
   // 关掉时清状态：留着 {id} 会让下一次 v-if 直接渲染在旧坐标上。
   assert.match(actions, /function closeAnchorMenu\(\) \{ anchorMenu\.value = null \}/)
-  assert.match(menu, /window\.addEventListener\('pointerdown', onPointerDown, true\)/, '点外面不收起 = 键盘之外的第二个死路')
-  assert.match(menu, /window\.removeEventListener\('pointerdown', onPointerDown, true\)/, '监听没摘掉会跨窗口泄漏')
+  // 2026-10-06：点外面 / Esc 不再由本组件自挂 window 监听，而是注册进**全局弹层栈**
+  // （`src/popupStack.ts` 承接上游 `PopupDispatcher.java:36-37` 的那条全局链）。
+  // 意图没变：菜单一定收得起来；形状变了，所以这里改查注册。自挂监听还有一个真问题 ——
+  // 两层弹层各挂各的监听会抢同一次 pointerdown（点开层时把下层一起关掉）。
+  assert.match(menu, /usePopupLayer\(box, shown, \(\) => emit\('close'\)/, '点外面/Esc 不收进弹层栈 = 菜单收不起来，也不被 auto-hide 认作「焦点进了弹层」')
+  assert.doesNotMatch(menu, /window\.addEventListener/, '组件不该再自己挂全局监听（一条链只该有一个所有者）')
 })

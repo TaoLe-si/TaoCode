@@ -3,6 +3,11 @@
 // results, (4) offer "rerun failed only" and stack-trace jump. This module holds
 // the pure parts: discovery per framework, result-line parsing, and the failed-set
 // bookkeeping the Rerun Failed action reads.
+//
+// 结果有两条来源，消费者（`src/assertionView.ts` 的 `TestResultFeed`）**先看结构化通道**：
+//   · `##taocode[{...}]` 事件行 —— `smRunner` 的等价物（`SMTestRunnerConnectionUtil` /
+//     `OutputToGeneralTestEventsConverter` / `TestEventChannel`，见 `src/testEventChannel.ts`）；
+//   · 认不出的行才走下面的逐行文本解析（TAP / ctest / gradle / JUnit 失败头）。
 
 export type TestFramework = 'ctest' | 'npm' | 'junit' | 'pytest'
 
@@ -164,3 +169,9 @@ export function firstStackFrame(stack: readonly string[]): { path: string; line:
   }
   return null
 }
+
+// 结构化事件通道从这条测试核心的出口转出（`TestResultFeed` 就是从这里取它）：
+// `TestEventChannel` 解析 `##taocode[...]` 行并驱动结果表/失败集/断言视图，
+// 认不出的行才轮到上面的文本解析。协议与上游对应见 `src/testEventChannel.ts` 的模块头。
+export { TestEventChannel, parseTestEvent, formatTestEvent, TEST_EVENT_PREFIX,
+         CHANNEL_OUTPUT_LIMIT, type TestEvent, type TestEventKind, type ChannelOutcome, type StructuredFailureView } from './testEventChannel.ts'

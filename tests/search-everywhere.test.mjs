@@ -1,6 +1,12 @@
 // Search Everywhere 的纯逻辑：一个对话框多个供给者（IDEA 263 新分屏实现）。
-// 对照依据：`IdeBundle.properties` 的 tab 名称键、`ContributorDefinedTabsCustomizationStrategy.kt:5`
-// 的 `@Deprecated`（旧 tab 体系已 sunset）、`commandSearch.ts` 的打分语义。
+// 对照依据：新 SE 的 tab 注册表
+// `platform/searchEverywhere/frontend/resources/intellij.platform.searchEverywhere.frontend.xml:64-69`
+// 与各 tab 的 `priority`（All/Classes/Files/Symbols/Actions/Text）、
+// `ContributorDefinedTabsCustomizationStrategy.kt:5` 的 `@Deprecated`（旧 tab 体系已 sunset）、
+// `commandSearch.ts` 的打分语义。
+// **注意**：`IdeBundle.properties:1116-1120` 那批 `searcheverywhere.*.tab.name`
+// （Project / IDE / Commands / Run Configurations / Autocompletion）不是新 SE 的 tab 名 ——
+// Project/IDE 两个键全树无代码引用，Commands 只被旧 SE 用，Autocompletion 只被已废弃的类用。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -31,13 +37,59 @@ const items = [
   item('cfg', 'Demo', 'runConfigs', { subtitle: 'Application' }),
 ]
 
-test('tab 集合与顺序照 IdeBundle 的键，不按记忆', () => {
-  // `searcheverywhere.*.tab.name` = All / Project / IDE / Commands / Run Configurations / Autocompletion。
-  // 我们只渲染有真实供给者的四个：IDE 与 Autocompletion 还没有供给者，渲染出来就是放假控件。
-  assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.label), ['All', 'Project', 'Commands', 'Run Configurations'])
-  assert.deepEqual(SEARCH_EVERYWHERE_TABS[0].sources, ['project', 'symbols', 'commands', 'runConfigs'], 'All 必须是并集')
-  // Project = 项目文件 + 项目类/符号（IDEA 的 project scope 就是这两类）。
-  assert.deepEqual(SEARCH_EVERYWHERE_TABS[1].sources, ['project', 'symbols'])
+test('tab 集合、名称与顺序照上游注册的 tabFactory 与各 tab 的 priority，不按记忆', () => {
+  // 上游新 SE 的 tab 由扩展点 `searchEverywhere.tabFactory` 列出，本树里
+  // `platform/searchEverywhere/frontend/resources/intellij.platform.searchEverywhere.frontend.xml:64-69`
+  // 注册了六个：All / Classes / Files / Symbols / Actions / Text。
+  // 顺序按各 tab 的 priority 降序：All `SeAllTab.kt:89` MAX、Classes `SeClassesTab.kt:50` 950、
+  // Files `SeFilesTab.kt:52` 900、Symbols `SeSymbolsTab.kt:50` 850、Actions `SeActionsTab.kt:56` 800、
+  // Text `SeTextTab.kt:56` 250。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.label),
+    ['All', 'Classes', 'Project', 'Symbols', 'Actions', 'Run Configurations', 'Text'])
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS.map(tab => tab.id),
+    ['all', 'classes', 'project', 'symbols', 'commands', 'runConfigs', 'text'])
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[0].sources, ['project', 'symbols', 'commands', 'runConfigs', 'text'], 'All 必须是并集')
+  // Classes = 只吃符号供给者，再按语言服务的 kind 收窄（不是按名字猜）。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[1].sources, ['symbols'])
+  assert.equal(SEARCH_EVERYWHERE_TABS[1].classesOnly, true)
+  // Project = 本仓的合成档（上游没有这一 tab），收项目文件 + 项目类/符号，取 Files(900) 的位次。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[2].sources, ['project', 'symbols'])
+  // Symbols = 上游 850 那一档，本仓就是 LSP workspace/symbol 那一批。
+  assert.deepEqual(SEARCH_EVERYWHERE_TABS[3].sources, ['symbols'])
+  // **订正 2026-10-06（桶 9b）**：Text 档已经接上宿主 `search.run`（`src/searchEverywhereHost.ts`
+  // 的 `refreshText`），所以上游 `SeTextTab(250)` 那一档在本仓不再是"有名字没供给者"。
+  assert.equal(SEARCH_EVERYWHERE_TABS.some(tab => tab.label === 'Text'), true)
+  assert.equal(SEARCH_EVERYWHERE_TABS[6].priority, 250, 'Text 档 priority 取上游那一档')
+  // 真正还没供给者的两档：IDE / Autocompletion（上游 `AutoCompletionProvider.java:27-29` 已废弃）。
+  assert.equal(SEARCH_EVERYWHERE_TABS.some(tab => /IDE|Autocompletion/i.test(tab.label)), false)
+})
+
+test('动作档叫 Actions —— 新 SE 那一档是 Actions，Commands 是旧 SE 的名字', () => {
+  // `SeActionsTab.kt:54` → `IdeBundle.properties:1811` `search.everywhere.group.name.actions=Actions`。
+  // `searcheverywhere.commands.tab.name` 只被**旧** SE 用（`SearchEverywhereUI.java:2042`），
+  // 而旧 SE 已被 `ContributorDefinedTabsCustomizationStrategy.kt` 标 @Deprecated sunset。
+  const actions = SEARCH_EVERYWHERE_TABS.find(tab => tab.id === 'commands')
+  assert.equal(actions.label, 'Actions')
+  assert.equal(SEARCH_EVERYWHERE_TABS.some(tab => tab.label === 'Commands'), false,
+    'Commands 是抄了旧 SE 的键，必须换掉')
+  // 内部 id 保持 'commands'：它标识的是同一批供给者（动作表），改名会牵动宿主与既有用例。
+  assert.deepEqual(searchEverywhereResults(items, 'rebuild', 'commands').map(each => each.id), ['cmd'],
+    '改名只动显示名，供给者链路不变')
+})
+
+test('Symbols 档只收符号，不收文件（上游 SeSymbolsTab 那一档）', () => {
+  const withSymbol = [...items, item('sym', 'DemoClass#parse', 'symbols', { subtitle: 'DemoClass.java:12' })]
+  assert.deepEqual(searchEverywhereResults(withSymbol, '', 'symbols').map(each => each.id), ['sym'])
+  assert.deepEqual(searchEverywhereResults(items, 'rebuild', 'symbols'), [], '动作不该混进 Symbols')
+  // 供给者没结果时那一档不进 tab 行（与「只渲染有真实供给者的」同一条规则）。
+  // `items` 里没有任何 source==='symbols' 的项，所以 Classes 与 Symbols 两档都空。
+  assert.deepEqual(availableSearchEverywhereTabs(items, ''),
+    ['all', 'project', 'commands', 'runConfigs'], 'items 里没有 symbols 供给者')
+  // 有 symbols 供给者时 Symbols 才进表，且位次按 priority 排在 Project 之后。
+  // `sym` 没有 symbolKind（它是个方法 `DemoClass#parse`），所以 Classes 那档仍空 —— 这正是
+  // `classesOnly` 的判据：不按名字猜，只认语言服务标的 Class/Interface/Enum/Struct。
+  assert.deepEqual(availableSearchEverywhereTabs(withSymbol, ''),
+    ['all', 'project', 'symbols', 'commands', 'runConfigs'])
 })
 
 test('每个 tab 只显示自己供给者的项', () => {
@@ -65,7 +117,7 @@ test('有结果的 tab 才进 tab 行（没有供给者的 tab 不渲染）', ()
   assert.deepEqual(availableSearchEverywhereTabs(items, ''), ['all', 'project', 'commands', 'runConfigs'])
   const onlyFiles = [items[0]]
   assert.deepEqual(availableSearchEverywhereTabs(onlyFiles, ''), ['all', 'project'],
-    '只有文件时只剩 All 与 Project —— 不能留一个永远空着的 Commands')
+    '只有文件时只剩 All 与 Project —— 不能留一个永远空着的 Actions')
 })
 
 test('Tab / Shift+Tab 在有结果的 tab 之间循环并跳过空的', () => {
@@ -90,24 +142,47 @@ test('符号与文件同属 Project tab（IDEA 的 project scope）', () => {
   assert.deepEqual(searchEverywhereResults(withSymbol, '', 'project').map(each => each.id), ['file', 'class', 'sym'],
     'Project 收文件与符号，不收动作与运行配置')
   assert.deepEqual(searchEverywhereResults(withSymbol, '', 'commands').map(each => each.id), ['cmd'])
-  // 符号只在 All 与 Project 里出现，Commands / Run Configurations 不该混进来。
+  // 符号只在 All / Classes / Project / Symbols 里出现，Actions / Run Configurations 不该混进来。
   assert.deepEqual(searchEverywhereResults(withSymbol, 'parse', 'runConfigs'), [])
 })
 
 // Execute the production host with real Vue reactivity and a controlled native transport.
 // As in scope-persistence.test.mjs, transpilation only replaces runtime imports.
-const hostJs = ts.transpileModule(readFileSync(new URL('../src/searchEverywhereHost.ts', import.meta.url), 'utf8'), {
+const transpile = relative => ts.transpileModule(readFileSync(new URL(`../src/${relative}`, import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText
+const hostJs = transpile('searchEverywhereHost.ts')
+const classesJs = transpile('searchEverywhereClasses.ts')
+const commandSearchJs = transpile('commandSearch.ts')
+function loadTranspiled(source, resolve) {
+  const exports = {}
+  new Function('require', 'exports', source)(resolve, exports)
+  return exports
+}
 function lifecycleHost(t) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const fsChanges = vue.reactive({ version: 0, paths: [] })
   const calls = []
   const request = (method, params) => new Promise((resolve, reject) => calls.push({ method, params, resolve, reject }))
+  const commandSearch = loadTranspiled(commandSearchJs, name => { throw new Error(`Unexpected commandSearch dependency: ${name}`) })
+  const classes = loadTranspiled(classesJs, name => {
+    if (name === './commandSearch.ts' || name === './commandSearch') return commandSearch
+    throw new Error(`Unexpected classes dependency: ${name}`)
+  })
   const exports = {}
+  // Text 档的两个纯模块（无运行时依赖，`import type` 在 transpile 阶段已被擦掉）。
+  const textTab = loadTranspiled(transpile('searchEverywhereText.ts'), name => {
+    throw new Error(`Unexpected searchEverywhereText dependency: ${name}`)
+  })
+  const exclusions = loadTranspiled(transpile('searchExclusions.ts'), name => {
+    throw new Error(`Unexpected searchExclusions dependency: ${name}`)
+  })
   new Function('require', 'exports', hostJs)(name => {
     if (name === 'vue') return vue
-    if (name === './bridge') return { fsChanges, request }
+    if (name === './bridge' || name === './bridge.ts') return { fsChanges, request }
+    if (name === './searchEverywhereClasses.ts' || name === './searchEverywhereClasses') return classes
+    if (name === './searchEverywhereText.ts') return textTab
+    if (name === './searchExclusions.ts') return exclusions
     throw new Error(`Unexpected host dependency: ${name}`)
   }, exports)
   const deps = {
@@ -117,6 +192,9 @@ function lifecycleHost(t) {
   }
   const scope = vue.effectScope()
   const host = scope.run(() => exports.createSearchEverywhereHost(deps))
+  // 这几条测的是**文件与符号**两条通道的生命周期：把当前档切到 Project，
+  // Text 档的整工作区扫描就不参与（`textWanted()` 认档），请求序列保持原样。
+  host.setSearchEverywhereTab('project')
   t.after(() => scope.stop())
   return { ...host, deps, calls, fsChanges, scope,
     files: () => host.searchEverywhereItems.value.filter(item => item.source === 'project').map(item => item.title),
@@ -285,9 +363,18 @@ test('模糊匹配的接线三处都在', () => {
   assert.match(shell, /<SearchEverywhereDialog[^>]*:fuzzy-files="generalSettings\.fuzzyFileSearch"/, '外壳没有把设置开关传给对话框')
   const dialog = readFileSync(join(root, 'src', 'components', 'SearchEverywhereDialog.vue'), 'utf8')
   // 第六个实参是作用域谓词（上游 `ScopeChooserAction`）—— 本批新加的，所以断言放宽到"开关在位"。
-  assert.match(dialog, /searchEverywhereResults\(props\.items, query\.value, tab\.value, SEARCH_EVERYWHERE_LIMIT, props\.fuzzyFiles, scopePredicate\.value\)/,
+  assert.match(dialog, /searchEverywhereResults\(\s*props\.items, query\.value, tab\.value, SEARCH_EVERYWHERE_LIMIT, props\.fuzzyFiles, scopePredicate\.value/,
     '对话框没有把开关交给打分函数')
-  assert.match(dialog, /fuzzyTitleFragments\(item, query\.value, props\.fuzzyFiles\)/, '对话框没有按命中下标画高亮')
+  // 原先这里钉的是「模板里直接调 `fuzzyTitleFragments(item, query, …)`」这一**形状**。
+  // 现在实现把每行的命中区间收进 `fragmentCache`（一次算好、按行取用，文本档直接用 `hitRanges`），
+  // 模板改成 `highlightParts(entry.title, fragmentCache[position])` —— 这是把 N 次重复计算收成一次，
+  // 意图没变（命中下标仍然驱动高亮）。所以断言改成钉**意图**，但依旧精确：
+  // ① 缓存的每一项仍由 `fuzzyTitleFragments(entry, query.value, props.fuzzyFiles)` 供数；
+  // ② 标题渲染确实按命中下标包 `<mark class="se-hit">`。
+  assert.match(dialog, /fragmentCache = computed\(\(\) => results\.value\.map\(entry =>[\s\S]{0,200}?fuzzyTitleFragments\(entry, query\.value, props\.fuzzyFiles\)/,
+    '命中区间不再由 fuzzyTitleFragments 供数（模糊匹配的高亮会静默失效）')
+  assert.match(dialog, /highlightParts\(entry\.title, fragmentCache\[position\][^\n]{0,40}\)[\s\S]{0,200}?<mark v-if="part\.hit" class="se-hit">/,
+    '对话框没有按命中下标画高亮')
   const toggles = readFileSync(join(root, 'src', 'components', 'GeneralRegistryToggles.vue'), 'utf8')
   assert.match(toggles, /v-model="general\.fuzzyFileSearch"/, '设置页没有这个开关（注册表键的落点）')
   const settings = readFileSync(join(root, 'src', 'components', 'SettingsDialog.vue'), 'utf8')
@@ -297,6 +384,8 @@ test('模糊匹配的接线三处都在', () => {
 test('来源副标签', () => {
   assert.equal(searchEverywhereSourceLabel('project'), 'File')
   assert.equal(searchEverywhereSourceLabel('symbols'), 'Symbol')
+  // 动作那一档与 tab 名同源：新 SE 叫 Actions（`IdeBundle.properties:1811`），不是旧 SE 的 Commands。
+  assert.equal(searchEverywhereSourceLabel('commands'), 'Actions')
   assert.equal(searchEverywhereSourceLabel('runConfigs'), 'Run Configuration')
 })
 
@@ -316,8 +405,11 @@ test('三个入口都打开 Search Everywhere，而不是「查找操作」', ()
   assert.match(toolbar, /title="随处搜索 \(Shift\+Shift\)"/, '工具栏的放大镜不是 Search Everywhere')
   assert.match(toolbar, /@click="c\.openSearchEverywhere\(\)"/, '工具栏的放大镜没有接 Search Everywhere')
   // 反向守卫：这两个键位/行必须**不**被改成 Search Everywhere，否则就把「查找操作」弄丢了。
-  assert.match(shell, /key\.toLowerCase\(\) === 'a' && event\.shiftKey\) \{ event\.preventDefault\(\); openActionSearch\(\)/,
-    'Ctrl+Shift+A 必须仍然是「查找操作」')
+  // Ctrl+Shift+A 现在由共享键位注册表承载（src/keymapBindings.ts；id → 动作的映射在 src/keymap.ts）。
+  assert.match(shell, /'actions\.search': \(\) => openActionSearch\(\)/,
+    'Ctrl+Shift+A 必须仍然是「查找操作」（分派映射）')
+  assert.match(shell, /id: 'actions\.search'[\s\S]{0,200}key: 'a'[\s\S]{0,120}shift: true/,
+    'Ctrl+Shift+A 的键位事实在键位注册表里不见了')
   assert.match(shell, /id: 'navigate\.actions'[\s\S]{0,200}openActionSearch/,
     '导航菜单的「查找操作」行不见了')
   // 三个供给者都真的接了数据源（不是空数组占位）。

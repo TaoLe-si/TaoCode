@@ -133,6 +133,12 @@ export interface ViewMenuContext {
       { id: 'view.zenMode', title: () => `${ctx.zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen fullscreen immersive 禅模式 一切隐藏', checked: () => ctx.zenMode.value, run: () => ctx.toggleZenMode() },
       { id: 'view.compactMode', title: '紧凑模式', keywords: 'compact mode density 紧凑 密度', checked: () => ctx.editorSettings.value.compactMode, run: () => void ctx.saveSettingsPatch({ compactMode: !ctx.editorSettings.value.compactMode }) },
       { id: 'view.ruleAppearance', rule: true },
+      // 分隔线下面是 IDEA 的第二个内联组 `UIToggleActions`（PlatformActions.xml:536-546）。
+      // 本仓有真实消费者的两条：`ViewStatusBar`（`ViewStatusBarAction.java`：勾选态 =
+      // `UISettings.showStatusBar`，消费者是状态栏 footer）与 `ViewToolButtons`（显示/隐藏
+      // 工具窗口条，落点 `editorSettings.showToolWindowBars`，消费方 `src/toolWindowStripes.ts`）。
+      { id: 'view.statusBar', title: '状态栏', keywords: 'status bar toggle hide show 状态栏', checked: () => ctx.editorSettings.value.showStatusBar, run: () => void ctx.saveSettingsPatch({ showStatusBar: !ctx.editorSettings.value.showStatusBar }) },
+      { id: 'view.toolButtons', title: '工具窗口条', keywords: 'tool window bars buttons stripe 工具窗口条 侧栏按钮', checked: () => ctx.editorSettings.value.showToolWindowBars, run: () => void ctx.saveSettingsPatch({ showToolWindowBars: !ctx.editorSettings.value.showToolWindowBars }) },
       // IDEA 的 ToggleFullScreenGroup 里还有 ToggleDistractionFreeMode 与 ToggleFullScreen：
       // 前者与 ToggleZenMode 在 TaoCode 里是同一件事（Zen 就是免打扰），不重复放两行；
       // 后者要先给宿主加全屏通道（Win32 窗口态 / Fullscreen API），本轮不做，登记在审计文档里。

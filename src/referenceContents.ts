@@ -8,7 +8,7 @@
 // 模块级状态与 src/gradleEvents.ts 同一形状：这份内容由 bridge/编辑器动作/工具窗口三处共写，
 // 挂到 App.vue 上只会把那 2737 行再撑胖。
 import { computed, ref, watch } from 'vue'
-import type { LspLocation } from './bridge'
+import type { LspLocation } from './bridge.ts'
 import { addToolContent, removeToolContent, togglePinned, toolContentsToCloseAll,
          toolContentsToCloseOthers, usagesPanelTitle, usagesTabName, type ToolContent } from './toolContents.ts'
 

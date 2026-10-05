@@ -18,6 +18,10 @@
 //      目录范围里没打开的文件导出为**纯文本 + 行号**（IDEA 用 PSI + 编辑器高亮器，对任何文件都能染色）。
 //      结果提示里会把"几个带高亮、几个是纯文本"说清楚。
 //   ② 不生成整棵树的 `index.html` 层级？—— 生成：每个被导出的目录一份（与 `:248` 一致）。
+//   ③ 打印：上游 `PrintAction` 与 HTML 导出共用 `HTMLTextPainter`，所以导出物自带
+//      `@media print` 规则（白底、保留 token 颜色、行不被分页切断）—— 在浏览器里 Ctrl+P
+//      打印的就是它。`PrintDialog`/`BasePainter` 的原生打印通道本仓没有（WebView2 宿主，
+//      native/main.cpp 是禁改文件），所以「打印」动作本身未接，判词里点名。
 import { ref } from 'vue'
 import { request, type ProjectSettings, type Workspace } from './bridge.ts'
 import { errorMessage } from './errors.ts'
@@ -112,6 +116,16 @@ export function htmlDocument(options: HtmlDocumentOptions, lines: readonly Style
         opacity: .45; user-select: none; }
   .code { flex: 1 1 auto; white-space: pre; }
   a { color: inherit; }
+  /* 打印（上游 PrintAction 与 HTML 导出共用 HTMLTextPainter，所以导出物本身就是打印件）：
+     白底黑字、彩色 token 保留、一行不被分页切断；页边距取打印对话框的默认量级。 */
+  @media print {
+    body { background: #fff; color: #000; padding: 0; }
+    .meta { opacity: 1; }
+    .line { break-inside: avoid; page-break-inside: avoid; }
+    .ln { opacity: 1; }
+    .code span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { margin: 12mm; }
+  }
 </style>
 </head>
 <body>

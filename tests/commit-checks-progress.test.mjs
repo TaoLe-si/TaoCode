@@ -78,7 +78,8 @@ test('the warning yields to the progress row while checks run', () => {
 // —— 接线 ——
 
 test('the panel renders both rows', () => {
-  const panel = read('src/components/SourceControl.vue')
+  // 进度行/分析中警告那一族已拆进 src/sourceControlCommitChecks.ts（模块化拆分，行为逐字未改），两处都读。
+  const panel = read('src/components/SourceControl.vue') + read('src/sourceControlCommitChecks.ts')
   assert.match(panel, /class="sc-checks-progress"/, '面板内要有进度行')
   assert.match(panel, /checksProgress\.title/, '标题来自上游')
   assert.match(panel, /class="sc-checks-indexing"/, '面板内要有分析中警告')
@@ -88,11 +89,13 @@ test('the panel renders both rows', () => {
 // 「分析中」的判据必须与状态栏 `smartModeLabel` 同源：**配了服务但没跑起来**，
 // 而不是"服务没就绪"（没配服务是正常状态，不能报"分析中"）。
 test('the analyzing signal matches the status bar rule, not "not ready"', () => {
-  const panel = read('src/components/SourceControl.vue')
+  // 进度行/分析中警告那一族已拆进 src/sourceControlCommitChecks.ts（模块化拆分，行为逐字未改），两处都读。
+  const panel = read('src/components/SourceControl.vue') + read('src/sourceControlCommitChecks.ts')
   assert.match(panel, /analyzing\?: boolean/, 'prop 叫 analyzing')
   assert.doesNotMatch(panel, /lspRunning\?: boolean/, '不该直接把 lspRunning 当分析中')
   assert.match(panel, /indexingWarningVisible\(Boolean\(props\.analyzing\), checksBusy\.value\)/)
-  assert.match(panel, /checksProgressOf\(true, null, checksBusy\.value\)/, '可见性要跟着 checksBusy，不能恒显示')
+  assert.match(panel, /checksProgressOf\(\s*checksRound\.value\.onlyRunChecks, checksRound\.value\.step,\s*checksProgressShown\(checksBusy\.value, checksFailures\.value\.length > 0, checksRowShown\.value\), true,/,
+    '可见性 = 在跑 + 失败行为空 + 延迟已过（:163-175），正文两档跟着这一轮的 onlyRunChecks，步名跟着当前步')
   const view = read('src/components/ToolWindowView.vue')
   assert.match(view, /:analyzing="Boolean\(ctx\.activeTabPath\) && Boolean\(ctx\.activeConfigured\) && !ctx\.activeLspRunning"/,
     '判据 = 有活动文件 + 配了服务 + 还没跑起来')

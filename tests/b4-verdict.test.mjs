@@ -86,12 +86,14 @@ test('§D 的四类理由必须真的写在文件里', () => {
 test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 0)
-  assert.equal(count('[~]'), 40)
+  // 2026-10-04 两轮改判后：`CollapseExpandDocCommentsHandler` 与 `CodeFoldingPass`/`FoldingUpdate`
+  // 三条 `[~]` → `[x]`，四档从 1/39/0/29 变成 3/37/0/29（表尾那句同步改过）。
+  assert.equal(count('[x]'), 3)
+  assert.equal(count('[~]'), 37)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 29)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 69)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 0 \+ `\[~\]` 40 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 3 \+ `\[~\]` 37 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
     '表尾的和数要与逐条表一致')
 })
 

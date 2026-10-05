@@ -4,10 +4,11 @@
 // 左右侧栏的并排（leftSideBySide / rightSideBySide）。状态（背景图相关）由设置持有，
 // 这里只负责把它们应用到 DOM 与提供开关动作。
 import { computed, nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
-import { request, runOutput, setNativeDirty, type EditorSettings } from './bridge'
-import { errorMessage } from './errors'
-import { useMergedMainMenu } from './mergedMainMenu'
-import { TOOL_MNEMONIC_BINDINGS } from './toolWindowMeta'
+import { request, runOutput, setNativeDirty, type EditorSettings } from './bridge.ts'
+import { errorMessage } from './errors.ts'
+import { applicationActivation } from './applicationActivation.ts'
+import { useMergedMainMenu } from './mergedMainMenu.ts'
+import { TOOL_MNEMONIC_BINDINGS } from './toolWindowMeta.ts'
 
 export interface AppearanceActionsDeps {
   // 工具条提示与"按编号切工具窗口"也在这一块里（它们和菜单开合状态耦合），
@@ -79,11 +80,14 @@ export function createAppearanceActions(deps: AppearanceActionsDeps) {
   // ToolbarFrameHeader.kt:424-427 用它取 mainToolbarBackground(active)）；这里把它摊成一个根节点属性，
   // 与磁盘同步（diskSync 的 focus 监听）、LSP 暂停（lspNavigation 的 blur 监听）各走各的，互不依赖。
   const markWindowActive = (active: boolean) => { document.documentElement.dataset.windowActive = active ? 'active' : 'inactive' }
-  const onWindowActivated = () => markWindowActive(true)
-  const onWindowDeactivated = () => markWindowActive(false)
+  // 窗口焦点也是 `ApplicationActivationListener` 的信号（上游 TOPIC 的 app 级广播）：
+  // 顶栏底色与监听器在同一处分发，谁想响应激活/失活都往 src/applicationActivation.ts 注册。
+  const onWindowActivated = () => { markWindowActive(true); applicationActivation.applicationActivated() }
+  const onWindowDeactivated = () => { markWindowActive(false); applicationActivation.applicationDeactivated() }
   window.addEventListener('focus', onWindowActivated)
   window.addEventListener('blur', onWindowDeactivated)
   markWindowActive(document.hasFocus())
+  if (document.hasFocus()) applicationActivation.applicationActivated()
   onBeforeUnmount(() => {
     window.removeEventListener('focus', onWindowActivated)
     window.removeEventListener('blur', onWindowDeactivated)

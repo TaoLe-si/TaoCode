@@ -9,8 +9,13 @@
 //     没有修饰键的绑定（裸 F12 / Esc），之下才是有修饰键的绑定 —— 栅栏的位置本身是语义。
 //
 // 依赖之所以有 104 个，是因为它是"按键 → 动作"的总线，动作本身都在各自的域里；这里只做判定。
-import { dapState, dapStep, isDesktop, runState, type RunConfig, type RunStartParams, type Workspace } from './bridge'
-import { MAXIMIZE_SHORTCUT_CODE } from './toolWindowHeader'
+import { dapState, dapStep, isDesktop, runState, type RunConfig, type RunStartParams, type Workspace } from './bridge.ts'
+import { MAXIMIZE_SHORTCUT_CODE } from './toolWindowHeader.ts'
+import { findKeyBinding } from './keymapBindings.ts'
+import { effectiveKeyBindings } from './keymapEditor.ts'
+import { ACTIONS, registerKeymapActions } from './actionRegistry.ts'
+import { recordKeyEvent } from './macroHost.ts'
+import { presentShortcut } from './presentationAssistant.ts'
 import type { Tab } from './editorTab'
 
 export interface KeymapContext {
@@ -22,6 +27,7 @@ export interface KeymapContext {
   /** 上次运行的参数（宿主是 `let`，运行菜单与外观动作也要读）。 */
   lastRunParams: { readonly value: RunStartParams | null }
   runConfigs: { readonly value: RunConfig[] }
+  allRunConfigNames?: { readonly value: string[] }
   // ---- 左栏与面板 ----
   explorer: any
   leftView: any
@@ -60,7 +66,7 @@ export interface KeymapContext {
   zenMode: any
   // ---- 动作（各自的域提供） ----
   answerLeave: (choice: any) => void
-  applyConfigChoice: (config: RunConfig) => void
+  applyConfigChoice: (config: RunConfig | string) => void
   caretPayload: () => any
   closeActiveTab: () => void
   closeSignaturePopup: () => void
@@ -71,6 +77,10 @@ export interface KeymapContext {
   extractConstant: () => void
   extractMethod: () => void
   extractVariable: () => void
+  /** 更改签名（Ctrl+F6，`$default.xml:469-471`）—— 宿主装配在 src/refactorHostAssembly.ts。 */
+  openChangeSignature: () => void
+  /** 安全删除（Alt+Delete，`$default.xml:999-1001`）—— 三选一对话框在 src/safeDelete.ts + 宿主装配。 */
+  openSafeDelete: () => void
   focusToolWindowByNumber: (event: KeyboardEvent) => void
   forceReloadFromDisk: () => unknown
   gitMenuAction: (method: 'git.push' | 'git.pull' | 'git.fetch' | 'git.rebase' | 'git.stash.save' | 'git.stash.pop') => unknown
@@ -104,6 +114,8 @@ export interface KeymapContext {
   openRecentPlaces: () => void
   // 双击 Shift 的默认手势（Search Everywhere），与 Ctrl+Shift+A 的「查找操作」不是一回事。
   openSearchEverywhere: () => unknown
+  /** 双击 Ctrl 的默认手势（Run Anything，`$default.xml:7-9` 的 `keyboard-gesture-shortcut`）。 */
+  openRunAnything: () => unknown
   openSettings: (id?: any) => unknown
   openSymbol: (mode: 'file' | 'global' | 'class') => void
   openWorkspace: (path?: string) => unknown
@@ -146,14 +158,16 @@ export function createKeymap(ctx: KeymapContext) {
           forceReloadFromDisk, gitMenuAction, goBack, goForward, hideActiveToolWindow, inlineVariable,
           jumpLastEditLocation, jumpMnemonic, jumpToLastToolWindow, maximizeActiveToolWindow, moveActiveFile, moveConfig,
           movePlace, noteActivity, openActionSearch, openPasteHistory, pasteAsPlainText, copyPaths, openCodeActions, openConfigChooser, openGeneratePopup, openGoLine,
-          openMnemonicPrompt, openPalette, openPlace, openProjectStructure, openRecentFiles, openRecentPlaces, openSearchEverywhere, openSettings,
+          openMnemonicPrompt, openChangeSignature, openSafeDelete, openPalette, openPlace, openProjectStructure, openRecentFiles, openRecentPlaces, openSearchEverywhere, openSettings,
           openSymbol, openWorkspace, pickMnemonic, rerunLast, resolveConflictKeep, restoreCurrentToolLayout,
           runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, openSelectIn, showNavBar, selectNextTab,
           selectPreviousTab, showBlame, showOutput, showQuickDoc, showView, startBuild, stopRun, stretchToolWindow,
-          toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject } = ctx
+          toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject, openRunAnything } = ctx
   // IDEA 的 Keymap 没有"双击 Shift"这条绑定，它是 SearchEverywhere 的默认手势；宿主原先用
   // 一个模块级 `let lastShiftAt` 记上一次 Shift 的时间戳，随函数一起搬进来。
+  // RunAnything 的双击 Ctrl 走同一机制（`$default.xml:7-9` 的 gesture shortcut）。
   let lastShiftAt = 0
+  let lastCtrlAt = 0
 function onKey(event: KeyboardEvent) {
   // Every keystroke counts as activity for the idle-driven background refresh.
   noteActivity()
@@ -221,10 +235,15 @@ function onKey(event: KeyboardEvent) {
   if (configChooser.value) {
     if (event.key === 'ArrowDown') { event.preventDefault(); moveConfig(1); return }
     if (event.key === 'ArrowUp') { event.preventDefault(); moveConfig(-1); return }
-    if (event.key === 'Enter') { event.preventDefault(); const config = runConfigs.value[configIndex.value]; if (config) applyConfigChoice(config); return }
+    if (event.key === 'Enter') { event.preventDefault(); const name = (ctx.allRunConfigNames?.value ?? runConfigs.value.map(config => config.name))[configIndex.value]; if (name) applyConfigChoice(name); return }
     return
   }
   if (projectMode.value || settingsOpen.value || leavePrompt.value || renamePrompt.value || symbolPrompt.value || actionPrompt.value || actionSearch.value || surroundPrompt.value || mnemonicPrompt.value || goLinePrompt.value || encodingPrompt.value || conflictPrompt.value || quickDoc.value || recentPrompt.value || templateChooser.value) return
+  // 宏录制：把这次按键按上游分类落成一步（`ActionMacroManager.kt:515-531`）。
+  // 位置就是上游 `ready = IdeEventQueue.getInstance().keyEventDispatcher.isReady`（`:515`）的落点 ——
+  // 上面那行就是「有弹层拦键」的判据，弹层开着时事件被弹层吃掉，不该进宏。
+  // 纯字符不在这里记（编辑器的 `recordTypingStep` 拿得到真实插入文本），这里只管组合键/功能键/Enter。
+  recordKeyEvent(event)
   // --- Debugger/build transport, from $default.xml ---
   // F9 Resume, F8 Step Over, F7 Step Into, Shift+F8 Step Out, Ctrl+F8 Toggle Line
   // Breakpoint, Shift+F9 Debug, Ctrl+F9 Build, Ctrl+Shift+F9 Rebuild.
@@ -327,52 +346,70 @@ function onKey(event: KeyboardEvent) {
   if (event.key.toLowerCase() === 'k' && event.ctrlKey && event.shiftKey && workspace.value && gitAvailable.value) { event.preventDefault(); void gitMenuAction('git.push'); return }
   if (event.key.toLowerCase() === 'k' && event.ctrlKey && workspace.value && gitAvailable.value) { event.preventDefault(); showView('git'); return }
   if (!(event.ctrlKey || event.metaKey) && !event.altKey) return
-  // --- Files / actions / search / refactor, from $default.xml ---
-  // $default.xml:260-262 — Ctrl+Shift+F4 is CloseActiveTab (`CloseActiveTabAction.java:39-58`).
-  if (event.key === 'F4' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); closeActiveTab(); return }
-  // $default.xml:288-290 / :637-638 —— PasteMultiple = Ctrl+Shift+V、EditorPasteSimple = Ctrl+Alt+Shift+V。
-  // 浏览器把 Ctrl+Shift+V 当成「粘贴为纯文本」，不拦下来就永远开不了历史选择器。
-  if (event.key.toLowerCase() === 'v' && event.ctrlKey && event.shiftKey && event.altKey) { event.preventDefault(); void pasteAsPlainText(); return }
-  if (event.key.toLowerCase() === 'v' && event.ctrlKey && event.shiftKey && !event.altKey) { event.preventDefault(); openPasteHistory(); return }
-  if (event.key.toLowerCase() === 'a' && event.shiftKey) { event.preventDefault(); openActionSearch(); return }
-  if (event.key.toLowerCase() === 's' && event.altKey) { event.preventDefault(); void openSettings(); return }
-  if (event.key.toLowerCase() === 's') { event.preventDefault(); void (workspace.value ? saveAll() : save()) }
-  // Ctrl+Shift+N file, Ctrl+N class, Ctrl+Shift+Alt+N symbol.
-  if (event.key.toLowerCase() === 'n' && event.shiftKey && event.altKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('global'); return }
-  if (event.key.toLowerCase() === 'n' && event.shiftKey && workspace.value) { event.preventDefault(); openPalette(); return }
-  if (event.key.toLowerCase() === 'o' && event.shiftKey && !event.altKey) { event.preventDefault(); void openWorkspace(); return }
-  if (event.key.toLowerCase() === 'g' && event.shiftKey && !event.altKey && active.value) { event.preventDefault(); void showBlame(); return }
-  if (event.key.toLowerCase() === 'n' && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('class'); return }
-  // Ctrl+Shift+F12 is HideAllWindows ($default.xml:870-872) and must be tested before the
-  // Ctrl+F12 branch, which used to swallow it because it did not look at Shift.
-  if (event.key === 'F12' && event.ctrlKey && event.shiftKey && workspace.value) { event.preventDefault(); toggleMaximizeEditor(); return }
-  // Ctrl+F12 = FileStructurePopup ($default.xml:279-281). Shift is excluded explicitly, so the
-  // two branches cannot both match even if their order is ever changed.
-  if (event.key === 'F12' && event.ctrlKey && !event.shiftKey && workspace.value && lspReady.value) { event.preventDefault(); openSymbol('file'); return }
+  // --- Files / actions / search / refactor：表驱动（键位与顺序在 src/keymapBindings.ts）---
+  // 这一段原先是一条条 if；现在键位事实与分派优先级都在 KEY_BINDINGS 里（数组顺序 = 原 if 链顺序
+  // = 上游 $default.xml 的条目顺序），这里只留「动作 id → 本仓动作」的映射与三个可用性标志。
+  // 菜单/测试按 action id 查同一张表（`keymapKeys()`），不再各写一份键位文案。
+  const tailActions: Record<string, () => void> = {
+    'tab.close': () => closeActiveTab(),
+    'edit.pastePlain': () => { void pasteAsPlainText() },
+    'edit.pasteHistory': () => { openPasteHistory() },
+    'actions.search': () => openActionSearch(),
+    'settings.open': () => { void openSettings() },
+    'file.saveAll': () => { void (workspace.value ? saveAll() : save()) },
+    'symbol.global': () => openSymbol('global'),
+    'file.open': () => openPalette(),
+    'file.openPath': () => { void openWorkspace() },
+    'vcs.blame': () => { void showBlame() },
+    'symbol.class': () => openSymbol('class'),
+    'window.maximizeEditor': () => toggleMaximizeEditor(),
+    'symbol.file': () => openSymbol('file'),
+    'search.findInPath': () => showView('search'),
+    'navigate.recentLocations': () => openRecentPlaces(),
+    'navigate.recentFiles': () => openRecentFiles(),
+    'navigate.gotoLine': () => openGoLine(),
+    'refactor.changeSignature': () => openChangeSignature(),
+    'refactor.safeDelete': () => void openSafeDelete(),
+    'refactor.extractVariable': () => extractVariable(),
+    'refactor.extractConstant': () => extractConstant(),
+    'refactor.extractMethod': () => extractMethod(),
+    'refactor.inline': () => inlineVariable(),
+    'inspection.runByName': () => { void openCodeActions(caretPayload(), true) },
+    'docs.quickDoc': () => { void showQuickDoc() },
+    'edit.copyReference': () => { void copyReference() },
+    'edit.copyPath': () => copyPaths(),
+  }
+  // 这 25 条动作同时注册进**动作注册表**（`src/actionRegistry.ts`）：id → 标题/可用性谓词/处理器。
+  // 可用性谓词读的是与 `findKeyBinding` 同一组实时状态；`ACTIONS.run` 在执行前再复核一次
+  // （上游 keymap 同样不会触发 `update()` 关掉的动作）。菜单/插件入口按 id 查得到这些动作。
+  //
+  // `effectiveKeyBindings()` = 出厂表 + 用户自定义覆盖（上游 `KeymapManagerEx.getActiveKeymap()`：
+  // 用户方案叠在出厂 `BundledKeymapBean` 之上）。分派与「演示助手」显示的快捷键都读同一份，
+  // 所以改键**立刻**改变实际行为，不是只改菜单文案。
+  const bindings = effectiveKeyBindings()
+  registerKeymapActions(bindings, binding => tailActions[binding.id], () => ({
+    workspace: !!workspace.value, editor: !!active.value, lsp: lspReady.value,
+  }))
+  const binding = findKeyBinding(event, { workspace: !!workspace.value, editor: !!active.value, lsp: lspReady.value }, bindings)
+  if (binding && ACTIONS.has(binding.id)) {
+    event.preventDefault()
+    // 演示助手（上游 `ShortcutPresenter.showActionInfo`）：开关关闭时 presentShortcut 直接返回。
+    presentShortcut(binding)
+    ACTIONS.run(binding.id)
+    return
+  }
+  // 双击 Shift = SearchEverywhere、双击 Ctrl = RunAnything（`$default.xml:7-11` 的
+  // keyboard-gesture-shortcut；手势不是键位对，所以不进键位表）。
   if (event.key === 'Shift' && !event.repeat) {
     const now = event.timeStamp
     if (now - lastShiftAt < 400) { lastShiftAt = 0; event.preventDefault(); openSearchEverywhere(); return }
     lastShiftAt = now
   }
-  // Ctrl+Shift+F Find in Path, Ctrl+E recent files / Ctrl+Shift+E recent locations,
-  // Ctrl+G Goto Line.
-  if (event.key.toLowerCase() === 'f' && event.shiftKey && workspace.value) { event.preventDefault(); showView('search'); return }
-  if (event.key.toLowerCase() === 'e' && workspace.value) { event.preventDefault(); if (event.shiftKey) openRecentPlaces(); else openRecentFiles(); return }
-  if (event.key.toLowerCase() === 'g' && !event.shiftKey && active.value) { event.preventDefault(); openGoLine(); return }
-  // Introduce/Extract/Inline, from $default.xml (Ctrl+Alt+V/C/M/N).
-  if (event.altKey && event.ctrlKey && !event.shiftKey) {
-    if (event.key.toLowerCase() === 'v') { event.preventDefault(); extractVariable(); return }
-    if (event.key.toLowerCase() === 'c') { event.preventDefault(); extractConstant(); return }
-    if (event.key.toLowerCase() === 'm') { event.preventDefault(); extractMethod(); return }
-    if (event.key.toLowerCase() === 'n') { event.preventDefault(); inlineVariable(); return }
+  if (event.key === 'Control' && !event.repeat) {
+    const now = event.timeStamp
+    if (now - lastCtrlAt < 400) { lastCtrlAt = 0; event.preventDefault(); openRunAnything(); return }
+    lastCtrlAt = now
   }
-  // Run Inspection (Ctrl+Shift+Alt+I), Quick Documentation (Ctrl+Q), Copy Reference.
-  if (event.key.toLowerCase() === 'i' && event.ctrlKey && event.shiftKey && event.altKey && lspReady.value && active.value) { event.preventDefault(); void openCodeActions(caretPayload(), true); return }
-  if (event.key.toLowerCase() === 'q' && !event.shiftKey && active.value && lspReady.value) { event.preventDefault(); void showQuickDoc(); return }
-  if (event.key.toLowerCase() === 'c' && event.altKey && event.shiftKey && active.value) { event.preventDefault(); void copyReference(); return }
-  // $default.xml:454-456 —— CopyPaths = Ctrl+Shift+C。它在 IDEA 的菜单里**不可见**
-  // （`CopyPathsAction.java:44-48` 只在键盘 place 下 setVisible(true)），所以只有这一条键位。
-  if (event.key.toLowerCase() === 'c' && event.ctrlKey && event.shiftKey && !event.altKey && active.value) { event.preventDefault(); copyPaths(); return }
 }
   return { onKey }
 }

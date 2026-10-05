@@ -1,6 +1,7 @@
 // Local History engine: an on-disk, Git-independent snapshot store.
 // See history.hpp for the store layout and the public contract.
 #include "history.hpp"
+#include "history_diff.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -34,10 +35,8 @@ constexpr std::size_t max_reason_bytes = 64;
 constexpr std::size_t max_id_length = 64;
 constexpr std::size_t max_index_versions = 512;  // 读取损坏索引时的硬上限，也是版本数上限
 constexpr std::size_t sha256_hex_length = 64;
-// LCS 动态规划预算（方向表约 (a+1)*(b+1) 字节）。超预算时退化为整段替换，
-// 输出仍是合法的 unified diff，但不会为巨型文件分配上百 MB 内存。
-constexpr std::size_t diff_cell_budget = 8'000'000;
-constexpr std::size_t diff_context = 3;
+// 本地历史的落盘/版本索引/指纹留在这一层；行级 unified diff 的两段常数（`diff_cell_budget`
+// 动态规划预算与 `diff_context` 的 @@ 上下文行数）连同算法一起搬到了 history_diff.cpp。
 constexpr const wchar_t* index_name = L"index.json";
 
 [[noreturn]] void fail(const char* code, const std::string& message) {
@@ -547,124 +546,6 @@ Version take_version(const fs::path& root, const fs::path& directory, const std:
     fail("NOT_FOUND", "该文件没有此本地历史版本：" + path + " @" + id + "。");
 }
 
-// ---- 行级 unified diff ------------------------------------------------------------
-
-std::string_view trim_cr(std::string_view line) {
-    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-    return line;
-}
-
-std::vector<std::string_view> split_lines(std::string_view text) {
-    std::vector<std::string_view> lines;
-    std::size_t start = 0;
-    for (;;) {
-        const auto end = text.find('\n', start);
-        if (end == std::string_view::npos) {
-            if (start < text.size()) lines.push_back(trim_cr(text.substr(start)));
-            return lines;
-        }
-        lines.push_back(trim_cr(text.substr(start, end - start)));
-        start = end + 1;
-    }
-}
-
-struct Row {
-    char kind;            // ' ' 上下文，'-' 删除，'+' 新增
-    std::string_view text;
-    std::size_t a;        // 该行的 a 游标：0 起行号，新增行是插入位置
-    std::size_t b;
-    std::size_t hunk = 0;   // 增删段不得跨块配对（unified 解析器按 @@ 递增）
-};
-
-// 标准 LCS 回溯；先剥离公共前后缀，让常见编辑只对小窗口做动态规划。
-std::vector<Row> build_script(const std::vector<std::string_view>& a,
-                              const std::vector<std::string_view>& b) {
-    std::size_t head = 0;
-    while (head < a.size() && head < b.size() && a[head] == b[head]) ++head;
-    std::size_t tail = 0;
-    while (tail + head < a.size() && tail + head < b.size() &&
-           a[a.size() - 1 - tail] == b[b.size() - 1 - tail]) ++tail;
-    const std::size_t n = a.size() - head - tail;
-    const std::size_t m = b.size() - head - tail;
-
-    std::vector<Row> script;
-    script.reserve(a.size() + 1);
-    for (std::size_t i = 0; i < head; ++i) script.push_back({' ', a[i], i, i});
-
-    const bool feasible = n == 0 || m == 0 || n + 1 <= diff_cell_budget / (m + 1);
-    std::vector<std::uint8_t> direction;
-    if (feasible) {
-        direction.assign((n + 1) * (m + 1), 0);
-        std::vector<std::uint32_t> next(m + 1, 0);
-        std::vector<std::uint32_t> current(m + 1, 0);
-        for (std::size_t i = n; i-- > 0;) {
-            current[m] = 0;
-            for (std::size_t j = m; j-- > 0;) {
-                std::uint8_t move = 0;
-                std::uint32_t length = 0;
-                if (a[head + i] == b[head + j]) { move = 1; length = next[j + 1] + 1; }
-                else if (next[j] >= current[j + 1]) { move = 2; length = next[j]; }
-                else { move = 3; length = current[j + 1]; }
-                direction[i * (m + 1) + j] = move;
-                current[j] = length;
-            }
-            next.swap(current);
-        }
-    }
-    // 超预算时 move 恒为 2：先删空 a 的中间段，再整体插入 b 的中间段。
-    std::size_t i = 0;
-    std::size_t j = 0;
-    while (i < n && j < m) {
-        const auto move = feasible ? direction[i * (m + 1) + j] : std::uint8_t{2};
-        if (move == 1) { script.push_back({' ', a[head + i], head + i, head + j}); ++i; ++j; }
-        else if (move == 2) { script.push_back({'-', a[head + i], head + i, head + j}); ++i; }
-        else { script.push_back({'+', b[head + j], head + i, head + j}); ++j; }
-    }
-    while (i < n) { script.push_back({'-', a[head + i], head + i, head + j}); ++i; }
-    while (j < m) { script.push_back({'+', b[head + j], head + i, head + j}); ++j; }
-    for (std::size_t k = 0; k < tail; ++k) {
-        const std::size_t ai = a.size() - tail + k;
-        const std::size_t bi = b.size() - tail + k;
-        script.push_back({' ', a[ai], ai, bi});
-    }
-    return script;
-}
-
-std::string render_hunks(const std::vector<Row>& script) {
-    std::vector<char> keep(script.size(), 0);
-    for (std::size_t index = 0; index < script.size(); ++index) {
-        if (script[index].kind == ' ') continue;
-        const std::size_t from = index > diff_context ? index - diff_context : 0;
-        const std::size_t to = index + diff_context < script.size() ? index + diff_context : script.size() - 1;
-        for (std::size_t k = from; k <= to; ++k) keep[k] = 1;
-    }
-    std::string out;
-    std::size_t index = 0;
-    while (index < script.size()) {
-        if (!keep[index]) { ++index; continue; }
-        const std::size_t begin = index;
-        while (index < script.size() && keep[index]) ++index;
-        std::size_t a_count = 0;
-        std::size_t b_count = 0;
-        for (std::size_t k = begin; k < index; ++k) {
-            if (script[k].kind != '+') ++a_count;
-            if (script[k].kind != '-') ++b_count;
-        }
-        // 纯新增/纯删除的块按 git 惯例报告“插入发生在哪一行之后”。
-        const std::size_t a_start = a_count ? script[begin].a + 1 : script[begin].a;
-        const std::size_t b_start = b_count ? script[begin].b + 1 : script[begin].b;
-        char header[96];
-        std::snprintf(header, sizeof(header), "@@ -%zu,%zu +%zu,%zu @@\n",
-                      a_start, a_count, b_start, b_count);
-        out += header;
-        for (std::size_t k = begin; k < index; ++k) {
-            out.push_back(script[k].kind);
-            out.append(script[k].text);
-            out.push_back('\n');
-        }
-    }
-    return out;
-}
 
 }  // namespace
 

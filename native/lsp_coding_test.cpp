@@ -607,6 +607,22 @@ int main() {
         check(hints[1].value("paddingLeft", false) == true, "padding flag survives");
     });
 
+    run("inlayHint forwards command and both tooltip shapes", [&] {
+        // LSP `InlayHint.command` / `InlayHint.tooltip`；tooltip 可以是字符串或 MarkupContent。
+        // 上游对应物：declarative sink 的同一对参数（InlayTreeSink.kt:27-31）。
+        const auto result = ask("inlayHint", 0, 0, Json::object());
+        const auto& hints = result.at("hints");
+        check(hints.size() == 2, "two hints, got " + std::to_string(hints.size()));
+        const auto& first = hints[0];
+        check(first.contains("command") && first.at("command").at("command").get<std::string>() == "editor.action.showType",
+              "the click command is forwarded");
+        check(!first.at("command").contains("arguments"), "no arguments key when the server sent none");
+        check(first.at("tooltip").get<std::string>() == "推断出的类型", "a string tooltip is forwarded as-is");
+        const auto& second = hints[1];
+        check(second.at("tooltip").get<std::string>() == "**参数名**", "MarkupContent tooltip is unwrapped to its value");
+        check(!second.contains("command"), "no command key when the server sent none");
+    });
+
     run("rename, references and documentSymbol are unregressed", [&] {
         const auto renamed = ask("rename", 0, 6, Json{{"newName", "renamedName"}});
         check(renamed.at("available") == true && renamed.at("edits").size() == 2, "still a two-file WorkspaceEdit");

@@ -7,7 +7,7 @@
 import { EditorView, GutterMarker, ViewPlugin, gutter } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import { RangeSet, StateEffect, StateField } from '@codemirror/state'
-import { gutterIconAppearance, type GutterIcon } from './gutterIcons'
+import { gutterIconAppearance, type GutterIcon } from './gutterIcons.ts'
 
 export type { GutterIcon } from './gutterIcons'
 
@@ -86,6 +86,10 @@ export interface GutterIconsOptions {
  */
 export function gutterContextMenu(onMenu: (line0: number, x: number, y: number) => void): Extension {
   return ViewPlugin.fromClass(class {
+    // 注意：这里**不能**写 `constructor(private readonly view: EditorView)` —— 参数属性是 TS 的
+    // 类型扩展语法，Node 22 直跑 .ts 时用的是 strip-only 模式，遇到它会直接
+    // `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`（测试就是被这一行挡住的）。显式字段即可。
+    private readonly view: EditorView
     private readonly element: HTMLElement | null
     private readonly handler = (event: MouseEvent) => {
       const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY })
@@ -96,7 +100,8 @@ export function gutterContextMenu(onMenu: (line0: number, x: number, y: number) 
       event.preventDefault()
       event.stopPropagation()
     }
-    constructor(private readonly view: EditorView) {
+    constructor(view: EditorView) {
+      this.view = view
       this.element = view.dom.querySelector<HTMLElement>('.cm-gutters')
       this.element?.addEventListener('contextmenu', this.handler, true)
     }

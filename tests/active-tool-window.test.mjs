@@ -78,11 +78,15 @@ test('F12 returns to the window focused before the editor was used', () => {
 // the handler sent F12 into FileStructure ($default.xml:279-281) and that branch swallowed
 // Ctrl+Shift+F12 (HideAllWindows, :870-872) because it never looked at Shift.
 test('F12 is JumpToLastWindow, Ctrl+F12 is FileStructure, Ctrl+Shift+F12 is HideAllWindows', () => {
-  // 快捷键分派在 2026-09-27 从 App.vue 拆到 src/keymap.ts，所以这里读整个外壳（App.vue + 各模块）；
-  // 三条绑定仍在同一个函数体内，相对顺序不变，`bare < bail` 的断言依然成立。
+  // 快捷键分派在 2026-09-27 从 App.vue 拆到 src/keymap.ts；本批又把尾部一组抽进
+  // src/keymapBindings.ts（数组顺序 = 分派顺序）。裸 F12 / Shift+F12 仍在 if 链上，`bare < bail` 成立。
   const app = shellSource()
   const lines = app.split('\n')
   const find = (...checks) => lines.findIndex(line => checks.every(check => line.includes(check)))
+  // F12 那一组（与其它尾部绑定）现在在共享键位注册表 src/keymapBindings.ts 里按**数组顺序**分派
+  // （src/keymap.ts 的 tailActions 只做 id → 动作的映射），所以这里查注册表而不是 if 链。
+  const registry = readFileSync('src/keymapBindings.ts', 'utf8').split('\n')
+  const registryLine = id => registry.findIndex(line => line.includes(`id: '${id}'`))
 
   const bare = find("event.key === 'F12'", 'jumpToLastToolWindow()')
   assert.ok(bare >= 0, 'bare F12 does not run jumpToLastToolWindow')
@@ -92,12 +96,12 @@ test('F12 is JumpToLastWindow, Ctrl+F12 is FileStructure, Ctrl+Shift+F12 is Hide
   assert.ok(bail >= 0, 'the modifier bail-out moved; revisit this assertion')
   assert.ok(bare < bail, 'bare F12 sits below the modifier bail-out and can never fire')
 
-  const hide = find("event.key === 'F12'", 'toggleMaximizeEditor()')
-  const structure = find("event.key === 'F12'", "openSymbol('file')")
+  const hide = registryLine('window.maximizeEditor')
+  const structure = registryLine('symbol.file')
   assert.ok(hide >= 0, 'Ctrl+Shift+F12 no longer runs HideAllWindows/toggleMaximizeEditor')
   assert.ok(structure >= 0, 'Ctrl+F12 no longer opens FileStructure')
   assert.ok(hide < structure, 'Ctrl+Shift+F12 is swallowed by the Ctrl+F12 branch again')
-  assert.ok(lines[structure].includes('!event.shiftKey'), 'the FileStructure branch must exclude Shift')
+  assert.ok(registry.slice(structure, structure + 2).join(' ').includes("forbid: ['shift']"), 'the FileStructure binding must exclude Shift')
 
   // WindowMenu › ActiveToolwindowGroup (PlatformActions.xml:653-660).
   const row = lines.find(line => line.includes("id: 'window.jumpToLastWindow'"))
@@ -176,7 +180,9 @@ test('the remaining ActiveToolwindowGroup actions are wired', () => {
 
   // Ctrl+Shift+F4 is CloseActiveTab (:260-262), and the reopen action it used to steal it from has
   // no binding in the Windows default keymap at all.
-  assert.ok(find("event.key === 'F4'", 'closeActiveTab()') >= 0, 'Ctrl+Shift+F4 does not close the active tab')
+  // Ctrl+Shift+F4 is CloseActiveTab (:260-262)，绑定与映射现在分别在键位注册表与分派器里。
+  assert.ok(readFileSync('src/keymapBindings.ts', 'utf8').includes("id: 'tab.close'"), 'Ctrl+Shift+F4 is not in the keymap registry')
+  assert.ok(app.includes("'tab.close': () => closeActiveTab()"), 'Ctrl+Shift+F4 does not close the active tab')
   const reopen = lines.find(line => line.includes("id: 'file.reopenClosedTab'"))
   assert.ok(reopen && !reopen.includes('Ctrl Shift F4'), 'ReopenClosedTab still borrows Ctrl+Shift+F4')
 

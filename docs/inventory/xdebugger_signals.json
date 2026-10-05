@@ -1,0 +1,7322 @@
+{
+ "counts": {
+  "total": 635,
+  "unreadable": 0,
+  "test": 0,
+  "swing": 106,
+  "platform": 11,
+  "in_code": 6,
+  "in_comment_only": 6,
+  "never": 623
+ },
+ "rows": [
+  {
+   "name": "AbstractDebuggerSession",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/AbstractDebuggerSession.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointErrorData",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/BreakpointErrorData.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DapMode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/DapMode.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultDebugProcessHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/DefaultDebugProcessHandler.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "Obsolescent",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/Obsolescent.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitDebuggerMode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/SplitDebuggerMode.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAlternativeSourceHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XAlternativeSourceHandler.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointBehaviorPolicy",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XBreakpointBehaviorPolicy.kt",
+   "lines": 80,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugProcess",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugProcess.java",
+   "lines": 367,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugProcessDebuggeeInForeground",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugProcessDebuggeeInForeground.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugProcessStarter",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugProcessStarter.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSession",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugSession.java",
+   "lines": 254,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionBuilder",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugSessionBuilder.kt",
+   "lines": 132,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionEventsProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugSessionEventsProvider.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionListener",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebugSessionListener.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerBundle",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebuggerBundle.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerManager",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebuggerManager.java",
+   "lines": 131,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerManagerListener",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebuggerManagerListener.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerUtil",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XDebuggerUtil.java",
+   "lines": 145,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEvaluationListener",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XEvaluationListener.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExpression",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XExpression.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XNamedTreeNode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XNamedTreeNode.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSourcePosition",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XSourcePosition.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSourcePositionWrapper",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/XSourcePositionWrapper.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointFileProhibitionPolicy",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/BreakpointFileProhibitionPolicy.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineBreakpointsDisabler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/InlineBreakpointsDisabler.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SuspendPolicy",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/SuspendPolicy.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpoint",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpoint.java",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointHandler.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointListener",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointListener.java",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointManager",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointManager.java",
+   "lines": 112,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointProperties",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointProperties.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointType",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointType.java",
+   "lines": 295,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpoint",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpoint.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpointAdditionalInfo",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointAdditionalInfo.kt",
+   "lines": 59,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpointType",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointType.java",
+   "lines": 360,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "XLineBreakpointTypeBase",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointTypeBase.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpointVerticalPlacement",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XLineBreakpointVerticalPlacement.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatchpointType",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XWatchpointType.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointCustomPropertiesPanel",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointCustomPropertiesPanel.java",
+   "lines": 36,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointGroup",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroup.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointGroupingRule",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroupingRule.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointsGroupingPriorities",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointsGroupingPriorities.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ControlExceptionBreakpointSupport",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/codeinsight/ControlExceptionBreakpointSupport.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluationMode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/EvaluationMode.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExpressionInfo",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/ExpressionInfo.kt",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineDebuggerHelper",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/InlineDebuggerHelper.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEditorsProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/XDebuggerEditorsProvider.java",
+   "lines": 79,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEditorsProviderBase",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/XDebuggerEditorsProviderBase.java",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEvaluator",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/XDebuggerEvaluator.java",
+   "lines": 108,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "XInstanceEvaluator",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/evaluation/XInstanceEvaluator.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ImmediateFullValueEvaluator",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/ImmediateFullValueEvaluator.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCompositeNode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XCompositeNode.java",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeNodeHyperlink",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XDebuggerTreeNodeHyperlink.java",
+   "lines": 80,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDescriptor",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XDescriptor.kt",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDropFrameHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XDropFrameHandler.java",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExecutionStack",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XExecutionStack.java",
+   "lines": 139,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExecutionStackGroup",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XExecutionStackGroup.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XFullValueEvaluator",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XFullValueEvaluator.java",
+   "lines": 124,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XInlineDebuggerDataCallback",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XInlineDebuggerDataCallback.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XNamedValue",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XNamedValue.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XNavigatable",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XNavigatable.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XPinToTopData",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XPinToTopData.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XReferrersProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XReferrersProvider.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrame",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XStackFrame.java",
+   "lines": 111,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameUiPresentationContainer",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XStackFrameUiPresentationContainer.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameVisibilityInfoProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XStackFrameVisibilityInfoProvider.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSuspendContext",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XSuspendContext.java",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValue",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValue.java",
+   "lines": 153,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueCallback",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueCallback.java",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueChildrenList",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueChildrenList.java",
+   "lines": 130,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueContainer",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueContainer.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueGroup",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueGroup.java",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueMarkerProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueMarkerProvider.java",
+   "lines": 70,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueModifier",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueModifier.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueNode",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueNode.java",
+   "lines": 63,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValuePlace",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValuePlace.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueTextModificationPreparator",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/XValueTextModificationPreparator.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XErrorValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XErrorValuePresentation.java",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XKeywordValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XKeywordValuePresentation.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XNumericValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XNumericValuePresentation.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XRegularValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XRegularValuePresentation.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStringValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XStringValuePresentation.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValuePresentation",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/frame/presentation/XValuePresentation.java",
+   "lines": 110,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "api",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/hotswap/api.kt",
+   "lines": 190,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixedModeStackBuilder",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/MixedModeStackBuilder.kt",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExecutionStackWithNativeThreadId",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XExecutionStackWithNativeThreadId.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeDebugProcessExtension",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeDebugProcessExtension.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeHighLevelDebugProcessExtension",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeHighLevelDebugProcessExtension.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeLowLevelDebugProcessExtension",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeLowLevelDebugProcessExtension.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeProcessHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeProcessHandler.kt",
+   "lines": 64,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeProcessesConfiguration",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeProcessesConfiguration.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeSuspendContext",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/mixedMode/XMixedModeSuspendContext.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/package-info.java",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerConfigurableProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/settings/DebuggerConfigurableProvider.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerSettingsCategory",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/settings/DebuggerSettingsCategory.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSettings",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/settings/XDebuggerSettings.java",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSettingsManager",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/settings/XDebuggerSettingsManager.java",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ForceSmartStepIntoSource",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/stepping/ForceSmartStepIntoSource.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PsiBackedSmartStepIntoVariant",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/stepping/PsiBackedSmartStepIntoVariant.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSmartStepIntoHandler",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/stepping/XSmartStepIntoHandler.java",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSmartStepIntoVariant",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/stepping/XSmartStepIntoVariant.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerColors",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/ui/DebuggerColors.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutionPointHighlighterProvider",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/ui/ExecutionPointHighlighterProvider.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IXDebuggerSessionTab",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/ui/IXDebuggerSessionTab.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextValueVisualizer",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/ui/TextValueVisualizer.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugTabLayouter",
+   "path": "platform/xdebugger-api/src/com/intellij/xdebugger/ui/XDebugTabLayouter.java",
+   "lines": 51,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEvaluationOrigin",
+   "path": "platform/xdebugger-impl/rpc/src/com/intellij/xdebugger/impl/evaluate/XEvaluationOrigin.kt",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ValueHintType",
+   "path": "platform/xdebugger-impl/rpc/src/com/intellij/xdebugger/impl/evaluate/quick/common/ValueHintType.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerSupport",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/DebuggerSupport.java",
+   "lines": 7,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerManagerProxyListener",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/XDebuggerManagerProxyListener.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSourceKind",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/XSourceKind.java",
+   "lines": 7,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSourcePositionImpl",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/XSourcePositionImpl.java",
+   "lines": 192,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatch",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/XWatch.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerActionHandler",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/actions/DebuggerActionHandler.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerActionBase",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/actions/XDebuggerActionBase.kt",
+   "lines": 94,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerActions",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/actions/XDebuggerActions.java",
+   "lines": 70,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CustomizedBreakpointPresentation",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/CustomizedBreakpointPresentation.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowBreakpointDialogRemoteTopic",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/ShowBreakpointDialogRemoteTopic.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointsDialogState",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointsDialogState.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDependentBreakpointListener",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/XDependentBreakpointListener.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExpressionImpl",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/XExpressionImpl.java",
+   "lines": 105,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointItem",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointItem.java",
+   "lines": 81,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SimpleColoredComponent",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerDocumentOffsetEvaluator",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/evaluate/quick/XDebuggerDocumentOffsetEvaluator.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HiddenFramesStackFrame",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/HiddenFramesStackFrame.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerDescriptionComponentProvider",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XDebuggerDescriptionComponentProvider.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerExecutionStackDescriptionService",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XDebuggerExecutionStackDescriptionService.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameContainerEx",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XStackFrameContainerEx.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameWithCustomBackgroundColor",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XStackFrameWithCustomBackgroundColor.java",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameWithSeparatorAbove",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XStackFrameWithSeparatorAbove.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueMarkers",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/frame/XValueMarkers.java",
+   "lines": 95,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineWatch",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/inline/InlineWatch.kt",
+   "lines": 83,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XInlineWatchesView",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/inline/XInlineWatchesView.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeExecutionStackDescriptor",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeExecutionStackDescriptor.kt",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PinToTopMemberValue",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/pinned/items/PinToTopMemberValue.kt",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PinToTopParentValue",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/pinned/items/PinToTopParentValue.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PinToTopValue",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/pinned/items/PinToTopValue.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PinnedItemInfo",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/pinned/items/PinnedItemInfo.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerPinToTopListener",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/pinned/items/XDebuggerPinToTopListener.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SourcePositionSerialization",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/rpc/SourcePositionSerialization.kt",
+   "lines": 57,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionData",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/XDebugSessionData.java",
+   "lines": 60,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerUIConstants",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/XDebuggerUIConstants.java",
+   "lines": 60,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueTextProvider",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/XValueTextProvider.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ValueMarkup",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/ValueMarkup.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueExtendedPresentation",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/XValueExtendedPresentation.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCustomizableTextRenderer",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/nodes/XCustomizableTextRenderer.kt",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueNodeEx",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueNodeEx.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValuePresentationUtil",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValuePresentationUtil.java",
+   "lines": 204,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueTextRendererBase",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueTextRendererBase.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueTextRendererImpl",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueTextRendererImpl.java",
+   "lines": 90,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DisposableUtil",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/util/DisposableUtil.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SequentialDisposables",
+   "path": "platform/xdebugger-impl/shared/src/com/intellij/xdebugger/impl/util/SequentialDisposables.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EnvironmentAwareHost",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/EnvironmentAwareHost.java",
+   "lines": 79,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LocalAttachHost",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/LocalAttachHost.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WslAttachHost",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/WslAttachHost.java",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDebugger",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachDebugger.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDebuggerProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachDebuggerProvider.java",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachHost",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachHost.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachHostPresentationGroup",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachHostPresentationGroup.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachHostProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachHostProvider.kt",
+   "lines": 57,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachMixedModeDebugger",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachMixedModeDebugger.kt",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachPresentationGroup",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachPresentationGroup.java",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachProcessPresentationGroup",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachProcessPresentationGroup.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachRecentItemsMatcher",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XAttachRecentItemsMatcher.java",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLocalAttachDebugger",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/XLocalAttachDebugger.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LazyAttachVirtualFS",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/fs/LazyAttachVirtualFS.java",
+   "lines": 133,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LazyAttachVirtualFile",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/fs/LazyAttachVirtualFile.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachOSHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/osHandlers/AttachOSHandler.java",
+   "lines": 108,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "OSX"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "GenericAttachOSHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/osHandlers/GenericAttachOSHandler.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LinuxAttachOSHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/osHandlers/LinuxAttachOSHandler.java",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MacAttachOSHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/osHandlers/MacAttachOSHandler.java",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "OSX"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnixAttachOSHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/attach/osHandlers/UnixAttachOSHandler.java",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlayRunToCursorEditorListener",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/InlayRunToCursorEditorListener.kt",
+   "lines": 463,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunToCursorState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/RunToCursorState.kt",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThreadsActionsProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ThreadsActionsProvider.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugProcessConfiguratorStarter",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebugProcessConfiguratorStarter.java",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionBuilderImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebugSessionBuilderImpl.kt",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebugSessionImpl.kt",
+   "lines": 1140,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerConsolePauseStateProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebuggerConsolePauseStateProvider.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerManagerImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebuggerManagerImpl.java",
+   "lines": 557,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerPerformanceCollector",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebuggerPerformanceCollector.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerUtilImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XDebuggerUtilImpl.java",
+   "lines": 643,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "XSteppingSuspendContext",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/XSteppingSuspendContext.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/AttachToProcessAction.java",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessActionBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/AttachToProcessActionBase.java",
+   "lines": 728,
+   "read": true,
+   "swing": [
+    "JBPopup",
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerThreadActionHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/DebuggerThreadActionHandler.java",
+   "lines": 89,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DefaultAttachRecentItemsMatcher",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/DefaultAttachRecentItemsMatcher.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FreezeActiveThreadAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/FreezeActiveThreadAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FreezeInactiveThreadsAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/FreezeInactiveThreadsAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FreezeInactiveThreadsAmongSelectedAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/FreezeInactiveThreadsAmongSelectedAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FreezeSelectedThreadsAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/FreezeSelectedThreadsAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LocalAttachHostPresentationGroup",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/LocalAttachHostPresentationGroup.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoveAllBreakpointsAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/RemoveAllBreakpointsAction.java",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoveAllBreakpointsInFileAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/RemoveAllBreakpointsInFileAction.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RestoreBreakpointAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/RestoreBreakpointAction.kt",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThawActiveThreadAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/ThawActiveThreadAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThawAllThreadsAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/ThawAllThreadsAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ThawSelectedThreadsAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/ThawSelectedThreadsAction.java",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerIdeCustomizableAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/XDebuggerIdeCustomizableAction.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSuspendedActionHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/XDebuggerSuspendedActionHandler.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunToolbarDebugActionHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/handlers/RunToolbarDebugActionHandler.kt",
+   "lines": 135,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerActionHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerActionHandler.java",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerBackendOnlyActionHandler",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerBackendOnlyActionHandler.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/BreakpointState.java",
+   "lines": 220,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsStatisticsCollector",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/BreakpointsStatisticsCollector.kt",
+   "lines": 124,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsUsageCollector",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/BreakpointsUsageCollector.kt",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineBreakpointsVariantsManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/InlineBreakpointsVariantsManager.kt",
+   "lines": 189,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "LineBreakpointState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/LineBreakpointState.java",
+   "lines": 60,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointBase.java",
+   "lines": 603,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointCustomTooltipProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointCustomTooltipProvider.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointDependencyState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointDependencyState.java",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointManagerImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointManagerImpl.java",
+   "lines": 954,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointUtil.kt",
+   "lines": 178,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionBreakpointManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XDebugSessionBreakpointManager.kt",
+   "lines": 325,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDependentBreakpointManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XDependentBreakpointManager.java",
+   "lines": 241,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpointImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XLineBreakpointImpl.java",
+   "lines": 214,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ControlExceptionBreakpointIntentionAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/codeinsight/ControlExceptionBreakpointIntentionAction.kt",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerRunDashboardCustomizer",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/dashboard/XDebuggerRunDashboardCustomizer.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerRunDashboardUpdater",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/dashboard/XDebuggerRunDashboardUpdater.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DfaAssistBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/dfaassist/DfaAssistBase.java",
+   "lines": 171,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DfaHint",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/dfaassist/DfaHint.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DfaResult",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/dfaassist/DfaResult.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ValueLookupManagerController",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/evaluate/ValueLookupManagerController.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEvaluatorUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/evaluate/XDebuggerEvaluatorUtils.kt",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HotSwapDebugSessionManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/hotswap/HotSwapDebugSessionManager.kt",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HotSwapSessionManagerImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/hotswap/HotSwapSessionManagerImpl.kt",
+   "lines": 245,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HotSwapStatistics",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/hotswap/HotSwapStatistics.kt",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HotSwapStatusNotificationManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/hotswap/HotSwapStatusNotificationManager.kt",
+   "lines": 72,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SourceFileChangesCollectorImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/hotswap/SourceFileChangesCollectorImpl.kt",
+   "lines": 441,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerImplBundle",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/messages/XDebuggerImplBundle.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MixedModeStateMachineBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/MixedModeStateMachineBase.kt",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAccumulatingStackFrameContainer",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XAccumulatingStackFrameContainer.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCombinedDebugTabLayouter",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XCombinedDebugTabLayouter.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeCombinedDebugProcess",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeCombinedDebugProcess.kt",
+   "lines": 328,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeDebuggersEditorProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeDebuggersEditorProvider.kt",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeExecutionStack",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeExecutionStack.kt",
+   "lines": 180,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeSuspendContext",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeSuspendContext.kt",
+   "lines": 175,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMixedModeUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/mixedmode/XMixedModeUtils.kt",
+   "lines": 106,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithBreakpointManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithBreakpointManager.kt",
+   "lines": 153,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithBreakpointProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithBreakpointProxy.kt",
+   "lines": 209,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithBreakpointTypeProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithBreakpointTypeProxy.kt",
+   "lines": 130,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithDependentBreakpointManagerProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithDependentBreakpointManagerProxy.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithInlineBreakpointsCache",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithInlineBreakpointsCache.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithLineBreakpointProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithLineBreakpointProxy.kt",
+   "lines": 58,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithLineBreakpointTypeProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithLineBreakpointTypeProxy.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithSessionProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithSessionProxy.kt",
+   "lines": 373,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithXDebugManagerProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithXDebugManagerProxy.kt",
+   "lines": 140,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MonolithXLineBreakpointInlineVariantProxy",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/MonolithXLineBreakpointInlineVariantProxy.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameColorsCacheProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/proxy/XStackFrameColorsCacheProvider.kt",
+   "lines": 102,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RpcDtoUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/RpcDtoUtils.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BackendXValueGroupModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/BackendXValueGroupModel.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BackendXValueModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/BackendXValueModel.kt",
+   "lines": 279,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ModelDeduplicator",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/ModelDeduplicator.kt",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunnerLayoutUiBridge",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/RunnerLayoutUiBridge.kt",
+   "lines": 238,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointValueId",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XBreakpointValueId.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionAdditionalTabComponentManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XDebugSessionAdditionalTabComponentManager.kt",
+   "lines": 86,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionValueIdType",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XDebugSessionValueIdType.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugTabLayouterModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XDebugTabLayouterModel.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExecutionStackModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XExecutionStackModel.kt",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSmartStepTargetModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XSmartStepTargetModel.kt",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XStackFrameModel.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSuspendContextModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XSuspendContextModel.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValuePresentationBridge",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/XValuePresentationBridge.kt",
+   "lines": 171,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "editorsProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/editorsProvider.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "executionEnvironment",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/executionEnvironment.kt",
+   "lines": 11,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "hyperlink",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/hyperlink.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/models/package-info.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/rpc/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunToolbarDebugProcess",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/runToolbar/RunToolbarDebugProcess.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunToolbarXDebuggerAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/runToolbar/RunToolbarXDebuggerAction.kt",
+   "lines": 141,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerDataViewSettings",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/settings/XDebuggerDataViewSettings.java",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerGeneralSettings",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/settings/XDebuggerGeneralSettings.java",
+   "lines": 95,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSettingManagerImpl",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/settings/XDebuggerSettingManagerImpl.java",
+   "lines": 145,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSettingsStatisticsCollector",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/settings/XDebuggerSettingsStatisticsCollector.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "state",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/state.kt",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitDebuggerUIUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/SplitDebuggerUIUtil.kt",
+   "lines": 76,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionTabCustomizer",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/XDebugSessionTabCustomizer.kt",
+   "lines": 59,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogCollectItemsUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogCollectItemsUtil.kt",
+   "lines": 97,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogDebuggersFilter",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogDebuggersFilter.kt",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogHostType",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogHostType.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogPresentationService",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogPresentationService.kt",
+   "lines": 61,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogProcessItem",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogProcessItem.kt",
+   "lines": 79,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogSettings",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogSettings.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogState.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogUtil.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachDialogUtils.kt",
+   "lines": 51,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachHostAndProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachHostAndProvider.kt",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachHostItem",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachHostItem.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachShowOnlyMyProcessesToggleAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachShowOnlyMyProcessesToggleAction.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToLocalProcessView",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToLocalProcessView.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessDialog",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToProcessDialog.kt",
+   "lines": 620,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessDialogFactory",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToProcessDialogFactory.kt",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessView",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToProcessView.kt",
+   "lines": 284,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessViewWithHosts",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToProcessViewWithHosts.kt",
+   "lines": 220,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToRemoteProcessView",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToRemoteProcessView.kt",
+   "lines": 115,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToRemoteProcessViewProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachToRemoteProcessViewProvider.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachViewType",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/AttachViewType.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ProcessesFetchingProblemException",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/diagnostics/ProcessesFetchingProblemException.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDebuggerButtonPresentationProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachDebuggerButtonPresentationProvider.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDialogItemPresentationProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachDialogItemPresentationProvider.kt",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDialogPresentationProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachDialogPresentationProvider.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachDialogUiInvisibleDebuggerProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachDialogUiInvisibleDebuggerProvider.kt",
+   "lines": 10,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachHostSettingsProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachHostSettingsProvider.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachToProcessViewProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachToProcessViewProvider.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAttachTreeDebuggersPresentationProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/extensions/XAttachTreeDebuggersPresentationProvider.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachComponentsFocusUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/AttachComponentsFocusUtil.kt",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogEmptyText",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/AttachDialogEmptyText.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessElementsFilters",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/AttachToProcessElementsFilters.kt",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessItemsListBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/AttachToProcessItemsListBase.kt",
+   "lines": 14,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessTableSelectionModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/AttachToProcessTableSelectionModel.kt",
+   "lines": 145,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachFiltersAwareCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/AttachFiltersAwareCell.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachTableCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/AttachTableCell.kt",
+   "lines": 86,
+   "read": true,
+   "swing": [
+    "JTable",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CommandLineCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/CommandLineCell.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggersCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/DebuggersCell.kt",
+   "lines": 24,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutableCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/ExecutableCell.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PidCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/PidCell.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UserCell",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/UserCell.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/cells/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogColumnsLayout",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/columns/AttachDialogColumnsLayout.kt",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogColumnsLayoutService",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/columns/AttachDialogColumnsLayoutService.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogColumnsUtil",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/columns/AttachDialogColumnsUtil.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogDefaultColumnsLayout",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/columns/AttachDialogDefaultColumnsLayout.kt",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessItemsList",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/list/AttachToProcessItemsList.kt",
+   "lines": 172,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/list/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogElementNode",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/nodes/AttachDialogElementNode.kt",
+   "lines": 16,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogGroupNode",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/nodes/AttachDialogGroupNode.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogProcessNode",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/nodes/AttachDialogProcessNode.kt",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachSelectionIgnoredNode",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/nodes/AttachSelectionIgnoredNode.kt",
+   "lines": 4,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/nodes/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachGroupRenderers",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/separators/AttachGroupRenderers.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JTable"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TableSeparators",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/separators/TableSeparators.kt",
+   "lines": 132,
+   "read": true,
+   "swing": [
+    "paintComponent",
+    "Graphics2D",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/separators/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachToProcessItemsTree",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/tree/AttachToProcessItemsTree.kt",
+   "lines": 289,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachTreeNodeWrapper",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/tree/AttachTreeNodeWrapper.kt",
+   "lines": 96,
+   "read": true,
+   "swing": [
+    "JTree",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachTreeNodes",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/tree/AttachTreeNodes.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FilteringTreeTableModel",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/items/tree/FilteringTreeTableModel.kt",
+   "lines": 116,
+   "read": true,
+   "swing": [
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AttachDialogStatisticsCollector",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/attach/dialog/statistics/AttachDialogStatisticsCollector.kt",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeActionBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/tree/actions/XDebuggerTreeActionBase.kt",
+   "lines": 133,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeBackendOnlyActionBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/tree/actions/XDebuggerTreeBackendOnlyActionBase.kt",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XFetchValueActionBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/ui/tree/actions/XFetchValueActionBase.java",
+   "lines": 60,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BringDebuggeeInForegroundUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/util/BringDebuggeeInForegroundUtils.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "IdentityConcurrentHashMap",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/util/IdentityConcurrentHashMap.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/impl/util/XDebugSessionUtils.kt",
+   "lines": 56,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowClassesWithDiffAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/action/ShowClassesWithDiffAction.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SwitchUpdateModeAction",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/action/SwitchUpdateModeAction.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/action/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesTracker",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/component/InstancesTracker.java",
+   "lines": 107,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MemoryViewManager",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/component/MemoryViewManager.java",
+   "lines": 89,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MemoryViewManagerState",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/component/MemoryViewManagerState.java",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesTrackerListener",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/event/InstancesTrackerListener.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MemoryViewManagerListener",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/event/MemoryViewManagerListener.java",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrackerForNewInstancesBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/tracking/TrackerForNewInstancesBase.java",
+   "lines": 9,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TrackingType",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/tracking/TrackingType.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ClassesFilteredViewBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/ClassesFilteredViewBase.java",
+   "lines": 342,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "ActionButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ClassesTable",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/ClassesTable.java",
+   "lines": 654,
+   "read": true,
+   "swing": [
+    "JTable",
+    "JBColor",
+    "JBUIScale"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesTree",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/InstancesTree.java",
+   "lines": 98,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesViewBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/InstancesViewBase.java",
+   "lines": 71,
+   "read": true,
+   "swing": [
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesWindowBase",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/InstancesWindowBase.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ReferenceInfo",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/ReferenceInfo.java",
+   "lines": 6,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TypeInfo",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/ui/TypeInfo.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractTableColumnDescriptor",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/utils/AbstractTableColumnDescriptor.java",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractTableModelWithColumns",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/utils/AbstractTableModelWithColumns.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InstancesProvider",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/utils/InstancesProvider.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "KeyboardUtils",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/utils/KeyboardUtils.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SingleAlarmWithMutableDelay",
+   "path": "platform/xdebugger-impl/src/com/intellij/xdebugger/memory/utils/SingleAlarmWithMutableDelay.java",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutionPointVm",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ExecutionPointVm.kt",
+   "lines": 122,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutionPositionNavigator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ExecutionPositionNavigator.kt",
+   "lines": 135,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrontendXLineBreakpointVariant",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/FrontendXLineBreakpointVariant.kt",
+   "lines": 118,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineTextValuePopupProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/InlineTextValuePopupProvider.java",
+   "lines": 47,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionSelectionService",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XDebugSessionSelectionService.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerExecutionPointManagerImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XDebuggerExecutionPointManagerImpl.kt",
+   "lines": 177,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerHistoryManager",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XDebuggerHistoryManager.java",
+   "lines": 139,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerWatchesManagerImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XDebuggerWatchesManagerImpl.java",
+   "lines": 278,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEditorSourcePosition",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XEditorSourcePosition.kt",
+   "lines": 18,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSourcePositionEx",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/XSourcePositionEx.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AddToWatchesAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/AddToWatchesAction.java",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AllButThisBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/AllButThisBreakpointAction.kt",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerCodeToolbarGroup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/DebuggerCodeToolbarGroup.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerQuickActions",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/DebuggerQuickActions.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerToggleActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/DebuggerToggleActionHandler.java",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DisableAllButThisBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/DisableAllButThisBreakpointAction.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/EditBreakpointAction.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EditBreakpointActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/EditBreakpointActionHandler.java",
+   "lines": 102,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluateAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/EvaluateAction.java",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluateInConsoleAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/EvaluateInConsoleAction.java",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FocusOnBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/FocusOnBreakpointAction.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FocusOnFinishAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/FocusOnFinishAction.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ForceRunToCursorAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ForceRunToCursorAction.kt",
+   "lines": 20,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ForceStepIntoAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ForceStepIntoAction.kt",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ForceStepOverAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ForceStepOverAction.kt",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MarkObjectAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/MarkObjectAction.java",
+   "lines": 51,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MarkObjectActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/MarkObjectActionHandler.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MuteBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/MuteBreakpointAction.java",
+   "lines": 70,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "OpenFilesInPreviewTabAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/OpenFilesInPreviewTabAction.kt",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PauseAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/PauseAction.kt",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RemoveAllButThisBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/RemoveAllButThisBreakpointAction.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ResetFrameAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ResetFrameAction.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ResumeAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ResumeAction.kt",
+   "lines": 63,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RunToCursorAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/RunToCursorAction.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowExecutionPointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ShowExecutionPointAction.kt",
+   "lines": 37,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowLibraryFramesAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ShowLibraryFramesAction.kt",
+   "lines": 112,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SmartStepIntoAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/SmartStepIntoAction.java",
+   "lines": 27,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StepIntoAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/StepIntoAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StepOutAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/StepOutAction.kt",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "StepOverAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/StepOverAction.kt",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleBreakpointEnabledAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ToggleBreakpointEnabledAction.java",
+   "lines": 72,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleLineBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ToggleLineBreakpointAction.java",
+   "lines": 118,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ToggleTemporaryLineBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ToggleTemporaryLineBreakpointAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UnmuteOnStopAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/UnmuteOnStopAction.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UseInlineDebuggerAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/UseInlineDebuggerAction.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ViewBreakpointsAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/ViewBreakpointsAction.java",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "XDebuggerEditBreakpointActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/XDebuggerEditBreakpointActionHandler.java",
+   "lines": 43,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerProxySuspendedActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/XDebuggerProxySuspendedActionHandler.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSuspendedSessionActionPromoter",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/XDebuggerSuspendedSessionActionPromoter.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AddLineBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/AddLineBreakpointAction.java",
+   "lines": 125,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAddToInlineWatchesFromEditorActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XAddToInlineWatchesFromEditorActionHandler.java",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAddToWatchesFromEditorActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XAddToWatchesFromEditorActionHandler.java",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerCustomEvaluateHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerCustomEvaluateHandler.kt",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerCustomMuteBreakpointHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerCustomMuteBreakpointHandler.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEvaluateActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerEvaluateActionHandler.java",
+   "lines": 212,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerMuteBreakpointsHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerMuteBreakpointsHandler.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerRunToCursorActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerRunToCursorActionHandler.kt",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSmartStepIntoHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerSmartStepIntoHandler.kt",
+   "lines": 562,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerSplitActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerSplitActionHandler.kt",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerStepIntoHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerStepIntoHandler.kt",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerToggleActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XDebuggerToggleActionHandler.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEvaluateInConsoleFromEditorActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XEvaluateInConsoleFromEditorActionHandler.java",
+   "lines": 94,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMarkObjectActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XMarkObjectActionHandler.kt",
+   "lines": 107,
+   "read": true,
+   "swing": [
+    "JDialog"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XToggleLineBreakpointActionHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/actions/handlers/XToggleLineBreakpointActionHandler.kt",
+   "lines": 188,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointDraggableObjectFactory",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/BreakpointDraggableObjectFactory.kt",
+   "lines": 85,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineBreakpointInlayManager",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/InlineBreakpointInlayManager.kt",
+   "lines": 431,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineBreakpointInlayRenderer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/InlineBreakpointInlayRenderer.kt",
+   "lines": 242,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointItem",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointItem.java",
+   "lines": 260,
+   "read": true,
+   "swing": [
+    "SimpleColoredComponent",
+    "ColoredListCellRenderer"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointTypeWithDocumentDelegation",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointTypeWithDocumentDelegation.java",
+   "lines": 14,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointUIUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointUIUtil.kt",
+   "lines": 668,
+   "read": true,
+   "swing": [
+    "JList",
+    "JBUIScale"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExpressionState",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/XExpressionState.java",
+   "lines": 77,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLineBreakpointManager",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/XLineBreakpointManager.kt",
+   "lines": 97,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AddXBreakpointAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/AddXBreakpointAction.kt",
+   "lines": 74,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointChooser",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointChooser.java",
+   "lines": 244,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JList",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "BreakpointNoneItem",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointNoneItem.java",
+   "lines": 92,
+   "read": true,
+   "swing": [
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsDialog",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointsDialog.java",
+   "lines": 611,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsDialogFactory",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointsDialogFactory.kt",
+   "lines": 159,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsDialogInitialBreakpoint",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointsDialogInitialBreakpoint.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointActionsPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/XBreakpointActionsPanel.java",
+   "lines": 338,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointPropertiesSubPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/XBreakpointPropertiesSubPanel.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XLightBreakpointPropertiesPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/XLightBreakpointPropertiesPanel.java",
+   "lines": 653,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMasterBreakpointPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/XMasterBreakpointPanel.java",
+   "lines": 268,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSuspendPolicyPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/XSuspendPolicyPanel.java",
+   "lines": 304,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointCustomGroup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointCustomGroup.java",
+   "lines": 39,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointCustomGroupingRule",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointCustomGroupingRule.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointFileGroup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointFileGroup.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointFileGroupingRule",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointFileGroupingRule.kt",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointGroupingByTypeRule",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointGroupingByTypeRule.kt",
+   "lines": 25,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointGroupingUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointGroupingUtil.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XBreakpointTypeGroup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointTypeGroup.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointItemNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointItemNode.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointItemsTreeController",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointItemsTreeController.java",
+   "lines": 267,
+   "read": true,
+   "swing": [
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsCheckboxTree",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointsCheckboxTree.java",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsGroupNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointsGroupNode.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsSimpleTree",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointsSimpleTree.java",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointsTreeCellRenderer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/BreakpointsTreeCellRenderer.java",
+   "lines": 83,
+   "read": true,
+   "swing": [
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/tree/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerNodeLinkActionProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/collection/visualizer/XDebuggerNodeLinkActionProvider.kt",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CodeFragmentInputComponent",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/CodeFragmentInputComponent.java",
+   "lines": 76,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerEvaluationStatisticsCollector",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/DebuggerEvaluationStatisticsCollector.kt",
+   "lines": 30,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluationInputComponent",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/EvaluationInputComponent.java",
+   "lines": 26,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExpressionInputComponent",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/ExpressionInputComponent.java",
+   "lines": 82,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExpressionInputForm",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/ExpressionInputForm.java",
+   "lines": 116,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEvaluationDialog",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/XDebuggerEvaluationDialog.java",
+   "lines": 448,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XExpressionDialog",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/XExpressionDialog.kt",
+   "lines": 44,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueCompactPresentation",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/XValueCompactPresentation.java",
+   "lines": 29,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HintXValue",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/HintXValue.kt",
+   "lines": 12,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerInstanceTreeCreator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/XDebuggerInstanceTreeCreator.java",
+   "lines": 108,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeCreator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/XDebuggerTreeCreator.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueHint",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/XValueHint.java",
+   "lines": 522,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractValueHint",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/AbstractValueHint.java",
+   "lines": 603,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerTreeCreator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/DebuggerTreeCreator.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerTreeWithHistoryContainer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/DebuggerTreeWithHistoryContainer.java",
+   "lines": 210,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerTreeWithHistoryPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/DebuggerTreeWithHistoryPanel.java",
+   "lines": 56,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerTreeWithHistoryPopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/DebuggerTreeWithHistoryPopup.java",
+   "lines": 151,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "QuickEvaluateHandler",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/QuickEvaluateHandler.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerPopupPanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/XDebuggerPopupPanel.java",
+   "lines": 281,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTextPopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/XDebuggerTextPopup.java",
+   "lines": 426,
+   "read": true,
+   "swing": [
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTooltipPopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/XDebuggerTooltipPopup.java",
+   "lines": 107,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreePopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/XDebuggerTreePopup.java",
+   "lines": 353,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerFramesList",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/DebuggerFramesList.java",
+   "lines": 108,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "FrameNotificationRemoteTopic",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/FrameNotificationRemoteTopic.kt",
+   "lines": 66,
+   "read": true,
+   "swing": [
+    "JBPopup"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HiddenStackFramesItem",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/HiddenStackFramesItem.java",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowSessionTabRemoteTopic",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/ShowSessionTabRemoteTopic.kt",
+   "lines": 21,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WatchInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/WatchInplaceEditor.java",
+   "lines": 84,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XDebugView.java",
+   "lines": 112,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugViewSessionListener",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XDebugViewSessionListener.java",
+   "lines": 69,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerFramesList",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XDebuggerFramesList.java",
+   "lines": 830,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "Graphics2D",
+    "JList"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerThreadsList",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XDebuggerThreadsList.kt",
+   "lines": 192,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JList",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerThreadsListRenderer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XDebuggerThreadsListRenderer.kt",
+   "lines": 120,
+   "read": true,
+   "swing": [
+    "JList",
+    "JPanel",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XFramesView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XFramesView.java",
+   "lines": 851,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSplitterWatchesViewImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XSplitterWatchesViewImpl.kt",
+   "lines": 169,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStandaloneVariablesView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XStandaloneVariablesView.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XThreadsFramesView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XThreadsFramesView.kt",
+   "lines": 622,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JList",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XThreadsView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XThreadsView.kt",
+   "lines": 242,
+   "read": true,
+   "swing": [
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueTextModificationPreparatorProviders",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XValueTextModificationPreparatorProviders.kt",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XVariablesView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XVariablesView.java",
+   "lines": 205,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XVariablesViewBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XVariablesViewBase.java",
+   "lines": 282,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatchesView",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XWatchesView.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatchesViewImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/XWatchesViewImpl.java",
+   "lines": 744,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCopyWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XCopyWatchAction.java",
+   "lines": 42,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEditWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XEditWatchAction.java",
+   "lines": 41,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMoveWatchDown",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XMoveWatchDown.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XMoveWatchUp",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XMoveWatchUp.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XNewWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XNewWatchAction.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XPauseWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XPauseWatchAction.kt",
+   "lines": 67,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XRemoveAllWatchesAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XRemoveAllWatchesAction.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XRemoveWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XRemoveWatchAction.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSeparateWatchesAndVariables",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XSeparateWatchesAndVariables.java",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XToggleEvaluateExpressionFieldAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XToggleEvaluateExpressionFieldAction.java",
+   "lines": 91,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatchesTreeActionBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/frame/actions/XWatchesTreeActionBase.java",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ui",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/hotswap/ui.kt",
+   "lines": 90,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "AddInlineWatchAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/AddInlineWatchAction.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerInlayListener",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/DebuggerInlayListener.java",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineDebugRenderer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineDebugRenderer.java",
+   "lines": 415,
+   "read": true,
+   "swing": [
+    "JBColor"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineDebugRendererBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineDebugRendererBase.java",
+   "lines": 281,
+   "read": true,
+   "swing": [
+    "Graphics2D"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineValuePopupProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineValuePopupProvider.java",
+   "lines": 54,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineWatchInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineWatchInplaceEditor.java",
+   "lines": 134,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineWatchNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineWatchNode.java",
+   "lines": 17,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineWatchNodeImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineWatchNodeImpl.java",
+   "lines": 230,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InlineWatchesRootNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/InlineWatchesRootNode.java",
+   "lines": 255,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerInlayUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/XDebuggerInlayUtil.java",
+   "lines": 198,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTextInlayPopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/XDebuggerTextInlayPopup.java",
+   "lines": 130,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeInlayPopup",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/inline/XDebuggerTreeInlayPopup.java",
+   "lines": 150,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "PinToTopUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/pinned/items/PinToTopUtil.kt",
+   "lines": 48,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerPinToTopManager",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/pinned/items/XDebuggerPinToTopManager.kt",
+   "lines": 141,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerPinToTopAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/pinned/items/actions/XDebuggerPinToTopAction.kt",
+   "lines": 121,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/pinned/items/actions/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DataViewsConfigurable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/DataViewsConfigurable.java",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DataViewsConfigurableUi",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/DataViewsConfigurableUi.kt",
+   "lines": 79,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerConfigurable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/DebuggerConfigurable.java",
+   "lines": 192,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerConfigurableProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/DebuggerConfigurableProvider.java",
+   "lines": 34,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerGeneralConfigurable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/DebuggerGeneralConfigurable.kt",
+   "lines": 71,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MergedCompositeConfigurable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/MergedCompositeConfigurable.java",
+   "lines": 142,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowBreakpointsOverLineNumbersAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/ShowBreakpointsOverLineNumbersAction.java",
+   "lines": 52,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SubCompositeConfigurable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/SubCompositeConfigurable.java",
+   "lines": 159,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerConfigurableProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/settings/XDebuggerConfigurableProvider.java",
+   "lines": 50,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "state",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/state.kt",
+   "lines": 92,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": true,
+   "in_comment_only": false
+  },
+  {
+   "name": "BreakpointEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/BreakpointEditor.java",
+   "lines": 220,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JButton"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "CustomComponentEvaluator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/CustomComponentEvaluator.kt",
+   "lines": 78,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerColorsPage",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerColorsPage.java",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerCopyPastePreprocessor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerCopyPastePreprocessor.java",
+   "lines": 35,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerFocusManager",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerFocusManager.java",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerSessionTabBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerSessionTabBase.java",
+   "lines": 103,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerTitleInfoProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerTitleInfoProvider.kt",
+   "lines": 116,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "DebuggerUIUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/DebuggerUIUtil.java",
+   "lines": 776,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ExecutionPointHighlighter",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/ExecutionPointHighlighter.java",
+   "lines": 256,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": true
+  },
+  {
+   "name": "ExecutionPositionUi",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/ExecutionPositionUi.kt",
+   "lines": 167,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "InplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/InplaceEditor.java",
+   "lines": 305,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SessionTabComponentProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/SessionTabComponentProvider.kt",
+   "lines": 31,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SplitDebuggerDataKeys",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/SplitDebuggerDataKeys.kt",
+   "lines": 28,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextViewer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/TextViewer.java",
+   "lines": 98,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugFramesAndThreadsLayoutOptions",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugFramesAndThreadsLayoutOptions.kt",
+   "lines": 96,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionTab",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugSessionTab.java",
+   "lines": 667,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionTab3",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugSessionTab3.kt",
+   "lines": 172,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugSessionTabNewUI",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugSessionTabNewUI.kt",
+   "lines": 181,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugTabCustomizableActionGroupProvider",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugTabCustomizableActionGroupProvider.java",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebugTabLayoutSettings",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebugTabLayoutSettings.kt",
+   "lines": 163,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEditorBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebuggerEditorBase.java",
+   "lines": 761,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerEmbeddedComboBox",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebuggerEmbeddedComboBox.java",
+   "lines": 135,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "LayoutManager"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerExpressionComboBox",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebuggerExpressionComboBox.java",
+   "lines": 294,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerExpressionEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/XDebuggerExpressionEditor.java",
+   "lines": 152,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "keysSerialization",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/keysSerialization.kt",
+   "lines": 23,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SetValueInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/SetValueInplaceEditor.java",
+   "lines": 65,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TreeInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/TreeInplaceEditor.java",
+   "lines": 49,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JTree"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ValueMarkerPresentationDialog",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/ValueMarkerPresentationDialog.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ValueMarkerPresentationDialogBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/ValueMarkerPresentationDialogBase.java",
+   "lines": 203,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "JLabel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTree",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTree.java",
+   "lines": 564,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeInplaceEditor.java",
+   "lines": 149,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeListener",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeListener.java",
+   "lines": 31,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreePanel",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreePanel.java",
+   "lines": 89,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeRenderer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeRenderer.java",
+   "lines": 273,
+   "read": true,
+   "swing": [
+    "Graphics2D",
+    "JTree",
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeRestorer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeRestorer.java",
+   "lines": 192,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeSpeedSearch",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeSpeedSearch.java",
+   "lines": 199,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeState",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeState.java",
+   "lines": 158,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeValueNodeInplaceEditor",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XDebuggerTreeValueNodeInplaceEditor.java",
+   "lines": 61,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JPanel",
+    "SimpleColoredComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XInspectDialog",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XInspectDialog.java",
+   "lines": 104,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XRendererDecoratorPresentation",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/XRendererDecoratorPresentation.kt",
+   "lines": 13,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "AbstractXFetchValueAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/AbstractXFetchValueAction.java",
+   "lines": 195,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluateInConsoleFromTreeAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/EvaluateInConsoleFromTreeAction.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "ShowReferringObjectsAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/ShowReferringObjectsAction.java",
+   "lines": 97,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "SortValuesToggleAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/SortValuesToggleAction.kt",
+   "lines": 38,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XAddToWatchesTreeAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XAddToWatchesTreeAction.java",
+   "lines": 45,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCompareWithClipboardAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XCompareWithClipboardAction.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCopyNameAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XCopyNameAction.java",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XCopyValueAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XCopyValueAction.java",
+   "lines": 66,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeSplitActionBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XDebuggerTreeSplitActionBase.kt",
+   "lines": 75,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XFetchValueSplitActionBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XFetchValueSplitActionBase.kt",
+   "lines": 36,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XInspectAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XInspectAction.java",
+   "lines": 32,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XJumpToSourceAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XJumpToSourceAction.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XJumpToSourceActionBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XJumpToSourceActionBase.kt",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XJumpToTypeSourceAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XJumpToTypeSourceAction.kt",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XSetValueAction",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XSetValueAction.java",
+   "lines": 43,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XWatchTransferable",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/actions/XWatchTransferable.java",
+   "lines": 44,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "EvaluatingExpressionRootNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/EvaluatingExpressionRootNode.java",
+   "lines": 86,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HeadlessValueEvaluationCallback",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/HeadlessValueEvaluationCallback.java",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HeadlessValueEvaluationCallbackBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/HeadlessValueEvaluationCallbackBase.java",
+   "lines": 93,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "MessageTreeNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/MessageTreeNode.java",
+   "lines": 212,
+   "read": true,
+   "swing": [
+    "SwingUtilities"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RestorableStateNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/RestorableStateNode.java",
+   "lines": 33,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WatchNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/WatchNode.java",
+   "lines": 15,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WatchNodeImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/WatchNodeImpl.java",
+   "lines": 386,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "WatchesRootNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/WatchesRootNode.java",
+   "lines": 316,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTreeNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XDebuggerTreeNode.java",
+   "lines": 192,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEvaluationCallbackBase",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XEvaluationCallbackBase.java",
+   "lines": 22,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XEvaluationCallbackWithOrigin",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XEvaluationCallbackWithOrigin.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XStackFrameNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XStackFrameNode.java",
+   "lines": 19,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueContainerNode",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueContainerNode.java",
+   "lines": 345,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueGroupNodeImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueGroupNodeImpl.java",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueNodeImpl",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueNodeImpl.java",
+   "lines": 398,
+   "read": true,
+   "swing": [],
+   "platform": [
+    "Headless"
+   ],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueNodeImplDelegate",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueNodeImplDelegate.kt",
+   "lines": 325,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XValueNodePresentationConfigurator",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/tree/nodes/XValueNodePresentationConfigurator.java",
+   "lines": 137,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "RawTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/RawTextVisualizer.kt",
+   "lines": 26,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextBasedContentTab",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/TextBasedContentTab.kt",
+   "lines": 34,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "TextVisualizerStatisticsCollector",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/TextVisualizerStatisticsCollector.kt",
+   "lines": 40,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "VisualizedTextPopupUtil",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/VisualizedTextPopupUtil.kt",
+   "lines": 382,
+   "read": true,
+   "swing": [
+    "JComponent",
+    "JBPopup",
+    "JPanel"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "HtmlTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/common/HtmlTextVisualizer.kt",
+   "lines": 77,
+   "read": true,
+   "swing": [
+    "JComponent"
+   ],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JsonTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/common/JsonTextVisualizer.kt",
+   "lines": 73,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "JwtTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/common/JwtTextVisualizer.kt",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "UrlEncodedTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/common/UrlEncodedTextVisualizer.kt",
+   "lines": 53,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XmlTextVisualizer",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/common/XmlTextVisualizer.kt",
+   "lines": 78,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "package-info",
+   "path": "platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/visualizedtext/package-info.java",
+   "lines": 5,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerAssertions",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XDebuggerAssertions.java",
+   "lines": 425,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XDebuggerTestUtil",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XDebuggerTestUtil.java",
+   "lines": 507,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XTestCompositeNode",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XTestCompositeNode.java",
+   "lines": 82,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XTestContainer",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XTestContainer.java",
+   "lines": 62,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XTestEvaluationCallback",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XTestEvaluationCallback.java",
+   "lines": 49,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "XTestValueNode",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/XTestValueNode.java",
+   "lines": 55,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  },
+  {
+   "name": "debuggerTestUtils",
+   "path": "platform/xdebugger-testFramework/src/com/intellij/xdebugger/debuggerTestUtils.kt",
+   "lines": 46,
+   "read": true,
+   "swing": [],
+   "platform": [],
+   "test": false,
+   "in_code": false,
+   "in_comment_only": false
+  }
+ ]
+}

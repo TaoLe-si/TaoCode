@@ -31,7 +31,17 @@ function normalizePoint(event: { clientX: number; clientY: number; detail?: numb
   return valid ? { x: event.clientX, y: event.clientY } : { x: viewport.width / 2, y: viewport.height / 2 }
 }
 
+/**
+ * 两道降级闸，**都要看**：
+ *   1. 系统偏好 `prefers-reduced-motion`（CSS 侧对应 `@media (prefers-reduced-motion: reduce)`）；
+ *   2. 应用内省电模式 `html[data-motion='reduced']`（`appearanceActions.ts:224` 写这个属性，
+ *      CSS 侧对应 `style.css` 里 `html[data-motion='reduced']` 的全局降级）。
+ * 只看第 1 道会漏掉"用户在设置里开了省电"这条路径 —— 水纹是 `startViewTransition` 驱动的一次
+ * 560ms 全屏 clip-path 揭示（`style.css` 的 `theme-reveal`），正是省电要停的那种重绘。
+ * 省电是用户在应用内能点到的开关，所以它与系统偏好是**同一条语义**，不是两个可叠加的档。
+ */
 function prefersReducedMotion(): boolean {
+  if (typeof document !== 'undefined' && document.documentElement?.dataset?.motion === 'reduced') return true
   return typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }

@@ -77,6 +77,16 @@ test('宿主把行接进齿轮，且只有项目视图在场时才给', () => {
   assert.equal(rows['window.removeStripeButton'].id, 'window.removeStripeButton')
 })
 
+test('上下/Home/End 的可见行步进只有一处真源：内容下拉不许另写回绕数学', () => {
+  // 上游：这一层列表的键盘导航同样走 `SpeedSearchBase.adjustSelection`（:683-693）→
+  // findNextElement / findPreviousElement（:476-516），过滤串在场时只在**命中行**之间挪。
+  const combo = read('src/components/ContentComboLabel.vue')
+  assert.match(combo, /active\.value = stepVisibleIndex\(rows\.value, active\.value, step\.kind\)/,
+    '高亮没走 stepVisibleIndex 这张可见表 ⇒ 组件里又抄了一份回绕数学（本批的错位就是这个）')
+  // 反向门禁：出现就地取模就是第二套索引算术。
+  assert.doesNotMatch(combo, /%\s*\w+\.length/, '组件里自己写取模回绕')
+})
+
 // 真渲染那个搜索框（关着时整段不出现、开着时有输入框且带上游的空提示）。
 // 它是独立组件就是为了这条：SSR 拿不到 setup 内部状态，那就把"长什么样"抽出来单独渲染。
 test('搜索框：关着不出现，开着带上游的空提示', async () => {

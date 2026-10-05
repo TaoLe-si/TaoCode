@@ -113,8 +113,12 @@ export interface CommitMessageProblem {
   fixes: readonly CommitMessageFix[]
 }
 
-/** `VcsBundle.properties:1161` "Subject cannot exceed {0} characters". */
-export const SUBJECT_LIMIT_MESSAGE = (rightMargin: number) => `主题行不能超过 ${rightMargin} 个字符`
+/**
+ * `commit.message.inspection.message.subject.should.not.exceed.characters`（`VcsBundle.properties:1161`
+ * "Subject cannot exceed {0} characters"；中文包 = 「主题不能超过 {0} 个字符」，**没有"行"字**）。
+ * 出处：`SubjectLimitInspection.kt:34` 取的就是这个 key。
+ */
+export const SUBJECT_LIMIT_MESSAGE = (rightMargin: number) => `主题不能超过 ${rightMargin} 个字符`
 /** `VcsBundle.properties:1158` "Body lines cannot exceed {0} characters". */
 export const BODY_LIMIT_MESSAGE = (rightMargin: number) => `正文行不能超过 ${rightMargin} 个字符`
 /** `VcsBundle.properties:1160` "Missing blank line between subject and body". */

@@ -173,7 +173,7 @@ onUnmounted(() => {
           @click="emit('activate', id)" @contextmenu.prevent.stop="emit('menu', id, $event)"
           @dragstart="emit('dragStart', id, $event)" @dragover="emit('dragOver', id, $event)"
           @drop="emit('drop', id, $event)" @dragend="emit('dragEnd')"
-        ><component :is="icons[id]" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
+        ><component :is="icons[id]" :size="iconSize.rail" /><span class="activity-name">{{ labels[id] }}</span><span class="activity-number">{{ mnemonicOf(id) }}</span></button>
       </template>
       <span v-if="dropAtEnd" class="stripe-drop-marker" aria-hidden="true" />
       <!-- 「更多」（`MoreSquareStripeButton`）：位置在上条纹之后、拆分按钮之前。 -->
@@ -181,7 +181,7 @@ onUnmounted(() => {
         v-if="moreVisible" ref="moreButton" class="activity-button stripe-more" :class="{ active: moreOpen }"
         :title="moreTitle" :aria-label="moreLabel" :aria-expanded="moreOpen"
         @click.stop="toggleMore()" @contextmenu.prevent="toggleMoveTo"
-      ><MoreHorizontal /></button>
+      ><MoreHorizontal :size="iconSize.rail" /></button>
     </div>
     <span v-if="side === 'right'" class="stripe-drop-hint" aria-hidden="true" />
     <!-- 宽度的分隔线（`ResizeStripeManager` 的 `mySplitter`）：只有名称开着时才挂（`:89-102`）。 -->

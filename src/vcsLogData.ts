@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
-import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitLogQuery, type GitCommitDetails, type GitCommitChanges } from './bridge'
+import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitLogQuery, type GitCommitDetails, type GitCommitChanges } from './bridge.ts'
 
-export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
+export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?: () => GitLogQuery) {
   const commits = ref<GitFullCommit[]>([])
   const selected = ref('')
   const query = ref<GitLogQuery>({})
@@ -48,6 +48,10 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
   const canBack = computed(() => back.value.length > 0), canForward = computed(() => forward.value.length > 0)
   function select(hash: string) { if (selected.value !== hash) { remember(); selected.value = hash } }
   const message = (caught: unknown) => caught instanceof Error ? caught.message : String(caught)
+  // 过滤持久化的读侧（写作在 VcsLog.vue：只有用户显式「应用」过滤才存档，导航/历史回溯不写）。
+  function restoredQuery(): GitLogQuery {
+    try { return restore ? restore() : {} } catch { return {} }
+  }
   function scope() { const current = generation; return () => current === generation }
   async function load(more = false): Promise<boolean> {
     if (!isDesktop || !root.value || (more && (loading.value || !hasMore.value))) return false
@@ -177,11 +181,13 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>) {
     back.value = []; forward.value = []
     loading.value = false; busy.value = false; navigating.value = false
     loaded.value = false; hasMore.value = false; offset = 0
-    commits.value = []; selected.value = ''; query.value = {}; error.value = ''
+    commits.value = []; selected.value = ''; query.value = restoredQuery(); error.value = ''
     details.value = null; changes.value = null; detailsError.value = ''; changesError.value = ''
     detailsLoading.value = false; changesLoading.value = false
     if (active.value) void load()
   }, { flush: 'sync' })
+  // 打开日志窗口时先问一次存档（每个仓库根各存各的）。
+  query.value = restoredQuery()
   watch(active, value => { if (value && !loaded.value) void load() }, { immediate: true })
   onBeforeUnmount(() => { generation++; logToken++; selectionToken++; navigationToken++ })
   return { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,

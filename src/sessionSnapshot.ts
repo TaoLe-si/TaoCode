@@ -5,11 +5,14 @@
 // 模式：`restorePrompt` 由模块**自持**（模板直接 import 使用）；其余依赖经 ctx 注入，
 // 且全部用箭头包装/getter 惰性解析 —— 工厂在顶层立即求值，不依赖 App 里的声明顺序。
 import { nextTick, ref, watch } from 'vue'
-import { request } from './bridge'
+import { request } from './bridge.ts'
 import type { DocumentData } from './bridge'
+import { restoredReadParams, sessionTabEntry, type SessionTabEntry } from './sessionEncodings.ts'
+
+export type { SessionTabEntry } from './sessionEncodings.ts'
 
 export interface SessionState {
-  tabs: Array<{ path: string; line: number; column: number; pane: number; draft?: string }>
+  tabs: SessionTabEntry[]
   active: [string, string]
   orientation: 'none' | 'horizontal' | 'vertical'
   focused: 0 | 1
@@ -48,7 +51,7 @@ export function createSessionSnapshot(ctx: SessionSnapshotContext) {
       for (const tab of groups[pane].tabs) {
         if (pane === 1 && groups[0].tabs.includes(tab)) continue  // shared buffer, already listed
         const draft = tab.dirty ? ctx.editorFor(tab.path)?.text() ?? tab.content : undefined
-        tabs.push({ path: tab.path, line: tab.line, column: tab.column, pane, ...(draft !== undefined ? { draft } : {}) })
+        tabs.push(sessionTabEntry(tab, pane, draft))
       }
     const split = ctx.splitModel()
     return { tabs, active: [groups[0].activePath, groups[1].activePath], orientation: split.orientation, focused: split.focused }
@@ -108,7 +111,7 @@ export function createSessionSnapshot(ctx: SessionSnapshotContext) {
     const restored: any[] = []
     for (const entry of prompt.state.tabs) {
       try {
-        const doc = await request<DocumentData>('file.read', { path: entry.path })
+        const doc = await request<DocumentData>('file.read', restoredReadParams(entry))
         if (epoch !== ctx.workspaceEpoch()) return
         const tab = { ...doc, saving: false, dirty: false, line: Math.max(1, entry.line), column: Math.max(1, entry.column) }
         if (entry.draft !== undefined && entry.draft !== doc.content) { tab.content = entry.draft; tab.dirty = true }

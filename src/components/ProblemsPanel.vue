@@ -1,0 +1,778 @@
+<script setup lang="ts">
+// 问题面板 —— IDEA `ProblemsView` 的用户可见面（从 App.vue 的底部面板内联块搬出成为组件）。
+//
+// 上游行为：工具栏动作组在 `platform/problemsView/ui/resources/intellij.platform.problemView.ui.xml:81-107`
+// ——「Options」弹层（严重度多选过滤 `SeverityFiltersActionGroup` + 三个排序开关 + 按检查器分组）、
+// QuickFixes、ShowPreview、ExpandAll、CollapseAll；树按所选取向折叠，点一行跳源位置。
+// 本仓数据源是 LSP 诊断（`src/problems.ts` 的 `allProblems`），过滤/排序/分组规则在
+// `src/problemsView.ts`（可单测），视图状态在 `src/problemsPanelState.ts`（可持久化）。
+import { computed, ref, watch } from 'vue'
+import { Check, ChevronDown, ChevronRight, Copy, Group, ListFilter, Search, X } from 'lucide-vue-next'
+import { iconSize } from '../uiIcons'
+import type { ProblemRow } from '../problems'
+import { severityClass, severityLabel } from '../problems'
+import {
+  filterProblems, focusRows, groupMuteKeys, groupProblems, sortProblems,
+  MUTABLE_GROUPINGS, PROBLEM_SEVERITIES, type ProblemGrouping,
+} from '../problemsView'
+// 检查结果导出（IDEA `codeInspection/export` 的 `ExportToHTMLAction`）：报告的纯生成在
+// src/inspectionReport.ts，这里只负责选目录 + 落盘（走 app.writeExportFiles 的 .html 通道）。
+import { request } from '../bridge'
+import { inspectionReportFileName, inspectionReportHtml } from '../inspectionReport.ts'
+// 错误树文本导出（IDEA 消息窗口的 Export to text file，`ErrorViewTextExporter`）：
+// 按严重度分桶 / 缩进 / 「Show details」规则在 src/errorTree.ts，这里只负责选路径 + 落盘（.txt）。
+import { errorReportFileName, errorTreeText } from '../errorTree.ts'
+// 分析忽略（上游 `AnalysisIgnoreService`）：规则编辑与逐文件忽略都落在这里，问题表本身
+// 已在 src/problems.ts 聚合前过滤，所以保存后这一面板当场变短。
+import { clearAnalysisIgnore, ignorePatternsText, ignoredFiles, saveIgnorePatterns, toggleIgnoredFile } from '../analysisIgnore'
+// 按文件覆盖文件类型（上游 `OverrideFileTypeAction`/`ReverteOverrideFileTypeAction` +
+// `PersistentFileSetManager`，见 src/fileTypeOverrides.ts）：标成纯文本的文件退出语言分析 ——
+// 聚合门控在 src/problems.ts，改完这里的问题表当场变短；恢复入口就是下面那份覆盖清单。
+import { clearFileTypeOverrides, fileSetPaths, overrideFileType, revertFileType } from '../fileTypeOverrides'
+// 分析范围（上游 `BaseAnalysisActionDialog` + `AnalysisUIOptions`，见 src/analysisScope.ts）：
+// 「检查代码（整工程）」跑之前按这里的范围过滤，范围外的文件不进问题表。
+import { analysisScope, resetAnalysisScope, scopeSummary, scopeText, setAnalysisScopeFromText } from '../analysisScope'
+// 逐文件高亮级别（上游 `HighlightingSettingsPerFile` 的 None/Syntax/Inspections，见
+// src/highlightSettingsPerFile.ts）：菜单里按行设级别，聚合门控在 src/problems.ts。
+import {
+  clearHighlightLevels, highlightLevelEntries, highlightLevelForPath, HIGHLIGHTING_LEVELS,
+  setHighlightLevelForPath, type HighlightingLevel,
+} from '../highlightSettingsPerFile'
+// 本地检查配置文件（上游 `InspectionProfile` 的启用/严重度覆盖，见 src/inspectionProfile.ts）：
+// 逐检查项开关与严重度在下面的「检查配置…」弹层里编辑，聚合门控在 src/problems.ts。
+import {
+  currentProfileName, inspectionItems, profileNames, resetInspectionProfile, resetInspectionTool,
+  setInspectionToolEnabled, setInspectionToolSeverity,
+} from '../inspectionProfile'
+// 检查项身份（(source, code, tags) → IDEA 的那个检查项）：行上的「未使用 / 已废弃」芯片、
+// 组头的停用键都从这里取，见 src/inspectionIdentity.ts。
+import { identityOfRow } from '../inspectionIdentity'
+// 配置档的工程级导入/导出（上游 `InspectionProjectProfileManager` 读 `.idea/inspectionProfiles/`，
+// 见 src/inspectionProfileIo.ts；桥那一层在 src/inspectionProfileHost.ts）。这一段补的是
+// `dm/inspections` 判词里「profile 的导入/导出（.xml）」那条缺：档不再只活在 localStorage 里。
+import { PROFILE_DIR, loadProjectProfiles, saveCurrentProfileToProject, selectProfileOnDisk } from '../inspectionProfileIo.ts'
+import { bridgeProfileDiskDeps } from '../inspectionProfileHost.ts'
+// 本地抑制（上游 `SuppressIntentionAction` 在 ProblemsView 的行菜单里的形态，见
+// src/localIntentions.ts + src/suppressIntention.ts）：逐行「抑制此检查」把注释写进文件，
+// 写入后由 src/localSuppressions.ts 在 LSP 重发布之前先隐去该行。
+import { alreadySuppressed, suppressOptionsFor, type SuppressOption } from '../suppressIntention.ts'
+import { ruleIdFromMessage, suppressionEditFor, suppressionLanguageFor } from '../localIntentions.ts'
+import { isLocallySuppressed, noteLocalSuppression, reconcileLocalSuppressions } from '../localSuppressions.ts'
+// 意图预览（上游 intention/preview 一族，见 src/intentionPreview.ts）：快速修复与抑制条目
+// 在菜单里先显示将改哪几行；LSP 条目只有编辑载荷，按编辑算对照。
+import { previewOfEdits, type IntentionPreview } from '../intentionPreview.ts'
+// 本地意图开关（上游 `IntentionManager` 的启用/停用面，见 src/intentionSettings.ts）。
+import { intentionEntries, intentionSettings, resetIntentionSettings, setAllIntentionsEnabled, setIntentionEnabled } from '../intentionSettings'
+// 面板视图状态持久化（分组/严重度/文本过滤，见 src/problemsPanelState.ts）。
+import { loadProblemsPanelState, saveProblemsPanelState } from '../problemsPanelState'
+import { copyToClipboard } from '../clipboard'
+import { applyTextEdits } from '../editorText.ts'
+import type { DocumentData, LspCodeAction, LspCodeActionResults, LspFormatResult, SaveResult } from '../bridge'
+// 行菜单的锚定外壳（按实测尺寸夹到视口里，口径见 src/popupAnchor.ts）。
+import AnchoredMenu from './AnchoredMenu.vue'
+
+const props = defineProps<{ problems: ProblemRow[]; fixing: boolean; fixDisabled: boolean }>()
+const emit = defineEmits<{ reveal: [target: { path: string; line: number }]; fixAll: [] }>()
+
+// 视图状态初值来自上次会话（上游 `ProblemsViewState` 的工作区文件持久化，见 src/problemsPanelState.ts）。
+const persisted = loadProblemsPanelState()
+const hiddenSeverities = ref<number[]>(persisted.hiddenSeverities)
+const sortBySeverity = ref(persisted.sortBySeverity)
+const sortByName = ref(persisted.sortByName)
+const query = ref(persisted.query)
+const grouping = ref<ProblemGrouping>(persisted.grouping)
+const collapsedGroups = ref<string[]>(persisted.collapsedGroups)
+watch([hiddenSeverities, sortBySeverity, sortByName, query, grouping, collapsedGroups], () =>
+  saveProblemsPanelState({
+    hiddenSeverities: hiddenSeverities.value, sortBySeverity: sortBySeverity.value,
+    sortByName: sortByName.value, query: query.value, grouping: grouping.value,
+    collapsedGroups: collapsedGroups.value,
+  }))
+
+// 「选项」弹层（上游 `ProblemsView.Options`：Show 段 = 严重度过滤，Sort by 段 = 排序开关）。
+const optionsOpen = ref(false)
+/**
+ * 「只看某一组」的焦点（上游 `ProblemsView.Options` 里没有这一格，
+ * `intellij.platform.problemView.ui.xml:82-99` 的 Options 只有严重度 + 三个排序开关 +
+ * `ProblemsView.GroupByToolId`；本仓把上游"整族显隐"的两个形状
+ * （`ProblemFilter.kt:62-75` 的「Show Other Problems」按一批严重度显隐、
+ * `InspectionProfileImpl.java:804` 的按检查项停用）推广到分组维度的某一组，谓词本身仍是逐条问题的
+ * （`ProblemFilter.kt:17-22` `(Problem) -> Boolean`）。
+ * 上游的树选中态也不在 `ProblemsViewState` 里（`ProblemsViewState.kt:20-33` 是全字段清单，没有选中的组），
+ * 所以这里同样只活在会话内、不落存档；换分组档就清掉，避免旧键把整张表过滤空。
+ */
+const focus = ref<{ key: string; label: string } | null>(null)
+watch(grouping, () => { focus.value = null })
+const severityEntries = computed(() => PROBLEM_SEVERITIES.map(severity => ({
+  severity, label: severityLabel(severity), shown: !hiddenSeverities.value.includes(severity),
+})))
+function toggleSeverity(severity: number) {
+  const next = hiddenSeverities.value.includes(severity)
+    ? hiddenSeverities.value.filter(value => value !== severity)
+    : PROBLEM_SEVERITIES.filter(value => value === severity || hiddenSeverities.value.includes(value))
+  hiddenSeverities.value = next
+}
+function showAllSeverities() { hiddenSeverities.value = [] }
+
+// 组的展开态（上游树的展开/折叠；本仓把它落在可持久化的组键集合上，见 src/problemsPanelState.ts）。
+function isCollapsed(key: string) { return collapsedGroups.value.includes(key) }
+function toggleGroup(key: string) {
+  collapsedGroups.value = isCollapsed(key)
+    ? collapsedGroups.value.filter(value => value !== key)
+    : [...collapsedGroups.value, key]
+}
+function collapseAll(groups: readonly { key: string }[]) { collapsedGroups.value = groups.map(group => group.key).filter(Boolean) }
+function expandAll() { collapsedGroups.value = [] }
+const rulesOpen = ref(false)
+const rulesText = ref(ignorePatternsText.value)
+watch(ignorePatternsText, value => { rulesText.value = value })
+const ignoredCount = computed(() => ignoredFiles.value.length)
+function saveRules() { saveIgnorePatterns(rulesText.value); rulesOpen.value = false }
+function restoreAll() { clearAnalysisIgnore(); rulesText.value = ''; rulesOpen.value = false }
+function ignoreFile(path: string) { toggleIgnoredFile(path) }
+
+// 文件类型覆盖（`OverrideFileTypeAction`）：逐行「纯文本」按钮 + 工具栏里的覆盖清单。
+const overrideOpen = ref(false)
+const overriddenFiles = computed(() => fileSetPaths())
+function markPlainText(path: string) { overrideFileType(path) }
+function revertOverride(path: string) { revertFileType(path) }
+function clearOverrides() { clearFileTypeOverrides() }
+
+// 分析范围（`AnalysisUIOptions.SCOPE_TYPE` + `CUSTOM_SCOPE_NAME` 的本仓形态）：两行 glob。
+const scopeOpen = ref(false)
+const scopeIncludeText = ref(scopeText(analysisScope.value.include))
+const scopeExcludeText = ref(scopeText(analysisScope.value.exclude))
+const scopeLabel = computed(() => scopeSummary(analysisScope.value))
+function saveScope() {
+  setAnalysisScopeFromText(scopeIncludeText.value, scopeExcludeText.value)
+  scopeOpen.value = false
+}
+function clearScope() {
+  resetAnalysisScope()
+  scopeIncludeText.value = ''
+  scopeExcludeText.value = ''
+  scopeOpen.value = false
+}
+
+// 本地抑制的即时隐藏（只在这里过滤，聚合表不动）：理由与对账口径见 src/localSuppressions.ts。
+// 对账用**未过滤**的 props.problems：语言服务重算后真的不报了，记录就丢掉。
+const visibleProblems = computed(() => props.problems.filter(row => !isLocallySuppressed(row)))
+watch(() => props.problems, rows => reconcileLocalSuppressions(rows))
+
+// 先按严重度/文本过滤 → 再按排序开关排 → 最后套用「只看某一组」的焦点（三段的顺序与
+// 上游一致：过滤在建表时套（`ProblemsTreeModel` 用 `ProblemFilter` 谓词），排序在比较器里，
+// 分组只是把已经排好的问题挂到组节点下）。
+const rows = computed(() => focusRows(sortProblems(
+  filterProblems(visibleProblems.value, { hidden: hiddenSeverities.value, query: query.value }),
+  { sortBySeverity: sortBySeverity.value, sortByName: sortByName.value }), grouping.value, focus.value?.key ?? null))
+const groups = computed(() => groupProblems(rows.value, grouping.value))
+/** 有可折叠的组吗（不分组时组键为空串，展开/折叠是空操作 —— 按钮置灰而不是做假动作）。 */
+const hasGroups = computed(() => groups.value.some(group => group.key !== ''))
+/** 折起来的组把 rows 清空（顺序稳定，折着就不渲染那些行）；count 始终是折叠前的条数。 */
+const visibleGroups = computed(() => groups.value.map(group => ({
+  key: group.key, label: group.label, count: group.rows.length,
+  // 停用键用**折叠前**的整组算（折起来的组没有 rows，但仍然要能停用这一项）。
+  muteKeys: groupMute.value ? muteKeysFor(group) : [],
+  rows: group.key && isCollapsed(group.key) ? [] : group.rows,
+})))
+function setFocus(group: { key: string; label: string }) {
+  focus.value = focus.value?.key === group.key ? null : { key: group.key, label: group.label }
+}
+
+/**
+ * 行上的「未使用 / 已废弃」芯片：LSP `Diagnostic.tags` 折出来的伪检查项
+ * （上游 `LspDiagnosticsCustomizer.kt:93-96` → `HighlightInfoType.java:49-55` 注册的两档）。
+ * 其余诊断没有这一格，返回 null 就不画（不做空芯片）。
+ */
+function kindChip(row: ProblemRow): string | null {
+  return identityOfRow(row).kindLabel
+}
+
+/**
+ * 一条问题的可读描述（上游 `ProblemsView.CopyProblemDescription` 复制的那一串：
+ * 严重度 + 路径 + 行列 + 消息 + 检查器）。行列与文本导出同一口径（0 基 → 1 基）。
+ */
+function problemDescription(row: ProblemRow): string {
+  const where = `${row.path}:${row.line + 1}:${row.character + 1}`
+  const head = `${severityLabel(row.severity)}: ${where}`
+  // 括号里是**检查项**（有码时 `检查器 (码)`，tags 那两档是上游注册出来的显示名），
+  // 没有来源也没有码时不编造，直接省掉这一段。
+  const item = identityOfRow(row).displayName
+  return `${head} — ${row.message}${item ? `（${item}）` : ''}`
+}
+async function copyDescription(row: ProblemRow) {
+  try {
+    await copyToClipboard(problemDescription(row))
+    actionNote.value = `已复制问题描述：${row.path}:${row.line + 1}`
+  } catch (error) {
+    actionNote.value = `复制失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+// 逐行菜单（上游 ProblemsView 右键菜单的可见面）：抑制此检查（带插入预览）、快速修复
+// （带意图预览）、高亮级别、忽略文件、纯文本覆盖。位置按视口坐标由 AnchoredMenu 夹取。
+interface MenuFix { action: LspCodeAction; preview: IntentionPreview | null }
+const rowMenu = ref<{ row: ProblemRow; x: number; y: number } | null>(null)
+const menuNote = ref('')
+const menuLoading = ref(false)
+const menuDoc = ref<DocumentData | null>(null)
+const menuOptions = ref<Array<{ option: SuppressOption; preview: string }>>([])
+const menuFixes = ref<MenuFix[]>([])
+const menuLevel = computed<HighlightingLevel>(() => rowMenu.value ? highlightLevelForPath(rowMenu.value.row.path) : 'inspections')
+const actionNote = ref('')
+
+function closeRowMenu() { rowMenu.value = null }
+
+async function openRowMenu(row: ProblemRow, event: MouseEvent) {
+  rowMenu.value = { row, x: event.clientX, y: event.clientY }
+  menuNote.value = ''
+  menuDoc.value = null
+  menuOptions.value = []
+  menuFixes.value = []
+  menuLoading.value = true
+  try {
+    const doc = await request<DocumentData>('file.read', { path: row.path })
+    menuDoc.value = doc
+    const lines = doc.content.split('\n')
+    // 诊断码优先：语言服务给的 `code` 就是规则短名（eslint 的 ruleId、tsc 的错误号），
+    // 正是 `// eslint-disable-line <rule>` / `//noinspection <id>` 要插的那一串；
+    // 从消息里抠出来的规则号只做回退（本地检查那一路没有独立的 code，见 src/problems.ts）。
+    const rule = row.code?.trim() || ruleIdFromMessage(row.message)
+    const problem = { line: row.line, source: row.source ?? '', ...(rule ? { code: rule } : {}) }
+    menuOptions.value = suppressOptionsFor(problem, suppressionLanguageFor(row.path))
+      .filter(option => !alreadySuppressed(doc.content, row.line, option))
+      .map(option => {
+        const edit = suppressionEditFor(lines, row.line, option)
+        return { option, preview: edit ? edit.text.replace(/\n$/, '') : '（行号越界，不能插入）' }
+      })
+  } catch (error) {
+    menuNote.value = error instanceof Error ? error.message : String(error)
+  }
+  try {
+    const diagnostics = [{
+      range: { start: { line: row.line, character: row.character }, end: { line: row.line, character: row.character } },
+      severity: row.severity, message: row.message, ...(row.source ? { source: row.source } : {}),
+    }]
+    const result = await request<LspCodeActionResults>('lsp.request', {
+      kind: 'codeAction', path: row.path, line: row.line, character: row.character, diagnostics,
+    })
+    const actions = result.actions ?? []
+    // 预览要文件内容：本文件用刚读到的那份，其余被编辑的文件各读一次（读不到就落 unavailable）。
+    const texts = new Map<string, string>()
+    if (menuDoc.value) texts.set(row.path, menuDoc.value.content)
+    for (const action of actions) for (const file of action.edits ?? []) {
+      if (texts.has(file.path)) continue
+      try { texts.set(file.path, (await request<DocumentData>('file.read', { path: file.path })).content) } catch { /* 预览标不可用 */ }
+    }
+    menuFixes.value = actions.map(action => ({
+      action,
+      preview: action.edits?.length ? previewOfEdits(action.edits, path => texts.get(path)) : null,
+    }))
+  } catch (error) {
+    if (!menuNote.value) menuNote.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    menuLoading.value = false
+  }
+}
+
+async function applySuppression(entry: { option: SuppressOption; preview: string }) {
+  const menu = rowMenu.value
+  const doc = menuDoc.value
+  if (!menu || !doc) return
+  const edit = suppressionEditFor(doc.content.split('\n'), menu.row.line, entry.option)
+  if (!edit) { menuNote.value = '行号越界，未写入。'; return }
+  try {
+    const next = applyTextEdits(doc.content, [edit])
+    await request<SaveResult>('file.write', {
+      path: menu.row.path, content: next, expectedVersion: doc.version, encoding: doc.encoding, bom: doc.bom, safeWrite: true,
+    })
+    // 写入后先本地隐去（LSP 重发布之前），把新内容告诉语言服务触发重算。
+    noteLocalSuppression(menu.row)
+    void request('lsp.change', { path: menu.row.path, text: next }).catch(() => undefined)
+    actionNote.value = `已写入抑制：${entry.option.insertText}（第 ${menu.row.line + 1} 行）`
+    rowMenu.value = null
+  } catch (error) {
+    menuNote.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function applyMenuFix(fix: MenuFix) {
+  const menu = rowMenu.value
+  if (!menu) return
+  const action = fix.action
+  try {
+    let edits = action.edits ?? []
+    let executable = action.command === true
+    if (!edits.length && action.resolvable) {
+      const resolved = await request<LspFormatResult>('lsp.request', {
+        kind: 'codeActionResolve', path: menu.row.path, line: 0, character: 0, index: action.index,
+      })
+      edits = resolved.edits ?? []
+      executable = resolved.command === true
+    }
+    for (const file of edits) {
+      const doc = file.path === menu.row.path && menuDoc.value
+        ? menuDoc.value
+        : await request<DocumentData>('file.read', { path: file.path })
+      const next = applyTextEdits(doc.content, file.textEdits)
+      if (next === doc.content) continue
+      await request<SaveResult>('file.write', {
+        path: file.path, content: next, expectedVersion: doc.version, encoding: doc.encoding, bom: doc.bom, safeWrite: true,
+      })
+      void request('lsp.change', { path: file.path, text: next }).catch(() => undefined)
+    }
+    if (executable) await request('lsp.request', {
+      kind: 'executeCommand', path: menu.row.path, line: 0, character: 0, index: action.index,
+    })
+    actionNote.value = `已应用：${action.title}`
+    rowMenu.value = null
+  } catch (error) {
+    menuNote.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+// 三个工具栏弹层：高亮级别清单 / 检查配置（profile）/ 本地意图开关。
+// 三个清单都读各自模块的 ref，改设置即重算（不需要额外的版本号）。
+const levelOpen = ref(false)
+const profileOpen = ref(false)
+const intentOpen = ref(false)
+const levelEntries = computed(() => highlightLevelEntries())
+function setLevel(path: string, level: string) { setHighlightLevelForPath(path, level as HighlightingLevel) }
+function resetLevels() { clearHighlightLevels() }
+const profileItems = computed(() => inspectionItems(props.problems))
+function toggleProfileItem(key: string, enabled: boolean) { setInspectionToolEnabled(key, enabled) }
+function setProfileSeverity(key: string, value: string) {
+  setInspectionToolSeverity(key, value === '' ? null : Number(value))
+}
+function resetProfile() { resetInspectionProfile() }
+function resetProfileTool(key: string) { resetInspectionTool(key) }
+// 组头的「停用此检查项」：只有能折出身份键的三档分组才给这个动作（file/directory/none 没有检查项可言，
+// 不做点不动的假控件）。停用的落点就是「检查配置…」的那把键 —— 上游 profile 也按同一个
+// `HighlightDisplayKey` 判启用（`InspectionProfileImpl.java:804`）。
+// 键集合的算法在 src/problemsView.ts 的 `groupMuteKeys`（纯函数，可单测；为什么 `code` 档可能有多把键见那里）。
+const groupMute = computed(() => MUTABLE_GROUPINGS.includes(grouping.value))
+function muteKeysFor(group: { key: string; rows: readonly ProblemRow[] }): string[] {
+  return groupMuteKeys(group, grouping.value)
+}
+function muteGroup(group: { key: string; label: string; rows: readonly ProblemRow[] }) {
+  const keys = muteKeysFor(group)
+  if (!keys.length) { actionNote.value = '这一组既无来源也无诊断码，没有可停用的检查项。'; return }
+  for (const key of keys) setInspectionToolEnabled(key, false)
+  actionNote.value = keys.length > 1
+    ? `已停用这一组的 ${keys.length} 个检查项（${keys.join('、')}），在「检查配置…」里可恢复`
+    : `已停用检查项：${group.label}（在「检查配置…」里可恢复）`
+}
+
+// —— 配置档的工程级落盘（`.taocode/inspectionProfiles/`，上游是 `.idea/inspectionProfiles/`）——
+// 导入：把工程目录里的每份档读进来并按 profiles_settings.xml 切根档（坏档只记一条错，不整批丢）。
+// 导出：把当前档写回工程目录（profile 本体 + 根选择两份）。
+const profileDiskBusy = ref(false)
+const profileDiskNote = ref('')
+// 真桥由这里注入（src/inspectionProfileHost.ts 刻意不引桥，好让 node --test 能直接测它）。
+const profileDiskDeps = bridgeProfileDiskDeps(request)
+async function importProfileFromProject() {
+  if (profileDiskBusy.value) return
+  profileDiskBusy.value = true
+  profileDiskNote.value = ''
+  try {
+    const outcome = await loadProjectProfiles(profileDiskDeps)
+    const head = outcome.loaded.length
+      ? `已导入 ${outcome.loaded.join('、')}`
+      : `${PROFILE_DIR} 下没有可导入的配置档`
+    const tail = outcome.errors.length
+      ? `；${outcome.errors.length} 份没读进来（${outcome.errors[0]}）`
+      : `，当前档 ${outcome.root}`
+    profileDiskNote.value = head + tail
+  } catch (error) {
+    profileDiskNote.value = `导入失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    profileDiskBusy.value = false
+  }
+}
+async function exportProfileToProject() {
+  if (profileDiskBusy.value) return
+  profileDiskBusy.value = true
+  profileDiskNote.value = ''
+  try {
+    const written = await saveCurrentProfileToProject(profileDiskDeps)
+    profileDiskNote.value = `已导出到 ${written.path}（${written.bytes} 字节）`
+  } catch (error) {
+    profileDiskNote.value = `导出失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    profileDiskBusy.value = false
+  }
+}
+async function selectProfileOnProject(name: string) {
+  if (profileDiskBusy.value) return
+  profileDiskBusy.value = true
+  profileDiskNote.value = ''
+  try {
+    const ok = await selectProfileOnDisk(profileDiskDeps, name)
+    profileDiskNote.value = ok ? `当前档已切到 ${name}，并写进 profiles_settings.xml` : `切换失败：没有名为 ${name} 的配置档`
+  } catch (error) {
+    profileDiskNote.value = `切换失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    profileDiskBusy.value = false
+  }
+}
+const profileNamesOnDisk = computed(() => profileNames())
+const intentRows = computed(() => intentionEntries())
+function toggleIntention(id: string, enabled: boolean) { setIntentionEnabled(id, enabled) }
+function toggleAllIntentions(enabled: boolean) { setAllIntentionsEnabled(enabled) }
+function resetIntentions() { resetIntentionSettings() }
+
+// 导出报告：IDEA 的 ExportToHTMLAction 作用在**全部检查结果**上，不是当前过滤视图 ——
+// 这里保持同一口径（导 props.problems），避免"导出少了东西"这种不可见的偏差。
+const exporting = ref(false)
+const exportNote = ref('')
+async function exportReport() {
+  if (!props.problems.length || exporting.value) return
+  exporting.value = true
+  exportNote.value = ''
+  try {
+    const directory = await request<string | null>('dialog.pickDirectory', { title: '选择检查报告输出目录', initial: '' })
+    if (!directory) return
+    const path = `${directory.replace(/[\\/]+$/, '')}/${inspectionReportFileName(new Date())}`
+    const content = inspectionReportHtml(props.problems, { generatedAt: new Date() })
+    await request('app.writeExportFiles', { files: [{ path, content }] })
+    exportNote.value = `已导出 ${props.problems.length} 条问题：${path}`
+  } catch (error) {
+    exportNote.value = error instanceof Error ? error.message : String(error)
+  } finally { exporting.value = false }
+}
+// 文本导出（上游 `ErrorViewTextExporter` + 消息窗口的 Export to text file）：同一口径导出**全部**
+// 问题，按 kind 分桶（`ErrorViewStructure.ourMessagesOrder`）；文件走保存对话框 + .txt 导出通道。
+async function exportText() {
+  if (!props.problems.length || exporting.value) return
+  exporting.value = true
+  exportNote.value = ''
+  try {
+    const target = await request<string | null>('dialog.saveFile', {
+      title: '导出问题为文本', filters: [{ name: '文本文件', pattern: '*.txt' }], name: errorReportFileName(new Date()),
+    })
+    if (!target) return
+    await request('app.writeExportFiles', { files: [{ path: target, content: errorTreeText(props.problems) }] })
+    exportNote.value = `已导出 ${props.problems.length} 条问题为文本：${target}`
+  } catch (error) {
+    exportNote.value = error instanceof Error ? error.message : String(error)
+  } finally { exporting.value = false }
+}
+</script>
+
+<template>
+  <div class="problems-panel">
+    <div class="problems-toolbar">
+      <!-- 「选项」弹层 = 上游 `ProblemsView.Options`（ui.xml:82-99）：Show 段 + Sort by 段。 -->
+      <button class="subtle-button problems-options-toggle" title="显示哪些严重度、按什么排序（IDEA: ProblemsView.Options）" aria-label="显示与排序选项" :aria-expanded="optionsOpen" @click="optionsOpen = !optionsOpen">
+        <ListFilter :size="iconSize.inline" aria-hidden="true" />选项…
+      </button>
+      <!-- 分组下拉：上游是一个开关（`ProblemsViewState.kt:28` `groupByToolId`，默认关），
+           动作项 `ProblemsView.GroupByToolId` 在「View Options」弹层最后一格
+           （`intellij.platform.problemView.ui.xml:96-98`，图标 `AllIcons.ObjectBrowser.SortByType`），
+           文案原文 `ActionsBundle.properties:2659` `action.ProblemsView.GroupByToolId.text=Group by Inspection`。
+           本仓把开关与另几档合成一个下拉，图标取同一语义的 `Group`（上游弹层本身是
+           `AllIcons.Actions.GroupBy`，ui.xml:82）。
+           「按检查项」= 那个开关的等价物；「按诊断码」= 本仓用诊断码承接 tool id 的那一档
+           （等价关系的论证见 src/problemsView.ts 与 docs/batch-2026-10-06-bucket2b2.md）。 -->
+      <label class="problems-field" title="分组方式（IDEA: ProblemsView.GroupByToolId「Group by Inspection」+ 按文件/目录查看）">
+        <Group :size="iconSize.inline" aria-hidden="true" />
+        <select v-model="grouping" aria-label="分组方式">
+          <option value="none">不分组</option>
+          <option value="file">按文件</option>
+          <option value="directory">按目录</option>
+          <option value="source">按来源（检查器）</option>
+          <option value="code">按诊断码（承接上游的 tool id）</option>
+          <option value="inspection">按检查项（IDEA: Group by Inspection）</option>
+        </select>
+      </label>
+      <!-- 「只看某一组」的在场标记（点组头上的按钮进入，这里退出）。 -->
+      <button v-if="focus" class="subtle-button problems-focus-chip" :title="`取消只看「${focus.label}」，恢复显示全部问题`"
+              aria-label="取消只看这一组" @click="focus = null">
+        <X :size="iconSize.chip" aria-hidden="true" />只看：{{ focus.label }}
+      </button>
+      <label class="problems-field problems-search" title="按消息、路径或来源过滤">
+        <Search :size="iconSize.inline" aria-hidden="true" />
+        <input v-model="query" placeholder="过滤问题…" aria-label="过滤问题" spellcheck="false" />
+      </label>
+      <span class="problems-count" aria-live="polite">{{ rows.length }} / {{ problems.length }}{{ ignoredCount ? `（已忽略 ${ignoredCount} 个文件）` : '' }}</span>
+      <!-- 展开/折叠（上游工具栏的 `ExpandAll`/`CollapseAll`，ui.xml:105-106）。没有分组时两个都是空操作。 -->
+      <button class="subtle-button" :disabled="!hasGroups" title="展开全部分组（IDEA: Expand All）" @click="expandAll">展开全部</button>
+      <button class="subtle-button" :disabled="!hasGroups" title="折叠全部分组（IDEA: Collapse All）" @click="collapseAll(groups)">折叠全部</button>
+      <button class="subtle-button" :title="rulesOpen ? '收起忽略规则' : '编辑分析忽略规则（每行一条 glob，# 开头是注释）'" :aria-expanded="rulesOpen" @click="rulesOpen = !rulesOpen">忽略规则…</button>
+      <button class="subtle-button" :title="overrideOpen ? '收起覆盖清单' : '把一个文件覆盖为纯文本（退出语言分析，IDEA: Override File Type）'" :aria-expanded="overrideOpen" @click="overrideOpen = !overrideOpen">纯文本覆盖…{{ overriddenFiles.length ? `（${overriddenFiles.length}）` : '' }}</button>
+      <button class="subtle-button" :title="`分析范围：${scopeLabel}（IDEA: Inspect Code 的范围选择）`" :aria-expanded="scopeOpen" @click="scopeOpen = !scopeOpen">分析范围…</button>
+      <button class="subtle-button" :title="'逐文件高亮级别（IDEA: Highlighting Level per File 的 None/Syntax/Inspections）'" :aria-expanded="levelOpen" @click="levelOpen = !levelOpen">高亮级别…{{ levelEntries.length ? `（${levelEntries.length}）` : '' }}</button>
+      <button class="subtle-button" :title="'本地检查配置：按检查项（检查器 / 诊断码）启用/停用与严重度覆盖（IDEA: Inspection Profile）'" :aria-expanded="profileOpen" @click="profileOpen = !profileOpen">检查配置…{{ profileItems.length ? `（${profileItems.length}）` : '' }}</button>
+      <button class="subtle-button" :title="'本地意图开关：抑制条目在 Alt+Enter 与行菜单里是否出现（IDEA: Editor > Intentions）'" :aria-expanded="intentOpen" @click="intentOpen = !intentOpen">意图…</button>
+      <button class="subtle-button" :disabled="fixing || fixDisabled || !problems.length" title="对当前文件逐条应用无歧义的快速修复（Code Cleanup）" @click="emit('fixAll')">{{ fixing ? '修复中…' : '批量修复当前文件' }}</button>
+      <button class="subtle-button" :disabled="exporting || !problems.length" title="把全部检查结果导出为自包含的 HTML 报告（IDEA: Export Inspection Results）" @click="exportReport">{{ exporting ? '导出中…' : '导出报告…' }}</button>
+      <button class="subtle-button" :disabled="exporting || !problems.length" title="把全部问题导出为文本（按严重度分桶；IDEA 消息窗口的 Export to text file）" @click="exportText">导出文本…</button>
+    </div>
+    <!-- 「选项」弹层内容（上游 `ProblemsView.Options`：Show 段 = 严重度复选，Sort by 段 = 排序开关）。 -->
+    <div v-if="optionsOpen" class="problems-ignore-editor">
+      <p class="problems-menu-title">显示</p>
+      <div class="problems-profile-list">
+        <label v-for="entry in severityEntries" :key="entry.severity" class="problems-profile-toggle" :title="`${entry.shown ? '隐藏' : '显示'}${entry.label}`">
+          <input type="checkbox" :checked="entry.shown" @change="toggleSeverity(entry.severity)" />
+          <span>{{ entry.label }}</span>
+        </label>
+      </div>
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" :disabled="!hiddenSeverities.length" @click="showAllSeverities">全部显示</button>
+        <button class="subtle-button" @click="optionsOpen = false">关闭</button>
+      </div>
+      <p class="problems-menu-title">排序</p>
+      <label class="problems-profile-toggle" title="严重度高的排前面（IDEA: ProblemsView.SortBySeverity）">
+        <input type="checkbox" :checked="sortBySeverity" @change="sortBySeverity = ($event.target as HTMLInputElement).checked" />
+        <span>按严重度</span>
+      </label>
+      <label class="problems-profile-toggle" title="按消息文本排序，数字段按自然序（IDEA: ProblemsView.SortByName）">
+        <input type="checkbox" :checked="sortByName" @change="sortByName = ($event.target as HTMLInputElement).checked" />
+        <span>按名称</span>
+      </label>
+    </div>
+    <p v-if="exportNote" class="problems-export-note" role="status">{{ exportNote }}</p>
+    <p v-if="actionNote" class="problems-export-note" role="status">{{ actionNote }}</p>
+    <!-- 忽略规则编辑（上游 `AnalysisIgnoreFileWriter` 的写入面）：保存后问题表即时重算。 -->
+    <div v-if="rulesOpen" class="problems-ignore-editor">
+      <textarea v-model="rulesText" rows="3" spellcheck="false" aria-label="分析忽略规则" placeholder="例如：**/generated/**&#10;*.min.js&#10;# 注释行会被忽略" />
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" @click="saveRules">保存规则并重算</button>
+        <button class="subtle-button" @click="restoreAll">恢复全部（清空文件与规则）</button>
+        <button class="subtle-button" @click="rulesOpen = false">取消</button>
+      </div>
+    </div>
+    <!-- 分析范围（上游 `BaseAnalysisActionDialog` 的范围选择；`AnalysisScope.PROJECT` = 两行都空）。 -->
+    <div v-if="scopeOpen" class="problems-ignore-editor">
+      <label class="problems-scope-field"><span>包含（每行一条 glob，空 = 全部）</span>
+        <textarea v-model="scopeIncludeText" rows="2" spellcheck="false" aria-label="分析范围包含模式" placeholder="例如：src/**&#10;*.ts" /></label>
+      <label class="problems-scope-field"><span>排除（exclude 优先）</span>
+        <textarea v-model="scopeExcludeText" rows="2" spellcheck="false" aria-label="分析范围排除模式" placeholder="例如：**/generated/**&#10;build/**" /></label>
+      <div class="problems-ignore-actions">
+        <span class="problems-count">当前：{{ scopeLabel }}</span>
+        <button class="subtle-button" @click="saveScope">保存范围</button>
+        <button class="subtle-button" @click="clearScope">重置为全部项目</button>
+        <button class="subtle-button" @click="scopeOpen = false">取消</button>
+      </div>
+      <p class="field-hint">范围在下次「分析 › 检查代码…」时生效：范围外的文件不进问题表（IDEA 的 Inspect Code 只在所选范围内找问题）。</p>
+    </div>
+    <!-- 纯文本覆盖清单（上游 `PersistentFileSetManager` 的可见面 + `ReverteOverrideFileTypeAction`）。 -->
+    <div v-if="overrideOpen" class="problems-ignore-editor">
+      <p v-if="!overriddenFiles.length" class="field-hint">还没有覆盖的文件。问题行上的「纯文本」会把该文件退出语言分析，其诊断不再出现在这里。</p>
+      <div v-else class="problems-override-list">
+        <span v-for="path in overriddenFiles" :key="path" class="problems-override-row"><span class="ref-path" :title="path">{{ path }}</span><button class="subtle-button" :title="`恢复 ${path} 的文件类型`" @click="revertOverride(path)">恢复</button></span>
+      </div>
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" :disabled="!overriddenFiles.length" @click="clearOverrides">恢复全部</button>
+        <button class="subtle-button" @click="overrideOpen = false">关闭</button>
+      </div>
+    </div>
+    <!-- 逐文件高亮级别清单（上游 `HighlightingSettingsPerFile` 的覆盖表 + Revert）。 -->
+    <div v-if="levelOpen" class="problems-ignore-editor">
+      <p v-if="!levelEntries.length" class="field-hint">还没有逐文件覆盖。问题行的「操作」菜单里可为该文件设：无（不显示问题）/ 仅语法（只留错误）/ 检查（全量，默认）。</p>
+      <div v-else class="problems-profile-list">
+        <span v-for="entry in levelEntries" :key="entry.path" class="problems-override-row">
+          <span class="ref-path" :title="entry.path">{{ entry.path }}</span>
+          <select :value="entry.level" aria-label="高亮级别" @change="setLevel(entry.path, ($event.target as HTMLSelectElement).value)">
+            <option v-for="option in HIGHLIGHTING_LEVELS" :key="option.id" :value="option.id">{{ option.label }}</option>
+          </select>
+        </span>
+      </div>
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" :disabled="!levelEntries.length" @click="resetLevels">全部恢复默认</button>
+        <button class="subtle-button" @click="levelOpen = false">关闭</button>
+      </div>
+    </div>
+    <!-- 本地检查配置（上游 `InspectionProfile` 的逐检查项启用/严重度覆盖；停用的检查项不落表）。
+         粒度 = 检查项身份（`检查器::诊断码`，tags 那两档单列），与问题视图的分组键同一把。 -->
+    <div v-if="profileOpen" class="problems-ignore-editor">
+      <p v-if="!profileItems.length" class="field-hint">当前没有问题，检查项清单随诊断出现。</p>
+      <div v-else class="problems-profile-list">
+        <span v-for="entry in profileItems" :key="entry.key || '(none)'" class="problems-override-row">
+          <label class="problems-profile-toggle" :title="entry.source ? `检查器 ${entry.source}${entry.code ? ` · 诊断码 ${entry.code}` : ''}` : entry.label">
+            <input type="checkbox" :checked="entry.setting.enabled && !entry.disabledBy" @change="toggleProfileItem(entry.key, ($event.target as HTMLInputElement).checked)" />
+            <span class="ref-path">{{ entry.label }}</span>
+          </label>
+          <span class="problems-count" :title="entry.disabledBy ? `随 ${entry.disabledBy} 一起停用` : ''">{{ entry.count }}</span>
+          <select :value="entry.setting.severity ?? ''" aria-label="严重度覆盖" @change="setProfileSeverity(entry.key, ($event.target as HTMLSelectElement).value)">
+            <option value="">按服务端</option><option :value="1">错误</option><option :value="2">警告</option><option :value="3">提示</option><option :value="4">信息</option>
+          </select>
+          <button class="subtle-button" :disabled="entry.setting.enabled && entry.setting.severity === null" :title="`${entry.label} 恢复默认`" @click="resetProfileTool(entry.key)">恢复</button>
+        </span>
+      </div>
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" :disabled="!profileItems.length" @click="resetProfile">全部恢复默认</button>
+        <button class="subtle-button" @click="profileOpen = false">关闭</button>
+      </div>
+      <!-- 配置档的工程级落盘：上游 InspectionProfileManager 的工程目录（.idea/inspectionProfiles/），
+           本仓用 .taocode/inspectionProfiles/。导入读回并按 profiles_settings.xml 切根档。 -->
+      <div class="problems-ignore-actions">
+        <select :value="currentProfileName()" aria-label="配置档" @change="selectProfileOnProject(($event.target as HTMLSelectElement).value)">
+          <option v-for="name in profileNamesOnDisk" :key="name" :value="name">{{ name }}</option>
+        </select>
+        <button class="subtle-button" :disabled="profileDiskBusy" title="从工程目录读回配置档并按根档切换" @click="importProfileFromProject">从工程目录导入…</button>
+        <button class="subtle-button" :disabled="profileDiskBusy" title="把当前配置档写回工程目录" @click="exportProfileToProject">导出到工程目录…</button>
+      </div>
+      <p v-if="profileDiskNote" class="field-hint">{{ profileDiskNote }}</p>
+      <p class="field-hint">停用的检查器只是不在本仓的问题表/状态栏里出现（诊断仍由语言服务给出，宿主无法让服务器不跑它）。</p>
+    </div>
+    <!-- 本地意图开关（上游 `IntentionManager` 的启用/停用清单的可见面）。 -->
+    <div v-if="intentOpen" class="problems-ignore-editor">
+      <label class="problems-profile-toggle">
+        <input type="checkbox" :checked="intentionSettings.enabled" @change="toggleAllIntentions(($event.target as HTMLInputElement).checked)" />
+        <span>显示本地抑制条目（总开关；语言服务的快速修复不受影响）</span>
+      </label>
+      <div class="problems-profile-list">
+        <label v-for="entry in intentRows" :key="entry.id" class="problems-profile-toggle" :title="`${entry.group}：${entry.title}`">
+          <input type="checkbox" :checked="entry.enabled" @change="toggleIntention(entry.id, ($event.target as HTMLInputElement).checked)" />
+          <span>{{ entry.group }} · {{ entry.title }}</span>
+        </label>
+      </div>
+      <div class="problems-ignore-actions">
+        <button class="subtle-button" @click="resetIntentions">恢复默认</button>
+        <button class="subtle-button" @click="intentOpen = false">关闭</button>
+      </div>
+    </div>
+    <div class="problems-list" role="list" aria-label="问题">
+      <p v-if="!problems.length" class="ref-empty">没有问题。LSP 报告的编译错误与警告会汇总在这里。</p>
+      <p v-else-if="!rows.length" class="ref-empty">没有匹配过滤条件的问题。</p>
+      <template v-for="group in visibleGroups" :key="group.key || '(all)'">
+        <!-- 组头 = 上游的 GroupNode：可折叠（`ProblemsViewGroupNode` + `DefaultTreeExpander`），
+             折起时仍显示条数（上游的展开箭头就是这一行的 affordance）。
+             「停用此检查项」只在按检查项/来源/诊断码分组时出现，落点是 profile 的同一把键
+             （上游 profile 的启停粒度：`InspectionProfileImpl.java:804`）。
+             「只看这一组」= 本仓把上游的逐条可见性谓词（`ProblemFilter.kt:17-22`）套到某一组上；
+             未分组的那批（诊断码档里没码的行，上游同样不给组节点，
+             `ProblemsViewHighlightingChildrenBuilder.kt:56-61`）没有组头，也就不给这两个按钮。 -->
+        <div v-if="group.label" class="problems-group-row">
+          <button class="problems-group" :class="{ collapsed: !group.rows.length }" :aria-expanded="Boolean(group.rows.length)" :title="`${group.rows.length ? '折叠' : '展开'}分组 ${group.label}（${group.count}）`" @click="toggleGroup(group.key)">
+            <span class="problems-group-caret"><ChevronDown v-if="group.rows.length" :size="iconSize.chip" aria-hidden="true" /><ChevronRight v-else :size="iconSize.chip" aria-hidden="true" /></span>
+            <span class="problems-group-label">{{ group.label }}</span>
+            <span class="problems-group-count">{{ group.count }}</span>
+          </button>
+          <button class="subtle-button problems-group-focus" :aria-pressed="focus?.key === group.key" :title="focus?.key === group.key ? `取消只看「${group.label}」` : `只看「${group.label}」这一组（其余暂时不显示，IDEA 的可见性谓词 ProblemFilter.kt:17-22）`" @click="setFocus(group)">
+            <ListFilter :size="iconSize.chip" aria-hidden="true" />只看这一组
+          </button>
+          <button v-if="group.muteKeys.length" class="subtle-button problems-group-mute" :title="`停用检查项 ${group.label}（写进当前检查配置档，可在「检查配置…」恢复）${group.muteKeys.length > 1 ? `；这一组有 ${group.muteKeys.length} 个检查器身份，会逐个停用` : ''}`" @click="muteGroup(group)">停用此检查项</button>
+        </div>
+        <div v-for="(p, index) in group.rows" :key="`${p.path}:${p.line}:${p.character}:${index}`" class="ref-item problem-row" role="button" tabindex="0" @click="emit('reveal', { path: p.path, line: p.line })" @keydown.enter.prevent="emit('reveal', { path: p.path, line: p.line })"><span class="problem-sev" :class="severityClass(p.severity)">{{ severityLabel(p.severity) }}</span><span class="ref-path" :title="p.path">{{ p.path }}</span><span class="ref-pos">{{ p.line + 1 }}:{{ p.character + 1 }}</span><span class="problem-msg">{{ p.message }}</span><span v-if="p.source" class="problem-src" :title="p.code ? `检查项 ${identityOfRow(p).displayName}` : `检查器 ${p.source}`">{{ p.source }}</span><span v-if="kindChip(p)" class="problem-kind">{{ kindChip(p) }}</span><span class="problem-actions"><button class="problem-ignore" title="行操作：抑制此检查 / 快速修复（带预览）/ 高亮级别 / 忽略 / 纯文本 / 复制描述" @click.stop="openRowMenu(p, $event)">操作<ChevronDown :size="iconSize.chip" aria-hidden="true" /></button></span></div>
+      </template>
+    </div>
+    <!-- 行菜单（上游 ProblemsView 右键菜单的行动作）：背景层只负责点外面/Esc 关闭。 -->
+    <div v-if="rowMenu" class="tree-menu-backdrop" @click.self="closeRowMenu" @keydown.esc="closeRowMenu">
+      <AnchoredMenu :x="rowMenu.x" :y="rowMenu.y">
+        <p class="problems-menu-scope">{{ rowMenu.row.path }}:{{ rowMenu.row.line + 1 }} · {{ severityLabel(rowMenu.row.severity) }}</p>
+        <p v-if="menuLoading" class="problems-menu-note">正在取快速修复…</p>
+        <p v-if="menuNote" class="problems-menu-note">{{ menuNote }}</p>
+        <!-- 抑制条目与快速修复在上游是**同一个弹层**：问题视图的「Show Quick-Fixes」
+             （`intellij.platform.problemView.ui.xml:100-103`，动作项 `ProblemsView.QuickFixes`）走
+             `ShowProblemsViewQuickFixesAction.kt:78-92` 的 `IntentionListStep(…, IntentionSource.PROBLEMS_VIEW)`
+             —— 枚举里那一格的注释就是「Quick fixes button in the Problems tool window」
+             （`platform/lang-impl/src/com/intellij/codeInsight/intention/IntentionSource.java:37-40`），
+             而抑制本身就是一个意图（`platform/analysis-api/src/com/intellij/codeInspection/SuppressIntentionAction.java:19`
+             `implements Iconable, IntentionAction`）。本仓没有 PSI 意图注册表，所以
+             · 语言服务给的 codeAction 列表 = 上游弹层里的 quick fix 那一半；
+             · 本仓按诊断码折出的抑制注释 = 上游弹层里的 intention 那一半（插的就是 `code`，
+               见上面 openRowMenu 里 `row.code?.trim() || ruleIdFromMessage(...)` 的取键顺序）；
+             两段分开画只是本仓的排版，动作来源与落点（写文件 + 重报）与上游同一条。
+             两段都为空时（没有 codeAction 也没有可用抑制）菜单里就不渲染这些条目，
+             对应上游 `ShowProblemsViewQuickFixesAction.kt:36-44` 的「没有意图就置灰」。 -->
+        <template v-if="menuOptions.length">
+          <p class="problems-menu-title">抑制此检查（写入文件）</p>
+          <button v-for="entry in menuOptions" :key="entry.option.id" class="problems-menu-item" :title="`${entry.option.title}；将插入：${entry.preview}`" @click="applySuppression(entry)">
+            <span>{{ entry.option.title }}</span><span class="small-muted">将插入 {{ entry.preview }}</span>
+          </button>
+        </template>
+        <template v-if="menuFixes.length">
+          <p class="problems-menu-title">快速修复（应用前预览）</p>
+          <button v-for="(fix, index) in menuFixes" :key="`${fix.action.title}:${index}`" class="problems-menu-item" @click="applyMenuFix(fix)">
+            <span>{{ fix.action.title }}</span>
+            <span v-if="fix.preview" class="small-muted">{{ fix.preview.summary }}</span>
+            <span v-else class="small-muted">{{ fix.action.command ? '由语言服务执行' : '无编辑载荷' }}</span>
+            <span v-for="(change, ci) in fix.preview?.files[0]?.changes.slice(0, 3) ?? []" :key="ci" class="problems-menu-change">第 {{ change.line }} 行：{{ change.before.join(' / ') || '（空）' }} → {{ change.after.join(' / ') || '（空）' }}</span>
+            <span v-if="fix.preview && fix.preview.changedLines > 3" class="small-muted">…共 {{ fix.preview.changedLines }} 处</span>
+          </button>
+        </template>
+        <p class="problems-menu-title">高亮级别</p>
+        <button v-for="option in HIGHLIGHTING_LEVELS" :key="option.id" class="problems-menu-item" :title="option.description" @click="setLevel(rowMenu.row.path, option.id); closeRowMenu()">
+          <span class="problems-menu-check"><span>{{ option.label }}</span><Check v-if="menuLevel === option.id" :size="iconSize.chip" aria-hidden="true" /></span><span class="small-muted">{{ option.description }}</span>
+        </button>
+        <p class="problems-menu-title">文件</p>
+        <button class="problems-menu-item" @click="ignoreFile(rowMenu.row.path); closeRowMenu()"><span>忽略此文件的分析结果</span></button>
+        <button class="problems-menu-item" @click="markPlainText(rowMenu.row.path); closeRowMenu()"><span>覆盖为纯文本（退出语言分析）</span></button>
+        <!-- 「复制描述」（上游树右键菜单的 `ProblemsView.CopyProblemDescription`，ui.xml:111-114）：
+             复制的是这一条的可读描述，不是整张表。 -->
+        <p class="problems-menu-title">复制</p>
+        <button class="problems-menu-item" :title="'复制这一条问题的描述到剪贴板'" @click="copyDescription(rowMenu.row); closeRowMenu()">
+          <span class="problems-menu-check"><Copy :size="iconSize.chip" aria-hidden="true" /><span>复制问题描述</span></span>
+          <span class="small-muted">{{ problemDescription(rowMenu.row) }}</span>
+        </button>
+      </AnchoredMenu>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.problems-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.problems-toolbar { justify-content: flex-start; align-items: center; gap: var(--space-2); }
+.problems-field { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); }
+/* 分组下拉的前缀图标（上游 `ProblemsView.GroupByToolId` 那一枚，ui.xml:96-98）不参与收缩。 */
+.problems-field > svg { flex-shrink: 0; }
+.problems-field select, .problems-field input { height: 22px; background: var(--editor); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 11px; }
+.problems-search { flex: 1; min-width: 0; }
+.problems-search input { flex: 1; min-width: 0; }
+.problems-count { color: var(--muted); font-size: 11px; }
+/* 导出结果的一行回执（成功给路径、失败给原因；不弹窗，面板内可见即可）。 */
+.problems-export-note { margin: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+/* 忽略规则编辑（上游 `AnalysisIgnoreFileWriter`）：与工具栏同一套紧凑控件。 */
+.problems-ignore-editor { display: flex; flex-direction: column; gap: var(--space-1); flex-shrink: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+.problems-ignore-editor textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font: 11px/1.6 var(--font-mono); }
+.problems-ignore-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.problem-ignore { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: auto; padding: 0 var(--space-1); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius-xs, 3px); font-size: 10px; }
+.problem-ignore > svg { flex-shrink: 0; }
+.problem-ignore:hover { color: var(--bright); background: var(--elevated); border-color: var(--line-strong); }
+.problem-actions { display: inline-flex; gap: var(--space-1); margin-left: auto; flex-shrink: 0; }
+.problem-actions .problem-ignore { margin-left: 0; }
+/* 纯文本覆盖清单：一行一个文件 + 恢复按钮。 */
+.problems-override-list { display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow: auto; }
+.problems-override-row { display: flex; align-items: center; gap: var(--space-2); }
+.problems-override-row .ref-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 分析范围的两个模式框（与忽略规则编辑同一套紧凑控件）。 */
+.problems-scope-field { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
+.problems-scope-field textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 3px var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font: 11px/1.6 var(--font-mono); }
+/* 检查配置/高亮级别/意图三个弹层的清单（一行 = 名字 + 控件）。 */
+.problems-profile-list { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; }
+.problems-profile-toggle { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text); font-size: 11px; cursor: pointer; }
+.problems-override-row select { height: 22px; background: var(--editor); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 11px; }
+/* 行菜单（装进 AnchoredMenu 的 `.tree-menu`）：标题、单行说明与预览的紧凑排布。 */
+.problems-menu-scope { margin: 0; padding: var(--space-1) var(--space-3) var(--space-2); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.problems-menu-title { margin: var(--space-2) 0 0; padding: 0 var(--space-3) 2px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+.problems-menu-note { margin: 0; padding: var(--space-1) var(--space-3); color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.problems-menu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+.problems-menu-check { display: inline-flex; align-items: center; gap: var(--space-1); }
+.problems-menu-check > svg { flex-shrink: 0; }
+.problems-menu-change { color: var(--secondary); font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+/* 组头是可折叠的按钮（上游 GroupNode + 展开箭头）：撑满一行、按钮原色去掉、粘在列表顶部。 */
+/* 组头一行：折叠按钮（撑满）+「停用此检查项」。粘性贴在列表顶部的是整行，不是按钮。 */
+.problems-group-row { display: flex; align-items: center; gap: var(--space-1); position: sticky; top: 0; }
+.problems-group { display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; margin: 0; padding: var(--space-1) var(--space-2); background: var(--hover); color: var(--muted); font: inherit; font-size: 11px; text-align: left; border: 0; }
+/* 「未使用 / 已废弃」芯片（tags 折出来的伪检查项；上游是UNUSED_SYMBOL/DEPRECATED 两档注册键）。 */
+.problem-kind { flex-shrink: 0; padding: 0 var(--space-1); color: var(--secondary); border: 1px solid var(--line-strong); border-radius: var(--radius-xs, 3px); font-size: 10px; }
+.problems-group-mute { flex-shrink: 0; }
+/* 「只看这一组」的两个入口：组头上的按钮（进入/退出）与工具栏上的在场标记（退出）。
+   图标只是装饰，文案自己说明状态，所以两个按钮都不是纯图标按钮。 */
+.problems-group-focus { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.problems-group-focus > svg { flex-shrink: 0; }
+.problems-group-focus[aria-pressed="true"] { color: var(--bright); background: var(--elevated); border-color: var(--line-strong); }
+.problems-focus-chip { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; color: var(--secondary); }
+.problems-focus-chip > svg { flex-shrink: 0; }
+.problems-group:hover { color: var(--bright); }
+.problems-group-caret { display: inline-flex; flex-shrink: 0; }
+.problems-group-caret > svg { flex-shrink: 0; }
+.problems-group-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problems-group-count { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.problems-group.collapsed .problems-group-label { opacity: .75; }
+/* 「选项…」按钮带一枚图标，按钮内图标不参与收缩。 */
+.problems-options-toggle { display: inline-flex; align-items: center; gap: 2px; }
+.problems-options-toggle > svg { flex-shrink: 0; }
+</style>

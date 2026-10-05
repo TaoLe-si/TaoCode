@@ -11,7 +11,7 @@ import { computed, ref, type Ref } from 'vue'
 import {
   distractionFreeSettings, rememberAdjustments, restoredSettings, snapshotSettings,
   type DistractionFreeKey, type DistractionFreeSnapshot,
-} from './distractionFreeMode'
+} from './distractionFreeMode.ts'
 
 /** 专注模式会动的设置是一个子集，读写都按这个子集来（不把整个设置对象塞进快照）。 */
 export type DistractionFreeSettingsSlice = Partial<Record<DistractionFreeKey, boolean>>

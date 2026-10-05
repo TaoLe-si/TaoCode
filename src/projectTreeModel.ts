@@ -1,9 +1,11 @@
 import { computed, nextTick, reactive, ref } from 'vue'
-import { request, type Entry } from './bridge'
-import { sortProjectEntries, type ProjectTreeSortSettings } from './projectTreeSort'
+import { request, type Entry } from './bridge.ts'
+import { sortProjectEntries, type ProjectTreeSortSettings } from './projectTreeSort.ts'
+import { DEFAULT_NESTING_RULES, nestSiblings, type NestingRule } from './projectTreeNesting.ts'
+import { MAX_COMPACT_CHAIN, compactName, singleDirectoryChild } from './projectTreeCompactDirs.ts'
 
 export interface SyntheticNode { path: string; label: string; icon: 'libraries' | 'scratches'; entries: Entry[] }
-export interface ProjectTreeRow { entry: Entry; level: number; parent?: string; synthetic?: SyntheticNode }
+export interface ProjectTreeRow { entry: Entry; level: number; parent?: string; synthetic?: SyntheticNode; nested?: boolean }
 
 // One model per mounted project view, never per directory or process-wide.
 export function createProjectTreeModel(options: {
@@ -12,6 +14,10 @@ export function createProjectTreeModel(options: {
   depth: () => number
   projectName?: () => string | undefined
   sortSettings?: () => ProjectTreeSortSettings | undefined
+  /** 文件嵌套规则（`pv/project-view-nodes` 的 File Nesting）；缺省用本仓默认表。 */
+  nestingRules?: () => readonly NestingRule[]
+  /** 「压缩目录」（`ProjectView.CompactDirectories`，上游默认关）；缺省关。 */
+  compactDirs?: () => boolean
   error: (message: string) => void
 }) {
   const hasProjectRoot = () => options.depth() === 0 && options.projectName?.() !== undefined
@@ -38,15 +44,72 @@ export function createProjectTreeModel(options: {
   ]
   const synthetic = (path: string) => options.synthetic().find(node => node.path === path)
   const descendants = (path: string) => project(path === '' && hasProjectRoot() ? options.entries() : synthetic(path)?.entries ?? children.get(path) ?? [])
+  const nestingRules = () => options.nestingRules?.() ?? DEFAULT_NESTING_RULES
+  const nest = (entries: Entry[]) => nestSiblings(entries, nestingRules())
+  /**
+   * 「压缩目录」（`ProjectView.CompactDirectories`）：只有一个子目录的目录与那个子目录并成一行 ——
+   * 上游那条 while 在 `ScopeViewTreeModel.java:595-608`，`getSingleDirectory` 在 `:657-661`，
+   * 显示名的拼接在 `:789-792`。规则本体在 `src/projectTreeCompactDirs.ts`，这里只做它做不了的那一半：
+   * 本仓的目录内容是**点开才向宿主取**的，所以要先把链上每一格的列表取到缓存里，行才能一出现就是并好的样子
+   * （上游的 VFS/PSI 缓存是现成的，取子列表不要钱；这里要，所以链只往上取一层，不再往下递归）。
+   */
+  const compactOn = () => options.compactDirs?.() ?? false
+  const compacted = reactive(new Map<string, Entry>())
+  async function resolveChain(head: Entry, token: number): Promise<void> {
+    if (head.kind !== 'directory' || head.path === '' || head.path.startsWith('\u0000') || synthetic(head.path)) return
+    const names = [head.name]
+    let current = head
+    while (names.length < MAX_COMPACT_CHAIN) {
+      const listing = await fetch(current, token)
+      if (!listing || !valid(token)) break
+      const only = singleDirectoryChild(listing)
+      if (!only) break
+      names.push(only.name)
+      current = only
+    }
+    // depth>1 才真的并起来了；否则把这一格清掉，行就用它自己的名字（上游不加 mapper 的那条分支）。
+    if (names.length > 1) compacted.set(head.path, { ...current, name: compactName(names) })
+    else compacted.delete(head.path)
+  }
+  async function resolveChainsFor(listing: readonly Entry[], token: number): Promise<void> {
+    if (!compactOn()) { compacted.clear(); return }
+    for (const entry of listing) {
+      await resolveChain(entry, token)
+      if (!valid(token)) return
+    }
+  }
+  const compactOf = (entry: Entry): Entry =>
+    compactOn() && entry.kind === 'directory' ? compacted.get(entry.path) ?? entry : entry
+  // 一个路径所在的同级列表（文件嵌套只认同一目录内的兄弟）。
+  // 顶层那一格有两种：有项目根行时兄弟是**根行下面的**列表（`descendants('')`），
+  // 嵌入树（depth>0、没有根行）时兄弟就是 `roots()` 本身。此前一律取 `roots()`，
+  // 于是项目根行下面那层的文件永远找不到父、点不开嵌套（`hasNested` 恒 false）。
+  const listingFor = (path: string): Entry[] => {
+    const slash = path.lastIndexOf('/')
+    if (slash >= 0) return descendants(path.slice(0, slash))
+    return hasProjectRoot() ? descendants('') : roots()
+  }
+  const nestedChildren = (path: string): Entry[] => nest(listingFor(path)).nested.get(path) ?? []
+  const hasNested = (path: string): boolean => nestedChildren(path).length > 0
+  function nestingParentPath(path: string, list: Entry[]): string | undefined {
+    const { nested } = nest(list)
+    for (const [parentPath, items] of nested) if (items.some(item => item.path === path)) return parentPath
+    return undefined
+  }
   const rows = computed(() => {
     const result: ProjectTreeRow[] = []
     const seen = new Set<string>()
-    function visit(entries: Entry[], level: number, parent?: string) {
-      for (const entry of entries) {
+    function visit(entries: Entry[], level: number, parent?: string, nested = false) {
+      const { visible, nested: nestedMap } = nest(entries)
+      for (const raw of visible) {
+        // 压缩目录只是**换了这一行代表哪个目录**（上游 `children.add(mapper.apply(parent, child, icon))`
+        // 加的就是走到底的那个 child）：行指向最深的那一格，名字是整条链。
+        const entry = compactOf(raw)
         if (seen.has(entry.path)) continue
         seen.add(entry.path)
-        result.push({ entry, level, parent, synthetic: synthetic(entry.path) })
-        if (expanded.has(entry.path)) visit(descendants(entry.path), level + 1, entry.path)
+        const children = nestedMap.get(raw.path)
+        result.push({ entry, level, parent, synthetic: synthetic(entry.path), nested })
+        if (expanded.has(entry.path)) visit(children ?? descendants(entry.path), level + 1, entry.path, children !== undefined)
       }
     }
     visit(roots(), options.depth())
@@ -94,7 +157,7 @@ export function createProjectTreeModel(options: {
   function report(error: unknown, token: number) {
     if (valid(token)) options.error(error instanceof Error ? error.message : String(error))
   }
-  async function load(entry: Entry, token: number): Promise<Entry[] | undefined> {
+  async function fetch(entry: Entry, token: number): Promise<Entry[] | undefined> {
     if (!valid(token) || entry.kind !== 'directory') return
     if (entry.path === '' && hasProjectRoot()) return options.entries()
     const node = synthetic(entry.path)
@@ -117,6 +180,16 @@ export function createProjectTreeModel(options: {
     })
     pending.set(entry.path, job)
     return job
+  }
+  /**
+   * 取一层列表 + 把这一层里每个目录的压缩链算好。**顺序不能反**：`expanded` 是在 `expand` 里
+   * 等这个函数回来才加上的，所以一行第一次出现就已经是并好的名字，不会先显示 `src` 再跳成
+   * `src/components/ui`（上游没有这个问题，因为它的子列表是同步的）。
+   */
+  async function load(entry: Entry, token: number): Promise<Entry[] | undefined> {
+    const listing = await fetch(entry, token)
+    if (listing && valid(token)) await resolveChainsFor(listing, token)
+    return listing
   }
   async function expand(entry: Entry, token = epoch) {
     const entries = await load(entry, token)
@@ -146,8 +219,15 @@ export function createProjectTreeModel(options: {
     expanded.delete(path)
   }
   function toggle(entry: Entry) {
+    if (entry.kind === 'directory') {
+      if (expanded.has(entry.path)) collapse(entry.path)
+      else void expand(entry)
+      return
+    }
+    // 文件行只有「文件嵌套」这一种可展开性：父文件展开后露出它名下的子文件。
+    if (!hasNested(entry.path)) return
     if (expanded.has(entry.path)) collapse(entry.path)
-    else void expand(entry)
+    else expanded.add(entry.path)
   }
   function collapseAll() {
     const selectedIndex = rows.value.findIndex(row => row.entry.path === selected.value)
@@ -187,6 +267,9 @@ export function createProjectTreeModel(options: {
     let entries = roots()
     const seen = new Set<string>()
     while (valid(token) && revision === selectionRevision) {
+      // 目标被文件嵌套收在某个父行下时，先展开那一行（上游 TreeSpeedSearch 也会展开祖先）。
+      const nestingParent = nestingParentPath(path, entries)
+      if (nestingParent) expanded.add(nestingParent)
       const exact = entries.find(entry => entry.path === path)
       if (exact) { select(path); await focus(path, token); return }
       const parent = entries.filter(entry => isAncestor(entry, path) || synthetic(entry.path)?.entries.some(child => child.path === path || isAncestor(child, path)))
@@ -258,8 +341,12 @@ export function createProjectTreeModel(options: {
     // fresh entries. Never reuse stale cached directory contents after refresh.
     const seen = new Set<string>()
     async function restore(entries: Entry[]) {
-      for (const entry of entries) {
+      for (const raw of entries) {
+        const entry = compactOf(raw)
         if (!valid(token) || seen.has(entry.path)) continue
+        // 原始路径与「并好之后这一行真正代表的路径」都记下：`expanded` 存的是后者，
+        // 下面那条 revalidate 不能把它当成已经消失的节点删掉。
+        seen.add(raw.path)
         seen.add(entry.path)
         if (entry.kind === 'directory' && wantedExpanded.has(entry.path)) {
           const loaded = await load(entry, token)
@@ -268,6 +355,9 @@ export function createProjectTreeModel(options: {
       }
     }
     await restore(roots())
+    // 没有项目根行时，`roots()` 这一层就是顶层列表，它自己的链没有别的入口去算（有项目根行时
+    // 由上面那次 `load('')` 顺带算好）。
+    if (valid(token) && !hasProjectRoot()) await resolveChainsFor(roots(), token)
     if (!valid(token)) return
     for (const path of expanded) if (!seen.has(path)) expanded.delete(path)
     const visible = new Set(rows.value.map(row => row.entry.path))
@@ -287,11 +377,12 @@ export function createProjectTreeModel(options: {
     expanded.clear()
     if (hasProjectRoot()) expanded.add('')
     children.clear()
+    compacted.clear()
     selected.value = ''
     selection.clear()
     anchor = undefined
     elements.clear()
   }
   function dispose() { reset(); disposed = true }
-  return { rows, expanded, selected, selection, loading, children, elements, tabStop, select, onFocus, focus, toggle, collapseAll, expandAll, expandRecursively, getSelectedEntries, canExpandRecursively, reveal, navigate, refresh, reset, dispose }
+  return { rows, expanded, selected, selection, loading, children, elements, tabStop, select, onFocus, focus, toggle, collapseAll, expandAll, expandRecursively, getSelectedEntries, canExpandRecursively, reveal, navigate, refresh, reset, dispose, hasNested }
 }

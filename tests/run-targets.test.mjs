@@ -81,7 +81,7 @@ test('没有 main 的 Java 文件不报候选（宁可少报，也不给点下�
 
 test('Node / Python / Gradle / CMake 四类目标', () => {
   const targets = discoverRunTargets({
-    files: ['package.json', 'tool.py', 'build.gradle', 'build/app.exe'],
+    files: ['package.json', 'tool.py', 'build.gradle', 'build/app.exe', 'gradlew.bat'],
     contents: {
       'package.json': '{"scripts":{"start":"node index.js"}}',
       'tool.py': 'if __name__ == "__main__":\n    pass\n',
@@ -102,7 +102,8 @@ test('接线：宿主打开项目时发现候选，无配置时运行按钮回�
   assert.match(configs, /filesNeedingContent/)
   assert.match(configs, /allRunConfigNames/)
   // 自动候选**不落盘**：没有走 persistRunConfigs
-  const discoverBlock = configs.slice(configs.indexOf('async function discoverRunTargetsForProject'))
+  // 发现流程只把候选挂进会话表；真正写盘的是 saveRunConfigFromDialog（saveRunConfigFromDialog 之后的那段）。
+  const discoverBlock = configs.slice(configs.indexOf('async function discoverRunTargetsForProject'), configs.indexOf('const runWidgetTitle'))
   assert.ok(!persistIn(discoverBlock), '发现流程不能写用户配置')
   // 运行按钮在没有选中配置时**不弹提示**，而是从上下文生成
   const actions = read('src/runActions.ts')

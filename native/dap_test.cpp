@@ -961,6 +961,199 @@ void scenario_terminate_and_restart_fall_back() {
     client.shutdown();
 }
 
+// DAP `loadedSources` / `modules` 的**按需重取**：事件通道（loadedSource/module 事件）只推增量，
+// 这两条请求是主动拉整份清单的通道。三条口径：路径映射成工作区相对、缺字段不造空值、
+// 规范必填（Module.id / Module.name）缺一个的条目丢弃。
+void scenario_loaded_sources_and_modules() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for(), "dap.start never replied");
+    check(started.ok(), "dap.start failed: " + started.failure_text());
+    check(client.supports_loaded_sources() && client.supports_modules(),
+          "the fake advertises both list-refresh capabilities");
+
+    Waiter sources;
+    client.loaded_sources(sources.reply());
+    check(sources.await_for(), "no loadedSources response");
+    check(sources.ok(), "loadedSources failed: " + sources.failure_text());
+    check(flag_at(sources.result, "available"), "an answer is available");
+    const auto& list = sources.result.at("sources");
+    check(list.is_array() && list.size() == 3,
+          "the source with no identity is dropped, got " + std::to_string(list.size()));
+    check(string_at(list[0], "path") == "dap/main.cpp",
+          "a workspace source maps to a workspace-relative path, got: " + string_at(list[0], "path"));
+    check(string_at(list[1], "name") == "<memory>" && number_at(list[1], "sourceReference") == 7,
+          "a source identified by reference keeps it");
+    check(!list[1].contains("path"), "a missing source path must not be invented");
+    check(string_at(list[2], "path") == "C:/Windows/lib.cpp",
+          "a path outside the workspace stays absolute, got: " + string_at(list[2], "path"));
+    check(string_at(list[2], "origin") == "lib" && string_at(list[2], "presentationHint") == "deemphasize",
+          "origin and presentationHint survive");
+
+    Waiter modules;
+    client.modules(0, 0, modules.reply());
+    check(modules.await_for(), "no modules response");
+    check(modules.ok(), "modules failed: " + modules.failure_text());
+    const auto& module_list = modules.result.at("modules");
+    check(module_list.is_array() && module_list.size() == 2,
+          "the Module without an id is dropped (id is required), got " + std::to_string(module_list.size()));
+    check(number_at(module_list[0], "id") == 7 && string_at(module_list[0], "name") == "fake.dll",
+          "module id and name survive");
+    check(string_at(module_list[0], "path") == "fake.dll", "a module path maps to a workspace-relative path");
+    check(string_at(module_list[0], "version") == "1.0.0" && string_at(module_list[0], "symbolStatus") == "Symbols loaded",
+          "optional module fields survive");
+    check(string_at(module_list[1], "id") == "plugin-a", "a string module id survives as-is");
+    check(flag_at(module_list[1], "isUserCode"), "isUserCode survives");
+    check(!module_list[1].contains("path"), "a missing module path must not be invented");
+    check(number_at(modules.result, "totalModules") == 2, "totalModules survives");
+    // 分页字段省略时**不能**发 0（规范：省略 = 从 0 开始 / 返回全部）。假适配器把收到的值
+    // （缺席记 -1）回声成 output，所以 -1 证明两个键都没发。
+    Json heard;
+    check(recorder.wait_for(is_output_containing("modules startModule=-1 moduleCount=-1"), 10, &heard),
+          "omitted paging fields must stay omitted, not be sent as 0");
+    client.shutdown();
+}
+
+// DAP `stepBack` / `reverseContinue`（反向调试）：共用能力位 `supportsStepBack`（默认 false）。
+void scenario_reverse_debugging() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for() && started.ok(), "dap.start failed: " + started.failure_text());
+    check(client.supports_step_back(), "the fake advertises supportsStepBack");
+
+    Waiter back;
+    client.step_back(1, back.reply());
+    check(back.await_for(), "no stepBack response");
+    check(back.ok() && flag_at(back.result, "ok"), "stepBack must answer ok:true: " + back.failure_text());
+    Json heard;
+    check(recorder.wait_for(is_output_containing("stepBack threadId=1"), 10, &heard),
+          "the adapter never saw the stepBack thread id");
+
+    Waiter reverse;
+    client.reverse_continue(2, reverse.reply());
+    check(reverse.await_for(), "no reverseContinue response");
+    check(reverse.ok() && flag_at(reverse.result, "ok"), "reverseContinue must answer ok:true: " + reverse.failure_text());
+    check(recorder.wait_for(is_output_containing("reverseContinue threadId=2"), 10, &heard),
+          "the adapter never saw the reverseContinue thread id");
+    client.shutdown();
+}
+
+// DAP `readMemory` / `disassemble`：内存字节（base64 过桥）与指令清单的整形口径。
+void scenario_memory_and_disassembly() {
+    const auto root = workspace_root();
+    Recorder recorder;
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(), {}, root, [&recorder](Json event) { recorder.push(std::move(event)); });
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for() && started.ok(), "dap.start failed: " + started.failure_text());
+    check(client.supports_read_memory() && client.supports_disassemble(),
+          "the fake advertises both memory capabilities");
+
+    Waiter memory;
+    client.read_memory("0x1000", 4, 8, memory.reply());
+    check(memory.await_for(), "no readMemory response");
+    check(memory.ok(), "readMemory failed: " + memory.failure_text());
+    check(flag_at(memory.result, "available"), "an answer is available");
+    check(string_at(memory.result, "address") == "0x1000", "the memory address survives");
+    // 假适配器回的 8 个字节是 'A'..'H'（0x41 + i），base64 应当是 QUJDREVGR0g=。
+    check(string_at(memory.result, "dataB64") == "QUJDREVGR0g=",
+          "the scripted bytes must survive as base64, got: " + string_at(memory.result, "dataB64"));
+    check(!memory.result.contains("unreadableBytes"), "a readable range must not get an unreadableBytes key");
+    Json heard;
+    check(recorder.wait_for(is_output_containing("readMemory 0x1000 count=8 offset=4"), 10, &heard),
+          "memoryReference, count and offset must all reach the adapter");
+
+    // 读不到的范围：规范只回 unreadableBytes（没有 data）。这不是错误。
+    Waiter unreadable;
+    client.read_memory("unreadable:0", 0, 16, unreadable.reply());
+    check(unreadable.await_for(), "no readMemory response for an unreadable range");
+    check(unreadable.ok(), "an unreadable range is still an answer: " + unreadable.failure_text());
+    check(flag_at(unreadable.result, "available"), "the adapter answered");
+    check(number_at(unreadable.result, "unreadableBytes") == 16, "the unreadable byte count survives");
+    check(!unreadable.result.contains("dataB64"), "no data key may be invented for an unreadable range");
+
+    Waiter code;
+    client.disassemble("0x1000", 0, 0, 5, true, code.reply());
+    check(code.await_for(), "no disassemble response");
+    check(code.ok(), "disassemble failed: " + code.failure_text());
+    const auto& instructions = code.result.at("instructions");
+    check(instructions.is_array() && instructions.size() == 2,
+          "the instruction without an address is dropped (address is required), got " + std::to_string(instructions.size()));
+    check(string_at(instructions[0], "address") == "0x1000" && string_at(instructions[0], "instruction") == "mov rbp, rsp",
+          "address and instruction survive");
+    check(string_at(instructions[0], "instructionBytes") == "4889E5" && string_at(instructions[0], "symbol") == "main",
+          "instructionBytes and symbol survive");
+    check(string_at(instructions[0], "path") == "dap/main.cpp",
+          "location.path maps to a workspace-relative path, got: " + string_at(instructions[0], "path"));
+    check(number_at(instructions[0], "line") == 5 && number_at(instructions[0], "column") == 1,
+          "instruction line/column stay 1-based (DAP)");
+    check(!instructions[1].contains("instructionBytes") && !instructions[1].contains("path"),
+          "absent instruction fields must not be invented");
+    check(!code.result.contains("offset") && !code.result.contains("unreadableBytes"),
+          "optional response fields at their default must not be written");
+    Json code_heard;
+    check(recorder.wait_for(
+              is_output_containing("disassemble 0x1000 instructionCount=5 instructionOffset=-1 offset=-1 resolveSymbols=true"),
+              10, &code_heard),
+          "the optional disassemble fields must be omitted when they are at their defaults");
+    client.shutdown();
+}
+
+// 五个新能力位（规范默认 false）**都不声明**时：客户端必须本地回 DAP_UNSUPPORTED，
+// 一个请求都不发 —— 调用方据此不渲染入口（而不是发一个适配器答不上来的请求）。
+void scenario_inspection_capability_gates() {
+    const auto root = workspace_root();
+    Client client;
+    client.set_root(root);
+    client.start(adapter_path(),
+                 {L"--no-loaded-sources", L"--no-modules", L"--no-step-back", L"--no-read-memory", L"--no-disassemble"},
+                 root, [](Json) {});
+    Waiter started;
+    client.start_debugging("fake-adapter", Json{{"program", "dap/main.cpp"}}, started.reply());
+    check(started.await_for() && started.ok(), "dap.start failed: " + started.failure_text());
+    check(!client.supports_loaded_sources() && !client.supports_modules() && !client.supports_step_back() &&
+              !client.supports_read_memory() && !client.supports_disassemble(),
+          "the fake was told to advertise none of the five protocol-side capabilities");
+
+    const auto expect_unsupported = [](const std::string& what, Waiter& waiter) {
+        check(waiter.await_for(), "an unsupported " + what + " must answer instead of hanging");
+        check(!waiter.ok(), "an unsupported " + what + " is not a success");
+        check(string_at(waiter.error, "code") == "DAP_UNSUPPORTED",
+              what + " needs the DAP_UNSUPPORTED code, got: " + string_at(waiter.error, "code"));
+    };
+    Waiter no_sources;
+    client.loaded_sources(no_sources.reply());
+    expect_unsupported("loadedSources", no_sources);
+    Waiter no_modules;
+    client.modules(0, 0, no_modules.reply());
+    expect_unsupported("modules", no_modules);
+    Waiter no_back;
+    client.step_back(1, no_back.reply());
+    expect_unsupported("stepBack", no_back);
+    Waiter no_reverse;
+    client.reverse_continue(1, no_reverse.reply());
+    expect_unsupported("reverseContinue", no_reverse);
+    Waiter no_memory;
+    client.read_memory("0x1000", 0, 4, no_memory.reply());
+    expect_unsupported("readMemory", no_memory);
+    Waiter no_code;
+    client.disassemble("0x1000", 0, 0, 4, false, no_code.reply());
+    expect_unsupported("disassemble", no_code);
+    client.shutdown();
+}
+
 void scenario_disconnect_then_destroy() {
     const auto root = workspace_root();
     int events = 0;
@@ -1006,6 +1199,10 @@ int main() {
     run("runInTerminal and startDebugging are answered for real", scenario_reverse_requests);
     run("disconnect waits for the reader thread, so the client can be dropped", scenario_disconnect_then_destroy);
     run("terminate and restart fall back when the adapter lacks the capability", scenario_terminate_and_restart_fall_back);
+    run("loadedSources / modules refresh on demand and shape the lists", scenario_loaded_sources_and_modules);
+    run("stepBack / reverseContinue reach the adapter", scenario_reverse_debugging);
+    run("readMemory bytes and disassemble instructions survive shaping", scenario_memory_and_disassembly);
+    run("the five protocol-side capabilities gate every new request", scenario_inspection_capability_gates);
 
     std::cout << passed << " passed, " << failures << " failed\n";
     return failures == 0 ? 0 : 1;

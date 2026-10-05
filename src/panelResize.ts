@@ -11,8 +11,8 @@
 // 它们共享同一个 `viewport` 与同一套 clamp，拆开会让每一份都要重新注入对方的尺寸状态。
 // 工具窗口的**停靠/隐藏/最大化**在 src/toolWindowActions.ts；这里只管尺寸。
 import { reactive, watch } from 'vue'
-import { clampPanelSize } from './appearance'
-import { RESIZE_CHARS, resizeDirectionEnabled, stretchDelta, type ResizeDirection } from './toolWindowResize'
+import { clampPanelSize } from './appearance.ts'
+import { RESIZE_CHARS, resizeDirectionEnabled, stretchDelta, type ResizeDirection } from './toolWindowResize.ts'
 // 分栏比例的「0 = 没存过」哨兵（上游 `ToolWindowPaneState.getPreferredSplitProportion` 的等价物）。
 import { splitSizeOrDefault } from './toolWindowPaneState.ts'
 

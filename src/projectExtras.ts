@@ -4,8 +4,10 @@
 // （只有模板渲染 + 菜单动作调用）。外部依赖实测只有 2 个（`notify` 与 `workspace`），所以 ctx 很小。
 import { ref } from 'vue'
 import { request, type GitFileHistory, type GitShowCommit, type GitSubmodule, type GitSubmodules,
-         type GitWorktree, type GitWorktrees, type PluginInfo, type PluginList, type Workspace } from './bridge'
-import { errorMessage } from './errors'
+         type GitWorktree, type GitWorktrees, type PluginInfo, type PluginList, type Workspace } from './bridge.ts'
+import { errorMessage } from './errors.ts'
+import { chooseWithDescriptor, singleDirDescriptor, singleFileDescriptor, withExtensionFilter, withTitle,
+         type FileChooserHost } from './fileChooserDescriptor.ts'
 
 export interface ProjectExtrasDeps {
   notify: (message: string, error?: boolean) => void
@@ -19,6 +21,14 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   const pluginOpen = ref(false)
   const pluginBusy = ref(false)
   const pluginList = ref<PluginInfo[]>([])
+  // 文件/目录选择走描述件（`src/fileChooserDescriptor.ts`，上游 `FileChooserDescriptor` 的宿主侧子集）：
+  // 描述件决定宿主方法与过滤串，选完再复核扩展名，避免用户在「所有文件」里手选一个非插件包。
+  const chooserHost: FileChooserHost = {
+    pickFile: params => request<string | null>('dialog.pickFile', params),
+    pickDirectory: params => request<string | null>('dialog.pickDirectory', params),
+  }
+  const pluginArchiveDescriptor = withTitle(withExtensionFilter(singleFileDescriptor(), '插件包', ['zip', 'jar']), '选择插件包')
+  const pluginDirectoryDescriptor = withTitle(singleDirDescriptor(), '选择插件目录')
   // 正在安装的条目（安装源的名字）。解压完才解析出 plugin.json，所以这期间只有名字；
   // 对话框把它们渲染在"正在安装"组里（对照 IDEA 的 `MyPluginModel.installingPlugins`）。
   const installingPlugins = ref<string[]>([])
@@ -52,10 +62,7 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   async function installPlugin() {
     if (!isDesktop) { deps.notify('浏览器预览不能安装本机插件。', true); return }
     try {
-      const source = await request<string | null>('dialog.pickFile', {
-        filters: '插件包 (*.zip;*.jar)|*.zip;*.jar|所有文件 (*.*)|*.*',
-        initial: '',
-      })
+      const source = await chooseWithDescriptor(chooserHost, pluginArchiveDescriptor)
       if (!source) return
       await runPluginInstall(source, sourceName(source))
     } catch (error) { deps.notify(errorMessage(error), true) }
@@ -64,7 +71,7 @@ export function createProjectExtras(deps: ProjectExtrasDeps) {
   async function installPluginDirectory() {
     if (!isDesktop) { deps.notify('浏览器预览不能安装本机插件。', true); return }
     try {
-      const source = await request<string | null>('dialog.pickDirectory', { initial: '' })
+      const source = await chooseWithDescriptor(chooserHost, pluginDirectoryDescriptor)
       if (!source) return
       await runPluginInstall(source, sourceName(source))
     } catch (error) { deps.notify(errorMessage(error), true) }

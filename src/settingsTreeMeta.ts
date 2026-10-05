@@ -7,8 +7,8 @@
 // 这样"这一页对应源码哪一条注册"在代码里就是答案；早期批次用过的键（appearance / editor.general /
 // structure / commit …）保持不变，以免打断跳转目标与测试。
 import {
-  AlignLeft, Braces, Cog, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Layers,
-  ListChecks, Palette, Save, SlidersHorizontal, Sparkles, Terminal,
+  AlignLeft, Braces, Bug, Cog, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Keyboard,
+  Layers, ListChecks, Palette, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Type, Volume2,
 } from 'lucide-vue-next'
 
 /**
@@ -38,9 +38,20 @@ export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.ap
   | 'preferences.sourceCode' | 'preferences.sourceCode.indents' | 'tools.actionsOnSave'
   | 'preferences.general' | 'editing.templates' | 'commit' | 'project.scopes'
   | 'reference.settings.ide.settings.file-colors'
+  // `trusted.hosts` 注册在 groupId="appearance"（intellij.platform.ide.impl.xml:783-786，
+  // instance TrustedHostsConfigurable，key configurable.trusted.hosts.display.name）。
+  | 'trusted.hosts'
+  // AudioCuesConfigurable（`intellij.platform.ide.impl.xml:971-976`）：
+  // `groupId="appearance" groupWeight="140" id="ide.audiocues"` —— 自己的页，不是 general 的子页。
+  | 'ide.audiocues'
   | 'editor.breadcrumbs' | 'editor.stickyLines' | 'Console' | 'Errors'
+  // InlaySettingsConfigurable（intellij.platform.lang.impl.xml:935-941 `parentId="editor" id="inlay.hints"`）。
+  | 'inlay.hints'
   | 'preferences.toDoOptions' | 'preferences.fileTypes' | 'preferences.externalTools'
-  | 'diff.base' | 'build.tools' | 'vcs.log'
+  | 'diff.base' | 'build.tools' | 'vcs.log' | 'debugger'
+  // Keymap 顶层页（`intellij.platform.ide.impl.xml:951` 的 `id="preferences.keymap"`）——
+  // 键位面板 `KeymapPanel`（`KeymapPanel.java:111`）本体，可搜索可改键。
+  | 'preferences.keymap'
   // IDEA Gradle 页（`intellij.gradle.xml:177-179`：`groupId="build.tools" groupWeight="110"
   // id="reference.settingsdialog.project.gradle"`）—— 是 **build.tools 组的子页**，不是兄弟节点。
   | 'reference.settingsdialog.project.gradle'
@@ -57,6 +68,12 @@ export interface SettingsNode { key: PageKey; label: string; icon: typeof Palett
 export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'preferences.lookFeel', label: '外观', icon: Palette, parent: 'group:appearance', keywords: '主题 亮色 暗色 外观 缩放 theme scale' },
   { key: 'preferences.general', label: '系统设置', icon: Cog, parent: 'group:appearance', keywords: '系统设置 退出 删除 回收站 保存 自动 同步 安全写入 打开项目 新窗口 默认目录 System Settings reopen reopenLastProject deleteToBin confirm exit safe write autosave sync process close terminate disconnect ask' },
+  // trusted.hosts groupId="appearance"（intellij.platform.ide.impl.xml:783-786）：一张受信任位置清单
+  // （TrustedHostsConfigurable），新增/删除后信任判定即时生效。
+  { key: 'trusted.hosts', label: '受信任位置', icon: ShieldCheck, parent: 'group:appearance', keywords: '受信任 位置 信任 项目 安全模式 不受信任 清单 trusted locations trust safe mode' },
+  // AudioCuesConfigurable（intellij.platform.ide.impl.xml:971-976）：
+  // `groupId="appearance" groupWeight="140" id="ide.audiocues"` —— 播放档（auto/on/off）+ 六个 cue 的逐条开关。
+  { key: 'ide.audiocues', label: '音频提示', icon: Volume2, parent: 'group:appearance', keywords: '音频 提示 声音 无障碍 朗读 播报 audio cues accessibility sound' },
   // IDEA 的高级设置本质是内部注册表（Registry）编辑器；TaoCode 没有注册表对话框，
   // 等价物是把内部设置（editor/general 的键）集中成一个可编辑页。
   { key: 'advanced', label: '高级设置', icon: SlidersHorizontal, parent: 'group:appearance', keywords: '高级设置 registry 注册表 内部 键值 advanced' },
@@ -90,7 +107,7 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // groupId="editor" groupWeight=160（:1823）
   { key: 'Errors', label: '检查', icon: SlidersHorizontal, parent: 'group:editor', keywords: '检查 错误 警告 高亮 波浪线 inspections errors diagnostics' },
   // editing.templates groupId="editor" groupWeight=130（:1000-1002）—— 实时模板属于**编辑器**，不是默认项目。
-  { key: 'editing.templates', label: '实时模板', icon: Braces, parent: 'group:editor', keywords: '模板 缩写 实时 展开 template live templates' },
+  { key: 'editing.templates', label: '实时模板', icon: Braces, parent: 'group:editor', keywords: '模板 缩写 实时 展开 文件模板 file template parse 变量 template live templates' },
   // preferences.fileTypes groupId="editor" groupWeight=120（:992-994）
   { key: 'preferences.fileTypes', label: '文件类型', icon: FileType, parent: 'group:editor', keywords: '文件类型 扩展名 关联 file types extension association' },
   // parentId="preferences.editor"（:983）
@@ -99,12 +116,23 @@ export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'editor.breadcrumbs', label: '面包屑', icon: AlignLeft, parent: 'editor', keywords: '面包屑 路径 导航 breadcrumbs placement language' },
   // parentId="preferences.editor"（intellij.platform.ide.impl.xml:1236）
   { key: 'editor.stickyLines', label: '粘性行', icon: Layers, parent: 'editor', keywords: '粘性行 作用域 固定 sticky lines scope' },
+  // parentId="editor"（intellij.platform.lang.impl.xml:935-941，`id="inlay.hints" groupWeight="1"`）：
+  // LSP inlayHint 按 kind 分的三档（类型 / 参数名 / 其它）。
+  { key: 'inlay.hints', label: '内联提示', icon: Type, parent: 'editor', keywords: '内联 提示 参数名 类型 推断 inlay hints parameter type' },
   // preferences.toDoOptions groupId="editor"（platform/todo/resources/intellij.platform.todo.xml:49）
   { key: 'preferences.toDoOptions', label: 'TODO', icon: ListChecks, parent: 'group:editor', keywords: 'TODO 模式 标记 待办 fixme pattern marker' },
 
   // 顶层页面，不是分组：VcsExtensions.xml:172，root + weight 45；目录映射（project.propVCSSupport.Mappings）
   // 是它的本体，提交与 VCS 日志都是它的子页（VcsManagerConfigurable.java:83-96 逐个 add）。
   { key: 'project.propVCSSupport.Mappings', label: '版本控制', icon: GitBranch, parent: null, expandOnly: true, keywords: '版本控制 git 目录映射 忽略 问题导航 搁置 version control mappings' },
+  // Keymap：`intellij.platform.ide.impl.xml:950-952`
+  // `<applicationConfigurable groupId="root" groupWeight="65" instance="...ui.KeymapPanel" id="preferences.keymap" key="keymap.display.name" bundle="messages.KeyMapBundle"/>`
+  // （`keymap.display.name=Keymap` 见 `platform/platform-api/resources/messages/KeyMapBundle.properties:26`）。
+  // `groupId="root"` ⇒ **顶层页面节点**，权重 65 > 版本控制的 45，所以排在版本控制之前。
+  // 面板本体是 `KeymapPanel`（`KeymapPanel.java:111` `implements SearchableConfigurable`）——
+  // 上一批只把入口放在帮助菜单（`src/menus/helpMenu.ts:52`），那是**本仓的落位决定**不是上游位置；
+  // 这一页才是上游的真实入口，与对话框共用同一份 `keymapHost` 活状态。
+  { key: 'preferences.keymap', label: '键盘映射', icon: Keyboard, parent: null, keywords: '键位 快捷键 改键 冲突 恢复默认 keymap shortcuts change conflicts' },
   { key: 'commit', label: '提交', icon: GitCommitIcon, parent: 'project.propVCSSupport.Mappings', keywords: '提交 信息 主题 正文 右边距 空行 换行 commit message margin' },
   { key: 'vcs.log', label: 'VCS 日志', icon: History, parent: 'project.propVCSSupport.Mappings', keywords: 'VCS 日志 标签名 仓库根名 vcs log tag root names' },
 
@@ -118,6 +146,10 @@ export const SETTINGS_NODES: SettingsNode[] = [
   { key: 'build.tools', label: '构建工具', icon: Hammer, parent: 'group:build', keywords: '构建 工具 自动 重新加载 build tools reload external system' },
   // Gradle（intellij.gradle.xml:177-179，groupWeight 110）：是 build.tools 组的子页。
   { key: 'reference.settingsdialog.project.gradle', label: 'Gradle', icon: Hammer, parent: 'build.tools', keywords: 'gradle 包装器 wrapper 发布 distribution 离线 offline 用户主目录 服务目录 gradle user home service directory' },
+  // 调试器的数据视图（XDebuggerDataViewSettings：xdebugger-impl/.../settings/，
+  // `XDebuggerSettingsConfigurable` 挂在 Build, Execution, Deployment 分组下）：
+  // 隐藏 null 值 + 命名变量按名排序，消费点在 DebugPanel 的变量树。
+  { key: 'debugger', label: '调试器', icon: Bug, parent: 'group:build', keywords: '调试器 变量 数据视图 隐藏 null 排序 debugger variables data view hide null sort' },
 ]
 
 /** IDEA 的树里"有子项的节点"只负责展开，本身不是设置页（点它不会打开一个空页面）。 */
@@ -144,5 +176,8 @@ export const PROJECT_SCOPED_PAGES: ReadonlySet<string> = new Set<PageKey>([
 export const PAGE_KEYS: PageKey[] = ['preferences.lookFeel', 'editor', 'editor.preferences.appearance', 'editor.preferences.tabs', 'editor.preferences.smartKeys', 'editor.preferences.gutterIcons',
   'preferences.sourceCode.indents', 'tools.actionsOnSave', 'editing.templates', 'commit', 'preferences.general', 'project.scopes',
   'reference.settings.ide.settings.file-colors',
+  'trusted.hosts',
+  'ide.audiocues', 'inlay.hints',
   'editor.breadcrumbs', 'editor.stickyLines', 'Console', 'Errors', 'preferences.toDoOptions', 'preferences.fileTypes',
-  'preferences.externalTools', 'diff.base', 'build.tools', 'vcs.log', 'reference.settingsdialog.project.gradle']
+  'preferences.externalTools', 'diff.base', 'build.tools', 'vcs.log', 'reference.settingsdialog.project.gradle',
+  'preferences.keymap']

@@ -8,9 +8,10 @@
 //   · `jumpToIssue` / `nextRunIssue` = 控制台侧的"跳到问题".
 // 它们共享同一份派生结果（`runLines`），所以合成一域；真正的运行控制在 src/runActions.ts。
 import { computed, watch } from 'vue'
-import { runState, type GeneralSettingsState } from './bridge'
-import { foldConsoleLines } from './consoleFold'
-import { parseAnyIssue, type RunIssue } from './buildOutput'
+import { runState, type GeneralSettingsState } from './bridge.ts'
+import { foldConsoleLines } from './consoleFold.ts'
+import { findRunHyperlinks, type RunHyperlink } from './runHyperlinks.ts'
+import { parseAnyIssue, type RunIssue } from './buildOutput.ts'
 
 export interface RunIssuesDeps {
   /** 控制台已累积的输出（宿主是 reactive 数组，`join('')` 后按行切）。 */
@@ -28,8 +29,18 @@ function parseRunIssue(text: string): RunIssue | null {
   return parseAnyIssue(text, workspace.value?.root ?? '')
 }
 // 运行面板的行 = 原始输出按行切分，再按 Console 设置（折叠行/例外）折叠连续重复行。
+// 每行同时收集**全部** `file:line` 链接（`findRunHyperlinks`，上游 MultipleFilesHyperlinkInfo
+// 的等价物）与首个可跳转问题（编译器诊断的 `file(line,col)` 形态仍由 parseAnyIssue 认）。
 const runLines = computed(() => foldConsoleLines(
-  runOutput.join('').split('\n').map(text => ({ text, issue: parseRunIssue(text) })),
+  runOutput.join('').split('\n').map(text => {
+    const links = findRunHyperlinks(text, workspace.value?.root ?? '')
+    const first: RunHyperlink | undefined = links[0]
+    return {
+      text,
+      issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null),
+      links,
+    }
+  }),
   generalSettings.value.foldConsoleLines,
   generalSettings.value.foldExceptions,
   2000))

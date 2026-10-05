@@ -157,6 +157,23 @@ std::int64_t number(const Json& object, const char* key, std::int64_t fallback) 
     return fallback;
 }
 
+// readMemory 的响应体走 base64（规范），这里手写一份编码器：与客户端的
+// src/base64.ts 独立实现，两边对上了才说明字节真的过桥了。
+std::string encode_base64(std::string_view bytes) {
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (std::size_t i = 0; i < bytes.size(); i += 3) {
+        const unsigned value = (static_cast<unsigned>(static_cast<unsigned char>(bytes[i])) << 16) |
+                               (i + 1 < bytes.size() ? static_cast<unsigned>(static_cast<unsigned char>(bytes[i + 1])) << 8 : 0u) |
+                               (i + 2 < bytes.size() ? static_cast<unsigned>(static_cast<unsigned char>(bytes[i + 2])) : 0u);
+        out.push_back(alphabet[(value >> 18) & 63]);
+        out.push_back(alphabet[(value >> 12) & 63]);
+        out.push_back(i + 1 < bytes.size() ? alphabet[(value >> 6) & 63] : '=');
+        out.push_back(i + 2 < bytes.size() ? alphabet[value & 63] : '=');
+    }
+    return out;
+}
+
 }  // namespace
 
 // One test switch: --extras makes the launch also emit the events the client has
@@ -186,6 +203,16 @@ int main(int argc, char** argv) {
     // 关掉 supportsBreakpointLocationsRequest：客户端必须回 DAP_UNSUPPORTED，而不是发请求。
     const bool no_breakpoint_locations =
         std::find(switches.begin(), switches.end(), std::string("--no-breakpoint-locations")) != switches.end();
+    // 协议侧补齐的三族（清单重取 / 反向调试 / 内存与反汇编）：每个能力位都能单独关掉，
+    // 用来验证客户端的能力门控（规范里这五个位都默认 false）。
+    const bool no_loaded_sources =
+        std::find(switches.begin(), switches.end(), std::string("--no-loaded-sources")) != switches.end();
+    const bool no_modules = std::find(switches.begin(), switches.end(), std::string("--no-modules")) != switches.end();
+    const bool no_step_back = std::find(switches.begin(), switches.end(), std::string("--no-step-back")) != switches.end();
+    const bool no_read_memory =
+        std::find(switches.begin(), switches.end(), std::string("--no-read-memory")) != switches.end();
+    const bool no_disassemble =
+        std::find(switches.begin(), switches.end(), std::string("--no-disassemble")) != switches.end();
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -276,6 +303,12 @@ int main(int argc, char** argv) {
                                            // 这个假适配器实现了 setVariable/setExpression，能力位要如实声明。
                                            {"supportsSetVariable", true},
                                            {"supportsCompletionsRequest", !no_completions},
+                                           // 协议侧补齐的三族：清单重取 / 反向调试 / 内存与反汇编。
+                                           {"supportsLoadedSourcesRequest", !no_loaded_sources},
+                                           {"supportsModulesRequest", !no_modules},
+                                           {"supportsStepBack", !no_step_back},
+                                           {"supportsReadMemoryRequest", !no_read_memory},
+                                           {"supportsDisassembleRequest", !no_disassemble},
                                            {"exceptionBreakpointFilters", Json::array({
                                                Json{{"filter", "all"}, {"label", "All Exceptions"}},
                                                Json{{"filter", "uncaught"}, {"label", "Uncaught Exceptions"}},
@@ -479,6 +512,83 @@ int main(int argc, char** argv) {
                 else {
                     event("terminated", Json{{"restartable", false}});
                     return 0;  // the session is over; let the pipes close
+                }
+            } else if (command == "stepBack" || command == "reverseContinue") {
+                // 反向调试：把 threadId 回声成 output（响应里没有这个字段），客户端测试据此
+                // 证明请求真的发出去了；响应体按规范是空的。
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: " + command + " threadId=" +
+                                                    std::to_string(number(arguments, "threadId", 0))}});
+                respond(seq, command, Json::object());
+            } else if (command == "loadedSources") {
+                // 四条覆盖：工作区内的 path（客户端要映射成相对路径）、只有 name+sourceReference、
+                // 工作区外的 path 带 origin/presentationHint、以及一条**什么都没有**的（客户端必须丢掉）。
+                respond(seq, command, Json{{"sources", Json::array({
+                    Json{{"name", "main.cpp"}, {"path", workspace_uri() + "/dap/main.cpp"}},
+                    Json{{"name", "<memory>"}, {"sourceReference", 7}},
+                    Json{{"name", "lib.cpp"},
+                         {"path", "file:///C:/Windows/lib.cpp"},
+                         {"origin", "lib"},
+                         {"presentationHint", "deemphasize"}},
+                    Json::object()})}});
+            } else if (command == "modules") {
+                // 分页字段原样回声（客户端测试据此证明 startModule/moduleCount 真发出去了）；
+                // 第三条缺 id —— 规范必填，客户端必须丢掉它。
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: modules startModule=" +
+                                                    std::to_string(number(arguments, "startModule", -1)) +
+                                                    " moduleCount=" +
+                                                    std::to_string(number(arguments, "moduleCount", -1))}});
+                respond(seq, command, Json{{"modules", Json::array({
+                    Json{{"id", 7}, {"name", "fake.dll"}, {"type", "shared library"},
+                         {"path", workspace_uri() + "/fake.dll"}, {"version", "1.0.0"},
+                         {"symbolStatus", "Symbols loaded"}, {"addressRange", "0x1000-0x2000"}},
+                    Json{{"id", "plugin-a"}, {"name", "plugin-a"}, {"isUserCode", true}},
+                    Json{{"name", "no-id-module"}}})},
+                    {"totalModules", 2}});
+            } else if (command == "readMemory") {
+                // 字节是确定性的（0x41 + i）：客户端测试解码后逐字节比对。
+                // reference 里带 "unreadable" 时按规范只回 unreadableBytes（没有 data）。
+                const auto reference = arguments.value("memoryReference", std::string());
+                const auto count = number(arguments, "count", 0);
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: readMemory " + reference + " count=" + std::to_string(count) +
+                                                    " offset=" + std::to_string(number(arguments, "offset", -1))}});
+                if (reference.empty() || count <= 0) {
+                    refuse(seq, command, "readMemory needs a memoryReference and a positive count");
+                } else if (reference.find("unreadable") != std::string::npos) {
+                    respond(seq, command, Json{{"address", reference}, {"unreadableBytes", count}});
+                } else {
+                    std::string bytes;
+                    for (std::int64_t index = 0; index < count; ++index)
+                        bytes.push_back(static_cast<char>((0x41 + index) & 0xFF));
+                    respond(seq, command, Json{{"address", reference}, {"data", encode_base64(bytes)}});
+                }
+            } else if (command == "disassemble") {
+                // 把分页/偏移选项回声成 output；第三条指令缺 address（规范必填），客户端必须丢掉。
+                const auto reference = arguments.value("memoryReference", std::string());
+                const auto instruction_count = number(arguments, "instructionCount", 0);
+                event("output", Json{{"category", "console"},
+                                     {"output", "fake-adapter: disassemble " + reference + " instructionCount=" +
+                                                    std::to_string(instruction_count) + " instructionOffset=" +
+                                                    std::to_string(number(arguments, "instructionOffset", -1)) + " offset=" +
+                                                    std::to_string(number(arguments, "offset", -1)) + " resolveSymbols=" +
+                                                    (arguments.contains("resolveSymbols") &&
+                                                             arguments.at("resolveSymbols").is_boolean() &&
+                                                             arguments.at("resolveSymbols").get<bool>()
+                                                         ? "true" : "false")}});
+                if (reference.empty() || instruction_count <= 0) {
+                    refuse(seq, command, "disassemble needs a memoryReference and a positive instructionCount");
+                } else {
+                    respond(seq, command, Json{{"instructions", Json::array({
+                        Json{{"address", "0x1000"}, {"instructionBytes", "4889E5"}, {"instruction", "mov rbp, rsp"},
+                             {"symbol", "main"},
+                             {"location", Json{{"name", "main.cpp"},
+                                               {"path", workspace_uri() + "/dap/main.cpp"},
+                                               {"sourceReference", 0}}},
+                             {"line", 5}, {"column", 1}},
+                        Json{{"address", "0x1003"}, {"instruction", "ret"}},
+                        Json{{"instruction", "nop"}}})}});
                 }
             } else if (command == "breakpointLocations") {
                 // 把请求里的 line/endLine/column/endColumn 原样带回（客户端测试据此证明四个字段

@@ -7,9 +7,9 @@
 //   · 文件级：复制路径 / 移动文件（F6）/ 复制文件（F5）—— 移动要顺带改引用（`willRenameFiles`）。
 // 它们共享 `codeActions` + `actionPrompt` 两个弹窗状态与 `applyCodeAction` 这一条套用链路，
 // 拆开会让每一半都要重新注入对方的弹窗状态。`parentOf` / `baseName` 是全局工具函数，留在宿主。
-import { request, lspDiagnostics, type LspCodeAction, type LspCodeActionResults } from './bridge'
-import { copyToClipboard } from './clipboard'
-import { errorMessage } from './errors'
+import { request, lspDiagnostics, type LspCodeAction, type LspCodeActionResults } from './bridge.ts'
+import { copyToClipboard } from './clipboard.ts'
+import { errorMessage } from './errors.ts'
 import type { Tab } from './editorTab'
 
 export interface GenerateRefactorDeps {

@@ -65,7 +65,7 @@
 | `RefactoringEventListener` / VFS 文件操作通知（`VfsEventsMerger`、`MoveFileProcessor`） | `workspace/{didCreateFiles, didRenameFiles, didDeleteFiles, willRenameFiles}` | `[x]` **2026-09-27 补齐**：`initialize` 里按 `workspace.fileOperations` 声明四类（文件 + 文件夹两种 filter）；`Session::announce_file_operations` 只发给**声明了对应能力**的服务器（`file_operation_supported` 判三层嵌套 `workspace.fileOperations.<其一>`）；`main.cpp` 的 `file.create`/`file.rename`/`file.delete` 在**操作成功之后**才发（`announce_file_change`）。改名前问 `workspace/willRenameFiles`（注意它的返回值是 **WorkspaceEdit 本身**，不是 `{edit:…}`），拿到的引用更新由前端在改名**之后**落盘（`App.vue:renameEntryWithReferences`，三处改名调用统一走它）。测试：`lsp_coding_test` 4 条（含「没声明就不发」的负例）|
 | 整工程批处理检查（IDEA 的 Analyze → Inspect Code，`AnalyzeMenu` 里的 `InspectCodeAction`） | `workspace/diagnostic` | `[x]` **2026-09-27 补齐**：与 `textDocument/diagnostic` 共用 `diagnosticProvider`，但**额外要求它声明 `workspaceDiagnostics: true`**（由 `workspace_diagnostic_supported` 单独判 —— 顶层 `unsupported()` 只看 provider 在不在，看不到这个字段）；新 kind `workspaceDiagnostic` 不要求打开文档（和 `workspaceSymbol`/`willRenameFiles` 同一档）；整形把 `full` 与 `unchanged` **分开带出去**，`unchanged` 不补 `diagnostics` 键。前端 `src/workspaceDiagnostics.ts` 定合并规则（unchanged **不写**诊断表，否则会把一整批诊断抹掉）+ `src/workspaceInspection.ts` 管「跑一次并入表」（deps 注入，App 只组装）；分析菜单加了「检查代码（整工程）」Ctrl+Alt+Shift+I。测试：`lsp_semantics_test` 1 条 + `workspace-diagnostics.test.mjs` 8 条 |
 | **符号标识**（用户可见落点是 Copy Reference）：`CopyReferenceAction`（`platform/lang-impl/src/com/intellij/ide/actions/CopyReferenceAction.java:41`）、复制 `actionPerformed`（`:104`）、取标识 `getQualifiedName`（`:128`） | `textDocument/moniker` | `[x]` **2026-09-27 补齐**：客户端声明 `textDocument.moniker`；整形保留 `scheme/identifier/unique`，**没有 `identifier` 的条目丢弃**（没有可复制的东西）；`unique` **如实带出去**（`false` 表示同名符号可能有多个）。落点是编辑菜单的「复制符号引用」（IDEA 的 Copy Reference，Ctrl+Alt+Shift+C）→ 复制到剪贴板 + 提示（剪贴板状态用户看不见，按提示规范必须给反馈）。前端 `src/moniker.ts` 定「取哪一条 / 复制什么 / 怎么提示」。测试：`lsp_semantics_test` 1 条 + `moniker.test.mjs` 5 条 |
-| `XDebugProcess`（JVM 调试后端） | DAP（`native/dap.cpp`） | `[x]` 17 个请求全部实现（见 §D） |
+| `XDebugProcess`（JVM 调试后端） | DAP（`native/dap.cpp`） | `[x]` 33 个请求全部实现（见 §D） |
 | `XBreakpointManager` / `XSourcePosition` | `setBreakpoints` / `setExceptionBreakpoints` / `stackTrace` | `[x]` |
 | `RunToCursorAction`（Alt+F9）/ `ForceRunToCursorAction`（Ctrl+Alt+F9） | `gotoTargets` + `goto` | `[x]` **2026-09-27 补齐**：原生 `Client::goto_targets` / `goto_target`（`source.path` 走与断点同一条绝对路径规则），能力 `supportsGotoTargetsRequest` 未声明时回 `DAP_UNSUPPORTED`；前端 `runToCursor()`（编辑器 0 基 → DAP 1 基）绑在 **Alt+F9 / Ctrl+Alt+F9**，Run 菜单也加了两行（DAP 没有"强制"语义，两条同路） |
 | Frames 视图的「丢弃帧」（`XDebuggerFramesView` 的 Drop Frame） | `restartFrame` | `[x]` **2026-09-27 补齐**：原生 `Client::restart_frame`（`supportsRestartFrame` 门控），调试面板每一帧行加「丢弃帧」按钮 |
@@ -87,29 +87,36 @@
 
 ## D. 已实现的 DAP 请求与缺失项
 
-**已实现 27 个（机械枚举）**：`initialize`、`launch`、`attach`、`configurationDone`、`setBreakpoints`、`setExceptionBreakpoints`、`threads`、`stackTrace`、`scopes`、`variables`、`evaluate`、**`setVariable`**、**`setExpression`**、**`exceptionInfo`**、**`breakpointLocations`**、**`completions`**、`continue`、`next`、`stepIn`、`stepOut`、`pause`、**`terminate`**、**`restart`**、**`gotoTargets`**、**`goto`**、**`restartFrame`**、`disconnect`。
+**已实现 33 个（机械枚举）**：`initialize`、`launch`、`attach`、`configurationDone`、`setBreakpoints`、`setExceptionBreakpoints`、`threads`、`stackTrace`、`scopes`、`variables`、`evaluate`、**`setVariable`**、**`setExpression`**、**`exceptionInfo`**、**`breakpointLocations`**、**`completions`**、**`loadedSources`**、**`modules`**、**`stepBack`**、**`reverseContinue`**、**`readMemory`**、**`disassemble`**、`continue`、`next`、`stepIn`、`stepOut`、`pause`、**`terminate`**、**`restart`**、**`gotoTargets`**、**`goto`**、**`restartFrame`**、`disconnect`。
 另有反向请求处理（`runInTerminal`、`startDebugging`，见 `main.cpp` 的 DAP 反向请求钩子）与事件整形（`exited`/`module`/`loadedSource`/`progress`/`breakpoint`/`thread`/`terminated`）。
 
 > `exceptionInfo` 的 C++ 方法名是 `Client::exception_details`，**不是** `exception_info` —— 后者是 Windows SDK 的函数式宏（SEH 那套，`<windows.h>` 里定义），撞名会得到一屏 `C4002: 类函数宏的调用参数过多`。协议串 `exceptionInfo` 不受影响。
 
-**缺失（3 项，都是「协议侧补齐」而不是「IDEA 行为移植」—— 依据已核实为**不存在**）**：
+**缺失 0 条**（2026-10-04 补齐最后三条，**均为协议侧补齐，IDEA 无对应类**）：
 
-下面三项在 IDEA 源码里**找不到任何对应的类**（搜索证据见每条）。也就是说：它们是 DAP 协议提供、
-而 **IDEA 自己没有**的功能。所以它们与 §C 的性质不同 —— §C 关掉的每一条都有 IDEA 的类做依据，
-这三条没有。按「源码有什么类就移植什么类」的基准，它们的优先级低于任何有 IDEA 依据的功能，
-**登记为待办而不是"不做"**：
+1. `loadedSources` / `modules` 的**按需重取** — 事件通道（`loadedSource`/`module` 事件）只推增量；
+   新增 `Client::loaded_sources` / `Client::modules`（`native/dap_inspect.cpp`）主动拉整份清单，
+   分别由 `supportsLoadedSourcesRequest` / `supportsModulesRequest` 门控（未声明回 `DAP_UNSUPPORTED`）。
+   整形把 `Source.path` / `Module.path` 映射成工作区相对路径；`Module.id`/`name` 缺一个的条目丢弃；
+   `totalModules` <= 0 不写键。前端 `dapLoadedSourcesRequest`/`dapModulesRequest` + 面板标题栏的 ↻ 重取。
+   **IDEA 依据：不存在**（`grep -rln "LoadedSources\|loadedSources" platform/xdebugger-impl/ platform/xdebugger-api/` 零命中；
+   本文档此前写「IDEA：`XDebuggerTree` 的 sources 组」是**未核实的推断**，已更正）。
+2. `stepBack` / `reverseContinue` — 反向调试，共用能力位 `supportsStepBack`（**规范默认 false**）。
+   `Client::step_back` / `Client::reverse_continue`（`native/dap_inspect.cpp`），未声明回 `DAP_UNSUPPORTED`；
+   前端两个按钮在暂停时可用、没声明能力时禁用并在 title 写明原因。**IDEA 依据：不存在**
+   （`find . -iname "*StepBack*"` 与 `grep -rn "stepBack" platform/` 均零命中 ——
+   反向执行是 GDB/LLDB 的能力，IDEA 平台没有这个功能）。
+3. `readMemory` / `disassemble` — 内存/反汇编视图，能力位分别是 `supportsReadMemoryRequest` /
+   `supportsDisassembleRequest`（**规范默认 false**）。`Client::read_memory` 把规范里的 `data`
+   （base64）改名 `dataB64` 过桥，`unreadableBytes` <= 0 不写键；`Client::disassemble` 丢弃
+   `address`/`instruction` 缺一个的条目，`location.path` 映射成工作区相对路径，line/column 原样（1 基）。
+   前端「内存 / 反汇编」面板：地址 + 长度，hex+ASCII 表 / 指令表；没声明能力的按钮不渲染。
+   **IDEA 依据：不存在**（`find . -iname "*Disassembler*"` 只匹配到 `python/helpers/typeshed/stubs/gdb/gdb/disassembler.pyi`
+   —— Python 的 gdb 类型存根，不是 IDEA 的类；此前写「IDEA 有 `XDebuggerDisassembler` 系列」同样是推断，已更正）。
 
-1. `loadedSources` / `modules` 的**按需重取** — 事件已在收（见上），但没有主动请求的通道。
-   **IDEA 依据：不存在**。`grep -rln "LoadedSources\|loadedSources" platform/xdebugger-impl/ platform/xdebugger-api/` 零命中。
-   （本文档此前写「IDEA：`XDebuggerTree` 的 sources 组」是**未核实的推断**，已更正。）
-2. `stepBack` / `reverseContinue` — 反向调试。**IDEA 依据：不存在**。
-   `find . -iname "*StepBack*"` 与 `grep -rn "stepBack" platform/` 均零命中 ——
-   反向执行是 GDB/LLDB 的能力，IDEA 平台没有这个功能。
-3. `readMemory` / `disassemble` — 反汇编/内存视图。**IDEA 依据：不存在**。
-   `find . -iname "*Disassembler*"` 只匹配到 `python/helpers/typeshed/stubs/gdb/gdb/disassembler.pyi`
-   （Python 的 gdb 类型存根，不是 IDEA 的类）。（本文档此前写「IDEA 有 `XDebuggerDisassembler` 系列」同样是推断，已更正。）
-
-**待办排期**：都排在 `docs/class-parity-todo.md` 的类清单之后 —— 那边每一条都有 IDEA 源码依据。
+**测试**：`native/dap_test.cpp` 新增 4 组（`loadedSources`/`modules` 整形与分页字段省略、`stepBack`/`reverseContinue` 到达适配器、
+`readMemory` base64 字节与 `disassemble` 指令整形、五个能力位的门控负例 —— 全部回 `DAP_UNSUPPORTED`）；
+前端 `tests/dap-sources.test.mjs` / `dap-memory.test.mjs` / `dap-capabilities.test.mjs`。
 
 ---
 
@@ -139,7 +146,7 @@
 |---|---|
 | 客户端能力声明逐条核对 | `[x]` §A（`lsp_session.cpp:600-663`） |
 | LSP 已发方法枚举（请求 37 / 通知 9 / 反向请求 2 / 入站通知 1，含 prepareRename、foldingRange、completionItem resolve、diagnostic、executeCommand、willRenameFiles、三个 did*Files） | `[x]` 机械枚举（2026-09-27 重新核对并修正原列表的计数与方向错误） |
-| DAP 已发请求枚举（27，含 setVariable / setExpression / exceptionInfo / breakpointLocations / completions / terminate / restart / goto* / restartFrame） | `[x]` 机械枚举 |
+| DAP 已发请求枚举（33，含 setVariable / setExpression / exceptionInfo / breakpointLocations / completions / loadedSources / modules / stepBack / reverseContinue / readMemory / disassemble / terminate / restart / goto* / restartFrame） | `[x]` 机械枚举（2026-10-04 补最后三条并更新计数） |
 | §B 类族对照 | `[x]` 17 行 |
-| §C / §D 缺口清单 | `[x]` 12 + 10 条（2026-09-27：DAP 四条 + LSP 折叠/resolve/pull 诊断/层级子请求/executeCommand/文件操作四件套已关 → **§C 剩 0 + §D 剩 3（均为协议侧补齐，IDEA 无对应类）**） |
+| §C / §D 缺口清单 | `[x]` 12 + 10 条（2026-09-27：DAP 四条 + LSP 折叠/resolve/pull 诊断/层级子请求/executeCommand/文件操作四件套已关；2026-10-04：DAP 最后三条 —— loadedSources/modules 按需重取、stepBack/reverseContinue、readMemory/disassemble —— 关闭 → **§C 剩 0 + §D 剩 0**） |
 | DAP `terminate`/`disconnect`/`restart` 语义核对 | `[x]` **2026-09-27 核实并修好**：原先 `dap.terminate` 与 `dap.disconnect` **都只是 `stop_dap()`**，从不发 DAP 请求，「断开」按钮的提示（保留被调试进程）与实现相反。现在：`Client::terminate` 在适配器声明 `supportsTerminateRequest` 时发 `terminate`，否则退化成 `disconnect{terminateDebuggee:true}`；`dap.disconnect {terminate:false}` 实现「断开但保留进程」；新增 `Client::restart`（仅当 `supportsRestartRequest`，否则回 `DAP_UNSUPPORTED`，前端退化成停止+重启）。能力在 `initialize` 响应里记住（`State::capabilities_`）。测试：`dap_test` 新增「能力回退」场景 |

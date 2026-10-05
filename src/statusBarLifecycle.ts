@@ -7,14 +7,16 @@
 //
 // 本仓的 `src/statusBarWidgets.ts` 只有工厂那一层（纯逻辑 + 持久化）。这一层补的是实例那半边：
 //
-//   · `install` / `dispose` / `isDisposed`（`EditorBasedWidget.kt:96-109`）；
-//   · `install` 时断言"装到属于自己那条状态栏上"（`:97-99` 的 `assert(statusBar.project == null
+//   · `install` / `dispose` / `isDisposed`（`EditorBasedWidget.kt:63-65` 的 isDisposed 字段、
+//     `:110-115` install、`:117-120` dispose）；
+//   · `install` 时断言"装到属于自己那条状态栏上"（`:111-113` 的 `assert(statusBar.project == null
 //     || statusBar.project == project)`）—— 本仓单窗口单状态栏，等价物就是"窗口 id 对得上"；
-//   · `isOurEditor(editor)`（`:57-64`）：这个编辑器是不是**本状态栏正在显示的那一个**。
-//     上游的三条：非空、`component.isShowing`、且属于本状态栏（`StatusBarUtil.getStatusBar(component)
-//     === statusBar`，`StatusBarUtil.kt:27-37` 沿组件树上溯找 `IdeFrame`）。
+//   · `isOurEditor(editor)`（`:97` 委派给 `EditorBasedWidgetHelper.isOurEditor`，
+//     真正的三条判据在同文件 `:46-51`）：非空、`component.isShowing`、且属于本状态栏
+//     （`:50` `StatusBarUtil.getStatusBar(editor.component) === statusBar`，
+//     `StatusBarUtil.kt:22-31` 沿组件树上溯找 `IdeFrame`）。
 //     本仓没有 `IdeFrame`，等价物是"这个编辑器属于当前窗口"—— 用 `windowId` 表达同一件事。
-//   · `getSelectedFile()`（`:91-95`）：`getCurrentFileEditor(statusBar)` 的文件。
+//   · `getSelectedFile()`（`:103-108`）：`StatusBarUtil.getCurrentFileEditor(statusBar)` 的文件。
 //
 // **为什么要单独一层**：这类"更新跑在已经卸载的组件上"的缺陷只有真机能碰到（编辑器关掉后
 // 还有一次异步回包要写状态栏）。把生命周期显式建出来，`isDisposed` 才是一个能写判据的状态，
@@ -47,8 +49,8 @@ export class StatusBarMismatchError extends Error {
 }
 
 /**
- * `install(statusBar)`（`EditorBasedWidget.kt:96-102`）：登记所属状态栏；已 dispose 的实例拒绝重装。
- * 装到不属于自己的窗口上时**抛错**而不是静默接受 —— 上游那里是一条 `assert`，
+ * `install(statusBar)`（`EditorBasedWidget.kt:110-115`）：登记所属状态栏；已 dispose 的实例拒绝重装。
+ * 装到不属于自己的窗口上时**抛错**而不是静默接受 —— 上游那里是一条 `assert`（`:111-113`），
  * 静默接受会让 `isOurEditor` 后面全都判错，缺陷会跑到很远的地方才显形。
  */
 export function installWidget(factory: StatusBarWidgetFactory, statusBar: StatusBarBinding, windowId: string): WidgetInstance {
@@ -58,13 +60,13 @@ export function installWidget(factory: StatusBarWidgetFactory, statusBar: Status
   return { factory, statusBar, isDisposed: false }
 }
 
-/** `dispose()`（`EditorBasedWidget.kt:104-108`）：置位并断开与状态栏的关联。 */
+/** `dispose()`（`EditorBasedWidget.kt:117-120`）：置位并断开与状态栏的关联。 */
 export function disposeWidget(instance: WidgetInstance): WidgetInstance {
   return { factory: instance.factory, statusBar: null, isDisposed: true }
 }
 
 /**
- * `isOurEditor(editor)`（`EditorBasedWidget.kt:57-64`）：
+ * `isOurEditor(editor)`（`EditorBasedWidget.kt:46-51` 的 helper 判据，`:97` 委派）：
  * 非空 + 可见 + 属于本状态栏。本仓把"属于本状态栏"折成 `editorId` 相等。
  */
 export function isOurEditor(instance: WidgetInstance, editorId: string | null, statusBar?: StatusBarBinding): boolean {
@@ -74,7 +76,7 @@ export function isOurEditor(instance: WidgetInstance, editorId: string | null, s
 }
 
 /**
- * `getSelectedFile()`（`EditorBasedWidget.kt:91-95`）：这条状态栏此刻显示的文件。
+ * `getSelectedFile()`（`EditorBasedWidget.kt:103-108`）：这条状态栏此刻显示的文件。
  * 已卸载的实例返回 null（上游那里 `myStatusBar` 已经置空，取不到 file editor）。
  */
 export function selectedFile(instance: WidgetInstance, statusBar?: StatusBarBinding): string | null {
@@ -93,7 +95,7 @@ export function shouldUpdateForEditor(instance: WidgetInstance, editorId: string
 }
 
 /**
- * 上游 `StatusBarEditorBasedWidgetFactory.canBeEnabledOn`（`StatusBarEditorBasedWidgetFactory.kt:14-16`）：
+ * 上游 `StatusBarEditorBasedWidgetFactory.canBeEnabledOn`（`StatusBarEditorBasedWidgetFactory.kt:12`）：
  * `getTextEditor(statusBar) != null` —— 有文本编辑器时这个组件才能开。
  * 本仓的对应判据（`src/statusBarWidgets.ts` 的 `widgetToggleEnabled` 用的是同一个概念的布尔版；
  * 这里给出"从状态栏绑定取"的那一半，供调用方拿到权威值）。

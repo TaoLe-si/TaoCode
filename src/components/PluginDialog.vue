@@ -7,6 +7,7 @@
 // 这里只负责把它们画出来。
 import { computed, nextTick, ref, watch } from 'vue'
 import { FileArchive, FolderPlus, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
+import PluginMarketPanel from './PluginMarketPanel.vue'
 import type { PluginInfo } from '../bridge'
 import {
   INSTALLED_OPTION_LABEL,
@@ -15,9 +16,21 @@ import {
   installedQueryOptions,
   matchesInstalledQuery,
   parseInstalledQuery,
+  pluginDependencySummary,
+  pluginIsBroken,
+  pluginIsEnabled,
   toggleInstalledSearchOption,
   type SupportedSearchOption,
 } from '../pluginGroups'
+// 启用裁决与加载原因（`UltimateDependencyChecker.canBeEnabled` /
+// `PluginManagerStateService.preparePluginErrors` 的等价物）：复选框为什么点不动、
+// 详情面板为什么标无效，都从这里取一句话原因。
+import { PLUGIN_FEATURE_LABELS, canBeEnabled, duplicateFeatures, pluginLoadingError, pluginLoadingErrors } from '../pluginInfo'
+import { marketplaceEntryStatus, type MarketplacePlugin } from '../pluginMarket'
+// 插件声明的文件类型（上游 `com.intellij.fileType` EP / `FileTypeBean`）：启用集合一变就重算注册表，
+// 用户在下一次打开「设置 › 编辑器 › 文件类型」或打开一个文件时就能看到差别。
+import { applyPluginFileTypes, type PluginFileTypeReport } from '../fileTypePluginBeans'
+import type { PluginFileType } from '../pluginGroups'
 
 import { iconSize } from '../uiIcons'
 const props = defineProps<{
@@ -46,22 +59,55 @@ const emit = defineEmits<{
 const query = ref('')
 const sortByName = ref(true)
 const selectedId = ref<string>('')
+// 两个标签页对应 IDEA `PluginManagerConfigurable` 里的 `InstalledPluginsTab` / `MarketplacePluginsTab`。
+const tab = ref<'installed' | 'market'>('installed')
 // 卸载是不可逆的目录删除：先点「卸载…」再确认（IDEA 也有确认步骤）。
 const confirmId = ref<string>('')
 const searchRef = ref<HTMLInputElement>()
 
 const installing = computed(() => props.installing ?? [])
 
+// 市场页读出的仓库条目（`PluginMarketPanel` 的 `catalog` 事件上报）：
+// 已安装页的 `/outdated` 过滤与详情里的「可更新到 vX」都从这里取真实数据
+// （`marketplaceEntryStatus()` 比对清单版本与已装版本）。
+const marketEntries = ref<MarketplacePlugin[]>([])
+function marketEntryOf(id: string): MarketplacePlugin | undefined {
+  return marketEntries.value.find(entry => entry.id === id)
+}
+function updateTargetOf(plugin: PluginInfo): string {
+  const entry = marketEntryOf(plugin.id)
+  if (!entry) return ''
+  const status = marketplaceEntryStatus(entry, props.plugins)
+  return status.state === 'update' ? status.target ?? '' : ''
+}
+
 const counts = computed(() => ({
   userInstalled: props.plugins.length,
-  enabled: props.plugins.filter(plugin => plugin.enabled && !plugin.error).length,
+  // 依赖不满足的插件不会被加载，不算「已启用」（`pluginIsEnabled` 的口径）。
+  enabled: props.plugins.filter(pluginIsEnabled).length,
   disabled: props.plugins.filter(plugin => !plugin.enabled && !plugin.error).length,
-  invalid: props.plugins.filter(plugin => Boolean(plugin.error)).length,
+  invalid: props.plugins.filter(plugin => Boolean(plugin.error) || pluginIsBroken(plugin)).length,
+  // 有更新的（市场清单比已装版本新）；仓库没读出来时是 0（"还不知道"，见 `matchesInstalledQuery`）。
+  needUpdate: props.plugins.filter(plugin => updateTargetOf(plugin)).length,
 }))
 
 const parsed = computed(() => parseInstalledQuery(query.value))
 const activeOptions = computed(() => installedQueryOptions(query.value))
-const visible = computed(() => props.plugins.filter(plugin => matchesInstalledQuery(plugin, parsed.value)))
+
+/**
+ * 复选框能不能点 —— 委托给 `canBeEnabled`（`UltimateDependencyChecker.canBeEnabled` 的等价物）：
+ * 清单读不出来 / 必需依赖成环 / 必需依赖缺装，三种都点不动。点不动的原因直接当 title 显示。
+ */
+function pluginCanToggle(plugin: PluginInfo): boolean {
+  return canBeEnabled(plugin).enabled
+}
+/** 点不动时的那一句话（能点时返回 null，`:title` 绑定空值就是不加 title）。 */
+function pluginToggleBlockedReason(plugin: PluginInfo): string | undefined {
+  const verdict = canBeEnabled(plugin)
+  return verdict.enabled ? undefined : verdict.reason
+}
+const visible = computed(() => props.plugins.filter(plugin =>
+  matchesInstalledQuery(plugin, parsed.value, marketEntries.value.filter(entry => marketplaceEntryStatus(entry, props.plugins).state === 'update').map(entry => entry.id))))
 // 按启用状态筛选时"正在安装"那一组不参与（它还没有启用状态可言）。
 const visibleInstalling = computed(() => {
   const current = parsed.value
@@ -100,6 +146,38 @@ function clearQuery() {
   query.value = ''
   void nextTick(() => searchRef.value?.focus())
 }
+
+// ── 插件贡献的文件类型（`FileTypeBean` 的装载面）───────────────────────────────────
+//
+// 上游插件一装载，它 `<fileType>` 标签里的类型与关联就进 `FileTypeManager`；停用/卸载后
+// EP 不再贡献，关联也随之消失。本仓的等价时机就是这张列表变化时（启用/禁用/安装/卸载/刷新），
+// 所以在这里 `watch` 一次整张表 —— 回收与认领都要看全表才判得准。
+const fileTypeReport = ref<PluginFileTypeReport | null>(null)
+watch(() => props.plugins, plugins => { fileTypeReport.value = applyPluginFileTypes(plugins) }, { immediate: true })
+
+/** 被拒的声明与改判结论合成一句人话（没有就空串，页脚不渲染）。 */
+const fileTypeNote = computed(() => {
+  const report = fileTypeReport.value
+  if (!report) return ''
+  const parts: string[] = []
+  for (const rejected of report.rejected) parts.push(`「${rejected.typeName}」没有注册：${rejected.reason}`)
+  for (const conflict of report.conflicts) if (conflict.message) parts.push(conflict.message)
+  return parts.join('；')
+})
+
+/** 一条声明实际认领了什么（把分号串翻成人话，规则与 `parseFileTypeBean` 同源）。 */
+function fileTypeAssociationsText(bean: PluginFileType): string {
+  const parts: string[] = []
+  if (bean.extensions) parts.push(`扩展名 ${bean.extensions.split(';').filter(Boolean).join('、')}`)
+  if (bean.fileNames) parts.push(`文件名 ${bean.fileNames.split(';').filter(Boolean).join('、')}`)
+  if (bean.patterns) parts.push(`模式 ${bean.patterns.split(';').filter(Boolean).join('、')}`)
+  if (bean.fileNamesCaseInsensitive) parts.push(`文件名（忽略大小写） ${bean.fileNamesCaseInsensitive.split(';').filter(Boolean).join('、')}`)
+  if (bean.hashBangs) parts.push(`hashbang ${bean.hashBangs.split(';').filter(Boolean).join('、')}`)
+  return parts.join(' · ')
+}
+
+/** 这条声明是「新类型」还是「给已有类型补关联」（上游 `FileTypeBean.java:29-41` 的两种用法）。 */
+const fileTypeKindLabel = (bean: PluginFileType) => (bean.implementationClass ? '新类型' : '给已有类型补关联')
 </script>
 
 <template>
@@ -107,20 +185,26 @@ function clearQuery() {
     <section class="help-dialog plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="plugin-title" @keydown.esc.stop="emit('close')">
       <header class="plugin-head">
         <h2 id="plugin-title">插件</h2>
-        <button type="button" class="subtle-button plugin-install" title="安装一个插件包（.zip / .jar，内含 plugin.json）" :disabled="busy" @click="emit('install')">
+        <button v-if="tab === 'installed'" type="button" class="subtle-button plugin-install" title="安装一个插件包（.zip / .jar，内含 plugin.json）" :disabled="busy" @click="emit('install')">
           <FileArchive :size="iconSize.control" aria-hidden="true" />从磁盘安装…
         </button>
-        <button type="button" class="icon-button" title="从一个含 plugin.json 的目录安装" aria-label="从目录安装插件" :disabled="busy" @click="emit('installDirectory')">
+        <button v-if="tab === 'installed'" type="button" class="icon-button" title="从一个含 plugin.json 的目录安装" aria-label="从目录安装插件" :disabled="busy" @click="emit('installDirectory')">
           <FolderPlus :size="iconSize.toolbar" aria-hidden="true" />
         </button>
-        <button type="button" class="icon-button" title="重新读取插件目录" aria-label="刷新插件列表" :disabled="busy" @click="emit('refresh')">
+        <button v-if="tab === 'installed'" type="button" class="icon-button" title="重新读取插件目录" aria-label="刷新插件列表" :disabled="busy" @click="emit('refresh')">
           <RefreshCw :size="iconSize.toolbar" aria-hidden="true" />
         </button>
         <button type="button" class="icon-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="iconSize.action" aria-hidden="true" /></button>
       </header>
+      <!-- 两个标签页：已安装（InstalledPluginsTab）与市场（MarketplacePluginsTab）。 -->
+      <div class="plugin-tabs" role="tablist" aria-label="插件页">
+        <button type="button" role="tab" class="plugin-tab" :class="{ on: tab === 'installed' }" :aria-selected="tab === 'installed'" @click="tab = 'installed'">已安装</button>
+        <button type="button" role="tab" class="plugin-tab" :class="{ on: tab === 'market' }" :aria-selected="tab === 'market'" @click="tab = 'market'">市场</button>
+      </div>
+      <template v-if="tab === 'installed'">
       <p class="plugin-hint">
         插件目录：用户配置目录下的 <code>plugins</code>。一个插件是一个含 <code>plugin.json</code> 的子目录（也可以直接装 <code>.zip</code> 插件包）；
-        <span class="plugin-hint-actions">启用后它贡献的命令与实时模板会立即出现在菜单与模板列表里。</span>
+        <span class="plugin-hint-actions">启用后它贡献的命令、实时模板与文件类型会立即出现在菜单、模板列表与文件类型注册表里。</span>
       </p>
 
       <div class="plugin-toolbar">
@@ -164,11 +248,11 @@ function clearQuery() {
                     <span class="plugin-avatar" :style="{ background: `linear-gradient(135deg, hsl(${tone(plugin)} 62% 52%), hsl(${(tone(plugin) + 40) % 360} 62% 44%))` }" aria-hidden="true">{{ initial(plugin) }}</span>
                     <span class="plugin-main">
                       <span class="plugin-name">{{ plugin.name || plugin.id }}<span class="plugin-version">v{{ plugin.version || '0' }}</span></span>
-                      <span class="plugin-desc">{{ plugin.error ? `清单无法读取：${plugin.error}` : (plugin.description || '没有描述。') }}</span>
-                      <span v-if="!plugin.error" class="plugin-meta">{{ plugin.commands.length }} 个命令 · {{ plugin.templates.length }} 个模板</span>
+                      <span class="plugin-desc">{{ plugin.error ? `清单无法读取：${plugin.error}` : (plugin.broken ? `依赖不满足：${plugin.broken}` : (plugin.description || '没有描述。')) }}</span>
+                      <span v-if="!plugin.error" class="plugin-meta">{{ plugin.commands.length }} 个命令 · {{ plugin.templates.length }} 个模板<span v-if="(plugin.fileTypes ?? []).length"> · {{ (plugin.fileTypes ?? []).length }} 个文件类型</span></span>
                     </span>
                     <label class="plugin-toggle" @click.stop>
-                      <input type="checkbox" :checked="plugin.enabled" :disabled="busy || Boolean(plugin.error)" :aria-label="`启用插件 ${plugin.name || plugin.id}`" @change="emit('toggle', plugin.id, !plugin.enabled)" />
+                      <input type="checkbox" :checked="plugin.enabled" :disabled="busy || !pluginCanToggle(plugin)" :title="pluginToggleBlockedReason(plugin)" :aria-label="`启用插件 ${plugin.name || plugin.id}`" @change="emit('toggle', plugin.id, !plugin.enabled)" />
                     </label>
                   </button>
                 </li>
@@ -189,14 +273,16 @@ function clearQuery() {
         <aside v-if="selected" class="plugin-detail" aria-label="插件详情">
           <h3>{{ selected.name || selected.id }}</h3>
           <dl>
-            <div><dt>版本</dt><dd>{{ selected.version || '未声明' }}</dd></div>
+            <div><dt>版本</dt><dd>{{ selected.version || '未声明' }}<span v-if="updateTargetOf(selected)" class="plugin-update"> · 市场有 v{{ updateTargetOf(selected) }}</span></dd></div>
             <div><dt>标识</dt><dd><code>{{ selected.id }}</code></dd></div>
             <div v-if="selected.category"><dt>类目</dt><dd>{{ selected.category }}</dd></div>
-            <div><dt>状态</dt><dd>{{ selected.error ? '无效（清单无法读取）' : (selected.enabled ? '已启用' : '已禁用') }}</dd></div>
+            <div><dt>状态</dt><dd>{{ selected.error ? '无效（清单无法读取）' : (pluginIsBroken(selected) ? '无效（依赖不满足）' : (selected.enabled ? '已启用' : '已禁用')) }}</dd></div>
+            <div v-if="pluginDependencySummary(selected)"><dt>依赖</dt><dd>{{ pluginDependencySummary(selected) }}</dd></div>
             <div><dt>路径</dt><dd><code>{{ selected.path }}</code></dd></div>
           </dl>
           <p class="plugin-detail-desc">{{ selected.description || '没有描述。' }}</p>
           <p v-if="selected.error" class="plugin-detail-error">清单无法读取：{{ selected.error }}</p>
+          <p v-else-if="pluginIsBroken(selected)" class="plugin-detail-error">{{ selected.broken }} —— 装齐依赖后复选框才可点；依赖不满足期间它的命令与模板不会出现。</p>
           <section v-if="selected.commands.length" class="plugin-detail-section">
             <h4>命令</h4>
             <ul>
@@ -209,6 +295,17 @@ function clearQuery() {
               <li v-for="template in selected.templates" :key="template.key"><code>{{ template.key }}</code> — {{ template.description || '未描述' }}<span class="plugin-detail-muted">（{{ template.languages.join('、') || '全部语言' }}）</span></li>
             </ul>
           </section>
+          <!-- 文件类型贡献（上游 `<fileType>` = `FileTypeBean`）：这一节存在就说明它真的进了注册表。 -->
+          <section v-if="(selected.fileTypes ?? []).length" class="plugin-detail-section">
+            <h4>文件类型</h4>
+            <ul>
+              <li v-for="bean in selected.fileTypes" :key="bean.name">
+                <code>{{ bean.name }}</code> — {{ fileTypeAssociationsText(bean) || '没有认领任何模式' }}
+                <span class="plugin-detail-muted">（{{ fileTypeKindLabel(bean) }}{{ bean.language ? ` · 语言 ${bean.language}` : '' }}）</span>
+              </li>
+            </ul>
+          </section>
+          <p v-if="fileTypeNote" class="plugin-detail-error" role="status">{{ fileTypeNote }}</p>
           <div class="plugin-detail-actions">
             <button v-if="confirmId !== selected.id" type="button" class="subtle-button plugin-danger" :disabled="busy" @click="confirmId = selected.id">
               <Trash2 :size="iconSize.menu" aria-hidden="true" />卸载…
@@ -222,6 +319,8 @@ function clearQuery() {
           </div>
         </aside>
       </div>
+      </template>
+      <PluginMarketPanel v-show="tab === 'market'" :plugins="plugins" :busy="busy" @changed="emit('refresh')" @catalog="entries => marketEntries = entries" />
 
       <div class="dialog-actions"><button class="subtle-button" @click="emit('close')">关闭</button></div>
     </section>
@@ -232,6 +331,9 @@ function clearQuery() {
 .plugin-dialog { width: min(880px, 94vw); }
 .plugin-head { display: flex; align-items: center; gap: var(--space-2); }
 .plugin-head h2 { flex: 1; margin: 0; }
+.plugin-tabs { display: flex; align-items: center; gap: var(--space-1); border-bottom: 1px solid var(--line); }
+.plugin-tab { padding: 5px var(--space-3); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--secondary); font-size: 12px; }
+.plugin-tab.on { border-bottom-color: var(--accent); color: var(--bright); }
 .plugin-hint { margin: var(--space-1) 0 var(--space-3); color: var(--muted); font-size: 12px; line-height: 1.6; }
 .plugin-hint-actions { color: var(--secondary); }
 .plugin-toolbar { display: flex; align-items: center; gap: var(--space-2); }
@@ -277,6 +379,7 @@ function clearQuery() {
 .plugin-detail-section h4 { margin: 0 0 4px; color: var(--bright); font-size: 11px; }
 .plugin-detail-section ul { display: flex; flex-direction: column; gap: 3px; margin: 0; padding-left: var(--space-3); color: var(--secondary); font-size: 11px; line-height: 1.5; }
 .plugin-detail-muted { color: var(--muted); }
+.plugin-update { color: var(--accent); }
 .plugin-install { flex-shrink: 0; }
 .plugin-detail-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .plugin-danger { color: var(--warning); }

@@ -7,15 +7,17 @@ import * as appearance from '../src/appearance.ts'
 import * as toolWindowResize from '../src/toolWindowResize.ts'
 import * as toolWindowPaneState from '../src/toolWindowPaneState.ts'
 
-// Run the production host with real Vue reactivity; only resolve its extensionless imports.
+// Run the production host with real Vue reactivity; only resolve its relative imports.
+// 2026-10-06：`src/panelResize.ts` 的值 import 补上了 `.ts` 扩展名（Node ESM 下缺扩展名会
+// `ERR_MODULE_NOT_FOUND`，整个测试文件加载失败），所以这里的桩按**新**的 specifier 建键。
 const js = ts.transpileModule(readFileSync(new URL('../src/panelResize.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 const exports = {}
 new Function('require', 'exports', js)(name => {
   if (name === 'vue') return vue
-  if (name === './appearance') return appearance
-  if (name === './toolWindowResize') return toolWindowResize
+  if (name === './appearance.ts') return appearance
+  if (name === './toolWindowResize.ts') return toolWindowResize
   if (name === './toolWindowPaneState.ts') return toolWindowPaneState
   throw new Error(`Unexpected import: ${name}`)
 }, exports)

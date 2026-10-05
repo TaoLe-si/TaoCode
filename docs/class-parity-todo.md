@@ -45,7 +45,7 @@
 
 **两个附带结论**：
 - §1.1–1.7 的包分布表、以及 §0 的 `174 659` / `32 352` / `4 955` 全部基于旧枚举，**作废**（`174 658` 是含测试的实扫值；排除测试源码集后全树 73 511 类；`platform` 未归属 20 574）。要数字就跑脚本，别信文档里的。
-- **B1 的判决少覆盖 20 类**：判决表原是 107 类（`ui/tabs` 53 + `ui/popup` 54），而这两个包真实是 63 + 64 = 127 类。**已于 2026-09-27 补判完毕**，见 `docs/inventory/verdict-ui-tabs-popup.md` 末节「补判：2026-09-27 重枚举带进来的 20 类」：9 类是**文件颜色**（`com.intellij.ui.tabs` 的 File Colors 一族，本轮已实现，闭合 B1 缺口里最大的一块）、7 类是**弹层详情面板**（`[ ]` 可移植）、3 类是**弹层位置与内容刷新**（`[~]`，其中 `PopupUpdateProcessor`「数据变了要刷新已开的弹层」是本族唯一有用户可感差异的缺口）。
+- **B1 的判决少覆盖 20 类**（2026-10-04 再复核：规范类数是 **124**（`ui/tabs` 63 + `ui/popup` 61），旧写的"127 类"把 3 个 `package-info.java` 当成了类；另有 4 个类从未出现在判决书里，已在 `docs/inventory/verdict-ui-tabs-popup.md` 的「2026-10-04 补判」补齐，门禁 `tests/b1-verdict.test.mjs`）：判决表原是 107 类（`ui/tabs` 53 + `ui/popup` 54），而这两个包真实是 63 + 64 = 127 类。**已于 2026-09-27 补判完毕**，见 `docs/inventory/verdict-ui-tabs-popup.md` 末节「补判：2026-09-27 重枚举带进来的 20 类」：9 类是**文件颜色**（`com.intellij.ui.tabs` 的 File Colors 一族，本轮已实现，闭合 B1 缺口里最大的一块）、7 类是**弹层详情面板**（`[ ]` 可移植）、3 类是**弹层位置与内容刷新**（`[~]`，其中 `PopupUpdateProcessor`「数据变了要刷新已开的弹层」是本族唯一有用户可感差异的缺口）。
 
 **新工具（都在 `scripts/`，都带"骗人就会失败"的退出码）**：
 | 脚本 | 作用 | 失败条件 |
@@ -53,6 +53,8 @@
 | `enumerate_inventory.py` | 按**包路径后缀**重枚举 7 域 + 重算 `platform_rest` / `_platform`；`--check` 只报差异 | 任一定义好的包一个类都没匹配到 → exit 1 |
 | `inventory_gaps.py` | 核实指定包真实类数 vs 已枚举数 | 有缺口 → exit 1 |
 | `parity_scan.py` | 逐类机检（原有） | — |
+
+`docs/inventory/_platform.json` 的三个数是**机器生成**的：`platform_total`（平台类总数）、`covered`（**落在 7 个域里的平台类** = `platform_total` − `rest`，本轮重新生成后是 **9092**）、`rest`（平台里未被 7 域覆盖的 20 574）。注意它**不等于**上面的「7 域合计 10 400」—— 后者含 7 个域里**平台之外**的类（`java/idea-ui`、`plugins/gradle` 等）。2026-10-04 更正的正是这个口径：旧文件把 `covered` 写成了 10 400，与 `platform_total − rest` 对不上，`python scripts/enumerate_inventory.py --check` 一直在报「机器摘要内容不一致」。
 
 域定义只写在 `docs/inventory/_domains.json` 一处（可审计、可版本化）。重叠归属按"更长后缀优先"，`com/intellij/ide/todo` 归 `projectviews`（TODO 工具窗口）。
 
@@ -206,18 +208,18 @@
 
 | 批        | 范围                                                                              | 入口                                            | 状态                                                                                        |
 | -------- | ------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **B1** | `ui/tabs`（53）+ `ui/popup`（54） | 判决见 `docs/inventory/verdict-ui-tabs-popup.md` | **判决 107/107 完成**（`[~]` 20 / `[ ]` 56 / `[-]` 30 / `[x]` 1）。已实现：① `TabsUtil` 拖拽分屏几何；② `ScrollableSingleRowLayout` 的**溢出压缩 + `…` 隐藏标签下拉**（判决表里最大的一块）。剩余 `[ ]`：~~`TabsListener.beforeSelectionChange` 否决~~（**更正**：它返回 void、是通知不是否决，真行为是切标签重同步 —— 已落，见 `docs/ui-placement-audit.md` §AB）、~~`TabLabel` 就地重命名~~（**更正**：IDEA 无此行为，双击的真语义是预览晋升+隐藏全部工具窗口 —— 已落，见 `docs/ui-placement-audit.md` §AC）、~~`ActionPanel` 多动作按钮~~（标签条右端「更多」下拉已落，见 §AD）、~~`AbstractPopup` 选项集~~（候选键逐条核过：Esc 两段式已落，见 §AG；尺寸/位置见 §AE）、~~`PopupState` 尺寸记忆~~（**更正**：真出处是 `AbstractPopup`；SE 弹窗已记尺寸+位置，见 §AE）、~~`MnemonicsSearch`~~（已落：`src/selectIn.ts`，见 §AF.1）、~~列表行内动作~~（已落：欢迎页项目行/通知列表，见 §AF.2）、多行布局（Wrap/Compressible/Scrollable）、`TabInfo` 的 hidden/alert 等 |
+| **B1** | `ui/tabs`（63）+ `ui/popup`（61） | 判决见 `docs/inventory/verdict-ui-tabs-popup.md` | **判决 124/124 完成**（2026-10-04 复核：规范类数是 124；清单里另有 3 个 `package-info.java` 不是类 —— 旧口径的「107 类」是第一版枚举，后面 20 条补判 + 本轮 4 条补判都写在判决书里），门禁 `tests/b1-verdict.test.mjs` |
 | **B2**   | `toolwindow/openapi/wm`（350）：条纹按钮、内容模型、`impl/status` 的 widget 工厂             | 判决见 `docs/inventory/verdict-toolwindow-openapi.md` | **判决 350/350 完成**（`[x]` 4 / `[~]` 68 / `[ ]` 96 / `[-]` 182），逐条表在 §G、门控 `tests/b2-verdict.test.mjs`。**已实现 §C 第一条**：状态栏组件注册表（`src/statusBarWidgets.ts` 纯逻辑 + `src/statusWidgets.ts` 工厂表，判据 `tests/status-bar-widgets.test.mjs`，见 `docs/ui-placement-audit.md` §AI）。**并补上此前完全不存在的状态栏文字通道**（`StatusBar.Info` → `InfoAndProgressPanel.setText` → `StatusPanel.updateText`，含 `ProcessTerminatedListener` 的退出码文案与 Unix 信号表，判据 `tests/status-bar-text.test.mjs`，见 §AJ）。剩余 `[ ]`：`StatusBarWidgetsManager` 的 EP 动态增删、`EditorBasedWidget` 基类、十个 widget 工厂的逐个折装、`ToolWindowManager` 查询面、工具窗口注册机制（EP→Factory） |
 | **B3**   | `vcs/commit`（67）全量 + `vcs/changes` 的行为层                                         | `docs/inventory/vcs_scan.md`                  |                                                                                           |
 | **B4**   | `editor/openapi/editor`（226）的 actions/ caret/ 事件层；`codeInsight/hint`（38）        | `docs/inventory/editor_scan.md`               |                                                                                           |
 | **B5**   | `codeInsight/template`（138）：实时模板（TaoCode 已有 `src/templates.ts`）                 | 同上                                            |                                                                                           |
 | **B6**   | `settings-run`：`ui/dsl` 对应物 + `openapi/options`（96）+ `ide/ui`（189）              | `docs/inventory/settings-run_scan.md`         |                                                                                           |
 | **B7**   | `find`（约 115）+ `diff`（约 194）                                                    | 同上                                            |                                                                                           |
-| **B8**   | `execution`（约 300）+ `xdebugger`（约 250，按 DAP 口径）                                 | 同上                                            |                                                                                           |
-| **B9**   | `projectviews`：`ide/todo`（66）、`structureView`（41）、`lvcs`（84）、`notification`（49） | `docs/inventory/projectviews_scan.md`         |                                                                                           |
-| **B10**  | `actions`（115）                                                                  | `docs/inventory/actions_scan.md`              |                                                                                           |
-| **B11**  | `codeInsight/daemon`（150，按 LSP 诊断口径，依赖 §3）                                      | `docs/inventory/editor_scan.md`               |                                                                                           |
-| **B12+** | §2 A 堆逐模块；B 堆逐模块判定可移植性；C 堆逐类写理由                                                 | `docs/inventory/platform_rest.txt`            |                                                                                           |
+| **B8**   | `execution`（约 300）+ `xdebugger`（约 250，按 DAP 口径）                                 | 同上                                            | **判决 2243/2243 完成**（生成型：`docs/inventory/verdict-execution-debug.md` + `execution_verdict_table.md` / `xdebugger_verdict_table.md`，`[x]`0 / `[~]`1256 / `[ ]`167 / `[-]`820；门禁 `tests/verdict-generated.test.mjs`） |
+| **B9**   | `projectviews`：`ide/todo`（66）、`structureView`（41）、`lvcs`（84）、`notification`（49） | `docs/inventory/projectviews_scan.md`         | **判决 755/755 完成**（生成型：`docs/inventory/verdict-projectviews.md`，`[~]`578 / `[-]`177；书签 5 类见 B5 判决书） |
+| **B10**  | `actions`（115）                                                                  | `docs/inventory/actions_scan.md`              | B10 = 已由 B6 覆盖（`actions` 域 317 类，`tests/b6-verdict.test.mjs`） |
+| **B11**  | `codeInsight/daemon`（150，按 LSP 诊断口径，依赖 §3）                                      | `docs/inventory/editor_scan.md`               | **判决 659/659 完成**（生成型：`docs/inventory/verdict-daemon.md`，`[~]`328 / `[-]`331；按 LSP 诊断口径） |
+| **B12+** | §2 A 堆逐模块→逐子族；B 堆逐模块判定可移植性；C 堆逐类写理由                                                 | `docs/inventory/platform_rest.txt`            | **A 堆已按包细分为 183 个有判词的子族**：`docs/inventory/verdict-platform_rest.md`（20574 类：`[~]` 4867 / `[ ]` 1115 / `[-]` 14592；`[ ]` = 结构化搜索整族 144 + 可移植待办（文件模板/外部工具/Run Anything/大文件模式/包依赖/Facet/更新/轻量编辑…）884 + 未归族的 A 堆子包 231（判词写明「逐类判定待办」）；门禁同上） |
 
 
 
@@ -242,10 +244,10 @@
 | platform 全量枚举（32352）                  | `[x]` 完成                                                                                                                                                                                 |
 | 机检对照（184 提及 / 4867 未出现）               | `[x]` 完成，脚本 `scripts/parity_scan.py`                                                                                                                                                     |
 | LSP/DAP 承接层对照（§3） | `[x]` 完成 → `docs/enum-lsp-dap.md`（B1-e）：声明逐条核对 + 28 个 LSP 方法 / 17 个 DAP 请求 + 12/10 条缺口 |
-| B1 判决（`ui/tabs` + `ui/popup` = 107 类） | `[x]` 完成：`[~]` 20 / `[ ]` 56 / `[-]` 30 / `[x]` 1                                                                                                                                        |
+| B1 判决（`ui/tabs` + `ui/popup` = 107 类） | `[x]` 完成：`[~]` 20 / `[ ]` 56 / `[-]` 30 / `[x]` 1                                                                                                                                        | `[x]` 完成：124 类逐条判决（原表 107 行 + 2026-09-27 补判 20 + 2026-10-04 补判 4），门禁 `tests/b1-verdict.test.mjs`（3 条：类数 124、逐个类都被判决书提到、不再写「127 类」口径） |
 | B1 实现 | `[~]` 进行中：已落地 `TabsUtil` 拖拽分屏几何 + `ScrollableSingleRowLayout` 溢出压缩与 `…` 下拉（标签裁剪/丢弃/隐藏全部按源码公式）。待做：~~`beforeSelectionChange` 否决~~（更正为通知；切标签重同步已落，见 §AB）、~~`TabLabel` 就地重命名~~（**更正**：IDEA 无此行为，双击的真语义是预览晋升+隐藏全部工具窗口 —— 已落，见 `docs/ui-placement-audit.md` §AC）、~~`ActionPanel` 多动作按钮~~（标签条右端「更多」下拉已落，见 §AD）、~~`AbstractPopup` 选项集~~（候选键逐条核过：Esc 两段式已落，见 §AG；尺寸/位置见 §AE）、~~`PopupState` 尺寸记忆~~（**更正**：真出处是 `AbstractPopup`；SE 弹窗已记尺寸+位置，见 §AE）、~~`MnemonicsSearch`~~（已落：`src/selectIn.ts`，见 §AF.1）、~~列表行内动作~~（已落：欢迎页项目行/通知列表，见 §AF.2）、~~Wrap/Compressible/Scrollable 多行布局~~（换行布局早前已落，本批补上固定标签单独成排 + 固定标签宽度上限，见 §AH） |
 | B2 判决（`toolwindow` + `openapi/wm` = 350 类） | `[x]` 完成：`[x]` 4 / `[~]` 68 / `[ ]` 96 / `[-]` 182，见 `docs/inventory/verdict-toolwindow-openapi.md`（§0 机械总账 / §A-§E 分档 / §G 350 行逐条表），门控 `tests/b2-verdict.test.mjs`（350 覆盖 + `[x]`/`[~]` 引用必须真实存在 + 四档计数自洽 + 9 个 testSources 判 `[-]`） |
-| B3..B12 判决                            | `[ ]` 起点：0 / 4944（B2 已闭合 350）                                                                                                                                                        |
+| B3..B12 判决 | **全部域都已有判决表**：B3（78）/ B4（69）/ B5（5）/ B6（317）/ B7（630）逐条手写判决 + `tests/b{3,4,5,6,7}-verdict.test.mjs`；B8（`execution` 1608 + `xdebugger` 635）/ B9（`projectviews` 755）/ B11（`daemon` 659）/ B12（`platform_rest` 20574）为**生成型**判决表（族判词手写、逐类覆盖机械生成，`scripts/verdict_table.py` + `tests/verdict-generated.test.mjs`）。B12 的 A 堆**已按包细分为 183 个子族**（`lp/*`/`pf/*` 等，每族一条判词、引用的本仓文件由门禁核对存在）：20574 类 = `[~]` 4867 / `[ ]` 1115 / `[-]` 14592；`[ ]` 的 1115 = 结构化搜索 144 + 884 个可移植待办（文件模板/外部工具/Run Anything/大文件模式/包依赖/Facet/更新/轻量编辑/无障碍…）+ 231 个未归族的 A 堆子包（`module/platform-impl` 174 / `module/lang-impl` 50 / `module/code-style-api` 7，判词写明「逐类判定待办」）|
 
 ---
 
@@ -306,7 +308,7 @@
 | 6 | `ConvertIndentsGroup`（转换为空格/制表符缩进，PlatformActions.xml:500-505） | 纯文本变换，无需新能力（前导空白按 tabSize 折算） | `[x]` **已移植**：`编辑 › 转换缩进` 子菜单（To Spaces / To Tabs），`src/App.vue` 的 `convertIndents(mode)`——整文件前导空白按 tabSize 折算，`setDraft` + 标脏，用户 Ctrl+S 保存；宽度跟随「编辑器 › 代码风格 › 制表符与缩进」 |
 | 7 | `Macros` 菜单 | 宏录制/回放系统 | `[x]` **三条动作 + 录制/回放都已移植**（2026-09-27）。**模型**（`src/macros.ts`，纯逻辑、10 条单测）逐条对照 `platform/platform-impl/src/com/intellij/ide/actionMacro/ActionMacro.java`：三类步骤 = `IdActionDescriptor`（按动作 id 调用）/ `TypedDescriptor`（输入文字，`:203-213` 的 `appendKeyPressed` **把连续字符合并成一条**）/ `ShortcutActionDescription`（按键，**`playBack` 是空实现** `:325-327` —— 与源码一致，回放时跳过）；`:62/222` `MACRO_ACTION_PREFIX = "Macro."` ⇒ `macroActionId(name)`；`upsertMacro` 复刻 `ActionMacroManager.addRecordedMacroWithName:307-330`（命名宏入表，同名先删旧；**空名字 = 匿名宏，只有一个、新的覆盖旧的**）；`macroNameError` 对应 `checkCanCreateMacro` 的循环再问；`serializeMacros`/`parseMacros` 是 `macros.xml` 的等价持久化（localStorage，坏数据/未知步骤丢弃 —— 宏是用户数据，宁可丢也不要让 IDE 起不来）。**录制钩子**复刻 `ActionMacroManager:100-121` 的全局 `AnActionListener.beforeActionPerformed`：`src/menuUi.ts` 的 `pickMenuRow`（主菜单）与 `runAction`（Find Action）在执行前各记一步，`StartStopMacroRecording` 自身不录；**打字也录**（`:496+` 的 `KeyPostProcessor`）—— 编辑器新增 `@typing` 事件（`src/editorTyping.ts` 从 `ViewUpdate.changes` 取插入文本），宿主按 400ms 合并成一条 `TypedDescriptor`。**回放**（`playMacro`）：动作按 id 走 Find Action 的那份清单（= `ActionManager.getAction(id)`），输入写进活动编辑器，`playing` 期间宏动作禁用（`InvokeMacroAction.update` 的 `setEnabled(!isPlaying)`，防递归）；`startRecording/stopRecording` 对应 `:148-155` / `:279-305`（停止时问名字、取消即丢弃、`lastMacro` 供「回放上一个宏」）。**菜单**：`src/menus/macrosMenu.ts` 放在 EditMenu 里（`PlatformActions.xml:506-510`：`PlaybackLastMacro` · `StartStopMacroRecording` · `EditMacros` · `PlaySavedMacrosAction`），对话框 `src/components/MacrosDialog.vue`（看步骤 / 删步骤 / 删宏 / 重命名 / 回放）。**顺手补的宿主能力**：`MenuRow.childrenOf`（IDEA `ActionGroup.getChildren()` 的对应物）—— 「已保存的宏」是动态子菜单，早先的静态 `children` 表达不了（宏表一变菜单不刷新）；渲染（`submenuRows(row)`）与 Find Action 的扁平化都已改走它。**仍待办**：① 录制时 IDE 的状态栏有一个**动画录制指示器**（`ActionMacroManager.Widget`，`AnimatedIcon.Recording.ICONS`）且点击即停止 —— TaoCode 用通知代替（状态栏 widget 体系里没有"动画图标"这一档）；② 录制按键里的**退格/方向键等非输入键**没有对应的 `MacroStep`（源码把 keyCode/modifiers 一起存进 `TypedDescriptor`，用于导出回放脚本 `generateTo`）；③ `EditMacros` 在 IDEA 里是一个 Configurable 页（可从设置进入），TaoCode 只做了对话框（设置页放置待核）。 |
 | 8 | `EditorBidiTextDirection`（内容自适应 / LTR / RTL） | 双向文本方向支持 | `[x]` **三档已移植**（2026-09-27）。源码依据：枚举 `BidiTextDirection.java:21-23`（只有 `CONTENT_BASED / LTR / RTL`）、设置字段与默认值 `EditorSettingsExternalizable.java:137`（`BIDI_TEXT_DIRECTION = CONTENT_BASED`，`@Storage("editor.xml")` ⇒ 归 `editorSettings`）、动作 `SetEditorBidiTextDirectionAction.java:20-32`（`ToggleAction`：`isSelected` 比较设置值 ⇒ 三选一；`setSelected` 写设置后 `EditorFactory.refreshAllEditors()`）、菜单位置 `PlatformActions.xml:591-595`（`ViewMenu` 末尾的 **popup 子菜单**，在 `ToggleFocusMode` 之后），动作类 `intellij.platform.ide.impl.actions.xml:418-422`。落点：`src/bidiTextDirection.ts`（模式 / 文案 / 动作 id / CSS 映射，纯函数且有单测）+ `editorSettings.bidiTextDirection`（前端接口 / 默认值 / 白名单 + 原生 `settings_schema.hpp/.cpp` 键白名单、默认值与三值校验）+ 视图菜单「文本方向」子菜单（`src/menus/viewMenu.ts`，三项按 `BIDI_DIRECTIONS` 展开，`checked` 走设置值互斥）+ 行为落点在 `src/style.css`：`.editor-stage[data-bidi="…"] .cm-content` 三档 —— `rtl` / `ltr` 用 `unicode-bidi: isolate` 强制方向，`contentBased` 用 **`unicode-bidi: plaintext`**（让每个换行分隔的段落各自按首个强方向字符定方向，对应 IDEA 的段落级内容判定；不是元素级的 `dir="auto"`），宿主的 `:data-bidi` 绑在编辑器 stage 上（`src/App.vue`）。**没有设置页行**：`grep BIDI_TEXT_DIRECTION` 在源码里只命中 `EditorSettingsExternalizable` 与三个动作类，IDEA 的 `EditorSettingsConfigurable` 里没有这一行，所以 TaoCode 也不造。测试 `tests/bidi-text-direction.test.mjs` 6 条（纯函数 3 + 接线 3：CSS 三档选择器与 `plaintext`、宿主属性、菜单展开与写回、前后端键白名单）。**仍待办**：`BidiContentNotificationProvider`（`platform-impl/.../editor/impl/BidiContentNotificationProvider.java:69`，IDE 在文件里出现双向文本时提示「文本方向」子菜单）——需要一个"检测文档含 RTL 字符"的判定与提示条（TaoCode 有 `NoticeList` 可承接），尚未做。 |
-| 9 | `NavigateInFileGroup`（MethodDown/MethodUp / 模板参数导航 / GotoCustomRegion） | ~~需要语言服务符号边界~~ **已核实：不需要**——用已实现的 `textDocument/documentSymbol` 即可（~~原先写「SymbolKind 6=Method / 12=Function」~~ —— 那个 kind 过滤**是错的**，见本行末尾的更正①） | `[~]` **MethodDown/MethodUp 已移植**：规则落点 `src/navigateInFile.ts`（依据 `platform/lang-impl/src/com/intellij/codeInsight/navigation/MethodUpDownUtil.java:24/48/61-73`、`MethodDownHandler:23-31`、`MethodUpHandler:23-30`）+ `App.vue:jumpMethod` + 导航菜单两项，经 `revealLocation` 跳转并接入后退历史。**2026-09-27 更正两处早先的不忠实**：① **挑的元素不该按 kind 过滤** —— 名字叫 Method，但 `addStructureViewElements`（`:61-73`）收的是结构视图的**全部**元素（类/字段/嵌套结构都算）；② **本行原先写「Alt Down/Up 与 IDEA 一致」是错的** —— `grep -rn 'actionId="$MethodDown"' --include=*.xml` 零命中，IDEA 没有给这两个动作绑默认快捷键，只有菜单项；已去掉自造键位。测试 `tests/navigate-in-file.test.mjs` 6 条；模板参数导航与 GotoCustomRegion 仍 `[ ]`（需要 LSP 的签名/折叠区能力） |
+| 9 | `NavigateInFileGroup`（MethodDown/MethodUp / 模板参数导航 / GotoCustomRegion） | ~~需要语言服务符号边界~~ **已核实：不需要**——用已实现的 `textDocument/documentSymbol` 即可（~~原先写「SymbolKind 6=Method / 12=Function」~~ —— 那个 kind 过滤**是错的**，见本行末尾的更正①） | `[~]` **MethodDown/MethodUp 已移植**：规则落点 `src/navigateInFile.ts`（依据 `platform/lang-impl/src/com/intellij/codeInsight/navigation/MethodUpDownUtil.java:24/48/61-73`、`MethodDownHandler:23-31`、`MethodUpHandler:23-30`）+ `App.vue:jumpMethod` + 导航菜单两项，经 `revealLocation` 跳转并接入后退历史。**2026-09-27 更正两处早先的不忠实**：① **挑的元素不该按 kind 过滤** —— 名字叫 Method，但 `addStructureViewElements`（`:61-73`）收的是结构视图的**全部**元素（类/字段/嵌套结构都算）；② **本行原先写「Alt Down/Up 与 IDEA 一致」是错的** —— `grep -rn 'actionId="$MethodDown"' --include=*.xml` 零命中，IDEA 没有给这两个动作绑默认快捷键，只有菜单项；已去掉自造键位。测试 `tests/navigate-in-file.test.mjs` 6 条；模板参数导航与 GotoCustomRegion 仍 `[ ]`（需要 LSP 的签名/折叠区能力）。**2026-10-05 补**：上游 `<group id="NavigateInFileGroup" popup="true">`（`PlatformActions.xml:620-629`，标题 `ActionsBundle.properties:1992` `group.NavigateInFileGroup.text=Navigate in File`）是**子菜单**，原先这两项被拍平进「导航」顶层 —— 现收进 `导航 › 在文件中导航`（`src/menus/navigateMenu.ts`，`children` 两条）。子菜单内**不画分隔线**（上游 `:623` 那条隔的是后三簇，本仓无落点）。两条成员 ≥ 已收拢各组的最少项数，与 `BackgroundTasks`（单项）、`HelpDiagnosticTools`（父菜单不存在）两个有意例外都不同。判据 `tests/refactor-menu-parity.test.mjs` |
 | 10 | `ExportImportGroup`（导入设置 / 导出设置 / 恢复默认设置）+ `PowerSaveGroup`（`TogglePowerSave`） | `platform/platform-impl/resources/idea/PlatformActions.xml:419-424`（`ExportImportGroup` popup：ImportSettings · ExportSettings · sep · RestoreDefaultSettings）、`:437-440`（`PowerSaveGroup` = sep + TogglePowerSave）、`:430-436`（`PrintExportGroup` = FileExportGroup(ExportToHTML) + Print）；实现 `platform/configuration-store-impl/src/ExportSettingsAction.kt:54-66`（`saveFile.outputStream().use { exportSettings(markedComponents, it) }` —— 把设置打包成一个归档）、`ImportSettingsAction.kt:47-70`（文件选择器 → `:58-65` `validateSelectedFiles` 校验 → 导入后提示重启）；打开/保存对话框对应 `FileChooser`（`ImportSettingsAction` 用 `FileChooserDescriptorFactory.singleFileOrDir()`） | `[x]` **三项设置动作 + 省电模式菜单行都已落地**（2026-09-27）。**先补的宿主能力**：① `native/dialogs.cpp` 的通用「打开文件 / 保存文件」对话框（`dialog.pickFile` / `dialog.saveFile`；过滤器串 `名称|通配符|…` 由纯函数 `parse_file_filters` 解析，有独立单测 —— 原来只有"选文件夹"与"选图片"两种）；② `native/settings_transfer.cpp`（**归档 = 一个 zip + 一份 JSON**；`zipstore` 原有接口只收磁盘文件，为此加了内存条目重载）+ `ProjectStore::export_settings/import_settings/reset_settings` + 路由 `app.exportSettings` / `app.readSettingsArchive` / `app.importSettings` / `app.resetSettings`。**比 IDEA 强的一点**：`app.readSettingsArchive` 是**只读摘要**（只校验、不写盘，并报出包里有什么），UI 的顺序是「读摘要 → 用户确认 → 才写盘」，而且归档的值域校验**复用 settings_schema 的补丁校验器**（坏包在写盘前就被拒），不像 IDEA 那样先导入、重启时才发现。**导入与恢复默认都保留最近项目列表**（IDEA 的导出清单里没有 recentProjects，`read_archive` 也只带 `settings`/`general`/`perProject` 三段）。前端 `src/settingsTransfer.ts`（纯逻辑：文件名/文案/段落标签 + `createSettingsTransfer` 三个动作）+ `src/menus/fileMenu.ts` 的 `file.exportImport` 三行与 `file.togglePowerSave` 一行。测试：原生 `settings_transfer_test`（4 条：往返、九种坏包分支、包结构）与 `dialogs_test`（5 条过滤器解析）+ 前端 `tests/settings-transfer.test.mjs`（11 条：文案、菜单行顺序与启用条件、"读-确认-写"的顺序断言）。**第二批（同日）补上 `ExportToHTML`**：先加宿主能力 `native/export_file.hpp/.cpp`（批量写导出文件：只写绝对路径 + 扩展名白名单 `.html/.htm` + 父目录必须存在 + 拒绝重解析点 + 2000 文件/64 MiB 上限，任一条不合法**整体拒绝**、一个字都不写）+ 路由 `app.writeExportFiles`；前端 `src/htmlExport.ts`（纯逻辑：范围常量 1/2/4、输出名 = 原名 + `.html`、行号开关、内联颜色的完整 HTML、目录级 `index.html`、`file://` 链接、结果文案）+ `src/htmlExportDom.ts`（从**已渲染的编辑器 DOM** 读每行的带颜色文本段，相邻同样式合并）+ `src/components/ExportToHtmlDialog.vue`（三个范围单选 + 包含子目录 + 输出目录 + 浏览 + 显示行号 / 在浏览器中打开，逐条照 `ExportToHTMLDialog.kt:51-103` 与 `reset():117-134` / `apply():135-156`）+ `ExportToHtmlSettings` 进项目级设置（原生默认值 + `validate_export_to_html` + 前端 `settingsModel.ts` + 预览校验）+ 文件菜单 `file.exportGroup` › `file.exportToHtml`（`PlatformActions.xml:430-436` 的 `PrintExportGroup` = 分隔 + `FileExportGroup`(popup) + `Print`）。**TaoCode 的两处如实差异（已写进对话框提示与结果文案）**：① 语法高亮来自编辑器已渲染的 DOM，所以**没打开的文件**导出为纯文本 + 行号（结果提示里报「几个带高亮、几个是纯文本」）；② 目录范围会为每个被导出的目录生成 `index.html`（与 `:248-255` 一致）。测试：原生 `export_file_test`（4 条，含真写盘与「非法批次一个字都不写」）+ 前端 `tests/html-export.test.mjs`（15 条）。**仍待办**：① `Print` —— 需要 Win32 打印能力（`PrintDlg` + 打印 DC + 分页），宿主能力未补（也因此在菜单里**不渲染**假行）；② 导出**项目/选中多个文件**的范围（IDEA 的 `PrintOption` 扩展点与 `ExportToHTMLManager` 的多文件路径）；③ `TemplateProjectProperties`（`FileOtherSettingsGroup`，要读写模板工程的 `.idea` 属性文件）与 `FileSettingsGroup`（源码里是空组）。
 | 11 | `Notifications` 子菜单 | **已移植**（`窗口 › 通知`：关闭最新 / 关闭全部，`src/App.vue` 的 `closeFirstNotification` + `clearNotices`） | `[x]` |
 | 12 | `EditorToggleActions` 子菜单 | **已移植**（`视图 › 编辑器开关`，含字号 ±）。字号的上下限曾误写 10–32（上游是写入 [4,40]、菜单动作 [8,40]）—— 2026-09-29 已订正并抽成 `src/editorFontSize.ts` 单一来源，判据 `tests/editor-font-size.test.mjs`，见 `docs/ui-placement-audit.md` §AK | `[x]` |
@@ -421,14 +423,14 @@ AE2 这种 Forge 工程首次同步需要能访问 Maven 仓库；同步没完�
 | additionalGearActions（各窗口自己的） | `:859-868` | ✅ 项目视图的那一组已接（2026-09-29）：`ProjectViewImpl.java:1169` + `intellij.platform.projectView.xml:43-60` 的 Behavior 组（用预览标签打开 / 单击打开文件 / 始终选择打开的文件），存在项目视图设置里。其余窗口自己的组（Git 日志、TODO、书签、调试…）仍未逐窗口接 —— 需要哪个窗口的能力就先接哪个（本表保持逐条登记）。见 `docs/ui-placement-audit.md` §AA |
 | SpeedSearch | `:869` | ✅ 已接（2026-09-29）：项目树装了速度搜索（Ctrl+F / 输入即选 / 上下键走 / Enter·Esc 收），齿轮第一条由宿主按"焦点处有没有可搜的列表"给行（上游 `isVisible = 有 handler`）。见 `docs/ui-placement-audit.md` §Y |
 | TabbedContentAction.CloseAllAction | `:872` | ✅ 齿轮里的「关闭所有标签页」（引用 `window.closeAllTabs` = `TW.CloseAllTabs`，谓词就是 `ContentManagerImpl.canCloseAllContents()`）。内容条住在底部 dock，所以这一组 `contentsScoped` 的行只在那个 dock 的齿轮上出现 —— 侧栏齿轮拿到它会去清别人的标签（假控件的另一形态） |
-| ToggleToolbarAction + ToggleContentUiTypeAction | `:874-879` | 「合并标签页」= `window.toggleContentUiType` ✅ 已进齿轮（底部 dock 那一份；`update()` 用 setEnabled ⇒ 灰着但不消失，与上面那条 setEnabledAndVisible 分开实现） |
+| ToggleToolbarAction + ToggleContentUiTypeAction | `:874-879` | 「合并标签页」= `window.toggleContentUiType` ✅ 已进齿轮（底部 dock 那一份；`update()` 用 setEnabled ⇒ 灰着但不消失，与上面那条 setEnabledAndVisible 分开实现）。**2026-10-05 复核：摊平是对的，不必改成子菜单** —— `createToggleToolbarGroup` 返回的是 `DefaultActionGroup(OptionsGroup)`（`ToggleToolbarAction.java:45-47`），`OptionsGroup` 只收**隐藏工具条**里 `instanceof ToggleAction` 的成员（`:213-225` + `:199`），而「显示工具条」在 2026.3 已废弃成 no-op（`:55-67` "The Show Toolbar action is dropped in 2026.3, so toolbars are always visible"）⇒ 这一组实际只剩 `ToggleContentUiTypeAction` 一条；`OptionsGroup.update` 又规定「可见成员 >3 才开 popup」（`:183-185`）⇒ 1 条时就是**内联**，摊平与上游一致 |
 | （底部 dock 的齿轮本身） | `ToolWindowHeader.kt:119` | ✅ 以前只有侧栏标题栏有 ⋮，底部 dock 的内容动作只能从主菜单进；现在 `.output-heading` 有同一个 `ToolWindowGear`（弹层 Teleport + fixed，因为 `.output-panel` 是 overflow:hidden） |
-| `TW.ViewModeGroup`（Dock / Float / Window / Split） | `:880` | **未接**：本仓工具窗口只有停靠一种形态，浮动/独立窗口没有宿主实现 —— 放假控件是项目硬规则禁的 |
-| 移动组（Move to Left/Right/Bottom） | `:882` / `:885` | ✅ 标题栏「移动到…」 |
+| `TW.ViewModeGroup` | `:880` | **未接**。这一格原先写「Dock / Float / Window / Split」是**错的**（2026-10-05 按源码更正）：该组是 `ToolWindowViewModeAction$Group`（注册在 `intellij.platform.ide.actions.xml:479`，`popup="true"`），成员 = `ViewMode.values()` 五个（`ToolWindowViewModeAction.java:31-36`、`:170`）：`DockPinnedMode` / `DockUnpinnedMode` / `UndockMode` / `FloatMode` / `WindowMode` —— **没有 Split**（split 是 `ToolWindowMoveAction.Anchor.isSplit()` 那条正交的轴，见下一格）。`update` 是 `setEnabledAndVisible(getToolWindow(e) != null)`（`:138-141`）⇒ 上游总是显示这 5 条。不接的理由：前两条是 `DOCKED + autoHide` 的组合（`:48-57`），后三条要 `SLIDING/FLOATING/WINDOWED` 三种宿主形态（`setType`，`ToolWindowImpl.kt:541-545`），本仓都没有；只留一条可点的又违反「单项不做子菜单」与不放假控件 |
+| 移动组 | `:881-886` | ✅ 标题栏「移动到…」+ 底部 dock 标签右键的锚点菜单（同一份三行）。**2026-10-05 复核并更正两处**：① `isNewUi` 两个分支其实是**同一个类** —— 新 UI 走 `SquareStripeButton.createMoveGroup()`，它就是 `return ToolWindowMoveAction.Group()`（`SquareStripeButton.kt:84`），旧 UI 直接 `ToolWindowMoveAction.Group()`（`:885`），没有"新旧 UI 两套"；② 这一组在 New UI 下**有 6 条**而不是 3 条：`Anchor.values()` 共 8 个，`isAllowed`（`ToolWindowMoveAction.java:247-254`）在没有 `ToolWindowStripeExtension` 时滤掉 `TopLeft`/`TopRight`，剩下 6 个里有 3 个是 `isSplit()` 变体（`:89-91`：`LeftBottom`/`BottomRight`/`RightBottom`）。本仓那 3 条 = **非 split 的子集**（`LeftTop`/`BottomLeft`/`RightTop`，`:73-77`），另 3 条要 `WindowInfoImpl.isSplit`（`ToolWindowImpl.kt:509`），已登记在 `docs/source-todo.md` §15。当前位置置灰这一条也已对上（`update` 的 `setEnabled(!myAnchor.isApplied(window))`，`:211-215`；`ToolWindowHeader.vue` 与 `ToolWindowAnchorMenu.vue` 两处都是 `:disabled="anchor === …"`） |
 | ResizeActionGroup | `:887` | 「调整工具窗口」四个拉伸方向 ✅ 已进齿轮（成员摊平显示，`.tool-menu` 里不再开一层浮层） |
 | RemoveStripeButtonAction | `:889` | ✅ 已接（2026-09-29）：侧栏按钮可移除（持久化 `taocode.hiddenStripeButtons`），再激活即恢复（`showToolWindowImpl:942`）；齿轮最后一行由宿主给。见 `docs/ui-placement-audit.md` §Z |
 | HideAction | `:810` | ✅ 标题栏「隐藏」（文案 UIBundle `tool.window.hide.action.name`） |
-| HelpAction（ContextHelpAction） | `:813` | **未接**：需要每个内容的 `helpId`，本仓没有帮助映射表 |
+| HelpAction（ContextHelpAction） | `:813` | **未接**：要每个内容/窗口的 `helpId`（`ToolWindowImpl.getHelpId/setHelpId`，`:790-794`；`HelpAction.getHelpId` 先问 `selectedContent.helpId`、再问窗口自己的，`:826-840`），本仓没有帮助映射表。**注意上游在没 helpId 时也是隐藏**（`update` 的 `setEnabledAndVisible = getHelpId(...) != null`，`:842-845`）⇒ 本仓整条不画与上游视觉一致，不是漏接 |
 
 判据：`tests/tool-window-gear.test.mjs`（引用 id 必须存在于主菜单索引；接不住的必须留在本表里）。
 
@@ -501,8 +503,19 @@ B2 §C 里排"下一步优先级 1"的两条已落地（判决表 §G 的 `Resiz
 本仓 `DiffView` 只活在面板里（提交面板/历史/日志/剪贴板对比），编辑器标签是 `DocumentData` 绑死的 ⇒
 **要么先做 diff 标签，要么只接「源」那一条**，别做成两个都点了没反应的单选）、
 `terminal`（`TerminalToolWindowTabsManagerImpl.kt:300` 的标签动作）、`debug`/`services`
-（`ServiceViewSourceScrollHelper.java:41-47`）、`problems`（`InspectionResultsView.java:274-277`）、
+（`ServiceViewSourceScrollHelper.java:41-47`）、
 `maven`（`MavenProjectsNavigator.kt:306`，本仓无 Maven）。
+
+**`problems` 已判掉（2026-10-05，补上确切的"那一行是什么"）**：这一组其实**只有一条**
+（`InspectionResultsView.java:274-277`：`new DefaultActionGroup(myGlobalInspectionContext.createToggleAutoscrollAction())`），
+就是**单击导航 / 自动滚动到源码**那个开关 —— `GlobalInspectionContextImpl.java:299-301` 转发到
+`AutoScrollToSourceHandler.createToggleAction()`（`AutoScrollToSourceHandler.kt:187-200`），文案取
+`UIBundle.properties:23` `autoscroll.to.source.action.name = Navigate with Single Click`。
+**不接**：本仓的问题行是**单击即跳转**、没有选中态（`src/components/ProblemsPanel.vue:417` 的
+`@click="emit('reveal', …)"`），开关无处可关 —— 与 `src/usageViewGear.ts` 里同样被否掉的第三条
+（`UsageViewContentManagerImpl.java:114-116` 的同一个 action）是**同一个理由**，不是两个不同缺口。
+要接得先给问题表一个选择模型，那是另一批的活。
+
 
 ## 18. 工具窗口注册表落地（2026-09-29 第三十九批）
 
@@ -685,3 +698,66 @@ key 是什么）？②如果没有，它是不是本仓措辞（那就在清单�
 `native/lsp_recover.cpp`（换线程 / 就地回包）+ `lsp.stop` 走就地通路 + 前端 10s 上限 + 自动重启一次。
 **决定不删 LSP**：语义能力（诊断/补全/跳转/重命名/语义着色…）全经它进来，IDEA 的 PSI 引擎在
 C++/WebView2 宿主里没有可移植等价物；痛点根因是可恢复性，已修。**待补**：端到端复验与更深的根因。
+
+## 28. 运行/调试执行域 parity 收口（2026-10-05 第八十九批）
+
+`execution` + `xdebugger` 两域的判决表里 `[ ]` 已是 0（`docs/inventory/verdict-execution.md` /
+`verdict-xdebugger.md`：1608 + 635 类，`[~]` 1316 / `[-]` 927）。所以这一刀是从 `[~]` 族判词里
+点名"缺"、且**用户可见 + 有真后端**的那些里挑。落地点是 `exec/ui` 族判词里那半句
+"缺 RunnerLayout 的可定制布局动作"。
+
+### 28.1 已补：Run 工具窗口的 `RunnerLayoutActions` 一族
+
+上游 `RunnerLayoutActions`（`platform/execution-impl/resources/intellij.platform.execution.impl.actions.xml:25-31`
+登记六个 `Runner.*` id，`:78-99` 是组结构，由 `platform/platform-impl/resources/idea/ExecutionActions.xml:142`
+挂到 Run 工具窗口）。本仓一个运行实例 = 上游一个 `Content`，所以这一族就是"标签条上那几行"的动作：
+
+| 上游动作 | 本仓落点 | 上游判定依据 |
+| --- | --- | --- |
+| `Runner.ToggleTabLabels` | 弹层勾选（默认**隐藏**标题） | `ToggleShowTabLabelsAction.java:22-44`；默认档 `RunnerLayout.java:295` `isTabLabelsHidden = true`；消费面 `GridImpl.java:163-171` |
+| `Runner.CloseView` | 关选中的视图 | `CloseViewAction.java:58-60`（`content.length == 1 && isCloseable()`） |
+| `Runner.CloseOtherViews` | 关其余视图 | `CloseOtherViewsAction.java:27-29` + `CloseViewsActionBase.java:32-38` |
+| `Runner.CloseAllViews` | 关全部视图 | `CloseAllViewsAction.java:27-33`（可关的**多于一个**才可用） |
+| `Runner.CloseAllUnpinnedViews` | **渲染成禁用条目 + 写明原因** | `CloseAllUnpinnedViewsAction.java:27-32`：一个 pinned 都没有就直接 false。而 `ContentImpl.java:36-37` 两字段默认 false、`setPinned` 只在 `isPinnable()` 时生效（`:218-224`），`execution-impl` 全树没对运行视图调过 `setPinnable`/`setPinned` ⇒ 运行视图恒未固定 ⇒ 这条**按上游恒不可用** |
+
+代码：纯函数 `src/runToolWindowLayout.ts`（判定 + 关闭集合 + 标题可见性持久化，
+带"不渲染的两条"及理由的 `RUNNER_VIEW_ACTIONS_NOT_PORTED`）、
+`src/runInstances.ts` 的 `closeRunView`（关视图 = 停实例 + 摘标签；记录留到 `run.exit` 才删，
+因为宿主 `Manager::stop_instance` 一定会补一条 `run.exit{aborted:true}`，`native/run_host.cpp:306-310`，
+晚到的事件不会把视图叫回来）、
+`src/components/RunConsole.vue` 的「视图」弹层 + 标签上的 × 改走 `closeView`。
+判据 `tests/runner-view-actions.test.mjs`（12 条）。
+
+**两条明确不渲染**（不放假控件，理由导出成常量可被门禁核对）：
+* `Runner.RestoreLayout` —— `RunnerContentUi.restoreLayout()` `:1491-1526` 是把全部 Content 按
+  **默认 tab 顺序**重新加回去（`myLayoutSettings.resetToDefault()`）。本仓标签条扁平，没有可移动的
+  视图格、没有 `CustomContentLayoutSettings`，它没有任何可恢复的状态。
+* `MinimizeViewAction` —— 类上标着 `@ComponentNotRegistered`，唯一调用点是
+  `RunnerContentUi.java:408-409` 的**标签关闭键**分支（`CloseViewAction.isEnabled` 为假才轮到最小化），
+  而运行视图都可关 ⇒ 该分支在 Run 工具窗口里不可达；另加 `!tab.isDefault()` 的限制
+  （`MinimizeViewAction.java:28-45`）。做成"双击最小化"是发明上游没有的手势，不做。
+
+### 28.2 复核并更正两条已经过期的事实
+
+`docs/ui-placement-audit.md` 的 G.1 段把 **Allow multiple instances** 与 **Run on target** 记成
+"未实现"，两处都已过期，2026-10-05 按代码与上游坐标更正（前者是 `native/run_host.cpp` 的多实例
+`Manager` + `ExecutionManagerImpl.kt:613-619`；后者是 `src/executionTargets.ts`，判据
+`tests/run-config-templates.test.mjs`）。**Store as project file** 复核后**维持不渲染**：
+`native/projects_test.cpp:281` 与 `:442-443` 两条断言按设计锁住"不在用户项目里建配置"，
+接后端要新增 native 模块 + 改 `src/bridge.ts` 的 `Method` union + 改 `native/main.cpp` 分派表，
+并推翻那两条断言 —— 独立工程，不在 parity 收口这一刀里。
+
+## 28. 工具窗口与主菜单 parity 收口（2026-10-05 第七十批）
+
+四条线索（§14 / §16 / §21 / §22）逐条复核完毕，结论与出处见 `docs/ui-placement-audit.md` §BQ。要点：
+
+- **改掉一个真缺陷**：换锚点时**可见性没有跟着搬**。上游 `ToolWindowManagerImpl.kt:1700-1726`
+  `hideIfNeededAndShowAfterTask` 是这条规则的原文（`:1706` 记 `wasVisible` → `:1708-1710` 先收 →
+  `:1712` 搬 → `:1714-1719` 原来开着就 `doShowWindow` 在新位置重新显示）。本仓 `setToolAnchor`
+  只搬不显示，且只在 `anchor !== 'bottom'` 时开面板 ⇒ **从侧栏标题栏「移动到…」把窗口搬到底部，
+  两个 aside 都因为 `activeAnchor` 翻转而不渲染、底部 dock 又没被打开，整个窗口从界面上消失**
+  （条纹拖放同一条路径）。修法写在 `src/toolWindowStripes.ts` 的 `setToolAnchor`，三个入口一起好。
+- **主菜单**：12 档与顺序、`CodeMenu` 里检查族的位置、两条动作的文案/键位都已有判据
+  （`tests/main-menu-parity.test.mjs`，5 条），本轮复核未发现差异，不动。
+- **§16 / §21 / §22** 复核后仍成立，登记项（`ToolWindowButtonManager` 那一族、`StripeActionGroup`、
+  `weight`/`sideWeight`/`isSplit`）保持原样，没有新增。

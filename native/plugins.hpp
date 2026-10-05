@@ -28,6 +28,25 @@ struct Template {
     std::vector<std::string> languages;
 };
 
+// A file type the plugin declares — the `com.intellij.fileType` extension point, i.e. one
+// `<fileType>` tag (`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeBean.java`).
+// Field names mirror the upstream `@Attribute`s 1:1 (`name` :93, `extensions` :101, `fileNames` :108,
+// `patterns` :116, `fileNamesCaseInsensitive` :123, `language` :132, `hashBangs` :144,
+// `implementationClass` :72, `fieldName` :84). Values stay the raw semicolon-separated strings:
+// splitting and matcher construction live in ONE place on the frontend (`parseFileTypeBean`,
+// `src/fileTypeRegistry.ts`), so the host cannot grow a second, drifting set of association rules.
+struct FileTypeContribution {
+    std::string name;                          // required upstream (@RequiredElement) — empty = dropped
+    std::string language;                       // bounded to the editor's known language ids
+    std::string extensions;                     // "py;pyw"
+    std::string file_names;                     // "Makefile"
+    std::string patterns;                       // "*.blade.php"
+    std::string file_names_case_insensitive;    // "makefile"
+    std::string hash_bangs;                     // "python" — content-based, not a name matcher
+    std::string implementation_class;           // non-empty = declares a NEW type (FileTypeBean.java:29-30)
+    std::string field_name;
+};
+
 struct Plugin {
     std::string id;
     std::string name;
@@ -39,8 +58,29 @@ struct Plugin {
     std::string path;      // absolute directory
     bool enabled = true;
     std::string error;     // set when the manifest could not be read/validated
+    // 清单声明的依赖：`depends`（必需，对应 `PluginDependencies` 的 required）与
+    // `optionalDepends`（可选，`IdeaPluginDescriptorImpl` 里 optional="true" 的那一组）。
+    // id 必须合法且不能指向自己；重复取第一条、上限 32 条。
+    std::vector<std::string> depends;
+    std::vector<std::string> optional_depends;
+    // 下面四格由 `list()` 在扫完整个插件目录后解出（依赖要看得到别的插件）：
+    //   · 必需依赖里**没装**（或清单坏得读不出来）的 id；
+    //   · 必需依赖里装了但处于停用状态的 id；
+    //   · 反向引用：哪些已装插件在 `depends` 里点名要它（停用/卸载前的警示依据）；
+    //   · 依赖不满足的原因（IDEA 里这类插件不会被加载）。空串 = 依赖齐了。
+    std::vector<std::string> missing_dependencies;
+    std::vector<std::string> disabled_dependencies;
+    std::vector<std::string> required_by;
+    // 必需依赖构成的循环：分量成员（按 id 排序）。上游 `PluginManagerStateService.kt:175-202`
+    // 的 `adaptExclusionReasonAsCycleError` 把成环的插件判为**不可加载**，`CoreBundle.properties:32`
+    // 的文案是「Plugins {0} cannot be loaded because they form a dependency cycle」。
+    // 可选依赖不进图（上游的解析顺序也只由必需依赖决定）。空 = 不在环上。
+    std::vector<std::string> dependency_cycle;
+    std::string broken;
     std::vector<Command> commands;
     std::vector<Template> templates;
+    // `contributes.fileTypes` — 上游 `<fileType>` EP 的等价物，装载时灌进前端的文件类型注册表。
+    std::vector<FileTypeContribution> file_types;
 };
 
 // Scans the profile's plugins directory. A directory without a readable manifest is
@@ -59,6 +99,13 @@ void uninstall(const std::filesystem::path& directory, const std::string& id);
 
 // Enable/disable by writing (or removing) a `.disabled` marker next to the manifest.
 // The id is a directory name, so it is validated before it ever reaches the path.
+//
+// 依赖是连带的（上游 `PluginEnabler` / `UiPluginManager.enablePlugins` 的语义）：
+//   · 启用：先把**必需的**依赖逐个启用（递归）；必需依赖缺失时抛
+//     `DEPENDENCY_MISSING`（启一个装不起来的插件只会留下坏状态）；必需依赖成环时抛
+//     `DEPENDENCY_CYCLE`（上游同样不加载成环的插件，启用只会停在一个装不起来的态里）。
+//     可选依赖不动。
+//   · 停用：把依赖它的已启用插件一并停用（递归），避免它们停在「依赖已停用」的坏状态。
 void set_enabled(const std::filesystem::path& directory, const std::string& id, bool enabled);
 
 Json to_json(const std::vector<Plugin>& plugins);

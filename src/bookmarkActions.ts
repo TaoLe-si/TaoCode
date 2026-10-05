@@ -4,12 +4,12 @@
 // 也不负责持久化格式（那是 `src/bookmarksView.ts` 与设置）。
 // `bookmarks` 的 ref 由本模块创建，宿主通过返回值拿它（模板与状态栏都要读）。
 import { computed, ref, watch, type Ref } from 'vue'
-import { request } from './bridge'
-import { errorMessage } from './errors'
-import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks'
-import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView'
+import { request } from './bridge.ts'
+import { errorMessage } from './errors.ts'
+import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks.ts'
+import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView.ts'
 import { addBookmarkToNamedList, configureBookmarkLists, runWithChosenList, syncBookmarkLists } from './bookmarkListActions.ts'
-import { type Bookmark, type ProjectSettings, type Workspace } from './bridge'
+import { type Bookmark, type ProjectSettings, type Workspace } from './bridge.ts'
 
 export interface BookmarkActionsDeps {
   /** 编辑器/UISettings 那一份（本批用到 `sortBookmarks`）。 */

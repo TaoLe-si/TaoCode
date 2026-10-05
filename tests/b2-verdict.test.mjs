@@ -49,22 +49,18 @@ test('扫描件是 350 类，且 §G 逐条覆盖（名字与路径都对得上�
   assert.deepEqual(missing, [], `§G 漏了这些类：${missing.join(', ')}`)
 })
 
-// 计数随批次变化（第三十六批把 `ResizeStripeManager` / `MoreSquareStripeButton` 判成 `[x]`、
-// 三行侧条本体类从误判的 `[ ]` 改成 `[~]`：4 + 68 + 96 + 182 → 6 + 71 + 91 + 182）。
-// 这里盯的是**自洽**：每档的数字与总数对得上，且判决表自己写的和数一致。
-// 计数随批次变化（第三十六批：`ResizeStripeManager` / `MoreSquareStripeButton` 判成 `[x]`、
-// 三行侧条本体类从误判的 `[ ]` 改成 `[~]`；同批把第三十批欠账的状态栏注册表 5 行补判：
-// 4 + 68 + 96 + 182 → 12 + 80 + 62 + 196）。这里盯的是**自洽**：每档数字与总数对得上，
-// 且判决表自己写的和数一致。
-test('四档计数自己加得起来（15 + 92 + 39 + 204 = 350）', () => {
-  // 第九十一批把状态栏那一族 7 条改判（4 条 [~]、3 条 [-]），数字随判决走。
+// 计数随批次变化（2026-10-04 本轮：`StatusBarEditorBasedWidgetFactory` / `WidgetRegistry` 两条
+// 复核后改判 `[x]` —— 缺的是形态差异不是行为，判据 `tests/status-widgets-registry.test.mjs`；
+// 此前为 17 + 99 + 0 + 234 = 350）。
+// 这里盯的是**自洽**：每档数字与总数对得上，且判决表自己写的和数一致。
+test('四档计数自己加得起来（19 + 97 + 0 + 234 = 350）', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 15)
-  assert.equal(count('[~]'), 92)
-  assert.equal(count('[ ]'), 39)
-  assert.equal(count('[-]'), 204)
+  assert.equal(count('[x]'), 19)
+  assert.equal(count('[~]'), 97)
+  assert.equal(count('[ ]'), 0)
+  assert.equal(count('[-]'), 234)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 350)
-  assert.match(verdict, /四档合计 \*\*15 \+ 92 \+ 39 \+ 204 = 350\*\*/, '文档头部的和数也要跟着改')
+  assert.match(verdict, /四档合计 \*\*19 \+ 97 \+ 0 \+ 234 = 350\*\*/, '文档头部的和数也要跟着改')
 })
 
 test('每个 [x]/[~] 行的依据必须指到真实存在的 src/ 或 native/ 文件（防"注释里提过就算移植"）', () => {

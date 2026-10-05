@@ -3,11 +3,11 @@
 // 判据：两套"提示 + 候选列表 + 应用"的交互共享同一套结构（打开提示、方向键移动、回车应用、
 // Esc 取消），状态（提示开关 / 查询 / 索引 / 输入）也自成一体。外部依赖越少越好拆 —— 实测 6 个。
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
-import { request, type PluginInfo, type ProjectSettings, type Workspace } from './bridge'
-import { rankCommands } from './commandSearch'
-import { surroundTemplates, type SurroundTemplate } from './surround'
+import { request, type PluginInfo, type ProjectSettings, type Workspace } from './bridge.ts'
+import { rankCommands } from './commandSearch.ts'
+import { surroundTemplates, type SurroundTemplate } from './surround.ts'
 import { candidates as templateCandidates, effectiveTemplates, expand as expandTemplateAt,
-         defaultTemplateSettings, type Template } from './templates'
+         defaultTemplateSettings, type Template } from './templates.ts'
 
 /** 当前标签（宿主是 computed，只要只读视图）。 */
 type ActiveTab = { path: string; line: number; column: number } | undefined

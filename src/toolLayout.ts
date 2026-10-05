@@ -21,6 +21,7 @@
 //   default 50, `registry.properties:2198`) and not already taken. A taken name keeps the OK
 //   button enabled and is refused when it is pressed, while a too long name shows its error
 //   immediately (`LayoutNameInputDialog.kt:84-118`).
+import { resolveContentUiType, type ToolWindowContentUiType } from './toolWindowContentUi.ts'
 
 /** `ToolWindowDefaultLayoutManager.FACTORY_DEFAULT_LAYOUT_NAME` (:47). */
 export const FACTORY_LAYOUT_NAME = ''
@@ -31,7 +32,14 @@ export const MAX_LAYOUT_NAME_LENGTH = 50
 
 export type ToolWindowSide = 'left' | 'right' | 'bottom'
 
-/** One snapshot of the tool window layout. */
+/**
+ * One snapshot of the tool window layout.
+ *
+ * 上游 `ToolWindowDefaultLayoutManager` 存的是每个窗口的 `WindowInfo`（`WindowInfoImpl` 的
+ * `anchor`/`order`/`isShowStripeButton`/`contentUiType`/`isVisible`/`weight`…），不是三张投影表 ——
+ * 所以「从侧栏移除的按钮」（`isShowStripeButton = false`）与「每个内容的标签形态」
+ * （`contentUiType`）也属于布局快照：恢复一套命名布局时它们要跟着回来。
+ */
 export interface ToolLayout {
   explorer: boolean
   bottom: boolean
@@ -40,6 +48,10 @@ export interface ToolLayout {
   anchors: Record<string, ToolWindowSide>
   order: Record<string, string[]>
   sizes: Record<string, number>
+  /** 被「从侧栏移除」（`RemoveStripeButtonAction`）摘掉按钮的窗口 id。 */
+  hidden: string[]
+  /** 显式设过标签形态的内容（`WindowInfo.contentUiType`）；没设过的不进快照，保持各自现状。 */
+  uiTypes: Record<string, ToolWindowContentUiType>
 }
 
 /** The persisted store: the active name plus every named layout. */
@@ -71,6 +83,13 @@ export function normalizeToolLayout(raw: unknown, fallback: ToolLayout): ToolLay
   if (isRecord(raw.sizes))
     for (const [key, value] of Object.entries(raw.sizes))
       if (typeof value === 'number' && Number.isFinite(value) && value > 0) sizes[key] = value
+  // 兜底对象可能是旧快照（没有这两个字段）—— 逐字段解析的老规矩：读不出来就用空值。
+  const hidden: string[] = Array.isArray(fallback.hidden) ? [...fallback.hidden] : []
+  if (Array.isArray(raw.hidden))
+    hidden.splice(0, hidden.length, ...raw.hidden.filter((id): id is string => typeof id === 'string'))
+  const uiTypes: Record<string, ToolWindowContentUiType> = { ...(fallback.uiTypes ?? {}) }
+  if (isRecord(raw.uiTypes))
+    for (const [id, value] of Object.entries(raw.uiTypes)) uiTypes[id] = resolveContentUiType(value)
   return {
     explorer: typeof raw.explorer === 'boolean' ? raw.explorer : fallback.explorer,
     bottom: typeof raw.bottom === 'boolean' ? raw.bottom : fallback.bottom,
@@ -79,6 +98,8 @@ export function normalizeToolLayout(raw: unknown, fallback: ToolLayout): ToolLay
     anchors,
     order,
     sizes,
+    hidden,
+    uiTypes,
   }
 }
 

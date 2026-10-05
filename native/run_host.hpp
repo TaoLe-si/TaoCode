@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -46,6 +47,24 @@ Step step_from(const Json& value);
 /** 解析一个 `beforeLaunch` 数组（顺序即执行顺序）。 */
 std::deque<Step> chain_from(const Json& params);
 
+/**
+ * 一条 TCP 监听记录（pid + 本地端口）。平台层（`listening_tcp_ports`）负责枚举，
+ * 过滤逻辑放在下面这个纯函数里，便于离线自测。
+ */
+struct ListeningPort {
+    std::uint32_t pid = 0;
+    std::uint16_t port = 0;
+};
+
+/**
+ * 从监听记录里取出「属于给定 pid 集合」的端口（去重、升序）。
+ *
+ * 上游对应物是 `execution/portsWatcher`：进程占用端口对用户可见（调试端口/服务端口）。
+ * 本仓的可见落点是 Run 控制台「进程」区每个实例的 `ports` 字段（同一份 `run.instances` 快照）。
+ */
+std::vector<std::int64_t> ports_of(const std::vector<std::uint32_t>& pids,
+                                   const std::vector<ListeningPort>& listeners);
+
 class Manager {
 public:
     /** 事件出口：拿到一条已经带 `instance` 的 `run.output` / `run.exit` JSON。 */
@@ -70,7 +89,12 @@ public:
     /** 给某个实例的 stdin 写一行；实例不存在/已结束返回 false。 */
     bool write_line(int instance, const std::string& line);
 
-    /** 正在运行/刚结束的实例清单（IDEA 的 Run 工具窗口按它开标签）。 */
+    /**
+     * 正在运行/刚结束的实例清单（IDEA 的 Run 工具窗口按它开标签）：
+     * 每项 `{id, label, running, pid, children, tree}` —— `pid` 是该实例当前子进程的 OS pid
+     * （0 = 没在跑或已回收），`children` 是它下面活着的后代 pid，`tree` 是同一批后代的
+     * 结构 `{pid, parent, name}`（前序：先父后子），Run 控制台据此显示带进程名的进程树。
+     */
     Json instances() const;
 
     /** 还有实例在跑（进度面板与状态栏用它）。 */

@@ -187,8 +187,14 @@ test('a snapshot covers every piece of the layout and is written back in full', 
   const apply = app.slice(app.indexOf('function applyToolLayout'), app.indexOf('function applyNamedToolLayout'))
   for (const field of ['explorer', 'bottom', 'view', 'tab', 'anchors', 'order', 'sizes'])
     assert.ok(capture.includes(`${field}:`), `the snapshot does not capture ${field}`)
+  // `hidden`/`uiTypes` 在返回字面量里是简写属性（`hidden,`），所以按"作为键出现"匹配。
+  for (const field of ['hidden', 'uiTypes'])
+    assert.ok(new RegExp(`\\b${field},`).test(capture), `the snapshot does not capture ${field}`)
   // Restoring reuses the existing setters so a stored value is clamped and persisted like a drag.
   assert.ok(apply.includes('setPanelSize(panel, size)'), 'a restored panel size bypasses the clamp')
   assert.ok(apply.includes('saveToolOrder()'), 'a restored stripe order is not persisted')
   assert.ok(apply.includes('isLeftToolWindowId(layout.view)'), 'a restored view id is not validated')
+  // 每窗口状态（摘掉的侧条按钮 / 标签形态）也必须写回 —— 上游 setLayout 换的是整份 WindowInfo。
+  assert.ok(apply.includes('applyStripeButtons(layout.hidden)'), 'removed stripe buttons are not restored')
+  assert.ok(apply.includes('applyContentUiTypes(layout.uiTypes)'), 'explicit content-ui types are not restored')
 })

@@ -19,6 +19,11 @@ import { watch } from 'vue'
 import { gradleOutputTail } from './gradle.ts'
 import { elapsedLabel } from './progressPanel.ts'
 import { lspProgressInterrupted, lspProgressTasks, lspServerMessages, runningLspTasks } from './lspProgress.ts'
+import {
+  exportLspLogText, logLspProgress, logLspServerMessage, logLspServerStopped, lspLogEntries,
+  lspLogSummary, lspLogTail,
+} from './lspServerLog.ts'
+import { copyToClipboard } from './clipboard.ts'
 import type { NoticeEntry } from './notices'
 
 /** 通知列表的写入端口（`notifications.ts` 的 `notifyProgress`）。 */
@@ -53,6 +58,22 @@ export function lspInterruptedNoticeOf(task: { language: string; token: string; 
   return { message: `${task.title}：语言服务已停止`, error: false, displayId: lspNoticeId(task.language, task.token), percent: null }
 }
 
+/**
+ * 语言服务**日志**那一行（一个语言一条，`displayId` 稳定 ⇒ 原地刷新；动作「复制日志」）。
+ * 它不是进度：`percent` 缺省（不发进度条），`detail` 是日志尾部。
+ * 这是「语言服务输出」在本仓的呈现面（上游是 Services 里的 `LspClientConsole`）。
+ */
+export function lspLogNoticeOf(language: string): Omit<NoticeEntry, 'id' | 'at'> {
+  const entries = lspLogEntries.value
+  return {
+    message: lspLogSummary(entries, language),
+    error: entries.some(entry => entry.language === language && entry.level === 1),
+    detail: lspLogTail(entries, language, 8),
+    displayId: `lsp:log:${language}`,
+    actions: [{ label: '复制日志', run: () => { void copyToClipboard(exportLspLogText(entries, { language })) } }],
+  }
+}
+
 /** Gradle 同步进行中那一行。 */
 export function gradleRunningNoticeOf(startedAt: number, output: string, command: string, now: number): Omit<NoticeEntry, 'id' | 'at'> {
   const tail = gradleOutputTail(output, 1)[0] ?? ''
@@ -78,28 +99,45 @@ export function gradleFinishedNoticeOf(error: string, seconds: number, label = '
 /**
  * 语言服务进度 → 消息窗口。表里有的行就地刷新；上一拍见过、这一拍消失的那个 token
  * 补一条"已完成"的结论（`end` 那拍任务会被删掉，所以要自己留着上一次的形状）。
+ *
+ * 同一批事件也写进 `src/lspServerLog.ts` 的日志（上游 `LanguageServiceLogger` 的等价物）：
+ * 服务器消息/进度起止/停机各记一行；服务停止或报错时在消息窗口再挂一行**该语言的日志通知**
+ * （detail = 日志尾部、动作 = 复制日志）—— 这就是本仓的「语言服务输出」呈现面
+ * （IDEA 的 Services 输出窗口要改 App.vue 的工具窗口装配，本批冻结）。
  */
 export function wireLspProgressNotices(notifyProgress: NotifyProgress) {
   // 服务器自己发的消息（`window/showMessage`）：一条一行，错误/警告标成错误样式。
   watch(() => lspServerMessages.length, () => {
     for (const message of lspServerMessages.splice(0, lspServerMessages.length)) {
+      logLspServerMessage(message)
       notifyProgress({
         message: message.message,
         error: message.severity <= 2,
         detail: [`来自 ${message.language || '语言服务'}`],
         displayId: `lsp:message:${message.language}`,
       })
+      // 错误/警告把日志行一并留在消息窗口（`LspServerNotificationsHandlerImpl` 的 showMessage
+      // 只给消息本身；日志尾部让用户能看见这条消息之前服务器都说了什么）。
+      if (message.severity <= 2) notifyProgress(lspLogNoticeOf(message.language))
     }
   })
   let previous = new Map(Object.entries(lspProgressTasks).map(entry => [entry[0], entry[1]]))
   watch(() => `${Object.keys(lspProgressTasks).join('|')}#${lspProgressInterrupted.length}`, () => {
     const current = new Map(runningLspTasks(lspProgressTasks).map(task => [task.key, task]))
-    for (const task of current.values()) notifyProgress(lspNoticeOf(task))
+    for (const task of current.values()) {
+      if (!previous.has(task.key)) logLspProgress('begin', task)
+      notifyProgress(lspNoticeOf(task))
+    }
     // 停机的那批由 bridge 放进中断列表（它才知道"不会再有 end 了"），这里读走并给出对的措辞。
     const interrupted = new Map(lspProgressInterrupted.splice(0, lspProgressInterrupted.length).map(task => [task.key, task]))
-    for (const task of interrupted.values()) notifyProgress(lspInterruptedNoticeOf(task))
+    for (const task of interrupted.values()) {
+      logLspServerStopped(task)
+      notifyProgress(lspInterruptedNoticeOf(task))
+      notifyProgress(lspLogNoticeOf(task.language))
+    }
     for (const [key, task] of previous) {
       if (current.has(key) || interrupted.has(key)) continue
+      logLspProgress('end', task)
       notifyProgress(lspFinishedNoticeOf(task))
     }
     previous = current

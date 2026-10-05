@@ -4,7 +4,7 @@
 //
 // 数据与规则在 src/macros.ts（纯逻辑）与 src/macroHost.ts（宿主），这里只做渲染与派发。
 import { computed, ref } from 'vue'
-import { Play, Trash2, X } from 'lucide-vue-next'
+import { Play, Trash2, X, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { ANONYMOUS_MACRO_LABEL, actionStepCount, macroDisplayName, type Macro } from '../macros'
 import { iconSize } from '../uiIcons'
 
@@ -14,6 +14,7 @@ const emit = defineEmits<{
   (event: 'remove', payload: { name: string }): void
   (event: 'rename', payload: { from: string; to: string }): void
   (event: 'removeStep', payload: { name: string; index: number }): void
+  (event: 'moveStep', payload: { name: string; index: number; delta: number }): void
   (event: 'close'): void
 }>()
 
@@ -83,6 +84,8 @@ function commitRename() {
               <li v-for="(step, index) in current.steps" :key="`${index}:${step.kind}`">
                 <span class="macros-step-kind">{{ step.kind === 'action' ? '动作' : step.kind === 'typing' ? '输入' : '按键' }}</span>
                 <span class="macros-step-text">{{ stepLabel(step) }}</span>
+                <button class="icon-button" :disabled="index === 0" :aria-label="`上移第 ${index + 1} 步`" title="上移这一步" @click="emit('moveStep', { name: current.name, index, delta: -1 })"><ArrowUp :size="iconSize.menu" /></button>
+                <button class="icon-button" :disabled="index === current.steps.length - 1" :aria-label="`下移第 ${index + 1} 步`" title="下移这一步" @click="emit('moveStep', { name: current.name, index, delta: 1 })"><ArrowDown :size="iconSize.menu" /></button>
                 <button class="icon-button" :aria-label="`删除第 ${index + 1} 步`" title="删除这一步" @click="emit('removeStep', { name: current.name, index })"><Trash2 :size="iconSize.menu" /></button>
               </li>
             </ol>

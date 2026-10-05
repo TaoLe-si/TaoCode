@@ -51,11 +51,50 @@ export function exportResultMessage(result: { path?: string; bytes?: number; com
 /** 段名 → 人话（native 给的是 JSON 键名）。 */
 export function sectionLabel(section: string): string {
   switch (section) {
-    case 'settings': return '编辑器设置'
+    // native `empty_document()` 的键名就是 `general`；`preferences.general` 是设置树里的页键，
+    // 老版本的摘要可能用过它，一并认下（两处都映到「系统设置」，免得导出提示里露出生键名）。
+    case 'general':
     case 'preferences.general': return '系统设置'
+    case 'settings': return '编辑器设置'
     case 'perProject': return '每个项目的设置'
     default: return section
   }
+}
+
+/**
+ * 归档路径的**前置校验**：本仓的导入/导出都只认 zip（`native/settings_transfer.cpp` 写的就是
+ * 它），选错文件在这里就报清楚，不必等原生返回一句"这不是一个可读的设置归档"。
+ */
+export function archivePathProblem(path: string): string | null {
+  const target = path.trim()
+  if (!target) return '请选择设置归档。'
+  return target.toLowerCase().endsWith(SETTINGS_ARCHIVE_EXTENSION)
+    ? null
+    : `设置归档应当是 ${SETTINGS_ARCHIVE_EXTENSION} 文件。`
+}
+
+/** 用户在保存对话框里把 `.zip` 删掉时补回来（对话框的过滤器带扩展名，手打的名字不一定）。 */
+export function ensureArchiveExtension(path: string): string {
+  return path.toLowerCase().endsWith(SETTINGS_ARCHIVE_EXTENSION) ? path : path + SETTINGS_ARCHIVE_EXTENSION
+}
+
+/**
+ * 读回来的归档摘要的形状校验（`app.readSettingsArchive` 的返回）—— 在确认框**之前**跑，
+ * 形状不对的摘要不进确认、更不进写盘。原生已经保证了归档内容本身合法（坏包在那里就抛错），
+ * 这里防的是"桥接层返回了缺字段/字段类型不对的东西"时用户看到一句假的"将覆盖：设置"。
+ */
+export function validateTransferSummary(summary: unknown): string | null {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return '归档摘要格式不对。'
+  const value = summary as Partial<SettingsTransferSummary>
+  if (typeof value.path !== 'string' || !value.path.trim()) return '摘要里没有归档路径。'
+  if (!Array.isArray(value.components) || value.components.length === 0)
+    return '归档里没有任何可导入的设置段（可能是别的工具写的 zip）。'
+  if (value.components.some(section => typeof section !== 'string' || !section.trim()))
+    return '摘要里的设置段名不合法。'
+  if (typeof value.projects !== 'number' || !Number.isInteger(value.projects) || value.projects < 0)
+    return '摘要里的项目数不合法。'
+  if (typeof value.exportedAt !== 'string') return '摘要里的导出时间不合法。'
+  return null
 }
 
 /** 导入前的确认文案：先说清"会覆盖什么、不会覆盖什么"（最近项目不动，与源码一致）。 */
@@ -116,7 +155,8 @@ export function createSettingsTransfer(deps: SettingsTransferDeps) {
     const path = await saveSettingsFile()
     if (!path) return
     try {
-      const result = await request<{ path: string; bytes: number; components: string[] }>('app.exportSettings', { path })
+      // 补扩展名后再交给原生（用户手打掉 `.zip` 时归档仍能被下次导入认出）。
+      const result = await request<{ path: string; bytes: number; components: string[] }>('app.exportSettings', { path: ensureArchiveExtension(path) })
       deps.notify(exportResultMessage(result))
     } catch (error) { deps.notify(`导出设置失败：${errorMessage(error)}`, true) }
   }
@@ -125,11 +165,17 @@ export function createSettingsTransfer(deps: SettingsTransferDeps) {
     if (!deps.isDesktop) { deps.notify('浏览器预览不能导入设置，请在桌面端使用。', true); return }
     const path = await pickSettingsFile()
     if (!path) return
+    // 只认 zip：选错文件在这里就说清，别让原生的"不是归档"当第一句提示。
+    const pathProblem = archivePathProblem(path)
+    if (pathProblem) { deps.notify(pathProblem, true); return }
     // 先让原生把包读出来校验（**不写盘**），拿到摘要再问用户 —— 免得确认完才发现包是坏的。
     let summary: SettingsTransferSummary
     try {
       summary = await request<SettingsTransferSummary>('app.readSettingsArchive', { path })
     } catch (error) { deps.notify(`无法读取这个设置归档：${errorMessage(error)}`, true); return }
+    // 摘要形状不对同样停在确认框之前（`validateTransferSummary` 只认字段形状，内容校验在原生）。
+    const summaryProblem = validateTransferSummary(summary)
+    if (summaryProblem) { deps.notify(`这个设置归档读不出内容：${summaryProblem}`, true); return }
     if (!confirm(importConfirmMessage(summary))) return
     try {
       await request('app.importSettings', { path })

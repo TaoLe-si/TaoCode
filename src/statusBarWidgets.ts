@@ -20,6 +20,12 @@
 // 有了它，新组件只是往 `src/statusWidgets.ts` 的工厂表里加一条；可见性、持久化、右键勾选的过滤
 // 全在这里，且不碰 DOM（`tests/status-bar-widgets.test.mjs` 直接跑）。
 
+// 组件**实例**那一层（`src/statusBarLifecycle.ts`）在这里落地：工厂表决定「该不该建」，
+// 实例表决定「建了没、卸了没」，两者分开正是上游 `StatusBarWidgetsManager` 存在的理由
+// （`LinkedHashMap<Factory, Widget>` + `widgetIdMap`，`StatusBarWidgetsManager.kt:58-59`）。
+// 有了实例表，`dispose` 之后「所有更新一律返回」这条保护才有地方生效（`EditorBasedWidget.kt:96-109`）。
+import { disposeWidget, installWidget, type StatusBarBinding, type WidgetInstance } from './statusBarLifecycle.ts'
+
 /** 上游 `StatusBarWidgetFactory`（`platform-api/.../StatusBarWidgetFactory.java`）的字段面。 */
 export interface StatusBarWidgetFactory {
   /** 上游 `getId()`：与 plugin.xml 的扩展 `id` 一致，**也是持久化可见性用的键**（`:31-34`）。 */
@@ -104,4 +110,74 @@ export function migrateHiddenKeys(hidden: unknown): Record<string, boolean> {
   if (!Array.isArray(hidden)) return overrides
   for (const key of hidden) if (typeof key === 'string') overrides[key] = false
   return overrides
+}
+
+// ── 组件实例表（`StatusBarWidgetsManager.updateWidget` 的可移植核心）──────────────────────
+
+/** 状态栏此刻的宿主状态（`StatusBarBinding` 的**活**来源；本仓单窗口，所以按 getter 给）。 */
+export interface StatusBarWidgetHost {
+  /** 这条状态栏属于哪个窗口 —— 装错窗口要抛错（`EditorBasedWidget.kt:111-113` 的 assert）。 */
+  windowId: string
+  editorId: () => string | null
+  filePath: () => string | null
+  editorShowing: () => boolean
+}
+
+export interface StatusBarWidgetInstances {
+  /** 已建组件的实例表（`LinkedHashMap<Factory, Widget>` 的可移植子集，键用工厂 id）。 */
+  instance: (id: string) => WidgetInstance | null
+  /** 此刻**活着的**实例 id（已 dispose 的不算）。 */
+  liveIds: () => string[]
+  /**
+   * `updateWidget()`（`:97-131`）的一拍：按 `shouldCreateWidget` 的三道闸逐个建或卸。
+   * 返回这一拍**真的动了**的那些 id（建起来的 / 卸掉的），调用方据此决定要不要重渲染。
+   */
+  sync: (factories: readonly StatusBarWidgetFactory[], overrides: Readonly<Record<string, boolean>>) => { installed: string[]; disposed: string[] }
+  /** 卸掉全部（关工作区 / 换项目时）。 */
+  disposeAll: () => string[]
+}
+
+export function createStatusBarWidgetInstances(host: StatusBarWidgetHost): StatusBarWidgetInstances {
+  const instances = new Map<string, WidgetInstance>()
+  // **活状态栏**，不是安装那一刻的快照：上游 `EditorBasedWidget.myStatusBar`（`EditorBasedWidget.kt:59`）
+  // 存的是那条 `StatusBar` **对象本身**，`isOurEditor`（`:97`）与 `getSelectedFile()`（`:103-108`，
+  // 内部走 `StatusBarUtil.getCurrentFileEditor(myStatusBar)`）每次调用都从它身上现取当前编辑器。
+  // 存成快照的话，「先没有编辑器时装上、之后编辑器被打开」的组件会永远判不出是自己的编辑器 ——
+  // 菜单那一侧的 `widgetToggleEnabled` 已经跟着编辑器变灰/变亮，实例这一侧必须跟着活。
+  const statusBar: StatusBarBinding = {
+    windowId: host.windowId,
+    get editorId() { return host.editorId() },
+    get filePath() { return host.filePath() },
+    get editorShowing() { return host.editorShowing() },
+  }
+  return {
+    instance: id => instances.get(id) ?? null,
+    liveIds: () => [...instances.values()].filter(instance => !instance.isDisposed).map(instance => instance.factory.id),
+    sync(factories, overrides) {
+      const installed: string[] = []
+      const disposed: string[] = []
+      for (const factory of factories) {
+        const current = instances.get(factory.id)
+        if (shouldCreateWidget(factory, overrides)) {
+          // 已经在跑就**不重装**：上游 `updateWidget` 复用已登记的组件，重装会把它的状态清掉。
+          if (current && !current.isDisposed) continue
+          instances.set(factory.id, installWidget(factory, statusBar, host.windowId))
+          installed.push(factory.id)
+        } else if (current && !current.isDisposed) {
+          instances.set(factory.id, disposeWidget(current))
+          disposed.push(factory.id)
+        }
+      }
+      return { installed, disposed }
+    },
+    disposeAll() {
+      const disposed: string[] = []
+      for (const [id, instance] of instances) {
+        if (instance.isDisposed) continue
+        instances.set(id, disposeWidget(instance))
+        disposed.push(id)
+      }
+      return disposed
+    },
+  }
 }

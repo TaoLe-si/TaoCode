@@ -2,9 +2,9 @@
 // 纯逻辑（环的增删改、上限与清理、选择器的行渲染规则）都在 src/clipboardHistory.ts，那边没有 Vue 依赖、可直接单测。
 import { computed, ref } from 'vue'
 import { CLIPBOARD_MAX_ITEMS, CLIPBOARD_MAX_MEMORY, pushClipboardContent, removeClipboardContent,
-         moveClipboardContentToTop, syncSystemClipboard, type ClipboardEntry } from './clipboardHistory'
+         moveClipboardContentToTop, syncSystemClipboard, type ClipboardEntry } from './clipboardHistory.ts'
 
-export * from './clipboardHistory'
+export * from './clipboardHistory.ts'
 
 // ---------------------------------------------------------------------------
 // 宿主通道：模块自持的环 + 系统剪贴板读写
@@ -46,6 +46,13 @@ export async function readClipboardHistory(): Promise<ClipboardEntry[]> {
   const current = await readSystemClipboard()
   clipboardRing.value = syncSystemClipboard(clipboardRing.value, current)
   return clipboardRing.value
+}
+
+/** 只要当前系统剪贴板的纯文本（外部工具的 `$ClipboardContent$` 宏；同时把环同步一次）。 */
+export async function readClipboardText(): Promise<string> {
+  const current = await readSystemClipboard()
+  clipboardRing.value = syncSystemClipboard(clipboardRing.value, current)
+  return current ?? ''
 }
 
 /** `removeContent`：删掉某项；删的是表头时把系统剪贴板回落到新表头（与源码一致）。 */

@@ -1,33 +1,139 @@
-import { acceptCompletion, autocompletion, currentCompletions, startCompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
-import { Prec, type EditorState } from '@codemirror/state'
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus, currentCompletions, startCompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
+import { Prec, EditorSelection, type EditorState } from '@codemirror/state'
 import { EditorView, ViewPlugin, getTooltip, keymap, repositionTooltips, showTooltip, tooltips, type TooltipView } from '@codemirror/view'
 import { completionIcon } from './completionIcons.ts'
 import { completionPresentation, type PresentedCompletion } from './completionPresentation.ts'
+import { beginCompletion, completionModeForEvent, endCompletion, type CompletionMode } from './completionModes.ts'
+import { hippieStep, type HippieState } from './cyclicWordCompletion.ts'
+import { otherOpenEditorTexts } from './completionOpenEditors.ts'
 
-// $default.xml:732-734 is BASIC. :909-911 is SMART, a different contributor.
-// Neither a physical-key fallback nor a menu invocation may alias Smart to Basic.
-export function isBasicCompletionKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'keyCode' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'isComposing' | 'defaultPrevented'>): boolean {
-  return !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && event.key !== 'Process'
-    && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-    && (event.code === 'Space' || event.key === ' ')
+// 三条补全键位（`platform/platform-resources/src/keymaps/$default.xml`）：
+//   · `CodeCompletion` = Ctrl+Space —— `:732-734`（`CodeCompletionAction.java:12-17`，BASIC）；
+//   · `SmartTypeCompletion` = Ctrl+Shift+Space —— `:909-911`（`SmartCodeCompletionAction.java:11-17`，SMART）；
+//   · `ClassNameCompletion` = Ctrl+Alt+Space —— `:843-845`（`ClassNameCompletionAction.java:11-17`，
+//     **BASIC + 第二次调用**，`CompletionParameters.java:113-115`）。
+// 模式与「第几次调用」记在 `completionModes.ts` 那份**按 EditorView 存**的状态上（上游那份挂在
+// `CompletionServiceImpl` 的 `CompletionPhase` 上，`CodeCompletionHandlerBase.java:210-213`：
+// 同一个键再按一次才递增 `invocationCount`，弹层关掉就是新一轮）。
+// 三条不能互相冒充：BASIC 只认裸 Ctrl+Space（`!shiftKey && !altKey`），Shift/Alt 各自走自己的模式；
+// 那张判定表在只读参考 `completionModes.ts:57-65` 的 `completionModeForEvent`（它对三条键位
+// 逐条对上游，含输入法合成码 229/`Process` 的排除）。以前这里另有一份只认 BASIC 的
+// `isBasicCompletionKey`/`handleBasicCompletionKey`，三条键位因此只落了 1 条 —— 已由
+// `handleCompletionModeKey` 取代（判据 `tests/completion-mode-keys.test.mjs`）。
+
+/** 正在"关-开"重查的编辑器（见 `handleCompletionModeKey`）：那一次中间状态不算一轮结束。 */
+const reopeningViews = new WeakSet<EditorView>()
+
+/**
+ * 这一台编辑器现在有没有补全弹层（上游那份状态挂在 `CompletionPhase` 上，
+ * `CodeCompletionHandlerBase.java:210-213`：开着再按 = 第 N 次调用，关了就是新一轮）。
+ * 本仓那份在 `completionModes.ts` 的 WeakMap 里，所以「弹层关了要把状态清掉」这件事
+ * 由 `completionLayout` 那个 ViewPlugin 在每次 state 更新时代做（`endCompletionIfRoundOver`）。
+ */
+export function completionRoundActive(view: EditorView): boolean {
+  return completionStatus(view.state) === 'active'
 }
 
-export function startBasicCompletion(view: EditorView): boolean {
-  // Menu / Find Action left focus on a button or input. The lookup does not take
-  // focus (LookupImpl.java:248); the editor must own subsequent lookup keys.
+function endCompletionIfRoundOver(view: EditorView): void {
+  if (!completionRoundActive(view) && !reopeningViews.has(view)) endCompletion(view)
+}
+
+/**
+ * 按模式起一次补全 —— **键位与菜单共用的唯一入口**。
+ * 弹层已经开着时同一档再按 = 放宽一档（上游 `CodeCompletionHandlerBase.java:210-213` 在补全还开着时
+ * 把 `invocationCount` 往上加，`phase.newCompletionStarted(...)`），表跟着重新算一次。
+ * CodeMirror 的 `startCompletion` 在弹层开着时是 no-op（它只负责"起"），所以这里用「关-开」两次
+ * dispatch 逼它重新查询；中间那一次不能被收尾判定当成"这一轮结束了" —— 那是 `reopeningViews` 的作用。
+ * 弹层没开 = 新一轮：先把上一次的状态作废，否则上次的模式会跟着这次的查询。
+ *
+ * 菜单 / Find Action 那一侧（`Code > 代码补全`，见接线请求 W2）也走这里：
+ * `LookupImpl.java:248` 的 lookup 不抢焦点，所以先 `view.focus()` 把键权还给编辑器。
+ */
+export function startCompletionAs(view: EditorView, mode: CompletionMode): boolean {
+  const active = completionRoundActive(view)
+  if (!active) endCompletion(view)
+  beginCompletion(view, mode)
   view.focus()
-  return startCompletion(view)
+  if (active) {
+    reopeningViews.add(view)
+    try {
+      closeCompletion(view)
+      startCompletion(view)
+    } finally {
+      reopeningViews.delete(view)
+    }
+    return true
+  }
+  const started = startCompletion(view)
+  // 没起弹层就别把这次的模式留在状态上（下一次查询会是别人的一轮）。
+  if (!started) endCompletion(view)
+  return started
 }
 
-export function handleBasicCompletionKey(event: KeyboardEvent, view: EditorView): boolean {
-  return isBasicCompletionKey(event) && startBasicCompletion(view)
+/** `CodeCompletion`（`$default.xml:732-734`，`CodeCompletionAction.java:12-17` 的 BASIC）。 */
+export function startBasicCompletion(view: EditorView): boolean {
+  return startCompletionAs(view, 'basic')
+}
+
+/** Ctrl+Space / Ctrl+Shift+Space / Ctrl+Alt+Space 三条都从这里落（判定表 `completionModes.ts:57-65`）。 */
+export function handleCompletionModeKey(event: KeyboardEvent, view: EditorView): boolean {
+  const mode = completionModeForEvent(event)
+  return mode ? startCompletionAs(view, mode) : false
 }
 
 export const basicCompletionKeys = [
-  Prec.highest(EditorView.domEventHandlers({ keydown: handleBasicCompletionKey })),
+  // 这里是**唯一**的三条补全键位入口：以前只挂了 Ctrl+Space 一条，
+  // 于是 Smart / 类名两档在模型里齐了、在界面上按不出来。
+  Prec.highest(EditorView.domEventHandlers({ keydown: handleCompletionModeKey })),
   // EditorChooseLookupItemReplace is Tab ($default.xml:111-113). Without this,
   // CodeEditor's indentation consumes Tab even when a lookup is open.
   Prec.high(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
+]
+
+// 循环词补全（上游 `HippieCompletionAction`：Alt+/ 向前、Alt+Shift+/ 向后，`$default.xml:735-739`）。
+// 算法在 `src/cyclicWordCompletion.ts`；这里只做编辑器侧的按键与替换。状态按编辑器存放 ——
+// 上游挂在 Editor 的 `KEY_STATE` 上，连续按从同一前缀往后循环，一轮走完恢复原前缀。
+// 「其他打开文档」那一档的正文来自 `src/completionOpenEditors.ts`（上游 `getAllEditors()`，
+// `HippieWordCompletionHandler.java:271-278`）；表是空的就没换档，退回只搜当前文档。
+const hippieStates = new WeakMap<EditorView, HippieState>()
+function runHippieCompletion(view: EditorView, direction: 1 | -1): boolean {
+  if (view.state.readOnly) return false
+  const ranges = view.state.selection.ranges
+  if (ranges.some(range => !range.empty)) return false
+  const text = view.state.sliceDoc()
+  const step = hippieStep(text, view.state.selection.main.head, hippieStates.get(view) ?? null, direction, {
+    carets: ranges.map(range => range.head),
+    // 上游比的是 `document.getModificationStamp()`（`HippieWordCompletionHandler.java:74`、`:107`）。
+    // CodeMirror 的 `EditorState.doc` 是**不可变**的 `Text`：任何一次文档编辑都换一个新对象，
+    // 所以对象身份就是那份改动号（`EditorState` 上没有公开的 changeCount/seq 可用）。
+    revision: view.state.doc,
+    otherDocuments: otherOpenEditorTexts(text),
+  })
+  if (!step) return false
+  view.dispatch({
+    // 上游对每个 caret 各替换一次（`insertStringForEachCaret:115-122`），本仓一次 dispatch 做完。
+    changes: step.spans.map(span => ({ from: span.from, to: span.to, insert: step.word })),
+    selection: EditorSelection.create(
+      step.spans.map(span => EditorSelection.cursor(span.from + step.word.length))),
+    scrollIntoView: true,
+    userEvent: 'input.complete',
+  })
+  if (step.state && !step.exhausted) {
+    // 上游把 `lastModCount` 记在插入**之后**（`:107`），所以改动号要等 dispatch 落地再盖进状态。
+    hippieStates.set(view, { ...step.state, revision: view.state.doc })
+  } else hippieStates.delete(view)
+  return true
+}
+/** 上游快捷键表那两条（`$default.xml:735-739`，按物理 SLASH 判，避开 Shift+/ 在部分布局是 `?`）。 */
+export const hippieCompletionKeys = [
+  Prec.highest(EditorView.domEventHandlers({
+    keydown: (event, view) => {
+      if (!event.altKey || event.code !== 'Slash' || event.ctrlKey || event.metaKey) return false
+      if (!runHippieCompletion(view, event.shiftKey ? -1 : 1)) return false
+      event.preventDefault()
+      return true
+    },
+  })),
 ]
 
 function presentationOf(completion: Completion) {
@@ -96,8 +202,10 @@ export function renderCompletionRow(
 
 // 颜色一律读 tokens.css 的 `--completion-*` / `--popup-*`（月相层，随 data-theme 换面）：
 // 这里**不再写死十六进制**，也不再按 CM 的 light/dark 类各发一份 —— 那会让补全弹窗与
-// 菜单浮层在换主题时各走各的。度量（行高、条数、inset、右留白）才是这个文件管的事，
-// 每一条后面注了上游的类与行号。
+// 菜单浮层在换主题时各走各的。**注意那些值不是上游调色板的原样抄写**（上游 `LOOKUP_COLOR`
+// 与 `CompletionPopup.foreground`/`matchForeground` 的逐条核对写在 tokens.css `--m-pop-bg` 旁）。
+// 度量（行高、条数、inset、右留白）才是这个文件管的事，每一条后面注了上游的类与行号；
+// 2026-10-05 复核过一遍，这些行号仍然准确。
 export const completionThemeRules = {
   // 月相浮层规格：圆角 + 1px 描边 + 与菜单弹层同一档阴影（--popup-shadow）。
   // **不能写 overflow: hidden** —— CM 把右侧文档面板（.cm-completionInfo）绝对定位在
@@ -110,8 +218,10 @@ export const completionThemeRules = {
     width: 'max-content', maxWidth: 'min(500px, 100vw)',
   },
   // UISettingsState.kt:197,199: max width 500, max 11 visible items.
-  // LookupCellRenderer.kt:718 + UIUtil.java:3079-3081: MINIMUM row height,
-  // not a fixed row height. New UI List.rowHeight is 24; large editor fonts grow.
+  // LookupCellRenderer.kt:718 + UIUtil.java:3079-3081: MINIMUM row height
+  // (`Math.max(size.height, UIManager.getInt("List.rowHeight"))`), not a fixed row height.
+  // New UI `List.rowHeight` = 24 (expUI_light.theme.json:376 / expUI_dark.theme.json:378);
+  // large editor fonts grow the row.
   '.cm-tooltip.tc-completion > ul': {
     fontFamily: 'inherit', minWidth: '0', maxWidth: '100%', height: 'auto',
     maxHeight: `calc(11 * max(var(--popup-row-h), 1lh + 4px) + 2 * var(--popup-pad))`,
@@ -166,8 +276,16 @@ export const completionThemeRules = {
 }
 
 const completionLayout = ViewPlugin.fromClass(class {
-  constructor(readonly view: EditorView) { this.schedule() }
-  update() { this.schedule() }
+  // 显式字段，不写参数属性（`constructor(readonly view: …)` 是类型扩展语法，Node 22 直跑
+  // `.ts` 的 strip-only 擦除不支持它，会让 import 到本文件的用例**整个文件**加载失败）。
+  private readonly view: EditorView
+  constructor(view: EditorView) { this.view = view; this.schedule() }
+  update() {
+    // 弹层一关就把这一轮的模式与调用次数作废（上游那份状态随 `CompletionPhase` 一起结束，
+    // `CodeCompletionHandlerBase.java:210-213`）；打字收层、Esc、接受条目、切焦点都走到这里。
+    endCompletionIfRoundOver(this.view)
+    this.schedule()
+  }
   schedule() { this.view.requestMeasure(this.measure) }
   measure = {
     read: () => {
@@ -192,6 +310,8 @@ const completionLayout = ViewPlugin.fromClass(class {
 export function completionUi(sources: CompletionSource[]) {
   return [
     ...basicCompletionKeys,
+    // Alt+/ 的循环词补全（与补全弹层无关：不弹层，直接就地替换前缀）。
+    ...hippieCompletionKeys,
     // The CM tooltip container carries view.themeClasses and tracks theme changes.
     // Body hosting removes editor overflow/transform containing-block constraints.
     tooltips({ parent: document.body }),

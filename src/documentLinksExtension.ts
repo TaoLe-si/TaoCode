@@ -11,7 +11,7 @@
 
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { DocumentLink, DocumentLinkResult } from './documentLinks'
+import type { DocumentLink, DocumentLinkResult } from './documentLinks.ts'
 
 export const setDocumentLinks = StateEffect.define<readonly DocumentLink[]>()
 

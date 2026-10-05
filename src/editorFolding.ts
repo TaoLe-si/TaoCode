@@ -7,20 +7,25 @@
 //   · `FoldingUtil.getFoldRegionsAtOffset` ↔ `innermostAt`（光标所在的最内层区间）；
 //   · `FoldingUtil.createFoldTreeIterator` 的层级 ↔ `depthOf`（祖先条数）；
 //   · `BaseExpandToLevelAction` 的"展开到第 N 层" ↔ `levelPlan`；
-//   · 文档注释那一组（`Collapse/ExpandDocCommentsAction`）↔ `commentRanges`（`kind === 'comment'`）。
+//   · 文档注释那一组（`Collapse/ExpandDocCommentsAction`）↔ `docCommentRanges`（`kind === 'comment'` 且起始行是 doc 记号）。
 //
 // 区间**按行**来（服务端只给行；IDEA 的 `FoldRegion` 是偏移），所以行模型统一用行号算层级、
 // 到用时才换算成偏移；下面「区域层」那一节是偏移模型，给逐个动作挑目标用（上游挑目标靠的是
 // `FoldingUtil.findFoldRegionStartingAtLine` / `getFoldRegionsAtOffset`，都是偏移比较）。
-import { foldable, foldedRanges, foldEffect, foldNodeProp, foldService, syntaxTree, unfoldEffect } from '@codemirror/language'
+import { ensureSyntaxTree, foldable, foldedRanges, foldEffect, foldNodeProp, foldService, syntaxTree, unfoldEffect } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import type { EditorState } from '@codemirror/state'
 import { StateEffect, StateField } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
 import { caretInsideRange, signatureAt as signatureOf } from './editorFoldingState.ts'
+import { collapsedByDefaultMarker, commentMarkerBody, markerKindOf } from './customFoldingProviders.ts'
 
-/** LSP `textDocument/foldingRange` 的一条（0 基行号，`kind` 见 LSP 规范：comment / imports / region）。 */
-export interface LspFold { startLine: number; endLine: number; kind?: string }
+/**
+ * LSP `textDocument/foldingRange` 的一条（0 基行号，`kind` 见 LSP 规范：comment / imports / region）。
+ * `collapseByDefault` 只有本地 region 标记会带：开始标记写着 `defaultstate="collapsed"`
+ * （`NetBeansCustomFoldingProvider.java:46-48`），全局开关关着也要默认折起。
+ */
+export interface LspFold { startLine: number; endLine: number; kind?: string; collapseByDefault?: boolean }
 
 /** 服务端给的折叠区间（`CodeEditor.vue` 请求回来后就装进这个 field）。 */
 export const setFoldingRanges = StateEffect.define<readonly LspFold[]>()
@@ -44,6 +49,72 @@ export const lspFoldService = foldService.of((state, lineStart) => {
   const to = state.doc.line(range.endLine + 1).to
   return to > from ? { from, to } : null
 })
+
+// ── 本地自定义折叠区域（region 标记） ────────────────────────────────────────────────
+//
+// 上游的自定义折叠不依赖语言服务：`CustomFoldingBuilder.java:33-50` 遍历 PSI 树，只问**注释节点**
+// （`:211-213` 的 `isCustomFoldingCandidate`），按 provider 的 `isCustomRegionStart/End`
+// （`:164-187`）配对成区间（`:82-91`：区间 = 开始标记起点 → 结束标记末尾）。
+// 本仓的折叠区间全部来自 LSP，服务端不发 `region` kind 时（或没接语言服务时）标记就没有折叠 ——
+// 这里补上本地解析：标记形态、占位文字与默认折叠规则全在 `src/customFoldingProviders.ts` 那张表里
+// （社区树注册的两条 provider 见 `intellij.platform.lang.impl.xml:1466-1467`，
+// 加上判决写作「默认标记」的 `//<region>` / `//</region>` 一族）。
+// 解析出的区间 `kind: 'region'`，与设置项 `collapseCustomRegions`（`src/editorFoldingSettings.ts`
+// 的 `autoCollapseKinds`）走同一条路 —— 开关打开时随开文件默认折起；
+// 开始标记自己带 `defaultstate="collapsed"` 的那一条另记 `collapseByDefault`
+// （`NetBeansCustomFoldingProvider.java:46-48`，全局开关关着也折）。
+
+/** 去掉注释前缀后的 region 标记正文；不是注释行时返回 null（表在 `src/customFoldingProviders.ts`）。 */
+export function regionMarkerBody(line: string): string | null {
+  return commentMarkerBody(line)
+}
+
+/** 一行的标记类型：`start` / `end` / `null`（不是标记行）。 */
+export function regionMarker(line: string): 'start' | 'end' | null {
+  return markerKindOf(regionMarkerBody(line))?.kind ?? null
+}
+
+/**
+ * 扫全文的 region 标记，配对成折叠区间（0 基行号，`kind: 'region'`，`endLine` 是**结束标记那一行**，
+ * 折起来只看得见开始标记 —— 与 IDEA 的自定义折叠区域同形）。
+ * 支持嵌套（配对按栈）；**未闭合的开始标记不产生区域** —— 一个手误不该让整个文件从那一行折到底。
+ */
+export function localRegionFolds(text: string): LspFold[] {
+  const stack: number[] = []
+  const out: LspFold[] = []
+  const lines = text.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index++) {
+    const body = regionMarkerBody(lines[index])
+    const marker = markerKindOf(body)
+    if (marker?.kind === 'start') stack.push(index)
+    else if (marker?.kind === 'end' && stack.length) {
+      const start = stack.pop() as number
+      if (index > start) {
+        // 只在真带 `defaultstate="collapsed"` 时才加这个字段：区间表处处与别的来源比形状。
+        out.push(collapsedByDefaultMarker(regionMarkerBody(lines[start]))
+          ? { startLine: start, endLine: index, kind: 'region', collapseByDefault: true }
+          : { startLine: start, endLine: index, kind: 'region' })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * 把本地标记区间并进服务端给的区间：**同样起止的以服务端为准**（它可能带更准的 kind），
+ * 本地独有的补在后面。服务端已经给了同一块时不去重就成两条区间，折/展的边界会打架。
+ */
+export function mergeFoldRanges(remote: readonly LspFold[], local: readonly LspFold[]): LspFold[] {
+  const merged = [...remote]
+  const seen = new Set(remote.map(range => `${range.startLine}:${range.endLine}`))
+  for (const range of local) {
+    const key = `${range.startLine}:${range.endLine}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(range)
+  }
+  return merged
+}
 
 // ── 行模型（LSP 区间那棵树） ──────────────────────────────────────────────────────────
 
@@ -92,9 +163,35 @@ export function blockAt(ranges: readonly LspFold[], line: number): LspFold | nul
   return innermostAt(candidates, line)
 }
 
-/** 文档注释那一组要动的区间（`Collapse/ExpandDocCommentsAction`）。 */
+/** 注释区间（`kind === 'comment'`）—— 上游整个 comment 家族的第一层过滤。 */
 export function commentRanges(ranges: readonly LspFold[]): LspFold[] {
   return ranges.filter(range => range.kind === 'comment')
+}
+
+/**
+ * 文档注释起始行的**词法**判定。上游 `CollapseExpandDocCommentsHandler` 区分「文档注释」与普通注释
+ * 靠 `PsiDocCommentBase` 或语言的 `CodeDocumentationAwareCommenter` 的 doc 记号类型
+ * （`CollapseExpandDocCommentsHandler.java:46-52` 与 `:66-79`）；本仓没有 PSI，用起始行的记号近似：
+ *   · `/** …`（Java/Kotlin/JS/TS/PHP/C 系的 Javadoc/JSDoc；注释体为空的单行写法不算）；
+ *   · Python 的 `"""` / `'''` 文档字符串（语言服务把它的折叠区间标成 `comment`）。
+ * 认不出的语言返回 false —— 收起文档注释不会误伤普通注释。
+ */
+export function isDocCommentLine(lineText: string): boolean {
+  const text = lineText.trimStart()
+  if (text.startsWith('/**')) return !text.startsWith('/**/')
+  return text.startsWith('"""') || text.startsWith("'''")
+}
+
+/** 文档注释那一组要动的区间（`Collapse/ExpandDocCommentsAction`）：`kind === 'comment'` 且起始行是文档注释记号。 */
+export function docCommentRanges(lines: readonly string[], ranges: readonly LspFold[]): LspFold[] {
+  return ranges.filter(range => range.kind === 'comment' && isDocCommentLine(lines[range.startLine] ?? ''))
+}
+
+/** 状态里的逐行文本（0 基下标 = 行号 - 1），给上面那条词法判定用；命令是用户触发的，整表扫一遍不敏感。 */
+function lineTexts(state: EditorState): string[] {
+  const lines: string[] = []
+  for (let number = 1; number <= state.doc.lines; number++) lines.push(state.doc.line(number).text)
+  return lines
 }
 
 /**
@@ -244,7 +341,13 @@ function syntaxArea(state: EditorState, pos: number): FoldArea | null {
  * （真机上验过：光标在 `return a` 上按 Ctrl+- 什么也没发生）。
  */
 export function enclosingAreas(state: EditorState, pos: number): FoldArea[] {
-  const tree = syntaxTree(state)
+  // 增量解析是**按时间片**做的：`syntaxTree()` 返回的树可能只解析到一半，机器忙或文件大时
+  // 光标所在的位置根本没被解析到 —— `resolveInner` 只能摸到 doc 节点，祖先链是空的，
+  // 表现就是"光标在块中间按 Ctrl+- 一动不动"（这条正是本函数当初要修的那个真机症状，
+  // 2026-10-04 才查清它的另一半：**不止**是"没接语言服务"，树没解析到也是同一个结果）。
+  // `ensureSyntaxTree` 把它推到光标处（不需要 view，与 `forceParsing` 是同一件事）；
+  // 超时就退回现有的树 —— 折叠是用户按出来的动作，等 200ms 换来正确结果比"没反应"好。
+  const tree = ensureSyntaxTree(state, pos, 200) ?? syntaxTree(state)
   if (!tree.length) return []
   const out: FoldArea[] = []
   for (let node: SyntaxNode | null = tree.resolveInner(pos, -1); node; node = node.parent) {
@@ -284,7 +387,7 @@ function areasOf(state: EditorState, pos: number): FoldArea[] {
 }
 
 /** 把一批区域折起/展开（`editor.getFoldingModel().runBatchFoldingOperation` 的对应物）。 */
-function applyAreas(view: EditorView, areas: readonly FoldArea[], collapse: boolean): boolean {
+function applyAreas(view: EditorView, areas: readonly { from: number; to: number }[], collapse: boolean): boolean {
   const folded = foldedBounds(view.state)
   const effects = []
   for (const area of areas) {
@@ -440,9 +543,116 @@ export function foldKinds(view: EditorView, kinds: readonly string[], collapse: 
   return applyRanges(view, safe, true)
 }
 
-/** 收起/展开文档注释（`Collapse/ExpandDocCommentsAction`）。 */
-export const foldDocComments: Command = view => applyRanges(view, commentRanges(rangesOf(view.state)), true)
-export const unfoldDocComments: Command = view => applyRanges(view, commentRanges(rangesOf(view.state)), false)
+/**
+ * 开始标记自带 `defaultstate="collapsed"` 的那几条区域：与 `collapseCustomRegions` 全局开关无关，
+ * 关着也默认折（上游 `NetBeansCustomFoldingProvider.java:46-48` 的 `isCollapsedByDefault`，
+ * 由 `CustomFoldingBuilder.java:131-142` 在每条区间落地时单独问一次）。
+ * 折的时候同样跳过光标**严格**落在里面的那几条（同 `foldKinds`，`UpdateFoldRegionsOperation:236-253`）。
+ */
+export function foldDefaultCollapsed(view: EditorView): boolean {
+  const ranges = rangesOf(view.state).filter(range => range.collapseByDefault === true)
+  if (!ranges.length) return false
+  const caret = view.state.selection.main.head
+  return applyRanges(view, ranges.filter(range => {
+    const offsets = offsetsOf(view.state, range)
+    return offsets !== null && !caretInsideRange(caret, offsets)
+  }), true)
+}
+
+// ── 「全部收起/全部展开」的选区作用域 ─────────────────────────────────────────────────
+//
+// 上游 `BaseFoldingHandler.getFoldRegionsForSelection:43-58`：有选区时取
+// 「与选区搭界（`getRegionsOverlappingWith`）」**且**「整条落在选区里」的那些区间；
+// 一个都没有就退回全文（`editor.getFoldingModel().getAllFoldRegions()`）。
+// `CollapseAllRegionsAction:31` 与 `ExpandAllRegionsAction` 都以它为目标集合 ——
+// 也就是"框住一段按 Ctrl+Shift+-，只折这一段"。本仓原来直接用 CodeMirror 的整篇 `foldAll`，
+// 判词因此记「缺 `getFoldRegionsForSelection`」（`docs/inventory/verdict-folding.md` §G 的
+// `BaseFoldingHandler` / `CollapseAllRegionsAction` / `ExpandAllRegionsAction` 三行）。
+//
+// 两段式（`twoStepFoldToggling`）在本仓仍是一段：`keepExpandedOnFirstCollapseAll` 是语言侧
+// `FoldingBuilder` 的钩子（`FoldingBuilder.java:65-70` 默认 false），上游 LSP 路径没覆盖它，
+// 判词 §G 的 `CollapseAllRegionsAction` 行已经算过这一条。
+
+/** 与选区搭界且整条落在选区里的区间；没有选区（或选区里一条都没有）返回 null = 用全集。 */
+export function selectionScoped(areas: readonly { from: number; to: number }[], from: number, to: number): { from: number; to: number }[] | null {
+  if (from >= to) return null
+  const inside = areas.filter(area => area.to > from && area.from < to && area.from >= from && area.to <= to)
+  return inside.length ? inside : null
+}
+
+/**
+ * 全部收起（`CollapseAllRegionsAction`）。两条分支：
+ *   · 选区里有**完整落在其中**的区间 → 只作用那几条
+ *     （`BaseFoldingHandler.getFoldRegionsForSelection:43-58`，本仓的 `selectionScoped`）；
+ *   · 否则整篇 —— 逐行问 `foldable`、命中就跳到那条区间的尾行之后继续
+ *     （CodeMirror `foldAll` 的走法，但用**文档行**而不是 `view.lineBlockAt` 的渲染行：
+ *     折叠候选是语法/LSP 的概念，与软换行无关，这样在没有真实 EditorView 的场合（单测）也跑得动）。
+ */
+export const foldAllCommand: Command = view => {
+  const selection = view.state.selection.main
+  const scoped = selectionScoped(areasOf(view.state, selection.head), selection.from, selection.to)
+  if (scoped) return applyAreas(view, scoped, true)
+  const whole: { from: number; to: number }[] = []
+  for (let number = 1; number <= view.state.doc.lines;) {
+    const line = view.state.doc.line(number)
+    const range = foldable(view.state, line.from, line.to)
+    if (range && range.to > range.from) {
+      whole.push(range)
+      number = view.state.doc.lineAt(range.to).number + 1
+    } else number++
+  }
+  return applyAreas(view, whole, true)
+}
+
+/** 全部展开（`ExpandAllRegionsAction`）：目标换成正折着的那些，选区作用域同上。 */
+export const unfoldAllCommand: Command = view => {
+  const selection = view.state.selection.main
+  const folded = foldedBounds(view.state)
+  return applyAreas(view, selectionScoped(folded, selection.from, selection.to) ?? folded, false)
+}
+
+// 上游 `CollapseSelectionHandler.java:44`：命中一条**自动生成**的折叠区域时不移除它，
+// 而是弹一条轻量信息提示。文案 = `CodeInsightBundle.properties:269`
+// （`collapse.selection.existing.autogenerated.region`），中文取随 IDE 发货的
+// `localization-zh.jar` 的 `messages/CodeInsightBundle.properties:97`。
+export const CANNOT_REMOVE_AUTOGENERATED_REGION = '无法移除自动生成的折叠区域'
+
+/**
+ * 「折叠选区/移除区域」做成了哪一步（宿主据此决定要不要弹 `CANNOT_REMOVE_AUTOGENERATED_REGION`）。
+ * 规则与 `toggleFoldSelection` 同源，只是把结果说出来：
+ *   · `removed`        —— 手工折的那条被移除（`:37-41`）；
+ *   · `collapsed`      —— 折起选区那几行（`:63-69`）；
+ *   · `toggled`        —— 没有选区，切换光标处最内层（`:75-87`）；
+ *   · `autogenerated` —— 正好等于一条自动生成的区间，**不许**移除（`:42-45`）；
+ *   · `overlapping`    —— 与别的区间搭界，上游弹确认框且默认「取消」，本仓按取消不动（`:49-58`）；
+ *   · `nothing`        —— 什么都没做。
+ */
+export type FoldSelectionOutcome = 'removed' | 'collapsed' | 'toggled' | 'autogenerated' | 'overlapping' | 'nothing'
+
+export function foldSelectionOutcome(view: EditorView): FoldSelectionOutcome {
+  const { state } = view
+  const selection = state.selection.main
+  const folded = foldedBounds(state)
+  if (selection.from >= selection.to) {
+    const target = areasContaining(areasOf(state, selection.head), selection.head)[0] ?? null
+    if (!target) return 'nothing'
+    return applyAreas(view, [target], !isCollapsedIn(folded, target)) ? 'toggled' : 'nothing'
+  }
+  let end = selection.to
+  if (state.doc.sliceString(end - 1, end) === '\n') end--
+  const exact = folded.find(bounds => bounds.from === selection.from && bounds.to === end) ?? null
+  if (exact) {
+    const auto = autoAreas(state, selection.head).some(area => area.from === exact.from && area.to === exact.to)
+    if (auto) return 'autogenerated'
+    return applyAreas(view, [exact], false) ? 'removed' : 'nothing'
+  }
+  if (folded.some(bounds => containsStrict(bounds, selection.from) !== containsStrict(bounds, end))) return 'overlapping'
+  return applyAreas(view, [{ from: selection.from, to: end }], true) ? 'collapsed' : 'nothing'
+}
+
+/** 收起/展开文档注释（`Collapse/ExpandDocCommentsAction`）：只动**文档**注释，普通注释不碰（上游口径见 isDocCommentLine）。 */
+export const foldDocComments: Command = view => applyRanges(view, docCommentRanges(lineTexts(view.state), rangesOf(view.state)), true)
+export const unfoldDocComments: Command = view => applyRanges(view, docCommentRanges(lineTexts(view.state), rangesOf(view.state)), false)
 
 /** 展开到第 N 层（`ExpandToLevelNAction`）：根 = 光标行的区间（挑法见 `rootAtLine`）。 */
 export function expandCaretToLevel(level: number): Command {
@@ -468,29 +678,11 @@ export function expandAllToLevel(level: number): Command {
 
 /**
  * 折叠选区/移除区域（`CollapseSelection`，`CollapseSelectionHandler.java:24-90`）：
- * 有选区时 —— 正好等于某条已折区间就**移除**它（自动生成的不许移除，上游给提示；本仓没有编辑器内提示通道，
- * 按"不动"处理，判决表登记）；和别的折叠区域搭界（只含住选区一头）时上游弹「存在重叠的折叠区域」确认框、
- * 默认「取消」，本仓按取消处理；都不是就把选区那几行折起来。
- * 没选区时 —— 切换光标处最内层的那条区域（`:75-87`）。
+ * 规则与六档结果都在 `foldSelectionOutcome`（那一份把每一步说出来，宿主据此弹提示）。
+ * 命令层只回「这一下有没有做事」：`autogenerated`（不许移除自动生成的区间）与
+ * `overlapping`（上游弹确认框且默认「取消」）都算没做事 —— 与改动前的行为一致。
  */
 export const toggleFoldSelection: Command = view => {
-  const { state } = view
-  const selection = state.selection.main
-  const folded = foldedBounds(state)
-  if (selection.from >= selection.to) {
-    const target = areasContaining(areasOf(state, selection.head), selection.head)[0] ?? null
-    return target ? applyAreas(view, [target], !isCollapsedIn(folded, target)) : false
-  }
-  let end = selection.to
-  if (state.doc.sliceString(end - 1, end) === '\n') end--
-  const exact = folded.find(bounds => bounds.from === selection.from && bounds.to === end) ?? null
-  if (exact) {
-    const auto = autoAreas(state, selection.head).some(area => area.from === exact.from && area.to === exact.to)
-    if (auto) return false
-    view.dispatch({ effects: unfoldEffect.of(exact) })
-    return true
-  }
-  if (folded.some(bounds => containsStrict(bounds, selection.from) !== containsStrict(bounds, end))) return false
-  view.dispatch({ effects: foldEffect.of({ from: selection.from, to: end }) })
-  return true
+  const outcome = foldSelectionOutcome(view)
+  return outcome === 'removed' || outcome === 'collapsed' || outcome === 'toggled'
 }

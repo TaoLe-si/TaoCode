@@ -159,8 +159,9 @@ test('编辑器句柄真的提供了导出需要的两样东西', () => {
 test('桥接与原生都有写导出文件这条方法，且预览里明确拒绝', () => {
   assert.ok(read('src/bridge.ts').includes("'app.writeExportFiles'"), 'Method union 里要有它')
   assert.ok(read('native/main.cpp').includes('case "app.writeExportFiles"_h:'), '原生里要有路由')
-  const bridge = read('src/bridge.ts')
-  assert.match(bridge, /app\.writeExportFiles'\) throw new BridgeError\('DESKTOP_REQUIRED'/, '浏览器预览要拒绝')
+  // 2026-10-05 模块化体检：预览那条拒绝语句随「浏览器预览内存桩」搬到了 src/bridgePreview.ts
+  // （bridge.ts 贴着机检上限）。断言的形状没变，只换了锚点。
+  assert.match(read('src/bridgePreview.ts'), /app\.writeExportFiles'\) throw new BridgeError\('DESKTOP_REQUIRED'/, '浏览器预览要拒绝')
 })
 
 test('过滤器串成对（native parse_file_filters 的要求）', () => {
@@ -187,3 +188,12 @@ function fileMenuContext(overrides = {}) {
     ...overrides,
   }
 }
+
+test('打印：导出物自带 @media print 规则（上游 PrintAction 与导出共用 HTMLTextPainter）', () => {
+  const html = htmlDocument({ title: 'a.ts', lineNumbers: true, background: '#fff', foreground: '#000', fontFamily: 'mono', fontSize: 12 },
+    [[{ text: 'const x = 1', color: '#00f', fontStyle: 'normal', fontWeight: '400' }]])
+  assert.match(html, /@media print/)
+  assert.match(html, /break-inside: avoid/)
+  assert.match(html, /print-color-adjust: exact/)
+  assert.match(html, /@page \{ margin: 12mm; \}/)
+})

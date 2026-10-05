@@ -65,8 +65,22 @@ test('the content UI toggle is wired to a real combo rendering and is remembered
 
   assert.ok(strip.includes('v-if="isTabbedContentUi(contentUiType())"'), 'the tab strip is not conditional on the type')
   assert.ok(strip.includes('class="output-content-select"'), 'there is no combo form of the content list')
-  assert.ok(/<select[^>]*v-else class="output-content-select"/.test(strip), 'the combo is not the else branch of the strip')
-  assert.ok(strip.includes('v-for="option in bottomTabOptions"'), 'the combo does not list the tool window contents')
+  // 2026-10-04：combo 的本体搬进了 src/components/ContentComboLabel.vue（图标 + 名称 + 箭头 + 点击弹层）。
+  assert.ok(/<ContentComboLabel[^>]*v-else class="output-content-select"[^>]*:options="bottomTabOptions"/.test(strip),
+    'the combo is not the else branch of the strip / does not list the contents')
+  const combo = readFileSync(new URL('../src/components/ContentComboLabel.vue', import.meta.url), 'utf8')
+  // 2026-10-06（桶 8c 收口）：这一条原判 `v-for="(option, index) in rows"`，是速度搜索落地时
+  // **按实现写的**，把 `tests/content-combo-label.test.mjs` 那条「逐条列每一条 content」钉红了。
+  // 按上游改正：`ListPopupModel` 留着原表、只把没命中的行标成不可见
+  // （`platform/platform-impl/src/com/intellij/ui/popup/list/ListPopupModel.java:44-48` 的
+  // `getOriginalIndex` / `:152-154` 的 `isVisible`），列表数据源始终是
+  // `ToolWindowContentUi.java:863` 传进去的**全量 contents**。所以渲染源改回 `options`，
+  // `rows` 退回它上游的位置 —— 一张「可见行的原索引」表，由 `props.options` 投影出来。
+  assert.match(combo, /v-for="\(option, index\) in options"/, 'combo 画的那一排不是内容列表')
+  assert.match(combo, /v-show="rows\.includes\(index\)"/, '速度搜索没把没命中的行收起（上游是过滤视图，不是换数据源）')
+  assert.match(combo, /const rows = computed\(\(\) => \{[\s\S]{0,240}props\.options\.forEach[\s\S]{0,160}speedSearchMatches\(query, option\.label\)/,
+    'rows 不是 options 的投影（过滤串为空时必须是全量）')
+  assert.ok(combo.includes('contentCountLabel'), 'the combo does not use the tabs/views naming')
   // 形态改成**每个内容一份**、跟着项目布局走（上游 `WindowInfo.contentUiType`）：见第四十二批 §AT。
   const stripes = readFileSync(new URL('../src/toolWindowStripes.ts', import.meta.url), 'utf8')
   assert.ok(stripes.includes('function contentUiType(id: string)'), '内容形态不是每内容一份的读')

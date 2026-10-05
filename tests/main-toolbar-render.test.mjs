@@ -7,7 +7,34 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import { createRenderer, createSSRApp, defineComponent, h, nextTick, reactive } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 
-const require = createRequire(import.meta.url)
+// 这条判据跑在**没有 DOM 的自搭渲染器**上（见下面的 mountToolbar）。工具栏里有两处真实的
+// `window` 用法（仪表盘心跳的 `window.setInterval` 与选择器宽度拖拽的 pointermove 监听），
+// 卸载钩子因此在纯 node 里会 `ReferenceError: window is not defined`。
+// 给一个只记录调用的最小 window 桩 —— 渲染的是真组件、真处理器，桩不替组件做任何决定。
+// （与 `tests/tab-listener-behavior.test.mjs` 同一套路子。）
+if (typeof globalThis.window === 'undefined') {
+  globalThis.window = {
+    addEventListener: () => {}, removeEventListener: () => {},
+    setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {},
+  }
+}
+
+const require_ = createRequire(import.meta.url)
+// 编译出来的 CJS 里 `require('../xxx.ts')` 是**组件目录**的相对路径，而 createRequire 的基准是
+// 本测试文件 —— 逐个点名映射的做法每次组件多 import 一个兄弟模块就会整文件加载失败
+// （`runToolbarSlots.ts` 就是这么把这条渲染判据打红的）。改成一律按 `src/` 解析，
+// 认不出来的原样透传（`.vue` 与已点名的桩在上面已经拦掉了）。
+const require = name => {
+  if (name.startsWith('../') && !name.startsWith('../src/')) {
+    const viaSrc = '../src/' + name.slice(3)
+    try { return require_(viaSrc) } catch (error) {
+      // 只有「那个路径下面根本没有这个文件」才退回原样解析（让报错里保留组件写的那个名字）；
+      // 模块自身抛的错要原样冒出来，否则真缺陷会被掩盖。
+      if (error?.code !== 'MODULE_NOT_FOUND') throw error
+    }
+  }
+  return require_(name)
+}
 const source = readFileSync(new URL('../src/components/MainToolbar.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
 const compiled = compileScript(descriptor, { id: 'main-toolbar-render', inlineTemplate: true })
@@ -20,6 +47,11 @@ new Function('require', 'exports', js)(name => {
   if (name === '../mainToolbarFocus.ts') return require('../src/mainToolbarFocus.ts')
   // 图标尺寸梯子（第八十五批）：模板里的 `:size="iconSize.<role>"` 要真模块才转得出值。
   if (name === '../uiIcons') return require('../src/uiIcons.ts')
+  // 运行仪表盘（exec/run-toolbar 的补齐项）：组件直接读实例清单、停止按钮走桥接的 run.stop；
+  // 渲染测试不需要真宿主，给一个只认 run.stop 的 request 桩，实例清单用真模块（空表）。
+  if (name === '../bridge') return { request: async () => ({}) }
+  if (name === '../runInstances.ts') return require('../src/runInstances.ts')
+  if (name === '../runDashboard.ts') return require('../src/runDashboard.ts')
   return require(name)
 }, exports)
 const MainToolbar = exports.default

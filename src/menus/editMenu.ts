@@ -1,7 +1,7 @@
 // 编辑菜单（EditMenu，PlatformActions.xml:446-518 的 TaoCode 对应物）。
 // 一组一文件（桃 2026-09-26：模块化）；依赖经 ctx 注入。
 import type { MenuRow } from './types'
-import { createMacrosMenuRows } from './macrosMenu'
+import { createMacrosMenuRows } from './macrosMenu.ts'
 
 export interface EditMenuContext {
   // 参数统一 any：参数逆变下 App 的窄签名函数才能赋进来（后续批次可收紧）。
@@ -96,12 +96,44 @@ export interface EditMenuContext {
       { ...ctx.toolWindow('search', '在文件中查找', 'find in path find in files 在文件中查找'), id: 'edit.findInPath', keys: 'Ctrl Shift F' },
       { ...ctx.toolWindow('search', '在文件中替换', 'replace in path replace in files 在文件中替换'), id: 'edit.replaceInPath', keys: 'Ctrl Shift R' },
     ] },
+    // EditMenu › FindUsagesMenuGroup：`LangActions.xml:112-114` 把它 add-to-group 到 EditMenu
+    // 的 FindMenuGroup **之后**；成员顺序照 `intellij.platform.usageView.impl.actions.xml:33-41`
+    // （FindUsages · ShowSettingsAndFindUsages · ShowUsages · 分隔 · FindUsagesInFile ·
+    // HighlightUsagesInFile · GotoNext/PrevElementUnderCaretUsage · ShowRecentFindUsages）。
+    // 本仓只有本行（`usage.highlight`，实现在 src/usageHighlightExtension.ts）+ Code 菜单里的
+    // 「查找用法」（id `references`，同一组的第一项）；其余成员没有动作，不渲染假行。
+    { id: 'edit.findUsagesGroup', title: '查找用法', keywords: 'find usages highlight usages in file 查找用法 高亮用法', children: [
+      ctx.editable('usage.highlight', '高亮用法', 'Ctrl Shift F7', 'highlight usages in file 高亮用法 临时高亮 $default.xml:362'),
+    ] },
     { id: 'edit.rule2', rule: true },
     ctx.editable('selectAll', '全选', 'Ctrl A', 'select all 全选'),
     { id: 'edit.rule3', rule: true },
     ctx.editable('case.toggle', '切换大小写', 'Ctrl Shift U', 'case upper lower 大小写'),
     ctx.editable('line.join', '合并行', 'Ctrl Shift J', 'join lines 合并行'),
     ctx.editable('line.duplicate', '复制行', 'Ctrl D', 'duplicate copy line 复制行'),
+    // 填充段落（上游 `FillParagraphAction`，`PlatformActions.xml:494` 就在 EditorDuplicate 之后：
+    // EditSmartGroup 的次序是 ToggleCase(:491) → JoinLines(:492) → Duplicate(:493) → FillParagraph(:494)）。
+    // 文案取 zh 包 `plugins/localization-zh/lib/localization-zh.jar` 的
+    // `messages/ActionsBundle.properties:873`（英文原文
+    // `platform/platform-resources-en/src/messages/ActionsBundle.properties:1946`）。
+    // `$default.xml` 里没有它的键位 ⇒ 只给菜单行，不编快捷键。
+    ctx.editable('paragraph.fill', '填充段落', '', 'fill paragraph 填充段落 折行'),
+    // 代码块首尾移动（上游 `EditorCodeBlockStart`/`End` 与 ±`WithSelection`，
+    // 键位 `$default.xml:569-571`/`:315-317`/`:318-320`/`:824-826`；
+    // 文案 `messages/ActionsBundle.properties:568-571`（zh 包），英文原文
+    // `platform/platform-resources-en/src/messages/ActionsBundle.properties:157-160`）。
+    // **本仓菜单落点与上游不同**：上游这四条只有键位、没有菜单行，而本仓的键位面
+    // （`src/keymapBindings.ts` / `CodeEditor.vue` 的 keymap）是冻结文件 ⇒ 先给菜单行让人够得着，
+    // 键盘接线见 docs/wiring-requests-2026-10-06-bucket5b.md。
+    ctx.editable('block.start', '将文本光标移至代码块开始', 'Ctrl [', 'code block start 代码块开始'),
+    ctx.editable('block.end', '将文本光标移至代码块结束', 'Ctrl ]', 'code block end 代码块结束'),
+    ctx.editable('block.startSelect', '在保持选区的情况下将文本光标移至代码块开始', 'Ctrl Shift [', 'code block start selection 代码块开始 选区'),
+    ctx.editable('block.endSelect', '在保持选区的情况下将文本光标移至代码块结束', 'Ctrl Shift ]', 'code block end selection 代码块结束 选区'),
+    // 用自定义折叠标记包围选区（上游是 Ctrl+Alt+T「环绕方式(_S)…」列表里的一族，
+    // `CustomFoldingSurroundDescriptor.java:217-227` 每个 provider 一行）。本仓那个列表在
+    // `src/surroundTemplates.ts`（别的桶名下）⇒ 先给一条走默认标记（`//<region>`）的菜单行，
+    // 列表侧接线见交接请求。
+    ctx.editable('fold.surroundRegion', '用折叠区域标记包围', '', 'surround region folding 折叠区域 包围'),
     ctx.editable('line.delete', '删除行', 'Ctrl Y', 'delete line 删除行'),
     ctx.editable('line.moveUp', '上移行', 'Alt Shift ↑', 'move line up 上移行'),
     ctx.editable('line.moveDown', '下移行', 'Alt Shift ↓', 'move line down 下移行'),
@@ -117,6 +149,16 @@ export interface EditMenuContext {
     { id: 'edit.rule4', rule: true },
     ctx.editable('comment.line', '行注释', 'Ctrl /', 'comment line 行注释'),
     ctx.editable('comment.block', '块注释', 'Ctrl Shift /', 'comment block 块注释'),
+    { id: 'edit.rule4', rule: true },
+    // 扩展选区（上游 Extend Selection 一族 + `BlockCommentSelectioner` 那个块注释选择器）。
+    // **快捷键一栏留空**：$default.xml 里查不到 ExtendSelection 的绑定（全树也没有
+    // EditorExtendSelectionHandler），按「无上游依据不编键位」的规矩不编，见 src/editorExtendSelection.ts 头第 5 条。
+    ctx.editable('selection.extend', '扩展选区（向右）', '', 'extend selection 扩展选区 块注释 smart select'),
+    ctx.editable('selection.extendLeft', '扩展选区（向左）', '', 'extend selection left 扩展选区 向左'),
+    // 移动到配对的括号（上游 `EditorMatchBrace`，`intellij.platform.lang.impl.actions.xml:23`）。
+    // 键位 Ctrl+Shift+M 有上游依据（`$default.xml:1146-1148`），但 keymap 是保留文件 ⇒ 已提接线请求，
+    // 这一行的键位栏先留空，等键位真的注册了再填（不编一个按下去没反应的加速键）。
+    ctx.editable('brace.match', '移动到配对的括号', 'Ctrl Shift M', 'match brace 配对括号 匹配括号'),
     { id: 'edit.rule4', rule: true },
     ctx.editable('cursor.above', '在上行添加光标', 'Ctrl Alt Shift ↑', 'multiple cursors column 多光标'),
     ctx.editable('cursor.below', '在下行添加光标', 'Ctrl Alt Shift ↓', 'multiple cursors column 多光标'),

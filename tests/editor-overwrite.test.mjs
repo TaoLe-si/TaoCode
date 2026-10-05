@@ -1,9 +1,11 @@
 // 插入/覆盖模式（B2：`InsertOverwrite` 那一族里**唯一没有状态栏组件**的能力 ——
 // `EditorToggleInsertStateAction` + `EditorEx.setInsertMode`）。
 //
-// 上游要点（逐条核过）：
-//   · `$default.xml:457-459`：INSERT 键 → `EditorToggleInsertState`；
-//   · `TypedCharImpl.java:31-47`：`COMPLEX_CHARS`（`\n \t ( ) < > [ ] { } " '`）与代理对**永不覆盖**；
+// 上游要点（逐条核过，`TypedCharImpl.java` 全路径
+// `platform/lang-impl/src/com/intellij/codeInsight/editorActions/TypedCharImpl.java`）：
+//   · `ToggleInsertStateAction.java:26`：每编辑器一个 `setInsertMode(!isInsertMode())`；
+//   · `TypedCharImpl.java:23` 的 `COMPLEX_CHARS` + `:31-33` 的**两道**守卫
+//     （COMPLEX_CHARS 与 `Character.isSurrogate`）—— 这两组的字符**永不覆盖**；
 //   · `ImmediatePainter.java:164`：可见指示是**块状光标**，不是状态栏组件
 //     （`intellij.platform.ide.impl.xml:1627` 的 `InsertOverwrite` 那个 id 其实指向列选择组件）。
 import test from 'node:test'
@@ -21,7 +23,7 @@ function stateAt(doc, pos, overwrite = false) {
   return overwrite ? withCursor.update({ effects: setOverwriteMode.of(true) }).state : withCursor
 }
 
-// —— shouldOverwrite（TypedCharImpl 的两道守卫）——
+// —— shouldOverwrite（`TypedCharImpl.java:31-33` 的两道守卫）——
 
 test('an ordinary character overwrites', () => {
   assert.equal(shouldOverwrite('a'), true)
@@ -29,11 +31,19 @@ test('an ordinary character overwrites', () => {
   assert.equal(shouldOverwrite('中'), true)
 })
 
-// `COMPLEX_CHARS` 逐字照抄 —— 打一个 `(` 不该吃掉右边那个配对括号。
+// `COMPLEX_CHARS` 逐字照抄上游 `TypedCharImpl.java:23` 的
+// `Set.of('\n','\t','(',')','<','>','[',']','{','}','"','\'')`。
+// 打一个 `(` 不该吃掉右边那个配对括号。
 test('the complex characters never overwrite', () => {
   for (const ch of ['\n', '\t', '(', ')', '<', '>', '[', ']', '{', '}', '"', "'"])
     assert.equal(shouldOverwrite(ch), false, `${JSON.stringify(ch)} 不该覆盖`)
-  assert.deepEqual([...COMPLEX_CHARS].sort(), ['\t', '\n', '"', "'", '(', ')', '<', '>', '[', ']', '{', '}'].sort())
+})
+
+// 集合本身按**内容与书写顺序**钉住（`deepEqual` 不排序）：上游增删或改顺序都必须红，
+// 否则"逐字照抄"这句话就没人守着了。
+test('COMPLEX_CHARS is copied verbatim from upstream, in order', () => {
+  assert.equal(COMPLEX_CHARS.size, 12)
+  assert.deepEqual([...COMPLEX_CHARS], ['\n', '\t', '(', ')', '<', '>', '[', ']', '{', '}', '"', "'"])
 })
 
 test('multi-character input (paste / IME) never overwrites', () => {
@@ -41,10 +51,10 @@ test('multi-character input (paste / IME) never overwrites', () => {
   assert.equal(shouldOverwrite(''), false)
 })
 
-test('surrogates and control characters never overwrite', () => {
+// 上游第二道守卫是 `Character.isSurrogate(ch)`，Java 的定义就是 0xD800..0xDFFF。
+test('a lone surrogate never overwrites', () => {
   assert.equal(shouldOverwrite('\ud83d'), false, '代理对的一半')
-  assert.equal(shouldOverwrite(String.fromCharCode(13)), false, 'CR')
-  assert.equal(shouldOverwrite(String.fromCharCode(7)), false, 'BEL')
+  assert.equal(shouldOverwrite('\udf00'), false, '代理对的另一半')
 })
 
 // —— overwriteChange（把插入改写成替换）——

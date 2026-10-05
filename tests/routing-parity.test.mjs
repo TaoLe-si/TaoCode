@@ -26,9 +26,14 @@ const bridge = read('src/bridge.ts')
 const main = read('native/main.cpp')
 const session = read('native/lsp_session.cpp')
 const codeActions = read('native/lsp_code_actions.cpp')
+// 2026-10-05：`Session::semantic()` 门控之后的整条 kind 链搬到了 native/lsp_session_kinds.cpp
+// 的 `Session::dispatch_semantic_kind`（行数上限治理，逐字搬运）—— 这是第四张表，也要算进来。
+const sessionKinds = read('native/lsp_session_kinds.cpp')
 // 2026-10-01：文件/系统侧的只读查询（七条）搬到了 native/file_queries.cpp（main.cpp 贴着 2000 行
 // 上限），分派用**方法名字符串**而不是哈希 case —— 这张清单也要扫那份。
 const fileQueries = read('native/file_queries.cpp')
+// `dap.*` 一族同理搬到了 native/dap_routes.cpp（同上限，2026-10-04），也要扫。
+const dapRoutes = read('native/dap_routes.cpp')
 
 /** `export type X = 'a' | 'b'` 单行联合类型里的全部字面量。 */
 function unionMembers(source, name) {
@@ -38,10 +43,11 @@ function unionMembers(source, name) {
 }
 
 /** `switch (fnv1a(method))` 里的全部 case 标签（UDL 哈希 ⇒ 方法名原样保留在源码里），
- *  外加 native/file_queries.cpp 里那组 `method == "…"` 的分派。 */
+ *  外加 native/file_queries.cpp 与 native/dap_routes.cpp 里那两组 `method == "…"` 的分派。 */
 function nativeCases() {
   const labels = [...main.matchAll(/case "([^"]+)"_h:/g)].map(match => match[1])
       .concat([...fileQueries.matchAll(/method == "([^"]+)"/g)].map(match => match[1]))
+      .concat([...dapRoutes.matchAll(/method == "([^"]+)"/g)].map(match => match[1]))
   assert.ok(labels.length > 50, `原生分派只解析出 ${labels.length} 个 case，正则可能已失效`)
   return labels
 }
@@ -93,7 +99,9 @@ test('git 方法名白名单与实际分支完全对齐', () => {
 test('每个 LSP kind 至少被一个分派函数认识', () => {
   // `Session::request` 与 `Session::semantic` 互为兜底：从哪个入口进来都必须能到达一个分支。
   // 代码操作一族（codeAction / codeActionResolve / executeCommand）住在
-  // native/lsp_code_actions.cpp，由 `semantic()` 转交 —— 那是第三张表，也要算进来。
+  // native/lsp_code_actions.cpp，由 `semantic()` 转交 —— 那是第三张表；
+  // semantic() 门控之后的 kind 链住在 native/lsp_session_kinds.cpp 的 dispatch_semantic_kind
+  // —— 那是第四张表。
   const body = (source, signature) => {
     const start = source.indexOf(signature)
     assert.ok(start >= 0, `找不到 ${signature}`)
@@ -104,11 +112,13 @@ test('每个 LSP kind 至少被一个分派函数认识', () => {
     ...kindsOf(body(session, 'void Session::request(')),
     ...kindsOf(body(session, 'void Session::semantic(')),
     ...kindsOf(body(codeActions, 'bool Session::dispatch_code_action(')),
+    ...kindsOf(body(sessionKinds, 'void Session::dispatch_semantic_kind(')),
   ])
   assert.ok(known.size > 20, `LSP 分派只解析出 ${known.size} 个 kind`)
   // 转交必须真的存在且**不带走处理器**：按值转交会让下面十余个 kind 拿到空的
   // std::function（std::bad_function_call），而这一族的 kind 看起来仍"被认识"。
-  assert.match(session, /dispatch_code_action\(kind,[^)]*\bon_result\)\)\s*return;/,
+  // 转交这一行随 kind 链一起搬到了 native/lsp_session_kinds.cpp（见上面的 sessionKinds）。
+  assert.match(sessionKinds, /dispatch_code_action\(kind,[^)]*\bon_result\)\)\s*return;/,
     'semantic() 不再把不认识的 kind 交给代码操作一族，或转交方式改成了带走处理器')
   const missing = unionMembers(bridge, 'LspRequestKind').filter(kind => !known.has(kind))
   assert.deepEqual(missing, [], `这些 kind 会回 LSP_BAD_KIND：${missing.join(', ')}`)

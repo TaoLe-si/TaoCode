@@ -708,9 +708,31 @@ int main() {
                 {{"runConfigs", Json::array({{{"name", std::string(81, 'n')}, {"command", "cmake"}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", std::string(4097, 'c')}}})}},
                 {{"runConfigs", Json::array({{{"name", "build"}, {"command", std::string("\xC0\xAF", 2)}}})}},
+                // 复合配置（IDEA `CompoundRunConfiguration`）：命令为空是合法的（成员才有命令），
+                // 但成员表必须非空、存在、不重复且不成环。
+                {{"runConfigs", Json::array({{{"name", "all"}, {"command", ""}, {"type", "compound"}, {"configurations", Json::array()}}})}},
+                {{"runConfigs", Json::array({{{"name", "all"}, {"command", ""}, {"type", "compound"}, {"configurations", Json::array({"missing"})}}})}},
+                {{"runConfigs", Json::array({{{"name", "all"}, {"command", ""}, {"type", "compound"}, {"configurations", Json::array({"all"})}}})}},
+                {{"runConfigs", Json::array({{{"name", "all"}, {"command", ""}, {"type", "compound"}, {"configurations", 5}}})}},
+                {{"runConfigs", Json::array({{{"name", "plain"}, {"command", ""}, {"configurations", Json::array({"plain"})}}})}},
+                {{"runConfigs", Json::array({{{"name", "a"}, {"command", "run-a"}, {"configurations", Json::array({"a"})}}})}},
+                {{"runConfigs", Json::array({{{"name", "a"}, {"command", "run-a"}, {"type", "compound"}, {"configurations", Json::array({"b"})}},
+                                             {{"name", "b"}, {"command", "run-b"}, {"type", "compound"}, {"configurations", Json::array({"a"})}}})}},
             };
             for (const auto& patch : rejected)
                 expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, patch); });
+            // 合法的复合配置：成员表按顺序存下来，空命令合法；嵌套/共享成员只算一次。
+            const Json compound = Json::array({{{"name", "client"}, {"command", "run-client"}},
+                                               {{"name", "api"}, {"command", ""}, {"program", "api.exe"}},
+                                               {{"name", "all"}, {"command", ""}, {"type", "compound"}, {"configurations", Json::array({"api", "client"})}}});
+            check(store.update_project_settings(root_a, {{"runConfigs", compound}}).at("runConfigs") == compound,
+                  "A compound configuration must round-trip with its member list and blank command");
+            // 只有程序、没有命令的普通配置同样合法（IDEA 的 ApplicationConfiguration 就是这样）。
+            const Json program_only = Json::array({{{"name", "app"}, {"command", ""}, {"program", "app.exe"}}});
+            check(store.update_project_settings(root_a, {{"runConfigs", program_only}}).at("runConfigs") == program_only,
+                  "A program-only configuration stays valid");
+            // 命令与程序都为空才是真错（上面那条 already covered the blank-command rejection）。
+            expect_error("INVALID_SETTINGS", [&] { store.update_project_settings(root_a, {{"runConfigs", Json::array({{{"name", "empty"}, {"command", ""}}})}}); });
             Json too_many = Json::array();
             for (std::size_t i = 0; i != config_limit + 1; ++i)
                 too_many.push_back({{"name", "config-" + std::to_string(i)}, {"command", "cmake"}});

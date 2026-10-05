@@ -186,6 +186,16 @@ private:
     // 会话文件贴着上限，这条两跳退化自成一段）。已处理返回 true。
     bool dispatch_navigation(const std::string& kind, const std::string& uri, Host& host, const Json& position,
                              ResultHandler& on_result);
+    // `semantic()` 门控之后的**每个 kind 怎么发、怎么整形**那整条 if 链，在
+    // native/lsp_session_kinds.cpp（2026-10-05 整段搬出，594 行 —— 本文件原来把「门控」与
+    // 「每个 kind 的整形」两件事挤在一起，见 tests/module-size.test.mjs 的登记说明）。
+    // `host` / `uri` / `language_name` 都是门控放行之后才算好的，这里只负责发信与整形。
+    // void 而不是 bool：链上每个分支原本就是 `return;`，而「没有分支认领」由本方法自己答掉
+    // （末尾那句 LSP_BAD_KIND），所以调用方那边没有可判的东西。
+    // `on_result` 按**值**收：这一族里每个分支都把它 std::move 掉，按引用收会污染调用方那条。
+    void dispatch_semantic_kind(const std::string& kind, const std::string& path, int line, int character,
+                                const Json& args, Host* host, const std::string& uri,
+                                const std::string& language_name, ResultHandler on_result);
     bool dispatch_code_action(const std::string& kind, const std::string& path, Host& host, const std::string& uri,
                               const Json& args, int line, int character, ResultHandler& on_result);
     // `pending_actions_[path]` 的第 `index` 条原始 CodeAction。false = 这次引用已过期

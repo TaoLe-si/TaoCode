@@ -10,13 +10,14 @@
 import { ref, type Ref } from 'vue'
 import { request, type BookmarksViewState, type Bookmark, type EditorSettings, type Entry,
          type GeneralSettingsState, type JavaProjectSettings, type NamedScopeSetting, type ProjectSettings, type TemplateSettings, type TodoPattern,
-         type Workspace } from './bridge'
+         type Workspace } from './bridge.ts'
 import type { FileColorSetting } from './fileColors'
-import { errorMessage } from './errors'
-import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView'
+import { errorMessage } from './errors.ts'
+import { chooseWithDescriptor, singleDirDescriptor, withTitle, type FileChooserHost } from './fileChooserDescriptor.ts'
+import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView.ts'
 import type { BuildToolsSettings } from './gradle'
 import { COMMIT_MESSAGE_INSPECTION_STORAGE_KEY, resolveInspectionSettings,
-         type CommitMessageInspectionSettings } from './commitMessageInspection'
+         type CommitMessageInspectionSettings } from './commitMessageInspection.ts'
 
 // 设置对话框要跳到哪一节（IDEA 的 Settings 树按 section 定位）。值就是各叶子页的 id。
 // 构建工具那两页（`build.tools` / Gradle）也在这里 —— Gradle 工具窗口的齿轮按钮会跳到 Gradle 页。
@@ -268,12 +269,19 @@ export function createSettingsPersistence(deps: SettingsPersistenceDeps) {
   }
   // The Project Structure pane's Edit/Browse buttons: pick a directory with the native
   // dialog and write it straight into the stored Java settings.
+  // 选择走描述件（`src/fileChooserDescriptor.ts`）：宿主对话框带上「给哪个字段选」的标题，
+  // 与上游 `FileChooserDescriptorFactory.createSingleFolderDescriptor()` 的形态一致。
+  const structureDirHost: FileChooserHost = {
+    pickFile: params => request<string | null>('dialog.pickFile', params),
+    pickDirectory: params => request<string | null>('dialog.pickDirectory', params),
+  }
   async function browseStructureDir(field: 'jdkHome' | 'outputPath') {
     if (busy.value || settingsBusy.value || !isDesktop) return
     busy.value = true
     try {
       const start = projectSettings.value.java[field] ?? ''
-      const path = await request<string | null>('dialog.pickDirectory', { initial: start })
+      const descriptor = withTitle(singleDirDescriptor(), field === 'jdkHome' ? '选择 JDK 目录' : '选择输出目录')
+      const path = await chooseWithDescriptor(structureDirHost, descriptor, start)
       if (path && workspace.value) await saveJavaSettings({ ...projectSettings.value.java, [field]: path })
     } catch (error) { deps.notify(errorMessage(error), true) }
     finally { busy.value = false }

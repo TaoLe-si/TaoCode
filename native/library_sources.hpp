@@ -16,7 +16,9 @@
 #pragma once
 
 #include <filesystem>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 #include "workspace.hpp"  // Json
 

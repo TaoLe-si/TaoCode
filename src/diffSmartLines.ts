@@ -16,11 +16,11 @@
 // （上游注释里那组 `.{` / `..{` / `...{` 的例子在 `ByLineRt.kt:143-160`）。
 //
 // 本仓的接线在 `src/diffText.ts` 的 `buildDiffRows`：对齐那一步改用它。
-// **没做的两步**（如实记在判决里）：上游在 compareSmart 之后还有 `optimizeLineChunks`
-// （`ChunkOptimizer.LineChunkOptimizer`，按同一阈值合并行块）与 `expandRanges` /
-// `correctChangesSecondStep`（把"策略意义下相等但原文不等"的行再修一遍）。
+// 完整入口 `compareLineMatch` 对应 `ByLineRt.doCompare`（`ByLineRt.kt:60-81`）：
+// 忽略空白的两步比较 → 行块优化 → 按目标策略修正相等区间。
 import { alignLines } from './diffAlign.ts'
-import { expandBackward, expandForward } from './diffChunks.ts'
+import { expandBackward, expandForward, expandMatchGaps, optimizeSpans, pairsToSpans, spansToPairs, type ShiftFn } from './diffChunks.ts'
+import { comparisonKeys, isDiffWhitespace, type ComparisonPolicy } from './diffComparison.ts'
 
 /** `DiffConfig.kt:12`：`UNIMPORTANT_LINE_CHAR_COUNT = 3`。 */
 export const UNIMPORTANT_LINE_CHAR_COUNT = 3
@@ -28,7 +28,7 @@ export const UNIMPORTANT_LINE_CHAR_COUNT = 3
 /** 一行里非空白字符的个数（上游 `ByLineRt.Line.countNonSpaceChars`，`ByLineRt.kt:440-...`）。 */
 export function nonSpaceChars(line: string): number {
   let n = 0
-  for (const ch of line) if (!/\s/.test(ch)) n++
+  for (let i = 0; i < line.length; i++) if (!isDiffWhitespace(line[i]!)) n++
   return n
 }
 
@@ -58,6 +58,7 @@ export function smartLineMatch(
   linesAfter: readonly string[] = keysAfter,
   threshold = UNIMPORTANT_LINE_CHAR_COUNT,
 ): LineMatch[] {
+  if (threshold === 0) return alignLines(keysBefore, keysAfter)
   const equals = (i: number, j: number): boolean => keysBefore[i] === keysAfter[j]
   const out: LineMatch[] = []
 
@@ -100,4 +101,121 @@ export function smartLineMatch(
   }
   matchGap(last1, last2, keysBefore.length, keysAfter.length)
   return out
+}
+
+/** `ChunkOptimizer.kt:174-261`: empty boundaries precede merely unimportant boundaries. */
+export function lineShift(lines1: readonly string[], lines2: readonly string[], threshold = UNIMPORTANT_LINE_CHAR_COUNT): ShiftFn {
+  const counts = { a: lines1.map(nonSpaceChars), b: lines2.map(nonSpaceChars) }
+  const find = (lines: readonly number[], offset: number, count: number, step: number, limit: number): number => {
+    for (let i = 0; i < count; i++) if (lines[offset + step * i]! <= limit) return i
+    return -1
+  }
+  const choose = (forward: number, backward: number): number | null => {
+    if (forward === -1 && backward === -1) return null
+    if (forward === 0 || backward === 0) return 0
+    return forward !== -1 ? forward : -backward
+  }
+  return (side, forward, backward, first, second) => {
+    const other = side === 'a' ? 'b' : 'a'
+    for (const limit of [0, threshold]) {
+      const unchanged = choose(
+        find(counts[side], second[side].start, forward + 1, 1, limit),
+        find(counts[side], second[side].start - 1, backward + 1, -1, limit),
+      )
+      if (unchanged !== null) return unchanged
+      const changed = choose(
+        find(counts[other], first[other].end, forward + 1, 1, limit),
+        find(counts[other], second[other].start - 1, backward + 1, -1, limit),
+      )
+      if (changed !== null) return changed
+    }
+    return 0
+  }
+}
+
+export function optimizeLineChunks(keys1: readonly string[], keys2: readonly string[], matches: readonly LineMatch[], lines1: readonly string[] = keys1, lines2: readonly string[] = keys2): LineMatch[] {
+  return spansToPairs(optimizeSpans(pairsToSpans(matches), keys1.length, keys2.length,
+    (i, j) => keys1[i] === keys2[j], lineShift(lines1, lines2)))
+}
+
+/** `ByLineRt.kt:268-319`: first maximum-weight monotone combination wins; search only up to 10. */
+function bestAlignment(short: readonly number[], long: readonly number[], shortKeys: readonly string[], longKeys: readonly string[]): number[] {
+  let best = short.map((_, i) => i)
+  let bestWeight = 0
+  const combination: number[] = []
+  const search = (start: number): void => {
+    if (combination.length === short.length) {
+      let weight = 0
+      for (let i = 0; i < short.length; i++) if (shortKeys[short[i]!] === longKeys[long[combination[i]!]!]) weight++
+      if (weight > bestWeight) { bestWeight = weight; best = [...combination] }
+      return
+    }
+    for (let i = start; i <= long.length - (short.length - combination.length); i++) {
+      combination.push(i)
+      search(i + 1)
+      combination.pop()
+    }
+  }
+  search(0)
+  return best
+}
+
+/** `ByLineRt.kt:135-265`: preserve IW slots, maximise exact-policy matches within one IW sample. */
+export function correctChangesSecondStep(keys1: readonly string[], keys2: readonly string[], iw1: readonly string[], iw2: readonly string[], matches: readonly LineMatch[]): LineMatch[] {
+  const equal: LineMatch[] = []
+  let sample: string | null = null
+  let last1 = 0, last2 = 0
+  let index1 = 0, index2 = 0
+  const markEqual = (from: number, to: number): void => {
+    equal.push({ from, to })
+    index1 = from + 1
+    index2 = to + 1
+  }
+  const flush = (end1: number, end2: number): void => {
+    if (sample === null) return
+    const sub1: number[] = [], sub2: number[] = []
+    for (let i = Math.max(last1, index1); i < end1; i++) {
+      if (iw1[i] === sample) { sub1.push(i); last1 = i + 1 }
+    }
+    for (let i = Math.max(last2, index2); i < end2; i++) {
+      if (iw2[i] === sample) { sub2.push(i); last2 = i + 1 }
+    }
+    if (Math.max(sub1.length, sub2.length) > 10 || sub1.length === sub2.length) {
+      for (let i = 0; i < Math.min(sub1.length, sub2.length); i++) {
+        if (keys1[sub1[i]!] === keys2[sub2[i]!]) markEqual(sub1[i]!, sub2[i]!)
+      }
+    } else {
+      const leftShorter = sub1.length < sub2.length
+      const short = leftShorter ? sub1 : sub2
+      const long = leftShorter ? sub2 : sub1
+      const alignment = bestAlignment(short, long, leftShorter ? keys1 : keys2, leftShorter ? keys2 : keys1)
+      for (let i = 0; i < short.length; i++) {
+        const from = leftShorter ? short[i]! : long[alignment[i]!]!
+        const to = leftShorter ? long[alignment[i]!]! : short[i]!
+        if (keys1[from] === keys2[to]) markEqual(from, to)
+      }
+    }
+    sample = null
+  }
+  for (const { from, to } of matches) {
+    if (sample !== iw1[from]) {
+      flush(from, to)
+      if (keys1[from] === keys2[to]) markEqual(from, to)
+      else sample = iw1[from]!
+    }
+  }
+  flush(keys1.length, keys2.length)
+  return expandMatchGaps(equal, keys1.length, keys2.length, (i, j) => keys1[i] === keys2[j])
+}
+
+/** Full two-way `ByLineRt.doCompare` (`ByLineRt.kt:60-81,364-377`). */
+export function compareLineMatch(lines1: readonly string[], lines2: readonly string[], policy: ComparisonPolicy = 'default'): LineMatch[] {
+  const keys1 = comparisonKeys(lines1, policy), keys2 = comparisonKeys(lines2, policy)
+  const iw1 = comparisonKeys(lines1, 'ignoreWhitespaces'), iw2 = comparisonKeys(lines2, 'ignoreWhitespaces')
+  const smart = smartLineMatch(iw1, iw2, lines1, lines2)
+  const ignored = policy === 'ignoreWhitespaces' || policy === 'ignoreWhitespacesChunks'
+  const optimized = optimizeLineChunks(ignored ? iw1 : keys1, ignored ? iw2 : keys2, smart, lines1, lines2)
+  return ignored
+    ? expandMatchGaps(optimized, keys1.length, keys2.length, (i, j) => keys1[i] === keys2[j])
+    : correctChangesSecondStep(keys1, keys2, iw1, iw2, optimized)
 }

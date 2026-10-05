@@ -89,19 +89,30 @@ test('编辑器把「代码折叠」设置交给折叠控制器（顺序与串�
   assert.match(editor, /fetchRanges: async \(\) => \{[\s\S]{0,200}kind: 'foldingRange'/, '区间仍走 lsp.request 的 foldingRange')
   // 设置一改就重算（上游 applyCodeFoldingSettingsChanges）；关标签/换文件前存档。
   assert.match(editor, /FOLDING_SETTING_ROWS\.map\(row => props\.settings\[row\.key\]\)[\s\S]{0,40}folding\.applyDefaults\(\)/, '设置一改就重算')
-  assert.match(editor, /onBeforeUnmount\(\(\) => \{ folding\.capture\(\)/)
-  assert.match(editor, /watch\(\(\) => props\.path, \(\) => \{ folding\.capture\(\)/)
+  // 卸载/换文件时先把折叠状态存下来（`capture`）—— **不要求它是那行里的第一个调用**：
+  // 2026-10-04 接入「语言服务导入期重试」后在前面加了 `cancelWarmups()`，原来「必须以
+  // `onBeforeUnmount(() => { folding.capture()` 开头」的写法会误红；判据意图（先 capture 再 destroy）不变。
+  assert.match(editor, /onBeforeUnmount\(\(\) => \{[^}]*folding\.capture\(\)/, '卸载时要先捕获折叠状态')
+  // 「同一段里随后销毁 view」用**行边界**表达，不用字符数预算：2026-10-06 起别的桶往这一个
+  // 处理器里加了清理调用（warmup / timer / 各扩展层的 dispose），`{0,400}` 那档预算量的其实是
+  // 「这一行有多长」，与判据意图（capture 在前、destroy 在同一个处理器里）无关。
+  // 意图没变：同一个 `onBeforeUnmount(() => { … })` 里 capture 之后必须还有 `view?.destroy()`。
+  assert.match(editor, /onBeforeUnmount\(\(\) => \{[^\n]*folding\.capture\(\)[^\n]*view\?\.destroy\(\)/, '同一段里随后要销毁 view')
+  assert.match(editor, /watch\(\(\) => props\.path, \(\) => \{[^}]*folding\.capture\(\)/, '换文件前也要存一次')
 
   // 管道本体：顺序是语义（先存后折默认），并且必须串行。
   const controller = read('src/editorFoldingController.ts')
   const run = controller.slice(controller.indexOf('async function run()'))
-  const order = ['capture()', 'setFoldingRanges.of(ranges)', 'rememberCandidates(', 'applyDefaults()', 'dropStale()', 'restore()']
+  const order = ['capture()', 'setFoldingRanges.of(', 'rememberCandidates(', 'applyDefaults()', 'dropStale()', 'restore()']
   let last = -1
   for (const step of order) {
     const at = run.indexOf(step)
     assert.ok(at > last, `管道顺序不对：${step}`)
     last = at
   }
+  // 装进 field 的不是服务端原样那组，而是并上本地 `//<region>` / `//region` 标记后的合并区间
+  // （服务端同起止的优先，见 editorFolding.ts 的 mergeFoldRanges）—— 顺序判据只锚「安装」这一步。
+  assert.match(controller, /mergeFoldRanges\(ranges, localRegionFolds\(/, '安装的区间要先并上本地 region 标记')
   assert.match(controller, /if \(busy\) \{ again = true; return \}/, '管道必须串行（两轮并存会把覆盖状态记错）')
   assert.match(controller, /flushFoldState\(\)/, '存完顺带安排落盘（上游是 dispose 时交给 saveFoldingState）')
   assert.match(controller, /for \(const entry of deps\.foldingKinds\(\)\) foldKinds\(view, \[entry\.kind\], entry\.collapse\)/,

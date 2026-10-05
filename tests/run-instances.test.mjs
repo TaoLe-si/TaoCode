@@ -165,7 +165,7 @@ test('运行配置的「允许并行运行多个实例」走全链路', () => {
   assert.match(dialog, /v-model="form\.allowRunningInParallel"/, '对话框要有复选框')
   assert.ok(dialog.includes('操作系统'), '复选框属于「操作系统」组（CommonTags.parallelRun():13）')
   const actions = read('src/runActions.ts')
-  assert.match(actions, /allowParallel: config\.allowRunningInParallel === true/, '启动时把策略交给宿主')
+  assert.match(actions, /params\.allowParallel = config\.allowRunningInParallel === true/, '启动时把策略交给宿主')
   // 原生：校验 + 条目键白名单
   const schema = read('native/settings_schema.cpp')
   assert.ok(schema.includes('"allowRunningInParallel"'), '原生要认这个键')
@@ -175,7 +175,12 @@ test('运行配置的「允许并行运行多个实例」走全链路', () => {
 test('运行控制台按实例开标签（IDEA 的 Run 工具窗口）', () => {
   const console_ = read('src/components/RunConsole.vue')
   assert.match(console_, /v-if="instances\.length > 1"/, '多于一个实例才显示标签条')
-  assert.match(console_, /emit\('stop', instance\.id\)/, '标签上的 × 停那一个实例')
+  // × 走 `closeView`：先发 stop（停那一个实例），再 `closeRunView` 摘掉这个标签
+  // —— 上游 `RunnerContentUi.java:396-406` 的标签关闭键就是 `CloseViewAction.perform`
+  // （removeContent + dispose），不是只发一个 stop。详见 tests/runner-view-actions.test.mjs。
+  assert.match(console_, /function closeView\(id: number\) \{\s*emit\('stop', id\)\s*closeRunView\(id\)/s,
+    '标签上的 × 停那一个实例并摘掉标签')
+  assert.match(console_, /class="run-tab-close"[^>]*@click="closeView\(instance\.id\)"/s)
   assert.match(console_, /role="tablist"/, '标签条要有 role=tablist')
   const app = read('src/App.vue')
   assert.match(app, /<RunConsole ref="runLog"/, 'App 要用它替换原来的 .run-log')

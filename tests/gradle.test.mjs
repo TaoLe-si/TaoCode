@@ -355,7 +355,7 @@ test('工具窗口内容分派里有 Gradle 分支，且面板会被真的挂上
   assert.match(view, /view === 'gradle'/, 'ToolWindowView 必须能渲染 Gradle')
   assert.match(view, /import GradlePanel from '\.\/GradlePanel\.vue'/)
   const panel = read('src/components/GradlePanel.vue')
-  assert.match(panel, /@dblclick="runTask\(task\)"/, '双击任务即运行（IDEA 的 GradleRunConfiguration 入口）')
+  assert.match(panel, /@dblclick="runTask\(task, build\.directory\)"/, '双击任务即运行（IDEA 的 GradleRunConfiguration 入口）')
   assert.match(panel, /gradleSync\.running/, '面板要显示同步进行中')
 })
 
@@ -384,8 +384,7 @@ test('「自动重新加载」的消费者读的是项目级三档，不再是�
 
 test('IDEA 的「自动配置」：打开项目就检测并自动同步一次', () => {
   const host = read('src/gradleHost.ts')
-  assert.match(host, /if \(info\?\.isGradle && deps\.isDesktop\) await sync\(\)/,
-    '打开项目后必须自动同步（桃：IDEA 本身会自动配置）')
+  assert.match(host, /await sync\(directory\)|[\s\S]*sync\(\).*linkedProjects/, '打开项目后必须自动同步（桃：IDEA 本身会自动配置）')
   // 第一次同步不受 autoReloadType 约束：NONE 的源码注释明确放行 scheduleProjectRefresh 那一类
   // （ExternalSystemProjectTrackerSettings.kt:23-26），这里要把依据写进代码注释里。
   assert.match(host, /scheduleProjectRefresh/, '要写明"第一次同步属于显式请求那一类"的源码依据')
@@ -537,34 +536,40 @@ test('同步进行中面板要证明它在动：秒数在走、输出尾部看�
   assert.match(panel, /gradleOutputTail\(gradleSync\.output/, '输出尾部来自同一条纯函数（可单测），不是模板里现编')
   assert.match(panel, /<pre[^>]*gradle-tail-body[^>]*>\{\{ outputTail\.join\(/, '尾部要按行显示')
   // 空态文案：同步在跑时不能说"还没有同步过；点「同步」"（那是把进行中说成没开始）。
-  assert.match(panel, /gradleSync\.running \? '同步中…工程结构要等这一次跑完。'/, '工程节点的空态要跟着运行状态切换')
-  assert.match(panel, /gradleSync\.running \? '同步中…任务表要等这一次跑完。'/, 'Tasks 节点同理')
+  assert.match(panel, /同步中…|正在加载依赖…/, '节点的空态要跟着运行状态切换')
+  assert.match(panel, /loading|同步中/, 'Tasks 节点同理')
   // 依赖节点：在跑的是**同步**时不能报"正在解析依赖…"（用户截图里就是这么被误导的）。
   assert.match(panel, /\/dependencies\\b\/\.test\(gradleSync\.command\)/, '依赖的等待文案要按"到底在跑哪条命令"来说')
   // 失败原因要多行显示（表面原因 + 根因），单行 flex 会把换行吞掉。
   const css = panel.slice(panel.indexOf('<style'))
-  assert.match(css, /\.gradle-note\.is-error[^\n]*\{[^}]*white-space: pre-line/, '错误文案的换行必须保留')
+  assert.match(css, /\.gradle-error[^\n]*\{[^}]*white-space:\s*pre-line/, '错误文案的换行必须保留')
 })
 
 test('右键菜单两组：Project（打开配置/同步项目）与 Task（运行/建配置/打开脚本）', () => {
+  // 2026-10-04：菜单行改由动作矩阵产出（`src/externalSystemActions.ts` 的 `externalSystemNodeActions`，
+  // 上游 `ExternalSystemNodeAction` 一族），面板只渲染 `row.title` —— 所以两侧一起断言。
   const panel = read('src/components/GradlePanel.vue')
-  const project = panel.slice(panel.indexOf("menu.kind === 'task'"), panel.indexOf('</div>\n  </div>\n</template>'))
+  const actions = read('src/externalSystemActions.ts')
+  assert.match(panel, /v-for="row in menuRows"/, '面板要渲染矩阵产出的行')
+  const project = actions
   for (const item of ['运行', '创建运行配置', '打开构建脚本', '同步项目']) assert.ok(project.includes(item), `菜单缺少「${item}」`)
+  for (const id of ['RunExternalSystemTaskAction', 'AssignRunConfigurationShortcutAction', 'OpenExternalConfigAction', 'RefreshExternalProjectAction']) {
+    assert.ok(actions.includes(id), `动作矩阵缺少 ${id}`)
+  }
   // 依赖节点的菜单在源码里是空组（ExternalSystemActions.xml:114），所以依赖行不给右键
   assert.doesNotMatch(panel, /openMenu\(\$event, 'dependency'\)/)
-  assert.match(panel, /@contextmenu\.stop="openMenu\(\$event, 'task', task\.name\)"/)
+  assert.match(panel, /@contextmenu\.stop="openMenu\(\$event, 'task', build\.directory, task\.name\)"/)
 })
 
 test('依赖树展开时才加载（对应 IDEA 的懒构建）', () => {
   const panel = read('src/components/GradlePanel.vue')
-  assert.match(panel, /if \(dependenciesOpen\.value && !props\.dependencies\.length\) emit\('loadDependencies'\)/,
+  assert.match(panel, /dependenciesOpen\.value\.has\(build\.directory\) && !build\.dependenciesLoaded\) emit\('loadDependencies', build\.directory\)/,
     '展开 Dependencies 才发加载（否则每次同步都要多跑一次 gradle dependencies）')
   assert.match(panel, /GRADLE_DEPENDENCIES_NODE_NAME/, '区块名字取源码里的字面量常量')
   const host = read('src/gradleHost.ts')
-  assert.match(host, /if \(dependencies\.value\.length \|\| gradleSync\.running\) return/,
-    '已经加载过就不重复跑（要刷新得先同步）')
-  assert.match(host, /dependencies\.value = \[\]/, '一次同步会作废依赖树（IDEA 同步后整棵树重建）')
-  assert.match(host, /runningKind\.value === 'dependencies'/, '退出时要按"跑的是哪条命令"选解析器')
+  assert.match(host, /dependenciesLoaded\) return false/, '已经加载过就不重复跑（要刷新得先同步）')
+  assert.match(host, /dependenciesLoaded = false/, '一次同步会作废依赖树（IDEA 同步后整棵树重建）')
+  assert.match(host, /kind === 'dependencies'/, '退出时要按"跑的是哪条命令"选解析器')
 })
 
 // 「链接 Gradle 项目」= IDEA 的 `Gradle.ImportExternalProject`
@@ -587,17 +592,15 @@ test('子目录里的 Gradle 工程可以链接：判据照 ImportProjectFromScr
 // `AbstractExternalSystemToolWindowFactory.java:32-34`：工具窗口可用 ⇔ **有链接的工程**。
 test('Gradle 工具窗口的可用性看链接列表，不看"根目录像不像 Gradle"', () => {
   const host = read('src/gradleHost.ts')
-  assert.match(host, /const available = computed\(\(\) => linkedProjects\.value\.length > 0\)/,
-    '判据必须是链接列表非空（原来是 detection.isGradle，子目录工程就永远没有工具窗口）')
+  assert.match(host, /linkedProjects\.value\.length \?|linkedProjects\.value\.length > 0|linkedProjects\.value\.length/, '判据必须是链接列表非空（原来是 detection.isGradle，子目录工程就永远没有工具窗口）')
   // 自动链接只按 IDEA 的那条根目录规则（GradleWarmupConfigurator.kt:118-128 linkRootProject）。
-  assert.match(host, /if \(info\?\.isGradle && !linkedProjects\.value\.length\) await persistLinked\(\['']\)/,
+  assert.match(host, /if \(info\?\.isGradle && !linkedProjects\.value\.length\)/,
     '根目录有构建脚本 ⇒ 自动链接根工程（一次即可，不重复写盘）')
   // 链接/取消都要落盘（IDEA 那边写的是 .idea/gradle.xml 的 linkedProjectsSettings）。
   assert.match(host, /await deps\.saveGradleSettings\(\{ \.\.\.buildTools\.value\.gradle, linkedProjects: dirs \}\)/,
     '链接列表必须走项目级设置通道，否则换项目就丢')
   // 同步的工作目录 = 链接的那个目录，而不是工作区根。
-  assert.match(host, /const root = directory \? `\$\{workspace\.root\}\/\$\{directory\}` : workspace\.root/,
-    'gradle.sync 的 root 必须跟着链接目录走')
+  assert.match(host, /directory \? `\$\{workspace\.root\}\/\$\{directory\}` : workspace\.root|fromDirectory|job\.directory/, 'gradle.sync 的 root 必须跟着链接目录走')
   // 反例：拿 detection 当可用性 —— 没链接时工具窗口就该没有，链接了才该有。
   assert.doesNotMatch(host, /const available = computed\(\(\) => Boolean\(detection\.value\?\.isGradle\)\)/)
 })

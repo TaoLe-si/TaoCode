@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url'
 import {
   SETTINGS_ARCHIVE_EXTENSION,
   SETTINGS_ARCHIVE_FILTERS,
+  archivePathProblem,
+  ensureArchiveExtension,
   exportResultMessage,
   importConfirmMessage,
   importResultMessage,
@@ -20,6 +22,7 @@ import {
   restoreResultMessage,
   sectionLabel,
   settingsArchiveName,
+  validateTransferSummary,
 } from '../src/settingsTransfer.ts'
 import { createFileMenuRows } from '../src/menus/fileMenu.ts'
 
@@ -42,9 +45,49 @@ test('过滤器串用 native 的 `名称|通配符` 格式，且认得出 zip', 
 
 test('段落标签把 JSON 键名换成人话', () => {
   assert.equal(sectionLabel('settings'), '编辑器设置')
+  // native `empty_document()` 的键就是 `general`（旧写法 `preferences.general` 也认）
+  assert.equal(sectionLabel('general'), '系统设置')
   assert.equal(sectionLabel('preferences.general'), '系统设置')
   assert.equal(sectionLabel('perProject'), '每个项目的设置')
   assert.equal(sectionLabel('whatever'), 'whatever', '不认识的段原样返回，不编一个假名字')
+})
+
+test('导入/导出的路径校验：只认 zip，扩展名可补', () => {
+  assert.equal(archivePathProblem(''), '请选择设置归档。')
+  assert.equal(archivePathProblem('   '), '请选择设置归档。')
+  assert.equal(archivePathProblem('D:/x/taocode-settings-20260927.zip'), null)
+  assert.equal(archivePathProblem('D:/x/PACK.ZIP'), null, '扩展名大小写不敏感')
+  assert.match(archivePathProblem('D:/x/settings.7z'), /应当是 \.zip/)
+  assert.equal(ensureArchiveExtension('D:/x/taocode-settings'), 'D:/x/taocode-settings.zip')
+  assert.equal(ensureArchiveExtension('D:/x/taocode-settings.zip'), 'D:/x/taocode-settings.zip')
+  assert.equal(ensureArchiveExtension('D:/x/TAOCODE.ZIP'), 'D:/x/TAOCODE.ZIP', '已有扩展名不重复追加')
+})
+
+test('归档摘要形状校验：坏摘要停在确认框之前', () => {
+  const ok = { path: 'D:/a.zip', components: ['settings', 'general'], projects: 2, exportedAt: '2026-09-27T10:00:00' }
+  assert.equal(validateTransferSummary(ok), null)
+  assert.match(validateTransferSummary(null), /格式不对/)
+  assert.match(validateTransferSummary([]), /格式不对/)
+  assert.match(validateTransferSummary({ ...ok, path: '' }), /归档路径/)
+  assert.match(validateTransferSummary({ ...ok, components: [] }), /没有任何可导入的设置段/)
+  assert.match(validateTransferSummary({ ...ok, components: ['settings', ''] }), /设置段名不合法/)
+  assert.match(validateTransferSummary({ ...ok, projects: -1 }), /项目数不合法/)
+  assert.match(validateTransferSummary({ ...ok, projects: 1.5 }), /项目数不合法/)
+  assert.match(validateTransferSummary({ ...ok, exportedAt: 5 }), /导出时间不合法/)
+})
+
+test('校验真的接在导入链路上：路径 → 摘要 → 才确认 → 才写盘', () => {
+  const source = read('src/settingsTransfer.ts')
+  const pathCheck = source.indexOf('archivePathProblem(path)')
+  const readArchive = source.indexOf("'app.readSettingsArchive'")
+  const summaryCheck = source.indexOf('validateTransferSummary(summary)')
+  const confirm = source.indexOf('if (!confirm(importConfirmMessage(summary))) return')
+  const write = source.indexOf("request('app.importSettings'")
+  assert.ok(pathCheck >= 0 && summaryCheck >= 0, '两处校验都要在')
+  assert.ok(pathCheck < readArchive, '路径校验在发请求之前')
+  assert.ok(readArchive < summaryCheck && summaryCheck < confirm, '摘要校验在读到摘要之后、确认之前')
+  assert.ok(confirm < write, '写盘仍要在确认之后')
+  assert.match(source, /ensureArchiveExtension\(path\)/, '导出要补扩展名')
 })
 
 test('导出提示说清"写了多大、写到哪、含什么"', () => {

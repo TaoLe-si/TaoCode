@@ -14,6 +14,7 @@ import { EditorSelection, StateEffect, StateField, type EditorState, type Extens
 import { foldedRanges, unfoldEffect } from '@codemirror/language'
 import { Decoration, EditorView, keymap, type Command, type DecorationSet } from '@codemirror/view'
 import { collectSearchMatches, nextMatch, type SearchMatch, type SearchOptions, DEFAULT_SEARCH_OPTIONS } from './editorSearch.ts'
+import { usageHighlightExtension } from './usageHighlightExtension.ts'
 
 /** 查找栏的状态：开没开、查询词、选项。**只放在 CodeMirror 里**（法一是权威），
  *  Vue 组件读它来画，写它来改 —— 两边不会各存一份。 */
@@ -64,10 +65,16 @@ export function matchesIn(state: EditorState): SearchMatch[] {
 
 // 「在所选内容中搜索」(`FindModel.isGlobal` 取反)：只看主选区的行区间 ——
 // 上游在编辑器里也是按**选区**限定，而不是按整个文档。
+//
+// **没有选区 ≠ 搜全文件**：上游 `EditorSelectionSearchAreaProvider`（`SearchResults.java:573-582`）
+// 直接拿 `getBlockSelectionStarts()/getBlockSelectionEnds()`，空选区就是空搜索区，于是
+// `EditorSearchSession.java:408-410` 报 `editorsearch.noselection`（「无选区」）。这里照做：
+// 悄悄退回全文件会让用户以为自己按的开关没生效。
 function searchScope(state: EditorState): { from: number; to: number } {
   const { options } = searchStateOf(state)
   const range = state.selection.main
-  if (!options.inSelection || range.empty) return { from: 0, to: state.doc.length }
+  if (!options.inSelection) return { from: 0, to: state.doc.length }
+  if (range.empty) return { from: range.from, to: range.from }
   return { from: state.doc.lineAt(range.from).from, to: state.doc.lineAt(range.to).to }
 }
 
@@ -129,6 +136,10 @@ const findPrevCommand: Command = view => goToMatch(view, true)
  * 编辑器里的那一层扩展：状态 + 高亮 + 两条导航键。
  * **替换** CodeMirror 自带的 `Mod-f` / `F3` 绑定（那些都指它自己的面板）：本仓的
  * keymap 里这几条要排在 `basicSetup` **之前**（CodeMirror 的 keymap 是谁在前谁赢）。
+ *
+ * 末尾一并返回「高亮用法」的扩展（`src/usageHighlightExtension.ts`，上游 `HighlightUsagesAction`）：
+ * 它同属**光标驱动的高亮层**，而 CodeEditor.vue 已冻结（1147 行机检上限），本函数是它已经调用的
+ * 注册入口 —— 单独开一个模块不会被谁 import。
  */
 export function editorSearchExtension(): Extension {
   return [
@@ -138,5 +149,6 @@ export function editorSearchExtension(): Extension {
       { key: 'F3', preventDefault: true, run: findNextCommand },
       { key: 'Shift-F3', preventDefault: true, run: findPrevCommand },
     ]),
+    usageHighlightExtension(),
   ]
 }

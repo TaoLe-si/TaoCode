@@ -75,6 +75,18 @@ test('速度搜索：空串放行全部，大小写无关，命中后不重排',
   assert.deepEqual(filterSelectIn(rows, labels[0]).map(row => row.id), ['z'], '顺序必须还是权重顺序，不是相关度')
 })
 
+test('速度搜索按 MinusculeMatcher 的子序列（驼峰缩写能命中，SpeedSearch.java:158-166）', () => {
+  const rows = planSelectIn([
+    { id: 'project', label: 'Project View', weight: 0, selectable: true },
+    { id: 'structure', label: 'File Structure', weight: 4, selectable: true },
+    { id: 'navbar', label: 'Navigation Bar', weight: 8, selectable: true },
+  ])
+  assert.deepEqual(filterSelectIn(rows, 'pv').map(row => row.id), ['project'], '驼峰缩写 PV → Project View')
+  assert.deepEqual(filterSelectIn(rows, 'fs').map(row => row.id), ['structure'])
+  assert.deepEqual(filterSelectIn(rows, 'proj').map(row => row.id), ['project'], '子串行为保留')
+  assert.deepEqual(filterSelectIn(rows, 'zzz'), [], '对不上就是空表')
+})
+
 test('上下键在可选行之间走，两端不回绕', () => {
   const rows = planSelectIn([target('a', 0), target('b', 1, false), target('c', 2)])
   assert.equal(moveSelectIn(rows, 0, 1), 2, '必须跳过置灰的中间行')

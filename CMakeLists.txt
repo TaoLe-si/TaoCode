@@ -27,34 +27,44 @@ endif()
 
 # window_state（全屏等窗口态）放在这个库里：它同样只依赖 Win32 + json，
 # 而且 workspace_test 要能直接测它（加在可执行目标上就链接不到）。
-add_library(taocode_workspace native/workspace.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
+add_library(taocode_workspace native/workspace.cpp native/workspace_tree_ops.cpp native/window_state.cpp native/dialogs.cpp native/export_file.cpp native/file_queries.cpp)
 target_include_directories(taocode_workspace PUBLIC native)
 target_link_libraries(taocode_workspace PUBLIC nlohmann_json::nlohmann_json bcrypt)
 
-add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/git_clone.cpp native/git.cpp
-                             native/settings_transfer.cpp native/git_log.cpp)
+add_library(taocode_projects native/projects.cpp native/java_lsp_paths.cpp native/project_settings_state.cpp native/project_file_colors.cpp native/settings_schema.cpp native/folding_state_schema.cpp native/trusted_paths.cpp native/git_clone.cpp native/git.cpp
+                             native/settings_transfer.cpp native/git_log.cpp native/git_worktree.cpp)
 target_link_libraries(taocode_projects PUBLIC taocode_workspace taocode_history xmllite shlwapi ole32)
 
 add_library(taocode_lsp native/lsp.cpp native/lsp_host.cpp native/lsp_session.cpp
                            native/lsp_support.cpp native/lsp_capability_queries.cpp native/lsp_discovery.cpp
-                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp native/lsp_recover.cpp native/lsp_children.cpp native/lsp_navigation.cpp native/library_sources.cpp)
+                           native/lsp_code_actions.cpp native/jdtls.cpp native/lsp_config.cpp native/request_trace.cpp native/lsp_host_bootstrap.cpp native/lsp_worker.cpp native/lsp_session_progress.cpp native/lsp_recover.cpp native/lsp_children.cpp native/lsp_navigation.cpp native/lsp_session_kinds.cpp native/library_sources.cpp)
 # lsp_config 要把项目的 `java` 设置喂给 Java 服务器（补全偏好、sourceLevel…），
 # 那是 `java_lsp_settings`（native/projects.cpp）—— 依赖是单向的，不成环。
 target_link_libraries(taocode_lsp PUBLIC taocode_workspace taocode_projects)
 
 add_library(taocode_runner native/runner.cpp native/run_host.cpp)
-target_link_libraries(taocode_runner PUBLIC taocode_workspace)
+# iphlpapi：run_host 的 `run.instances` 用 GetExtendedTcpTable 列出实例进程树的监听端口
+# （上游 execution/portsWatcher 的可见等价物，前端在 Run 控制台「进程」区显示）。
+target_link_libraries(taocode_runner PUBLIC taocode_workspace iphlpapi)
 
 add_library(taocode_search native/search.cpp)
 target_link_libraries(taocode_search PUBLIC taocode_workspace)
 
-add_library(taocode_dap native/dap.cpp)
+# 按职责拆文件（三个都是同一个道理：一个文件一个职责域，见 tests/module-size.test.mjs）：
+#   dap.cpp          —— 会话 / 管道 / reader / 请求的构造与发信
+#   dap_inspect.cpp  —— 「清单重取 / 反向调试 / 内存与反汇编」这一族请求
+#   dap_shaping.cpp  —— 响应整形（事件 / 栈帧 / 作用域 / 变量 / 异常 / 断点 / 补全 / 运行到光标处）
+#   dap_routes.cpp   —— 桥接层的 `dap.*` 分派（从 main.cpp 抽出，那边有 2000 行硬上限）
+add_library(taocode_dap native/dap.cpp native/dap_inspect.cpp native/dap_shaping.cpp native/dap_routes.cpp)
 target_link_libraries(taocode_dap PUBLIC taocode_workspace)
 
 add_library(taocode_terminal native/terminal.cpp)
 target_link_libraries(taocode_terminal PUBLIC taocode_workspace)
 
-add_library(taocode_history native/history.cpp)
+# history.cpp 管本地历史的快照落盘/版本索引/指纹；history_diff.cpp 管「行级 unified diff 脚本」
+# （切行 → 出脚本 → 渲染 @@ 块），它不碰目录、句柄与索引，是一个独立的算法域
+# （2026-10-05 拆出，history.cpp 贴着 1050 行机检上限；见 tests/module-size.test.mjs）。
+add_library(taocode_history native/history.cpp native/history_diff.cpp)
 target_link_libraries(taocode_history PUBLIC taocode_workspace)
 
 add_library(taocode_session native/session.cpp)
@@ -72,7 +82,7 @@ add_library(taocode_jdk native/jdk.cpp)
 target_link_libraries(taocode_jdk PUBLIC taocode_workspace)
 
 # diagnostics（日志文件 / 特殊目录 / 排障信息）—— IDEA `com.intellij.diagnostic` 的对应物。
-add_library(taocode_diagnostics native/diagnostics.cpp native/zipstore.cpp)
+add_library(taocode_diagnostics native/diagnostics.cpp native/zipstore.cpp native/crash_log.cpp)
 target_include_directories(taocode_diagnostics PUBLIC native)
 target_link_libraries(taocode_diagnostics PUBLIC taocode_workspace taocode_jdk shell32 ole32)
 # settings_transfer（在 taocode_projects 里）要用 zipstore 打包设置归档。写在 diagnostics 定义**之后**：
@@ -103,6 +113,11 @@ add_test(NAME workspace_safety COMMAND workspace_test)
 add_executable(projects_test native/projects_test.cpp)
 target_link_libraries(projects_test PRIVATE taocode_projects)
 add_test(NAME projects_lifecycle COMMAND projects_test)
+# 「解析外部」那条线（类路径 / 源根 / Eclipse 工程物化）单独一个目标：它在 projects.cpp 那条
+# 项目层回归之外有自己的夹具形状（多子工程工作区 vs 单模块工程），判据见源文件头。
+add_executable(java_lsp_paths_test native/java_lsp_paths_test.cpp)
+target_link_libraries(java_lsp_paths_test PRIVATE taocode_projects)
+add_test(NAME java_lsp_paths COMMAND java_lsp_paths_test)
 # 文件颜色是独立模块（.idea 两层 XML + 自己的回滚/失败码），回归单独一个目标；
 # 共用夹具在 native/project_test_support.hpp。
 add_executable(project_file_colors_test native/project_file_colors_test.cpp)

@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -23,6 +25,12 @@ namespace fs = std::filesystem;
 constexpr std::size_t max_plugins = 200;
 constexpr std::size_t max_commands = 100;
 constexpr std::size_t max_templates = 100;
+// 一个清单能声明的文件类型条数上限（上游没有这一档，但 `<fileType>` 是会进注册表的入口点）。
+constexpr std::size_t max_file_types = 50;
+// 一条关联属性（分号分隔）的长度上限。
+constexpr std::size_t max_associations = 500;
+// 一个清单能声明的依赖条数上限 —— 防一个手写/生成的清单把依赖图撑成无限大。
+constexpr std::size_t max_dependencies = 32;
 // 插件包解压后的上限。这不是"防大插件"，是防**一个包把插件目录灌满**：
 // 一个 200 MB 的包解开可能是几十 GB（压缩炸弹），而插件目录是要被 `list()` 全量扫的。
 constexpr std::size_t max_package_entries = 5000;
@@ -31,9 +39,22 @@ constexpr DWORD package_timeout_ms = 60000;
 
 const std::set<std::string> known_languages = {"java", "cpp", "typescript", "other"};
 
+/** 剪掉首尾 ASCII 空白 —— 清单是人手写的，" name " 与 "name" 必须同义（否则空名字的
+ *  兜底、命令 id 的去重、长度上限都会因为几个空格而判错）。 */
+std::string trimmed(const std::string& value) {
+    const auto space = [](char character) {
+        return character == ' ' || character == '\t' || character == '\r' || character == '\n';
+    };
+    std::size_t begin = 0;
+    std::size_t end = value.size();
+    while (begin < end && space(value[begin])) ++begin;
+    while (end > begin && space(value[end - 1])) --end;
+    return value.substr(begin, end - begin);
+}
+
 std::string text_or(const Json& value, const char* key, std::size_t limit) {
     if (!value.contains(key) || !value.at(key).is_string()) return {};
-    const auto text = value.at(key).get<std::string>();
+    const auto text = trimmed(value.at(key).get<std::string>());
     return text.size() > limit ? std::string() : text;
 }
 
@@ -53,6 +74,7 @@ std::vector<Command> read_commands(const Json& contributes) {
     if (!contributes.contains("commands")) return commands;
     const auto& values = contributes.at("commands");
     if (!values.is_array()) return commands;
+    std::set<std::string> seen;
     for (const auto& value : values) {
         if (!value.is_object() || commands.size() >= max_commands) continue;
         Command command;
@@ -61,10 +83,44 @@ std::vector<Command> read_commands(const Json& contributes) {
         command.action = text_or(value, "action", 80);
         if (value.contains("group")) command.group = text_or(value, "group", 40);
         if (command.group.empty()) command.group = "插件";
+        // 空白值（`"title": "   "`）与缺字段同样处理：`text_or` 已剪过首尾空白，这里只认空串。
         if (command.id.empty() || command.title.empty() || command.action.empty()) continue;
+        // 行 id 是 `plugin.<插件 id>.<命令 id>`，同一个插件里重复的命令 id 会让菜单/命令面板
+        // 出现两行同 id 的条目（Vue 的 key 也会撞）。重复的取第一条，后一条丢掉。
+        if (!seen.insert(command.id).second) continue;
         commands.push_back(std::move(command));
     }
     return commands;
+}
+
+/**
+ * 清单里的依赖声明：`depends`（必需）/ `optionalDepends`（可选）都取字符串数组。
+ * 非法 id、空串与自己（`self`）都丢掉 —— 一个指向自己的依赖会立刻死循环；
+ * 重复 id 取第一条；条数上限 `max_dependencies`。
+ * 读不出来的形状（不是数组 / 元素不是字符串）与「没写」同义，不报错：
+ * 依赖是清单的附加声明，不该因为一个手滑的 `"depends": "a"` 就让整个插件变成坏清单。
+ */
+std::vector<std::string> read_dependencies(const Json& document, const char* key, const std::string& self) {
+    std::vector<std::string> result;
+    if (!document.contains(key) || !document.at(key).is_array()) return result;
+    std::set<std::string> seen;
+    for (const auto& value : document.at(key)) {
+        if (!value.is_string() || result.size() >= max_dependencies) continue;
+        const std::string id = trimmed(value.get<std::string>());
+        if (!valid_id(id) || id == self) continue;
+        if (seen.insert(id).second) result.push_back(id);
+    }
+    return result;
+}
+
+/** 把 id 列表拼成一句人话（`a、b`）；空列表给空串。 */
+std::string joined(const std::vector<std::string>& values) {
+    std::string text;
+    for (const auto& value : values) {
+        if (!text.empty()) text += "、";
+        text += value;
+    }
+    return text;
 }
 
 std::vector<Template> read_templates(const Json& contributes) {
@@ -72,6 +128,7 @@ std::vector<Template> read_templates(const Json& contributes) {
     if (!contributes.contains("templates")) return templates;
     const auto& values = contributes.at("templates");
     if (!values.is_array()) return templates;
+    std::set<std::string> seen;
     for (const auto& value : values) {
         if (!value.is_object() || templates.size() >= max_templates) continue;
         Template entry;
@@ -87,10 +144,56 @@ std::vector<Template> read_templates(const Json& contributes) {
                     if (language.is_string() && known_languages.contains(language.get<std::string>()))
                         entry.languages.push_back(language.get<std::string>());
             if (entry.languages.empty()) entry.languages.push_back("other");
+            // 同一个 key 在模板列表里只能展开到一个模板（用户模板也是这么遮蔽内建的）：
+            // 重复 key 取第一条，否则 `effectiveTemplates` 的遮蔽关系会随清单顺序漂移。
+            if (!seen.insert(entry.key).second) continue;
             templates.push_back(std::move(entry));
         }
     }
     return templates;
+}
+
+/**
+ * `contributes.fileTypes` —— 上游 `com.intellij.fileType` EP 的一个 `<fileType>` 标签
+ * （`FileTypeBean.java`：`name` 是 `@RequiredElement` :93；两种用法见 :26-43）。
+ * native 只把关**形状、长度与重名**，分号拆分与匹配器构造留给前端那一份
+ * （`parseFileTypeBean`，`src/fileTypeRegistry.ts:217`），免得规则漂成两套。
+ * 语言只认编辑器知道的四种（与 `read_templates` 同一张 `known_languages` 表）。
+ */
+std::vector<FileTypeContribution> read_file_types(const Json& contributes) {
+    std::vector<FileTypeContribution> result;
+    if (!contributes.contains("fileTypes")) return result;
+    const auto& values = contributes.at("fileTypes");
+    if (!values.is_array()) return result;
+    std::set<std::string> seen;
+    for (const auto& value : values) {
+        if (!value.is_object() || result.size() >= max_file_types) continue;
+        FileTypeContribution entry;
+        entry.name = text_or(value, "name", 80);
+        // 上游 `name` 缺了就是坏标签（`PluginException`）；本仓整条丢掉，不留一个空名字的类型。
+        if (entry.name.empty()) continue;
+        entry.implementation_class = text_or(value, "implementationClass", 200);
+        entry.field_name = text_or(value, "fieldName", 60);
+        entry.language = text_or(value, "language", 40);
+        if (!entry.language.empty() && !known_languages.contains(entry.language)) entry.language.clear();
+        entry.extensions = text_or(value, "extensions", max_associations);
+        entry.file_names = text_or(value, "fileNames", max_associations);
+        entry.patterns = text_or(value, "patterns", max_associations);
+        entry.file_names_case_insensitive = text_or(value, "fileNamesCaseInsensitive", max_associations);
+        entry.hash_bangs = text_or(value, "hashBangs", max_associations);
+        // 一条什么关联都没声明的标签在这里不收：上游会给它一张空匹配器表，
+        // 本仓的设置页上就多出一行既判不出文件又抢不走的插件类型。
+        if (entry.extensions.empty() && entry.file_names.empty() && entry.patterns.empty() &&
+            entry.file_names_case_insensitive.empty() && entry.hash_bangs.empty()) continue;
+        // 重名：上游是「两个类型用同一个 name 是错误」（`FileTypeBean.java:49-54`）。
+        // native 先收第一条、按大小写不敏感判重（`FileTypeManagerImpl.java:1499-1501` 那种
+        // equalsIgnoreCase 的口径），后面的整条丢掉；前端还会跨插件再核一次。
+        std::string folded = entry.name;
+        for (char& character : folded) if (character >= 'A' && character <= 'Z') character += 32;
+        if (!seen.insert(folded).second) continue;
+        result.push_back(std::move(entry));
+    }
+    return result;
 }
 
 // ---- 安装：id 推导、插件包解压、解压后的边界校验 ------------------------------
@@ -263,6 +366,64 @@ fs::path unpack_package(const fs::path& package, const fs::path& staging) {
     return root;
 }
 
+/**
+ * 必需依赖图上的强连通分量（Tarjan）。只收**非平凡**分量（≥ 2 个插件）：依赖不能指向自己
+ * （`read_dependencies` 已经把 `self` 丢掉），所以剩下的每个分量都是一个真循环。
+ *
+ * 边只连到「装着且清单读得出来」的依赖：坏清单的插件自己已经是无效的，把它拉进环里只会
+ * 把「依赖缺失」和「成环」两个原因搅在一起（上游也是先解析清单再谈成环的）。
+ *
+ * 循环是**不可修复**的缺陷 —— 与缺依赖（装上就好）、依赖停用（启用就好）都不同，
+ * 它只能改清单。所以 `list()` 把它单独记一格 `dependency_cycle`，`set_enabled` 直接拒绝启用。
+ * 上游依据：`PluginManagerStateService.kt:175-202` + `CoreBundle.properties:32`。
+ */
+std::vector<std::vector<std::string>> dependency_cycles(const std::map<std::string, const Plugin*>& by_id) {
+    std::map<std::string, std::vector<std::string>> adjacency;
+    for (const auto& entry : by_id) {
+        for (const auto& dependency : entry.second->depends) {
+            const auto found = by_id.find(dependency);
+            if (found == by_id.end() || !found->second->error.empty()) continue;
+            adjacency[entry.first].push_back(dependency);
+        }
+    }
+    std::map<std::string, int> index, low;
+    std::vector<std::string> stack;
+    std::set<std::string> on_stack;
+    std::vector<std::vector<std::string>> cycles;
+    int counter = 0;
+    std::function<void(const std::string&)> strong_connect = [&](const std::string& node) {
+        index[node] = counter;
+        low[node] = counter;
+        ++counter;
+        stack.push_back(node);
+        on_stack.insert(node);
+        for (const auto& next : adjacency[node]) {
+            if (!index.count(next)) {
+                strong_connect(next);
+                low[node] = std::min(low[node], low[next]);
+            } else if (on_stack.count(next)) {
+                low[node] = std::min(low[node], index[next]);
+            }
+        }
+        if (low[node] != index[node]) return;
+        std::vector<std::string> component;
+        for (;;) {
+            const std::string member = stack.back();
+            stack.pop_back();
+            on_stack.erase(member);
+            component.push_back(member);
+            if (member == node) break;
+        }
+        if (component.size() > 1) {
+            std::sort(component.begin(), component.end());
+            cycles.push_back(std::move(component));
+        }
+    };
+    for (const auto& entry : by_id)
+        if (!index.count(entry.first)) strong_connect(entry.first);
+    return cycles;
+}
+
 }  // namespace
 
 Json to_json(const std::vector<Plugin>& plugins) {
@@ -276,11 +437,27 @@ Json to_json(const std::vector<Plugin>& plugins) {
         for (const auto& entry : plugin.templates)
             templates.push_back({{"key", entry.key}, {"body", entry.body},
                                  {"description", entry.description}, {"languages", entry.languages}});
+        Json file_types = Json::array();
+        for (const auto& entry : plugin.file_types)
+            file_types.push_back({{"name", entry.name}, {"language", entry.language},
+                                  {"extensions", entry.extensions}, {"fileNames", entry.file_names},
+                                  {"patterns", entry.patterns},
+                                  {"fileNamesCaseInsensitive", entry.file_names_case_insensitive},
+                                  {"hashBangs", entry.hash_bangs},
+                                  {"implementationClass", entry.implementation_class},
+                                  {"fieldName", entry.field_name}});
         Json value{{"id", plugin.id}, {"name", plugin.name}, {"version", plugin.version},
                    {"description", plugin.description}, {"category", plugin.category},
                    {"path", plugin.path}, {"enabled", plugin.enabled},
-                   {"commands", std::move(commands)}, {"templates", std::move(templates)}};
+                   {"depends", plugin.depends}, {"optionalDepends", plugin.optional_depends},
+                   {"missingDependencies", plugin.missing_dependencies},
+                   {"disabledDependencies", plugin.disabled_dependencies},
+                   {"requiredBy", plugin.required_by},
+                   {"commands", std::move(commands)}, {"templates", std::move(templates)},
+                   {"fileTypes", std::move(file_types)}};
         if (!plugin.error.empty()) value["error"] = plugin.error;
+        if (!plugin.broken.empty()) value["broken"] = plugin.broken;
+        if (!plugin.dependency_cycle.empty()) value["dependencyCycle"] = plugin.dependency_cycle;
         list.push_back(std::move(value));
     }
     return {{"plugins", std::move(list)}};
@@ -311,9 +488,12 @@ std::vector<Plugin> list(const fs::path& directory) {
             plugin.description = text_or(document, "description", 400);
             plugin.category = text_or(document, "category", 40);
             if (plugin.name.empty()) plugin.name = plugin.id;
+            plugin.depends = read_dependencies(document, "depends", plugin.id);
+            plugin.optional_depends = read_dependencies(document, "optionalDepends", plugin.id);
             if (document.contains("contributes") && document.at("contributes").is_object()) {
                 plugin.commands = read_commands(document.at("contributes"));
                 plugin.templates = read_templates(document.at("contributes"));
+                plugin.file_types = read_file_types(document.at("contributes"));
             }
         } catch (const Json::exception&) {
             plugin.error = "plugin.json 不是合法 JSON";
@@ -322,6 +502,42 @@ std::vector<Plugin> list(const fs::path& directory) {
         result.push_back(std::move(plugin));
     }
     std::sort(result.begin(), result.end(), [](const Plugin& a, const Plugin& b) { return a.id < b.id; });
+    // 依赖解析放在整个目录扫完之后：依赖可能排在引用者后面（列表已按 id 排序），
+    // 边读边判会把「装着但排在后面」误报成缺装。
+    std::map<std::string, const Plugin*> by_id;
+    for (const auto& plugin : result) by_id[plugin.id] = &plugin;
+    std::map<std::string, std::vector<std::string>> cycle_of;
+    for (const auto& component : dependency_cycles(by_id))
+        for (const auto& id : component) cycle_of[id] = component;
+    for (auto& plugin : result) {
+        for (const auto& dependency : plugin.depends) {
+            const auto found = by_id.find(dependency);
+            // 清单坏得读不出来的依赖与「没装」同罪：它不会被加载，引用者自然起不来。
+            if (found == by_id.end() || !found->second->error.empty())
+                plugin.missing_dependencies.push_back(dependency);
+            else if (!found->second->enabled)
+                plugin.disabled_dependencies.push_back(dependency);
+        }
+        for (const auto& other : result)
+            if (std::find(other.depends.begin(), other.depends.end(), plugin.id) != other.depends.end())
+                plugin.required_by.push_back(other.id);
+        // broken 只对**启用着的**插件有意义：停用的插件不是「加载失败」，它就是被停用了
+        // （连带停用的依赖者不该被标成坏插件）。两种原因同时存在时并列写出。
+        if (plugin.enabled && !plugin.missing_dependencies.empty()) {
+            plugin.broken = "缺少依赖插件：" + joined(plugin.missing_dependencies);
+            if (!plugin.disabled_dependencies.empty())
+                plugin.broken += "；依赖的插件已停用：" + joined(plugin.disabled_dependencies);
+        } else if (plugin.enabled && !plugin.disabled_dependencies.empty()) {
+            plugin.broken = "依赖的插件已停用：" + joined(plugin.disabled_dependencies);
+        }
+        // 成环与前两个原因并列写出（上游 `preparePluginErrors` 的 `globalErrors` 也是把
+        // 环错误单列一条，不与逐插件原因混在一起）。
+        plugin.dependency_cycle = cycle_of[plugin.id];
+        if (plugin.enabled && !plugin.dependency_cycle.empty()) {
+            if (!plugin.broken.empty()) plugin.broken += "；";
+            plugin.broken += "必需依赖形成循环：" + joined(plugin.dependency_cycle);
+        }
+    }
     return result;
 }
 
@@ -331,16 +547,73 @@ void set_enabled(const fs::path& directory, const std::string& id, bool enabled)
     std::error_code ec;
     if (!fs::exists(target, ec) || !fs::is_directory(target, ec))
         throw WorkspaceError("NOT_FOUND", "找不到插件目录：" + id);
-    const fs::path marker = target / ".disabled";
+
+    const std::vector<Plugin> plugins = list(directory);
+    std::map<std::string, const Plugin*> by_id;
+    for (const auto& plugin : plugins) by_id[plugin.id] = &plugin;
+    if (by_id.find(id) == by_id.end()) throw WorkspaceError("NOT_FOUND", "找不到插件目录：" + id);
+
+    const auto write_marker = [&](const std::string& plugin_id, bool want_enabled) {
+        const fs::path marker = directory / plugin_id / ".disabled";
+        std::error_code marker_error;
+        if (want_enabled) {
+            if (fs::exists(marker, marker_error) && !fs::remove(marker, marker_error))
+                throw WorkspaceError("IO_ERROR", "无法启用插件 " + plugin_id + "（删除 .disabled 失败）。");
+            return;
+        }
+        if (fs::exists(marker, marker_error)) return;
+        std::ofstream stream(marker, std::ios::binary | std::ios::trunc);
+        if (!stream) throw WorkspaceError("IO_ERROR", "无法停用插件 " + plugin_id + "（写入 .disabled 失败）。");
+        stream << "disabled\n";
+    };
+
     if (enabled) {
-        if (fs::exists(marker, ec) && !fs::remove(marker, ec))
-            throw WorkspaceError("IO_ERROR", "无法启用插件（删除 .disabled 失败）。");
+        // 启用前先递归启用**必需的**依赖（可选依赖不动）：依赖缺失就拒绝启用，
+        // 否则用户会得到一个「看着已启用、实际加载不了」的插件。
+        std::set<std::string> visited;
+        std::vector<std::string> missing;
+        std::function<void(const std::string&)> resolve = [&](const std::string& current) {
+            if (!visited.insert(current).second) return;
+            const auto entry = by_id.find(current);
+            if (entry == by_id.end()) return;
+            for (const auto& dependency : entry->second->depends) {
+                const auto found = by_id.find(dependency);
+                if (found == by_id.end() || !found->second->error.empty()) {
+                    missing.push_back(dependency);
+                    continue;
+                }
+                resolve(dependency);
+                write_marker(dependency, true);
+            }
+        };
+        resolve(id);
+        if (!missing.empty())
+            throw WorkspaceError("DEPENDENCY_MISSING",
+                                 "无法启用 " + id + "：缺少依赖插件 " + joined(missing) + "（先安装它）。");
+        // 成环的插件启不了：上游把环上的插件判为不可加载（`PluginManagerStateService.kt:175-202`），
+        // 这里是同一口径 —— 放行只会得到一个「看着已启用、实际加载不了」的状态。
+        for (const auto& component : dependency_cycles(by_id))
+            if (std::find(component.begin(), component.end(), id) != component.end())
+                throw WorkspaceError("DEPENDENCY_CYCLE",
+                                     "无法启用 " + id + "：必需依赖形成循环 " + joined(component) +
+                                         "（环上的插件都启不了，请改清单里的 depends）。");
+        write_marker(id, true);
         return;
     }
-    if (fs::exists(marker, ec)) return;
-    std::ofstream stream(marker, std::ios::binary | std::ios::trunc);
-    if (!stream) throw WorkspaceError("IO_ERROR", "无法停用插件（写入 .disabled 失败）。");
-    stream << "disabled\n";
+
+    // 停用：把依赖它的**已启用**插件一并停用（递归）。不这么做，那些插件会停在
+    // 「必需依赖已停用」的坏状态里 —— `list()` 会把它们标成 broken。
+    std::set<std::string> affected{id};
+    bool grew = true;
+    while (grew) {
+        grew = false;
+        for (const auto& plugin : plugins) {
+            if (affected.count(plugin.id) || !plugin.enabled) continue;
+            for (const auto& dependency : plugin.depends)
+                if (affected.count(dependency)) { affected.insert(plugin.id); grew = true; break; }
+        }
+    }
+    for (const auto& plugin_id : affected) write_marker(plugin_id, false);
 }
 
 void install(const fs::path& directory, const fs::path& source) {

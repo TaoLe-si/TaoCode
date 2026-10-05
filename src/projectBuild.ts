@@ -26,6 +26,7 @@
 // 纯逻辑（零 import 之外无副作用），可 `node --test` 直接 import。
 import type { GradleDetection, GradleRunSettings } from './gradle.ts'
 import { gradleCommand } from './gradle.ts'
+import { orderCompileClasspath } from './orderRoots.ts'
 
 /** 构建时认领这个项目的"执行者"（IDEA 里就是哪个 ProjectTaskRunner 接手）。 */
 export type ProjectKind = 'gradle' | 'maven' | 'javac' | 'cmake'
@@ -185,7 +186,13 @@ export function javacCommand(request: BuildRequest, argFile: string): string {
   // 混着拼会得到 `D:/Java21\bin\javac.exe`，Windows 认但看着像 bug。
   const home = request.jdkHome.trim().replace(/[\\/]+$/, '')
   const executable = home ? (home.includes('\\') ? `${home}\\bin\\javac.exe` : `${home}/bin/javac.exe`) : 'javac'
-  const classpath = [output, ...request.classpath].filter(Boolean).join(CLASSPATH_SEPARATOR)
+  // 类路径走 `OrderRootType.CLASSES` 的枚举顺序：模块输出根在前、库根在后，按首次出现去重
+  // （上游 `OrderRootComputer.computeRoots` 的 `LinkedHashSet`；规则与缓存见 src/orderRoots.ts）。
+  const classpath = orderCompileClasspath({
+    moduleName: request.projectName,
+    outputPaths: [output],
+    libraryRoots: [{ classes: request.classpath }],
+  }).join(CLASSPATH_SEPARATOR)
   return `"${executable}" -encoding UTF-8 -g -d "${output}" -cp "${classpath}" @${argFile}`
 }
 

@@ -5,6 +5,9 @@
 import type { Diagnostic } from '@codemirror/lint'
 import type { Text } from '@codemirror/state'
 import type { LspDiagnostic } from './bridge'
+// 高亮级别模型（上游 `HighlightDisplayLevel`）：LSP 严重度 → 编辑器标记的 severity 与问题面板
+// 同一份判定，见 src/highlightLevels.ts。
+import { severityForMarker } from './highlightLevels.ts'
 
 /** LSP 的 0 基 (line, character) → 文档偏移。行与列都夹到合法范围（`lspPosition` 的老实现）。 */
 export function lspPosition(doc: Text, line: number, character: number): number {
@@ -22,7 +25,7 @@ export function diagnosticMarkers(items: readonly LspDiagnostic[], doc: Text): D
     try {
       const from = lspPosition(doc, item.line, item.character)
       const to = Math.min(Math.max(from, item.endLine === undefined ? from + item.message.length : lspPosition(doc, item.endLine, item.endCharacter ?? 0)), doc.length)
-      markers.push({ from, to, severity: item.severity === 1 ? 'error' : item.severity === 2 ? 'warning' : 'info', message: item.message, source: item.source })
+      markers.push({ from, to, severity: severityForMarker(item.severity), message: item.message, source: item.source })
     } catch { /* 过期或越界的诊断不影响编辑 */ }
   }
   return markers

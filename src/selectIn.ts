@@ -10,6 +10,7 @@
 //    （SelectInAction.java:99-105 第 5 个实参），能否选中由 `isSelectable` 决定（:171-176）。
 //  · 数字/字母命中：只在 KEY_TYPED、只接受字母或数字、速度搜索**已有字时不抢键**、命中即吃掉事件
 //    （MnemonicsSearch.java:34-46），助记符表大小写各登记一次（:25-31）。
+import { symbolMatchesQuery } from './symbolSearch.ts'
 
 export interface SelectInTargetSpec {
   id: string
@@ -64,13 +65,14 @@ export function selectInMnemonicHit(map: ReadonlyMap<string, string>, rows: read
 }
 
 /**
- * 速度搜索过滤。上游用 `NameUtil.MatcherBuilder`/`MinusculeMatcher`（SpeedSearch.java:158-166），
- * 这里是**大小写无关的子串**版：空串放行全部、命中后保持原有（按权重）顺序，这两点与上游一致。
+ * 速度搜索过滤。上游用 `NameUtil.MatcherBuilder`/`MinusculeMatcher`（SpeedSearch.java:158-166）：
+ * 大小写无关的**子序列** + 驼峰/词首加权（`PV` 能命中 `Project View`）。本仓的等价物是
+ * `src/symbolSearch.ts`（与结构弹层 Ctrl+F12 同一套，见那里的上游依据）。
+ * 命中后保持原有（按权重）顺序、空串放行全部 —— 这两点与上游一致（上游只在树里过滤，不重排）。
  */
 export function filterSelectIn(rows: readonly SelectInRow[], filter: string): SelectInRow[] {
-  const needle = filter.trim().toLowerCase()
-  if (!needle) return [...rows]
-  return rows.filter(row => row.label.toLowerCase().includes(needle))
+  if (!filter.trim()) return [...rows]
+  return rows.filter(row => symbolMatchesQuery(row.label, filter))
 }
 
 /** 上下键在**可选项**之间移动，跳过置灰行；到达两端不回绕（`ListPopupBaseStep` 的选择行为）。 */

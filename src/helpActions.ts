@@ -14,9 +14,11 @@
 //
 // 本仓的宿主通道：`app.info` / `app.logPaths` / `app.specialPaths` / `app.collectLogs`（native/diagnostics.cpp）。
 import { ref } from 'vue'
-import { request } from './bridge'
-import { copyToClipboard } from './clipboard'
-import { errorMessage } from './errors'
+import { request, type ProcessMemory } from './bridge.ts'
+import { copyToClipboard } from './clipboard.ts'
+import { errorMessage } from './errors.ts'
+import { collectTroubleshootingReport, describeScreens, type ProjectTroubleContext } from './troubleshootingCollectors.ts'
+import type { PluginList } from './pluginGroups.ts'
 
 export interface AppInfo { version: string; platform: string; arch: string; webview2: string; profile: string }
 export interface LogPaths { dir: string; file: string; exists: boolean; size: number }
@@ -29,6 +31,11 @@ export interface HelpActionsDeps {
   helpPanel: { value: boolean }
   /** HelpMenu 的第一项就是 `GotoAction`（查找操作），与 Edit/主工具栏入口同一条。 */
   openActionSearch: () => void
+  /**
+   * 当前工作区（上游把 `Project` 直接传给每个 `GeneralTroubleInfoCollector.collectInfo(project)`；
+   * 本仓没有容器，改由宿主注入）。没有打开工作区时返回 null —— 那时「Project」段整段省略。
+   */
+  projectContext?: () => ProjectTroubleContext | null
 }
 
 export function createHelpActions(deps: HelpActionsDeps) {
@@ -89,8 +96,21 @@ export function createHelpActions(deps: HelpActionsDeps) {
   /** `CollectTroubleshootingInformationAction`：把排障文本复制到剪贴板（用户可直接粘进工单/聊天）。 */
   async function copyTroubleshooting() {
     try {
-      const info = await request<{ text: string }>('app.troubleshooting')
-      await copyToClipboard(info.text)
+      const host = await request<{ text: string }>('app.troubleshooting')
+      // 上游是 `CompositeGeneralTroubleInfoCollector` 逐项收集（`TroubleInfoCollector` EP）；
+      // 本仓宿主给进程侧固定字段，前端按 `src/troubleshootingCollectors.ts` 的四条通用收集器
+      // （About/System/Plugins/Displays）补一段 —— 每条数据抓不到就省略该段，不写空话。
+      const appInfo = await request<AppInfo>('app.info').catch(() => null)
+      const memory = await request<ProcessMemory>('app.memory').catch(() => null)
+      const plugins = deps.isDesktop ? await request<PluginList>('plugin.list').catch(() => null) : null
+      const report = collectTroubleshootingReport(() => ({
+        info: appInfo,
+        memory: memory?.available ? memory : null,
+        plugins: plugins?.plugins ?? null,
+        screens: describeScreens(),
+        cpuCount: navigator.hardwareConcurrency,
+      }))
+      await copyToClipboard(report ? `${host.text}\n\n${report}` : host.text)
       deps.notify('排障信息已复制到剪贴板。')
     } catch (error) { deps.notify(errorMessage(error), true) }
   }

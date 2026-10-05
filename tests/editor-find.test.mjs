@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { EditorSelection, EditorState } from '@codemirror/state'
-import { buildSearchRegex, collectSearchMatches, matchStatus, nextMatch, DEFAULT_SEARCH_OPTIONS } from '../src/editorSearch.ts'
+import { buildSearchRegex, collectSearchMatches, findStatusText, INCORRECT_REGEXP_TEXT, matchStatus, matchesStatusText, nextMatch, NO_SELECTION_TEXT, DEFAULT_SEARCH_OPTIONS } from '../src/editorSearch.ts'
 import { CLOSED_SEARCH, editorSearchExtension, matchesIn, searchStateField, setSearchState } from '../src/editorSearchExtension.ts'
 
 const opts = patch => ({ ...DEFAULT_SEARCH_OPTIONS, ...patch })
@@ -66,6 +66,44 @@ test('the status text reads n/m', () => {
   assert.equal(matchStatus(0, 3), '1/3')
   assert.equal(matchStatus(2, 3), '3/3')
   assert.equal(matchStatus(0, 0), '')
+})
+
+// —— 状态文案（`SearchReplaceComponent.getStatusText()` / `EditorSearchSession.java:404-428`）——
+
+test('the status line follows the four upstream states', () => {
+  const base = { query: 'alpha', total: 2, current: -1, inSelection: false, hasSelection: false, invalid: false }
+  // 还没定位到一条：报个数（`editorsearch.matches` = `{0} 个结果`）。
+  assert.equal(findStatusText(base), '2 个结果')
+  assert.equal(findStatusText({ ...base, total: 1 }), '1 个结果')
+  assert.equal(findStatusText({ ...base, total: 0 }), '0 个结果')
+  assert.equal(matchesStatusText(7), '7 个结果')
+  // 定位过：`editorsearch.current.cursor.position` = `{0}/{1}`。
+  assert.equal(findStatusText({ ...base, current: 1 }), '2/2')
+  // 坏正则：`find.incorrect.regexp`「错误模式」（`EditorSearchSession.java:660`）。
+  assert.equal(findStatusText({ ...base, invalid: true }), INCORRECT_REGEXP_TEXT)
+  // 「仅在选区内」而编辑器没有选区：`editorsearch.noselection`「无选区」（`:408-410`）。
+  assert.equal(findStatusText({ ...base, inSelection: true }), NO_SELECTION_TEXT)
+  assert.equal(findStatusText({ ...base, inSelection: true, hasSelection: true }), '2 个结果')
+  // 查询词为空时不摆文案（栏还没在用）。
+  assert.equal(findStatusText({ ...base, query: '' }), '')
+})
+
+test('the controller composes the status from the four states', () => {
+  const controller = read('src/editorFindController.ts')
+  assert.match(controller, /findStatusText\(\{/)
+  assert.match(controller, /hasSelection: !view\.state\.selection\.main\.empty/, '无选区要单独传（不能拿 total 猜）')
+  assert.ok(!controller.includes('matchStatus(current >= 0'), '旧的"没有 current 就顶 1/N"写法要去掉')
+})
+
+// 上游 `EditorSelectionSearchAreaProvider`（`SearchResults.java:573-582`）拿的是选区本身：
+// 「仅在选区内」开着但没有选区 ⇒ 搜索区域为空、0 命中，而不是悄悄搜全文件。
+test('in-selection with no selection finds nothing', () => {
+  const base = EditorState.create({ doc: 'alpha\nbeta\nalpha', extensions: [editorSearchExtension()] })
+  const state = base.update({
+    selection: { anchor: 3, head: 3 },
+    effects: setSearchState.of({ open: true, query: 'alpha', options: opts({ inSelection: true }) }),
+  }).state
+  assert.deepEqual(matchesIn(state), [], '空选区 + 仅在选区内 ⇒ 空搜索区')
 })
 
 // —— ② CodeMirror 侧 ——

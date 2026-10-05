@@ -12,7 +12,7 @@ import { DEFAULT_BOOKMARKS_VIEW } from './bookmarksView.ts'
 import { addBookmarkToNamedList, runWithChosenList } from './bookmarkListActions.ts'
 import { requestBookmarkEdit } from './bookmarkActions.ts'
 import { isDesktop, type BookmarksViewState } from './bridge.ts'
-import { getProjectTreeState } from './projectTreeState'
+import { getProjectTreeState } from './projectTreeState.ts'
 import type { ToolWindowViewContext } from './components/ToolWindowView.vue'
 
 /** 面板能从宿主拿到什么：每一项都是宿主里同名变量的**引用**（不是快照）。 */
@@ -42,6 +42,8 @@ export interface ToolViewContext {
   onSearchOpen: any
   onSearchReplaced: any
   onTreeContext: any
+  /** 树上的 Shift+F6（`RenameElement`，`$default.xml:996-998`）→ 重命名对话框。 */
+  onTreeRename: any
   openFile: any
   openMnemonicPrompt: any
   openSettings: any
@@ -53,6 +55,7 @@ export interface ToolViewContext {
   revertHistory: any
   runConfigCwd: any
   runConfigProgram: any
+  runConfigDebugAdapter: any
   /** VCS 日志的显示开关写回（`project.settings.update` 那条通路）。 */
   saveVcsLog: (log: { showTagNames: boolean; showRootNames: boolean }) => unknown
   /** 还没保存的编辑器路径（宿主 `allTabs` 里 dirty 的那些）。 */
@@ -72,6 +75,8 @@ export interface ToolViewContext {
   todoSource: any
   /** 通知（IDEA 的 Notifications 工具窗口用它渲染列表）。 */
   noticeLog: any
+  /** 应用级 general 设置草稿源（调试器数据视图两格从这里透传给 DebugPanel）。 */
+  generalSettings: any
   /** 通知中心在工具窗口里也有一份，动作按钮与 expire 都要能在那边跑。 */
   runNoticeAction?: (action: { label: string; run: () => void }) => void
   expireNotice?: (id: number) => void
@@ -79,11 +84,21 @@ export interface ToolViewContext {
   workspace: any}
 
 export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewContext {
-  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, sortBookmarkGroup, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace } = ctx
+  const { active, activePath, runNoticeAction, expireNotice, commitMessageSettings, dropBookmark, editorFor, editorSettings, evaluateRequest, explorer, fileTreeRef, gitCompareWith, gradleHost, gradleViewContext, historyEpoch, leftView, lspReady, notify, notifyFromPanel, showToolWindow, onSearchOpen, onSearchReplaced, onTreeContext, onTreeRename, openFile, openMnemonicPrompt, openSettings, outline, projectSettings, refreshTree, revealLocation, revertHistory, runConfigCwd, runConfigProgram, saveBookmarksView, saveSettingsPatch, saveVcsLog, dirtyPaths, openTabPaths, savePath, searchPanelRef, sortedAll, sortBookmarkGroup, syntheticNodes, testRunnerRef, todoSource, noticeLog, clearNotices, workspace, generalSettings } = ctx
   return {
   // Notifications 工具窗口（`intellij.platform.ide.impl.xml:1210`，anchor="right"）：
   // 复用状态栏那份通知列表，两个入口看到的是同一批 `notices`。
   noticeLog: noticeLog?.value ?? [], onClearNotices: clearNotices, onRunNoticeAction: runNoticeAction, onExpireNotice: expireNotice,
+  // 调试器的数据视图（XDebuggerDataViewSettings + XDebuggerGeneralSettings）→ DebugPanel。
+  debugView: {
+    hideNullValues: generalSettings?.value?.debuggerHideNullValues === true,
+    sortByName: generalSettings?.value?.debuggerSortByName === true,
+    showValuesInline: generalSettings?.value?.debuggerShowValuesInline === true,
+    showLibraryFrames: generalSettings?.value?.debuggerShowLibraryFrames === true,
+    confirmBreakpointRemoval: generalSettings?.value?.debuggerConfirmBreakpointRemoval === true,
+    unmuteOnStop: generalSettings?.value?.debuggerUnmuteOnStop === true,
+    evaluationMode: generalSettings?.value?.debuggerEvaluationMode === 'codeFragment' ? 'codeFragment' : 'expression',
+  },
   root: workspace.value?.root ?? '',
   active: explorer.value && Boolean(workspace.value),
   workspace: workspace.value ? { root: workspace.value.root, name: workspace.value.name, entries: workspace.value.entries } : null,
@@ -109,6 +124,7 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   testRunnerRef: null,
   runConfigProgram: runConfigProgram.value,
   runConfigCwd: runConfigCwd.value,
+  runConfigDebugAdapter: ctx.runConfigDebugAdapter.value,
   evaluateRequest: evaluateRequest.value,
   commitSettings: commitMessageSettings.value,
   activeFileText: active.value ? (editorFor(active.value.path)?.text() ?? active.value.content) : '',
@@ -120,6 +136,9 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   onBookmarkSortGroup: (path: string) => sortBookmarkGroup(path),
   onHistoryRevert: payload => revertHistory(payload as never),
   onTreeContext: payload => onTreeContext(payload as never),
+  // 树里按 Shift+F6（`RenameElement`，`$default.xml:996-998`）给焦点那一行改名：
+  // 与右键菜单「重命名…」是同一个对话框（`beginRename` 在树上没有第二个入口）。
+  onTreeRename: (entry: unknown) => onTreeRename(entry),
   // 从树里打开：进不进预览标签由「用预览标签打开」开关定（IDEA `openInPreviewTabIfPossible`，
   // `UISettingsState.kt:75`）。树的 `behavior` 读的是同一份设置，两处不会各说各话。
   onTreeOpen: (path, preview: boolean) => void openFile(path, false, { preview }),

@@ -7,11 +7,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { foldable } from '@codemirror/language'
+import { codeFolding, foldedRanges, foldable } from '@codemirror/language'
 import { keymap, runScopeHandlers } from '@codemirror/view'
 import { javascript } from '@codemirror/lang-javascript'
 import { EditorState } from '@codemirror/state'
-import { blockAt, commentRanges, depthOf, enclosingAreas, foldingRanges, innermostAt, levelPlan, lspFoldService, nestedWithin,
+import { blockAt, commentRanges, depthOf, docCommentRanges, enclosingAreas, foldingRanges, innermostAt, isDocCommentLine,
+  levelPlan, lspFoldService, nestedWithin,
   rootAtLine, setFoldingRanges, areaStartingAtLine, areasContaining, collapseTarget, expandTarget, toggleTarget,
   recursiveScope } from '../src/editorFolding.ts'
 import { editingCommands } from '../src/editorCommands.ts'
@@ -57,6 +58,55 @@ test('折叠代码块：跳过 comment / imports（上游找的是语言块）',
 
 test('文档注释那一组只挑 kind=comment 的区间', () => {
   assert.deepEqual(commentRanges(ranges), [ranges[4]])
+})
+
+// 2026-10-04 本轮：收起/展开文档注释要**只动文档注释**（上游 CollapseExpandDocCommentsHandler
+// 靠 `PsiDocCommentBase` / `CodeDocumentationAwareCommenter` 的 doc 记号区分；本仓按起始行记号的词法判定）。
+test('文档注释判定：/** 与 Python 三引号算，普通注释不算', () => {
+  assert.equal(isDocCommentLine('/** 说明 */'), true, 'Javadoc/JSDoc')
+  assert.equal(isDocCommentLine('  /**'), true, '缩进后的 Javadoc 开头')
+  assert.equal(isDocCommentLine('/**/'), false, '空的单行注释不是文档注释')
+  assert.equal(isDocCommentLine('/* 普通块注释 */'), false, '普通块注释不算')
+  assert.equal(isDocCommentLine('// TODO'), false, '行注释不算')
+  assert.equal(isDocCommentLine('"""docstring 开头'), true, 'Python 文档字符串')
+  assert.equal(isDocCommentLine("'''docstring 开头"), true, 'Python 文档字符串（单引号）')
+  assert.equal(isDocCommentLine('x = 1'), false, '代码行不算')
+})
+
+test('文档注释区间：起始行不是 doc 记号的 comment 区间被排除', () => {
+  const lines = ['/** 文档 */', 'int a = 1;', '// 普通注释', '/* 普通块 */', '"""文档字符串']
+  const all = [
+    { startLine: 0, endLine: 2, kind: 'comment' },   // 文档注释 → 选中
+    { startLine: 2, endLine: 3, kind: 'comment' },   // 行注释 → 排除
+    { startLine: 3, endLine: 4, kind: 'comment' },   // 普通块注释 → 排除
+    { startLine: 4, endLine: 6, kind: 'comment' },   // Python docstring → 选中
+    { startLine: 1, endLine: 3, kind: 'imports' },   // 不是注释 → 排除
+  ]
+  assert.deepEqual(docCommentRanges(lines, all), [all[0], all[3]])
+  assert.deepEqual(docCommentRanges(lines, []), [])
+})
+
+test('fold.docs 命令：只折文档注释那条区间（普通注释保持展开）', () => {
+  const doc = ['/** 文档 */', 'class A {', '  // 普通注释', '  int a = 1;', '}', '"""docstring'].join('\n')
+  const base = EditorState.create({ doc, extensions: [codeFolding(), foldingRanges, lspFoldService] })
+  const placed = base.update({ effects: setFoldingRanges.of([
+    { startLine: 0, endLine: 2, kind: 'comment' },
+    { startLine: 2, endLine: 3, kind: 'comment' },
+  ]) }).state
+  let after = placed
+  const folded = editingCommands['fold.docs']({ state: placed, dispatch: spec => { after = placed.update(spec).state } })
+  assert.equal(folded, true, '有文档注释时命令要生效')
+  const spans = []
+  for (const iterator = foldedRanges(after).iter(); iterator.value; iterator.next()) spans.push([iterator.from, iterator.to])
+  assert.deepEqual(spans, [[after.doc.line(1).from, after.doc.line(3).to]],
+    '折起来的只有文档注释那一块（第 1–3 行），普通注释那块不动')
+  // 再按一次 unfold.docs：文档注释那块展开，普通注释始终没被碰过。
+  let restored = after
+  const unfolded = editingCommands['unfold.docs']({ state: after, dispatch: spec => { restored = after.update(spec).state } })
+  assert.equal(unfolded, true, '展开文档注释要有实际动作')
+  const left = []
+  for (const iterator = foldedRanges(restored).iter(); iterator.value; iterator.next()) left.push([iterator.from, iterator.to])
+  assert.deepEqual(left, [], '展开后没有残留折叠')
 })
 
 test('展开到第 N 层：比 N 浅的展开、正好第 N 层的折起、更深的原样不动（BaseExpandToLevelAction:64-69）', () => {
@@ -240,7 +290,10 @@ test('收起/展开走的是上游那两个动作（不是 CodeMirror 自带的 
   const module = read('src/editorFolding.ts')
   // 服务端没给区间时靠**语法树候选**顶（`foldable` 是 foldService + 语法树两段合一的入口），
   // 不能再退回 `foldCode`/`unfoldCode` —— 那两条只看光标行，挑不到 LSP 区间。
-  assert.match(module, /import \{ foldable, foldedRanges/, '区域层要用 foldable 拿候选')
+  // 只要求"从 @codemirror/language 里 import 了 foldable 与 foldedRanges"，不要求它们排在行首 ——
+  // 2026-10-04 往这条 import 里加 `ensureSyntaxTree` 时，原先 `/import \{ foldable, foldedRanges/`
+  // 的写法被顺带打断过一次（判据不该锁死同一行里的相邻顺序）。
+  assert.match(module, /import \{[^}]*\bfoldable\b[^}]*\bfoldedRanges\b[^}]*\} from '@codemirror\/language'/, '区域层要用 foldable 拿候选')
   assert.ok(!/foldCode\(|unfoldCode\(/.test(module), '模块里不该再出现 foldCode/unfoldCode')
   // 折叠代码块在没有服务端区间时也要能落到"光标套在里面的块"（真机上光标在 return a 里按 Ctrl+Shift+. 修过一次）。
   assert.match(module, /syntaxArea\(view\.state, pos\) \?\? enclosingAreas\(view\.state, pos\)\[0\]/, '折叠代码块的退路要用祖先链')

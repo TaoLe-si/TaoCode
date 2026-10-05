@@ -8,22 +8,25 @@
 // 三者都读同一份 `menu` 开关、同一批 `MenuRow`，拆开会让每一份都要重新注入对方的状态。
 // 菜单行本身的数据在 src/menus/*（一组一文件），这里只做「装配 + 交互」。
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
-import type { MenuRow } from './menus/types'
-import { useSubmenuState } from './menus/submenuState'
-import { rankCommands } from './commandSearch'
-import { createPopupGate } from './popupState'
+import type { MenuRow } from './menus/types.ts'
+import { useSubmenuState } from './menus/submenuState.ts'
+import { rankCommands } from './commandSearch.ts'
+import { createPopupGate } from './popupState.ts'
 import { focusMainToolbar, mainToolbarFocusHost } from './mainToolbarFocus.ts'
-import { editorPopupRows as editorPopupLayout } from './menus/editorPopupMenu'
-import { toolWindowGearRows as toolWindowGearLayout } from './menus/toolWindowGear'
-import { PLUGIN_MENU_LABEL, pluginMenuRows } from './pluginCommands'
-import { recordActionStep } from './macroHost'
-import { bookmarkOwner } from './bookmarks'
-import { filterProjects, groupProjects } from './projectWidget'
-import { widgetToggleRows } from './statusWidgets'
+import { editorPopupRows as editorPopupLayout } from './menus/editorPopupMenu.ts'
+import { toolWindowGearRows as toolWindowGearLayout } from './menus/toolWindowGear.ts'
+import { PLUGIN_MENU_LABEL, pluginMenuRows } from './pluginCommands.ts'
+import { recordActionStep } from './macroHost.ts'
+import { addActionListener, fireAfterActionPerformed, fireBeforeActionPerformed } from './actionEvents.ts'
+import { bookmarkOwner } from './bookmarks.ts'
+import { filterProjects, groupProjects } from './projectWidget.ts'
+import { widgetToggleRows } from './statusWidgets.ts'
+import { ACTIONS } from './actionRegistry.ts'
+import { keymapKeys } from './keymapBindings.ts'
 import type { EditorSettings, PluginInfo, RecentProject, Workspace } from './bridge'
 
 /** 命令面板/查找操作里的一条（IDEA 的 AnAction 在搜索列表中的投影）。 */
-export interface ActionEntry { id: string; title: string; keywords?: string; keys?: string; group: string; enabled?: () => boolean; run: () => void }
+export interface ActionEntry { id: string; title: string; keywords?: string; keys?: string; group: string; enabled?: () => boolean; /** 勾选型行（上游 `BooleanOptionDescription`）：显示当前开/关，点一下就地翻转。 */ checked?: () => boolean; run: () => void }
 
 export interface MenuUiDeps {
   notify: (message: string, error?: boolean) => void
@@ -67,12 +70,53 @@ export interface MenuUiDeps {
    * （`UsageViewContentManagerImpl.java:114-116` 的 `additionalGearActions`）。
    */
   bottomGearHostRows?: () => Record<string, MenuRow>
+  /**
+   * 「文件颜色」的三个开关（上游 `FileColorsOptionsTopHitProvider` 的 `BooleanOptionDescription` 行）：
+   * 宿主给行（读设置 + 写 `saveSettingsPatch`），这里只把它们放进动作索引。
+   */
+  fileColorRows?: () => ActionEntry[]
 }
 
+/**
+ * 只有键位入口、**不在任何菜单里**的动作：上游 `ActionManager` 里有、`getAction(id)` 拿得到，
+ * 但菜单树里没有对应行（IDEA 的键位面板就是按这个集合列出可改键的动作）。
+ *
+ * 键位动作是**每次按键**才注册进注册表的（`keymap.ts:384` 的 `registerKeymapActions`）。
+ * `keymapBindings.ts` 的 25 个动作 id 里有 **21 个**在 `src/menus/*` 找不到对应行 ——
+ * 转到行 / 快速文档 / 提取方法 / 按名字运行检查 / 打开设置 / 追溯 / 关闭标签页…，
+ * 也就是说这些动作原先在「查找操作」与 Search Everywhere 里**一个都搜不到**。
+ *
+ * 注册表不是响应式的（`ACTIONS.presentationVersion` 是普通数字，读它不构成 Vue 依赖），
+ * 所以这一段只能在**搜索面板打开的那一刻**重算 —— 见 `refreshActionRegistryIndex`。
+ */
+const REGISTRY_GROUP = '动作'
+function registryEntries(): ActionEntry[] {
+  const out: ActionEntry[] = []
+  for (const id of ACTIONS.ids()) {
+    const descriptor = ACTIONS.get(id)
+    if (!descriptor) continue
+    out.push({
+      id,
+      title: typeof descriptor.title === 'function' ? descriptor.title() : descriptor.title,
+      keywords: descriptor.keywords,
+      // 键位显示串与菜单行同一个来源（`actionRow` 也走 `keymapKeys`），不手写第二份。
+      keys: keymapKeys(id),
+      group: REGISTRY_GROUP,
+      ...(descriptor.enabled ? { enabled: () => descriptor.enabled!() } : {}),
+      ...(descriptor.checked ? { checked: () => descriptor.checked!() } : {}),
+      run: () => { ACTIONS.run(id) },
+    })
+  }
+  return out
+}
+
+// 内置监听者：宏录制（上游 `ActionMacroManager implements AnActionListener`，在 before 里记一步）。
+// 装配放在这里 —— 管道（src/actionEvents.ts）保持纯的，菜单分派只广播、不知道谁在听。
+addActionListener({ beforeActionPerformed: recordActionStep })
 export function createMenuUi(deps: MenuUiDeps) {
   const { notify, isDesktop, editorSettings, menu, workspace, menus, windowMenuRows, layoutMenuRows, toolsMenuRows,
           pluginList, mnemonics, bookmarks, jumpMnemonic, focusStatusBar, recentProjects, working, openWorkspace,
-          popupExtras, gearHostRows = () => ({}), bottomGearHostRows = () => ({}) } = deps
+          popupExtras, gearHostRows = () => ({}), bottomGearHostRows = () => ({}), fileColorRows = () => [] } = deps
 // 插件命令的执行：在动作表里按 id 找（IDEA 的 `ActionManager.getAction(id).actionPerformed`）。
 // 先记宏再执行，与其它菜单行同一条链 —— 所以走 `runAction` 而不是直接 `entry.run()`。
 function runPluginCommand(action: string) {
@@ -126,8 +170,10 @@ function pickMenuRow(row: MenuRow) {
   if (!(editorSettings.value.keepPopupsForToggles && row.checked)) menu.value = null
   submenuRow.value = null
   // 宏录制：菜单行也是 AnAction，执行前记一步（记的是 IDEA 的动作 id，不是菜单路径）。
-  recordActionStep({ id: row.id, title: rowTitle(row), ...(row.keys ? { keys: row.keys } : {}) })
+  const step = { id: row.id, title: rowTitle(row), ...(row.keys ? { keys: row.keys } : {}) }
+  fireBeforeActionPerformed(step)
   row.run?.()
+  fireAfterActionPerformed(step)
 }
 // IDEA's ProjectToolbarWidgetAction (headertoolbar/ProjectToolbarWidgetAction.kt:118-297):
 // the header carries the project name with a chevron, and the popup lists the open
@@ -166,7 +212,7 @@ function openRecentProject(project: RecentProject) {
   void openWorkspace(project.path)
 }
 
-interface ActionEntry { id: string; title: string; keywords?: string; keys?: string; group: string; enabled?: () => boolean; run: () => void }
+interface ActionEntry { id: string; title: string; keywords?: string; keys?: string; group: string; enabled?: () => boolean; checked?: () => boolean; run: () => void }
 const actionSearch = ref(false)
 const actionQuery = ref('')
 const actionIndex = ref(0)
@@ -184,12 +230,20 @@ function flattenMenuRows(rows: readonly MenuRow[]): MenuRow[] {
   }
   return flat
 }
+// 注册表那一段的刷新世代（见 `registryEntries` 的注释：键位动作按需注册，注册表不响应式）。
+const registryRevision = ref(0)
+/** 重算动作索引里来自注册表的那一段。Find Action 与 Search Everywhere 共用同一份 `actionList`。 */
+const refreshActionRegistryIndex = () => { registryRevision.value++ }
 const actionList = computed<ActionEntry[]>(() => {
+  void registryRevision.value
   const seen = new Map<string, ActionEntry>()
   for (const group of allMenuGroups.value) for (const row of flattenMenuRows(group.rows)) {
     if (!row.run || seen.has(row.id)) continue
     seen.set(row.id, { id: row.id, title: rowTitle(row), keywords: row.keywords, keys: row.keys, group: group.label, enabled: row.enabled, run: row.run })
   }
+  // 注册表里**没有菜单行**的那些动作补进索引。菜单已经有的（宏、`build.*`、本地历史）
+  // 一律不覆盖 —— 菜单那一侧的标题与关键字更具体（比如宏行的 keyword 带宏名）。
+  for (const entry of registryEntries()) if (!seen.has(entry.id)) seen.set(entry.id, entry)
   const list = [...seen.values()]
   // IDEA lists one jump action per mnemonic (`Bookmarks.Goto` 弹出组，36 个：
   // `intellij.platform.bookmarks.xml:81-117` 的 GotoBookmark0..9/A..Z），文案取中文包的
@@ -227,10 +281,15 @@ const actionList = computed<ActionEntry[]>(() => {
   for (const row of widgetToggleRows(deps.hasEditor())) {
     list.push({ id: row.id, title: row.title, keywords: row.keywords, keys: '', group: '状态栏', enabled: () => row.enabled, run: row.run })
   }
+  // 文件颜色的三个开关（上游 `FileColorsOptionsTopHitProvider`）：勾选型行，随设置实时显形。
+  // 主开关关闭时宿主只返回一行（上游 `:30-33`），这里不做判断。
+  for (const row of fileColorRows()) list.push({ ...row, group: row.group || '外观' })
   return list
 })
 const actionResults = computed(() => rankCommands(actionList.value, actionQuery.value))
 function openActionSearch() {
+  // 面板打开的这一刻重算注册表那一段：键位动作是按需注册的，而两个搜索面板共用 `actionList`。
+  refreshActionRegistryIndex()
   actionQuery.value = ''
   actionIndex.value = 0
   menu.value = null
@@ -244,9 +303,13 @@ function moveAction(step: number) {
 function runAction(entry: ActionEntry) {
   if (entry.enabled && !entry.enabled()) { notify(`「${entry.title}」当前不可用。`, true); return }
   // 宏录制（IDEA 的 `AnActionListener.beforeActionPerformed`）：动作**执行前**记一步。
-  recordActionStep({ id: entry.id, title: entry.title, ...(entry.keys ? { keys: entry.keys } : {}) })
-  actionSearch.value = false
+  const step = { id: entry.id, title: entry.title, ...(entry.keys ? { keys: entry.keys } : {}) }
+  fireBeforeActionPerformed(step)
+  // IDEA "Keep popups open for toggle items"：勾选型行就地翻转、面板留着（文件颜色那三条与
+  // 菜单里的可勾选行同一口径，`keepPopupsForToggles` 关掉才逐条收起）。
+  if (!(entry.checked && editorSettings.value.keepPopupsForToggles)) actionSearch.value = false
   entry.run()
+  fireAfterActionPerformed(step)
 }
 function runActionResult() {
   const entry = actionResults.value[actionIndex.value]
@@ -296,7 +359,7 @@ watch(actionQuery, () => { actionIndex.value = 0 })
     projectWidgetOpen, projectWidgetQuery, projectWidgetGroups, toggleProjectWidget, pickProjectFromWidget,
     branchOfProject, openRecentProject,
     actionSearch, actionQuery, actionIndex, actionInput, actionList, actionResults,
-    openActionSearch, moveAction, runAction, runActionResult,
+    openActionSearch, moveAction, runAction, runActionResult, refreshActionRegistryIndex,
     editorPopup, editorPopupRows, openEditorPopup, closeEditorPopup, pickEditorPopup, findMenuRow, toolWindowGearRows, bottomGearRows,
   }
 }

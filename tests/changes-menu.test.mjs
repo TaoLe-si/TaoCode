@@ -6,10 +6,11 @@
 // Shelve · —— · ChangesView.Refresh · —— · VersionControlsGroup
 //
 // 本仓的取舍（只列真有的动作，缺的逐条记在清单批 111）：
-//   · 有：显示差异 · 复制路径/引用… · 回滚… · 暂存 / 取消暂存 · 添加到 VCS · 加入 .gitignore · 刷新；
+//   · 有：显示差异 · 复制路径/引用… · 回滚… · 暂存 / 取消暂存 · 添加到 VCS · 加入 .gitignore ·
+//     从本地更改创建补丁… · 作为补丁复制到剪贴板 · 应用补丁… · 从剪贴板应用补丁 · 刷新；
 //   · 缺：签出（Perforce 语义）、更改列表四项与"移到另一个更改列表"（本仓没有 changelist 这一层）、
-//     创建补丁 / 作为补丁复制到剪贴板、搁置（本仓在 Git 菜单里）、在新标签页显示差异与跳转到源
-//     （都要宿主的"开标签页"通道，面板当前只 emit notify）。
+//     搁置（本仓在 Git 菜单里）、在新标签页显示差异与跳转到源（都要宿主的"开标签页"通道，
+//     面板当前只 emit notify）。
 // 文案取随 IDE 发货的中文包 `ActionsBundle.properties`（键注在每一行旁），助记符标记去掉。
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -20,17 +21,17 @@ const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 
 test('a tracked unstaged file gets diff / revert / stage / patch / refresh', () => {
   assert.deepEqual(changesMenuRows({ staged: false, untracked: false }).map(r => r.id),
-    ['diff', 'copyPath', 'revert', 'stage', 'patch', 'patchClipboard', 'refresh'])
+    ['diff', 'copyPath', 'revert', 'stage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
 test('an untracked file gets add-to-VCS and ignore instead of revert', () => {
   assert.deepEqual(changesMenuRows({ staged: false, untracked: true }).map(r => r.id),
-    ['diff', 'copyPath', 'stage', 'addToVcs', 'ignore', 'patch', 'patchClipboard', 'refresh'])
+    ['diff', 'copyPath', 'stage', 'addToVcs', 'ignore', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
 test('a staged file gets unstage instead of stage', () => {
   assert.deepEqual(changesMenuRows({ staged: true }).map(r => r.id),
-    ['diff', 'copyPath', 'unstage', 'patch', 'patchClipboard', 'refresh'])
+    ['diff', 'copyPath', 'unstage', 'patch', 'patchClipboard', 'applyPatch', 'applyPatchClipboard', 'refresh'])
 })
 
 test('the labels are the shipped Chinese ones (mnemonics stripped)', () => {
@@ -56,7 +57,7 @@ test('the row order follows the upstream group', () => {
 
 test('every row id the panel dispatches has a handler', () => {
   const panel = read('src/components/SourceControl.vue')
-  for (const id of ['diff', 'revert', 'stage', 'unstage', 'addToVcs', 'ignore', 'refresh'])
+  for (const id of ['diff', 'revert', 'stage', 'unstage', 'addToVcs', 'ignore', 'applyPatch', 'applyPatchClipboard', 'refresh'])
     assert.match(panel, new RegExp(`case '${id}':`), `面板没有处理 ${id}`)
   assert.match(panel, /row\.id\.startsWith\('copyPath\.'\)/, '复制那一组按前缀分派')
 })
@@ -81,9 +82,12 @@ test('the copy group copies through the central clipboard helper', () => {
 })
 
 
-test('an ignored file only gets diff / copy / refresh (git cannot stage it)', () => {
-  // git 对忽略的文件没有 diff、普通 `git add` 也不收 —— 菜单里不摆会失败的那几条。
-  assert.deepEqual(changesMenuRows({ staged: false, ignored: true }).map(r => r.id), ['diff', 'copyPath', 'refresh'])
+test('an ignored file only gets diff / copy / apply / refresh (git cannot stage it)', () => {
+  // git 对忽略的文件没有 diff、普通 `git add` 也不收 —— 菜单里不摆**按这个文件**会失败的那几条。
+  // 两条补丁应用是项目级动作（上游 `ChangesViewPopupMenu` 里它们跟着通用行出现，跟选中哪个文件无关），
+  // 所以对忽略的文件也照常出现；stage/revert/ignore 这类按文件的仍不出现。
+  assert.deepEqual(changesMenuRows({ staged: false, ignored: true }).map(r => r.id),
+    ['diff', 'copyPath', 'applyPatch', 'applyPatchClipboard', 'refresh'])
   // `staged + ignored` 是个**不可能的组合**（git 的 `!!` 记录永远是未跟踪/未暂存那一侧），
   // 所以不拿它当判据 —— 断言一个到不了的状态只会给人"这条管着什么"的错觉。
   assert.ok(!changesMenuRows({ ignored: true }).some(r => r.id === 'stage' || r.id === 'revert' || r.id === 'ignore'))

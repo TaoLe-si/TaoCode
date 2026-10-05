@@ -13,7 +13,12 @@ export const MAX_TODO_PATTERNS = 20
 export const TODO_PATTERN_MAX = 200
 export const TODO_DESCRIPTION_MAX = 60
 
-export interface TodoPatternLike { pattern: string; description: string; caseSensitive?: boolean }
+export interface TodoPatternLike { pattern: string; description: string; caseSensitive?: boolean; color?: string }
+
+/** IDEA 颜色列/色板的存储形状（本仓用 `#RRGGBB`；原生 validate_todo_patterns 同一套）。 */
+export function isTodoColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
+}
 
 /** 返回第一条不合法项的中文说明；全部合法时返回 null。 */
 export function validateTodoPatterns(patterns: readonly TodoPatternLike[]): string | null {
@@ -28,6 +33,7 @@ export function validateTodoPatterns(patterns: readonly TodoPatternLike[]): stri
     if (typeof entry.description !== 'string' || !entry.description.trim()) return 'TODO 模式的说明不能为空。'
     if (entry.description.length > TODO_DESCRIPTION_MAX) return `说明不能超过 ${TODO_DESCRIPTION_MAX} 个字符。`
     if (entry.caseSensitive !== undefined && typeof entry.caseSensitive !== 'boolean') return 'caseSensitive 必须是布尔值。'
+    if (entry.color !== undefined && !isTodoColor(entry.color)) return '颜色要写成 #RRGGBB。'
     if (seen.has(entry.pattern)) return `TODO 标记重复：${entry.pattern}`
     seen.add(entry.pattern)
   }

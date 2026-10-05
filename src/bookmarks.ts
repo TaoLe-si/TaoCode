@@ -36,6 +36,16 @@ const compare = (a: Bookmark, b: Bookmark) => a.path.localeCompare(b.path) || (a
 export const isFileBookmark = (entry: Bookmark): boolean => entry.line === undefined
 
 /**
+ * `Bookmark.getBookmarkFont`（`Bookmark.java:95`）：**带助记键**的书签用粗体
+ * （`BookmarkType.DEFAULT` 的是常规体）—— 列表/树上那一行因此一眼能认出"这条有编号"。
+ * 本仓的等价物就是这个布尔：面板按它落一个 class（`src/components/BookmarksPanel.vue`），
+ * 与"编号气泡在行尾"（`BookmarkItem.updateAccessoryView`）是同一条信息的两处呈现。
+ */
+export function bookmarkFontBold(entry: Bookmark): boolean {
+  return entry.mnemonic !== undefined
+}
+
+/**
  * 行书签的**自动描述**：书签树/列表那一行显示的文本。
  *
  * 上游（2026.2 的现代书签实现 `platform/bookmarks/src/com/intellij/ide/bookmark/`）：
@@ -209,6 +219,27 @@ export function nextBookmark(list: readonly Bookmark[], path: string, line: numb
 export function removeBookmark(list: readonly Bookmark[], entry: Bookmark): Bookmark[] {
   return list.filter(item => !(item.path === entry.path && item.line === entry.line))
 }
+
+/**
+ * 列表项的**速度搜索文本** —— 上游 `BookmarkItem.speedSearchText()`（`BookmarkItem.java:104`）：
+ * `bookmark.getFile().getName() + " " + bookmark.getDescription()`。
+ * 面板在「就地输入」的速度搜索里拿它当匹配对象（`src/components/BookmarksPanel.vue`），
+ * 匹配规则复用 `src/speedSearch.ts` 的 MinusculeMatcher（与文件树同一个入口）。
+ * 描述为空时不留下尾随空格（上游字符串拼接会留一个，但匹配语义相同；这里照"文件名 + 描述"的语义取值）。
+ */
+export function bookmarkSpeedSearchText(entry: Bookmark): string {
+  const name = entry.path.split('/').pop() ?? entry.path
+  const description = bookmarkDescription(entry)
+  return description ? `${name} ${description}` : name
+}
+
+/**
+ * 这一条能不能从列表里移除 —— 上游 `BookmarkItem.allowedToRemove()`（`BookmarkItem.java:119`）
+ * 恒为 true，`removed()`（`:123-125`）落到 `BookmarkManager.removeBookmark`。
+ * 本仓的等价物是 `removeBookmark`（上面）；面板的移除按钮对每一行都可用，
+ * 这个函数把"恒许可"写成可核对的判据（命名书签列表不改变单条的许可）。
+ */
+export const bookmarkRemovable = (): boolean => true
 
 /** 文件书签的开关（右键项目树/编辑器标签那一下）。 */
 export function toggleFileBookmark(list: readonly Bookmark[], path: string, description?: string): Bookmark[] {

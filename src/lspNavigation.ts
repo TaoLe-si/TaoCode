@@ -5,15 +5,44 @@
 // 语言服务是否在跑）。它们是一个交互闭环，所以放在同一个模块里；`onSemantic`（语义动作）
 // 另行处理，因为它依赖编辑器与重构链路。
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
-import { notifyEditorContentChanged } from './bookmarkActions'
-import { clearLspDiagnostics, lspDiagnostics, request, setLspDiagnostics, type DocumentData, type EditorSettings, type LspDocumentSymbol,
-         type LspSymbolsResult, type Workspace } from './bridge'
+import { notifyEditorContentChanged } from './bookmarkActions.ts'
+import { clearLspDiagnostics, lspDiagnostics, request, setLspDiagnostics, type DocumentData, type EditorSettings, type LspDiagnostic, type LspDocumentSymbol,
+         type LspSymbolsResult, type Workspace } from './bridge.ts'
 import type { Tab } from './editorTab'
-import { BreakpointLocationCache } from './breakpointLocations'
-import { errorMessage } from './errors'
-import { describeNavigationBoundary, navigateFrom, navigationPoints } from './navigateInFile'
-import { locationSnippet } from './recentLocations'
-import { startCompletionSession } from './lspCompletionStartup'
+import { BreakpointLocationCache } from './breakpointLocations.ts'
+import { errorMessage } from './errors.ts'
+import { describeNavigationBoundary, navigateFrom, navigationPoints } from './navigateInFile.ts'
+import { locationSnippet } from './recentLocations.ts'
+// LSP 符号导航包装层（workspaceSymbol/documentSymbol 一族，见该模块头）：
+// 文件内/工作区符号的过滤（含 SpeedSearch 匹配器）、去重、排序与导航目标都走同一份规则。
+import { CLASS_LIKE_SYMBOL_KINDS, documentSymbolEntries, mergeWorkspaceSymbols, symbolNavigationTarget } from './lspSymbolBridge.ts'
+// 「转到符号 / 转到类」的两条上游链路（本模块是它们的**生产消费方**）：
+//   · workspaceSymbol 的客户端缓存 —— `platform/lsp-impl/src/impl/LspRequestExecutor.kt:156-163`
+//     的 `getWorkspaceSymbolsCaching` + `impl/cache/LspSingleSlotCache.kt:20-52`，本仓那份在
+//     `src/navWorkspaceSymbolCache.ts`。缓存吃**服务器原始应答**，合并/过滤都在缓存之后
+//     （与 `LspWorkspaceSymbolContributor.kt:69` 先取缓存、后 `shouldAcceptSymbolKind` 的顺序一致）。
+//   · 「按类型过滤」条 —— `lp/navigation` 判词里的 `ChooseByNameFilter`/`FilteringGotoByModel`
+//     （`platform/lang-impl/src/com/intellij/ide/util/gotoByName/ChooseByNameFilter.java:74-117`、
+//     `FilteringGotoByModel.java:44-52`），本仓那份在 `src/navChooseByNameFilter.ts`；
+//     开关 UI 在 `src/menus/navigateMenu.ts` 的「按类型过滤」子菜单，排除态由那份模块持久化。
+import { NavWorkspaceSymbolCache } from './navWorkspaceSymbolCache.ts'
+import { filterSymbols, hiddenSymbolGroups } from './navChooseByNameFilter.ts'
+// Ctrl+U（`GotoSuperAction`）与 Ctrl+Shift+T（`GotoTestOrCodeAction`）的规则层，
+// 宿主装配就住在下面 `gotoSuper` / `gotoTest` 两处（本模块已经握着它们要的 request/outline/reveal）。
+import { runGotoSuper } from './navGotoSuper.ts'
+import { gotoTestActionLabel, gotoTestChooserTitle, gotoTestNotFoundMessage, gotoTestTargets, targetLineOfSymbol } from './navGotoTest.ts'
+// Ctrl+Alt+Home「相关符号」的 provider 表（`GotoRelatedSymbolAction.kt:43-83` 的三档结果 +
+// `GotoRelatedItem.java:23-43` 的分组条目），本仓的两个 provider 在 `src/navGotoRelated.ts`。
+import { CHOOSE_TARGET_TITLE, NO_RELATED_SYMBOLS_MESSAGE, collectRelatedItems, groupRelatedItems, relatedOutcome } from './navGotoRelated.ts'
+import { clearLocalInspections, refreshLocalInspections } from './junitInspections.ts'
+import { startCompletionSession } from './lspCompletionStartup.ts'; import { LspWarmup } from './lspWarmup.ts'
+import { LspPerFileCache } from './lspPerFileCache.ts'
+// LSP 高亮区间缓存（上游 `LspHighlightingCache`/`applyPendingEdits` 一族，见该文件头）：
+// 编辑后把诊断区间平移/裁剪，等服务端下一次推送覆盖 —— IDEA 的 daemon 缓存口径。
+import {
+  DIAGNOSTICS_QUIESCENCE_MS, HighlightingSnapshotCache, contentStamp, offsetOfPosition, positionOfOffset, textEditBetween,
+  type LspCachedHighlighting,
+} from './lspHighlightingCache.ts'
 
 /** 工作区符号索引里的一条（LSP `workspace/symbol` 的扁平化结果）。 */
 export interface SymbolEntry { name: string; kind: number; path: string; line: number; character: number; endLine?: number; endCharacter?: number }
@@ -21,9 +50,10 @@ export interface SymbolEntry { name: string; kind: number; path: string; line: n
 type NavigationDocumentSymbol = LspDocumentSymbol & { selectionEndLine?: number; selectionEndCharacter?: number }
 
 // IDEA's "Go to Class" (Ctrl+N) and "Go to Symbol" (Ctrl+Shift+Alt+N) are different
-// filters over the same workspace-symbol index; the class filter is the LSP kinds that
-// denote a type.
-export const CLASS_KINDS = new Set([5, 11, 13, 19, 23, 26])
+// filters over the same workspace-symbol index; the class filter is `LspGoToClassContributor`
+// 的四类（Class/Enum/Interface/Struct = 5/10/11/23，见 src/lspSymbolBridge.ts）。
+// App.vue 仍从这个模块导入它，保留同名导出以免动冻结文件。
+export const CLASS_KINDS = CLASS_LIKE_SYMBOL_KINDS
 
 export interface Place { kind: '文件' | '符号' | '书签'; path: string; line: number; label: string; edited?: boolean }
 
@@ -79,6 +109,12 @@ export interface LspNavigationDeps {
   symbolIndex: Ref<number>
   /** 符号搜索的防抖计时器由本模块自持（`let`，值语义不能靠外部传参）。 */
   breakpointLocationCache: BreakpointLocationCache
+  /**
+   * 多目标选择弹层（`src/chooseTarget.ts` 那一份的宿主通道）。**可选**：宿主（`src/App.vue`，冻结文件）
+   * 还没把它传进来时，Ctrl+U / Ctrl+Shift+T 在多条结果时退化为「跳第 1 条 + 报数量」，
+   * 单条结果不受影响 —— 差异与请求见 `docs/wiring-requests-2026-10-06-bucket4b.md`。
+   */
+  chooseTargets?: (targets: readonly { path: string; line: number; character: number }[], title: string) => unknown
 }
 
 export function createLspNavigation(deps: LspNavigationDeps) {
@@ -89,6 +125,12 @@ export function createLspNavigation(deps: LspNavigationDeps) {
           goLineValue, goLinePrompt, goLineInput, recentPrompt, recentQuery, recentInput } = deps
   // 符号搜索输入防抖：`let` 是本模块的私有状态，不进 ctx（值语义传出去就写不回来）。
   let symbolTimer: number | undefined
+  // —— workspaceSymbol 的**客户端缓存**（`src/navWorkspaceSymbolCache.ts`，上游 `LspSingleSlotCache`）——
+  // 计数源 = 本仓的「文档改过 / 文件关过 / 磁盘被替换写过」代次，对应上游
+  // `PsiManager.getModificationTracker().modificationCount`（`LspSingleSlotCache.kt:35` 每次命中都重读一遍，
+  // 变了就必然不命中）。语言服务重启与换工程走 `clearCache()`（`LspSingleSlotCache.kt:48-52` 三格全清）。
+  let symbolRevision = 0
+  const workspaceSymbolsCache = new NavWorkspaceSymbolCache<SymbolEntry[]>(() => symbolRevision)
   const starts = new Map<string, symbol>()
   async function startLsp(tab: Tab) {
     // **必须往响应式代理上写**：`startCompletionSession` 会设置 `lspRunning`/`lspConfigured`，
@@ -101,6 +143,11 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     const token = Symbol(live.path)
     starts.set(live.path, token)
     setLspDiagnostics(live.path, [])
+    // 本地检查（JUnit 规则，见 src/junitInspections.ts）：打开文件就算一次；此后每次编辑由
+    // `onEditorChange` 重算 —— 与 IDEA daemon 对打开文件做 on-the-fly 分析同一口径。
+    refreshLocalInspections(live.path, live.content)
+    // 高亮区间缓存的文本基线：第一次编辑才有「上一版」可对齐。
+    lastEditedText.set(live.path, live.content)
     const current = () => deps.workspaceEpoch() === epoch && starts.get(live.path) === token && hasTabPath(live.path)
     // Not awaited: a Java file must open (and be editable) while JDT LS is still
     // importing the project. The tab flips `lspRunning` once initialization lands,
@@ -142,13 +189,57 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     if (!isDesktop || !generalSettings.value.autoSaveFiles || !dirty.value) return
     void saveAll()
   }
+  // —— LSP 高亮区间缓存（上游 `LspHighlightingCache` 一族，模块见 src/lspHighlightingCache.ts）——
+  // 诊断表存的是行列；用户编辑后行号会漂。这里在每次编辑时把上一版区间按 pending edit
+  // 平移/裁剪（部分相交的整条删除），再换算回行列写回 `lspDiagnostics`，等服务端下一次推送
+  // 覆盖 —— 上游 `LspPublishDiagnosticsCache` + `applyPendingEdits` 的口径。与上游的差异：
+  // 本仓 push 事件不带版本号，没有上游的版本闸门；调整是近似的，下一次推送即修正。
+  const diagnosticRanges = new HighlightingSnapshotCache<LspDiagnostic>({ quiescenceDelayMs: DIAGNOSTICS_QUIESCENCE_MS })
+  const lastEditedText = new Map<string, string>()
+  const rangesOfDiagnostics = (items: readonly LspDiagnostic[], text: string): LspCachedHighlighting<LspDiagnostic>[] =>
+    items.map(item => ({
+      textRange: {
+        start: offsetOfPosition(text, item.line, item.character),
+        end: offsetOfPosition(text, item.endLine ?? item.line, item.endCharacter ?? item.character),
+      },
+      highlightingInfo: item,
+    }))
+  const diagnosticsOfRanges = (ranges: readonly LspCachedHighlighting<LspDiagnostic>[], text: string): LspDiagnostic[] =>
+    ranges.map(({ textRange, highlightingInfo }) => {
+      const start = positionOfOffset(text, textRange.start)
+      const end = positionOfOffset(text, textRange.end)
+      return { ...highlightingInfo, line: start.line, character: start.character, endLine: end.line, endCharacter: end.character }
+    })
+  function adjustDiagnosticsAfterEdit(path: string, text: string): void {
+    const previous = lastEditedText.get(path)
+    lastEditedText.set(path, text)
+    if (previous === undefined || previous === text) return
+    const items = lspDiagnostics.get(path)
+    if (!items?.length) return
+    const previousStamp = contentStamp(previous)
+    // 上一版之后服务端可能已推送新位置；快照签名对不上就以表里的当前内容重新起一份。
+    if (diagnosticRanges.snapshotStamp(path) !== previousStamp)
+      diagnosticRanges.acceptFull(path, previousStamp, previousStamp, rangesOfDiagnostics(items, previous))
+    diagnosticRanges.fileEdited(path, textEditBetween(previous, text))
+    const adjusted = diagnosticRanges.highlightingsFor(path)
+    // 调整后的快照重锚到新文本：下一次编辑的内联调整才对得上（上游靠文档 stamp 做这件事）。
+    const nextStamp = contentStamp(text)
+    diagnosticRanges.acceptFull(path, nextStamp, nextStamp, adjusted)
+    setLspDiagnostics(path, diagnosticsOfRanges(adjusted, text))
+  }
   function onEditorChange(tab: Tab) {
     tab.dirty = true
     tab.preview = false
     // 书签按"同一行号 + 同一行原文"对账（上游 BookmarkManager.documentChanged；丢/放回都在那一步）。
     notifyEditorContentChanged(tab.path, editorFor(tab.path)?.text() ?? tab.content)
+    // 本地检查（JUnit 规则）随编辑实时重算：问题面板与 LSP 诊断读同一张汇总表。
+    const edited = editorFor(tab.path)?.text() ?? tab.content
+    refreshLocalInspections(tab.path, edited)
+    adjustDiagnosticsAfterEdit(tab.path, edited)
     // 行号 → 可放置位置的映射依赖代码内容：改过就整体作废（见 breakpointLocations.ts 的类注释）。
     breakpointLocationCache.clear()
+    // 同理 workspaceSymbol 的槽：内容一变，服务器那份符号表就可能过时（上游 PSI 计数在这一刻 +1）。
+    symbolRevision += 1
     // IdeDocumentHistory.placeChanged(EditorEvent.DocumentChange): every user edit
     // pushes the caret line onto the "changed places" ring.
     rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true })
@@ -167,8 +258,14 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     void revealLocation(place)
   }
   function stopLspFile(path: string) {
+    if (outlineWarmupPath === path) outlineWarmup.cancel()
     starts.delete(path)
+    outlineCache.clearCache()   // 文件级生命周期操作：缓存跟着会话状态作废（上游 LspCache.clearCache）
+    // 符号表也按「文件增删 = PSI 计数变」作废（`LspSingleSlotCache.kt:35` 的命中条件之一）。
+    symbolRevision += 1
+    lastEditedText.delete(path)
     clearLspDiagnostics(path)
+    clearLocalInspections(path)
     if (isDesktop) void request('lsp.close', { path }).catch(() => undefined)
   }
   // UI-side reset only. The host already rebuilds the language session inside
@@ -176,7 +273,13 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   // sending lsp.stop here ran *after* workspace.open and destroyed the session the
   // host had just created, so every Java file reported "no language server".
   function resetLsp(stopHost = false) {
+    outlineWarmup.cancel()
+    outlineCache.clearCache()
+    // 语言服务重启 = 上游 `LspSingleSlotCache.clearCache()`（`LspSingleSlotCache.kt:48-52` 三格全清）的触发点。
+    workspaceSymbolsCache.clearCache()
     starts.clear()
+    lastEditedText.clear()
+    diagnosticRanges.clearCache()
     for (const path of [...lspDiagnostics.keys()]) clearLspDiagnostics(path)
     if (stopHost && isDesktop) void request('lsp.stop').catch(() => undefined)
   }
@@ -230,7 +333,8 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   function placeSnippet(place: Place): { text: string; firstLine: number } {
     const tab = findTab(place.path)
     if (!tab) return { text: '', firstLine: 0 }
-    return locationSnippet(tab.content.split(/\r?\n/), Math.min(place.line, Math.max(0, tab.content.split(/\r?\n/).length - 1)))
+    const lines = (editorFor(place.path)?.text() ?? tab.content).split(/\r?\n/)
+    return locationSnippet(lines, Math.min(place.line, Math.max(0, lines.length - 1)))
   }
   const placesFiltered = computed(() => {
     const query = placesQuery.value.trim().toLowerCase()
@@ -252,23 +356,43 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     void nextTick(() => placesInput.value?.focus())
   }
   function openPlace(place: Place) { placesPrompt.value = false; void revealLocation(place) }
+  // 「按类型过滤」条（`ChooseByNameFilter`/`FilteringGotoByModel.acceptItem:44-52`）：
+  // 被排除的类别不进列表。规则、排除态与持久化在 `src/navChooseByNameFilter.ts`，
+  // 开关在 `src/menus/navigateMenu.ts` 的「按类型过滤」子菜单（菜单与这里读同一份 `hiddenSymbolGroups`）。
   function fileSymbolEntries(query: string): SymbolEntry[] {
     const path = activePath.value
     if (!path) return []
-    const q = query.trim().toLowerCase()
-    return (outline.value as LspDocumentSymbol[])
-      .filter((symbol: LspDocumentSymbol) => !q || symbol.name.toLowerCase().includes(q))
-      .slice(0, 200)
-      .map((symbol: NavigationDocumentSymbol) => ({ name: symbol.name, kind: symbol.kind, path, line: symbol.startLine, character: symbol.startChar,
-        endLine: symbol.selectionEndLine, endCharacter: symbol.selectionEndCharacter }))
+    // 过滤用结构弹层的 SpeedSearch 档（驼峰缩写/子序列，见 src/symbolSearch.ts），
+    // 但**不重排**：上游 SpeedSearch 只在树里过滤，行序仍是结构视图顺序。
+    // 转换与跳转位置取法在 src/lspSymbolBridge.ts 的 documentSymbolEntries（selectionRange 优先）。
+    return filterSymbols(documentSymbolEntries(outline.value as NavigationDocumentSymbol[], path, query), hiddenSymbolGroups.value)
+  }
+  // 缓存里存的是**服务器原始应答**，合并/去重/排序与类别过滤都在缓存之后 ——
+  // 上游 `LspWorkspaceSymbolContributor.kt:69` 也正是先 `getWorkspaceSymbolsCaching(query)`
+  // 再逐条 `shouldAcceptSymbolKind(symbolKind)`。
+  function visibleSymbols(symbols: readonly SymbolEntry[], query: string): SymbolEntry[] {
+    return mergeWorkspaceSymbols([filterSymbols(symbols, hiddenSymbolGroups.value)], {
+      query, mode: symbolPrompt.value?.mode === 'class' ? 'class' : 'symbol',
+    })
   }
   async function globalSymbolEntries(query: string) {
     const q = query.trim()
     if (!isDesktop || !workspace.value || q.length < 2) { symbolResults.value = []; return }
+    const epoch = deps.workspaceEpoch()
+    // 探测：`getOrCompute(q, () => null)` 命中槽就给值，未命中时 compute 返回 null ——
+    // `LspSingleSlotCache.kt:41`「结果为 null 不入槽」保证这次探测**不会**把空结果写进槽里。
+    const cached = workspaceSymbolsCache.getOrCompute(q, () => null)
+    if (cached) { symbolResults.value = visibleSymbols(cached, q); return }
     try {
       const result = await request<{ available: boolean; symbols?: SymbolEntry[] }>('lsp.request', { kind: 'workspaceSymbol', path: activePath.value ?? '', query: q })
-      const all = result.symbols ?? []
-      symbolResults.value = (symbolPrompt.value?.mode === 'class' ? all.filter(entry => CLASS_KINDS.has(entry.kind)) : all).slice(0, 200)
+      // 回答期间用户又敲了字 / 换了工程：这一份已经过时，既不呈现也不入槽（下次按新查询重算）。
+      if (epoch !== deps.workspaceEpoch() || symbolQuery.value.trim() !== q) return
+      // `available: false` = 服务器**没答上来**（不支持这个请求），同上游的 null：不入槽，下次仍会重算。
+      if (!result.available) { symbolResults.value = []; return }
+      const symbols = result.symbols ?? []
+      // 「答了空表」与「没答」是两回事（`:41` 的那条区分）：空表照样入槽，同一次查询不再重发。
+      const stored = workspaceSymbolsCache.getOrCompute(q, () => symbols)
+      symbolResults.value = visibleSymbols(stored ?? symbols, q)
     } catch { symbolResults.value = [] }
   }
   function openSymbol(mode: 'file' | 'global' | 'class') {
@@ -295,7 +419,9 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   }
   async function jumpSymbol(entry: SymbolEntry) {
     symbolPrompt.value = null
-    await revealLocation({ path: entry.path, line: entry.line, kind: '符号', label: entry.name })
+    const target = symbolNavigationTarget(entry)
+    if (!target) { deps.notify('这条符号没有可跳转的位置。', true); return }
+    await revealLocation(target)
   }
   async function onSearchOpen(payload: { path: string; line: number }) {
     await revealLocation({ path: payload.path, line: Math.max(0, payload.line - 1) })
@@ -315,11 +441,12 @@ export function createLspNavigation(deps: LspNavigationDeps) {
         editorFor(path)?.setDraft(doc.content)
       } catch { /* the file may have been moved mid-replace */ }
     }
+    // 替换改写的是磁盘：符号索引里的行号全可能漂了（上游 PSI 计数在这一刻变），槽作废。
+    symbolRevision += 1
     await refreshTree()
   }
   // GoToMenu › NavigateInFileGroup 的 MethodDown / MethodUp（`PlatformActions.xml:621-623`）。
-  // 不需要新的语言服务能力：已实现的 `textDocument/documentSymbol` 就够 —— LSP SymbolKind
-  // 6 = Method、12 = Function，只认这两类，避免把字段/变量也当方法。键位与 IDEA 一致（Alt+Down / Alt+Up）。
+  // MethodUpDownUtil.java:61-73 收集全部结构元素；上游没有默认快捷键。
   async function jumpMethod(direction: 1 | -1) {
     const tab = active.value
     if (!tab || !lspOn(tab)) { deps.notify('该文件未启用语言服务。', true); return }
@@ -335,25 +462,155 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     if (!target) { deps.notify(describeNavigationBoundary(direction)); return }
     void revealLocation({ path: tab.path, line: target.line, column: 1 })
   }
+  // 结构视图的刷新带**导入期重试**：真机取证（AE2）显示 JDT 在大工程上要 ~9.5 分钟才给符号，
+  // 这期间 `documentSymbol` 一律 60 秒超时 —— 旧实现只问一次、失败就清空，于是导入完成后
+  // 面板一直空着（要点一次活动条才会重来）。规则与退避档见 src/lspWarmup.ts。
+  // 结构视图（`textDocument/documentSymbol`）的按文件缓存：内容没变就复用上一次的符号 ——
+  // 上游 `LspPerFileCache`（platform/lsp-impl/src/impl/cache）的单槽语义，`invalidateOnlyOnDocumentChange`
+  // 那一档正是为 documentSymbol 这类「只依赖本文件」的请求设的。切标签页/重开结构面板不再每次都问
+  // 语言服务；内容一变（stamp 变）或语言服务重启（clearCache）就重查。
+  const OUTLINE_REQUEST = 'documentSymbol'
+  const outlineCache = new LspPerFileCache<string, LspDocumentSymbol[]>(path => outlineDocumentStamp(path))
+  // 内容签名（长度 + FNV-1a）：字符串身份不变时直接复用上次的哈希，避免每次刷新都全量扫一遍。
+  const outlineStampMemo: { path: string; content: string; stamp: string } = { path: '', content: '', stamp: '' }
+  function hashOutlineContent(text: string): string {
+    let hash = 2166136261
+    for (let index = 0; index < text.length; ++index) { hash ^= text.charCodeAt(index); hash = Math.imul(hash, 16777619) }
+    return (hash >>> 0).toString(36)
+  }
+  function outlineDocumentStamp(path: string): string {
+    const tab = findTab(path)
+    if (!tab) return 'missing'
+    if (outlineStampMemo.path === path && outlineStampMemo.content === tab.content) return outlineStampMemo.stamp
+    outlineStampMemo.path = path
+    outlineStampMemo.content = tab.content
+    outlineStampMemo.stamp = `${tab.version ?? 0}:${tab.content.length}:${hashOutlineContent(tab.content)}`
+    return outlineStampMemo.stamp
+  }
+  let outlineWarmupPath = ''
+  const outlineWarmup = new LspWarmup({
+    run: async () => {
+      const path = outlineWarmupPath
+      const tab = path ? findTab(path) : undefined
+      if (!path || !tab || !lspOn(tab)) return true      // 文件关了/语言服务关了：当作"结束"，别再重试
+      try {
+        const result = await request<{ available: boolean; symbols?: LspDocumentSymbol[] }>('lsp.request', { kind: 'documentSymbol', path })
+        if (!result.available) return true               // 服务器说"不支持"不是"还没准备好"，重试没意义
+        const symbols = result.symbols ?? []
+        outline.value = symbols
+        // 空符号 = 导入还没完，不入缓存（下次重算）；有符号才落进单槽（上游 null 不入槽同口径）。
+        if (symbols.length > 0) outlineCache.set(path, OUTLINE_REQUEST, symbols)
+        return symbols.length > 0
+      } catch {
+        return false
+      }
+    },
+  })
   async function refreshOutline(path: string) {
     const tab = findTab(path)
     if (!tab || !lspOn(tab)) { outline.value = []; return }
+    // 内容签名未变：直接复用上一次的符号（切标签页/重开面板不重发 documentSymbol）。
+    const cached = outlineCache.get(path, OUTLINE_REQUEST)
+    if (cached) { outline.value = cached; return }
+    outlineWarmupPath = path
+    outlineWarmup.start()
+  }
+  // —— Ctrl+U / Ctrl+Shift+T 的宿主装配（规则层在 `src/navGotoSuper.ts` 与 `src/navGotoTest.ts`）——
+  // 多目标的落点：宿主给了选择弹层就用它（上游 `PsiTargetNavigator`，
+  // `java/java-impl/src/com/intellij/codeInsight/navigation/JavaGotoSuperHandler.java:41-53` 同一族）。
+  // `src/App.vue` 是冻结文件、还没把 `src/chooseTarget.ts` 那个弹层传进来 ⇒ 这里退化成
+  // 「跳第 1 条 + 把数量说清楚」，差异与请求见 `docs/wiring-requests-2026-10-06-bucket4b.md`。
+  function openTargetChooser(targets: readonly { path: string; line: number; character: number }[], title: string) {
+    if (deps.chooseTargets) { void deps.chooseTargets(targets, title); return }
+    const first = targets[0]
+    if (!first) return
+    deps.notify(`${title}：找到 ${targets.length} 个，已跳到第 1 个。`)
+    void revealLocation({ path: first.path, line: first.line, column: first.character + 1, kind: '符号', label: title })
+  }
+  // Ctrl+U：`GotoSuperAction`（键位 `$default.xml:251-253`，动作 id 是 `GotoSuperMethod`）。
+  function gotoSuper() {
+    const path = activePath.value ?? ''
+    const cursor = path ? editorFor(path)?.getCursor() : undefined
+    return runGotoSuper({
+      request: <T>(method: 'lsp.request', params: Record<string, unknown>) => request<T>(method, params),
+      path: () => path,
+      line: () => Math.max(0, cursor?.line ?? (active.value?.line ?? 1) - 1),
+      character: () => Math.max(0, (cursor?.character ?? (active.value?.column ?? 1)) - 1),
+      outline: () => outline.value as LspDocumentSymbol[],
+      reveal: target => void revealLocation({ path: target.path, line: target.line, column: target.column, kind: '符号' }),
+      openChooser: openTargetChooser,
+      notify: deps.notify,
+    })
+  }
+  // 落点：能取到目标文件的 `documentSymbol` 就对准**最外层类声明行**（上游
+  // `EditSourceUtil.navigateToPsiElement` 跳的是类本身），取不到就退回文件首行
+  // （差异见 `src/navGotoTest.ts` 文件头）。
+  async function revealFileAtTypeLine(path: string, label: string) {
+    let line = 0
     try {
-      const result = await request<{ available: boolean; symbols?: LspDocumentSymbol[] }>('lsp.request', { kind: 'documentSymbol', path })
-      outline.value = result.available ? result.symbols ?? [] : []
-    } catch { outline.value = [] }
+      const replied = await request<{ available: boolean; symbols?: LspDocumentSymbol[] }>('lsp.request', { kind: 'documentSymbol', path })
+      line = targetLineOfSymbol(replied.available ? replied.symbols : null)
+    } catch { /* 目标文件没有语言服务：落在文件首行 */ }
+    await revealLocation({ path, line, kind: '符号', label })
+  }
+  // Ctrl+Shift+T：`GotoTestOrCodeAction`（键位 `$default.xml:254-256`）。候选名/权重/测试判定都在
+  // `src/navGotoTest.ts`，这里比对的数据源是 `workspace.entries`（本仓没有 PSI 索引，见那个文件的头）。
+  async function gotoTest() {
+    const path = activePath.value ?? ''
+    if (!path || !workspace.value) { deps.notify('没有打开的文件。', true); return 0 }
+    const entries = (workspace.value.entries ?? []) as readonly { path: string; kind: 'file' | 'directory' }[]
+    const { direction, targets } = gotoTestTargets(entries, path)
+    if (!targets.length) { deps.notify(gotoTestNotFoundMessage(direction), true); return 0 }
+    const leaf = path.split(/[\\/]/).pop() ?? path
+    if (targets.length > 1) {
+      openTargetChooser(targets.map(target => ({ path: target.path, line: 0, character: 0 })),
+                        gotoTestChooserTitle(direction, leaf, targets.length))
+      return targets.length
+    }
+    const only = targets[0]!
+    await revealFileAtTypeLine(only.path, `${gotoTestActionLabel(direction)}：${only.name}`)
+    return targets.length
+  }
+  // Ctrl+Alt+Home「相关符号」（`GotoRelatedSymbolAction.kt:43-83`）：三档结果 ——
+  // 空 → 气泡（`:69` + `platform/lang-api/resources/messages/LangBundle.properties:138`）、
+  // 恰好一条 → 直接导航、**不出现弹层**（`:77-79`）、多条 → 弹层，标题
+  // `LangBundle.properties:350`（"Choose Target"）。provider 表与分组标题在 `src/navGotoRelated.ts`。
+  async function gotoRelated() {
+    const path = activePath.value ?? ''
+    if (!path || !workspace.value) { deps.notify(NO_RELATED_SYMBOLS_MESSAGE, true); return 0 }
+    const entries = (workspace.value.entries ?? []) as readonly { path: string; kind: 'file' | 'directory' }[]
+    // 按 provider 的分组顺序摊平（上游 `GotoRelatedItem.getGroup()` 的弹层分段）；
+    // 本仓的选择弹层（`src/chooseTarget.ts`）没有分段标题这一槽位 ⇒ 分组信息进每行的标签。
+    const ordered = groupRelatedItems(collectRelatedItems(entries, path)).flatMap(group =>
+      group.items.map(item => ({ ...item, label: item.group ? `${item.group} · ${item.name}` : item.name })))
+    const outcome = relatedOutcome(ordered)
+    if (outcome === 'none') { deps.notify(NO_RELATED_SYMBOLS_MESSAGE, true); return 0 }
+    const only = ordered[0]!
+    if (outcome === 'navigate') { await revealFileAtTypeLine(only.path, only.label); return 1 }
+    openTargetChooser(ordered.map(item => ({ path: item.path, line: 0, character: 0 })), CHOOSE_TARGET_TITLE)
+    return ordered.length
   }
   // 换文件只刷新结构视图。**不**清引用结果：IDEA 的 Find 窗口里那些内容是 `ContentManager`
   // 持有的条目，只有"再搜一次把它顶替掉"或"关掉那条"才会消失
   // （`platform/lang-impl/src/com/intellij/usageView/impl/UsageViewContentManagerImpl.java:149-192`），
   // 换编辑器标签页与它无关。
   watch(activePath, path => { void refreshOutline(path) })
+  // 换工程：槽里装的是上一个工作区的符号表，整槽作废 + 计数进位
+  // （上游 `LspSingleSlotCache.kt:48-52` 的 `clearCache()`，本仓的触发点是语言服务重启与换工程）。
+  watch(() => deps.workspaceEpoch(), () => { workspaceSymbolsCache.clearCache(); symbolRevision += 1 })
+  // 过滤条一改（菜单里勾掉/勾上某一类）立刻重算当前列表 —— 上游 `ChooseByNameFilter` 的
+  // 复选清单变更就是当场重刷弹层（`ChooseByNameFilter.java:101-117` 的三个按钮走的同一条重建）。
+  watch(hiddenSymbolGroups, () => {
+    if (symbolPrompt.value?.mode === 'file') symbolResults.value = fileSymbolEntries(symbolQuery.value)
+    else if (symbolPrompt.value) void globalSymbolEntries(symbolQuery.value)
+  })
   return {
     startLsp, lspOn, autoSaveDelay, clearAutoSave, scheduleAutoSave, onWindowBlur, onEditorChange,
     jumpLastEditLocation, stopLspFile, resetLsp, revealLocation, goBack, goForward, openGoLine,
     openRecentFiles, placesPrompt, placesQuery, placesInput, placesEditedOnly, placesList, placeSnippet,
     placesFiltered, placesIndex, movePlace, openRecentPlaces, openPlace,
     fileSymbolEntries, globalSymbolEntries, openSymbol, onSymbolQuery, moveSymbol, jumpSymbol,
-    onSearchOpen, onSearchReplaced, jumpMethod, refreshOutline,
+    onSearchOpen, onSearchReplaced, jumpMethod, refreshOutline, gotoSuper, gotoTest, gotoRelated,
+    workspaceSymbolsCache,
   }
 }

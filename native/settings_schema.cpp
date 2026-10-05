@@ -3,8 +3,11 @@
 #include "settings_schema.hpp"
 #include "folding_state_schema.hpp"
 #include "fsops.hpp"
+#include "trusted_paths.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <regex>
 #include <set>
 #include <span>
@@ -111,6 +114,12 @@ void validate_editor_patch(const Json& patch) {
             const auto direction = value.is_string() ? value.get<std::string>() : std::string();
             if (direction != "contentBased" && direction != "ltr" && direction != "rtl")
                 fail("INVALID_SETTINGS", "bidiTextDirection must be contentBased, ltr or rtl.");
+        } else if (it.key() == "lineNumeration") {
+            // EditorSettingsExternalizable.LINE_NUMERATION（EditorSettings.java:264 的 LineNumerationType）
+            // 只有绝对/相对/混合三档，默认 ABSOLUTE（EditorSettingsExternalizable.java:53）。
+            const auto mode = value.is_string() ? value.get<std::string>() : std::string();
+            if (mode != "absolute" && mode != "relative" && mode != "hybrid")
+                fail("INVALID_SETTINGS", "lineNumeration must be absolute, relative or hybrid.");
         } else if (it.key() == "mainMenuDisplayMode") {
             const auto mode = value.is_string() ? value.get<std::string>() : std::string();
             if (mode != "hamburger" && mode != "merged" && mode != "separate")
@@ -152,6 +161,10 @@ Json general_defaults_impl() {
                 {"processCloseConfirmation", "ASK"},
                 {"inactiveTimeout", 15},
                 {"supportScreenReaders", false},  // GeneralSettingsState.supportScreenReaders (kt:265)
+                // 音频提示（无障碍）：`AudioCuesSettings.kt:17`，默认 off（用户主动打开才响；
+                // 上游默认是 AUTO，差异记在 src/settingsModel.ts 的字段注释里）。
+                // 逐 cue 停用表默认空 = 六个 cue 全开（同上游 disabledCues 的空 Set 默认）。
+                {"audioCuesMode", "off"}, {"audioCuesDisabled", Json::array()},
                 // IDEA 用注册表键 ide.windowSystem.autoShowProcessPopup（registry.properties:209-210，
                 // 默认 false），在 InfoAndProgressPanel.kt:319-321 读一次：有进程开始跑时是否自动
                 // 弹出进度面板。全量移植时把它升格为持久化设置（TaoCode 没有注册表对话框）。
@@ -160,13 +173,28 @@ Json general_defaults_impl() {
                 {"foldConsoleLines", Json::array()}, {"foldExceptions", Json::array()},
                 // git 默认 3 行上下文；IDEA 的 settings.context.lines 默认值同为 3。
                 {"diffContextLines", 3},
-                // IDEA 2023+ 默认显示粘性行；一次最多 3 层作用域。
-                {"showStickyLines", true}, {"stickyLinesLimit", 3},
+                // EditorSettingsExternalizable.java:93-94.
+                {"showStickyLines", true}, {"stickyLinesLimit", 5},
                 // 默认没有任何外部工具。
                 {"externalTools", Json::array()},
                 // SeFuzzyFileSearchProviderFactory.kt:28-31：`Registry.is("search.everywhere.fuzzy.files.enabled", false)`
                 // —— 随处的文件供给者默认不走 Smith-Waterman，所以默认 false（勾上后才启用）。
-                {"fuzzyFileSearch", false}};
+                {"fuzzyFileSearch", false},
+                // XDebuggerDataViewSettings：两格默认关（与 IDEA 默认一致：显示 null、不排序）。
+                {"debuggerHideNullValues", false}, {"debuggerSortByName", false},
+                // XDebuggerDataViewSettings.showValuesInline 上游默认 true，但本仓的行内值渲染是子集
+                // （只到当前帧第一个作用域，见 src/debugInlineValues.ts 文件头），默认 false。
+                {"debuggerShowValuesInline", false},
+                // XDebuggerDataViewSettings.isShowLibraryStackFrames / XDebuggerGeneralSettings
+                // 的 confirmBreakpointRemoval / unmuteOnStop：上游默认都 false。
+                {"debuggerShowLibraryFrames", false}, {"debuggerConfirmBreakpointRemoval", false},
+                {"debuggerUnmuteOnStop", false},
+                // XDebuggerGeneralSettings.getEvaluationDialogMode：上游默认 EXPRESSION；两档
+                // expression（单行表达式）/ codeFragment（代码片段编辑器）。
+                {"debuggerEvaluationMode", "expression"},
+                // 受信任项目清单：默认空 = 任何陌生目录第一次打开都要问（`TrustedPaths.State`
+                // 的 `trustedPaths` 默认空 map，`TrustedPaths.kt:41-44`）。
+                {"trustedPaths", Json::array()}};
 }
 
 void validate_general_patch(const Json& patch) {
@@ -180,6 +208,43 @@ void validate_general_patch(const Json& patch) {
             // GeneralSettings.OPEN_PROJECT_ASK/NEW_WINDOW/SAME_WINDOW/SAME_WINDOW_ATTACH.
             if (!(value.is_null() || (value.is_number_integer() && (value == -1 || value == 0 || value == 1 || value == 2))))
                 fail("INVALID_SETTINGS", "confirmOpenNewProject2 must be null, -1, 0, 1 or 2.");
+        } else if (it.key() == "audioCuesMode") {
+            // AudioCuesMode 三档（AudioCuesSettings.kt:75-79：auto / on / off）。
+            // 消费判定 isOn（:85-89）：AUTO 看屏幕阅读器、ON 恒真、OFF 恒假。
+            if (!value.is_string() || (value.get<std::string>() != "auto" && value.get<std::string>() != "on"
+                                       && value.get<std::string>() != "off"))
+                fail("INVALID_SETTINGS", "audioCuesMode must be auto, on or off.");
+        } else if (it.key() == "audioCuesDisabled") {
+            // AudioCuesSettingsState.disabledCues（AudioCuesSettings.kt:69-72）的数组形态：
+            // 六个 cue 的 id（IdeAudioCues.kt:13-39）。上限取 6 —— 未知 id 在这里就拒，
+            // 不让坏值流到「逐 cue 停用」的判定里（那层只做集合判断，不校验 id）。
+            static constexpr std::string_view cue_ids[] = {
+                "error.line", "error.caret", "warning.line", "warning.caret", "folded.line", "folded.caret"};
+            if (!value.is_array() || value.size() > sizeof(cue_ids) / sizeof(cue_ids[0]))
+                fail("INVALID_SETTINGS", "audioCuesDisabled must be an array of at most 6 cue ids.");
+            for (const auto& entry : value) {
+                if (!entry.is_string() || std::find(std::begin(cue_ids), std::end(cue_ids), std::string_view(entry.get_ref<const std::string&>()))
+                        == std::end(cue_ids))
+                    fail("INVALID_SETTINGS", "audioCuesDisabled 里有未知的 cue id。");
+            }
+        } else if (it.key() == "trustedPaths") {
+            // 受信任项目清单（IDEA `TrustedPaths.State.trustedPaths: Map<Path, Boolean>` 的数组形态）：
+            // 每条 `{path, trusted}`；路径 1024 字节内、单行 UTF-8；同一路径只留一条 —— 重复会让
+            // 「最近祖先」的胜负依赖数组顺序（`trusted_paths.cpp` 取最长祖先）。
+            if (!value.is_array() || value.size() > 256)
+                fail("INVALID_SETTINGS", "trustedPaths must be an array of at most 256 entries.");
+            std::set<std::string> seen;
+            for (const auto& entry : value) {
+                if (!entry.is_object()) fail("INVALID_SETTINGS", "trustedPaths 的每一项都要是 {path, trusted}。");
+                known_keys(entry, {"path", "trusted"}, "INVALID_SETTINGS");
+                const auto path = text_or(entry, "path");
+                if (path.empty() || path.size() > 1024 || !valid_utf8(path) || path.find_first_of("\r\n") != std::string::npos)
+                    fail("INVALID_SETTINGS", "trustedPaths 的路径不能为空、不超过 1024 字节且必须是单行 UTF-8 文本。");
+                if (!entry.contains("trusted") || !entry.at("trusted").is_boolean())
+                    fail("INVALID_SETTINGS", "trustedPaths 的 trusted 必须是布尔值。");
+                if (!seen.insert(trusted::normalize_path(path)).second)
+                    fail("INVALID_SETTINGS", "trustedPaths 不能有重复路径：" + path);
+            }
         } else if (it.key() == "processCloseConfirmation") {
             const auto mode = value.is_string() ? value.get<std::string>() : std::string();
             if (mode != "ASK" && mode != "TERMINATE" && mode != "DISCONNECT")
@@ -205,6 +270,10 @@ void validate_general_patch(const Json& patch) {
                 if (name.empty() || name.size() > 80) fail("INVALID_SETTINGS", "external tool name must be 1..80 bytes.");
                 if (command.empty() || command.size() > 1000) fail("INVALID_SETTINGS", "external tool command must be 1..1000 bytes.");
             }
+        } else if (it.key() == "debuggerEvaluationMode") {
+            // EvaluationMode.EXPRESSION | CODE_FRAGMENT 两档（求值对话框是单行还是代码片段编辑器）。
+            if (!value.is_string() || (value.get<std::string>() != "expression" && value.get<std::string>() != "codeFragment"))
+                fail("INVALID_SETTINGS", "debuggerEvaluationMode must be expression or codeFragment.");
         } else if (it.key() == "foldConsoleLines" || it.key() == "foldExceptions") {
             // ConsoleConfigurable 的两个折叠列表：字符串数组（上限 64 条，每条 ≤200 字节）。
             if (!value.is_array() || value.size() > 64)
@@ -226,16 +295,25 @@ Json editor_defaults_impl() {
             // SHOW_BREADCRUMBS_ABOVE = false（即默认显示在**下方**）。按语言的表默认空
             //（未配置 = 显示，:459-466）。
             {"showBreadcrumbs", true}, {"breadcrumbsPlacement", "bottom"}, {"breadcrumbsLanguages", Json::object()},
+            // UISettingsState.kt:121 `showMembersInNavigationBar` 默认 true。
+            {"showMembersInNavigationBar", true},
             // IDEA 默认两者都开（错误高亮与 stripe 标记）。
             {"showDiagnostics", true}, {"showErrorStripe", true},
             // CodeInsightSettings.java:144 `REFORMAT_ON_PASTE = INDENT_EACH_LINE`。
             {"reformatOnPaste", "indentEachLine"},
             // EditorSettingsExternalizable.java:137 `BIDI_TEXT_DIRECTION = BidiTextDirection.CONTENT_BASED`。
             {"bidiTextDirection", "contentBased"},
+            // EditorSettingsExternalizable.java:53 `DEFAULT_LINE_NUMERATION = LineNumerationType.ABSOLUTE`
+            // （EditorAppearanceConfigurable.kt:118-124 的下拉框：绝对/相对/混合）。
+            {"lineNumeration", "absolute"},
             // EditorSettingsExternalizable.java:87 默认 true。
             {"showGutterIcons", true},
             // FileColorManagerImpl.java:75-106: all three switches default true.
             {"fileColorsEnabled", true}, {"fileColorsForTabs", true}, {"fileColorsForProjectView", true},
+            // InlaySettingsConfigurable（`inlay.hints`，intellij.platform.lang.impl.xml:935-941）：
+            // 上游 `InlayProviderSettingsModel.isEnabled` 出厂为真（platform/lang-api/.../InlayProviderSettingsModel.kt:26），
+            // 本仓按 LSP `kind` 分的三档默认也全开（键名见 src/inlayHints.ts 的 INLAY_HINT_SETTING_KEYS）。
+            {"showTypeInlayHints", true}, {"showParameterInlayHints", true}, {"showOtherInlayHints", true},
             // UISettingsState.editorTabLimit defaults to 30 open tabs per group.
             {"tabLimit", 30},
             // UISettingsState.kt:123 `scrollTabLayoutInEditor` 默认 **true** ⇒ 标签排成一行；
@@ -307,8 +385,7 @@ Json editor_defaults_impl() {
             // EditorSettingsExternalizable.java:83 `IS_RIGHT_MARGIN_SHOWN = true`。
             {"rightMargin", true},
             // EditorSettingsExternalizable.java:93-94 `SHOW_STICKY_LINES = true` / `STICKY_LINES_LIMIT = 5`。
-            // 层数默认取 3 而非上游的 5 —— 已登记的偏离（docs/settings-parity.md:53），不在这一批里改。
-            {"showStickyLines", true}, {"stickyLinesLimit", 3},
+            {"showStickyLines", true}, {"stickyLinesLimit", 5},
             // diff.base 的 settings.context.lines（DiffSettingsConfigurable.kt:30-58），默认与 git 一致。
             {"diffContextLines", 3}};
 }
@@ -449,13 +526,20 @@ void validate_todo_patterns(const Json& values) {
     std::set<std::string> patterns;
     for (const auto& value : values) {
         if (!value.is_object()) fail("INVALID_SETTINGS", "TODO 模式要写成 {pattern, description}。");
-        // caseSensitive 对应 IDEA TodoPattern.isCaseSensitive()（模式表每行的"区分大小写"列）。
-        known_keys(value, {"pattern", "description", "caseSensitive"}, "INVALID_SETTINGS");
+        // caseSensitive 对应 IDEA TodoPattern.isCaseSensitive()（模式表每行的"区分大小写"列）；
+        // color 对应 IDEA 的颜色列（TodoPattern.getColor()，IDEA 从颜色方案取；本仓存 #RRGGBB）。
+        known_keys(value, {"pattern", "description", "caseSensitive", "color"}, "INVALID_SETTINGS");
         const auto pattern = text_or(value, "pattern"), description = text_or(value, "description");
         if (pattern.empty() || pattern.size() > 200) fail("INVALID_SETTINGS", "TODO 模式不能为空且不超过 200 字节。");
         if (description.empty() || description.size() > 60) fail("INVALID_SETTINGS", "TODO 说明不能为空且不超过 60 字节。");
         if (value.contains("caseSensitive") && !value.at("caseSensitive").is_boolean())
             fail("INVALID_SETTINGS", "caseSensitive 必须是布尔值。");
+        if (value.contains("color")) {
+            const auto color = text_or(value, "color");
+            const bool hex = color.size() == 7 && color.front() == '#' &&
+                color.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos;
+            if (!hex) fail("INVALID_SETTINGS", "TODO 颜色要写成 #RRGGBB。");
+        }
         if (!valid_utf8(pattern) || !valid_utf8(description)) fail("INVALID_SETTINGS", "TODO 模式必须是 UTF-8 文本。");
         if (pattern.find_first_of("\r\n\u0000") != std::string::npos) fail("INVALID_SETTINGS", "TODO 模式不能换行。");
         if (!patterns.insert(pattern).second) fail("INVALID_SETTINGS", "TODO 模式不能重复：" + pattern);
@@ -884,7 +968,7 @@ void validate_project_patch(const Json& patch) {
             // `allowRunningInParallel` = IDEA `RunConfigurationOptions.isAllowRunningInParallel`
             // （`:54-56`，默认 false）：「允许并行运行多个实例」。
             known_keys(value, {"name", "command", "type", "program", "args", "cwd", "env", "beforeLaunch", "adapter", "folder",
-                               "allowRunningInParallel"},
+                               "allowRunningInParallel", "configurations"},
                        "INVALID_SETTINGS");
             if (value.contains("allowRunningInParallel") && !value.at("allowRunningInParallel").is_boolean())
                 fail("INVALID_SETTINGS", "运行配置的 allowRunningInParallel 必须是布尔值。");
@@ -895,12 +979,26 @@ void validate_project_patch(const Json& patch) {
             }
             if (value.contains("type")) {
                 const auto type = value.at("type").get<std::string>();
-                if (type != "shell" && type != "application" && type != "debug")
-                    fail("INVALID_SETTINGS", "运行配置类型只能是 shell、application 或 debug。");
+                if (type != "shell" && type != "application" && type != "debug" && type != "compound")
+                    fail("INVALID_SETTINGS", "运行配置类型只能是 shell、application、debug 或 compound。");
             }
             const auto name = text_or(value, "name"), command = text_or(value, "command");
             if (name.empty() || name.size() > 80) fail("INVALID_SETTINGS", "运行配置名不能为空且不超过 80 字节。");
-            if (command.empty() || command.size() > 4096) fail("INVALID_SETTINGS", "运行命令不能为空且不超过 4096 字节。");
+            const bool compound = value.value("type", std::string()) == "compound";
+            if ((!compound && command.empty() && text_or(value, "program").empty()) || command.size() > 4096)
+                fail("INVALID_SETTINGS", "运行命令与程序不能同时为空，命令不超过 4096 字节。");
+            if (!value.contains("command") || !value.at("command").is_string()) fail("INVALID_SETTINGS", "运行命令必须是字符串。");
+            if (compound) {
+                if (!value.contains("configurations") || !value.at("configurations").is_array() || value.at("configurations").empty() || value.at("configurations").size() > max_run_configs)
+                    fail("INVALID_SETTINGS", "复合配置必须选择至少一个成员配置。");
+                std::set<std::string> members;
+                for (const auto& member : value.at("configurations")) {
+                    if (!member.is_string()) fail("INVALID_SETTINGS", "复合配置成员必须是配置名。");
+                    const auto text = member.get<std::string>();
+                    if (text.empty() || text.size() > 80 || !valid_utf8(text) || text == name || !members.insert(text).second)
+                        fail("INVALID_SETTINGS", "复合配置成员名无效、重复或引用自身。");
+                }
+            } else if (value.contains("configurations")) fail("INVALID_SETTINGS", "只有复合配置可包含成员配置。");
             if (!valid_utf8(name) || !valid_utf8(command)) fail("INVALID_SETTINGS", "运行配置必须是 UTF-8 文本。");
             const auto optional_text = [&](const char* key, std::size_t limit) {
                 if (!value.contains(key)) return std::string();
@@ -947,6 +1045,21 @@ void validate_project_patch(const Json& patch) {
             }
             if (!names.insert(name).second) fail("INVALID_SETTINGS", "运行配置名不能重复：" + name);
         }
+        std::map<std::string, const Json*> by_name;
+        for (const auto& value : values) by_name.emplace(value.at("name").get<std::string>(), &value);
+        std::set<std::string> visiting, done;
+        std::function<void(const std::string&)> visit = [&](const std::string& name) {
+            if (done.contains(name)) return;
+            if (!visiting.insert(name).second) fail("INVALID_SETTINGS", "复合配置不能循环引用。");
+            const auto found = by_name.find(name);
+            if (found == by_name.end()) fail("INVALID_SETTINGS", "复合配置引用了不存在的成员：" + name);
+            const auto& value = *found->second;
+            if (value.value("type", std::string()) == "compound")
+                for (const auto& member : value.at("configurations")) visit(member.get<std::string>());
+            visiting.erase(name);
+            done.insert(name);
+        };
+        for (const auto& [name, value] : by_name) { (void)value; visit(name); }
     }
     if (patch.contains("bookmarks")) validate_bookmarks(patch.at("bookmarks"));
     if (patch.contains("bookmarkLists")) validate_bookmark_lists(patch.at("bookmarkLists"));

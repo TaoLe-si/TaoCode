@@ -5,7 +5,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { firstSpeedSearchHit, isWordStartAt, nextSpeedSearchHit, SPEED_SEARCH_HINT,
-         speedSearchKeyAction, speedSearchMatches, speedSearchStepForKey } from '../src/speedSearch.ts'
+         speedSearchKeyAction, speedSearchMatches, speedSearchStepForKey, stepVisibleIndex } from '../src/speedSearch.ts'
 
 test('大小写不敏感，但大写字母必须落在词首（MinusculeMatcherImpl.kt:303-305）', () => {
   assert.equal(speedSearchMatches('abc', 'Abc'), true, '小写 pattern 命中词首大写')
@@ -66,6 +66,34 @@ test('上下/Home/End 映射到命中项之间的移动（findTargetElement:695-
   assert.deepEqual(speedSearchStepForKey('Home'), { kind: 'first' })
   assert.deepEqual(speedSearchStepForKey('End'), { kind: 'last' })
   assert.equal(speedSearchStepForKey('a'), null)
+})
+
+// 上游的可见表就是「过滤后第几行 → 原列表下标」那张表（`ListPopupModel.java:44-48` getOriginalIndex），
+// 所以移动是在**原索引**之间走，而不是把可见行重新编号。
+test('可见行之间走一步：只在命中行里挪、走完一圈回绕（SpeedSearchBase:476-516 / :683-706）', () => {
+  const visible = [0, 2, 4] // 全量 5 条，命中第 0/2/4 条
+  assert.equal(stepVisibleIndex(visible, 0, 'next'), 2, '向下越过被过滤掉的第 1 条')
+  assert.equal(stepVisibleIndex(visible, 2, 'previous'), 0, '向上同样只落在命中行')
+  assert.equal(stepVisibleIndex(visible, 4, 'next'), 0, '最后一条再向下回到第一条（getCycleScrolling，:479-485）')
+  assert.equal(stepVisibleIndex(visible, 0, 'previous'), 4, '第一条再向上回到最后一条（:508-513）')
+  assert.equal(stepVisibleIndex(visible, 2, 'first'), 0, 'Home = 第一条命中（findFirstElement，:64-72 同族）')
+  assert.equal(stepVisibleIndex(visible, 2, 'last'), 4, 'End = 最后一条命中（findLastElement）')
+  // 当前高亮刚被打字过滤掉（本仓的 v-for 保留原索引才会出现这种"高亮不在可见表里"）：
+  // 端点起步，与同文件的 `nextSpeedSearchHit` 在 `from < 0` 时同一条口径
+  // （`SpeedSearchBase.java:476-486` 的"从列表头/尾起步"）。
+  assert.equal(stepVisibleIndex(visible, 3, 'next'), 0, '高亮行被过滤掉：向下从第一条可见行起')
+  assert.equal(stepVisibleIndex(visible, 1, 'previous'), 4, '高亮行被过滤掉：向上从最后一条可见行起')
+  // 一条都没命中 = 模型空：既不选也不挪（`ListPopupImpl.java:505` 的 size()==0 那一支）。
+  assert.equal(stepVisibleIndex([], 3, 'next'), 3)
+  assert.equal(stepVisibleIndex([], 3, 'previous'), 3)
+  assert.equal(stepVisibleIndex([], 3, 'first'), 3)
+  assert.equal(stepVisibleIndex([], 3, 'last'), 3)
+})
+
+test('可见表为空表以外的退化：单行时四个方向都停在它自己', () => {
+  for (const kind of ['next', 'previous', 'first', 'last']) {
+    assert.equal(stepVisibleIndex([7], 7, kind), 7, `${kind} 不该把高亮甩出唯一可见行`)
+  }
 })
 
 test('提示文字来自上游那一条 bundle 键', () => {

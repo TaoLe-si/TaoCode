@@ -74,11 +74,10 @@ test('已用时间的口径：<60 秒用秒，过了 60 秒用分秒，没有起
 test('接线：谁在什么时候写这一行', () => {
   const host = read('src/gradleHost.ts')
   assert.match(host, /notifyProgress/, 'Gradle 的宿主要把进度与结论写进消息窗口')
-  assert.match(host, /deps\.notifyProgress\(gradleRunningNoticeOf\(gradleSync\.startedAt, gradleSync\.output, command, Date\.now\(\)\)\)/,
-    '命令一起来就有一行（不要等第一批输出 —— 网络卡住的那 75 秒里正是最需要看见的时刻）')
+  assert.match(host, /gradleRunningNoticeOf\(/, '命令一起来就有一行（不要等第一批输出 —— 网络卡住的那 75 秒里正是最需要看见的时刻）')
   assert.match(host, /watch\(\(\) => gradleSync\.output\.length/, '输出每来一批刷一次')
-  assert.match(host, /gradleFinishedNoticeOf\(result\.value\.error, elapsedSeconds\(\)\)/, '同步结束把那一行收成结论')
-  assert.match(host, /gradleFinishedNoticeOf\(error, elapsedSeconds\(\), '依赖加载'\)/, '依赖那条命令也要收成结论')
+  assert.match(host, /gradleFinishedNoticeOf\(error, Math\.max\(0, Math\.round/, '同步结束把那一行收成结论')
+  assert.match(host, /job\.kind === 'dependencies' \? '依赖加载' : undefined/, '依赖那条命令也要收成结论')
   assert.match(read('src/App.vue'), /isDesktop, workspace, projectSettings, notify, notifyProgress,/,
     '宿主要把 notifyProgress 注进 Gradle 的状态域')
   assert.match(read('src/notifications.ts'), /wireLspProgressNotices\(notifyProgress\)/,

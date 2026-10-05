@@ -27,13 +27,15 @@
 //                走的就是那条退路：工作区相对路径 + `:` + 行号
 //   · 来自内容根的路径 `CopyContentRootPathProvider:121-129` → 相对内容根的路径（本仓的内容根 = 工作区根）
 //
-// **两条不做，理由如下**（判决书 §C 同款，不留假菜单项）：
-//   · 「来自源根的路径」（`CopySourceRootPathProvider:143-148`）要**源根**模型
-//     （`ProjectFileIndex.getSourceRootForFile`）。本仓的文件与语言的关系由 LSP 管，
-//     工程里没有"源码根"这一层 —— 做了就是发明一个不存在的概念。
+// **两条的现状（2026-10-05 更新）**：
+//   · 「来自源根的路径」（`CopySourceRootPathProvider:143-148`）—— 源根模型这一层已经有了：
+//     `src/projectFileIndex.ts` 提供 `getSourceRootForFile` 的查询面（配置的源根优先；渲染层拿不到
+//     项目设置时退到目录约定），`sourceRootPathText` 就是「相对源根的路径，没有源根不出这一条」。
+//     它**不进 `FIND_COPY_ACTIONS`**（那个数组是 App.vue / 搜索结果 / 源代码管理三处的四项菜单），
+//     由 `src/components/TabContextMenu.vue` 按当前标签的文件现算后单加一行。
 //   · 「工具箱 URL」（`CopyTBXReferenceProvider:151-157` → `CopyTBXReferenceAction.createJetBrainsLink`）
 //     生成的是 JetBrains Toolbox 的 `jetbrains://` 链接。本仓不是 JetBrains 那条产品线，
-//     生成这种链接对用户没有意义。
+//     生成这种链接对用户没有意义，仍然不做。
 
 /** 复制那一组的组名（`group.CopyReferencePopupGroup.text`）。 */
 export const COPY_REFERENCE_GROUP = '复制路径/引用…'
@@ -51,7 +53,9 @@ export interface FindCopyAction {
 
 /**
  * 菜单顺序与上游 `CopyFileReference` 组一致（绝对路径 · 文件名 · (分隔) · 带行号的路径 · 来自内容根的路径 ·
- * 来自源根的路径）。本仓少了最后一条（要源根模型，见文件头）。
+ * 来自源根的路径）。前四条是本数组；最后一条要按**当前文件**现算源根（算不出就不出），
+ * 所以由标签右键菜单单独加行（见 `SOURCE_ROOT_PATH_LABEL`），不塞进这个静态数组 ——
+ * 搜索结果与源代码管理那两处的菜单读的也是这个数组，它们没有标签页的文件路径。
  */
 export const FIND_COPY_ACTIONS: readonly FindCopyAction[] = [
   { id: 'absolute', label: '绝对路径' },
@@ -76,6 +80,23 @@ export function resultFileName(path: string): string {
  */
 export function resultPathWithLine(target: FindResultTarget): string {
   return `${target.path}:${target.line}`
+}
+
+/** 「来自源根的路径」那一行的文案（`ActionsBundle.properties:339` 同族的第 6 条）。 */
+export const SOURCE_ROOT_PATH_LABEL = '来自源根的路径'
+
+/**
+ * `CopySourceRootPathProvider`（`CopyPathProvider.kt:143-148`）：`VfsUtilCore.getRelativePath(file, 源根)`。
+ * 源根为 null（`ProjectFileIndex.getSourceRootForFile` 没找到）时返回 null —— 上游 `?: return null`
+ * 会让这一条整个不出现，调用方据此不渲染菜单行。
+ */
+export function sourceRootPathText(target: FindResultTarget, sourceRoot: string | null): string | null {
+  if (!sourceRoot) return null
+  const path = target.path.replace(/\\/g, '/').replace(/^\.\//, '')
+  const root = sourceRoot.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+  if (!root) return path
+  if (path === root) return ''
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null
 }
 
 /** 一条复制动作最终写进剪贴板的文本。 */

@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { BellDot, ChevronDown, CircleHelp, Copy, FolderOpen, FolderPlus, FolderSearch, GitBranch, Moon, Palette, Plug, RefreshCw, Search, Settings, Sun, X } from 'lucide-vue-next'
-import { lastOpenedPath, matchesSearch, systemDependentPath } from '../welcomeProjects'
+import { GROUP_MENU_LABELS, lastOpenedPath, matchesSearch, systemDependentPath } from '../welcomeProjects'
+import { UNGROUPED, createWelcomeProjectGroups } from '../welcomeProjectGroups'
+import {
+  avatarInitials, copiedPathNote, forgetDialogText, listStatusText, openedDate,
+  revealedNote, reopenDialogText,
+} from '../welcomeRowText'
+import { deleteTargets, isRowDeleteKey, searchKeyAction, selectionAfterClick } from '../welcomeRowSelection'
+import {
+  PROJECT_COLOR_AUTO_LABEL, PROJECT_COLOR_CHOICES, PROJECT_COLOR_MENU_LABEL, PROJECT_ICON_GRADIENTS, avatarTone,
+  clearProjectColorOverride, hasProjectColorOverride, projectColorLabel, projectColorOverride, projectGradient,
+  setProjectColorOverride,
+} from '../welcomeProjectColor'
 import { noticeButtonText, noticeButtonVisible, noticeTitle, type NoticeEntry } from '../notices'
 import { copyToClipboard } from '../clipboard'
 import { clampEditorFontSize, MAX_EDITOR_FONT_SIZE, MIN_EDITOR_FONT_SIZE } from '../editorFontSize'
@@ -67,95 +78,35 @@ const moreOpen = ref(false)
 const query = ref('')
 const searchInput = ref<HTMLInputElement>()
 const filteredProjects = computed(() => props.projects.filter(project => matchesSearch(project, groupOf(project.path), query.value)))
-const dateFormat = new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-})
-function openedDate(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '时间未知' : dateFormat.format(date)
-}
-// Source: RecentProjectIconHelper.kt:289-326 (ProjectIconPalette.gradients).
-// Nine gradient pairs ordered from warm red through cool purple. Indexing into
-// them via abs(path.hashCode()) % 9 mirrors ProjectIconPalette.gradient(path) and
-// getGeneratedNonLocalProjectIcon's `abs(id.hashCode() % 9)`. The RecentProjects
-// welcome list is the only TaoCode surface that needs a project icon today, so
-// the palette lives here next to the renderer.
-const RECENT_PROJECT_GRADIENTS: ReadonlyArray<readonly [string, string]> = [
-  ['#DB3D3C', '#FF8E42'], // Color1.Avatar
-  ['#F57236', '#FCBA3F'], // Color2
-  ['#2BC8BB', '#36EBAE'], // Color3
-  ['#359AF2', '#57DBFF'], // Color4
-  ['#8379FB', '#85A8FF'], // Color5
-  ['#7E54B5', '#9486FF'], // Color6
-  ['#D63CC8', '#F582B9'], // Color7
-  ['#954294', '#C87DFF'], // Color8
-  ['#E75371', '#FF78B5'], // Color9
-]
-function avatarTone(path: string): number {
-  let hash = 0
-  for (let i = 0; i < path.length; i += 1) hash = (hash * 31 + path.charCodeAt(i)) | 0
-  return Math.abs(hash) % RECENT_PROJECT_GRADIENTS.length
-}
-function avatarGradient(path: string): readonly [string, string] {
-  return RECENT_PROJECT_GRADIENTS[avatarTone(path)]!
-}
-// Source: RecentProjectIconHelper.iconTextForCommaSeparatedName and
-// AvatarUtils.initials. The IDE takes the first letter of each of the first
-// two comma-separated segments and uppercases them ("First, Second" → "FS").
-// Single-segment names fall back to the first non-whitespace character.
-function avatarInitials(name: string): string {
-  const segments = name.split(',').slice(0, 2)
-  const letters: string[] = []
-  for (const segment of segments) {
-    for (const ch of segment) {
-      if (!/\s/.test(ch)) { letters.push(ch); break }
-    }
-  }
-  return (letters.join('') || name.trim()[0] || '项').toLocaleUpperCase()
-}
-// IDEA's RecentProjectPanel shows each project's git branch under the path; the
-// branch was recorded by the IDE the last time the project was open (see the
-// gitHead watch in App.vue), so it costs nothing on the welcome page.
-// RemoveSelectedProjectsAction.kt mirrors the IDE's recent-project delete UX: the
-// action always confirms before it drops a record; the path itself is never touched.
-// The IDE bundle ships two dialog strings — `dialog.title.remove.recent.project`
-// (singular) and `dialog.title.remove.recent.project.plural` — and two messages,
-// one of which names the project, while the plural form says "selected projects".
-// We mirror the same branching so the wording matches across one and many items.
+// 行文本的规则（时间格式、头像缩写、两个确认框的措辞）在 src/welcomeRowText.ts。
+const listStatus = computed(() => listStatusText({
+  note: copyNote.value, busy: props.busy, query: query.value,
+  visibleCount: filteredProjects.value.length, totalCount: props.projects.length,
+}))
 function confirmForget(projects: RecentProject[]) {
-  if (projects.length === 0) return
-  const title = projects.length === 1
-    ? `从最近项目列表移除「${projects[0]!.name}」？`
-    : '从最近项目列表移除所选项目？'
-  const body = projects.length === 1
-    ? `磁盘上的文件不会被删除。`
-    : `共 ${projects.length} 项，磁盘上的文件不会被删除。`
-  if (!window.confirm(`${title}\n${body}`)) return
+  const text = forgetDialogText(projects)
+  if (!text || !window.confirm(text.message)) return
   menuPath.value = ''
-  // Emit one batch signal so the native side can mirror RecentProjectsManagerBase.removePath
-  // on every entry in a single state-mutation pass.
+  // RecentProjectsManagerBase.kt:270-279 calls removePath per path and fires a single
+  // change event at the end, so the page batches here: emit one batch signal so the
+  // native side can mirror it on every entry in a single state-mutation pass.
   emit('forget-batch', projects.map(project => project.path))
 }
-// RecentProjectsManagerBase.kt:270-279 calls removePath per path and fires a single
-// change event at the end, so the page batches here.
 function forgetSingle(project: RecentProject) { confirmForget([project]) }
 // ReopenProjectAction.showReopenDialog (ReopenProjectAction.kt:84-94): when the path
 // disappeared, the IDE offers two buttons — OK (closes the dialog, project stays on
 // the list) and "Remove from list" (calls removePath). We mirror the same choice.
 function showReopenDialog(project: RecentProject) {
-  const choice = window.prompt(
-    `路径「${project.path}」不存在或不可访问。\n` +
-    '点击「确定」继续，点击「取消」从最近项目列表移除（磁盘文件不会被删除）。',
-    '继续'
-  )
-  if (choice === null) confirmForget([project])
+  if (window.prompt(reopenDialogText(project.path), '继续') === null) confirmForget([project])
 }
 function onRowKeydown(project: RecentProject, event: KeyboardEvent) {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return
+  if (!isRowDeleteKey(event.key)) return
   event.preventDefault()
-  if (selectedPaths.value.has(project.path)) confirmForget(selectedProjects.value)
-  else confirmForget([project])
+  confirmForget(deleteTargets(filteredProjects.value, selectedPaths.value, project.path))
 }
+// IDEA's RecentProjectPanel shows each project's git branch under the path; the
+// branch was recorded by the IDE the last time the project was open (see the
+// gitHead watch in App.vue), so it costs nothing on the welcome page.
 function branchOf(path: string): string {
   if (!props.isDesktop) return ''
   try { return localStorage.getItem(`taocode.branch:${path}`) ?? '' } catch { return '' }
@@ -164,125 +115,57 @@ function clearSearch() {
   query.value = ''
   searchInput.value?.focus()
 }
+
+// --- 项目颜色（ChangeProjectColorActionGroup.kt:33-44）---------------------------------------
+// 上游这一族挂在**项目窗口标题栏**的菜单上；本仓的项目颜色唯一可见处是欢迎页这一行，
+// 所以照上游的**次序**放在行菜单里：分组那一段之后、那条分隔线之前（PlatformActions.xml:1026，
+// 正是上游 ChangeProjectIcon 所在的那一行）。
+const colorMenuPath = ref('')
+// 头像渐变随「用户选的颜色 / 按路径自动生成」切换，所以要一个版本号让这一行重算。
+const colorVersion = ref(0)
+function currentColorIndex(path: string): number | undefined {
+  void colorVersion.value
+  return projectColorOverride(path)
+}
+function colorLabel(path: string, index: number) {
+  void colorVersion.value
+  return projectColorLabel({ index, name: PROJECT_COLOR_CHOICES.find(choice => choice.index === index)?.name ?? '' }, currentColorIndex(path))
+}
+function pickColor(project: RecentProject, index: number) {
+  setProjectColorOverride(project.path, index)
+  colorVersion.value += 1
+  colorMenuPath.value = ''
+}
+function resetColor(project: RecentProject) {
+  clearProjectColorOverride(project.path)
+  colorVersion.value += 1
+  colorMenuPath.value = ''
+}
+function colorAutoDisabled(path: string) {
+  void colorVersion.value
+  return !hasProjectColorOverride(path)
+}
+function toggleColorMenu(path: string) {
+  colorMenuPath.value = colorMenuPath.value === path ? '' : path
+  menuPath.value = path
+}
+function gradientOf(path: string) { void colorVersion.value; return projectGradient(path) }
+function toneOf(path: string) { void colorVersion.value; return avatarTone(path) }
+/** 色板里某一个槽位自己的那一对渐变（菜单里每个色块的底色 —— 与当前选没选它无关）。 */
+function choiceGradient(index: number) { return PROJECT_ICON_GRADIENTS[index]! }
 // IDEA's project list: the ⋮ at the row end opens the row menu (open / remove from
 // the list); the row itself is highlighted while its menu is open.
 const menuPath = ref('')
-// Source: ProjectGroup.java (platform/ide-core/.../ProjectGroup.java).
-// Properties are name, projects (List<path>), expanded (myExpanded), tutorials
-// (myTutorials), bottomGroup (myBottomGroup), plus a modCounter for change tracking.
-// ProjectGroupActionGroup.update() reads myGroup.isExpanded() and toggles the
-// popup/inline rendering; TaoCode renders the group header collapsed vs expanded
-// with the same semantic (when collapsed the header is a "popup group" that
-// expands on click). The bottomGroup flag moves the group to the bottom of the
-// list; tutorials is informational only at the data layer for now.
-interface ProjectGroup { name: string; paths: string[]; expanded: boolean; tutorials: boolean; bottomGroup: boolean }
-const groups = ref<ProjectGroup[]>([])
-const groupCollapsed = ref<Set<string>>(new Set())
-const UNGROUPED = '未分组'
-try {
-  const saved = JSON.parse(localStorage.getItem('taocode.projectGroups') ?? 'null') as { groups?: Array<Partial<ProjectGroup>>; collapsed?: string[] } | null
-  if (saved && Array.isArray(saved.groups)) {
-    groups.value = saved.groups
-      .filter(group => group && typeof group.name === 'string' && Array.isArray(group.paths))
-      .map(group => ({
-        name: group.name as string,
-        paths: (group.paths as unknown[]).filter((path): path is string => typeof path === 'string'),
-        // Source: ProjectGroup.isExpanded() defaults to false (myExpanded = false).
-        // Older TaoCode builds used a collapsed-set as the source of truth, so
-        // when the persisted record lacks the boolean we fall back to that set
-        // to keep the user's view stable across the upgrade.
-        expanded: typeof group.expanded === 'boolean' ? group.expanded : !groupCollapsed.value.has(group.name as string),
-        tutorials: group.tutorials === true,
-        bottomGroup: group.bottomGroup === true,
-      }))
-  }
-  if (saved && Array.isArray(saved.collapsed)) groupCollapsed.value = new Set(saved.collapsed.filter((name): name is string => typeof name === 'string'))
-} catch { /* corrupted state falls back to a single ungrouped list */ }
-function saveGroups() {
-  try { localStorage.setItem('taocode.projectGroups', JSON.stringify({ groups: groups.value, collapsed: [...groupCollapsed.value] })) } catch { /* session-only */ }
-}
-function groupOf(path: string): string {
-  return groups.value.find(group => group.paths.includes(path))?.name ?? UNGROUPED
-}
-// Source: RecentProjectListActionProvider.addGroups (RecentProjectListActionProvider.kt:333-355)
-// iterates groups twice — once with `bottom = false` (top groups, rendered in
-// ProjectGroupComparator order) and once with `bottom = true` (the bottomGroup
-// buckets, rendered after the un-grouped recent projects). We mirror that two-pass
-// layout: top groups in ProjectGroupComparator order, then the un-grouped bucket,
-// then any bottom groups. The bottomGroup flag is set by ProjectGroup.setBottomGroup
-// and survives the localStorage round-trip just like the other ProjectGroup fields.
-// ProjectGroupComparator (RecentProjectListActionProvider.kt:388-407): orders two
-// groups by the lowest recent-path index they each contain; ties break on a
-// natural (locale-aware) comparison of their names.
-function projectGroupComparator(a: ProjectGroup, b: ProjectGroup): number {
-  const recent = filteredProjects.value
-  const pathIndex = new Map(recent.map((project, index) => [project.path, index]))
-  let indexA = Number.MAX_SAFE_INTEGER
-  for (const path of a.paths) {
-    const idx = pathIndex.get(path)
-    if (idx !== undefined && idx < indexA) indexA = idx
-  }
-  let indexB = Number.MAX_SAFE_INTEGER
-  for (const path of b.paths) {
-    const idx = pathIndex.get(path)
-    if (idx !== undefined && idx < indexB) indexB = idx
-  }
-  if (indexA === indexB) return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
-  return indexA - indexB
-}
-const groupedProjects = computed(() => {
-  const topGroups = [...groups.value.filter(group => !group.bottomGroup)].sort(projectGroupComparator)
-  const bottomGroups = [...groups.value.filter(group => group.bottomGroup)].sort(projectGroupComparator)
-  const buckets: { name: string; projects: RecentProject[] }[] = []
-  for (const group of topGroups) {
-    buckets.push({ name: group.name, projects: filteredProjects.value.filter(project => group.paths.includes(project.path)) })
-  }
-  buckets.push({ name: UNGROUPED, projects: filteredProjects.value.filter(project => groupOf(project.path) === UNGROUPED) })
-  for (const group of bottomGroups) {
-    buckets.push({ name: group.name, projects: filteredProjects.value.filter(project => group.paths.includes(project.path)) })
-  }
-  return buckets.filter(bucket => bucket.name === UNGROUPED ? bucket.projects.length > 0 : true)
+// --- 分组（`ProjectGroup` 一族）：读法/写法、桶序、折叠、新建/改名/移入移出都在
+// src/welcomeProjectGroups.ts（纯逻辑，可单测），这里只留接线。
+const {
+  groupCollapsed, groupedProjects, groupingActive, groupOf, moveTargets,
+  moveToGroup, createGroup, renameGroup, toggleGroupCollapsed, onGroupKeydown,
+} = createWelcomeProjectGroups({
+  recentProjects: () => filteredProjects.value,
+  closeMenu: () => { menuPath.value = '' },
 })
-const groupingActive = computed(() => groups.value.length > 0)
-function moveToGroup(project: RecentProject, name: string) {
-  menuPath.value = ''
-  for (const group of groups.value) group.paths = group.paths.filter(path => path !== project.path)
-  if (name !== UNGROUPED) {
-    const target = groups.value.find(group => group.name === name)
-    if (target) target.paths = [...target.paths, project.path]
-  }
-  saveGroups()
-}
-function createGroupWith(project: RecentProject) {
-  menuPath.value = ''
-  const name = window.prompt('新分组名称（用于把最近项目归类）', '')?.trim()
-  if (!name) return
-  if (name === UNGROUPED || groups.value.some(group => group.name === name)) { moveToGroup(project, name); return }
-  // Source: ProjectGroup(name) constructor sets myName; myExpanded defaults to
-  // false; the group's bottomGroup flag stays off so it renders above the
-  // un-grouped bucket.
-  groups.value = [...groups.value, { name, paths: [project.path], expanded: true, tutorials: false, bottomGroup: false }]
-  saveGroups()
-}
-// Source: ProjectGroupActionGroup.update() reads myGroup.isExpanded() to set
-// popupGroup, and ProjectGroup.setExpanded() flips it. We track both forms so
-// the JSON we serialise matches the boolean field on ProjectGroup and the older
-// collapsed-set semantics keep working for any caller that still reads them.
-function toggleGroupCollapsed(name: string) {
-  const next = new Set(groupCollapsed.value)
-  if (next.has(name)) next.delete(name)
-  else next.add(name)
-  groupCollapsed.value = next
-  for (const group of groups.value) {
-    if (group.name === name) group.expanded = !groupCollapsed.value.has(name)
-  }
-  saveGroups()
-}
-// IDEA's list binds Left/Right to collapse/expand the group under the cursor.
-function onGroupKeydown(name: string, event: KeyboardEvent) {
-  if (event.key === 'ArrowLeft') { if (!groupCollapsed.value.has(name)) toggleGroupCollapsed(name) }
-  else if (event.key === 'ArrowRight') { if (groupCollapsed.value.has(name)) toggleGroupCollapsed(name) }
-}
+
 function toggleMenu(path: string) {
   menuPath.value = menuPath.value === path ? '' : path
 }
@@ -291,9 +174,7 @@ function toggleMenu(path: string) {
 // ALT+DELETE to "remove it"; the tree selection is what those keys act on, so the page keeps track
 // of the focused row and falls back to the first visible project.
 const focusedPath = ref('')
-// IDEA's recent-project list is multi-selectable: RecentProjectFilteringTree wires
-// SHIFT and CTRL mouse presses into the tree's selection model, and
-// RemoveSelectedProjectsAction removes *the selection*, not just the focused row.
+// 选区怎么变（裸点击/Shift 段选/Ctrl 单行）在 src/welcomeRowSelection.ts，这里只留接线。
 const selectedPaths = ref<Set<string>>(new Set())
 const lastClickedPath = ref('')
 const selectedProjects = computed(() => filteredProjects.value.filter(project => selectedPaths.value.has(project.path)))
@@ -304,29 +185,11 @@ function clearSelection() {
 function onRowClick(project: RecentProject, event: MouseEvent) {
   // Focus row regardless of modifier.
   focusedPath.value = project.path
-  if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
-    if (selectedPaths.value.size > 0) clearSelection()
-    lastClickedPath.value = project.path
-    return
-  }
-  const list = filteredProjects.value.map(item => item.path)
-  if (event.shiftKey && lastClickedPath.value && list.includes(lastClickedPath.value)) {
-    const lastIndex = list.indexOf(lastClickedPath.value)
-    const currentIndex = list.indexOf(project.path)
-    if (lastIndex !== -1 && currentIndex !== -1) {
-      const [start, end] = lastIndex < currentIndex ? [lastIndex, currentIndex] : [currentIndex, lastIndex]
-      const next = new Set(selectedPaths.value)
-      for (let i = start; i <= end; i += 1) next.add(list[i]!)
-      selectedPaths.value = next
-      return
-    }
-  }
-  // CTRL/CMD toggles a single row.
-  const next = new Set(selectedPaths.value)
-  if (next.has(project.path)) next.delete(project.path)
-  else next.add(project.path)
-  selectedPaths.value = next
-  lastClickedPath.value = project.path
+  const next = selectionAfterClick(
+    filteredProjects.value.map(item => item.path), selectedPaths.value, lastClickedPath.value, project.path, event,
+  )
+  selectedPaths.value = next.selected
+  lastClickedPath.value = next.lastClicked
 }
 watch(() => props.projects, () => { clearSelection() })
 const activeProject = computed(() => filteredProjects.value.find(project => project.path === focusedPath.value)
@@ -352,7 +215,7 @@ function copyProjectPath(project: RecentProject) {
   menuPath.value = ''
   const text = systemDependentPath(project.path, props.isDesktop)
   void copyToClipboard(text)
-  copyNote.value = `已复制：${text}`
+  copyNote.value = copiedPathNote(text)
   if (copyTimer !== undefined) clearTimeout(copyTimer)
   copyTimer = window.setTimeout(() => { copyNote.value = '' }, 4000)
 }
@@ -365,7 +228,7 @@ async function revealProjectDir(project: RecentProject) {
   menuPath.value = ''
   try {
     await request('shell.reveal', { path: project.path })
-    copyNote.value = `已在资源管理器中显示：${project.path}`
+    copyNote.value = revealedNote(project.path)
   } catch (error) {
     copyNote.value = error instanceof Error ? error.message : String(error)
   }
@@ -374,16 +237,12 @@ async function revealProjectDir(project: RecentProject) {
 }
 function onSearchKeydown(event: KeyboardEvent) {
   const project = activeProject.value
+  const action = searchKeyAction(event.key, event.altKey, project, props.busy)
+  if (action === null) return
+  event.preventDefault()
   if (!project) return
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    if (project.available && !props.busy) openProject(project)
-    return
-  }
-  if (event.key === 'Delete' && event.altKey) {
-    event.preventDefault()
-    confirmForget([project])
-  }
+  if (action === 'open') openProject(project)
+  else if (action === 'remove') confirmForget([project])
 }
 // selectLastOpenedProject() — RecentProjectFilteringTree.kt:236-254, called while the Projects tab
 // is built (ProjectsTabFactory.kt:170,210): the list starts with the project the IDE opened last
@@ -541,7 +400,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
             <input :id="`${id}-search`" ref="searchInput" v-model="query" type="search" aria-label="按项目名称、路径或分组搜索" placeholder="搜索项目名称、路径或分组" autocomplete="off" spellcheck="false" @keydown="onSearchKeydown" />
             <button v-if="query" type="button" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="iconSize.toolbar" aria-hidden="true" /></button>
           </div>
-          <p class="list-status" role="status">{{ copyNote || (busy ? '正在处理项目操作…' : query.trim() ? `找到 ${filteredProjects.length} 个项目` : `${projects.length} 个项目`) }}</p>
+          <p class="list-status" role="status">{{ listStatus }}</p>
 
           <p v-if="filteredProjects.length && !filteredProjects.some(project => project.available)" class="list-hint" role="status">列出的路径都不存在或不可访问：用记录右侧的「仅从列表移除」删掉记录（不会动磁盘文件），或打开其他位置的项目。</p>
           <div v-if="menuPath" class="menu-backdrop" @click="menuPath = ''" />
@@ -549,10 +408,21 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                中间不能插入其它元素（否则链被打断，空状态会与列表同时渲染）。 -->
           <div v-if="filteredProjects.length" class="recent-list">
             <section v-for="group in groupedProjects" :key="group.name" class="recent-group">
-              <header v-if="groupingActive" class="recent-group-head" tabindex="0" role="button" :aria-expanded="!groupCollapsed.has(group.name)" :aria-label="`${group.name}，${group.projects.length} 个项目，左右方向键折叠展开`" @keydown="onGroupKeydown(group.name, $event)" @click="toggleGroupCollapsed(group.name)">
-                <ChevronDown :size="iconSize.menu" :class="{ collapsed: groupCollapsed.has(group.name) }" aria-hidden="true" />
-                <span class="recent-group-name">{{ group.name }}</span>
-                <span class="recent-group-count">{{ group.projects.length }}</span>
+              <header v-if="groupingActive" class="recent-group-head">
+                <button type="button" class="recent-group-toggle" :aria-expanded="!groupCollapsed.has(group.name)" :aria-label="`${group.name}，${group.projects.length} 个项目，左右方向键折叠展开`" @keydown="onGroupKeydown(group.name, $event)" @click="toggleGroupCollapsed(group.name)">
+                  <ChevronDown :size="iconSize.menu" :class="{ collapsed: groupCollapsed.has(group.name) }" aria-hidden="true" />
+                  <span class="recent-group-name">{{ group.name }}</span>
+                  <span class="recent-group-count">{{ group.projects.length }}</span>
+                </button>
+                <!-- 「编辑分组…」= 改名。上游它只在**分组行**上出现
+                     （`EditProjectGroupAction.kt:48` 的 `isEnabledAndVisible = item is ProjectsGroupItem`），
+                     挂在分组行的弹层里（`PlatformActions.xml:1024` = `WelcomeScreen.EditGroup`）。
+                     本仓的分组行只有这一个动作，所以给一个带文字的按钮，不再套一层弹出。 -->
+                <button v-if="group.name !== UNGROUPED" type="button" class="menu-button group-edit"
+                        :title="`${GROUP_MENU_LABELS.edit}：把「${group.name}」改成别的名字`" :aria-label="`${GROUP_MENU_LABELS.edit} ${group.name}`"
+                        @click.stop="renameGroup(group.name)">
+                  <Settings :size="iconSize.control" aria-hidden="true" />{{ GROUP_MENU_LABELS.edit }}
+                </button>
               </header>
               <ul v-show="!groupCollapsed.has(group.name)" class="recent-group-list">
             <li v-for="project in group.projects" :key="project.path" :ref="element => setRow(project.path, element)" class="recent-row" tabindex="0" :aria-label="`${project.name}，Delete 键可从列表移除${selectedPaths.has(project.path) ? '（已选中）' : ''}`" :aria-selected="selectedPaths.has(project.path)" @focus="focusedPath = project.path" @click="onRowClick(project, $event)" @keydown="onRowKeydown(project, $event)" :class="{ 'menu-open': menuPath === project.path, 'is-selected': selectedPaths.has(project.path) }">
@@ -561,7 +431,7 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 :title="project.available ? `打开 ${project.path}` : `路径不存在或不可访问：${project.path}`"
                 @click="tryOpen(project)"
               >
-                <span class="project-avatar" :class="`avatar-${avatarTone(project.path)}`" :style="{ backgroundImage: `linear-gradient(135deg, ${avatarGradient(project.path)[0]}, ${avatarGradient(project.path)[1]})` }" :title="`${project.name} 图标（${avatarTone(project.path) + 1}/9）`" aria-hidden="true">{{ avatarInitials(project.displayName || project.projectName || project.name) }}</span>
+                <span class="project-avatar" :class="`avatar-${toneOf(project.path)}`" :style="{ backgroundImage: `linear-gradient(135deg, ${gradientOf(project.path)[0]}, ${gradientOf(project.path)[1]})` }" :title="`${project.name} 图标（${toneOf(project.path) + 1}/9）`" aria-hidden="true">{{ avatarInitials(project.displayName || project.projectName || project.name) }}</span>
                 <span class="project-details">
                   <span class="project-title"><strong>{{ project.name }}</strong><span v-if="!isDesktop" class="memory-tag">内存示例</span></span>
                   <span class="project-path" :title="project.path">{{ project.path }}</span>
@@ -583,22 +453,61 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
                 <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy || !project.available" @click="openProject(project)">
                   <FolderOpen :size="iconSize.control" aria-hidden="true" />打开项目
                 </button>
-                <button type="button" class="menu-button row-menu-item" role="menuitem" title="把项目路径复制到剪贴板" @click="copyProjectPath(project)">
-                  <Copy :size="iconSize.control" aria-hidden="true" />复制路径
-                </button>
-                <!-- RevealFileAction.getActionName() = `action.RevealIn.name.other` ("Show in {0}")
-                     with the file manager name (`IdeBundle.properties:3209` `action.explorer.text`
-                     = "Explorer"); `isDirectoryOpenSupported()` (`RevealFileAction.java:108-110`)
-                     is what the desktop check stands for. -->
+                <!-- 上游 `WelcomeScreenRecentProjectActionGroup`（`PlatformActions.xml:1017-1031`）
+                     的前三项与它们的顺序：OpenSelected · RevealIn · CopyProjectPath，接着一个分隔线，
+                     之后是 NewGroup / MoveToGroup / EditGroup，最后（:1030）RemoveSelected。
+                     行菜单就照这个次序渲染，不再自己排。
+                     RevealFileAction.getActionName() = `action.RevealIn.name.other`（"Show in {0}"）
+                     带文件管理器名；`isDirectoryOpenSupported()`（`RevealFileAction.java:108-110`）
+                     就是这里那个桌面端判断的出处。 -->
                 <button
                   type="button" class="menu-button row-menu-item" role="menuitem" :disabled="!isDesktop" :title="isDesktop ? '在资源管理器中打开项目所在目录并选中它' : '浏览器预览无法打开资源管理器'"
                   @click="revealProjectDir(project)"
                 >
                   <FolderSearch :size="iconSize.control" aria-hidden="true" />在资源管理器中显示
                 </button>
-                <button v-if="groupingActive" type="button" class="menu-button row-menu-item" role="menuitem" @click="moveToGroup(project, '未分组')">移出分组</button>
-                <button v-for="group in groups" :key="group.name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === group.name" @click="moveToGroup(project, group.name)">移入「{{ group.name }}」</button>
-                <button type="button" class="menu-button row-menu-item" role="menuitem" @click="createGroupWith(project)">新建分组并移入…</button>
+                <button type="button" class="menu-button row-menu-item" role="menuitem" title="把项目路径复制到剪贴板" @click="copyProjectPath(project)">
+                  <Copy :size="iconSize.control" aria-hidden="true" />复制路径
+                </button>
+                <div class="menu-rule" role="separator" />
+                <!-- 分组那一段照 `PlatformActions.xml:1022-1024` 的次序：NewGroup → MoveToGroup → EditGroup。
+                     `EditProjectGroupAction.kt:48` 的 `isEnabledAndVisible = item is ProjectsGroupItem`
+                     说得很清楚：改名只挂在**分组行**上（就是列表里那个分组标题，见下面 `group-edit`），
+                     项目行只有前两项。
+                     `MoveToGroup` 的弹层（`MoveProjectToGroupActionGroup.kt:38-48`）在本仓是平铺的：
+                     各分组按自然序、跳过 tutorials 组（`:39-42`），末尾一条弹层自己的分隔线
+                     （`:46` ⇒ 用 `submenu-rule`，不占行菜单那两个 `menu-rule` 计数）
+                     + 「从分组移出」（`RemoveSelectedProjectsFromGroupsAction`，
+                     文案 `IdeBundle.properties:1793` "Remove from Groups"）。 -->
+                <button type="button" class="menu-button row-menu-item" role="menuitem" @click="createGroup()">{{ GROUP_MENU_LABELS.create }}</button>
+                <template v-if="groupingActive">
+                  <button v-for="name in moveTargets" :key="name" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === name" @click="moveToGroup(project, name)">移入「{{ name }}」</button>
+                  <div v-if="moveTargets.length" class="submenu-rule" role="separator" />
+                  <button v-if="moveTargets.length" type="button" class="menu-button row-menu-item" role="menuitem" :disabled="groupOf(project.path) === UNGROUPED" :title="`把 ${project.name} 从所属分组移出（仍留在最近项目里）`" @click="moveToGroup(project, UNGROUPED)">{{ GROUP_MENU_LABELS.removeFromGroups }}</button>
+                </template>
+                <!-- 上游 `PlatformActions.xml:1026` 的 ChangeProjectIcon 就在这个位置（分组段之后、
+                     最后那条分隔线之前）。上游它挂在项目窗口标题栏上；本仓项目颜色唯一可见处是
+                     这一行，所以把 ChangeProjectColorActionGroup 的九个具名颜色（:33-41）搬到这里。
+                     子菜单自己那条分隔线用 `submenu-rule`（同一套样式）而不是 `menu-rule` ——
+                     后者是**行菜单本身**的 :1021 / :1029 两条，判据 tests/welcome-row-menu-order.test.mjs
+                     按 `menu-rule` 计数，两层菜单不能混。 -->
+                <button
+                  type="button" class="menu-button row-menu-item row-menu-submenu-toggle" role="menuitem"
+                  :aria-expanded="colorMenuPath === project.path" aria-haspopup="menu"
+                  @click="toggleColorMenu(project.path)"
+                ><Palette :size="iconSize.control" aria-hidden="true" />{{ PROJECT_COLOR_MENU_LABEL }}<ChevronDown :size="iconSize.menu" aria-hidden="true" /></button>
+                <div v-if="colorMenuPath === project.path" class="row-submenu" role="menu" :aria-label="`${PROJECT_COLOR_MENU_LABEL}：${project.name}`">
+                  <button
+                    v-for="choice in PROJECT_COLOR_CHOICES" :key="choice.index"
+                    type="button" class="menu-button row-menu-item color-item" role="menuitem"
+                    @click="pickColor(project, choice.index)"
+                  >
+                    <span class="color-swatch" aria-hidden="true" :style="{ backgroundImage: `linear-gradient(135deg, ${choiceGradient(choice.index)[0]}, ${choiceGradient(choice.index)[1]})` }" />
+                    <span class="color-name">{{ colorLabel(project.path, choice.index) }}</span>
+                  </button>
+                  <div class="submenu-rule" role="separator" />
+                  <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="colorAutoDisabled(project.path)" @click="resetColor(project)">{{ PROJECT_COLOR_AUTO_LABEL }}</button>
+                </div>
                 <div class="menu-rule" role="separator" />
                 <button type="button" class="menu-button row-menu-item" role="menuitem" :disabled="busy" :title="'仅移除记录，不删除文件'" @click="forgetSingle(project)">
                   <X :size="iconSize.control" aria-hidden="true" />仅从列表移除
@@ -712,13 +621,17 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
 .list-hint { margin: 0 0 var(--space-1); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 11px; line-height: 1.7; }
 .recent-list { margin: 0; padding: 0; }
 .recent-group { margin-bottom: var(--space-1); }
-.recent-group-head { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); border-radius: var(--radius-xs); color: var(--muted); font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
-.recent-group-head:hover { background: var(--hover); color: var(--secondary); }
-.recent-group-head:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.recent-group-head { display: flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: 11px; }
+.recent-group-toggle { display: flex; flex: 1; align-items: center; gap: var(--space-2); min-width: 0; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font-size: 11px; cursor: pointer; transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.recent-group-toggle:hover { background: var(--hover); color: var(--secondary); }
+.recent-group-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .recent-group-head svg { transition: transform var(--dur-1) var(--ease); }
 .recent-group-head svg.collapsed { transform: rotate(-90deg); }
 .recent-group-name { font-weight: 600; letter-spacing: .02em; }
 .recent-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.group-edit { display: inline-flex; align-items: center; gap: 4px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--muted); font-size: 11px; }
+.group-edit:hover { background: var(--hover); color: var(--secondary); }
+.group-edit svg { flex-shrink: 0; }
 .recent-group-list { list-style: none; margin: 0; padding: 0; }
 .recent-row { position: relative; display: flex; align-items: center; gap: var(--space-2); min-width: 0; border-bottom: 1px solid var(--line); }
 .recent-row.is-selected { background: var(--selected); }
@@ -748,6 +661,16 @@ onBeforeUnmount(() => { if (copyTimer !== undefined) clearTimeout(copyTimer) })
    在上面全是空操作（与 `.tool-menu-item` style.css:318、`.status-widget-item`:734 同款）。
    由 ui-icons 门禁的"写了 gap 必须是 flex"那条一并盯住。 */
 .row-menu-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2); }
+/* 项目颜色的二级菜单（ChangeProjectColorActionGroup.kt:33-44 的九个具名颜色）。
+   它画在行菜单**内部**（上游那两个动作挂在项目窗口标题栏上，本仓没有那一层）。 */
+.row-menu-submenu-toggle svg:last-child { margin-left: auto; flex-shrink: 0; }
+.row-submenu { display: flex; flex-direction: column; min-width: 168px; padding: 2px 0; }
+/* 子菜单自己的分隔线：与 style.css:160 的 `.menu-rule` 同一套样式，只换类名 ——
+   行菜单本身那两条（上游 :1021 / :1029）由 tests/welcome-row-menu-order.test.mjs
+   按 `.menu-rule` 计数，两层菜单不能混进同一个计数里。 */
+.submenu-rule { height: 1px; margin: 4px 8px; background: var(--line); }
+.color-swatch { width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); }
+.color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .missing-tag { padding: 2px var(--space-1); border-radius: var(--radius-xs); color: var(--warning); background: var(--warning-bg); font-size: 10px; }
 /* Source: IconUtil.desaturate in RecentProjectIconHelper when isProjectValid=false.

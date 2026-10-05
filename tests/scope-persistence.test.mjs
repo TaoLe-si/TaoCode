@@ -9,13 +9,21 @@ function host(send) {
   const source = readFileSync(new URL('../src/settingsPersistence.ts', import.meta.url), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   const exports = {}
-  new Function('require', 'exports', js)(name => {
+  new Function('require', 'exports', js)(rawName => {
+    // 本仓 `.ts` 之间的值 import 必须写全扩展名（Node ESM 不猜扩展名），所以桩按「去掉 .ts」归一化匹配，
+    // 两种写法都收 —— 否则源码补扩展名会让这个 CJS 桩表整体失配（症状是 `Error: ./errors.ts`）。
+    const name = rawName.replace(/\.ts$/, '')
     if (name === 'vue') return vue
-    if (name === './bridge') return { request: send }
+    if (name === './bridge' || name === './bridge.ts') return { request: send }
     if (name === './errors') return { errorMessage: error => error.message }
     if (name === './bookmarksView') return { DEFAULT_BOOKMARKS_VIEW: {} }
     if (name === './commitMessageInspection') return { resolveInspectionSettings: () => ({}) }
     if (name === './settingsDraft') return {}
+    // 文件选择描述件只在 `browseStructureDir`（本文件不覆盖的动作）里用；给个形状正确的替身即可。
+    if (name === './fileChooserDescriptor') return {
+      chooseWithDescriptor: async (_host, _descriptor, initial) => initial ?? null,
+      singleDirDescriptor: () => ({}), withTitle: descriptor => descriptor,
+    }
     throw new Error(name)
   }, exports)
   let epoch = 1

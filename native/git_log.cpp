@@ -71,6 +71,23 @@ Json decorations(const std::string& raw) {
     return values;
 }
 
+// The log UI's text filter is a pattern, not a literal: `Vcs.Log.EnableFilterByRegexAction`
+// picks POSIX ERE (git's `--extended-regexp`) and `Vcs.Log.MatchCaseAction` picks
+// `--regexp-ignore-case`. Both default to off (`VcsLogUiPropertiesImpl.TextFilterSettings`
+// 的 isRegex/isMatchCase 都是 false），所以出厂行为是「不含正则元字符、忽略大小写」。
+// `--author` shares `--fixed-strings` with `--grep`, so a regex text filter would
+// otherwise turn the author substring into a pattern. Escape it back to a literal so
+// the author filter keeps meaning "contains", whichever text-filter mode is on.
+std::string literal_pattern(const std::string& value) {
+    static const std::string specials = R"(\.[]()*+?{}|^$/)";
+    std::string escaped;
+    for (const char ch : value) {
+        if (specials.find(ch) != std::string::npos) escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+    return escaped;
+}
+
 void date_filter(std::vector<std::string>& args, const Json& params, const char* key) {
     const auto value = text(params, key, 10);
     if (value.empty()) return;
@@ -112,14 +129,37 @@ Json log_full(const fs::path& repo, const Json& params) {
     const int requested = params.value("limit", 200);
     const int limit = requested <= 0 ? 200 : std::min(requested, 1000);
     const int offset = params.value("offset", 0);
-    std::vector<std::string> args = {"--literal-pathspecs", "log", "--topo-order", "--no-color", "-z",
-        "--encoding=UTF-8", "--no-show-signature", "--decorate=full", "--fixed-strings",
+    // `GraphOptionsUtil` / `VcsLogGraphOptionsChooserGroup.java:62-69`: 排序两档
+    // （`graph.sort.standard` = 拓扑序 ⇒ `--topo-order`；`graph.sort.off` = 按提交日期
+    // ⇒ git 自己的日期序，不加旗标），「第一个父项」⇒ `--first-parent`。
+    // 缺省跟上游 `PermanentGraph.Options.Default = Base(SortType.Normal)` 一致：**不**加
+    // `--topo-order`。`noMerges` 是 `VcsLogFilterObject.noMerges()`
+    // （`VcsLogFilters.kt:213` = `fromParentCount(maxParents = 1)`）⇒ `--no-merges`。
+    for (const auto* key : {"firstParent", "noMerges", "textRegex", "matchCase"})
+        if (params.contains(key) && !params.at(key).is_boolean())
+            invalid(std::string(key) + " 必须是布尔值。");
+    const auto sort = text(params, "sort", 32);
+    if (!sort.empty() && sort != "date" && sort != "topological") invalid("sort 只能是 date 或 topological。");
+    const auto author = text(params, "author");
+    const auto pattern = text(params, "text");
+    const bool regex = params.value("textRegex", false);
+    const bool match_case = params.value("matchCase", false);
+    const bool first_parent = params.value("firstParent", false);
+    const bool no_merges = params.value("noMerges", false);
+    std::vector<std::string> args = {"--literal-pathspecs", "log", "--no-color", "-z",
+        "--encoding=UTF-8", "--no-show-signature", "--decorate=full",
         "--format=%H%x00%h%x00%an%x00%aI%x00%s%x00%P%x00%D",
         "--skip=" + std::to_string(offset), "--max-count=" + std::to_string(limit + 1)};
-    for (const auto* key : {"author", "text"}) {
-        const auto value = text(params, key);
-        if (!value.empty()) args.push_back(std::string(key == std::string("author") ? "--author=" : "--grep=") + value);
-    }
+    if (sort == "topological") args.push_back("--topo-order");
+    if (first_parent) args.push_back("--first-parent");
+    if (no_merges) args.push_back("--no-merges");
+    // `--fixed-strings` 是 `--grep`/`--author` 共用的旗标：正则档下它不能开，所以作者
+    // 那一条要自己转义回字面量，作者过滤在任何档位下都还是「包含」。
+    if (regex) args.push_back("--extended-regexp");
+    else args.push_back("--fixed-strings");
+    if (!match_case) args.push_back("--regexp-ignore-case");
+    if (!author.empty()) args.push_back("--author=" + (regex ? literal_pattern(author) : author));
+    if (!pattern.empty()) args.push_back("--grep=" + pattern);
     date_filter(args, params, "since");
     date_filter(args, params, "until");
     const auto since = text(params, "since"), until = text(params, "until");

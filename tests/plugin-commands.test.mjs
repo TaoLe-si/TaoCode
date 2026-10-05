@@ -100,6 +100,17 @@ test('命令行的关键字带上插件与命令 id，好让「查找操作」�
   for (const needle of ['demo', '示例', 'hello', 'app.about', '插件']) assert.match(row.keywords, new RegExp(needle))
 })
 
+test('重复的命令 id 不会产生两行同 id 的菜单项', () => {
+  const entries = pluginCommandEntries([plugin({
+    commands: [command({ id: 'run', title: '第一条' }), command({ id: 'run', title: '第二条' }), command({ id: 'other' })],
+  })])
+  assert.deepEqual(entries.map(entry => entry.id), ['plugin.demo.run', 'plugin.demo.other'], '同 id 只留第一条')
+  assert.equal(entries[0].command.title, '第一条')
+  // 菜单行是同一个判断的消费者：平铺形态下也不能出现重复 id
+  const rows = pluginMenuRows([plugin({ commands: [command({ id: 'run' }), command({ id: 'run' })] })], { run: () => {} })
+  assert.deepEqual(rows.map(row => row.id), ['plugin.demo.run'])
+})
+
 test('插件贡献的实时模板进模板列表，且被用户模板与内建模板正确排序', () => {
   const source = { id: 'demo', enabled: true, templates: [{ key: 'hello', body: 'console.log("hi");', description: '插件模板', languages: ['typescript'] }] }
   const entries = effectiveTemplates('a.ts', defaultTemplateSettings, [source])

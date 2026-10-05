@@ -140,6 +140,13 @@ Json shape_diagnostics(const Json& array) {
             entry["endCharacter"] = int_at(end, "character");
         }
         if (item.contains("source")) entry["source"] = item.at("source");
+        // `tags` / `code` 原样透传：上游正是靠 `tags` 决定"未使用符号 / 已废弃"两档外观 ——
+        // `LspDiagnosticsCustomizer.kt:93-96` 把 DiagnosticTag.Unnecessary 映成
+        // ProblemHighlightType.LIKE_UNUSED_SYMBOL、Deprecated 映成 LIKE_DEPRECATED，
+        // 再由 `HighlightInfo.java:852-854` 落到 HighlightInfoType.UNUSED_SYMBOL / DEPRECATED。
+        // 在这里裁掉的话宿主拿不到 tags，那两档外观就只剩本地规则能画。
+        if (item.contains("code")) entry["code"] = item.at("code");
+        if (item.contains("tags")) entry["tags"] = item.at("tags");
         diagnostics.push_back(std::move(entry));
     }
     return diagnostics;

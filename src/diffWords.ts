@@ -1,216 +1,201 @@
-// 行内词级/字符级差异（上游 `ByWordRt` / `ByCharRt` / `LineFragmentSplitter` 的等价物）。
-//
-// 为什么要有这一层：行级 diff 只能说"这两行不一样"，改一个词和整行重写看起来一样。
-// 上游 `ByWordRt.compare`（`platform/util/diff/src/com/intellij/diff/comparison/ByWordRt.kt:33-58`）
-// 把两行切成词块、对词块做 diff，再把**不同的词块段**折成 `[起点, 长度]` 区间交给渲染层
-// （`DiffFragment`，见 `platform/diff-api/.../fragments/DiffFragment.java`）。
-//
-// 本仓的 native 侧（`native/history.cpp` 的 `tokenize` + `word_marks`，`git_test.cpp` /
-// `history_test.cpp` 各有一条判据）**早就有了**这套；缺的是前端那一份 ——
-// `src/diffText.ts` 的 `buildDiffRows`（剪贴板对比 `src/vcsActions.ts:122`、保存冲突预览
-// `src/editorFileOps.ts:54` 都走它）从来不填 `leftMarks`/`rightMarks`，
-// 所以 `DiffView.vue` 里那段渲染词级高亮的代码一直拿不到数据。
-//
-// 三档高亮对应上游 `HighlightPolicy`（`platform/diff-impl/.../base/HighlightPolicy.java`）：
-//   BY_WORD（**默认**，`TextDiffSettingsHolder.kt` 的 `HIGHLIGHT_POLICY = HighlightPolicy.BY_WORD`）、
-//   BY_LINE（只按行，不标词）、BY_CHAR（逐字符，用于词边界不明显的行）。
+// Two-way inline comparison: `ByWordRt.kt:28-58`（流水线）, `:637-683`（getInlineChunks）,
+// `:695-878`（AdjustmentPunctuationMatcher）, `:880-906`（DefaultCorrector，`:890`/`:893` 两次让白）,
+// `:939-963`（IgnoreSpacesCorrector）, `:989-1028`（TrimSpacesCorrector，用 `:590-623` 的 isLeading/TrailingSpace）。
+// Words anchor punctuation gaps; the selected comparison policy then corrects whitespace.
+import { alignLines } from './diffAlign.ts'
+import { changedSpans, expandBackward, expandForward, optimizeSpans, pairsToSpans, wordShift, type MatchSpan } from './diffChunks.ts'
+import { charMarks, comparePunctuationSpans, isDiffPunctuation, trimSpaceChanges } from './diffChars.ts'
+import { comparisonKey, isDiffWhitespace, type ComparisonPolicy } from './diffComparison.ts'
+export { charMarks } from './diffChars.ts'
 
-import { optimizeSpans, wordShift, type MatchSpan } from './diffChunks.ts'
-
-/** 上游 `HighlightPolicy` 的三档（`HighlightPolicy.java`）。 */
-export type HighlightPolicy = 'byWord' | 'byLine' | 'byChar'
-
-/** `TextDiffSettingsHolder.kt` 的 `HIGHLIGHT_POLICY` 默认值 = `BY_WORD`。 */
+export type HighlightPolicy = 'byLine' | 'byWord' | 'byWordSplit' | 'byChar' | 'doNotHighlight'
 export const DEFAULT_HIGHLIGHT_POLICY: HighlightPolicy = 'byWord'
-
-/** 词级 diff 的 token 上限（对齐 native 的 `diff_cell_budget`：`native/history.cpp:39`）。 */
-const TOKEN_CELL_BUDGET = 8_000_000
-
 export interface Token { start: number; text: string }
+export type Mark = [number, number]
 
 /**
- * 词法切分 —— 与 `native/history.cpp:809-830` 的 `tokenize` **同一条规则**：
- * 字母数字下划线连成一段、空白连成一段、其余字符各自成一段，并记下起点。
+ * `HighlightPolicy` 五个枚举值的派生语义（上游 `HighlightPolicy.java:24-45`）。
  *
- * 两边必须一致，否则同一个文件在 native 渲染的 diff（Git 变更视图）与前端渲染的
- * diff（剪贴板对比）里会高亮出不同的词 —— 那是同一功能的第二张脸。
+ * 上游那五个值不是"五档强弱"，各带三条正交属性：
+ *   · `isShouldCompare()`：要不要做行内比较（`DO_NOT_HIGHLIGHT` 为 false）；
+ *   · `isShouldSquash()`：要不要把相邻片段的内部片段合并（`BY_WORD_SPLIT` 为 false）；
+ *   · `getFragmentsPolicy()`：行内片段的粒度（`WORDS` / `CHARS` / `NONE`）。
+ * 本仓的 `marksFor` 只看粒度那一列；`isShouldSquash` 与忽略策略那条一起由
+ * `shouldSquashFragments` 表达（见 `diffComparison.ts` 与下面的组合函数）。
  */
+export function highlightIsFineFragments(policy: HighlightPolicy): boolean {
+  return fragmentsPolicyOf(policy) !== 'none'
+}
+
+/** `isShouldCompare()`：不亮那一档连比较都不做。 */
+export function highlightShouldCompare(policy: HighlightPolicy): boolean {
+  return policy !== 'doNotHighlight'
+}
+
+/** `isShouldSquash()`：只有"按单词拆分"不合并相邻片段。 */
+export function highlightShouldSquash(policy: HighlightPolicy): boolean {
+  return policy !== 'byWordSplit'
+}
+
+/** `getFragmentsPolicy()`：`InnerFragmentsPolicy` 三档。 */
+export function fragmentsPolicyOf(policy: HighlightPolicy): 'none' | 'words' | 'chars' {
+  if (policy === 'byWord' || policy === 'byWordSplit') return 'words'
+  if (policy === 'byChar') return 'chars'
+  return 'none'
+}
+
+/**
+ * `TwosideTextDiffProviderBase.java:75` 的组合式：
+ * `squashFragments = highlightPolicy.isShouldSquash() && ignorePolicy.isShouldSquash()`。
+ * `ignorePolicyShouldSquash` 从 `diffComparison.ts` 传入，避免这一层反向依赖比较策略。
+ */
+export function shouldSquashFragments(policy: HighlightPolicy, ignorePolicyShouldSquash: boolean): boolean {
+  return highlightShouldSquash(policy) && ignorePolicyShouldSquash
+}
+
+/** `TrimUtil.kt:33-46`: continuous scripts are individual chunks; digits remain word parts. */
+function continuousScript(ch: string): boolean {
+  const code = ch.codePointAt(0)!
+  if (code < 128 || /\p{Decimal_Number}/u.test(ch)) return false
+  return code > 0xffff || /\p{Ideographic}/u.test(ch) || !/\p{Alphabetic}/u.test(ch) ||
+    /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Javanese}]/u.test(ch)
+}
+
+/** `ByWordRt.getInlineChunks`: punctuation and spaces are gaps, LF is a matched chunk. */
 export function tokenizeLine(line: string): Token[] {
   const tokens: Token[] = []
-  let index = 0
-  while (index < line.length) {
-    const ch = line[index]!
-    const word = /[A-Za-z0-9_]/.test(ch)
-    const space = ch === ' ' || ch === '\t'
-    let end = index + 1
-    if (word || space) {
-      while (end < line.length) {
-        const next = line[end]!
-        const nextWord = /[A-Za-z0-9_]/.test(next)
-        const nextSpace = next === ' ' || next === '\t'
-        if (word ? !nextWord : !nextSpace) break
-        ++end
-      }
+  let offset = 0, start = -1
+  for (const ch of line) {
+    const alpha = !isDiffWhitespace(ch) && !isDiffPunctuation(ch)
+    const wordPart = alpha && !continuousScript(ch)
+    if (wordPart) {
+      if (start === -1) start = offset
+    } else {
+      if (start !== -1) { tokens.push({ start, text: line.slice(start, offset) }); start = -1 }
+      if (alpha || ch === '\n') tokens.push({ start: offset, text: ch })
     }
-    tokens.push({ start: index, text: line.slice(index, end) })
-    index = end
+    offset += ch.length
   }
+  if (start !== -1) tokens.push({ start, text: line.slice(start) })
   return tokens
 }
 
-/** `[起点, 长度]` 区间 —— 与 `DiffRow.leftMarks` / `rightMarks` 的形状一致。 */
-export type Mark = [number, number]
+function appendSpan(spans: MatchSpan[], span: MatchSpan): void {
+  const last = spans[spans.length - 1]
+  if (last && last.a.end === span.a.start && last.b.end === span.b.start) {
+    last.a.end = span.a.end
+    last.b.end = span.b.end
+  } else spans.push(span)
+}
 
-const isBlankToken = (token: Token) => token.text.length > 0 && (token.text[0] === ' ' || token.text[0] === '\t')
-
-/**
- * 两个 token 序列的最长公共子序列**方向表**，再按方向回放出"不同的连续段"。
- * 与 native 的实现同构（`native/history.cpp:838-891`）：token 不等才算差异，
- * 相邻差异段合并成一段 run，最后换算成字节区间。
- */
-function diffRuns(a: Token[], b: Token[]): { a: [number, number][]; b: [number, number][]; matches: MatchSpan[] } {
-  const n = a.length
-  const m = b.length
-  if (!n && !m) return { a: [], b: [], matches: [] }
-  // 单元格预算：超了就退化成"整行都标"（上游同样有 maxSize 保护，
-  // `ComparisonManagerImpl` 里是 `DiffTooBigException`）。这里退化而不是抛，
-  // 因为这一层是渲染用的，宁可粗也不能让界面炸。
-  const feasible = n === 0 || m === 0 || n + 1 <= TOKEN_CELL_BUDGET / (m + 1)
-  const aRuns: [number, number][] = []
-  const bRuns: [number, number][] = []
-  if (!feasible) {
-    if (n) aRuns.push([0, n])
-    if (m) bRuns.push([0, m])
-    return { a: aRuns, b: bRuns, matches: [] }
-  }
-  const direction = new Uint8Array((n + 1) * (m + 1))
-  let next = new Uint32Array(m + 1)
-  let current = new Uint32Array(m + 1)
-  for (let i = n; i-- > 0;) {
-    for (let j = m; j-- > 0;) {
-      let move = 0
-      let length = 0
-      if (a[i]!.text === b[j]!.text) { move = 1; length = next[j + 1]! + 1 }
-      else if (next[j]! >= current[j + 1]!) { move = 2; length = next[j]! }
-      else { move = 3; length = current[j + 1]! }
-      direction[i * (m + 1) + j] = move
-      current[j] = length
-    }
-    const swap = next; next = current; current = swap
-  }
-  let i = 0
-  let j = 0
-  let aBegin = -1, aEnd = 0, bBegin = -1, bEnd = 0
-  // 未更改段（成对）—— `src/diffChunks.ts` 的优化器要的就是这份；改动段由它的补集反推。
-  const matches: MatchSpan[] = []
-  let matchFrom = -1
-  const flush = (runs: [number, number][], begin: number, end: number) => { if (begin >= 0) runs.push([begin, end]) }
-  const flushMatch = (to1: number, to2: number) => {
-    if (matchFrom >= 0) matches.push({ a: { start: matchFrom, end: to1 }, b: { start: matchFromB, end: to2 } })
-    matchFrom = -1
-  }
-  let matchFromB = -1
-  while (i < n && j < m) {
-    const move = direction[i * (m + 1) + j]
-    if (move === 1) {
-      if (matchFrom < 0) { matchFrom = i; matchFromB = j }
-      flush(aRuns, aBegin, aEnd); aBegin = -1
-      flush(bRuns, bBegin, bEnd); bBegin = -1
-      ++i; ++j
-    } else if (move === 2) {
-      flushMatch(i, j)
-      if (aBegin < 0) aBegin = i
-      aEnd = i + 1
-      ++i
-    } else {
-      flushMatch(i, j)
-      if (bBegin < 0) bBegin = j
-      bEnd = j + 1
-      ++j
+/** `AdjustmentPunctuationMatcher`: never match punctuation across unmatched words. */
+function matchPunctuation(left: string, right: string, a: readonly Token[], b: readonly Token[], matches: readonly MatchSpan[]): MatchSpan[] {
+  const spans: MatchSpan[] = []
+  const start = (tokens: readonly Token[], index: number, length: number) => index === tokens.length ? length : tokens[index]!.start
+  const end = (tokens: readonly Token[], index: number) => index === -1 ? 0 : tokens[index]!.start + tokens[index]!.text.length
+  const gap = (i: number, j: number): MatchSpan => ({
+    a: { start: end(a, i - 1), end: start(a, i, left.length) },
+    b: { start: end(b, j - 1), end: start(b, j, right.length) },
+  })
+  const mark = (span: MatchSpan): void => appendSpan(spans, span)
+  const simple = (range: MatchSpan): void => {
+    for (const span of comparePunctuationSpans(left.slice(range.a.start, range.a.end), right.slice(range.b.start, range.b.end))) {
+      mark({ a: { start: range.a.start + span.a.start, end: range.a.start + span.a.end },
+        b: { start: range.b.start + span.b.start, end: range.b.start + span.b.end } })
     }
   }
-  if (i < n) { if (aBegin < 0) aBegin = i; aEnd = n }
-  if (j < m) { if (bBegin < 0) bBegin = j; bEnd = m }
-  flushMatch(i, j)
-  flush(aRuns, aBegin, aEnd)
-  flush(bRuns, bBegin, bEnd)
-  return { a: aRuns, b: bRuns, matches }
-}
-
-function runsToMarks(runs: [number, number][], tokens: Token[]): Mark[] {
-  const marks: Mark[] = []
-  for (const [first, last] of runs) {
-    if (first >= tokens.length || last > tokens.length || last <= first) continue
-    // 只含空白的首/尾 token 从标记里去掉："hello" → "hello world" 只圈住新增的词；
-    // 整段都是空白（纯缩进改动）时保持原样，否则用户看不到改动。
-    let begin = first
-    let stop = last
-    while (begin + 1 < stop && isBlankToken(tokens[begin]!)) ++begin
-    while (stop - 1 > begin && isBlankToken(tokens[stop - 1]!)) --stop
-    const start = tokens[begin]!.start
-    const end = tokens[stop - 1]!.start + tokens[stop - 1]!.text.length
-    marks.push([start, end - start])
+  const complex = (first: MatchSpan, second: MatchSpan): void => {
+    const sameLeft = first.a.start === second.a.start && first.a.end === second.a.end
+    const sameRight = first.b.start === second.b.start && first.b.end === second.b.end
+    if (!sameLeft && !sameRight) throw new Error('diff: invalid punctuation gap')
+    const oneText = sameLeft ? left : right, twoText = sameLeft ? right : left
+    const one = sameLeft ? first.a : first.b
+    const two1 = sameLeft ? first.b : first.a, two2 = sameLeft ? second.b : second.a
+    const prefixLength = two1.end - two1.start
+    const joined = twoText.slice(two1.start, two1.end) + twoText.slice(two2.start, two2.end)
+    for (const span of comparePunctuationSpans(oneText.slice(one.start, one.end), joined)) {
+      for (const [from, to, base] of [
+        [span.b.start, Math.min(span.b.end, prefixLength), two1.start],
+        [Math.max(span.b.start, prefixLength), span.b.end, two2.start - prefixLength],
+      ]) {
+        if (from! >= to!) continue
+        const single = { start: one.start + span.a.start + from! - span.b.start, end: one.start + span.a.start + to! - span.b.start }
+        const double = { start: base! + from!, end: base! + to! }
+        mark(sameLeft ? { a: single, b: double } : { a: double, b: single })
+      }
+    }
   }
-  return marks
-}
-
-/**
- * 未更改段 → 两侧的**改动段**（补集）。上游 `DiffIterableUtil.createUnchanged` 的反面。
- */
-export function spansToRuns(spans: readonly MatchSpan[], totalA: number, totalB: number): { a: [number, number][]; b: [number, number][] } {
-  const aRuns: [number, number][] = []
-  const bRuns: [number, number][] = []
-  let a = 0
-  let b = 0
-  for (const span of spans) {
-    if (span.a.start > a) aRuns.push([a, span.a.start])
-    if (span.b.start > b) bRuns.push([b, span.b.start])
-    a = span.a.end
-    b = span.b.end
+  let pending = gap(0, 0)
+  const backward = (i: number, j: number): void => {
+    const current = gap(i, j)
+    if (pending.a.start === current.a.start && pending.b.start === current.b.start) simple(current)
+    else if (pending.a.start < current.a.start && pending.b.start < current.b.start) {
+      simple(pending)
+      simple(current)
+    } else complex(pending, current)
   }
-  if (a < totalA) aRuns.push([a, totalA])
-  if (b < totalB) bRuns.push([b, totalB])
-  return { a: aRuns, b: bRuns }
+  for (const range of matches) {
+    for (let k = 0; k < range.a.end - range.a.start; k++) {
+      const i = range.a.start + k, j = range.b.start + k
+      backward(i, j)
+      mark({ a: { start: a[i]!.start, end: end(a, i) }, b: { start: b[j]!.start, end: end(b, j) } })
+      pending = gap(i + 1, j + 1)
+    }
+  }
+  backward(a.length, b.length)
+  return spans
 }
 
 /**
- * 词级差异：左右各返回一组 `[起点, 长度]`（上游 `ByWordRt.compare` 的产物）。
- *
- * **多一步块优化**（`src/diffChunks.ts`，上游 `ChunkOptimizer.WordChunkOptimizer`）：
- * 逐 token 的 LCS 只管"改动最少"，会把改动切在词的中间、或切出很多碎块；
- * 优化器先把能合并的块合并，再按"词边界"把切点挪到空白处。
+ * 默认档 = 上游 `DefaultCorrector`（`ByWordRt.kt:880-895`）：`:890` 先 `expandWhitespacesBackward`、
+ * `:893` 再 `expandWhitespacesForward`。忽略档 = `IgnoreSpacesCorrector`（`:939-963`）：
+ * 先 `expandWhitespaces`（`TrimUtil.kt:126-131`，向前在前）再 trim 两侧。
+ * 两个让白循环都带 `start1 < end1 && start2 < end2` 守卫（`TrimUtil.kt:401`/`:418`）——
+ * 空半边（纯增/纯删）一步都让不动，所以那一段没被标点配上的空格会留在标记里。
  */
-export function wordMarks(left: string, right: string): { left: Mark[]; right: Mark[] } {
-  const a = tokenizeLine(left)
-  const b = tokenizeLine(right)
-  const runs = diffRuns(a, b)
-  const optimized = optimizeSpans(runs.matches, a.length, b.length, (i, j) => a[i]!.text === b[j]!.text, wordShift(a, b, left, right))
-  const finalRuns = optimized === runs.matches ? runs : spansToRuns(optimized, a.length, b.length)
-  return { left: runsToMarks(finalRuns.a, a), right: runsToMarks(finalRuns.b, b) }
+function correctWhitespace(changes: readonly MatchSpan[], left: string, right: string, policy: ComparisonPolicy): MatchSpan[] {
+  const equals = (i: number, j: number) => left[i] === right[j] && isDiffWhitespace(left[i]!)
+  const ignored = policy === 'ignoreWhitespaces' || policy === 'ignoreWhitespacesChunks'
+  const trim = (text: string, range: MatchSpan['a']) => {
+    let { start, end } = range
+    while (start < end && isDiffWhitespace(text[start]!)) start++
+    while (start < end && isDiffWhitespace(text[end - 1]!)) end--
+    return { start, end }
+  }
+  const corrected = changes.flatMap(range => {
+    const { start: start1, end: end1 } = range.a, { start: start2, end: end2 } = range.b
+    const head = ignored ? expandForward(start1, start2, end1, end2, equals) : 0
+    const tail = expandBackward(start1 + head, start2 + head, end1, end2, equals)
+    const front = ignored ? head : expandForward(start1, start2, end1 - tail, end2 - tail, equals)
+    let a = { start: start1 + front, end: end1 - tail }, b = { start: start2 + front, end: end2 - tail }
+    if (ignored) {
+      a = trim(left, a); b = trim(right, b)
+      if (comparisonKey(left.slice(a.start, a.end), 'ignoreWhitespaces') === comparisonKey(right.slice(b.start, b.end), 'ignoreWhitespaces')) return []
+    }
+    return a.start === a.end && b.start === b.end ? [] : [{ a, b }]
+  })
+  return policy === 'trimWhitespaces' ? trimSpaceChanges(corrected, left, right) : corrected
 }
 
-/**
- * 字符级差异（上游 `ByCharRt`）：每个字符一个 token，规则同上。
- * 用在词边界不明显的行（长串符号、压缩过的 JS）上 —— 词级会整段标红，字符级能指出改了哪几个字。
- */
-export function charMarks(left: string, right: string): { left: Mark[]; right: Mark[] } {
-  const a: Token[] = [...left].map((text, start) => ({ start, text }))
-  const b: Token[] = [...right].map((text, start) => ({ start, text }))
-  const runs = diffRuns(a, b)
-  // 字符级不丢空白的首尾：逐字符看，空白也是被改掉的东西。
-  const direct = (runsList: [number, number][], tokens: Token[]): Mark[] =>
-    runsList.flatMap(([first, last]) => {
-      if (first >= tokens.length || last > tokens.length || last <= first) return []
-      const start = tokens[first]!.start
-      const end = tokens[last - 1]!.start + tokens[last - 1]!.text.length
-      return [[start, end - start] as Mark]
-    })
-  return { left: direct(runs.a, a), right: direct(runs.b, b) }
+export function compareWordChanges(left: string, right: string, policy: ComparisonPolicy = 'default'): MatchSpan[] {
+  const a = tokenizeLine(left), b = tokenizeLine(right)
+  const matches = pairsToSpans(alignLines(a.map(t => t.text), b.map(t => t.text)))
+  const optimized = optimizeSpans(matches, a.length, b.length, (i, j) => a[i]!.text === b[j]!.text, wordShift(a, b, left, right))
+  const punctuation = matchPunctuation(left, right, a, b, optimized)
+  return correctWhitespace(changedSpans(punctuation, left.length, right.length), left, right, policy)
 }
 
-/** 按高亮档取标记。`byLine` 不产生标记（上游 `BY_LINE` 就是"只按行"）。 */
-export function marksFor(policy: HighlightPolicy, left: string, right: string): { left: Mark[]; right: Mark[] } {
-  if (policy === 'byLine') return { left: [], right: [] }
-  if (policy === 'byChar') return charMarks(left, right)
-  return wordMarks(left, right)
+export function wordMarks(left: string, right: string, policy: ComparisonPolicy = 'default'): { left: Mark[]; right: Mark[] } {
+  const changes = compareWordChanges(left, right, policy)
+  const marks = (side: 'a' | 'b'): Mark[] => changes.flatMap(span => {
+    const range = span[side]
+    return range.end > range.start ? [[range.start, range.end - range.start] as Mark] : []
+  })
+  return { left: marks('a'), right: marks('b') }
+}
+
+export function marksFor(policy: HighlightPolicy, left: string, right: string, comparison: ComparisonPolicy = 'default'): { left: Mark[]; right: Mark[] } {
+  const fragments = fragmentsPolicyOf(policy)
+  if (fragments === 'none') return { left: [], right: [] }
+  return fragments === 'chars' ? charMarks(left, right, comparison) : wordMarks(left, right, comparison)
 }

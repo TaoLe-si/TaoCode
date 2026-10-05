@@ -7,19 +7,55 @@
 // `prepareHierarchy` 的触发。
 import { computed, nextTick, ref, type Ref } from 'vue'
 import { lspDiagnostics, request, type DocumentData, type GeneralSettingsState, type LspCodeAction, type LspCodeActionResults,
-         type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspLocation, type LspPrepareRenameResult,
-         type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type SaveResult, type Workspace } from './bridge'
-import { applyTextEdits, wordAt } from './editorText'
+         type LspDiagnostic, type LspExecuteCommandResult, type LspFileEdits, type LspFormatResult, type LspLocation, type LspPrepareRenameResult,
+         type LspRange, type LspReferencesResult, type LspRenameResult, type LspSignatureHelpResult, type SaveResult, type Workspace } from './bridge.ts'
+import { applyTextEdits, wordAt } from './editorText.ts'
 import { chooseTargetRows, implementationChooserTitle, implementationsUsageTitle, loadTargetContents, NO_IMPLEMENTATIONS_MESSAGE,
          sortTargetRows, typeChooserTitle, type ChooseTargetRow } from './chooseTarget.ts'
 import { failReferences, finishReferences, startReferences } from './referenceContents.ts'
-import { errorMessage } from './errors'
+import { mergePreviewEdits, nonCodeRenameEdits, nonCodeRenameSummary, renameConflictMessage, renamePreviewOf,
+         renameUsageSummary, SEARCH_IN_COMMENTS_DEFAULT, type NonCodeRenameEdits, type RenamePreview } from './renamePreview.ts'
+// 重构预览（上游 `RefactoringDialog` + `UsageViewImpl`：应用前把「要改哪些地方」印成用法树，
+// 用户确认后才写盘）。模型在 src/refactorPreview.ts，扫描在 src/nonCodeUsages.ts。
+import { buildRefactorPreview, previewRequired, refactorPreviewTree, type RefactorPreviewNode } from './refactorPreview.ts'
+import { commentStyleFor } from './commentToggle.ts'
+import { suppressionActionsFor } from './localIntentions.ts'
+// 本地检查通道的诊断表（`src/junitInspections.ts:281`）与 JUnit 快速修复规则
+// （`src/junitQuickFix.ts:154`）。上游 Alt+Enter 拿的是 HighlightInfo 全集，
+// 本地 inspection 与外部注解并进同一张表（`src/problems.ts` 的 `allProblems`）——
+// 不接这张表的话，JUnit 检查的诊断到不了 Alt+Enter。
+import { localDiagnostics } from './junitInspections.ts'
+import { junitQuickFixActions } from './junitQuickFix.ts'
+// 本地意图开关（上游 `IntentionManager` 的启用/停用）：停用的抑制形态不进 Alt+Enter 列表
+// （规则与清单在 src/intentionSettings.ts）。
+import { isIntentionEnabled } from './intentionSettings.ts'
+import { filterFormatEdits } from './formatterTags.ts'
+import { mergeFormattingResult } from './formattingMerge.ts'
+// 格式化准入（`ExcludedFileFormattingRestriction`/`UntrustedFileFormattingServiceSuppressor`）与
+// 进度行（`FormattingProgressTask`）：规则在 src/formattingRestriction.ts，任务表在 src/progressTasks.ts。
+import { formattingRestrictionFor } from './formattingRestriction.ts'
+// 每份文件生效的缩进（`CodeStyleSettings.getIndentSize` + `FileIndentOptionsProvider` 链）与
+// 格式化后处理设置（`PostFormatProcessor`）：模型在 src/codeStyleSettings.ts / src/postFormatProcessors.ts。
+import { indentOptionsFromSettings, makeEditorConfigReader, postFormatSettings, resolveIndentOptions } from './codeStyleSettings.ts'
+import { processLineCommentAddSpace } from './postFormatProcessors.ts'
+import { backgroundTaskManager } from './progressTasks.ts'
+import { trustBlockReason } from './trustedProjects.ts'
+
+/** 格式化在后台任务表里的 id（与整工程检查同一张表，见 src/progressTasks.ts）。 */
+const FORMAT_FORMATTING_TASK_ID = 'editor:formatting'
+import { errorMessage } from './errors.ts'
+import type { EditorSettings } from './settingsModel'
 import type { Tab } from './editorTab'
 
 export interface SemanticActionsDeps {
   notify: (message: string, error?: boolean) => void
   isDesktop: boolean
   generalSettings: Ref<GeneralSettingsState>
+  /**
+   * 编辑器设置（`EditorSettings.tabSize` / `useTabCharacter`）—— 格式化请求的缩进选项起步值。
+   * 上游那份是 `CodeStyleSettings.getIndentSize(fileType)`，见 `src/codeStyleSettings.ts`。
+   */
+  editorSettings: Ref<EditorSettings>
   /** 宿主是 `Ref<Workspace | null>`；本模块只读它的存在性，用 getter 取。 */
   workspace: () => Workspace | null
   active: { readonly value: Tab | undefined }
@@ -50,7 +86,7 @@ export interface SemanticActionsDeps {
 }
 
 export function createSemanticActions(deps: SemanticActionsDeps) {
-  const { notify, isDesktop, generalSettings, workspace, active, activePath, findTab, editorFor, lspOn, lspReady, save,
+  const { notify, isDesktop, generalSettings, editorSettings, workspace, active, activePath, findTab, editorFor, lspOn, lspReady, save,
           codeActions, actionPrompt, renamePrompt, renameValue, renameInput, invalidRenameName,
           baseName, explorer, leftView, prepareHierarchy, showOutput, refreshOutline, revealLocation, retitleTab } = deps
 async function onSemantic(payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }) {
@@ -143,24 +179,94 @@ function pinTargetChooser() {
 // Reformat: a live selection goes through rangeFormatting (IDEA's "reformat the
 // selected lines"), otherwise the whole buffer.
 async function runFormatting(path: string, range?: LspRange) {
+  // 准入限制（上游 `ExcludedFileFormattingRestriction` + `UntrustedFileFormattingServiceSuppressor`，
+  // 规则在 src/formattingRestriction.ts）：不受信任的项目与「不格式化」清单里的文件都不发请求。
+  const blockedByTrust = trustBlockReason('格式化', workspace()?.root, generalSettings.value.trustedPaths)
+  const restriction = blockedByTrust ?? formattingRestrictionFor(path)
+  if (restriction) { notify(restriction, true); return }
+  // 请求时刻的缓冲快照：LSP 的行列坐标按**这一刻**的文档算，响应可能晚于用户的输入
+  // （上游 `AsyncDocumentFormattingSupportImpl` 的 modificationStamp 快照 + DocumentMerger
+  // 扩展点，见 src/formattingMerge.ts）。没有快照时退回旧行为。
+  const before = editorFor(path)?.text()
+  // 缩进选项（上游 `LspFormattingService.createFormattingOptions`，`:119-125`：只发
+  // `tabSize` 与 `isInsertSpaces`）。这份生效值要走完「全局设置 → 按内容探测 → .editorconfig」
+  // 那条链（`src/codeStyleSettings.ts` 的 `resolveIndentOptions`）；发不出去就退回全局设置 ——
+  // 之前这条路径**不传**这两个字段，宿主按 4/空格兜底（`native/lsp_support.cpp:363-365`），
+  // 于是用户改的缩进宽度在「重排代码」上完全不起作用。
+  const indent = await formattingIndentOptions(path, Boolean(range), before ?? '')
+  // 进度行（上游 `FormattingProgressTask`）：格式化是异步长请求，状态栏的后台任务列表可见。
+  backgroundTaskManager.begin(FORMAT_FORMATTING_TASK_ID, '正在格式化', { detail: path })
   try {
     const result = await request<LspFormatResult>('lsp.request', {
-      kind: range ? 'rangeFormatting' : 'formatting', path, line: 0, character: 0, ...(range ? { range } : {}),
+      kind: range ? 'rangeFormatting' : 'formatting', path, line: 0, character: 0,
+      tabSize: indent.indentSize, insertSpaces: !indent.useTabCharacter,
+      ...(range ? { range } : {}),
     })
     if (!result.available || !result.edits?.length) { notify(range ? '所选内容无需格式化，或语言服务不支持选区格式化。' : '无需格式化，或语言服务不支持格式化。'); return }
     let touched = 0
+    let suppressed = 0
+    let conflicted = 0
+    let postProcessed = 0
     for (const file of result.edits) {
       const open = findTab(file.path)
       if (!open) continue  // formatting only makes sense on an open buffer
       const base = editorFor(file.path)?.text() ?? open.content
-      const next = applyTextEdits(base, file.textEdits)
+      // 格式化标记（`// @formatter:off` … `// @formatter:on`）：上游 `FormatterTagHandler`
+      // 对禁用区间不重排，这里把落在禁用区间的语言服务编辑整条丢掉（规则与边界见 src/formatterTags.ts）。
+      const edits = filterFormatEdits(base, file.textEdits)
+      suppressed += file.textEdits.length - edits.length
+      // 请求时刻的快照（`file.path === path` 才存在）。快照与当前缓冲一致时这就是原来的
+      // `applyTextEdits(base, edits)` 路径；不一致才走合并（下）。
+      const snapshot = file.path === path && before !== base ? before : undefined
+      const formatted = snapshot === undefined ? applyTextEdits(base, edits) : applyTextEdits(snapshot, edits)
+      let next = formatted
+      if (snapshot !== undefined) {
+        // 请求期间缓冲区被改过：只在格式化改动区间与用户改动区间不重叠时套用；
+        // 重叠（含边界）就整条跳过，绝不把按旧坐标算的编辑盖到用户刚打的字上。
+        const merged = mergeFormattingResult({ originalText: snapshot, currentText: base, formattedText: formatted })
+        if (!merged.merged) { ++conflicted; continue }
+        next = merged.text
+      }
       if (next === base) continue
+      // 格式化后处理器（上游 `PostFormatProcessor`，本仓只落
+      // `LineCommentAddSpacePostFormatProcessor`，规则在 src/postFormatProcessors.ts）：
+      // 在语言服务重排完之后补跑一遍。**只对发起格式化的那份文件跑**，且用 `base` 的长度当区间 ——
+      // 上游 `processText(source, rangeToReformat, settings)` 收的就是待重排区间。
+      if (file.path === path) {
+        const processed = processLineCommentAddSpace(next, { start: 0, end: next.length }, postFormatSettings.value)
+        if (processed.inserted) { next = processed.text; ++postProcessed }
+      }
       editorFor(file.path)?.setDraft(next)
       open.dirty = true  // buffer preview; user reviews then Ctrl+S
       ++touched
     }
-    notify(touched ? '已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。' : '格式已是最新。')
+    if (conflicted) notify(`格式化结果与你在格式化期间的修改重叠，已跳过 ${conflicted} 个文件以免覆盖；请重新格式化。`)
+    else if (!touched && suppressed) notify('格式化标记（@formatter:off）已禁用这些区域，未做改动。')
+    else notify(touched ? `已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。${postProcessed ? '（已按设置补齐行注释后的空格）' : ''}` : '格式已是最新。')
   } catch (error) { notify(errorMessage(error), true) }
+  finally { backgroundTaskManager.end(FORMAT_FORMATTING_TASK_ID) }
+}
+
+/**
+ * 这份文件发格式化请求时该用的缩进选项（上游 `LspFormattingService.createFormattingOptions`，
+ * `LspFormattingService.kt:119-125`）。
+ * 读盘 / 解析出错一律退回全局设置 —— 缩进探测只是锦上添花，绝不能因为它把格式化整个卡住。
+ */
+async function formattingIndentOptions(path: string, isRangeReformat: boolean, text: string) {
+  const base = indentOptionsFromSettings(editorSettings.value)
+  if (!isDesktop) return base
+  try {
+    const resolved = await resolveIndentOptions({
+      path, text, base,
+      // 整文件重排 vs 选区重排要走不同的 provider 准入门（`FileIndentOptionsProvider.isAllowed`，`:72-74`）。
+      isFullReformat: !isRangeReformat,
+      root: workspace()?.root,
+      readEditorConfig: makeEditorConfigReader(target => request<{ content: string }>('file.read', { path: target })),
+    })
+    return resolved.options
+  } catch {
+    return base
+  }
 }
 async function runSignature(payload: { path: string; line: number; character: number }) {
   try {
@@ -190,12 +296,31 @@ function navigateSignature(delta: number) {
 // single unambiguous preferred fix per problem, looping while new diagnostics with
 // fixes keep appearing (bounded, so a fixer that keeps re-triggering cannot loop).
 const batchFixBusy = ref(false)
+/**
+ * 文件级清理（LSP 的 `source.fixAll` / `source.fixAll.<provider>`：eslint --fix、TS 的
+ * fix-all 一族）—— 上游 Code Cleanup 先跑 profile 级的批量修复，本仓先问服务器有没有这条
+ * 动作；应用成功返回标题，没有这条动作/服务器报错返回 null（落回逐条循环）。
+ */
+async function applyFileLevelCleanup(path: string): Promise<string | null> {
+  try {
+    const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path, line: 0, character: 0, diagnostics: [] })
+    const action = (result.actions ?? []).find(item =>
+      item.kind?.startsWith('source.fixAll') && (item.edits?.length || item.command || item.resolvable))
+    if (!action) return null
+    actionPrompt.value = { path }
+    await applyCodeAction(action)
+    actionPrompt.value = null
+    return action.title
+  } catch { return null }
+}
 async function fixAllInFile() {
   const tab = active.value
   if (!tab || !lspOn(tab) || batchFixBusy.value) { notify('批量修复需要语言服务。', true); return }
   batchFixBusy.value = true
   let applied = 0
   try {
+    const cleanupTitle = await applyFileLevelCleanup(tab.path)
+    if (cleanupTitle) { notify(`批量修复：已应用文件级清理「${cleanupTitle}」。`); return }
     for (let pass = 0; pass < 25; ++pass) {
       const problems = (lspDiagnostics.get(tab.path) ?? []).filter(item => item.severity <= 2)
       if (!problems.length) break
@@ -225,17 +350,52 @@ async function openCodeActions(payload: { path: string; line: number; character:
   const diagnostics = (lspDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line).map(item => ({
     range: { start: { line: item.line, character: item.character }, end: { line: item.endLine ?? item.line, character: item.endCharacter ?? item.character } },
     severity: item.severity, message: item.message, ...(item.source ? { source: item.source } : {}) }))
+  // 本地抑制条目（上游 `SuppressIntentionAction`）：规则在 `src/suppressIntention.ts`，
+  // 可应用编辑的装配在 `src/localIntentions.ts`。语言服务缺席/报错时本地条目仍要能出，
+  // 所以服务端请求失败不直接 return，而是先记下来、再看合流后有没有条目。
+  const tab = findTab(payload.path)
+  // 本地条目这一层要同时看**两张诊断表**：`lspDiagnostics`（语言服务 push/pull）与
+  // `localDiagnostics`（本地检查）。`JunitInspectionProblem`（`junitInspections.ts:25`）与
+  // `LspDiagnostic` 结构兼容（多一个非可选的 `source`），所以能直接并进一张表喂给规则层。
+  // 注意**发给服务端**的 `diagnostics` 仍只用 LSP 那张：本地检查不是服务端报的，不该回给它。
+  const lineRows: LspDiagnostic[] = [
+    ...(lspDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line),
+    ...(localDiagnostics.get(payload.path) ?? []).filter(item => item.line === payload.line),
+  ]
+  const localActions = !onlyFixes && tab
+    ? [
+        ...suppressionActionsFor({
+          path: payload.path, text: tab.content, diagnostics: lineRows,
+          enabled: isIntentionEnabled,
+        }),
+        // JUnit 修复只要 `{行, 来源}`（`JunitQuickFixInput.diagnostics`），`source` 缺省成空串 ——
+        // 两条规则（MisorderedAssertEqualsArguments / JUnit3StyleTestMethodInJUnit4Class）都按来源分流。
+        ...junitQuickFixActions({
+          path: payload.path, text: tab.content,
+          diagnostics: lineRows.map(item => ({ line: item.line, source: item.source ?? '' })),
+        }),
+      ]
+    : []
+  let serverFailed: unknown
+  let serverActions: LspCodeAction[] = []
   try {
     const result = await request<LspCodeActionResults>('lsp.request', { kind: 'codeAction', path: payload.path, line: payload.line, character: payload.character, diagnostics })
-    // IDEA's "Show Fix…" variants keep only actions that actually fix a diagnostic;
-    // the server marks those with `isPreferred` or a `diagnostics` backlink.
-    let actions = result.actions ?? []
-    if (onlyFixes) actions = actions.filter(action => action.preferred || action.linkedDiagnostics)
-    if (!actions.length) { notify(onlyFixes ? '当前行没有与问题关联的快速修复。' : '此处没有可用的代码操作。'); return }
-    if (actions.length === 1) { await applyCodeAction(actions[0]!); return }
-    codeActions.value = actions
-    actionPrompt.value = { path: payload.path }
-  } catch (error) { notify(errorMessage(error), true) }
+    serverActions = result.actions ?? []
+  } catch (error) { serverFailed = error }
+  // IDEA's "Show Fix…" variants keep only actions that actually fix a diagnostic;
+  // the server marks those with `isPreferred` or a `diagnostics` backlink.
+  const actions = [
+    ...(onlyFixes ? serverActions.filter(action => action.preferred || action.linkedDiagnostics) : serverActions),
+    ...localActions,
+  ]
+  if (!actions.length) {
+    if (serverFailed) { notify(errorMessage(serverFailed), true); return }
+    notify(onlyFixes ? '当前行没有与问题关联的快速修复。' : '此处没有可用的代码操作。')
+    return
+  }
+  if (actions.length === 1) { await applyCodeAction(actions[0]!); return }
+  codeActions.value = actions
+  actionPrompt.value = { path: payload.path }
 }
 // Menu rows without an event payload ask for the caret position of the active file.
 function caretPayload() {
@@ -353,9 +513,158 @@ async function applyRename(target: { path: string; line: number; character: numb
   try {
     const result = await request<LspRenameResult>('lsp.request', { kind: 'rename', path: target.path, line: target.line, character: target.character, newName })
     if (!result.available || !result.edits?.length) { notify('语言服务无法重命名此符号。', true); return }
-    await applyEditsToFiles(result.edits, `已重命名为 ${newName}`)
-    if (target.path === activePath.value) await refreshOutline(target.path)
+    // IDEA 的 Refactoring Preview 在应用前算一遍账（`RenameUsage`/`RenameConflict`）：
+    // 编辑互相覆盖就整个不应用（写下去是静默改坏文件），重复编辑去掉，范围写进完成提示。
+    const preview = renamePreviewOf(result.edits)
+    if (preview.conflicts.length) { notify(renameConflictMessage(preview), true); return }
+    // 多于一处 / 跨文件 / 有冲突时才弹预览对话框（`RefactoringDialog` 的用法树；单文件单处直接改，
+    // 与 `previewRequired` 的判定一致 —— 上游是 `RenameProcessor.myForceShowPreview` 那一档）。
+    if (!previewRequired(buildRefactorPreview(preview.edits))) { await writeRename(preview, newName, target); return }
+    await openRefactorPreview({ label: '重命名', base: preview, newName, word: target.current, target, done: writeRename })
   } catch (error) { notify(errorMessage(error), true) }
+}
+
+/* ── 重构预览对话框（上游 `RefactoringDialog` + `UsageViewImpl`） ───────────────── */
+
+/** 写盘那一半的闭包：等用户在对话框里点了「重构」才跑。 */
+type PreviewWriter = (preview: RenamePreview, newName: string,
+  target: { path: string; line: number; character: number; current: string }) => Promise<void>
+
+/** 等「重构」那一下的上下文（对话框组件无状态，状态留在这儿）。 */
+interface PendingRefactor {
+  label: string
+  /** 语言服务给的那一半（每次重算都从这份出发，不在已合并的结果上叠加）。 */
+  base: RenamePreview
+  newName: string
+  word: string
+  target: { path: string; line: number; character: number; current: string }
+  done: PreviewWriter
+  contents: Record<string, string>
+  extra: NonCodeRenameEdits
+  /** 能不能扫非代码出现（要工作区：读盘 + 语言档）。 */
+  canScanNonCode: boolean
+}
+const pendingRefactor = ref<PendingRefactor | null>(null)
+
+/**
+ * 非重命名那一族（更改签名 / 成员上移下移 / 引入形参对象）的预览上下文：
+ * 上游同样是 `RefactoringDialog` 的用法树（`ChangeSignatureDialogBase.java:97` 继承它），
+ * 差别只在**没有**「在注释和字符中搜索」那一档 —— 那半属于 RenameProcessor 的 TextOccurrences。
+ * 写盘那一半由调用方给（本仓各重构的落盘路径不同：有的要建新文件）。
+ */
+interface PendingEditsRefactor {
+  label: string
+  edits: LspFileEdits[]
+  contents: Record<string, string>
+  /** 用户在树上确认「重构」之后的落盘动作。 */
+  write: (edits: LspFileEdits[]) => Promise<void>
+}
+const pendingEdits = ref<PendingEditsRefactor | null>(null)
+
+/** 对话框状态；字段与 `src/components/RefactorPreviewDialog.vue` 的 `RefactorPreviewModel` 一一对应。 */
+const refactorPreviewState = ref<{
+  label: string
+  summary: string
+  tree: RefactorPreviewNode
+  conflictCount: number
+  conflictText: string
+  showSearchInComments: boolean
+  searchInComments: boolean
+  searchInCommentsSummary: string
+  busy: boolean
+} | null>(null)
+
+async function writeRename(preview: RenamePreview, newName: string,
+  target: { path: string; line: number; character: number; current: string }) {
+  await applyEditsToFiles(preview.edits, `已重命名为 ${newName}（${renameUsageSummary(preview)}）`)
+  if (target.path === activePath.value) await refreshOutline(target.path)
+}
+
+/** 树里要印的原文：打开的缓冲（带当前未保存编辑）优先，其余读盘。读不到就只给位置。 */
+async function previewContentsOf(edits: readonly LspFileEdits[]): Promise<Record<string, string>> {
+  const contents: Record<string, string> = {}
+  for (const file of edits) {
+    const open = findTab(file.path)
+    if (open) { contents[file.path] = open.content; continue }
+    try { contents[file.path] = (await request<DocumentData>('file.read', { path: file.path })).content }
+    catch { /* 读不到就在树里只显示位置（oldText 空串），不猜原文 */ }
+  }
+  return contents
+}
+
+/** 按勾选状态重算整棵模型（打开时与切复选框时走同一条路，行为只有一份）。 */
+function refreshRefactorPreview(searchInComments: boolean) {
+  const pending = pendingRefactor.value
+  if (!pending) return
+  const merged = searchInComments ? mergePreviewEdits(pending.base, pending.extra.edits) : pending.base
+  const flat = buildRefactorPreview(merged.edits, pending.contents)
+  refactorPreviewState.value = {
+    label: pending.label,
+    summary: flat.summary,
+    tree: refactorPreviewTree(merged.edits, pending.contents),
+    conflictCount: merged.conflicts.length,
+    conflictText: merged.conflicts.length ? renameConflictMessage(merged) : '',
+    showSearchInComments: pending.canScanNonCode && Boolean(pending.word),
+    searchInComments,
+    searchInCommentsSummary: pending.canScanNonCode && pending.word ? nonCodeRenameSummary(pending.extra) : '',
+    busy: false,
+  }
+}
+
+/**
+ * 开预览对话框。注释/字符串里的追加编辑在**打开前**就算好（上游 `RenameDialog` 的复选框
+ * 旁边同样直接报数），用户取消勾选只是不并进去，不需要重扫。
+ * 没有工作区时不扫（读盘要宿主），那一行整行不出现 —— 不渲染点了没反应的东西。
+ */
+async function openRefactorPreview(payload: { label: string; base: RenamePreview; newName: string; word: string;
+  target: { path: string; line: number; character: number; current: string }; done: PreviewWriter }) {
+  const contents = await previewContentsOf(payload.base.edits)
+  const canScanNonCode = isDesktop && Boolean(workspace())
+  const extra = canScanNonCode && payload.word
+    ? nonCodeRenameEdits(payload.word, payload.newName,
+        Object.entries(contents).map(([path, text]) => ({ path, text, style: commentStyleFor(undefined, path) })),
+        payload.base)
+    : { edits: [], count: 0, files: 0, skipped: 0, truncated: false } satisfies NonCodeRenameEdits
+  pendingRefactor.value = { ...payload, contents, extra, canScanNonCode }
+  refreshRefactorPreview(SEARCH_IN_COMMENTS_DEFAULT)
+}
+
+/** 「重构」按钮：把勾选的那一档并进去再写盘（冲突仍整体拦下）。 */
+async function confirmRefactorPreview(searchInComments: boolean) {
+  const pending = pendingRefactor.value
+  const edits = pendingEdits.value
+  refactorPreviewState.value = null
+  pendingRefactor.value = null
+  pendingEdits.value = null
+  if (edits) { await edits.write(edits.edits); return }
+  if (!pending) return
+  const merged = searchInComments ? mergePreviewEdits(pending.base, pending.extra.edits) : pending.base
+  if (merged.conflicts.length) { notify(renameConflictMessage(merged), true); return }
+  await pending.done(merged, pending.newName, pending.target)
+}
+function cancelRefactorPreview() { refactorPreviewState.value = null; pendingRefactor.value = null; pendingEdits.value = null }
+/** 复选框取反：立刻重算树，追加编辑算不算在树上看得见差别。 */
+function toggleRefactorSearchInComments(value: boolean) { refreshRefactorPreview(value) }
+/** 点树上的一处 → 跳编辑器（宿主 `revealLocation`）。 */
+function openRefactorPreviewLocation(location: { path: string; line: number }) {
+  void revealLocation({ path: location.path, line: location.line })
+}
+
+/**
+ * 通用「重构预览」入口（上游 `RefactoringDialog` 的用法树那一面，非重命名族用）。
+ * 与 `openRefactorPreview` 的差别：没有「在注释和字符中搜索」那一档，写盘动作由调用方给。
+ * 单处改动也照弹 —— 更改签名/成员移动改的是**别的文件的调用点**，用户必须先看一眼。
+ */
+async function openEditsPreview(label: string, edits: LspFileEdits[],
+  write: (edits: LspFileEdits[]) => Promise<void>): Promise<void> {
+  const contents = await previewContentsOf(edits)
+  const flat = buildRefactorPreview(edits, contents)
+  pendingEdits.value = { label, edits, contents, write }
+  refactorPreviewState.value = {
+    label, summary: flat.summary, tree: refactorPreviewTree(edits, contents),
+    conflictCount: flat.conflictCount, conflictText: '',
+    showSearchInComments: false, searchInComments: false, searchInCommentsSummary: '', busy: false,
+  }
 }
 function toggleOutline() {
   explorer.value = true
@@ -374,5 +683,8 @@ async function jumpDebugLocation(target: { path?: string; line: number }) {
     applyCodeAction, renameEntryWithReferences, applyEditsToFiles, submitRename, applyRename,
     toggleOutline, jumpDebugLocation,
     targetChooser, pickTarget, closeTargetChooser, pinTargetChooser,
+    // 重构预览对话框（上游 `RefactoringDialog`）：宿主只负责把组件挂上 + 转发这四个动作。
+    refactorPreviewState, confirmRefactorPreview, cancelRefactorPreview, toggleRefactorSearchInComments,
+    openRefactorPreviewLocation, openEditsPreview,
   }
 }

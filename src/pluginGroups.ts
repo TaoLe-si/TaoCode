@@ -24,11 +24,51 @@
 // is ever loaded into the host.
 export interface PluginCommand { id: string; title: string; action: string; group: string }
 export interface PluginTemplate { key: string; body: string; description: string; languages: string[] }
+/**
+ * `plugin.json` 的 `contributes.fileTypes` 一条 —— 上游 `com.intellij.fileType` EP 的
+ * `<fileType>` 标签（`FileTypeBean.java` 的 `@Attribute`：name :93、extensions :101、
+ * fileNames :108、patterns :116、fileNamesCaseInsensitive :123、language :132、hashBangs :144、
+ * implementationClass :72、fieldName :84）。值是**分号分隔的原样字符串**，拆分与匹配器构造
+ * 只在 `src/fileTypeRegistry.ts` 的 `parseFileTypeBean` 做一份。装载与回收见
+ * `src/fileTypePluginBeans.ts`。
+ */
+export interface PluginFileType {
+  name?: string
+  language?: string
+  extensions?: string
+  fileNames?: string
+  patterns?: string
+  fileNamesCaseInsensitive?: string
+  hashBangs?: string
+  /** 非空 = 「声明一个新类型」；空 = 只给已有类型补关联（上游 `FileTypeBean.java:29-41` 的两种用法）。 */
+  implementationClass?: string
+  fieldName?: string
+}
 export interface PluginInfo {
   id: string; name: string; version: string; description: string; path: string
   /** `plugin.json` 的 `category`（IDEA 的 `displayCategory`）；缺省归入 "Other Tools"。 */
   category?: string
   enabled: boolean; error?: string; commands: PluginCommand[]; templates: PluginTemplate[]
+  /** 插件声明的文件类型（`native/plugins.cpp` 的 `read_file_types` 解析）。 */
+  fileTypes?: PluginFileType[]
+  /**
+   * 依赖（`plugin.json` 的 `depends` / `optionalDepends`，由 `native/plugins.cpp` 解析）：
+   * `depends` 是必需、`optionalDepends` 是可选；下面三格是原生在扫完插件目录后解出的
+   * 状态 —— 缺装的必需依赖、装着但停用的必需依赖、以及把它列进 `depends` 的插件（反向引用）。
+   * `broken` 是依赖不满足时的一句话原因（IDEA 里这类插件不会被加载）。
+   */
+  depends?: string[]
+  optionalDepends?: string[]
+  missingDependencies?: string[]
+  disabledDependencies?: string[]
+  requiredBy?: string[]
+  /**
+   * 必需依赖构成的循环（`native/plugins.cpp` 的 Tarjan 结果），成员按 id 排序。
+   * 上游把成环的插件判为**不可加载**（`PluginManagerStateService.kt:175-202`，
+   * `CoreBundle.properties:32`），所以非空即不可启用、也不加载。
+   */
+  dependencyCycle?: string[]
+  broken?: string
 }
 export interface PluginList { plugins: PluginInfo[] }
 
@@ -91,9 +131,59 @@ export function pluginGroupToggleLabel(enabledCount: number): string {
   return enabledCount === 0 ? '全部启用' : '全部禁用'
 }
 
+/**
+ * 依赖不满足（`broken` 非空）：IDEA 里这类插件**不会被加载**，贡献的命令/模板也不生效。
+ * 缺装与被停用的必需依赖都算 —— 原生侧在 `list()` 里分别列进
+ * `missingDependencies` / `disabledDependencies`。
+ */
+export function pluginIsBroken(plugin: PluginInfo): boolean {
+  return Boolean(plugin.broken)
+}
+
 /** 组内"已启用"的判定 —— `InstalledPluginsTab.kt:696-708` 排除了读取失败的插件。 */
 export function pluginIsEnabled(plugin: PluginInfo): boolean {
-  return plugin.enabled && !plugin.error
+  return plugin.enabled && !plugin.error && !pluginIsBroken(plugin)
+}
+
+/**
+ * 会真正加载的插件 = 清单可读 + 依赖齐 + 启用。命令与模板只从这些插件进来
+ * （`src/pluginCommands.ts` 的 `enabledPlugins` 用同一个判定）。
+ */
+export function pluginIsLoadable(plugin: PluginInfo): boolean {
+  return pluginIsEnabled(plugin)
+}
+
+/**
+ * 详情面板那行依赖摘要（没声明依赖时是空串）：
+ * 「必需：a、b · 可选：c · 缺少：d · 依赖它的：e」。
+ * 只列真实存在的部分，不印「缺少：无」这种噪音。
+ */
+export function pluginDependencySummary(plugin: PluginInfo): string {
+  const parts: string[] = []
+  const required = plugin.depends ?? []
+  const optional = plugin.optionalDepends ?? []
+  const cycle = plugin.dependencyCycle ?? []
+  const missing = plugin.missingDependencies ?? []
+  const disabled = plugin.disabledDependencies ?? []
+  const requiredBy = plugin.requiredBy ?? []
+  if (required.length) parts.push(`必需：${required.join('、')}`)
+  if (optional.length) parts.push(`可选：${optional.join('、')}`)
+  if (cycle.length) parts.push(`循环：${cycle.join('、')}`)
+  if (missing.length) parts.push(`缺少：${missing.join('、')}`)
+  if (disabled.length) parts.push(`已停用：${disabled.join('、')}`)
+  if (requiredBy.length) parts.push(`依赖它的：${requiredBy.join('、')}`)
+  return parts.join(' · ')
+}
+
+/**
+ * 复选框能不能点：清单读不出来、必需依赖缺装、或必需依赖成环时不能
+ * （前两种启用必然失败；成环是**永远**失败 —— 上游同样不加载成环的插件，
+ * 只能改清单，所以 `native/plugins.cpp` 的 `set_enabled` 直接抛 `DEPENDENCY_CYCLE`）。
+ * 缺的「必需依赖装着但被停用」不在此列：启用会把它连带启用。
+ */
+export function pluginCanToggle(plugin: PluginInfo): boolean {
+  if (plugin.error || (plugin.dependencyCycle?.length ?? 0) > 0) return false
+  return (plugin.missingDependencies?.length ?? 0) === 0
 }
 
 export function pluginEnabledCount(plugins: readonly PluginInfo[]): number {
@@ -210,7 +300,7 @@ export function buildInstalledGroups(
   const installed = order(plugins.filter(plugin => !installingSet.has(plugin.id)))
   if (installed.length) {
     // `InstalledPluginsTab.kt:303-317`：用户安装组标题 = `前缀（已启用 n/m）`。
-    const toggleable = installed.filter(plugin => !plugin.error)
+    const toggleable = installed.filter(pluginCanToggle)
     const enabled = pluginEnabledCount(installed)
     // `ComparablePluginsGroup` 在"没有可启停成员"时隐藏组级动作（`:690-692`）。
     groups.push({
@@ -246,7 +336,7 @@ export function groupPluginsByCategory(plugins: readonly PluginInfo[]): PluginGr
   }
   const groups: PluginGroup[] = [...buckets.entries()].map(([category, members]) => {
     const sorted = sortPluginsByName(members)
-    const toggleable = sorted.filter(plugin => !plugin.error)
+    const toggleable = sorted.filter(pluginCanToggle)
     const enabled = pluginEnabledCount(sorted)
     return {
       type: 'INSTALLED' as InstalledGroupType,
@@ -277,11 +367,12 @@ export const INSTALLED_SEARCH_OPTIONS = [
 export type InstalledSearchOption = (typeof INSTALLED_SEARCH_OPTIONS)[number]
 
 /**
- * 本仓**有真实数据**的选项。`needUpdate` / `bundled` / `updatedBundled` 依赖插件仓库
- * 与 IDE 自带插件这两样本仓还没有的东西，所以不渲染成控件（渲染了就是点不动的假筛选），
- * 已登记进 `docs/class-parity-todo.md` §10 #6。
+ * 本仓**有真实数据**的选项。`needUpdate`（`/outdated`）从市场页的本地仓库目录取数
+ * （`src/pluginMarket.ts` 的 `marketplaceUpdates()`：已装版本 < 清单版本）；`bundled` /
+ * `updatedBundled` 依赖 IDE 自带插件这一层（本仓插件全部来自用户配置目录），因此仍不渲染成
+ * 控件（渲染了就是点不动的假筛选），登记在 `docs/class-parity-todo.md` §10 #6。
  */
-export const SUPPORTED_SEARCH_OPTIONS = ['userInstalled', 'enabled', 'disabled', 'invalid'] as const
+export const SUPPORTED_SEARCH_OPTIONS = ['userInstalled', 'needUpdate', 'enabled', 'disabled', 'invalid'] as const
 export type SupportedSearchOption = (typeof SUPPORTED_SEARCH_OPTIONS)[number]
 
 export const INSTALLED_OPTION_LABEL: Record<InstalledSearchOption, string> = {
@@ -398,14 +489,22 @@ export function installedQueryOptions(text: string): Set<SupportedSearchOption> 
   return new Set(parseInstalledQuery(text).options)
 }
 
-/** 一个插件是否命中查询 —— 属性是**与**关系；关键字匹配名称 / id / 描述。 */
-export function matchesInstalledQuery(plugin: PluginInfo, query: InstalledQuery): boolean {
+/**
+ * 一个插件是否命中查询 —— 属性是**与**关系；关键字匹配名称 / id / 描述。
+ * `updateIds`：市场页从本地仓库算出的「有更新」插件 id（`marketplaceUpdates()` 的输出）。
+ * 传了就参与 `/outdated` 过滤；没传 = 还没读仓库，此时 `/outdated` 匹配不到任何插件
+ * （不是"没有更新"，是"还不知道"—— 界面上的计数同样是 0，读仓库后立刻有值）。
+ */
+export function matchesInstalledQuery(plugin: PluginInfo, query: InstalledQuery, updateIds?: readonly string[]): boolean {
   if (query.options.includes('enabled') && !pluginIsEnabled(plugin)) return false
+  // `/invalid`：清单读不出来，或必需依赖不满足 —— 两种都进不了加载（IDEA 同上）。
+  if (query.options.includes('invalid') && !plugin.error && !pluginIsBroken(plugin)) return false
+  if (query.options.includes('needUpdate') && !(updateIds ?? []).includes(plugin.id)) return false
+  // `disabled`/`userInstalled` 的判定放在 needUpdate 之后（顺序不影响结果，属性是与关系）。
   if (query.options.includes('disabled') && !(!plugin.enabled && !plugin.error)) return false
-  if (query.options.includes('invalid') && !plugin.error) return false
   // `userInstalled` 在本仓恒真：插件只能来自用户配置目录（见 `list()` 的实现）。
   if (!query.keyword) return true
   const needle = query.keyword.toLowerCase()
-  return [plugin.name, plugin.id, plugin.description, plugin.version, plugin.category]
+  return [plugin.name, plugin.id, plugin.description, plugin.version, plugin.category, ...(plugin.depends ?? [])]
     .some(value => (value ?? '').toLowerCase().includes(needle))
 }

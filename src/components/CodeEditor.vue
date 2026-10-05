@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { basicSetup } from 'codemirror'
-import { Compartment, EditorSelection, EditorState, Prec, RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
-import { Decoration, EditorView, hoverTooltip, keymap, rectangularSelection, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { foldService, foldedRanges, indentUnit, syntaxHighlighting, unfoldEffect } from '@codemirror/language'
+import { Compartment, EditorSelection, EditorState, Prec, StateEffect, type Extension, type Text } from '@codemirror/state'
+import { EditorView, hoverTooltip, keymap, rectangularSelection, ViewPlugin, type Command } from '@codemirror/view'
+import { foldEffect, foldService, foldedRanges, indentUnit, syntaxHighlighting, unfoldEffect } from '@codemirror/language'
 import { indentLess, indentMore } from '@codemirror/commands'
 import { autocompletion, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { forceLinting, lintGutter, linter, type Diagnostic } from '@codemirror/lint'
@@ -21,28 +21,47 @@ import { readStyledLines } from '../htmlExportDom'
 import { whitespaceLayer } from '../editorWhitespace'
 import { diagnosticMarkers, lspPosition } from '../editorDiagnosticMarkers'
 import { editorOptionExtensions, editorTheme, syntaxColors } from '../editorTheme'
-import { insertedText } from '../editorTyping'
+import { insertedText, smartQuotes } from '../editorTyping'
 import { copyToClipboard } from '../clipboard'
 import { insertTextAtCaret, pasteChannel, replaceInsertedRange, type PasteEvent } from '../editorPaste'
-import { NO_ERRORS_IN_FILE, nextErrorTarget } from '../gotoNextError'
+import { NO_ERRORS_IN_FILE, navigateToError } from '../gotoNextError'
 import { clearPullDiagnostics, setPullDiagnostics } from '../bridge'
 import { createLspCompletion } from '../lspCompletion'
 import { completionUi } from '../completionUi'
 import { mergeCompletionResults } from '../completionMerge'
 import TargetChooserPopup from './TargetChooserPopup.vue'
-import QuickDefinitionPopup from './QuickDefinitionPopup.vue'; import { createQuickDefinitionHost } from '../quickDefinitionHost.ts'
-import { type ChooseTargetRow, type TargetLocation } from '../chooseTarget'; import { createChooseTargetHost } from '../chooseTargetHost'
+import QuickDefinitionPopup from './QuickDefinitionPopup.vue'; import { createQuickDefinitionHost } from '../quickDefinitionHost.ts'; import { type ChooseTargetRow, type TargetLocation } from '../chooseTarget'; import { createChooseTargetHost } from '../chooseTargetHost'
 import { createDeclarationNavigation } from '../declarationNavigation'
 import { candidates as templateCandidates, expand as expandTemplateAt, defaultTemplateSettings, type PluginTemplateSource, type TemplateSettings } from '../templates'
 import { wrapSelection, type SurroundTemplate } from '../surround'
-import { applySemanticTokenEdits, decodeSemanticTokens, semanticTokenClass, type SemanticToken } from '../semanticTokens'
-import type { InlineCompletionResult } from '../inlineCompletion'
-import { inlineCompletionKeymap, inlineDecorationsField, inlineSuggestionField, setInlineSuggestion, suggestionFor } from '../inlineCompletionExtension'
+import { applySemanticTokenEdits, decodeSemanticTokens } from '../semanticTokens'
+// 语义着色的 decoration 层拆在 src/editorSemanticField.ts（拉取/增量/重试留在这里，与 warmup 生命周期绑一起）。
+import { semanticTokensField, setSemanticTokens } from '../editorSemanticField'
+// 缩进参考线 / 同符号高亮 / inlay hints 三层的状态机已拆成独立模块（本文件贴着机检上限）。
+import { indentGuidesExtension, setIndentGuides } from '../editorIndentGuides'
+import { createSymbolHighlight } from '../editorSymbolHighlight'
+import { createAnnotatorHighlightLayer } from '../annotatorHighlightLayer'
+import { createInlayHints } from '../editorInlayHints'
+import { inlayHintToggles, inlayHintTogglesKey } from '../inlayHints'
+import { errorMessage } from '../errors.ts'
+// 行内调试值（xdebugger dbg/inline，上游 InlineDebugRenderer）：纯规则在 src/inlineDebugValues.ts。
+import { createInlineValues } from '../editorInlineValues'
+// 彩虹括号（上游 RainbowHighlighter）的等价物；括号配对高亮仍由 basicSetup 的 bracketMatching 承担。
+import { angleBraceHighlight, rainbowBrackets } from '../editorBrackets'
+// 导入期重试：JDT 大工程导入 ~9.5 分钟里这三条请求全超时，失败要按档退避再试（src/lspWarmup.ts）。
+import { LspWarmup } from '../lspWarmup'
+import type { InlineCompletionItem, InlineCompletionResult } from '../inlineCompletion'
+import { cycleSuggestionIndex, dedupeSuggestions, inlineTriggerKindFor } from '../inlineCompletionNav'
+import { inlineCompletionKeymap, inlineDecorationsField, inlineNavigationKeymap, inlineSuggestionField, setInlineSuggestion, suggestionFor } from '../inlineCompletionExtension'
 import { describeLink, linkAt, type DocumentLink, type DocumentLinkResult } from '../documentLinks'
+import { createQuickEvaluateHint } from '../quickEvaluateHint'
 import { createDocumentLinks, linkField } from '../documentLinksExtension'
-import { createCodeLens } from '../codeLensExtension'
-import type { CodeLensResult } from '../codeLens'
-import { lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspHighlightResult, type LspDiagnosticReport, type LspFoldingRange, type LspFoldingRangeResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult, type LspSemanticTokensResult } from '../bridge'
+import { createCodeLens } from '../codeLensExtension'; import type { CodeLensResult } from '../codeLens'
+// 调试器悬停快速求值（上游 QuickEvaluateHandler + XDebuggerTextPopup）：装配在 src/quickEvaluateHint.ts，
+// 规则在 src/debugQuickEvaluate.ts。**不挂在 lspExtensions() 里** —— 那是语言服务的门，
+// 而调试不依赖语言服务；会话可用性由装配层自己按 dapState.paused 判，没会话时压根不返回 tooltip。
+const quickEvaluateHint = createQuickEvaluateHint({ path: () => props.path })
+import { dapState, lspDiagnostics, request, type DapBreakpoint, type EditorSettings, type LspHighlightResult, type LspDiagnosticReport, type LspFoldingRange, type LspFoldingRangeResult, type LspHoverResult, type LspInlayHintResult, type LspRange, type LspRangeSpan, type LspSelectionRangeResult, type LspSemanticTokensResult } from '../bridge'
 // 编辑器内查找栏（上游 `SearchReplaceComponent` + `EditorSearchSession`，不是工程内的 `FindPopupPanel`）：
 // 状态/高亮/导航在 src/editorSearchExtension.ts，匹配语义在 src/editorSearch.ts，宿主状态域在 src/editorFindController.ts。
 import EditorFindBar from './EditorFindBar.vue'
@@ -50,40 +69,74 @@ import EditorFindBar from './EditorFindBar.vue'
 import MergeBar from './MergeBar.vue'
 import { createMergeState } from '../editorMergeHost'
 import { createFindController, findCommand as findBarCommand } from '../editorFindController'
-// 插入/覆盖模式（`EditorToggleInsertStateAction`）：CodeMirror 没有这个能力，用事务过滤还原。
-import { overwriteExtension, overwriteTheme, toggleOverwrite } from '../editorOverwrite'
-import { createHintController } from '../editorHint'
-import { editorSearchExtension } from '../editorSearchExtension'
+// 插入/覆盖模式（`EditorToggleInsertStateAction`）：CodeMirror 没有这个能力，用事务过滤还原（见该模块头部）。
+import { overwriteExtension, overwriteTheme, toggleOverwrite } from '../editorOverwrite'; import { createHintController } from '../editorHint'; import { createUnwrapCommand } from '../unwrap'; import { IMAGE_PREVIEW_LIMIT, createLiteralPreview } from '../literalPreviewExtension'
+import { editorSearchExtension } from '../editorSearchExtension'; import { bidiNotificationExtension } from '../editorBidiNotification'
+// 回车家族（上游 `enter/*` 里本仓原先没有的三条：行注释中间回车、未配对左花括号后回车、
+// 字符串里回车）与语句级上下移动（`MoveStatementUp`/`MoveStatementDown`）：键位见下面 keymap。
+import { smartEnterCommand, smartEnterLanguageFor } from '../enterHandlers'
+import { moveStatement } from '../editorStatementMove'
+// 自定义折叠区域的列表弹层（上游 `CustomFoldingRegionsPopup` / `GotoCustomRegionAction`，
+// 键位 Ctrl+Alt+. = `$default.xml:535-537`）。
+import { createCustomRegionsPopup } from '../customFoldingPopup'
+// 行注释前缀：语言数据（CodeMirror 的 `commentTokens`）优先，没有语言数据时退回按扩展名的注释标记表。
+import { commentStyleFor, commentStyleFromState } from '../commentToggle'
+// 大文件模式：阈值/降级清单在 src/largeFileMode.ts；**按字节**判定与大小文案在 src/largeFileBytes.ts；
+// 提示条文案与「隐藏/不再显示」持久化在 src/largeFileNotice.ts（上游 LargeFileNotificationProvider）。
+import { largeFilePolicyForText, utf8ByteLength } from '../largeFileBytes'
+import { dismissLargeFileNotice, isLargeFileNoticeDismissed, largeFileNoticeText } from '../largeFileNotice'
+// 按扩展名选语法高亮的动态 import 表拆在 src/editorLanguage.ts。
+import { editorLanguageExtension } from '../editorLanguage'
 
 const props = defineProps<{ content: string; path: string; language?: string; theme: Theme; active: boolean; settings: EditorSettings; templates: TemplateSettings; pluginTemplates?: PluginTemplateSource[]; lspEnabled: boolean; readOnly?: boolean; reveal?: { path: string; line: number } | null; breakpoints?: DapBreakpoint[]; debugLine?: number; bookmarks?: number[]; gutterIcons?: GutterIcon[]; blame?: BlameAnnotation[] }>()
 const emit = defineEmits<{
   columnMode: [active: boolean]
   selection: [info: { characters: number; lines: number } | null]; cursors: [count: number]
-  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number; column?: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string]; gutterMenu: [at: { line: number; x: number; y: number }] }>()
+  change: []; cursor: [line: number, column: number]; save: []; error: [message: string]; reveal: [target: { path: string; line: number; column?: number }]; semantic: [payload: { kind: 'rename' | 'references' | 'codeAction' | 'format' | 'signature' | 'implementation' | 'callHierarchy' | 'typeHierarchy' | 'typeDefinition'; path: string; line: number; character: number; range?: LspRange }]; evaluate: [expression: string]; breakpoint: [line1based: number]; surround: []; templateChooser: []; link: [link: DocumentLink]; codeLens: [payload: { command: string; arguments?: unknown[] }]; paste: [payload: PasteEvent]; gutterIcon: [icon: GutterIcon]; gutterIconMiddle: [icon: GutterIcon]; typing: [text: string]; gutterMenu: [at: { line: number; x: number; y: number }]; bidiDirection: [direction: 'contentBased' | 'ltr' | 'rtl']; folded: [line1based: number] }>()
 const container = ref<HTMLDivElement>()
 const language = new Compartment()
 const appearance = new Compartment()
 const options = new Compartment()
 const lsp = new Compartment()
 const indentGuides = new Compartment()
+// 彩虹括号的开关（沿用 bracketMatching 设置；配对高亮由 basicSetup 的 bracketMatching 承担）。
+const brackets = new Compartment()
 let view: EditorView | undefined
 // 编辑器内查找栏的宿主侧状态域（上游 `SearchReplaceComponent` + `EditorSearchSession`）。传取值函数而不是 view：view 在 onMounted 才赋值，而控制器在 setup 期就要建好。
 const findBar = createFindController(() => view, message => emit('error', message))
 // 轻量信息提示（`HintManagerImpl`）：位置/自动消失的规则在 src/editorHint.ts。
 const { hint: errorHint, show: showErrorHint, hide: hideErrorHint } = createHintController(() => view, () => container.value)
 const findCommand = (backwards: boolean) => findBarCommand(findBar, backwards)
+// 自定义折叠区域弹层（上游 `CustomFoldingRegionsPopup`）；扩展挂在 `view.dom` 上，自带收起规则。
+const customRegions = createCustomRegionsPopup(() => view)
+// 回车：上游那四条先问，都不接管时交回 CodeMirror 的 `insertNewlineAndIndent`。
+// 语言词法（行前缀 + 块注释四件套 `JavaCommenter.java:27-28/:32-33/:62-63/:67-68`）在
+// src/enterHandlers.ts 的 `smartEnterLanguageFor` 里装配；不给 `block` 等于第②步永远问不到（`EnterInBlockCommentHandler.java:38-39`）。
+const smartEnter = smartEnterCommand(() => smartEnterLanguageFor(
+  (view ? commentStyleFromState(view.state, view.state.selection.main.head) : null)
+    ?? commentStyleFor(undefined, props.path)))
 const openFindBar = (replaceMode: boolean) => { findBar.open(replaceMode); nextTick(() => findBarBar.value?.focus?.()) }
 const findBarBar = ref<InstanceType<typeof EditorFindBar> | null>(null)
 // 光标行（0 基）：合并冲突条的计数要读它。清单与两个动作来自 createMergeState —— 清单取**实时文档**
 // （父级 tab.content 只在读盘/存盘时更新，编辑期间是旧的：真机抓到过接受一侧后计数停在 2/2）。
 const cursorLine = ref(0)
 const { conflicts: mergeConflicts, accept: acceptConflict, jump: jumpConflict, refresh: refreshMerge } = createMergeState(() => view, props.content)
-// Above this many characters the editor drops syntax highlighting, linting, LSP
-// and word wrap so a big file stays responsive; CodeMirror itself virtualises the
-// document so editing remains smooth. The document is owned by CodeMirror, never
-// copied to the parent on every keystroke.
-const HEAVY_LIMIT = 5 * 1024 * 1024
-const heavy = props.content.length > HEAVY_LIMIT
+// 大文件模式（降级清单在 src/largeFileMode.ts，上游 `LargeFileEditorProvider` 的等价物）：
+// 判定按 **UTF-8 字节数**（src/largeFileBytes.ts —— 上游拿到的是 VFS 长度，本仓只有已解码文本）；
+// 关语法高亮、语言服务与自动换行，并且**打开即只读**（上游 `EditorModel.java:1017` 用
+// `EditorFactory.createViewer`），点提示条上的「解除只读」才放行编辑；CodeMirror 自身按视口虚拟化。
+const large = largeFilePolicyForText(props.content)
+const heavy = large.large
+const largeBytes = utf8ByteLength(props.content)
+const largeNoticeHidden = ref(false)
+const largeNoticeDismissed = ref(isLargeFileNoticeDismissed())
+let largeProtected = heavy
+let diskReadOnly = props.readOnly ?? false
+function applyReadOnly() {
+  view?.dispatch({ effects: readOnlyMode.reconfigure(diskReadOnly || largeProtected ? EditorState.readOnly.of(true) : []) })
+}
+function allowLargeEditing() { largeProtected = false; applyReadOnly() }
+const literalPreview = createLiteralPreview({ enabled: () => !heavy, documentPath: () => props.path, loadImage: path => request<{ base64: string; kind: string }>('file.readBinary', { path, limit: IMAGE_PREVIEW_LIMIT }).catch(() => null) })  // 字面量预览（IDEA ImageOrColorPreviewService）：Shift + 悬停色块/小图，鼠标侧行为与弹层在 src/literalPreviewExtension.ts
 
 // LSP `documentLink` / `codeLens` 的渲染与调度在各自模块里（自包含控制器，见那两个文件的头部说明）——
 // 这里只做组装与触发。把 20 行"去抖 + 请求 + 转换"乘以八个能力塞回本文件，它就又会顶到机检上限。
@@ -100,11 +153,9 @@ const codeLens = createCodeLens({
   view: () => view,
   onCommand: (command, args) => emit('codeLens', { command, arguments: args }),
 })
-let replacing = false
-// IDEA's Column Selection Mode: Alt+Shift+Insert toggles a mode where plain drags and
-// arrow keys select rectangles. The installed rectangularSelection only takes an
-// eventFilter, so "mode on" swaps in a filter that accepts every plain left-drag;
-// reconfiguring the Compartment is what actually changes behavior.
+let replacing = false, foldedSeen = new Set<number>()   // foldedSeen：上一拍已折起的区间起点（音频提示只报新增，见 updateListener 的 `folded`）
+// IDEA's Column Selection Mode: Alt+Shift+Insert. rectangularSelection takes only an eventFilter,
+// so reconfiguring the Compartment between "accept every left-drag" and none is what changes behavior.
 const columnMode = new Compartment
 let columnActive = false
 // ToggleReadOnlyAttributeAction: the compartment holds EditorState.readOnly for the
@@ -132,113 +183,85 @@ function scheduleLspChange() {
 function syncGutter() { syncGutterIcons(view, props.gutterIcons ?? []) }
 // 追溯注解列（IDEA 的 `TextAnnotationGutterProvider`）：数据由宿主算好，这里只灌进状态。
 function syncBlame() { syncBlameAnnotations(view, props.blame ?? []) }
-// IDEA's "Show indent guides": a faint vertical rule at each indent level so the
-// user can tell which block owns the current line. Toggled by the editor settings.
-const setIndentGuides = StateEffect.define<boolean>()
-const indentGuideField = StateField.define<boolean>({
-  create: () => props.settings.showIndentGuides,
-  update(value, tr) {
-    for (const e of tr.effects) if (e.is(setIndentGuides)) return e.value
-    return value
+// IDEA's "Show indent guides"：每级缩进一条淡竖线，设置在 src/editorIndentGuides.ts（本文件只组装）。
+const editorIndentGuides = indentGuidesExtension(() => props.settings.tabSize, () => props.settings.showIndentGuides)
+// 同一符号高亮（LSP `documentHighlight`）：状态机与去抖在 src/editorSymbolHighlight.ts，
+// 这里只注入「可用与否 / 当前文件 / 当前视图」。
+const symbolHighlight = createSymbolHighlight({ enabled: () => props.lspEnabled && !heavy, path: () => props.path, view: () => view })
+// 注解器高亮层（上游 `AnnotatorRunner` + `GeneralHighlightingPass` 那一族）：规则在
+// src/annotatorHighlights.ts，调度在 src/annotatorHighlightLayer.ts，这里只注入宿主事实。
+// 两处口径说明：
+//   · `language` 传 props.language —— 已注册的两个注解器（诊断 tags / 注释里的网页链接）都是
+//     `languages: ['*']`（`allForLanguageOrAny` 的 any 部分），所以分派结果与具体语言无关；
+//     将来注册语言专属注解器时，这里要改成解析后的语言名。
+//   · `dumb` 恒 false —— 本仓没有「索引未就绪」信号，诊断是 LSP `publishDiagnostics` 推来的
+//     （那份到达即表示该文件已算完），两个注解器也没有声明 `dumbAware: false`。
+const annotatorLayer = createAnnotatorHighlightLayer({
+  enabled: () => props.lspEnabled && !heavy,
+  path: () => props.path,
+  language: () => props.language ?? '',
+  view: () => view,
+  diagnostics: () => lspDiagnostics.get(props.path) ?? [],
+  commentStyle: () => {
+    const editor = view
+    const style = editor ? commentStyleFromState(editor.state, editor.state.selection.main.head) : null
+    return style ?? commentStyleFor(undefined, props.path)
   },
-  provide: f => EditorView.decorations.compute([f, EditorView.scrollMargins], state => {
-    if (!state.field(f)) return Decoration.none
-    const tabSize = props.settings.tabSize
-    const builder = new RangeSetBuilder<Decoration>()
-    let lineNo = 1
-    let iter = state.doc.iterLines()
-    while (true) {
-      const next = iter.next()
-      if (next.done) break
-      const text = next.value
-      const indent = text.match(/^[ \t]*/)?.[0] ?? ''
-      const cols = Math.floor(indent.replace(/\t/g, ' '.repeat(tabSize)).length / tabSize)
-      if (cols > 1) {
-        const from = state.doc.line(lineNo).from
-        for (let c = 1; c < cols; ++c)
-          builder.add(from + c * tabSize - 1, from + c * tabSize, Decoration.widget({ widget: new (class extends WidgetType { toDOM() { const el = document.createElement('span'); el.className = 'cm-indent-guide'; return el } })(), side: -1 }))
-      }
-      ++lineNo
-      iter = next
-    }
-    return builder.finish()
-  }),
+  dumb: () => false,
 })
-const indentGuidesExtension = [
-  indentGuideField,
-  EditorView.theme({
-    '& .cm-indent-guide': { display: 'inline-block', width: '1px', height: '1em', background: 'var(--border)', opacity: '0.55' },
-  }),
-]
-// Same-symbol highlighting: on caret move (debounced) ask documentHighlight and mark
-// every occurrence. Sorted + non-overlapping so the decoration builder never throws.
-const setHighlights = StateEffect.define<{ from: number; to: number }[]>()
-const highlightField = StateField.define<{ from: number; to: number }[]>({
-  create: () => [],
-  update(value, tr) { for (const e of tr.effects) if (e.is(setHighlights)) return e.value; return value },
-  provide: f => EditorView.decorations.compute([f], state => {
-    const builder = new RangeSetBuilder<Decoration>()
-    let last = -1
-    for (const r of [...state.field(f)].sort((a, b) => a.from - b.from || a.to - b.to)) {
-      if (r.to <= r.from || r.from < last) continue
-      builder.add(r.from, r.to, Decoration.mark({ class: 'cm-lsp-highlight' }))
-      last = r.to
-    }
-    return builder.finish()
-  }),
+// Inlay hints（LSP `inlayHint`）：widget/渲染前归位/去抖调度在 src/editorInlayHints.ts，
+// 三档开关（InlaySettingsConfigurable `inlay.hints` 按 LSP kind 分）在 src/inlayHints.ts。
+// 带 `command` 的提示点一下执行 `workspace/executeCommand`（上游 sink 的 payloads 同一件事，
+// `InlayTreeSink.kt:27-31`）；路径取**本编辑器**的 path，而不是全局的 activePath ——
+// 提示是按这份文档的行列算出来的，命令得对着同一个文档发。
+const inlayHints = createInlayHints({
+  enabled: () => props.lspEnabled && !heavy,
+  path: () => props.path,
+  view: () => view,
+  toggles: () => inlayHintToggles(props.settings),
+  onCommand: (command, args) => {
+    void request('lsp.request', { kind: 'executeCommand', path: props.path, line: 0, character: 0, command, ...(args ? { arguments: args } : {}) })
+      .catch(error => emit('error', errorMessage(error)))
+  },
 })
-let highlightTimer: number | undefined
-function scheduleHighlight() {
-  if (!props.lspEnabled || heavy) return
-  if (highlightTimer !== undefined) clearTimeout(highlightTimer)
-  highlightTimer = window.setTimeout(() => { highlightTimer = undefined; void runHighlight() }, 160)
-}
-async function runHighlight() {
-  const editor = view
-  if (!editor || !props.lspEnabled) return
-  const head = editor.state.selection.main.head
-  const info = editor.state.doc.lineAt(head)
-  try {
-    const result = await request<LspHighlightResult>('lsp.request', { kind: 'documentHighlight', path: props.path, line: info.number - 1, character: head - info.from })
-    const current = view
-    if (!current) return
-    const ranges = (result.highlights ?? []).flatMap(item => {
-      try { const from = lspPosition(current.state.doc, item.startLine, item.startChar); const to = lspPosition(current.state.doc, item.endLine, item.endChar); return to > from ? [{ from, to }] : [] } catch { return [] }
-    })
-    current.dispatch({ effects: setHighlights.of(ranges) })
-  } catch { /* the server may be mid-shutdown; stale highlights are harmless */ }
-}
-// Inlay hints render as read-only inline widgets at a doc position.
-class InlayWidget extends WidgetType {
-  constructor(readonly text: string, readonly padLeft: boolean, readonly padRight: boolean) { super() }
-  eq(other: InlayWidget) { return other.text === this.text && other.padLeft === this.padLeft && other.padRight === this.padRight }
-  toDOM() { const span = document.createElement('span'); span.className = 'cm-lsp-inlay'; span.textContent = `${this.padLeft ? ' ' : ''}${this.text}${this.padRight ? ' ' : ''}`; return span }
-  ignoreEvent() { return false }
-}
-interface HintEntry { from: number; text: string; padLeft: boolean; padRight: boolean }
-const setHints = StateEffect.define<HintEntry[]>()
-const hintField = StateField.define<HintEntry[]>({
-  create: () => [],
-  update(value, tr) { for (const e of tr.effects) if (e.is(setHints)) return e.value; return value },
-  provide: f => EditorView.decorations.compute([f], state => {
-    const builder = new RangeSetBuilder<Decoration>()
-    for (const h of [...state.field(f)].sort((a, b) => a.from - b.from)) builder.add(h.from, h.from, Decoration.widget({ widget: new InlayWidget(h.text, h.padLeft, h.padRight), side: 1 }))
-    return builder.finish()
-  }),
-})
-
+// 行内调试值（xdebugger `dbg/inline`）：拉取当前栈顶帧的 DAP 变量并渲染到行尾
+// （纯规则与上限在 src/inlineDebugValues.ts，DAP→装饰在 src/editorInlineValues.ts）。
+const inlineValues = createInlineValues({ enabled: () => !heavy && dapState.paused && dapState.currentLocation?.path === props.path, view: () => view })
 let inlineTimer: number | undefined
 let inlineInFlight = false
+// 多建议：这一拍拿到的全部条目与当前下标。上游是「一个 session 里有多个 variant」，
+// 切换动作 `SwitchInlineCompletionVariantAction`（`InlineCompletionActions.kt:31-52`；键位
+// `alt CLOSE_BRACKET`/`alt OPEN_BRACKET`，intellij.platform.lang.impl.actions.xml:127-132）。
+// 纯规则在 src/inlineCompletionNav.ts（去重、绕圈、触发类型），这里只存下标并落进编辑器状态。
+let inlineItems: InlineCompletionItem[] = []
+let inlineIndex = 0
+/** 落第 `index` 条建议（绕圈）；没有可显示的就清掉旧建议。返回是否真的画出来了。 */
+function showInlineSuggestion(index: number): boolean {
+  const editor = view
+  if (!editor || !inlineItems.length) return false
+  const at = ((index % inlineItems.length) + inlineItems.length) % inlineItems.length
+  const head = editor.state.selection.main.head          // 接受区间与锚点都以光标的 LSP 坐标为准
+  const line = editor.state.doc.lineAt(head)
+  const suggestion = suggestionFor(inlineItems[at], { line: line.number - 1, char: head - line.from })
+  inlineIndex = at
+  editor.dispatch({ effects: setInlineSuggestion.of(suggestion) })
+  return suggestion !== null
+}
+function clearInlineSuggestion() {
+  inlineItems = []
+  inlineIndex = 0
+  view?.dispatch({ effects: setInlineSuggestion.of(null) })
+}
 function scheduleInlineCompletion() {
   if (!props.lspEnabled || heavy) return
   if (inlineTimer !== undefined) clearTimeout(inlineTimer)
   // IDEA 的 `isEnabled(event)` 在打字/停顿后触发；这里同样只在"没有选区"时问 ——
   // 有选区时用户是在选东西，不是在打字。
   const editor = view
-  if (editor && !editor.state.selection.main.empty) { editor.dispatch({ effects: setInlineSuggestion.of(null) }); return }
+  if (editor && !editor.state.selection.main.empty) { clearInlineSuggestion(); return }
   inlineTimer = window.setTimeout(() => { inlineTimer = undefined; void runInlineCompletion() }, 300)
 }
-async function runInlineCompletion() {
+async function runInlineCompletion(trigger: 'automatic' | 'explicit' = 'automatic') {
   const editor = view
   if (!editor || !props.lspEnabled || inlineInFlight) return
   const head = editor.state.selection.main.head
@@ -248,54 +271,34 @@ async function runInlineCompletion() {
   try {
     const result = await request<InlineCompletionResult>('lsp.request', {
       kind: 'inlineCompletion', path: props.path, line: line.number - 1, character: head - line.from,
-      triggerKind: 1,
+      // 自动（1）/ 显式（2）：Shift+Alt+\ 是 `CallInlineCompletionAction`（actions.xml:115-117），
+      // 协议里就是显式索取这一档，服务器据此决定要不要现在就算。规则见 inlineTriggerKindFor。
+      triggerKind: inlineTriggerKindFor(trigger),
     })
     // 这期间文档可能已经变了（await 之后位置全变了），所以 dispatch 前重新确认视图没换。
-    const target = view
-    if (target !== editor) return
-    const cursor = { line: line.number - 1, char: head - line.from }
-    const suggestion = suggestionFor(result.available ? result.items?.[0] : undefined, cursor)
-    if (!suggestion) { editor.dispatch({ effects: setInlineSuggestion.of(null) }); return }
-    editor.dispatch({ effects: setInlineSuggestion.of(suggestion) })
+    if (view !== editor) return
+    // 服务器重发时列表里可能有重复项，按身份键（range 起点 + 插入文本）去重后整份替换。
+    inlineItems = dedupeSuggestions(result.available ? result.items : undefined)
+    showInlineSuggestion(0)
   } catch { /* 服务器没有行内补全能力时什么都不显示，不影响编辑 */ }
   finally { inlineInFlight = false }
 }
-let hintTimer: number | undefined
-// LSP `textDocument/semanticTokens/*` 的 decoration —— IDEA 的 daemon 着色路径
-// （见 `src/semanticTokens.ts` 的模块注释：真实机制是 `HighlightVisitor`/`Annotator` +
-//  `TextAttributesKey`，不是网上流传的 "SemanticHighlightingPass"，那个类不存在）。
-//
-// **文档一变就整份作废**：语义着色依赖精确的 (行, 列)，不像断点行高亮那样能跟着 map 移动 ——
-// 把旧 decoration map 到新位置只会把颜色留在错误的 token 上。下一次拉取回来重建。
-const setSemanticTokens = StateEffect.define<readonly SemanticToken[]>()
-// 越界的行/列直接跳过：服务端的 legend 版本与文档版本都可能和客户端不一致，
-// 一个畸形 token 不该把编辑器打挂（更不该抛进 CodeMirror 的 update 里）。
-function buildSemanticDecorations(state: EditorState, tokens: readonly SemanticToken[]): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>()
-  // `RangeSetBuilder` 要求**按位置升序**添加，所以先排序（服务端的顺序不保证）。
-  const ordered = [...tokens].sort((left, right) => left.line - right.line || left.startChar - right.startChar)
-  for (const token of ordered) {
-    if (token.line < 0 || token.line >= state.doc.lines) continue
-    const line = state.doc.line(token.line + 1)
-    const from = line.from + Math.max(0, token.startChar)
-    const to = Math.min(line.to, from + Math.max(0, token.length))
-    if (to <= from) continue
-    const classes = semanticTokenClass(token)
-    if (!classes) continue
-    builder.add(from, to, Decoration.mark({ class: classes }))
-  }
-  return builder.finish()
+// Alt+] / Alt+[：切到下一条/上一条建议（绕圈，规则在 `cycleSuggestionIndex`）。
+// 没有建议时不消费按键 —— 与上游 `isEnabledForCaret` 同一口径（InlineCompletionActions.kt:48-50）。
+function cycleInlineSuggestion(editor: EditorView, delta: number) {
+  if (editor.state.field(inlineSuggestionField, false) === null) return false
+  return showInlineSuggestion(cycleSuggestionIndex(inlineIndex, delta, inlineItems.length))
 }
-const semanticTokensField = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update: (decorations, transaction) => {
-    if (transaction.docChanged) return Decoration.none
-    for (const effect of transaction.effects)
-      if (effect.is(setSemanticTokens)) return buildSemanticDecorations(transaction.state, effect.value)
-    return decorations
-  },
-  provide: field => EditorView.decorations.from(field),
-})
+// Shift+Alt+\：显式索取一次（`CallInlineCompletionAction`，actions.xml:115-117）。
+function callInlineCompletion() {
+  if (!props.lspEnabled || heavy) return false
+  if (inlineTimer !== undefined) { clearTimeout(inlineTimer); inlineTimer = undefined }
+  void runInlineCompletion('explicit')
+  return true
+}
+// LSP `textDocument/semanticTokens/*`：decoration 层在 src/editorSemanticField.ts
+// （上游 daemon 着色路径见 src/semanticTokens.ts 的 `HighlightVisitor`/`Annotator` + `TextAttributesKey`），
+// 拉取/增量/delta 合并与导入期重试留在这里（要和 warmup 生命周期绑一起）。
 let semanticTimer: number | undefined
 // `resultId` 与它对应的**压缩数组**必须成对维护：delta 的 `edits` 是作用在这个数组上的整数
 // 下标，两者不同源就会把颜色按错误的偏移改掉。
@@ -309,11 +312,11 @@ function scheduleSemanticTokens() {
   if (!props.lspEnabled || heavy) return
   if (semanticTimer !== undefined) clearTimeout(semanticTimer)
   // 语义着色跟着编辑走（IDEA 的 daemon 也是每次改动重跑），比补全宽松一点即可。
-  semanticTimer = window.setTimeout(() => { semanticTimer = undefined; void runSemanticTokens() }, 400)
+  semanticTimer = window.setTimeout(() => { semanticTimer = undefined; void semanticWarmup.start() }, 400)
 }
-async function runSemanticTokens() {
+async function runSemanticTokens(): Promise<boolean> {
   const editor = view
-  if (!editor || !props.lspEnabled) return
+  if (!editor || !props.lspEnabled) return true
   try {
     const result = await request<LspSemanticTokensResult>('lsp.request', {
       kind: 'semanticTokens', path: props.path, line: 0, character: 0,
@@ -322,8 +325,8 @@ async function runSemanticTokens() {
     })
     // 期间换过文档（视图重建）的话这次答案已经过期，不能 dispatch 到新文档上。
     const target = view
-    if (target !== editor) return
-    if (!result.available) { resetSemanticTokens(); target.dispatch({ effects: setSemanticTokens.of([]) }); return }
+    if (target !== editor) return true
+    if (!result.available) { resetSemanticTokens(); target.dispatch({ effects: setSemanticTokens.of([]) }); return true }
     if (result.resultId) semanticResultId = result.resultId
     // 规范允许 `/full/delta` 用整份 `data` 回答（"全部替换"），所以 edits 为空时就用 data。
     const hasEdits = Array.isArray(result.edits) && result.edits.length > 0
@@ -331,10 +334,11 @@ async function runSemanticTokens() {
       ? applySemanticTokenEdits(semanticData, result.edits)
       : [...(result.data ?? [])]
     target.dispatch({ effects: setSemanticTokens.of(decodeSemanticTokens(semanticData, result.legend)) })
-  } catch { /* 服务器没有语义高亮能力时保持词法着色，不影响编辑 */ }
+    // 非空才算"着色已到位"；空数组还可能是导入期，交给 warmup 退避重试（available: false 则到此为止）。
+    return semanticData.length > 0
+  } catch { return false }
 }
-// 折叠的调度管道（存 → 装区间 → 按设置折默认 → 清失效 → 恢复）在 src/editorFoldingController.ts ——
-// 宿主只注入依赖。顺序与两个真机踩过的坑（先存后折、管道必须串行）都写在那个模块头上。
+// 折叠调度管道在 src/editorFoldingController.ts（顺序与两个真机坑写在那；宿主只注入依赖）。
 const folding = createFoldingController({
   path: () => props.path,
   view: () => view,
@@ -349,49 +353,47 @@ const folding = createFoldingController({
   onError: () => undefined,   // 服务器不给折叠区间时保持内置折叠，不影响编辑
 })
 // LSP `textDocument/diagnostic`（**pull 模型**，IDEA 的批处理 Inspection）：服务器声明了
-// `diagnosticProvider` 时由客户端主动来问，结果写进同一个诊断 store；`previousResultId` 让服务器
-// 可以回答 `unchanged`。规范要求 pull 与 push 二选一，所以标记为 pull 的文件不再接受推送
-// （见 bridge 的 `pullManagedFiles`）。
+// `diagnosticProvider` 时由客户端主动来问，`previousResultId` 让它可以回答 `unchanged`。pull 与 push
+// 二选一，标记为 pull 的文件不再接受推送（见 bridge 的 `pullManagedFiles`）。
 const diagnosticIds = new Map<string, string>()
 let pullTimer: number | undefined
 function schedulePullDiagnostics() {
   if (!props.lspEnabled || heavy) return
   if (pullTimer !== undefined) clearTimeout(pullTimer)
-  pullTimer = window.setTimeout(() => { pullTimer = undefined; void runPullDiagnostics() }, 350)
+  pullTimer = window.setTimeout(() => { pullTimer = undefined; void diagnosticWarmup.start() }, 350)
 }
-async function runPullDiagnostics() {
-  if (!props.lspEnabled) return
+async function runPullDiagnostics(): Promise<boolean> {
+  if (!props.lspEnabled) return true
   try {
     const previousResultId = diagnosticIds.get(props.path)
     const report = await request<LspDiagnosticReport>('lsp.request',
       { kind: 'diagnostic', path: props.path, line: 0, character: 0, previousResultId })
-    // 服务器只推送（或重启后不再声明 diagnosticProvider）：撤掉 pull 标记，
-    // 让推送通道重新接管这个文件 —— 否则它会永远收不到诊断。已有诊断不清空。
-    if (!report.supported) { clearPullDiagnostics(props.path); return }
-    if (report.kind === 'unchanged') return
+    // 服务器只推送（或重启后不再声明 diagnosticProvider）：撤掉 pull 标记，让推送通道重新接管 ——
+    // 否则它会永远收不到诊断。已有诊断不清空。
+    if (!report.supported) { clearPullDiagnostics(props.path); return true }
+    if (report.kind === 'unchanged') return true
     if (report.resultId) diagnosticIds.set(props.path, report.resultId)
     setPullDiagnostics(props.path, report.items ?? [])
-  } catch { /* 拉取失败时保留现有诊断，不影响编辑 */ }
+    // 非空才算"诊断已到位"；空 items 在导入期还可能是没扫到，交给 warmup 退避重试。
+    return (report.items ?? []).length > 0
+  } catch { return false }
 }
-function scheduleHints() {
-  if (!props.lspEnabled || heavy) return
-  if (hintTimer !== undefined) clearTimeout(hintTimer)
-  hintTimer = window.setTimeout(() => { hintTimer = undefined; void runHints() }, 250)
-}
-async function runHints() {
-  const editor = view
-  if (!editor || !props.lspEnabled) return
+// —— 导入期重试（JDT 大工程导入 ~9.5 分钟里这三条请求全超时；规则与退避在 src/lspWarmup.ts）——
+// 折叠这条：拿到非空区间后让控制器重新拉取并应用；available: false 视为"能力没有"、不再重试。
+async function foldingWarmupRun(): Promise<boolean> {
+  if (!props.lspEnabled) return true
   try {
-    const result = await request<LspInlayHintResult>('lsp.request', { kind: 'inlayHint', path: props.path, line: 0, character: 0 })
-    const current = view
-    if (!current) return
-    const seen = new Set<number>()
-    const entries = (result.hints ?? []).flatMap(hint => {
-      try { const from = lspPosition(current.state.doc, hint.line, hint.character); if (seen.has(from)) return []; seen.add(from); return [{ from, text: hint.label, padLeft: !!hint.paddingLeft, padRight: !!hint.paddingRight }] } catch { return [] }
-    })
-    current.dispatch({ effects: setHints.of(entries) })
-  } catch { /* server busy */ }
+    const result = await request<LspFoldingRangeResult>('lsp.request', { kind: 'foldingRange', path: props.path, line: 0, character: 0 })
+    if (!result.available) return true
+    if (!(result.ranges ?? []).length) return false
+    folding.schedule()
+    return true
+  } catch { return false }
 }
+const semanticWarmup = new LspWarmup({ run: runSemanticTokens })
+const foldingWarmup = new LspWarmup({ run: foldingWarmupRun })
+const diagnosticWarmup = new LspWarmup({ run: runPullDiagnostics })
+function cancelWarmups() { semanticWarmup.cancel(); foldingWarmup.cancel(); diagnosticWarmup.cancel() }
 function rangesToDoc(ranges: LspRangeSpan[], doc: Text) {
   const list = ranges.flatMap(r => { try { const from = lspPosition(doc, r.startLine, r.startChar); const to = lspPosition(doc, r.endLine, r.endChar); return to > from ? [{ from, to }] : [] } catch { return [] } })
   list.sort((a, b) => a.from - b.from || b.to - a.to)
@@ -474,63 +476,26 @@ defineExpose({
     finally { replacing = false }
     if (props.lspEnabled) void request('lsp.change', { path: props.path, text: value }).catch(() => undefined)
   },
-  setReadOnly: (value: boolean) => {
-    const editor = view
-    if (!editor) return
-    replacing = true
-    try { editor.dispatch({ effects: readOnlyMode.reconfigure(value ? EditorState.readOnly.of(true) : []) }) }
-    finally { replacing = false }
-  },
+  setReadOnly: (value: boolean) => { diskReadOnly = value; applyReadOnly() },
 })
 async function loadLanguage(path: string) {
   if (heavy) return
   try {
-    // An "Associate with File Type…" override replaces the extension heuristic;
-    // 'other' means plain text on purpose. Without an override, extensions decide.
-    let extension = [] as Extension
-    const forced = props.language && props.language !== 'other' ? props.language : undefined
-    if (props.language === 'other') extension = []
-    else if (forced === 'java' || (!forced && /\.java$/i.test(path))) extension = (await import('@codemirror/lang-java')).java()
-    else if (forced === 'cpp' || (!forced && /\.(cpp|cc|c|h|hpp|cxx)$/i.test(path))) extension = (await import('@codemirror/lang-cpp')).cpp()
-    else if (forced === 'typescript' || (!forced && /\.(ts|tsx|js|jsx|mjs)$/i.test(path)))
-      extension = (await import('@codemirror/lang-javascript')).javascript({ typescript: forced ? forced === 'typescript' : /\.tsx?$/.test(path), jsx: /\.[jt]sx$/.test(path) })
-    else if (/\.json$/i.test(path)) extension = (await import('@codemirror/lang-json')).json()
-    else if (/\.(html|vue)$/i.test(path)) extension = (await import('@codemirror/lang-html')).html()
-    else if (/\.css$/i.test(path)) extension = (await import('@codemirror/lang-css')).css()
+    // 语言表在 src/editorLanguage.ts（「关联文件类型」覆盖 / 扩展名启发式都在那儿）。
+    const extension = await editorLanguageExtension(path, props.language)
     if (props.path === path) view?.dispatch({ effects: language.reconfigure(extension) })
   } catch { emit('error', `无法加载 ${path} 的语法高亮，文本编辑仍可用。`) }
 }
 /**
- * IDEA's GotoNextError / GotoPreviousError (GotoNextErrorHandler.java). The target is picked
- * by src/gotoNextError.ts; this only turns it into an editor transaction.
- *
- * navigateToError() (:165-198) removes the selection and the secondary carets, puts the caret
- * on the highlight and scrolls it to the centre (:172-177), then unfolds a collapsed region
- * hiding it (:178-179). getNavigationPositionFor() (:200-208) navigates to the highlight
- * start plus `navigationShift` — zero for LSP diagnostics, and the after-end-of-line case
- * needs no extra shift either: lspPosition() clamps the character to the line, so an
- * end-of-line highlight already resolves to the offset IDEA would use.
+ * IDEA's GotoNextError / GotoPreviousError (GotoNextErrorHandler.java). 挑目标与落进编辑器
+ * 都在 src/gotoNextError.ts（navigateToError）；这里只把「有没有视图/LSP」与提示的开关接上。
  */
 function goToError(forward: boolean): boolean {
-  const editor = view
-  if (!editor || !props.lspEnabled) return false
-  const doc = editor.state.doc
-  const head = editor.state.selection.main.head
-  const line = doc.lineAt(head)
-  const target = nextErrorTarget(
-    lspDiagnostics.get(props.path) ?? [],
-    { line: line.number - 1, character: head - line.from },
-    forward,
-  )
-  if (!target) { showErrorHint(NO_ERRORS_IN_FILE); return true }
-  const pos = lspPosition(doc, target.line, target.character)
-  const effects: StateEffect<unknown>[] = [EditorView.scrollIntoView(pos, { y: 'center' })]
-  foldedRanges(editor.state).between(0, doc.length, (from, to) => {
-    if (from <= pos && pos <= to) effects.push(unfoldEffect.of({ from, to }))
-  })
+  if (!props.lspEnabled) return false
+  const outcome = navigateToError(view, lspDiagnostics.get(props.path) ?? [], forward)
+  if (outcome === 'unavailable') return false
+  if (outcome === 'no-target') { showErrorHint(NO_ERRORS_IN_FILE); return true }
   hideErrorHint()
-  editor.dispatch({ selection: { anchor: pos }, effects })
-  editor.focus()
   return true
 }
 const hoverSource = hoverTooltip(async (hovered, pos) => {
@@ -637,12 +602,9 @@ function nextTemplateStop(view: EditorView): boolean {
   view.dispatch({ selection: { anchor: next.from, head: next.to }, scrollIntoView: true })
   return true
 }
-// Tab / Shift+Tab (IDEA's indent & outdent). CodeMirror's basicSetup deliberately
-// does NOT install `indentWithTab`, so until now the keystroke fell through to the
-// browser and only moved focus. A non-empty selection indents every line it touches;
-// a bare caret inserts one indent unit — a real tab when Editor → "Use tab character"
-// is on, `tabSize` spaces otherwise. Both paths read the same `indentUnit` facet the
-// settings compartment writes, so the result always matches the setting.
+// Tab / Shift+Tab (IDEA's indent & outdent). basicSetup deliberately omits `indentWithTab`, so the key
+// used to fall through to the browser. A selection indents every touched line; a caret inserts one indent
+// unit (tab when Editor → "Use tab character" is on, else `tabSize` spaces) — both from the same facet.
 function indentUnitText() { return props.settings.useTabCharacter ? '\t' : ' '.repeat(props.settings.tabSize) }
 function changeIndent(direction: 1 | -1): Command {
   const outdent = direction < 0
@@ -732,17 +694,13 @@ function emitSemantic(kind: 'rename' | 'references' | 'codeAction' | 'format' | 
     return true
   }
 }
-// One flat action surface for the menus: the shared editing commands plus the
-// editor-local actions (search panels, completion, and the LSP queries whose result
-// the parent has to render). A menu item and its key binding resolve to the same
-// function, so neither can advertise something the editor does not do.
+// One flat action surface for the menus: shared editing commands + editor-local actions (search bar,
+// completion, LSP queries the parent renders). A menu item and its key binding resolve to the same function.
 const editorActions: Record<string, Command> = {
   ...editingCommands,
   ...clipboardCommands(text => void copyToClipboard(text)), // IDEA EditorCopy/EditorCut：无选区时先选中整行（src/editorClipboard.ts）
-  // 查找那一族改走**编辑器内查找栏**（上游 `SearchReplaceComponent`）：`editingCommands` 里的
-  // `find` / `find.next` / `find.previous` 指的是 CodeMirror 自己的面板与命令，在本仓是空操作，
-  // 所以在这里整族覆盖掉。`replace.next` / `replace.all` 上游不是动作（是栏上的两个按钮），
-  // 也一并撤掉，免得 Find Action 里出现两个点了没反应的条目。
+  // 查找那一族改走**编辑器内查找栏**（上游 `SearchReplaceComponent`）：`editingCommands` 的 find 族指向
+  // CodeMirror 自己的面板（本仓是空操作），整族在此覆盖；`replace.next`/`replace.all` 上游是按钮、一并撤掉。
   find: () => { openFindBar(false); return true },
   replace: () => { openFindBar(true); return true },
   'find.next': findCommand(false),
@@ -807,6 +765,8 @@ function lspExtensions(): Extension[] {
     inlineSuggestionField,
     inlineDecorationsField,
     inlineCompletionKeymap,
+    // Alt+] / Alt+[ 切建议、Shift+Alt+\ 显式索取（键位与上游一致，见 inlineNavigationKeymap 的注释）。
+    inlineNavigationKeymap({ cycle: cycleInlineSuggestion, call: () => callInlineCompletion() }),
     // Completion UI（候选行三列 + 真实图标 + IDEA New UI 配色/几何）在 src/completionUi.ts；
     // Ctrl+Space 的 Basic 补全绑定也在那里（`$default.xml:732-734`），编辑器这里只提供 source。
     completionUi([mergeCompletion]),
@@ -832,10 +792,8 @@ function lspExtensions(): Extension[] {
       { key: 'Ctrl-p', preventDefault: true, run: emitSemantic('signature') },
       { key: 'Mod-w', preventDefault: true, run: () => adjustSelection(true) },
       { key: 'Mod-Shift-w', preventDefault: true, run: () => adjustSelection(false) },
-      // $default.xml:658-660 GotoNextError = F2, :679-681 GotoPreviousError = shift F2. Both
-      // are editor actions that need highlighting to be available
-      // (BaseGotoNextErrorAction.isValidForFile:52-54), so they belong to this conditional
-      // keymap rather than to the always-on one.
+      // $default.xml:658-660 / :679-681 — GotoNextError = F2, GotoPreviousError = shift F2. Both need
+      // highlighting to be available (BaseGotoNextErrorAction.isValidForFile:52-54), hence this keymap.
       { key: 'F2', preventDefault: true, run: () => goToError(true) },
       { key: 'Shift-F2', preventDefault: true, run: () => goToError(false) },
     ]),
@@ -863,7 +821,7 @@ function applyReveal(target: { path: string; line: number; column?: number } | n
 // 那几条状态扩展的实现在 src/editorTheme.ts（与主题同族，且那个文件已经拿着编辑器外观）。
 // IDEA「Use tab character」（Editor → Code Style）：缩进单位变成真制表符。
 function editorOptions() {
-  return editorOptionExtensions({ tabSize: props.settings.tabSize, indentUnit: indentUnitText(), wordWrap: props.settings.wordWrap, lineNumbers: props.settings.lineNumbers, showWhitespaces: props.settings.showWhitespaces }, heavy, whitespaceLayer)
+  return editorOptionExtensions({ tabSize: props.settings.tabSize, indentUnit: indentUnitText(), wordWrap: props.settings.wordWrap, lineNumbers: props.settings.lineNumbers, showWhitespaces: props.settings.showWhitespaces, lineNumeration: props.settings.lineNumeration }, heavy, whitespaceLayer)
 }
 onMounted(() => {
   view = new EditorView({
@@ -884,11 +842,11 @@ onMounted(() => {
           { key: 'Alt-Shift-ArrowUp', preventDefault: true, run: editingCommands['line.moveUp']! },
           { key: 'Alt-Shift-ArrowDown', preventDefault: true, run: editingCommands['line.moveDown']! },
           { key: 'Mod-Shift-j', preventDefault: true, run: editingCommands['line.join']! },
+          // 移动到配对的括号 = Ctrl+Shift+M（`EditorMatchBrace`，`$default.xml:1146-1148`；Mac 那份 `:642` 也是 shift control M）。
+          { key: 'Ctrl-Shift-m', preventDefault: true, run: editingCommands['brace.match']! },
           { key: 'Mod-Shift-u', preventDefault: true, run: editingCommands['case.toggle']! },
-          // FindNext/FindPrevious = F3 / Shift+F3（$default.xml:707-708 / :507-508）；编辑
-          // 菜单公布的正是这两条。它们**必须走查找栏的会话**：CodeMirror 自带的
-          // findNext/findPrevious 只在它自己的面板打开时才有事做，本仓的栏是自绘的
-          // （实现见 src/editorSearchExtension.ts 的 goToMatch）。
+          // FindNext/FindPrevious = F3 / Shift+F3（$default.xml:707-708 / :507-508），编辑菜单公布的正是这两条。
+          // 必须走查找栏会话：CodeMirror 自带的 findNext/findPrevious 只在它自己的面板打开时才有事做（见 editorSearchExtension.ts）。
           { key: 'F3', preventDefault: true, run: findCommand(false) },
           { key: 'Shift-F3', preventDefault: true, run: findCommand(true) },
           // Find = Ctrl+F / Replace = Ctrl+R（$default.xml:565-567 / :374-376）。
@@ -941,18 +899,34 @@ onMounted(() => {
           // own highest-precedence keymap, which runs before this one.)
           { key: 'Tab', preventDefault: true, run: editor => nextTemplateStop(editor) || indentCommand(editor), shift: outdentCommand },
           { key: 'Ctrl-Shift-Backspace', preventDefault: true, run: lastEditLocation },
+          // Unwrap（上游 Code 菜单 `UnwrapAction`，$default.xml:917-920 = Ctrl+Shift+Delete）。
+          { key: 'Ctrl-Shift-Delete', preventDefault: true, run: editor => createUnwrapCommand(props.settings.tabSize)(editor) },
           // EditorToggleInsertState = INSERT（`$default.xml:457-459`）。
           { key: 'Insert', preventDefault: true, run: editor => { toggleOverwrite(editor); return true } },
+          // 回车：上游 `enter/*` 里本仓原先没有的三条（行注释中间续注释、未配对左花括号后补 `}`、
+          // 字符串里插 `" + "`）。**排在 basicSetup 之前**，否则 `insertNewlineAndIndent` 先赢；
+          // 三条都不认得时本命令返回 false，键继续往 basicSetup 走（成对花括号之间多插一个换行
+          // 那一条是 `insertNewlineAndIndent` 自己在做，见 src/enterHandlers.ts 的模块头）。
+          { key: 'Enter', preventDefault: true, run: smartEnter },
+          // 语句级上下移动（`$default.xml:782-787`：MoveStatementDown = Ctrl+Shift+Down、
+          // MoveStatementUp = Ctrl+Shift+Up；Alt+Shift+Up/Down 是 MoveLineUp/Down，上面已挂）。
+          { key: 'Ctrl-Shift-ArrowUp', preventDefault: true, run: moveStatement(false) },
+          { key: 'Ctrl-Shift-ArrowDown', preventDefault: true, run: moveStatement(true) },
+          // GotoCustomRegion = Ctrl+Alt+.（`$default.xml:535-537`）：弹自定义折叠区域列表。
+          // 一个区域都没有时给提示，与 `GotoCustomRegionAction.java:65` 一致。
+          { key: 'Ctrl-Alt-.', preventDefault: true, run: () => {
+            if (customRegions.show()) return true
+            showErrorHint('这个文件里没有自定义折叠区域')
+            return true
+          } },
         ]),
         // Keys the library would otherwise answer with something IDEA does not do. These
         // bindings have to precede basicSetup: a CodeMirror keymap facet is a plain facet, so
         // the extension listed first wins the key.
         keymap.of([
-          // $default.xml:849-851 — F8 is Step Over in the debugger, and dapStep runs from the
-          // window-level handler. @codemirror/lint's lintKeymap also binds F8 to
-          // nextDiagnostic and would fire for the same press, dragging the caret away
-          // mid-step. Consuming the key here shadows only the library binding: CodeMirror
-          // prevents the browser default but lets the event through to the window handler.
+          // $default.xml:849-851 — F8 is Step Over; dapStep runs from the window-level handler, and
+          // @codemirror/lint's lintKeymap also binds F8 to nextDiagnostic. Consuming it here shadows only
+          // the library binding: the browser default is prevented but the event still reaches the window handler.
           { key: 'F8', preventDefault: true, run: () => true },
           // $default.xml:309-311 / :717-719 — Alt+Left/Right is PreviousTab/NextTab, and
           // TabNavigationActionBase.java:71-78 routes it to the editor's tabs. CodeMirror binds the
@@ -961,30 +935,41 @@ onMounted(() => {
           { key: 'Alt-ArrowRight', preventDefault: true, run: () => true },
         ]),
         basicSetup,
-        // 查找栏的状态、命中高亮与 F3/Shift+F3 的会话（上游 `SearchReplaceComponent`）。
         // 覆盖模式：事务过滤 + 块光标（上游的可见指示就是块光标，没有状态栏组件）。
-        overwriteExtension(),
-        overwriteTheme,
-        // 排在 basicSetup 之后即可：它自己那两条 F3 键位写在**前面**那张 keymap 里，先赢。
-        editorSearchExtension(),
+        overwriteExtension(), overwriteTheme,
+        // 自定义折叠区域弹层（上游 `CustomFoldingRegionsPopup`）：文本一变就收起。
+        customRegions.extension,
+        // 查找栏（上游 `SearchReplaceComponent`）的状态/高亮/F3 会话；排在 basicSetup 之后即可 ——
+        // 它自己那两条 F3 键位写在**前面**那张 keymap 里，先赢。双向文本提示挂在同一条链上。
+        editorSearchExtension(), bidiNotificationExtension(direction => emit('bidiDirection', direction)),
         EditorState.lineSeparator.of(props.content.includes('\r\n') ? '\r\n' : '\n'),
         language.of([]),
         ...(heavy ? [] : [syntaxHighlighting(syntaxColors)]),
         appearance.of(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })),
         options.of(editorOptions()),
         lsp.of(heavy ? [] : lspExtensions()),
+        // 调试器值提示：常驻（不进 lsp 门），没挂起的调试会话时它自己返回 null，不弹。
+        quickEvaluateHint,
         // Alt+drag always selects a rectangle; the compartment holds the persistent
         // column-selection mode toggled by Alt+Shift+Insert.
         rectangularSelection(),
         columnMode.of([]),
-        // IDEA's read-only status table: a locked file edits nowhere.
-        readOnlyMode.of(props.readOnly ? EditorState.readOnly.of(true) : []),
-        // Settings → "Show indent guides": the editor draws a thin vertical rule at
-        // every column boundary of `indentUnit`. Disabled by default to match the
-        // previous look; toggled live by reconfigure(indentGuides).
-        indentGuides.of(props.settings.showIndentGuides ? indentGuidesExtension : []),
+        // IDEA's read-only status table: a locked file edits nowhere. 大文件模式也走这里
+        // （上游 `EditorModel.java:1017` 用 viewer 编辑器；「解除只读」按钮撤掉这层保护）。
+        readOnlyMode.of(diskReadOnly || largeProtected ? EditorState.readOnly.of(true) : []),
+        // Settings → "Show indent guides"（每级缩进一条竖线，实现在 src/editorIndentGuides.ts）。
+        indentGuides.of(props.settings.showIndentGuides ? editorIndentGuides : []),
+        // 彩虹括号（上游 `RainbowHighlighter`）：本仓自己的开关沿用 `bracketMatching` 设置，
+        // 与 basicSetup 的括号配对高亮同一个门（见 tests/editor-brackets.test.mjs 记的口径）。
+        brackets.of(props.settings.bracketMatching && !heavy ? rainbowBrackets() : []),
+        // 逐语言的引号规则与 Java 泛型 `<>` 的配对高亮：两者都读 `getLanguage()` 的即时语言，常驻一条就够；
+        // 不在表里的语言一律返回 false，交回 CodeMirror 的 `closeBrackets`。上游按 fileType 取 handler
+        // （`QuoteHandlerEP.java:16-27` + `intellij.platform.lang.impl.xml:405/:408`；尖括号 `JavaPairedBraceMatcher.java:12/:26-34`）。
+        smartQuotes(() => props.language), angleBraceHighlight(() => props.language),
         debugLineExtension,
         semanticTokensField,
+        // 行内调试值（暂停时在行尾显示当前帧变量值）。
+        inlineValues.extension,
         // 粘贴通道（IDEA 的编辑器粘贴处理器 + REFORMAT_ON_PASTE 后处理）
         pasteChannel(event => emit('paste', event)),
         // 复制/剪切通道（IDEA `EditorCopy`/`EditorCut`：无选区时先选中整行）
@@ -996,9 +981,10 @@ onMounted(() => {
         // EditorGutterLayout.createNewUILayout places annotation columns before line numbers.
         Prec.high(blameAnnotationsExtension()),
         documentLinks.extension,
-        codeLens.extension,
-        highlightField,
-        hintField,
+        codeLens.extension, literalPreview.extension,
+        symbolHighlight.extension,
+        annotatorLayer.extension,
+        inlayHints.extension,
         EditorView.domEventHandlers({
           mousedown: (event, editor) => {
             const pos = editor.posAtCoords({ x: event.clientX, y: event.clientY })
@@ -1020,14 +1006,10 @@ onMounted(() => {
         EditorView.updateListener.of(update => {
           // HIDE_BY_TEXT_CHANGE (HintManagerImpl.java:624): typing dismisses the hint.
           if (update.docChanged) hideErrorHint()
-          // 每一次内容变更都要通知宿主，不能只在"变脏那一拍"发一次：书签对账
-          // （BookmarkManager 监听的是每个文档变更）、断点位置缓存失效、最近更改位置、
-          // 草稿与自动保存重排都挂在 `change` 上 —— 漏了第二次以后的编辑，撤销就更明显
-          // （Ctrl+Z 也是带 changes 的一次事务：CodeMirror history 的 `pop` 用
-          //  node_modules/@codemirror/commands/dist/index.js:548-556 的 state.update({changes…})
-          //  派发，userEvent 是 "undo"）。宿主侧对重复通知是幂等的（rememberPlace 按
-          //  文件+行去重，定时器重排就是 clear+set）。
-          if (update.docChanged && !replacing) { emit('change'); scheduleLspChange(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); rangeStack = null; templateStops = []; noteEdit(); scheduleHints() }
+          // 每一次内容变更都要通知宿主（书签对账、断点缓存、最近位置、草稿都在 `change` 上；Ctrl+Z 也是带
+          // changes 的一次事务 —— history 的 pop 用 state.update 派发，见 @codemirror/commands index.js:548-556）。
+          // 宿主侧通知幂等：rememberPlace 按文件+行去重、定时器重排是 clear+set。
+          if (update.docChanged && !replacing) { emit('change'); scheduleLspChange(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); rangeStack = null; templateStops = []; noteEdit(); inlayHints.schedule(); annotatorLayer.schedule(); if (props.lspEnabled && !heavy) folding.schedule() }
           // 查找栏的计数跟着文档变（改了字，命中数与当前下标都会变）。
           if (update.docChanged || update.selectionSet) findBar.refresh()
           // 冲突条同理：标记被接受/手写进来/删掉都要当场反映。
@@ -1036,68 +1018,77 @@ onMounted(() => {
           if (!replacing) { const typed = insertedText(update); if (typed) emit('typing', typed) }
           if (update.selectionSet) scheduleInlineCompletion()
           if (update.selectionSet || update.docChanged) {
-            const pos = update.state.selection.main.head
-            const line = update.state.doc.lineAt(pos)
-            emit('cursor', line.number, pos - line.from + 1)
-            cursorLine.value = line.number - 1
+            const pos = update.state.selection.main.head, line = update.state.doc.lineAt(pos)
+            emit('cursor', line.number, pos - line.from + 1); cursorLine.value = line.number - 1
             // IDEA's PositionPanel switches to "N selected" while a selection exists.
-            const range = update.state.selection.main
-            const selected = range.to - range.from
-            emit('selection', selected > 0 ? { characters: selected, lines: update.state.doc.lineAt(range.to).number - update.state.doc.lineAt(range.from).number } : null)
-            emit('cursors', update.state.selection.ranges.length)
-            if (update.selectionSet) scheduleHighlight()
+            const range = update.state.selection.main, selected = range.to - range.from
+            emit('selection', selected > 0 ? { characters: selected, lines: update.state.doc.lineAt(range.to).number - update.state.doc.lineAt(range.from).number } : null); emit('cursors', update.state.selection.ranges.length)
+            if (update.selectionSet) symbolHighlight.schedule()
+          }
+          // 音频提示的折叠线索（上游 `FoldedCodeAudioCueDetector`）：只报**新折起**的区间（展开不响）。
+          if (update.transactions.some(tr => tr.effects.some(effect => effect.is(foldEffect) || effect.is(unfoldEffect)))) {
+            const next = new Set<number>(); foldedRanges(update.state).between(0, update.state.doc.length, from => { next.add(from) })
+            for (const from of next) if (!foldedSeen.has(from)) emit('folded', update.state.doc.lineAt(from).number)
+            foldedSeen = next
           }
         }),
         EditorView.contentAttributes.of({ 'aria-label': `代码编辑器 ${props.path}`, spellcheck: 'false' }),
       ],
     }),
   })
-  void loadLanguage(props.path)
-  syncDebugLine(view, props.debugLine ?? 0)
-  syncGutter()
-  syncBlame()
+  void loadLanguage(props.path); syncDebugLine(view, props.debugLine ?? 0)
+  syncGutter(); syncBlame()
   // HIDE_BY_SCROLLING (HintManagerImpl.java:624): the hint is placed in the container's
   // coordinates and would be left floating over the wrong line once the text moves.
   view.scrollDOM.addEventListener('scroll', hideErrorHint, { passive: true })
   if (props.active) view.focus()
   applyReveal(props.reveal)
-  scheduleHighlight()
-  scheduleHints()
+  symbolHighlight.schedule()
+  annotatorLayer.schedule()
+  inlayHints.schedule()
 })
 // The hint belongs to one file and to the focused tab, so leaving either dismisses it.
 watch(() => FOLDING_SETTING_ROWS.map(row => props.settings[row.key]).join(','), () => folding.applyDefaults())
-watch(() => props.path, () => { folding.capture(); hideErrorHint(); void loadLanguage(props.path); resetSemanticTokens(); folding.schedule(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion() })
+// InlaySettingsConfigurable 的三档开关：关掉一档要把已经画出来的那些收走，打开要重新问一遍语言服务
+// （`shouldShowInlayHint` 在拉取时过滤，所以重跑 schedule 是唯一出路）。依赖用拼好的字符串而不是数组
+// —— 数组每次都是新引用，会变成「每拍都触发」。
+watch(() => inlayHintTogglesKey(inlayHintToggles(props.settings)), () => inlayHints.schedule())
+watch(() => props.path, () => { cancelWarmups(); folding.capture(); hideErrorHint(); void loadLanguage(props.path); resetSemanticTokens(); folding.schedule(); foldingWarmup.start(); schedulePullDiagnostics(); scheduleSemanticTokens(); documentLinks.schedule(); codeLens.schedule(); scheduleInlineCompletion(); annotatorLayer.schedule() })
 watch(() => props.active, async active => {
   if (active) { await nextTick(); view?.requestMeasure(); view?.focus() }
   else hideErrorHint()
 })
 watch(() => props.theme, () => view?.dispatch({ effects: appearance.reconfigure(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })) }))
-watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? indentGuidesExtension : []), setIndentGuides.of(props.settings.showIndentGuides)] }), { deep: true })
+watch(() => props.settings, () => view?.dispatch({ effects: [appearance.reconfigure(editorTheme({ fontSize: props.settings.fontSize, lineNumbers: props.settings.lineNumbers, dark: props.theme === 'dark' })), options.reconfigure(editorOptions()), indentGuides.reconfigure(props.settings.showIndentGuides ? editorIndentGuides : []), setIndentGuides.of(props.settings.showIndentGuides), brackets.reconfigure(props.settings.bracketMatching && !heavy ? rainbowBrackets() : [])] }), { deep: true })
 watch(() => props.lspEnabled, enabled => {
   view?.dispatch({ effects: lsp.reconfigure(enabled ? lspExtensions() : []) })
   if (!enabled) {
-    // 关掉语言服务时语义着色也必须撤掉 —— 留着就是一份没人再更新的旧颜色。
-    view?.dispatch({ effects: [setHighlights.of([]), setHints.of([]), setSemanticTokens.of([]), setInlineSuggestion.of(null)] }); documentLinks.reset(); codeLens.reset()
+    // 关掉语言服务时语义着色/同符号高亮/inlay hints 都必须撤掉 —— 留着就是没人再更新的旧标记。
+    // 行内补全连同它的**建议列表**一起清：列表留着，Alt+] 还能切出一条已经不存在的建议。
+    view?.dispatch({ effects: setSemanticTokens.of([]) }); symbolHighlight.clear(); annotatorLayer.clear(); inlayHints.clear(); clearInlineSuggestion(); documentLinks.reset(); codeLens.reset()
     resetSemanticTokens()
     rangeStack = null
     return
   }
   if (view) { forceLinting(view); scheduleLspChange() }
-  scheduleHighlight()
-  scheduleHints()
-  folding.schedule()
+  symbolHighlight.schedule()
+  annotatorLayer.schedule()
+  inlayHints.schedule()
+  folding.schedule(); foldingWarmup.start()
   schedulePullDiagnostics()
   scheduleSemanticTokens()
   documentLinks.schedule()
   codeLens.schedule()
   scheduleInlineCompletion()
 })
-watch(() => lspDiagnostics.get(props.path), () => { if (view && props.lspEnabled) { forceLinting(view); folding.schedule() } })
+watch(() => lspDiagnostics.get(props.path), () => { if (view && props.lspEnabled) { forceLinting(view); folding.schedule(); annotatorLayer.schedule() } })
+// 行内调试值：会话/停点/线程/当前文件任一变化就重取（暂停时才显示，见 enabled 门）。
+watch(() => [dapState.running, dapState.paused, dapState.threadId, dapState.currentLocation?.path, dapState.currentLocation?.line, props.path], () => { void inlineValues.refresh() })
 watch(() => props.reveal, target => applyReveal(target))
 // The parent already flips EditorState.readOnly through setReadOnly(); watching the
 // prop too would re-dispatch the effect on every later re-render.
 watch(() => [props.debugLine, props.gutterIcons, props.blame], () => { syncDebugLine(view, props.debugLine ?? 0); syncGutter(); syncBlame() })
-onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTimeout(lspTimer); if (highlightTimer !== undefined) clearTimeout(highlightTimer); if (pullTimer !== undefined) clearTimeout(pullTimer); if (semanticTimer !== undefined) clearTimeout(semanticTimer); folding.dispose(); documentLinks.dispose(); codeLens.dispose(); if (inlineTimer !== undefined) clearTimeout(inlineTimer); view?.destroy(); view = undefined })
+onBeforeUnmount(() => { cancelWarmups(); folding.capture(); if (lspTimer !== undefined) clearTimeout(lspTimer); if (pullTimer !== undefined) clearTimeout(pullTimer); if (semanticTimer !== undefined) clearTimeout(semanticTimer); folding.dispose(); documentLinks.dispose(); codeLens.dispose(); symbolHighlight.dispose(); annotatorLayer.dispose(); inlayHints.dispose(); if (inlineTimer !== undefined) clearTimeout(inlineTimer); view?.destroy(); view = undefined })
 </script>
 
 <template>
@@ -1114,6 +1105,7 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
       :invalid="findBar.state.invalid"
       :replace-mode="findBar.state.replaceMode"
       :replace-text="findBar.state.replace"
+      :preserve-case="findBar.state.preserveCase"
       :history="findBar.state.history"
       @update="findBar.setOptions"
       @query="findBar.setQuery"
@@ -1122,6 +1114,7 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
       @previous="findBar.previous"
       @close="findBar.close"
       @toggle-replace="findBar.toggleReplace"
+      @toggle-preserve-case="findBar.togglePreserveCase"
       @toggle-in-selection="findBar.toggleInSelection"
       @replace-one="findBar.replaceOne"
       @replace-all="findBar.replaceAll"
@@ -1135,6 +1128,13 @@ onBeforeUnmount(() => { folding.capture(); if (lspTimer !== undefined) clearTime
     />
     <!-- IDEA anchors the hint above the caret line (HintManagerImpl.java:611 ABOVE); coordinates are taken when it appears because any scroll dismisses it. -->
     <div v-if="errorHint" class="editor-hint" role="status" :style="errorHint.style">{{ errorHint.text }}</div>
+    <!-- 大文件提示（上游 `LargeFileNotificationProvider`）：大小 + 只读说明 + 隐藏/不再显示/解除只读。 -->
+    <div v-if="large.large && !largeNoticeHidden && !largeNoticeDismissed" class="editor-large-banner" role="status">
+      <span>{{ largeFileNoticeText(largeBytes) }}</span>
+      <button type="button" class="subtle-button" title="解除只读保护（大文件格式化成普通可编辑缓冲区）" @click="allowLargeEditing">解除只读</button>
+      <button type="button" class="subtle-button" title="本次打开期间隐藏这条提示" @click="largeNoticeHidden = true">隐藏</button>
+      <button type="button" class="subtle-button" title="以后不再显示大文件提示" @click="largeNoticeDismissed = true; dismissLargeFileNotice()">不再显示</button>
+    </div>
     <!-- Teleport 到 body：编辑器容器有 overflow/transform 约束，绝对定位在这里会被裁掉；源位置不影响落点，所以能挪进根 div。 -->
     <Teleport v-if="chooseTarget" to="body">
       <TargetChooserPopup :rows="chooseTarget.rows" :x="chooseTarget.x" :y="chooseTarget.y" title="选择声明" @pick="pickChooseTarget" @close="chooseTarget = null" />

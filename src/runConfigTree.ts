@@ -9,13 +9,15 @@
 //
 // 抽成纯函数的原因：树的分组规则（类型 → 文件夹 → 配置）、唯一名、文件夹名校验都是可测逻辑，
 // 组件只负责渲染与交互。
-import type { RunConfig } from './bridge'
+import { stableRunConfig, type RuntimeRunConfig as RunConfig } from './runTargets.ts'
+import { normalizeRunConfigurations } from './runConfigurationSchema.ts'
 
 /** IDEA 的 ConfigurationType 在 TaoCode 的三个对应物（标签沿用面板里的中文名）。 */
 export const RUN_CONFIG_TYPES: Array<{ id: NonNullable<RunConfig['type']>; label: string }> = [
   { id: 'shell', label: 'Shell 命令' },
   { id: 'application', label: '应用程序' },
   { id: 'debug', label: '调试' },
+  { id: 'compound', label: '复合配置' },
 ]
 
 /** 参数字段必须可逆（IDEA ParametersListUtil.join/parse），不能用空格 split 破坏 classpath。
@@ -94,7 +96,12 @@ export function buildRunConfigTree(configs: readonly RunConfig[]): RunConfigType
   }
   // 类型节点按固定顺序排（没配置的类型不出现），文件夹按名字，配置保持原有顺序。
   return RUN_CONFIG_TYPES.map(entry => byType.get(entry.id)).filter((node): node is RunConfigTypeGroup => Boolean(node))
-    .map(node => ({ ...node, folders: [...node.folders].sort((a, b) => a.name.localeCompare(b.name)) }))
+    .map(node => ({ ...node,
+      configs: [...node.configs].sort((a, b) => Number(Boolean(a.temporary)) - Number(Boolean(b.temporary))),
+      folders: [...node.folders].sort((a, b) => a.name.localeCompare(b.name)).map(folder => ({ ...folder,
+        configs: [...folder.configs].sort((a, b) => Number(Boolean(a.temporary)) - Number(Boolean(b.temporary))),
+      })),
+    }))
 }
 
 /** `RunConfigurable.createUniqueName`（:934）：基名被占用时追加 2、3…（IDEA 从 1 起，这里沿用「名字 2」风格）。 */
@@ -105,6 +112,56 @@ export function uniqueRunConfigName(configs: readonly RunConfig[], base: string)
     const candidate = `${base} ${index}`
     if (!used.has(candidate)) return candidate
   }
+}
+
+/** CompoundRunConfiguration.kt:91-102/130-140; editor :57-100 rejects recursive membership.
+ * Validate the entire reachable graph before any launch or promotion. Names are unique in TaoCode.
+ */
+export function runConfigClosure(config: RunConfig, configs: readonly RunConfig[]): RunConfig[] {
+  const byName = new Map(configs.map(entry => [entry.name, entry]))
+  if (byName.size !== configs.length) throw new Error('运行配置名不能重复。')
+  byName.set(config.name, config)
+  const closure: RunConfig[] = []
+  const seen = new Set<string>()
+  const visit = (entry: RunConfig) => {
+    if (seen.has(entry.name)) return
+    seen.add(entry.name)
+    closure.push(entry)
+    if (entry.type === 'compound') {
+      if (!Array.isArray(entry.configurations)) throw new Error(`复合配置「${entry.name}」没有有效成员。`)
+      for (const name of entry.configurations) {
+        const found = byName.get(name)
+        if (!found) throw new Error(`复合配置「${entry.name}」的成员「${name}」不存在。`)
+        visit(found)
+      }
+    }
+  }
+  visit(config)
+  // The same schema protects persistence and runtime, including every nested child's argv/steps.
+  normalizeRunConfigurations(closure.map(stableRunConfig))
+  for (const entry of closure) {
+    if (entry.env?.some(value => value.indexOf('=') <= 0 || /[\r\n\u0000]/.test(value)))
+      throw new Error(`配置「${entry.name}」的环境变量要写成 KEY=VALUE。`)
+    if (entry.beforeLaunch?.some(step => !step.name.trim() || !step.command.trim()))
+      throw new Error(`配置「${entry.name}」的启动前步骤不能为空。`)
+    if (entry.type === 'compound') {
+      // Upstream implements WithoutOwnBeforeRunSteps; silently dropping compound launch fields is unsafe.
+      if (entry.command.trim() || entry.program?.trim() || entry.args?.length || entry.cwd?.trim() || entry.env?.length || entry.beforeLaunch?.length)
+        throw new Error(`复合配置「${entry.name}」只选择成员；请在成员中设置命令、参数、工作目录、环境变量及启动前步骤。`)
+    } else if ((!entry.command.trim() && !entry.program?.trim()) || ((entry.type ?? 'shell') === 'shell' && !entry.command.trim())) {
+      throw new Error(`配置「${entry.name}」没有可执行命令或程序。`)
+    }
+  }
+  return closure
+}
+
+/** Nested/shared compounds dispatch each leaf once, preserving the member's own launch fields. */
+export function compoundRunMembers(config: RunConfig, configs: readonly RunConfig[]): RunConfig[] {
+  return runConfigClosure(config, configs).filter(entry => entry.type !== 'compound')
+}
+
+export function runConfigReferrers(name: string, configs: readonly RunConfig[]): RunConfig[] {
+  return configs.filter(config => config.type === 'compound' && config.configurations?.includes(name))
 }
 
 /** 文件夹名校验：与原生 `runConfigs[].folder` 同规则（≤80 字节、单行）。 */

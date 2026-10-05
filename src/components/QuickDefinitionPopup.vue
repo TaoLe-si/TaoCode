@@ -6,23 +6,17 @@
 // 那个只读编辑器"把目标元素的范围标出来"是同一层意思（这里不假装有语法高亮）。
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { excerptAt, type QuickDefinitionSource } from '../quickDefinition'
+import { useBestPositionAnchor } from '../popupPlacement'
 
 const props = defineProps<{ source: QuickDefinitionSource; x?: number; y?: number }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
 const box = ref<HTMLElement>()
 const excerpt = computed(() => excerptAt(props.source.content, props.source.line))
-const WIDTH = 560
-const MAX_HEIGHT = 320
-const anchor = computed(() => {
-  const innerWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
-  const innerHeight = typeof window === 'undefined' ? 800 : window.innerHeight
-  if (props.x === undefined || props.y === undefined) return { left: `${Math.round((innerWidth - WIDTH) / 2)}px`, top: '96px' }
-  return {
-    left: `${Math.max(4, Math.min(props.x, innerWidth - WIDTH - 8))}px`,
-    top: `${Math.max(4, Math.min(props.y, innerHeight - MAX_HEIGHT - 24))}px`,
-  }
-})
+// `showInBestPositionFor(editor)`（`AbstractPopup.java:974-993`）：有光标钉在光标处，
+// 没有坐标就按实测尺寸居中；越界夹取与翻转都在 src/popupPlacement.ts（不再按常数猜高度）。
+const { style: anchor } = useBestPositionAnchor(box, () =>
+  props.x === undefined || props.y === undefined ? null : { x: props.x, y: props.y })
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.preventDefault(); emit('close') }
 }

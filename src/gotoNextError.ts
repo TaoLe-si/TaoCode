@@ -47,7 +47,12 @@
 // forward (every offset counts as "after it") and the document length for backward.
 //
 // The offset IDEA navigates to is the highlight's start plus `navigationShift` (0 for
-// everything here; the after-end-of-line case is described in CodeEditor.vue's goToError).
+// everything here; the after-end-of-line case is described on navigateToError below).
+
+import { foldedRanges, unfoldEffect } from '@codemirror/language'
+import type { StateEffect } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { lspPosition } from './editorDiagnosticMarkers.ts'
 
 /** An LSP diagnostic's navigation-relevant fields (bridge.ts `LspDiagnostic`, 0-based). */
 export interface ErrorLocation {
@@ -130,4 +135,43 @@ export function nextErrorTarget<T extends ErrorDiagnostic>(
   // The `caretOffsetIfNoLuck` bucket (:97, :104-107) is what turns "nothing ahead" into the
   // first highlight of the file; the backward direction always has a candidate by then.
   return best ?? pool[0]!
+}
+
+// ---------------------------------------------------------------- 落进编辑器的那一拍
+
+/**
+ * 三种结局，调用方据此决定「吞不吞这次按键」与「要不要弹提示」：
+ *   · `unavailable` —— 没有视图，调用方返回 false（不吞键，让 F2 走别的动作）；
+ *   · `no-target`   —— 这个文件没有可导航的高亮，调用方弹 `NO_ERRORS_IN_FILE` 并**吞掉**按键；
+ *   · `moved`       —— 已经跳过去了。
+ */
+export type NavigateErrorResult = 'unavailable' | 'no-target' | 'moved'
+
+/**
+ * `navigateToError`（`GotoNextErrorHandler.java:165-198`）的落点：清掉选区与次级光标、把光标放到
+ * 高亮上并滚到居中（`:172-177`），再展开藏着它的那段折叠（`:178-179`）。
+ * 导航偏移是「高亮起点 + `navigationShift`」—— 本仓是 0；行尾之后那种情况也不需要额外偏移：
+ * `lspPosition` 会把 character 夹到行内，行尾高亮解出来的就是 IDEA 要的那个偏移。
+ *
+ * 从 `CodeEditor.vue` 拆出来是为了让那个文件降回机检上限以下（挑目标的口径与落点口径本就该同住）。
+ */
+export function navigateToError(
+  view: EditorView | undefined,
+  diagnostics: readonly ErrorDiagnostic[],
+  forward: boolean,
+): NavigateErrorResult {
+  if (!view) return 'unavailable'
+  const doc = view.state.doc
+  const head = view.state.selection.main.head
+  const line = doc.lineAt(head)
+  const target = nextErrorTarget(diagnostics, { line: line.number - 1, character: head - line.from }, forward)
+  if (!target) return 'no-target'
+  const pos = lspPosition(doc, target.line, target.character)
+  const effects: StateEffect<unknown>[] = [EditorView.scrollIntoView(pos, { y: 'center' })]
+  foldedRanges(view.state).between(0, doc.length, (from, to) => {
+    if (from <= pos && pos <= to) effects.push(unfoldEffect.of({ from, to }))
+  })
+  view.dispatch({ selection: { anchor: pos }, effects })
+  view.focus()
+  return 'moved'
 }

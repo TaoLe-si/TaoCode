@@ -12,8 +12,8 @@
 //       （`message ?: 旧值`、`percentage.toFraction() ?: 旧值`，:315-322）；`end` → 删掉这条（:323-326）；
 //     - `percentage` 是 0-100 的整数，转 fraction 时 `(it / 100.0).coerceIn(0.0, 1.0)`（:263）。
 //   · 显示位置：这条 fraction/text/details 进的是**状态栏的后台任务弹窗**
-//     （`platform/platform-impl/src/com/intellij/openapi/wm/impl/status/ProcessPopup.java:331` 里每行是一个
-//     `JProgressBar`），不是 Notifications 气球 —— 所以本仓的落点是 `progressPanel.ts` 的那些行。
+//     （`platform/platform-impl/src/com/intellij/openapi/wm/impl/status/ProgressComponent.kt:55`/`:66`
+//     每行一条 `JProgressBar`），不是 Notifications 气球 —— 所以本仓的落点是 `progressPanel.ts` 的那些行。
 //
 // 本模块只做"事件 → 任务表"这一段（纯函数 + 一个 reactive 表）；聚合与取消归 progressPanel。
 import { reactive } from 'vue'

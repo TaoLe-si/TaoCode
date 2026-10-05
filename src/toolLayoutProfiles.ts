@@ -35,8 +35,10 @@ export type ToolWindowLayoutApplyMode = 'seedOnly' | 'forceOnce'
  * 本仓能兑现的（只写这几个，别的登记在 `docs/source-todo.md` §15）：
  *   · `anchor` / `order` —— 停靠边与条纹次序（`src/toolWindowStripes.ts` 的两张运行时表由它派生）；
  *   · `showStripeButton` —— 上游同名字段（`RemoveStripeButtonAction` 把它置 false，本仓的"从侧栏移除"）；
- *   · `contentUiType` —— 内容条是标签还是下拉（`src/toolWindowContentUi.ts`）。
- * 没兑现的：`isVisible`（每窗口可见 + 打开项目时恢复）、`weight`/`sideWeight`/`isSplit`
+ *   · `contentUiType` —— 内容条是标签还是下拉（`src/toolWindowContentUi.ts`）；
+ *   · `visible` —— 每窗口可见性 + 打开项目时恢复（`ToolWindowSetInitializer` 那一半）；
+ *   · `type` / `autoHide` —— 视图模式的两个自由度（2026-10-06 第八桶：`src/toolWindowViewMode.ts`）。
+ * 没兑现的：`weight`/`sideWeight`/`isSplit`
  * （本仓的"每个窗口各自尺寸"是另一条路：`panelResize.ts` 的 `rememberSizeForEachToolWindow`）。
  */
 export interface WindowInfo {
@@ -52,7 +54,28 @@ export interface WindowInfo {
    * 打开项目时按它恢复"上次开着的那几个窗口"（上游 `ToolWindowSetInitializer` 装配时读的就是这个字段）。
    */
   visible?: boolean
+  /**
+   * `WindowInfoImpl.type`（`:74`，默认 DOCKED）：停靠 / 浮动 / 滑动 / 独立窗口。
+   * XML 里没有 `@Attribute` ⇒ 属性名就是字段名 `type`。
+   */
+  type?: ToolWindowType
+  /** `WindowInfoImpl.isAutoHide`（`:46-47`，默认 false，XML 属性名 `auto_hide`）。 */
+  autoHide?: boolean
+  /**
+   * `WindowInfoImpl.floatingBounds`（`:49-53`）：「浮动」那一档下窗口的矩形。
+   * 上游那条 `skipNullWhenLoading` 的谓词把"全 0 矩形"也当成没存过（`:53`），
+   * 读法在 `src/toolWindowViewMode.ts` 的 `floatingBoundsStored`。
+   */
+  floatingBounds?: { x: number; y: number; width: number; height: number } | null
 }
+
+/**
+ * `WindowInfo.type` / `WindowInfo.isAutoHide` 在本仓的形状（`src/toolWindowViewMode.ts` 的
+ * `WindowTypeState`：视图模式 = 这两个自由度的函数）。这里重复声明一遍是为了
+ * **不让 profiles 模块去 import 视图模式模块**（那条 import 会绕回 toolWindowContentUi，
+ * 一个键的读法不该有环）。
+ */
+export type ToolWindowType = 'docked' | 'floating' | 'sliding' | 'windowed'
 
 /** 上游默认值里本仓会用到的那几个（`anchor`/`order` 的默认在注册表与顺序表里）。 */
 export const WINDOW_INFO_DEFAULTS = { showStripeButton: true, contentUiType: 'tabbed', visible: false } as const
@@ -75,6 +98,34 @@ export function contentUiTypeOf(info: WindowInfo): ToolWindowContentUiType {
 /** `WindowInfoImpl.isVisible`：没写就是 false（**只有显式 true 才算"这个窗口开着"**）。 */
 export function windowVisible(info: WindowInfo): boolean {
   return info.visible === true
+}
+
+/**
+ * `WindowInfoImpl.type` 的默认值是 DOCKED（`:74` 的 `by enum(ToolWindowType.DOCKED)`）。
+ * 坏值不猜：认不出来就当 DOCKED（与 `resolveContentUiType` 同一条口径）。
+ */
+export function toolWindowTypeOf(info: WindowInfo): ToolWindowType {
+  return info.type === 'floating' || info.type === 'sliding' || info.type === 'windowed' ? info.type : 'docked'
+}
+
+/** `WindowInfoImpl.isAutoHide`：只有显式 true 才算开（默认 false，`:46-47`）。 */
+export function autoHideOf(info: WindowInfo): boolean {
+  return info.autoHide === true
+}
+
+/** 视图模式的两个自由度合起来读（`ToolWindowViewModeAction.ViewMode.fromWindowInfo` 的输入）。 */
+export function windowTypeStateOf(info: WindowInfo): { type: ToolWindowType; autoHide: boolean } {
+  return { type: toolWindowTypeOf(info), autoHide: autoHideOf(info) }
+}
+
+/** `WindowInfoImpl.floatingBounds`：没存过 / 存成全 0 ⇒ null（`:53` 那条谓词）。 */
+export function floatingBoundsOf(info: WindowInfo): { x: number; y: number; width: number; height: number } | null {
+  const raw = info.floatingBounds
+  if (!raw || typeof raw !== 'object') return null
+  const { x, y, width, height } = raw
+  if (![x, y, width, height].every(value => typeof value === 'number' && Number.isFinite(value))) return null
+  if (width === 0 && height === 0 && x === 0 && y === 0) return null
+  return { x, y, width, height }
 }
 
 /**

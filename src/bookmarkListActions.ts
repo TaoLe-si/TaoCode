@@ -9,8 +9,8 @@
 // `src/bookmarkLists.ts` 的 `listsFromLegacy`），本模块管**其余的**列表（`bookmarkLists` 字段）。
 // 规则全部来自 `src/bookmarkLists.ts`（那边是纯函数、有单测）。
 import { computed, ref, type Ref } from 'vue'
-import { request } from './bridge'
-import { errorMessage } from './errors'
+import { request } from './bridge.ts'
+import { errorMessage } from './errors.ts'
 import { addToListItem, createList, deleteList, listNameError, renameList, type BookmarkList } from './bookmarkLists.ts'
 import { isFileBookmark, type Bookmark } from './bookmarks.ts'
 import type { ProjectSettings, Workspace } from './bridge'

@@ -4,14 +4,14 @@
 // 模式：`lastDockFocus` / `bottomContentUiType`（含 localStorage 持久化）由模块**自持**；
 // 其余依赖注入且**全部惰性解析**（箭头包装/取值函数），与 App 的声明顺序无关。
 import { computed, ref, watch } from 'vue'
-import { nextContentIndex, tabNavigationCount, type TabNavigationTarget } from './activeToolWindow'
-import { canCloseAllContents, canCloseOtherContents, isCloseableToolTab, tabsCloseAllWouldRemove, tabsCloseOtherWouldRemove } from './toolTabs'
+import { nextContentIndex, tabNavigationCount, type TabNavigationTarget } from './activeToolWindow.ts'
+import { canCloseAllContents, canCloseOtherContents, isCloseableToolTab, tabsCloseAllWouldRemove, tabsCloseOtherWouldRemove } from './toolTabs.ts'
 import type { CloseableToolTabId, ToolTabPresence } from './toolTabs'
-import { closeAllReferences, closeReferences, closeOtherReferences, hasReferences, referenceTabs,
+import { closeAllReferences, closeOtherReferences, closeReferences, hasReferences, referenceTabs,
          selectedReferences, selectReferences, togglePinReferences } from './referenceContents.ts'
-import { isTabbedContentUi, toggledContentUiType } from './toolWindowContentUi'
+import { isTabbedContentUi, toggledContentUiType } from './toolWindowContentUi.ts'
 import type { ToolWindowContentUiType } from './toolWindowContentUi'
-import { BOTTOM_TABS } from './toolWindowMeta'
+import { BOTTOM_TABS } from './toolWindowMeta.ts'
 
 export { BOTTOM_TABS }
 
@@ -52,11 +52,11 @@ export interface ToolWindowActionsContext {
   showView: (id: any) => void
 }
 
-export function dockOf(element: Element | null): 'side' | 'bottom' | 'editor' {
-  if (element?.closest('.output-panel')) return 'bottom'
-  if (element?.closest('.explorer-panel')) return 'side'
-  return 'editor'
-}
+// `dockOf` 的**唯一实现**住在 `src/toolWindowDocks.ts`（那张选择器表），本文件只是转发：
+// 自动隐藏的判断住在 `src/toolWindowStripes.ts`，让它去 import 本文件会把整条
+// 引用视图 / 标签导航的依赖链拖进窗口状态模块 —— 两边都只依赖那张表。
+export { dockOf, type Dock } from './toolWindowDocks.ts'
+import { dockOf } from './toolWindowDocks.ts'
 
 export function focusedDock(): 'side' | 'bottom' | 'editor' {
   return dockOf(document.activeElement)

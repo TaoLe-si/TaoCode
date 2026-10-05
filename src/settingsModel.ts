@@ -7,14 +7,24 @@
 import type { Bookmark } from './bookmarks'
 import type { FoldSnapshot } from './editorFoldingState'
 import type { TemplateSettings } from './templates'
+import type { LineNumeration } from './editorLineNumbers.ts'
 import { DEFAULT_BUILD_TOOLS, type BuildToolsSettings } from './gradle.ts'
+import type { TrustedPathEntry } from './trustedProjects.ts'
 
 // IDEA's Run Configuration: a program with arguments, a working directory, an
 // environment block and an optional "before launch" task chain. `type` picks the
 // runner (shell through cmd.exe vs a direct executable).
 export interface RunConfig {
   name: string
-  type?: 'shell' | 'application' | 'debug'
+  // ⚠️ 这里**故意不加** `'jar'`：上游的 JAR 配置类型（`JarApplicationConfigurationType.java:19-22`，
+  // 本仓的规范名 `src/jarRun.ts:50` 的 `JAR_APPLICATION_TYPE_ID = 'JarApplication'`）要落地，三张表得一起加 ——
+  //   · 本联合（`RunConfig['type']`）；
+  //   · `RUN_CONFIG_EDITORS`（`src/runConfigEditors.ts:90`）—— 它是 `Record<NonNullable<RunConfig['type']>, …>`，
+  //     只改联合会让这张表少一个键、直接编译不过（2026-10-05 实测：`runConfigEditors.ts:90` TS2741）；
+  //   · `RUN_CONFIG_TYPES`（`src/runConfigTree.ts:16`）—— 否则左树不出类型节点。
+  // 表补齐后表单才会按 `JAR_FORM_FIELDS`（`jarRun.ts:103`）渲染。
+  type?: 'shell' | 'application' | 'debug' | 'compound'
+  configurations?: string[]
   command: string
   program?: string
   args?: string[]
@@ -46,6 +56,12 @@ export interface TodoPattern {
   description: string
   /** IDEA TodoPattern.isCaseSensitive()：默认 false（不区分大小写）。 */
   caseSensitive?: boolean
+  /**
+   * 标记在 TODO 工具窗口里显示的颜色（`#RRGGBB`）。IDEA 的颜色来自颜色方案的
+   * `TodoAttributes.getColor()`（`TodoPattern.getColor()` 从 scheme 取）；本仓没有色板页，
+   * 等价物是每条模式自带一个颜色，缺省时工具窗口用 `TODO_COLOR_FALLBACK` 的中性色。
+   */
+  color?: string
 }
 export interface JavaProjectSettings { jdkHome: string; jdkName: string; sourcePaths: string[]; outputPath: string; referencedLibraries: string[] }
 // jdkName 存 IDEA 的 SDK 显示名（`17`/`1.8`，JdkUtil.suggestJdkName），jdt.ls 的 JavaSE-x 只在原生 runtimes 边界归一。
@@ -107,6 +123,22 @@ export interface GeneralSettingsState {
   processCloseConfirmation: ProcessCloseConfirmation
   inactiveTimeout: number                // SAVE_FILES_AFTER_IDLE_SEC = UINumericRange(15, 1, 300)
   supportScreenReaders: boolean          // GeneralSettingsState.supportScreenReaders (kt:265), getter :179-186
+  /**
+   * AudioCuesConfigurable（`ide.audiocues`，注册行 intellij.platform.ide.impl.xml:971-976
+   * `groupId="appearance" groupWeight="140" id="ide.audiocues"`）的 mode 档。
+   * 值域三档 `auto` / `on` / `off` = 上游 `AudioCuesMode`（`AudioCuesSettings.kt:75-79`），
+   * 消费判定 `AudioCuesMode.isOn`（`:85-89`，AUTO → 屏幕阅读器是否开着）—— 本仓的探针是
+   * 「支持屏幕阅读器」设置（`src/audioCues.ts:71-75` 的 `isAudioCueModeOn`）。
+   * **默认仍是 off**（不是上游的 `AUTO`）：AUTO 在默认配置下（`supportScreenReaders=false`）
+   * 判定结果与 off 相同，但显式 off 不依赖探针的取值，差异记在这里而不是藏在别处。
+   */
+  audioCuesMode?: 'auto' | 'on' | 'off'
+  /**
+   * `AudioCuesSettingsState.disabledCues`（`AudioCuesSettings.kt:69-72`，`Set<String>`）：
+   * 逐 cue 停用的 id 表。存数组（与 IDEA 的 Set 同序无关，读出口 `disabledCueIds` 容忍坏值）。
+   * 消费点 `src/audioCueHost.ts` 的 `cueAllowed`（`isCueEnabled`，`audioCues.ts:86-91`）。
+   */
+  audioCuesDisabled: string[]
   autoShowProcessPopup: boolean          // ide.windowSystem.autoShowProcessPopup (registry.properties:209-210，默认 false)
   // search.everywhere.fuzzy.files.enabled（SeFuzzyFileSearchProviderFactory.kt:28-31，默认 false）：
   // 打开后「随处搜索」的文件来源改用 Smith-Waterman 本地对齐（src/fuzzyMatch.ts）。
@@ -115,6 +147,28 @@ export interface GeneralSettingsState {
   foldConsoleLines: string[]; foldExceptions: string[]
   // ToolConfigurable（`preferences.externalTools`）：应用级的外部命令收藏（名称 + 命令）。
   externalTools: Array<{ name: string; command: string }>
+  // XDebuggerDataViewSettings（调试器的数据视图，IDEA 存 xdebugger.xml）：本仓把它随 general
+  // 落盘（与 ConsoleConfigurable 的折叠规则同一策略 —— 都是没有独立存储层时的应用级开关）。
+  //   · debuggerHideNullValues —— 值为 null 的变量/数组元素不显示；
+  //   · debuggerSortByName —— 命名变量按名字排序（数组元素保持索引序）；
+  //   · debuggerShowValuesInline —— `XDebuggerDataViewSettings.showValuesInline`（上游默认 true）：
+  //     在编辑器执行行行尾渲染当前帧的变量值（消费者 src/debugInlineValues.ts → src/editorDebugLine.ts）。
+  //     本仓的渲染是子集（见 src/debugInlineValues.ts 文件头），默认 **false**（不冒充上游默认值）；
+  //   · debuggerShowLibraryFrames —— `isShowLibraryStackFrames`（上游默认 false）：调用堆栈里是否
+  //     显示适配器标为 `presentationHint: 'subtle'` 的库帧（src/debugDataView.ts 的 visibleFrames）。
+  // XDebuggerGeneralSettings（xdebugger-impl/.../settings/XDebuggerGeneralSettings.java）：
+  //   · debuggerConfirmBreakpointRemoval —— `isConfirmBreakpointRemoval`（默认 false）：移除断点前确认；
+  //   · debuggerUnmuteOnStop —— `isUnmuteOnStop`（默认 false）：会话停在断点时自动取消断点静音
+  //     （上游 XDebugSessionBreakpointManager.unmuteOnStop，消费点 src/debugBreakpointMute.ts）；
+  //   · debuggerEvaluationMode —— `getEvaluationDialogMode`（`EvaluationMode.EXPRESSION | CODE_FRAGMENT`，
+  //     默认 EXPRESSION）：求值对话框是单行表达式还是代码片段编辑器（src/components/DebugEvaluateDialog.vue）。
+  debuggerHideNullValues: boolean; debuggerSortByName: boolean; debuggerShowValuesInline: boolean
+  debuggerShowLibraryFrames: boolean; debuggerConfirmBreakpointRemoval: boolean
+  debuggerUnmuteOnStop: boolean; debuggerEvaluationMode: 'expression' | 'codeFragment'
+  // 受信任项目清单（IDEA `TrustedPaths`，应用级 `trusted-paths.xml` 的 `Map<Path, Boolean>`）：
+  // 本仓落成 `{path, trusted}` 数组（路径归一后存放；trusted=false 表示「以后不再问 + 不信任」）。
+  // 判据与执行门：src/trustedProjects.ts（前端）+ native/trusted_paths.cpp（硬边界）。
+  trustedPaths: TrustedPathEntry[]
   // StickyLinesConfigurable（`editor.stickyLines`）：粘性作用域行开关与层数上限。
 }
 // 注：`build.tools` **不在应用级** —— 它是 projectConfigurable（ExternalSystemGroupConfigurable.kt:22-26）。
@@ -140,21 +194,42 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   processCloseConfirmation: 'ASK',
   inactiveTimeout: 15,
   supportScreenReaders: false,
+  // 音频提示（无障碍）：mode 三档（audio.cues.mode.auto/on/off，AudioCuesSettings.kt:75-79），
+  // 本仓默认 off（上游默认 AUTO —— 差异见 GeneralSettingsState.audioCuesMode 的注释）；
+  // 逐 cue 停用表默认空 = 六个 cue 全开（同上游 disabledCues 的空 Set 默认）。
+  audioCuesMode: 'off',
+  audioCuesDisabled: [],
   autoShowProcessPopup: false,
   fuzzyFileSearch: false,
   foldConsoleLines: [],
   foldExceptions: [],
   externalTools: [],
+  // XDebuggerDataViewSettings 的两格：默认都不开（IDEA 的默认值也是显示 null、不排序）。
+  debuggerHideNullValues: false,
+  debuggerSortByName: false,
+  // 行内值：上游 showValuesInline 默认 true，但本仓渲染是子集（只到当前帧第一个作用域），
+  // 所以默认 false，让用户显式打开（差异写在 src/debugInlineValues.ts 文件头）。
+  debuggerShowValuesInline: false,
+  // 库帧（presentationHint=subtle）默认不显示（上游 isShowLibraryStackFrames 默认 false）。
+  debuggerShowLibraryFrames: false,
+  // 移断点确认、停在断点自动取消静音：上游默认都关。
+  debuggerConfirmBreakpointRemoval: false,
+  debuggerUnmuteOnStop: false,
+  // 求值对话框默认表达式模式（上游 XDebuggerGeneralSettings 的 EXPRESSION）。
+  debuggerEvaluationMode: 'expression',
+  // 受信任清单默认空 = 陌生目录第一次打开都要问（上游 `TrustedPaths.State` 默认空 map）。
+  trustedPaths: [],
 }
-export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 3, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true }
+export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showMembersInNavigationBar: true, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 5, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true, lineNumeration: 'absolute', showTypeInlayHints: true, showParameterInlayHints: true, showOtherInlayHints: true }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
   bookmarks: [],
   // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只有两条，正则逐字照抄。
+  // 颜色对默认色板的 TodoAttributes：TODO 蓝、FIXME 红（本仓存 `#RRGGBB`）。
   todoPatterns: [
-    { pattern: '\\btodo\\b.*', description: '待办' },
-    { pattern: '\\bfixme\\b.*', description: '需要修' },
+    { pattern: '\\btodo\\b.*', description: '待办', color: '#4a86e8' },
+    { pattern: '\\bfixme\\b.*', description: '需要修', color: '#e5484d' },
   ],
   templates: { overrides: [], customs: [] },
   java: structuredClone(defaultJavaProjectSettings),
@@ -196,7 +271,7 @@ export interface RecentProject {
 // paths in the window header). They are appearance state but ride the same
 // settings.update channel as the editor flags, so one save covers both pages.
 // 「编辑器 › 代码折叠」里本仓有消费者的两格（上游 CodeFoldingSettings 的五个见 src/editorFoldingSettings.ts）
-export interface EditorSettings { collapseImports: boolean; collapseCustomRegions: boolean; fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; showIndentGuides: boolean; bracketMatching: boolean; tabLimit: number; /** IDEA「显示一行」（`UISettings.scrollTabLayoutInEditor`）：true = 单行裁切 + 「…」，false = 多行换行不裁切。 */ tabsInOneRow: boolean;
+export interface EditorSettings { collapseImports: boolean; collapseCustomRegions: boolean; fontSize: number; tabSize: number; wordWrap: boolean; lineNumbers: boolean; showIndentGuides: boolean; bracketMatching: boolean; /** IDEA `EditorSettingsExternalizable.LINE_NUMERATION`（`EditorSettings.LineNumerationType`，默认 ABSOLUTE）：绝对/相对/混合行号，转换器在 `src/editorLineNumbers.ts`。 */ lineNumeration: LineNumeration; tabLimit: number; /** IDEA「显示一行」（`UISettings.scrollTabLayoutInEditor`）：true = 单行裁切 + 「…」，false = 多行换行不裁切。 */ tabsInOneRow: boolean;
   /**
    * `UISettings.sortBookmarks`（`UISettingsState.kt:249`，默认 **false**）：书签列表按
    * **位置**（路径 + 行号）排还是按**加入顺序**排。默认 false = 加入顺序，与上游一致。
@@ -219,6 +294,12 @@ export interface EditorSettings { collapseImports: boolean; collapseCustomRegion
   // （ToggleDistractionFreeModeAction.applyAndSave:96/108），所以它们必须是**真实存在的设置**。
   showStatusBar: boolean; rightMargin: boolean; breadcrumbsPlacement: 'top' | 'bottom';
   breadcrumbsLanguages: Record<string, boolean>;
+  // IDEA `UISettings.showMembersInNavigationBar`（`UISettingsState.kt:121` 默认 **true**）：
+  // 关掉后面包屑/导航栏只到类型那一层，不再列出成员（`JavaBreadcrumbsInfoProvider.java:125`
+  // `return !UISettings.getInstance().getShowMembersInNavigationBar()`；`JavaNavBarExtension.java:103/107`
+  // 把 `PsiClass` 的成员从导航栏里滤掉）。上游那个切换动作 `ViewNavigationBarMembersAction.java:20`
+  // 只在**旧 UI** 出现（`setEnabledAndVisible(!isNewUI)`），本仓没有新旧 UI 之分，所以设置项常驻。
+  showMembersInNavigationBar: boolean;
   // Error highlighting（`Errors`）：LSP 诊断的显示开关（波浪线 / 滚动条错误标记）。
   showDiagnostics: boolean; showErrorStripe: boolean;
   // 粘贴时的缩进/重新格式化（IDEA `CodeInsightSettings.REFORMAT_ON_PASTE`，`CodeInsightSettings.java:144`
@@ -304,4 +385,16 @@ export interface EditorSettings { collapseImports: boolean; collapseCustomRegion
   stickyLinesLimit: number
   /** DiffSettingsConfigurable：统一 diff 的上下文行数（IDEA diff settings.context.lines）。 */
   diffContextLines: number
+  /**
+   * InlaySettingsConfigurable（`inlay.hints`，注册行 `intellij.platform.lang.impl.xml:935-941`：
+   * `<projectConfigurable provider="…InlaySettingsConfigurableProvider" id="inlay.hints"
+   * parentId="editor" key="settings.hints" …/>`）—— 上游是**按 provider**（`InlayProviderSettingsModel.isEnabled`，
+   * `platform/lang-api/.../settings/InlayProviderSettingsModel.kt:26`）逐个勾的清单树。
+   * 本仓的 provider 只有一个：LSP 的 `textDocument/inlayHint`；它的 `kind` 分三档
+   * （LSP 规范：1 = Type，2 = Parameter；其余归第三档），于是三把键对三档。
+   * 键名与分组见 `src/inlayHints.ts` 的 `INLAY_HINT_SETTING_KEYS`，消费点是
+   * `src/editorInlayHints.ts` 的 `createInlayHints`（按 `shouldShowInlayHint` 过滤）。
+   * 默认全开（上游 `InlayHintsSettings.hintsEnabled` 出厂为真，见 `InlayProviderSettingsModel.isEnabled`）。
+   */
+  showTypeInlayHints: boolean; showParameterInlayHints: boolean; showOtherInlayHints: boolean
 }

@@ -64,5 +64,7 @@ test('the chip is a self-contained component, not inlined in App.vue', () => {
   const chip = read('src/components/InternalErrorsChip.vue')
   assert.match(chip, /request<InternalErrors>\('app\.internalErrors'\)/, '拉取走宿主路由')
   assert.match(chip, /setInterval\(\(\) => void refresh\(\), 30000\)/, '只涨不跌的计数：30s 一次就够')
-  assert.match(chip, /void showLog\(\)/, '列表底部要有去日志的出路')
+  // 「显示日志」那一行在上一轮拆分里跟着弹层搬进了对话框（`InternalErrorsDialog.vue`），
+  // 断言体不动，只把 read 路径改指搬过去的文件。
+  assert.match(read('src/components/InternalErrorsDialog.vue'), /void showLog\(\)/, '列表底部要有去日志的出路')
 })

@@ -500,12 +500,21 @@ export function layoutScrollableMultiRow(input: TabStripInput & { rowHeight?: nu
   if (!split.hasPinned) {
     return scrollableRow(input.preferredWidths, 0, 0, firstRowWidth, { gap, insetLeft, rowHeight, moreWidth, scrollOffset: input.scrollOffset ?? 0 })
   }
-const pinned = compressRowWidths(input.preferredWidths.slice(0, split.pinnedCount), firstRowWidth, gap)
+  const pinned = compressRowWidths(input.preferredWidths.slice(0, split.pinnedCount), firstRowWidth, gap)
   const rest = input.preferredWidths.slice(split.pinnedCount)
-  const scroll = scrollableRow(rest, 1, split.pinnedCount, fullRowWidth, { gap, insetLeft, rowHeight, moreWidth, scrollOffset: input.scrollOffset ?? 0 })
   const placed: PlacedRowTab[] = []
   let position = insetLeft
   pinned.forEach((width, offset) => { placed.push({ index: offset, row: 0, position, width }); position += width + gap })
+  // `splitToRows` 只在**真有未固定标签**时才建第二条 row：全部都是固定标签时只有固定那一排，
+  // 不能再给一条恒空的可滚动行（那会让条高多出一整行、也给不出任何标签）。
+  if (!rest.length) {
+    return {
+      placed, rowCount: 1, rowHeight,
+      moreButtonVisible: false, scrollOffset: 0, maxScrollOffset: 0, dropped: [],
+      moreButtonPosition: insetLeft + firstRowWidth - moreWidth,
+    }
+  }
+  const scroll = scrollableRow(rest, 1, split.pinnedCount, fullRowWidth, { gap, insetLeft, rowHeight, moreWidth, scrollOffset: input.scrollOffset ?? 0 })
   return { ...scroll, placed: [...placed, ...scroll.placed], rowCount: 2 }
 }
 
@@ -529,7 +538,10 @@ function scrollableRow(
     // 右边缘裁切：`len = max(0, x + tabsLength - curX)`，`<= |gap|` 的直接给 0 宽（上游那一行）。
     const clipped = cursor + length > insetLeft + tabsLength ? Math.max(0, insetLeft + tabsLength - cursor) : length
     const effective = clipped <= Math.abs(gap) ? 0 : clipped
-    if (effective <= 0) dropped.push(index)
+    // `dropped` 与 `placed` 一样用**条内全局下标**（`base + index`）：`isTabDropped` 拿它跟
+    // 标签的真实下标比，固定排开着时若记局部下标，会把固定排里同样下标的标签误判成"掉出条外"
+    // （真机上就是"明明在条的左端，宽度却被写成 0"）。
+    if (effective <= 0) dropped.push(base + index)
     else placed.push({ index: base + index, row, position: cursor, width: effective })
     cursor += length + gap
   }

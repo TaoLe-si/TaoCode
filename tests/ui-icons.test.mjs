@@ -58,7 +58,7 @@ test('尺寸阶梯与 tokens.css 逐档同步（几何只在一个地方定义�
 
 test('ICON_ROLE_BY_PX 覆盖了阶梯上的每一个像素（没有落在阶梯外的数字）', () => {
   // control 与 checkbox 同为 14px —— 同一像素只能反查到一个角色，所以这条只核覆盖率，
-  // 不核双向唯一。两档同尺寸是有据的（style.css:235 与 CheckboxIcon.kt:42 都给 14）。
+  // 不核双向唯一。两档同尺寸是有据的（uiIcons.ts 的 control 档与 CheckboxIcon.kt:42 都给 14）。
   for (const [role, px] of Object.entries(ICON_SIZE)) assert.equal(ICON_SIZE[ICON_ROLE_BY_PX[px]], px, `${role} = ${px}px 但按像素反查不到`)
   assert.deepEqual(Object.keys(ICON_ROLE_BY_PX).map(Number).sort((a, b) => a - b),
     [...new Set(Object.values(ICON_SIZE))].sort((a, b) => a - b), '像素表和尺寸阶梯对不上')
@@ -370,4 +370,114 @@ test('带图标槽的菜单行必须 text-align: left（button 的 UA 默认是 
   const bad = rowButtons.filter(([, , , classes]) => !classes.some(c => leftAligned.has(c)))
     .map(([file, line, raw]) => `${rel(file)}:${line} .${raw}`)
   assert.deepEqual(bad, [], `这些菜单行带图标槽却没写 text-align: left，字会在标题盒里居中：\n${bad.join('\n')}`)
+})
+
+/**
+ * 「图标宿主」= 自身就是一个定尺图标按钮的 class。它们的 svg **一定**被 CSS 的
+ * `> svg` 规则捞到（`style.css` 的 `.topbar .header-widget > svg` / `.topbar .icon-button > svg` /
+ * `.activity-button > svg`），所以尺寸必须由模板的 `:size` 说出来 —— 少写一个就等于
+ * 把决定权交给 CSS 那个 20px 的兜底值。
+ *
+ * 这一族过去长期没人管，是因为前 16 条门禁只看「写没写 `:size`」，不看**写的是不是
+ * 声明的那一档**：`MainToolbar.vue` 的运行仪表盘写着 `:size="iconSize.menu"`(13)、
+ * 搜索/设置写着 `:size="iconSize.action"`(16)，CSS 实际渲染 20px —— 源码在骗人。
+ */
+const ICON_HOST_CLASSES = ['icon-button', 'menu-button', 'header-widget', 'activity-button']
+
+/** 一个文件里从 `lucide-vue-next` 导入的图标名（可能有**多条** import，`BookmarksPanel.vue` 就有两条）。 */
+function lucideImportsOf(file) {
+  const src = readFileSync(file, 'utf8')
+  const names = new Set()
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]lucide-vue-next['"]/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/)[0].trim()
+      if (name) names.add(name)
+    }
+  }
+  return names
+}
+
+/** `:size` 的写法：`:iconSize.menu`（指令）或 `="13"`（静态属性）；没有就 null。 */
+function sizeBindingOf(node) {
+  for (const p of node.props ?? []) {
+    if (p.type === NodeTypes.DIRECTIVE && p.arg?.content === 'size') return { bound: true, value: p.exp?.content ?? '' }
+    if (p.type === NodeTypes.ATTRIBUTE && p.name === 'size') return { bound: true, value: p.value?.content ?? '', static: true }
+  }
+  return { bound: false, value: '' }
+}
+
+/** 宿主按钮的**直接子**图标组件（大写标签 = 组件、`<svg>`、`<component :is>`）。 */
+function iconChildrenInHosts(file) {
+  const tpl = TEMPLATES.get(file)
+  if (!tpl) return []
+  let ast
+  try { ast = parseDom(tpl) } catch { return [] }
+  const lucide = lucideImportsOf(file)
+  const out = []
+  walk(ast, node => {
+    if (node.type !== NodeTypes.ELEMENT) return
+    const host = staticClassOf(node)?.split(/\s+/).find(c => ICON_HOST_CLASSES.includes(c))
+    if (!host) return
+    for (const child of node.children ?? []) {
+      if (child.type !== NodeTypes.ELEMENT) continue
+      if (child.tag !== 'svg' && child.tag !== 'component' && !lucide.has(child.tag)) continue
+      out.push({ host, tag: child.tag, line: child.loc.start.line + descriptorOffset(file), node: child })
+    }
+  })
+  return out
+}
+
+test('图标宿主按钮里的每个图标都显式声明 :size（不许让 CSS 替它决定尺寸）', () => {
+  // 少了 `:size`，lucide 就退回自己的默认 24（`Icon.js` 的 `width: size || 24`），而 CSS 的
+  // 兜底只对 `:not(.lucide)` 生效 —— 也就是图标会**真的**变成 24px 而不是 20px。
+  // 所以"没写"不是风格问题，是一次肉眼可见的尺寸回归。
+  const all = FILES.flatMap(file => iconChildrenInHosts(file).map(icon => ({ ...icon, file })))
+  assert.ok(all.length > 0, '没匹配到任何图标宿主里的图标 —— 门禁本身失效了')
+  const bad = all.filter(({ node }) => !sizeBindingOf(node).bound)
+    .map(({ file, line, tag, host }) => `${rel(file)}:${line} <${tag}> 在 .${host} 里没有 :size`)
+  assert.deepEqual(bad, [], `这些图标没声明 :size，尺寸只能听 CSS 的（lucide 默认 24px）：\n${bad.join('\n')}`)
+})
+
+test('图标宿主的 :size 必须来自 iconSize 阶梯（不许写字面量或别的表达式）', () => {
+  // 与上面那条配套：声明了不等于声明对了。`:size="13"` 是字面量（几何散成第二处真源），
+  // `:size="iconSize.chekbox"` 这种拼错的角色名会渲染成 `undefined` → 退回 24。
+  const bad = []
+  for (const file of FILES) {
+    for (const { tag, line, host, node } of iconChildrenInHosts(file)) {
+      const { bound, value, static: isStatic } = sizeBindingOf(node)
+      if (!bound) continue
+      const m = /^iconSize\.(\w+)$/.exec(value)
+      if (!isStatic && m && Object.hasOwn(ICON_SIZE, m[1])) continue
+      bad.push(`${rel(file)}:${line} <${tag}> 在 .${host} 里 :size="${value}"`)
+    }
+  }
+  assert.deepEqual(bad, [], `这些 :size 不是 iconSize 阶梯上的一档：\n${bad.join('\n')}`)
+})
+
+test('CSS 的 `> svg` 宽度规则只兜底非 lucide 图标（不许覆盖模板声明的 :size）', () => {
+  // 组 A 那几处「源码在骗人」的**根因**，也是唯一能防它复发的判据。
+  // lucide 把 `:size` 渲染成 svg 的 `width`/`height` **属性**
+  // （`node_modules/lucide-vue-next/dist/esm/Icon.js`：`width: size || defaultAttributes.width`），
+  // 而 CSS 的 `width` **永远赢过**呈现属性 —— 所以 `.topbar .header-widget > svg { width: … }`
+  // 会把这一族模板里所有的 `:size` 一律改写成 20px。
+  // 豁免写法是 `:not(.lucide)`：`.lucide` 类同样出自那个文件（`class: ["lucide", "lucide-<kebab>"]`），
+  // 于是这条规则只对**手写的** `<svg>` 兜底。作用域：全局表 + 各组件的 `<style>` 块。
+  const sheets = [
+    ['src/style.css', styleCss],
+    ...[...PARSED].map(([file, d]) => [rel(file), d.styles.map(s => s.content).join('\n')]),
+  ]
+  const bad = []
+  for (const [file, css] of sheets) {
+    for (const m of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      // `(?<![\w-])` 是必须的：`stroke-width: 2` 里也含 `width:`，用 `(?<!max-|min-)` 会把它算进来。
+      if (!/(?<![\w-])width:\s*[^;]/.test(m[2])) continue
+      for (const part of m[1].split(',')) {
+        const selector = part.trim()
+        if (!/>\s*svg\b/.test(selector)) continue
+        if (selector.includes(':not(.lucide)')) continue
+        bad.push(`${file}  ${selector}`)
+      }
+    }
+  }
+  assert.deepEqual(bad, [], `这些规则会用 CSS 的 width 覆盖模板里的 :size：\n${bad.join('\n')}`)
 })

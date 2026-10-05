@@ -143,8 +143,12 @@ Host& Session::ensure(const std::string& language) {
                                                                                  12, 13, 14, 15, 16, 17, 18, 19, 20,
                                                                                  21, 22, 23, 24, 25})}}},
                                 {"contextSupport", true}}},
+                // tagSupport：声明客户端认得 DiagnosticTag 1/2（Unnecessary / Deprecated），服务器
+                // 才会在推送里带上 tags。能力表要与实际处理一致 —— 下面 `shape_diagnostics` 确实把
+                // tags 透传了；pull 那侧早就声明了同一组（见下面 `diagnostic.tagSupport`）。
                 {"publishDiagnostics", {{"relatedInformation", false}, {"versionSupport", false},
-                                        {"dataSupport", true}}},
+                                        {"dataSupport", true},
+                                        {"tagSupport", {{"valueSet", Json::array({1, 2})}}}}},
                 // Refactor + symbol capabilities: declaring hierarchical symbol
                 // support is what makes real servers answer DocumentSymbol[]
                 // instead of the legacy flat SymbolInformation[].

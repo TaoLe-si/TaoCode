@@ -76,7 +76,8 @@ test('a superseded request is silent, not a per-keystroke toast', async () => {
 })
 
 test('native and fake server use the real completionItem/resolve protocol method', () => {
-  assert.ok(read('native/lsp_session.cpp').includes('host->request("completionItem/resolve"'))
+  // 该请求从 Session::semantic 的 kind 链搬到了 native/lsp_session_kinds.cpp（逐字搬运）
+  assert.ok(read('native/lsp_session_kinds.cpp').includes('host->request("completionItem/resolve"'))
   assert.ok(!read('native/lsp_fake_server_requests.cpp').includes('method == "textDocument/completionItem/resolve"'))
 })
 
@@ -145,9 +146,13 @@ test('discard a delayed result after the user edits the document', async () => {
 })
 
 test('late resolve must not insert into a changed document', async () => {
+  // 条目label要**匹配打出来的前缀**（'Lis'）：表里的过滤按上游 `CamelHumpMatcher.prefixMatches`
+  // （`platform/analysis-impl/src/com/intellij/codeInsight/completion/impl/CamelHumpMatcher.java:80-119`）
+  // 在本仓做（`src/completionCamelHump.ts`），`println` 在这种点位根本进不了表。
   let reply
+  const matching = { label: 'List', kind: 'class', raw: { label: 'List', data: { id: 1 } } }
   const h = await fixture('Lis', async (method, params) => params.kind === 'completionItemResolve'
-    ? new Promise(resolve => { reply = resolve }) : { available: true, items: [item] })
+    ? new Promise(resolve => { reply = resolve }) : { available: true, items: [matching] })
   const result = await h.source(h.context)
   const pending = result.options[0].apply(h.view, { label: result.options[0].label }, result.from, 3)
   h.view.dispatch({ changes: { from: 3, insert: 't' } })
@@ -164,4 +169,26 @@ test('a member dot and Unicode identifier both query the server, never a keyword
     assert.equal(h.calls[1].params.kind, 'completion')
     assert.equal(h.calls[1].params.character, text.length)
   }
+})
+
+test('服务端一条都没回时，本地贡献者（文档词）接上而不是弹层关掉', async () => {
+  const doc = 'const value = 1\nval'
+  const h = await fixture(doc, async (method, params) =>
+    params.kind === 'completion' ? { available: false } : { available: true })
+  const result = await h.source(h.context)
+  assert.ok(result, '服务端空结果不该把本地词补全一起吞掉')
+  assert.equal(result.from, doc.length - 3)
+  assert.deepEqual(result.options.map(option => option.label), ['value'])
+  await result.options[0].apply(h.view, { label: 'value' }, result.from, doc.length)
+  assert.equal(h.view.state.sliceDoc(), 'const value = 1\nvalue')
+})
+
+test('服务端有条目时仍以服务端为准，不掺本地词', async () => {
+  // 服务端那条的 label 前缀命中打出来的 `val`（表内过滤按上游 CamelHumpMatcher，见上一条用例的注），
+  // 文档词 `value` 同样命中 —— 于是"只有一行"这个断言量的就是**混不混本地词**，不是过不过滤。
+  const doc = 'const value = 1\nval'
+  const serverItem = { label: 'validate', kind: 'method', raw: { label: 'validate', data: { id: 1 } } }
+  const h = await fixture(doc, async () => ({ available: true, items: [serverItem] }))
+  const result = await h.source(h.context)
+  assert.deepEqual(result.options.map(option => option.label), ['validate'])
 })

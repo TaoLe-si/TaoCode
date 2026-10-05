@@ -14,8 +14,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { BookMarked, Bookmark, Check, ListTree, Pencil, Plus, Settings2, X } from 'lucide-vue-next'
 import type { Bookmark as BookmarkEntry } from '../bridge'
-import { bookmarkDescription, isFileBookmark } from '../bookmarks'
+import { bookmarkDescription, bookmarkFontBold, bookmarkRemovable, bookmarkSpeedSearchText, isFileBookmark } from '../bookmarks'
 import { bookmarkKey, groupBookmarks, scrollTargetFor, stepSelection, type BookmarksViewSettings } from '../bookmarksView'
+// 就地速度搜索（上游书签树的 `SpeedSearchBase`）：匹配规则复用文件树那套（`src/speedSearch.ts`），
+// 搜索框是现成的展示件（`SpeedSearchBar.vue`，宿主自持开关与查询串）。
+import { firstSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
+import SpeedSearchBar from './SpeedSearchBar.vue'
 // 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction`）：文案取中文包。
 import { SORT_GROUP_LABEL } from '../bookmarks'
 import { ArrowDownUp } from 'lucide-vue-next'
@@ -102,9 +106,71 @@ async function scrollIntoViewFor(entry: BookmarkEntry) {
   scrollBox.value?.querySelector<HTMLElement>(`[data-key="${CSS.escape(bookmarkKey(entry))}"]`)?.scrollIntoView({ block: 'nearest' })
 }
 function activate(entry: BookmarkEntry) { cursor.value = bookmarkKey(entry); emit('jump', entry) }
+// ── 速度搜索（上游书签树的 `SpeedSearchBase`，文本来自 `BookmarkItem.speedSearchText`）──────────
+// 树里"开始打字即过滤"是内置行为；本仓面板就地把输入收成一个小搜索框（SpeedSearchBar），
+// 匹配对象是"文件名 + 描述"，上下键在命中项之间走（走完一圈回绕），Esc/回车收起。
+const searchOpen = ref(false)
+const search = ref('')
+const searchLabels = () => visible.value.map(entry => bookmarkSpeedSearchText(entry))
+function selectIndex(index: number) {
+  const target = visible.value[index]
+  if (!target) return
+  cursor.value = bookmarkKey(target)
+  void scrollIntoViewFor(target)
+}
+/** 输入变化后：从当前项继续找下一条命中（空串不移动，照 `firstSpeedSearchHit` 的空串语义）。 */
+function onSearchInput(value: string) {
+  search.value = value
+  const labels = searchLabels()
+  const from = visible.value.findIndex(entry => bookmarkKey(entry) === cursor.value)
+  const hit = from >= 0 ? nextSpeedSearchHit(labels, value, from, 1) : firstSpeedSearchHit(labels, value)
+  if (hit >= 0) selectIndex(hit)
+}
+function onSearchKeydown(event: KeyboardEvent) {
+  const action = speedSearchKeyAction(event.key, search.value)
+  const step = speedSearchStepForKey(event.key)
+  if (step) {
+    event.preventDefault()
+    const labels = searchLabels()
+    const from = visible.value.findIndex(entry => bookmarkKey(entry) === cursor.value)
+    const index = step.kind === 'first' ? firstSpeedSearchHit(labels, search.value)
+      : step.kind === 'last' ? nextSpeedSearchHit(labels, search.value, 0, -1)
+        : nextSpeedSearchHit(labels, search.value, from, step.kind === 'next' ? 1 : -1)
+    if (index >= 0) selectIndex(index)
+    return
+  }
+  if (action === 'accept') {
+    event.preventDefault()
+    searchOpen.value = false
+    search.value = ''
+    if (props.settings.autoscrollToSource) {
+      const target = visible.value.find(entry => bookmarkKey(entry) === cursor.value)
+      if (target) emit('jump', target)
+    }
+    return
+  }
+  if (action === 'hide') {
+    event.preventDefault()
+    searchOpen.value = false
+    search.value = ''
+    return
+  }
+  if (action === 'ignore') {
+    // 空串上的退格要吞掉（`SpeedSearchBase:960-963`）：否则焦点会从搜索框弹回列表。
+    if (event.key === 'Backspace' && !search.value) event.preventDefault()
+  }
+}
 // 键盘导航：上/下移动选中；`autoscrollToSource` 打开时移动即跳转（IDEA 的 AutoscrollToSource 语义）。
 function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    // 树上的速度搜索由"开始打字"触发（无修饰键的可打印字符）。
+    if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault()
+      searchOpen.value = true
+      onSearchInput(event.key)
+    }
+    return
+  }
   event.preventDefault()
   const next = stepSelection(visible.value, cursor.value, event.key === 'ArrowDown' ? 1 : -1)
   if (!next) return
@@ -145,6 +211,7 @@ function onKeydown(event: KeyboardEvent) {
         </button>
       </div>
     </div>
+    <SpeedSearchBar :open="searchOpen" :query="search" @input="onSearchInput" @keydown="onSearchKeydown" />
     <div v-if="!entries.length" class="bookmark-empty">
       <Bookmark :size="iconSize.artwork" />
       <p>还没有书签</p>
@@ -163,7 +230,7 @@ function onKeydown(event: KeyboardEvent) {
       <template v-for="group in groupBookmarks(section.entries, props.settings.groupLineBookmarks)" :key="(section.name || 'all') + ':' + (group.path || 'flat')">
         <!-- 分组模式下的文件标题行（IDEA 的 GroupLineBookmarks = 按文件分组） -->
         <div v-if="group.path" class="bookmark-group-head" :role="fileBookmarks.get(group.path) ? 'listitem' : 'presentation'" :title="group.path">
-          <button v-if="fileBookmarks.get(group.path)" class="bookmark-group-name bookmark-file-open" :title="`打开 ${group.path}${bookmarkDescription(fileBookmarks.get(group.path)!) ? '：' + bookmarkDescription(fileBookmarks.get(group.path)!) : ''}`" @click="activate(fileBookmarks.get(group.path)!)">{{ group.path.split('/').pop() }}</button>
+          <button v-if="fileBookmarks.get(group.path)" class="bookmark-group-name bookmark-file-open" :class="{ 'bookmark-bold': bookmarkFontBold(fileBookmarks.get(group.path)!) }" :title="`打开 ${group.path}${bookmarkDescription(fileBookmarks.get(group.path)!) ? '：' + bookmarkDescription(fileBookmarks.get(group.path)!) : ''}`" @click="activate(fileBookmarks.get(group.path)!)">{{ group.path.split('/').pop() }}</button>
           <span v-else class="bookmark-group-name">{{ group.path.split('/').pop() }}</span>
           <span class="bookmark-group-folder">{{ folderOf(group.path) }}</span>
           <span v-if="fileBookmarks.get(group.path)?.mnemonic !== undefined" class="bookmark-digit" :title="`Ctrl+${fileBookmarks.get(group.path)?.mnemonic} 跳转`">{{ fileBookmarks.get(group.path)?.mnemonic }}</span>
@@ -174,7 +241,7 @@ function onKeydown(event: KeyboardEvent) {
           <button v-if="group.entries.length > 1" class="icon-button" :title="SORT_GROUP_LABEL" :aria-label="`${SORT_GROUP_LABEL} ${group.path}`" @click="emit('sortGroup', group.path)"><ArrowDownUp :size="iconSize.dense" /></button>
         </div>
         <div v-for="entry in lineEntriesOf(group)" :key="bookmarkKey(entry)" class="bookmark-row" role="listitem" :data-key="bookmarkKey(entry)" :class="{ 'bookmark-selected': cursor === bookmarkKey(entry) }" @contextmenu.prevent.stop="openRowMenu($event, entry)">
-          <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath }"
+          <button class="bookmark-jump" :class="{ 'bookmark-current': entry.path === activePath, 'bookmark-bold': bookmarkFontBold(entry) }"
                   :title="`${entry.path}:${entry.line}`" :aria-label="`跳转到 ${entry.path} 第 ${entry.line} 行${bookmarkDescription(entry) ? `：${bookmarkDescription(entry)}` : ''}`" @click="activate(entry)">
 
             <!-- 分组在文件下：`"行号: "` 灰 + 描述（那一行原文）常规体 —— 逐条照 `ui/tree/LineNode.kt:20-31`。
@@ -211,7 +278,7 @@ function onKeydown(event: KeyboardEvent) {
         <button role="menuitem" @click="emit('edit', rowMenu.entry); rowMenu = null">编辑描述</button>
         <div class="menu-rule" role="separator" />
         <button role="menuitem" @click="activate(rowMenu.entry); rowMenu = null">转到书签</button>
-        <button role="menuitem" @click="emit('remove', rowMenu.entry); rowMenu = null">移除书签</button>
+        <button v-if="bookmarkRemovable()" role="menuitem" @click="emit('remove', rowMenu.entry); rowMenu = null">移除书签</button>
       </div>
     </div>
   </div>
@@ -255,6 +322,8 @@ function onKeydown(event: KeyboardEvent) {
 .bookmark-folder { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
 .bookmark-line { flex-shrink: 0; color: var(--muted); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .bookmark-current .bookmark-name { color: var(--bright); }
+/* `Bookmark.getBookmarkFont`（`Bookmark.java:95`）：带助记键的书签用粗体（DEFAULT 的常规体）。 */
+.bookmark-bold { font-weight: 600; }
 .bookmark-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-5) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
 .bookmark-empty p { margin: 0; color: var(--secondary); font-size: 12px; }
 .bookmark-empty span { max-width: 26em; }

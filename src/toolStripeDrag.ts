@@ -1,7 +1,9 @@
 // 工具窗口条（stripe）按钮的拖放：移动到另一侧 + 在目标侧排序。
 // 对应 IDEA AbstractDroppableStripe。从 App.vue 拆出（桃 2026-09-26：模块化）。
 // 拖放状态（draggingTool / dropTarget）由模块自持；其余依赖经 ctx 惰性注入。
+// HTML5 事件的读写走统一 DnD 模型（`src/dndModel.ts`），与标签拖放同一条规则。
 import { ref } from 'vue'
+import { acceptDrop, beginDrag, dropActionForEvent } from './dndModel.ts'
 
 export interface ToolStripeDragContext {
   toolAnchors: () => Record<string, 'left' | 'right' | 'bottom'>
@@ -16,15 +18,13 @@ export function createToolStripeDrag(ctx: ToolStripeDragContext) {
 
   function onToolDragStart(id: string, event: DragEvent) {
     draggingTool.value = id
-    event.dataTransfer?.setData('text/plain', id)
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+    beginDrag(event, { text: id, action: 'move' })
   }
 
   function onToolDragOver(side: string, before: string | null, event: DragEvent) {
     if (!draggingTool.value) return
-    event.preventDefault()
     dropTarget.value = { side, before }
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    acceptDrop(event, dropActionForEvent(event) ?? 'move')
   }
 
   function onToolDrop(side: 'left' | 'right' | 'bottom', before: string | null, event: DragEvent) {
@@ -34,11 +34,22 @@ export function createToolStripeDrag(ctx: ToolStripeDragContext) {
     dropTarget.value = null
     if (!id) return
     // Dropping onto a stripe both moves the window to that side and reorders it there.
-    if ((ctx.toolAnchors()[id] ?? 'left') !== side) ctx.setToolAnchor(id, side)
-    const order = ctx.toolOrder().value[side].filter(item => item !== id)
+    const anchor = ctx.toolAnchors()[id] ?? 'left'
+    if (anchor !== side) ctx.setToolAnchor(id, side)
+    // `before === id` 是"落点就是被拖的那个按钮自己"（宿主把按钮 id 当 before 传进来）——
+    // 原地松手不该换次序。旧实现会先把它从表里摘掉再 `indexOf(id)`（-1）⇒ 一路 push 到末尾，
+    // 于是在自家按钮上按一下再松手都会把窗口挪到侧条最后。
+    if (before === id) {
+      if (anchor !== side) ctx.saveToolOrder()
+      return
+    }
+    const list = ctx.toolOrder().value[side] ?? []
+    const order = list.filter(item => item !== id)
     const index = before ? order.indexOf(before) : -1
     if (index >= 0) order.splice(index, 0, id)
     else order.push(id)
+    // 位置没变就不写盘（拖动经过自家按钮、或在表尾落下，都不该产生一次存档写入）。
+    if (order.length === list.length && order.every((item, at) => item === list[at])) return
     ctx.toolOrder().value[side] = order
     ctx.saveToolOrder()
   }

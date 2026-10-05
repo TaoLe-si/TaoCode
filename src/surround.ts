@@ -23,6 +23,18 @@ export const surroundTemplates: SurroundTemplate[] = [
   { title: '行注释 //', keywords: 'comment line 注释', prefix: '// ', suffix: '', block: false },
   { title: '括号 ( )', keywords: 'parentheses group 括号', prefix: '(', suffix: ')', block: false },
   { title: '方括号 [ ]', keywords: 'brackets array 方括号', prefix: '[', suffix: ']', block: false },
+  // 自定义折叠区域（上游 `CustomFoldingSurroundDescriptor.getAllSurrounders`：`platform/lang-impl/
+  // src/com/intellij/lang/folding/CustomFoldingSurroundDescriptor.java:224-227` 逐个
+  // `CustomFoldingProvider` 造一个 surrounder，标题取 `getDescription()`）。
+  // 四个 provider 的标记原文见各自的 `getStartString`/`getEndString`：
+  //   `VisualStudioCustomFoldingProvider.java:36-42` region ? / endregion（`?` 是描述占位符，:47）、
+  //   `NetBeansCustomFoldingProvider.java:36-42` `<editor-fold desc="?">` / `</editor-fold>`；
+  // `//<region>` / `//</region>` 与 `#region` 两族是 2018.3+ 的内置区域标记，provider 在
+  // 社区树之外（**无法核实**其 `getDescription()` 的确切文案），这里按标记原文列出。
+  { title: '折叠区域 //<region>', keywords: 'region fold custom folding 折叠区域 区域', prefix: '//<region>', suffix: '//</region>', block: true },
+  { title: '折叠区域 //region', keywords: 'region fold custom folding 折叠区域 区域', prefix: '//region', suffix: '//endregion', block: true },
+  { title: '折叠区域 #region', keywords: 'region pragma fold custom folding 折叠区域 区域', prefix: '#region', suffix: '#endregion', block: true },
+  { title: '折叠区域 <editor-fold>', keywords: 'editor-fold netbeans region fold 折叠区域 区域', prefix: '//<editor-fold desc="Description">', suffix: '//</editor-fold>', block: true },
 ]
 
 export interface Wrapped {

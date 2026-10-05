@@ -79,10 +79,13 @@
     展开态按签名记，恢复那一步顶掉自动折叠）。边界对不上时按**签名**认块（`applyFoldPlan` 的匹配规则），
     这样"编辑把块推走"不会丢折叠。
     `caretInsideRange` 的"光标严格落在里面就不折"也接进管道了（`foldKinds` 折的时候跳过那些区间）。
+    **2026-10-04 第二轮补**：下一次重算不再只等语言服务回包/诊断更新 —— `CodeEditor.vue` 的
+    updateListener 在 `docChanged` 里直接 `folding.schedule()`（去抖 400ms），上游 `FoldingUpdate`
+    的"文档事件直触"这一条落地，`CodeFoldingPass`/`FoldingUpdate` 两行因此改判 `[x]`。
     **仍缺**：`ApplyDefaultStateMode` 的另外两种模式（本仓只有默认这一种）、`getFoldRegionsForSelection`
     （带选区时「全部收起/展开」只作用于选区内的区间）。
 
-## D. 不适用（`[-]`，26 类）
+## D. 不适用（`[-]`，29 类）
 
 四类理由：
 
@@ -98,7 +101,10 @@
    `EditorFoldingInfoWindow`（依附 `EditorWindow` 的那一半 —— 本仓每个标签一个编辑器，没有"同一文档开在多个编辑器
    窗口"的形态）、`FoldLimb`（通用复活机制的构件，本仓没有那套框架）。
 
-## E. 未移植（`[ ]`，33 类）
+## E. 未移植（`[ ]`，0 类）—— 2026-10-04 起没有留白
+
+下面这份清单是**历史记录**：第六十至六十五批逐条处置后本域 `[ ]` 归零（可移植的都有落点，
+语言侧 builder / 注入片段 / Swing 与打开期提示的宿主逐条判 `[-]`）。逐条现状以 §G 与表尾四档为准。
 
 可移植、本仓**确实还没有**的（都在 §G 里逐条标了落点或"还没有"）：
 
@@ -148,14 +154,14 @@
 | `CodeFoldingSettingsImpl` | `platform/editor-ui-ex/src/com/intellij/codeInsight/folding/CodeFoldingSettingsImpl.java` | `[~]` | 落盘那一段：上游 `@State(name = "CodeFoldingSettings", storages = @Storage("editor.xml"))`（`:11`），本仓两个键进编辑器设置那一段（`native/settings_schema.hpp` 的 `EDITOR_SETTING_KEYS` + `settings_schema.cpp` 的 `editor_defaults_impl()`，`src/settingsModel.ts` 的 `EditorSettings`）；**缺**另外三个键（同上） |
 | `CodeFoldingManager` | `platform/foldings/src/com/intellij/codeInsight/folding/CodeFoldingManager.java` | `[~]` | 折叠的查询/变更面：本仓落在 `src/components/CodeEditor.vue` 的折叠 StateField 与 `src/editorCommands.ts` 的命令表；**缺**按偏移查询折叠区间这类公开面 |
 | `CodeFoldingManagerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingManagerImpl.java` | `[~]` | 同上（本仓没有这个对象，行为分散在 `src/components/CodeEditor.vue` 与 `src/editorCommands.ts`） |
-| `CodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPass.java` | `[~]` | 重建折叠区间的 pass：本仓在打开/更新文档时用 LSP `foldingRange` 建区间（`src/components/CodeEditor.vue`）；**缺**文档变更后的重算 |
+| `CodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPass.java` | `[x]` | 重建折叠区间的 pass：本仓在打开/更新文档时用 LSP `foldingRange` 建区间（`src/components/CodeEditor.vue`）。文档一变 `foldingRanges` 的 `update` 先把旧区间清空（行号对不上了，`src/editorFolding.ts`），**同一次 `docChanged` 直接触发** `folding.schedule()`（`CodeEditor.vue` 的 updateListener，去抖 400ms），重取后走 `src/editorFoldingController.ts` 的六步管道（存档 → 装区间 → 记候选 → 折默认 → 清失效 → 恢复）；语言服务回包/诊断更新（`lspDiagnostics` watcher）是另一条触发，两条都进同一条管道。**2026-10-04 第二轮补齐**：上游 PSI 变更直触 `FoldingUpdate` 的那条独立触发已接上（服务端不推诊断时编辑也会重算），判据是 `tests/editor-folding.test.mjs` 的触发接线断言。上游的 per-editor pass 框架与 `FirstFoldingPass` 标记在本仓没有对应对象（每个标签一个 CodeMirror 视图，首跑/常规跑都归这一条管道），行为等价。 |
 | `CodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingPassFactory.java` | `[~]` | 按语言给 pass 的工厂：本仓等价的是编辑器装配时装折叠扩展（`src/components/CodeEditor.vue`） |
 | `CodeFoldingNecromancer` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancer.kt` | `[~]` | "重开后把折叠放回去"这件事在 `src/editorFoldingController.ts`（`capture`/`restore`）里；**缺** 上游那套把折叠模型**从磁盘缓存**复活（`cache.folding.model.on.disk` 的 `CleaverNecromancer`，`:44-56`）—— 本仓区间来自 LSP，重开时重新问一遍即可，不需要那份缓存 |
 | `CodeFoldingNecromancy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingNecromancy.kt` | `[~]` | 同上（编排）；本仓的等价物是 `src/editorFoldingController.ts` 的管道顺序 |
 | `CodeFoldingZombie` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CodeFoldingZombie.kt` | `[-]` | 折叠**模型**的磁盘缓存载荷（§D.4 的性能件）：上游把它挂在注册表开关 `cache.folding.model.on.disk` 后面（`CodeFoldingNecromancer.kt:52-56` 的 `isZombieFriendly`），缓存的是"区间对象"免得重算 —— 本仓的模型是服务端一次 `foldingRange` 请求就回来的列表，而**状态**已经落盘（`ProjectSettings.foldingState`，第六十四批），再造一层模型缓存没有可见收益 |
 | `FoldLimb` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldLimb.kt` | `[-]` | 通用复活机制的构件（§D.4）：本仓没有那套框架 |
 | `CollapseBlockHandlerImpl` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseBlockHandlerImpl.java` | `[~]` | `fold.block` = `src/editorFolding.ts` 的 `foldBlockAtCaret`（`blockAt` 跳过 `kind` 为 comment/imports/region 的区间，取光标处最内层；没有服务端区间时用 `syntaxArea` 的语法树候选顶上）；**缺**上游按语言注册的 `CollapseBlockHandler` EP（`CollapseBlockAction.java:29-46`） |
-| `CollapseExpandDocCommentsHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseExpandDocCommentsHandler.java` | `[~]` | `fold.docs`/`unfold.docs` = `src/editorFolding.ts` 的 `foldDocComments`/`unfoldDocComments`（`commentRanges` 取 `kind === 'comment'` 的区间）；**缺** PSI 侧"文档注释"与普通注释的区分（上游 `CollapseExpandDocCommentsHandler` 只认 doc comment） |
+| `CollapseExpandDocCommentsHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseExpandDocCommentsHandler.java` | `[x]` | `fold.docs`/`unfold.docs` = `src/editorFolding.ts` 的 `foldDocComments`/`unfoldDocComments`；**2026-10-04 本轮补上"文档注释 vs 普通注释"的区分**：`docCommentRanges` + `isDocCommentLine` 按起始行记号过滤（Java/Kotlin/JS/TS/PHP/C 系的 `/**` 且不是空注释、Python 的 `"""`/`'''`），`kind === 'comment'` 的普通注释不再被这组动作碰到 —— 上游 `CollapseExpandDocCommentsHandler:46-52` 的 `PsiDocCommentBase` / `CodeDocumentationAwareCommenter` 判定用词法近似替代，认不出的语言按"不动作"处理（保守，不误伤普通注释）；判据 `tests/editor-folding.test.mjs` 的三条（词法判定 / 区间筛选 / 命令端到端只折文档注释那块） |
 | `CollapseSelectionHandler` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/CollapseSelectionHandler.java` | `[~]` | `fold.selection` = `src/editorFolding.ts` 的 `toggleFoldSelection`，照 `CollapseSelectionHandler.java:24-87`：有选区时精确匹配就移除（手工区间）、搭界就按上游默认「取消」不动、否则折起选区那几行；无选区时切换光标处最内层区域；**缺** `:44` 的提示与 `:49-58` 的模态确认框（本仓没有编辑器内 hint / 模态框宿主） |
 | `DocumentFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/DocumentFoldingInfo.java` | `[~]` | 存档与恢复都在：`src/editorFoldingState.ts` 的 `captureFoldState`（`:91-110` 的"折着的都记 + 本该默认折着却展开着的按签名记"）与 `restorePlan`（`setToEditor:198-220` + `computeExpandRanges:146-164` 的按签名找回），落盘照 `writeExternal`/`readExternal`（`:260-368`）写进项目级设置（`native/folding_state_schema.cpp` 校验）；**缺**上游用**文件时间戳**挡"磁盘上改过"（`:333` 的 `date != e.getAttributeValue(DATE_ATT)`），本仓用轻签名当替身 |
 | `EditorFoldingInfo` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/EditorFoldingInfo.java` | `[~]` | 折叠状态与"谁建的折叠"的记录：本仓在 `src/editorFoldingState.ts`（存档）与 `src/editorFolding.ts` 的区域层（手工 vs 自动，`auto` 标记）里；**缺** PSI 元素指针那一层（`addRegion(region, pointer)`）—— 没有 PSI，映射只能按偏移+签名 |
@@ -168,7 +174,7 @@
 | `FoldingHintMouseMotionListener` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintMouseMotionListener.java` | `[-]` | 触发条件是鼠标落在**装订线折叠轮廓区**（`EditorMouseEventArea.FOLDING_OUTLINE_AREA`，`:47-53`）且该折叠区的**起始行已滚出视口上沿**（`:71-88`），此时弹一段"被挡住的头部"的片段提示（`:88-110`）。本仓的 CodeMirror 装订线只在折叠区的**起始行**画标记：起始行滚出视口后那一带没有可悬停的元素 ⇒ 这条交互的形态对不上（§D.4 的 Swing 宿主） |
 | `FoldingHintPostStartupActivity` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingHintPostStartupActivity.kt` | `[-]` | 打开期提示的宿主（§D.4） |
 | `FoldingPolicy` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingPolicy.java` | `[~]` | 三个职责都有落点：`isCollapsedByDefault`（`:25-28`）/`keepExpandedOnFirstCollapseAll`（`:35-42`）转发给**语言侧** `FoldingBuilder`，本仓的等价物是 LSP `kind` → 设置那套映射（`src/editorFolding.ts` 的 `foldKinds` + `src/editorFoldingSettings.ts`，依据 `LspFoldingBuilder.kt:41-46`；"首次全收起的例外"退化见 `CollapseAllRegionsAction` 行）；`getSignature`/`restoreBySignature`（`:44-70`，带 `ElementSignatureProvider` EP）↔ `src/editorFoldingState.ts` 的轻签名 `signatureAt` 与 `restorePlan` 的按签名认回。**缺** PSI 元素签名（§D.2）与 `processingInfoStorage` 那套诊断输出 |
-| `FoldingUpdate` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingUpdate.java` | `[~]` | 按语言重算折叠区间：本仓在打开文档时请求 LSP `foldingRange`（`src/components/CodeEditor.vue`）；**缺**编辑后重算 |
+| `FoldingUpdate` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/FoldingUpdate.java` | `[x]` | 按语言重算折叠区间：本仓在打开文档与**每次文档变更**时请求 LSP `foldingRange`（`src/components/CodeEditor.vue` 的 updateListener 直接调 `folding.schedule()`；编辑后区间在 `src/editorFolding.ts` 的 `foldingRanges` 里被清空），重取后走 `src/editorFoldingController.ts` 的同一条管道，含 `UpdateFoldRegionsOperation` 的三条规矩（清失效先存后删、用户展开过的块按签名活下来、默认折叠跳过光标所在区间）。**2026-10-04 第二轮补齐**：文档事件直触的独立触发已接上（与 `CodeFoldingPass` 行同一条），上游 PSI 侧的按文件缓存与注入片段分支在本仓没有对应物（注入见 §D.3），替换物是服务端一次 `foldingRange` 与服务端/本地 region 区间的合并（`src/editorFolding.ts` 的 `mergeFoldRanges`）。 |
 | `InjectedCodeFoldingPass` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPass.java` | `[-]` | 注入片段的折叠（§D.3） |
 | `InjectedCodeFoldingPassFactory` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/InjectedCodeFoldingPassFactory.java` | `[-]` | 同上 |
 | `UpdateFoldRegionsOperation` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/UpdateFoldRegionsOperation.java` | `[~]` | 三条都接了：失效项先存后删（`removeInvalidRegions`）、用户展开过的块活在重算里（`shouldExpandNewRegion` 的 `oldStatus`）、**默认折叠时跳过光标严格落在里面的那几条**（`caretInsideRange:236-238`，见 `src/editorFolding.ts` 的 `foldKinds`），管道在 `src/editorFoldingController.ts`；**缺** `ApplyDefaultStateMode` 的另外两种模式（`NO`/`EXCEPT_CARET_REGION` 是给别的调用方用的，本仓只有默认这一种） |
@@ -198,4 +204,4 @@
 | `ExpandToLevel4Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel4Action.java` | `[~]` | `unfold.level4` = `src/editorFolding.ts` 的 `expandCaretToLevel(4)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「展开到级别 4」） |
 | `ExpandToLevel5Action` | `platform/foldings/src/com/intellij/codeInsight/folding/impl/actions/ExpandToLevel5Action.java` | `[~]` | `unfold.level5` = `src/editorFolding.ts` 的 `expandCaretToLevel(5)`（`levelPlan` 照 `BaseExpandToLevelAction.java:43-70`）（「展开到级别 5」） |
 
-**四档合计**：`[x]` 0 + `[~]` 40 + `[ ]` 0 + `[-]` 29 = 69。（2026-09-30 第六十批：折叠动作族；第六十一批：设置页两条开关；第六十二批：状态存/取与重算；第六十三批：`caretInsideRange`；第六十四批：状态落盘；**第六十五批：最后 5 条 `[ ]` 判掉**（`FoldingPolicy`/`FoldingUtil` 逐函数有落点 → `[~]`；`CodeFoldingZombie` 是注册表后的模型缓存、`CollapseBlockHandler` 是语言侧 EP、`FoldingHintMouseMotionListener` 要装订线折叠轮廓区 —— 本仓都没有宿主 → `[-]`）。**B4 至此没有 `[ ]`。**）
+**四档合计**：`[x]` 3 + `[~]` 37 + `[ ]` 0 + `[-]` 29 = 69。（2026-09-30 第六十批：折叠动作族；第六十一批：设置页两条开关；第六十二批：状态存/取与重算；第六十三批：`caretInsideRange`；第六十四批：状态落盘；**第六十五批：最后 5 条 `[ ]` 判掉**（`FoldingPolicy`/`FoldingUtil` 逐函数有落点 → `[~]`；`CodeFoldingZombie` 是注册表后的模型缓存、`CollapseBlockHandler` 是语言侧 EP、`FoldingHintMouseMotionListener` 要装订线折叠轮廓区 —— 本仓都没有宿主 → `[-]`）。**B4 至此没有 `[ ]`。** 2026-10-04 本轮复核：`FoldingPolicy`/`FoldingUtil` 的逐函数落点与 `CollapseBlockHandler` 的 `[-]` 判定不变；`FoldingUpdate`/`CodeFoldingPass` 两条 `[~]` 的"缺编辑后重算"改写精确（重算走 `src/editorFoldingController.ts`，触发点是语言服务回包而非文档事件）。**2026-10-04 本轮改判**：`CollapseExpandDocCommentsHandler` `[~]` → `[x]` —— 文档注释与普通注释的区分已落（`src/editorFolding.ts` 的 `docCommentRanges`/`isDocCommentLine`，判据 `tests/editor-folding.test.mjs`），四档因此从 0/40/0/29 变成 1/39/0/29。**2026-10-04 第二轮改判**：`CodeFoldingPass`/`FoldingUpdate` `[~]` → `[x]` —— CodeEditor 独占放行后把"文档事件直触重算"接上（`CodeEditor.vue` 的 updateListener 在 `docChanged` 里 `folding.schedule()`，去抖在 `src/editorFoldingController.ts`），四档从 1/39/0/29 变成 3/37/0/29。）

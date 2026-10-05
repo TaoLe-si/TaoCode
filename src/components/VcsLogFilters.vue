@@ -1,15 +1,31 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { ChevronDown } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
-import type { GitLogQuery } from '../bridge'
+import type { GitLogQuery, GitLogSort } from '../bridge'
+import VcsLogTextFilterSettings from './VcsLogTextFilterSettings.vue'
+import VcsLogGraphOptions from './VcsLogGraphOptions.vue'
+import { graphOptionsQuery, graphOptionsState } from '../vcsLogGraphOptions'
+import { textFilterSettingsQuery, textFilterSettingsState } from '../vcsLogTextFilterSettings'
 const props = defineProps<{ query: GitLogQuery }>()
 const emit = defineEmits<{ apply: [query: GitLogQuery] }>()
 const draft = reactive({ text: '', refs: '', author: '', since: '', until: '', path: '' })
 watch(() => props.query, q => Object.assign(draft, { text: q.text ?? '', refs: (q.refs ?? []).join('\n'), author: q.author ?? '', since: q.since ?? '', until: q.until ?? '', path: q.path ?? '' }), { immediate: true })
 const controls = [{ key: 'refs', label: '分支' }, { key: 'author', label: '用户' }, { key: 'date', label: '日期' }, { key: 'path', label: '路径' }] as const
 type Filter = typeof controls[number]['key'] | 'text'
+// 上游 `VcsLogClassicFilterUi.createActionGroup()`（`:149-150`）的顺序是
+// 分支 → 用户 → 日期 → 路径 → **图选项**；文本框在它们之前（`:88-90`），紧挨着的那条
+// 内联工具条是「文本筛选器设置」（`Vcs.Log.TextFilterSettings` = 正则表达式 / 区分大小写）。
+// 换档立刻重查（`TextFilterModel` 的 PropertiesChangeListener，`TextFilterModel.kt:28-38`）。
+const textSettings = computed(() => textFilterSettingsState(props.query))
+const graphState = computed(() => graphOptionsState(props.query))
+function applyOptions(patch: Partial<GitLogQuery>) { emit('apply', { ...props.query, ...patch }) }
+function setTextRegex(value: boolean) { applyOptions(textFilterSettingsQuery({ ...textSettings.value, textRegex: value })) }
+function setMatchCase(value: boolean) { applyOptions(textFilterSettingsQuery({ ...textSettings.value, matchCase: value })) }
+function setSort(sort: GitLogSort) { applyOptions(graphOptionsQuery({ ...graphState.value, sort })) }
+function setFirstParent(firstParent: boolean) { applyOptions(graphOptionsQuery({ ...graphState.value, firstParent })) }
+function setNoMerges(noMerges: boolean) { applyOptions(graphOptionsQuery({ ...graphState.value, noMerges })) }
 let openPanel: HTMLDetailsElement | null = null
 function toggled(event: Event) {
   const panel = event.target as HTMLDetailsElement
@@ -41,18 +57,22 @@ function apply(key: Filter, event?: Event, clear = false) {
 </script>
 <template>
 
-  <!-- Components: text first; ClassicFilterUi: branch, user, date, structure, graph. Graph filter has no backend contract. -->
-  <form class="text-filter" @submit.prevent="apply('text')"><Search :size="iconSize.dense" /><input v-model="draft.text" aria-label="提交消息（区分大小写，回车过滤）" placeholder="搜索提交消息" /></form>
+  <!-- Components: text first; ClassicFilterUi (`VcsLogClassicFilterUi.kt:149-150`):
+       branch, user, date, structure, **graph**. The text field carries the inline
+       `Vcs.Log.TextFilterSettings` toolbar (regex / match case). -->
+  <form class="text-filter" @submit.prevent="apply('text')"><Search :size="iconSize.dense" /><input v-model="draft.text" aria-label="提交消息（回车过滤）" :placeholder="textSettings.textRegex ? '搜索提交消息（正则）' : '搜索提交消息'" /></form>
+  <VcsLogTextFilterSettings :regex="textSettings.textRegex" :match-case="textSettings.matchCase" @toggle-regex="setTextRegex" @toggle-match-case="setMatchCase" />
   <details v-for="control in controls" :key="control.key" class="filter" @toggle="toggled">
     <summary :class="{ applied: control.key === 'date' ? query.since || query.until : control.key === 'refs' ? query.refs?.length : query[control.key] }">{{ control.label }}<ChevronDown :size="iconSize.dense" class="filter-caret" aria-hidden="true" /></summary>
     <form class="popup" @submit.prevent="apply(control.key, $event)">
       <label v-if="control.key === 'refs'">分支 / 标签 / 哈希<textarea v-model="draft.refs" rows="3" placeholder="每行一个引用；留空为所有分支" /></label>
-      <label v-else-if="control.key === 'author'">用户<input v-model="draft.author" placeholder="区分大小写的作者子串" /></label>
+      <label v-else-if="control.key === 'author'">用户<input v-model="draft.author" placeholder="作者子串" /></label>
       <template v-else-if="control.key === 'date'"><label>起始日期（UTC）<input v-model="draft.since" type="date" /></label><label>截止日期（UTC）<input v-model="draft.until" type="date" /></label></template>
       <label v-else>路径<input v-model="draft.path" placeholder="仓库相对路径，使用 /" /></label>
       <div class="actions"><button type="button" @click="apply(control.key, $event, true)">清除</button><button type="submit">应用</button></div>
     </form>
   </details>
+  <VcsLogGraphOptions v-bind="graphState" @pick-sort="setSort" @toggle-first-parent="setFirstParent(!graphState.firstParent)" @toggle-no-merges="setNoMerges(!graphState.noMerges)" />
 </template>
 <style scoped>
 .text-filter { display: flex; align-items: center; flex: 1; min-width: 50px; gap: 4px; color: var(--muted); }

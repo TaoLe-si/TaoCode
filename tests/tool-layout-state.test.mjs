@@ -5,6 +5,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import * as layoutModel from '../src/toolLayout.ts'
 import * as metadata from '../src/toolWindowMeta.ts'
+import * as stripesModule from '../src/toolWindowStripes.ts'
 import { createToolWindowStripes } from '../src/toolWindowStripes.ts'
 
 // Follow scope-persistence.test.mjs: execute the host with real Vue and production dependencies.
@@ -16,6 +17,7 @@ const exports = {}
 new Function('require', 'exports', js)(name => {
   if (name === 'vue') return vue
   if (name === './toolWindowMeta.ts') return metadata
+  if (name === './toolWindowStripes.ts' || name === './toolWindowStripes') return stripesModule
   if (name === './toolLayout' || name === './toolLayout.ts') return layoutModel
   throw new Error(`Unexpected import: ${name}`)
 }, exports)
@@ -64,6 +66,9 @@ const custom = () => ({
     bottom: ['notifications', 'debug', 'todo', 'vcslog'],
   },
   sizes: { explorer: 350, trace: 310, output: 260 },
+  // 每窗口的另两项状态（`WindowInfo.isShowStripeButton` / `contentUiType`）同样属于布局快照。
+  hidden: ['outline'],
+  uiTypes: { files: 'combo', output: 'combo' },
 })
 
 // ToolWindowDefaultLayoutManager.kt:225-235 / 267-278 round-trip order and every anchor,
@@ -109,6 +114,33 @@ test('apply restores all docks, selections and sizes through the host setter', t
   assert.equal(h.toolOrder.value.bottom[0], 'notifications', 'applied order must not alias the snapshot')
 })
 
+// WindowInfo 的另外两项：`isShowStripeButton`（从侧栏移除）与 `contentUiType`（标签形态）。
+test('a snapshot carries removed stripe buttons and explicit content-ui types both ways', t => {
+  storage(t)
+  const h = host()
+  // 先做两个"非出厂"的状态，快照必须收进去
+  h.removeStripeButton('outline')
+  h.setContentUiType('files', 'combo')
+  h.deps.bottomTab.value = 'output'
+  h.setContentUiType('output', 'combo')
+  const snapshot = h.captureToolLayout()
+  assert.deepEqual(snapshot.hidden, ['outline'], '摘掉的按钮要进快照')
+  assert.deepEqual(snapshot.uiTypes, { files: 'combo', output: 'combo' }, '显式设过的形态才进快照')
+  // 再由快照恢复：先改乱，再 apply 回来
+  h.restoreStripeButton('outline')
+  h.setContentUiType('files', 'tabbed')
+  h.setContentUiType('output', 'tabbed')
+  h.applyToolLayout(snapshot)
+  assert.equal(h.hiddenStripeButtons.has('outline'), true, '恢复快照要把摘掉的按钮再摘掉')
+  assert.equal(h.contentUiType('files'), 'combo')
+  assert.equal(h.contentUiType('output'), 'combo')
+  // 出厂布局 = 所有按钮都在、没有显式形态（apply 工厂快照时这两项回到默认）
+  h.applyToolLayout(h.factoryToolLayout())
+  assert.equal(h.hiddenStripeButtons.size, 0)
+  assert.equal(h.contentUiType('files'), 'tabbed')
+  assert.deepEqual(h.captureToolLayout().uiTypes, {})
+})
+
 test('apply accepts every registered bottom tool as the selected tab, not just fixed content tabs', t => {
   storage(t)
   const h = host()
@@ -134,7 +166,9 @@ test('restoring a named layout persists its anchors and all stripe orders for a 
   h.persistToolLayouts()
   h.restoreCurrentToolLayout()
   const saved = JSON.parse(values.get('taocode.toolLayout:project') ?? 'null')
-  const anchors = Object.fromEntries(Object.entries(saved?.windows ?? {}).map(([id, info]) => [id, info.anchor]))
+  const anchors = Object.fromEntries(Object.entries(saved?.windows ?? {})
+    .filter(([, info]) => typeof info.anchor === 'string')
+    .map(([id, info]) => [id, info.anchor]))
   assert.deepEqual(anchors, snapshot.anchors, '锚点落在项目级布局的每窗口记录里')
   const order = { left: [], right: [], bottom: [] }
   for (const [id, info] of Object.entries(saved?.windows ?? {}))
@@ -146,8 +180,11 @@ test('restoring a named layout persists its anchors and all stripe orders for a 
   assert.deepEqual(order.bottom, snapshot.order.bottom)
   const reopened = host()
   assert.deepEqual({ ...reopened.toolAnchors }, snapshot.anchors)
+  // 侧条顺序是"按钮那一层"：被摘掉按钮的窗口不在上面（顺序表里仍在，由 hidden 过滤）。
   for (const side of ['left', 'right', 'bottom'])
-    assert.deepEqual(reopened.stripeOrder.value(side), snapshot.order[side])
+    assert.deepEqual(reopened.stripeOrder.value(side), snapshot.order[side].filter(id => !snapshot.hidden.includes(id)))
+  assert.equal(reopened.hiddenStripeButtons.has('outline'), true, '摘掉的按钮也要跟着项目布局回来')
+  assert.equal(reopened.contentUiType('files'), 'combo', '显式标签形态也要跟着项目布局回来')
   reopened.restoreCurrentToolLayout()
   assert.deepEqual(reopened.captureToolLayout(), snapshot)
 })

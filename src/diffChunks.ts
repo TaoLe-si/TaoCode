@@ -9,10 +9,12 @@
 // 算法骨架逐条照抄 `ChunkOptimizer.build` / `processLastRanges`（`ChunkOptimizer.kt:23-84`）：
 // 它在**未更改段**上工作，两两取相邻的一段；只有当两段在某一侧相接时才有文章可做（否则说明
 // 输入不是 LCS，上游直接 return，本仓也一样 —— 宁可不动，也不猜）。
-// 具体怎么微调由 `shift` 决定：词级用 `wordShift`（本文件），行级那一套（空行对齐）本仓没做。
+// 具体怎么微调由 `shift` 决定：词级用 `wordShift`，行级用 `diffSmartLines.lineShift`。
 //
 // 本仓的 token 化在 `src/diffWords.ts`（与 native `history.cpp` 同一条规则），
 // 所以这里只吃"token 下标 + 取文本"这三样，不认识字符串以外的任何东西 —— 可单测。
+
+import type { AlignedPair } from './diffAlign.ts'
 
 /** 一侧的 token 区间（半开）。 */
 export interface TokenSpan { start: number; end: number }
@@ -91,11 +93,66 @@ export function optimizeSpans(spans: readonly MatchSpan[], totalA: number, total
     result.push({ a: { ...span.a }, b: { ...span.b } })
     processLast()
   }
-  // 收尾：上游在遍历结束后不再处理（它每次 push 后就 process），这里补一次以防最后两段还有戏。
-  processLast()
-  void totalA
-  void totalB
+  for (const span of result) {
+    if (span.a.start < 0 || span.b.start < 0 || span.a.end > totalA || span.b.end > totalB) {
+      throw new RangeError('diff: optimized span outside input')
+    }
+  }
   return result
+}
+
+export function pairsToSpans(pairs: readonly AlignedPair[]): MatchSpan[] {
+  const spans: MatchSpan[] = []
+  for (const { from, to } of pairs) {
+    const last = spans[spans.length - 1]
+    if (last && last.a.end === from && last.b.end === to) {
+      last.a.end++
+      last.b.end++
+    } else {
+      spans.push({ a: { start: from, end: from + 1 }, b: { start: to, end: to + 1 } })
+    }
+  }
+  return spans
+}
+
+export function spansToPairs(spans: readonly MatchSpan[]): AlignedPair[] {
+  const pairs: AlignedPair[] = []
+  for (const span of spans) {
+    for (let i = 0; i < span.a.end - span.a.start; i++) {
+      pairs.push({ from: span.a.start + i, to: span.b.start + i })
+    }
+  }
+  return pairs
+}
+
+export function changedSpans(spans: readonly MatchSpan[], totalA: number, totalB: number): MatchSpan[] {
+  const changes: MatchSpan[] = []
+  let a = 0, b = 0
+  for (const span of spans) {
+    if (a !== span.a.start || b !== span.b.start) {
+      changes.push({ a: { start: a, end: span.a.start }, b: { start: b, end: span.b.start } })
+    }
+    a = span.a.end
+    b = span.b.end
+  }
+  if (a !== totalA || b !== totalB) changes.push({ a: { start: a, end: totalA }, b: { start: b, end: totalB } })
+  return changes
+}
+
+/** `ExpandChangeBuilder` (`DiffIterableUtil.kt:304-309`): trim equal edges of every change gap. */
+export function expandMatchGaps(pairs: readonly AlignedPair[], totalA: number, totalB: number, equals: (i: number, j: number) => boolean): AlignedPair[] {
+  const out: AlignedPair[] = []
+  let a = 0, b = 0
+  for (const pair of [...pairs, { from: totalA, to: totalB }]) {
+    const head = expandForward(a, b, pair.from, pair.to, equals)
+    for (let i = 0; i < head; i++) out.push({ from: a + i, to: b + i })
+    const tail = expandBackward(a + head, b + head, pair.from, pair.to, equals)
+    for (let i = tail; i > 0; i--) out.push({ from: pair.from - i, to: pair.to - i })
+    if (pair.from < totalA) out.push(pair)
+    a = pair.from + 1
+    b = pair.to + 1
+  }
+  return out
 }
 
 /** 微调要看 token 在文本里的位置，所以这里要的不只是词串。 */
@@ -113,13 +170,14 @@ export function wordShift(tokens1: readonly ShiftToken[], tokens2: readonly Shif
   /** 两个 token 之间隔着空白吗（越界当"隔着"，也就是不动）。 */
   const separated = (text: string, tokens: readonly ShiftToken[], left: number, right: number): boolean => {
     if (left < 0 || right < 0 || left >= tokens.length || right >= tokens.length) return true
+    if (tokens[left]!.text === '\n' || tokens[right]!.text === '\n') return true
     const from = tokens[left]!.start + tokens[left]!.text.length
     const to = tokens[right]!.start
     // 相邻（甚至重叠）时 upstream 的 `for (i in offset1 until offset2)` 一次都不跑 ⇒ 不算分开。
     if (to <= from) return false
     for (let i = from; i < to; i++) {
       const ch = text[i]!
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') return true
+      if (ch === ' ' || ch === '\t' || ch === '\n') return true
     }
     return false
   }

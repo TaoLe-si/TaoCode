@@ -10,8 +10,8 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import {
   ANONYMOUS_MACRO_LABEL, MACRO_ACTION_PREFIX, MACRO_STORAGE_KEY, actionStepCount, appendAction, appendShortcut,
-  appendTyping, findMacro, macroActionId, macroDisplayName, macroNameError, parseMacros, removeMacro,
-  serializeMacros, upsertMacro,
+  appendTyping, findMacro, macroActionId, macroDisplayName, macroNameConflict, macroNameError, moveMacroStep, parseMacros,
+  removeMacro, serializeMacros, upsertMacro,
 } from '../src/macros.ts'
 
 const action = (id, title, keys) => ({ kind: 'action', id, title, ...(keys ? { keys } : {}) })
@@ -70,6 +70,14 @@ test('宏名校验：空名拒绝、重名拒绝、改成自己原来的名字�
   assert.equal(macroNameError('m1', macros, 'm1'), null)
 })
 
+test('重名冲突单独可查：重命名时宿主拿它决定要不要问（canRenameMacro:157-178）', () => {
+  const macros = [{ name: 'm1', steps: [] }, { name: 'm2', steps: [] }]
+  assert.equal(macroNameConflict('m2', macros), macros[1], '撞上别的宏时返回那一个')
+  assert.equal(macroNameConflict('m1', macros, 'm1'), undefined, '改成自己不算冲突')
+  assert.equal(macroNameConflict('m3', macros), undefined)
+  assert.equal(macroNameConflict('   ', macros), undefined)
+})
+
 test('删除与查找', () => {
   const macros = [{ name: 'a', steps: [] }, { name: '', steps: [] }]
   assert.equal(findMacro(macros, 'a')?.name, 'a')
@@ -97,6 +105,24 @@ test('显示名：命名宏用名字，匿名宏用占位（菜单里不出现�
   assert.equal(macroDisplayName({ name: '', steps: [] }), ANONYMOUS_MACRO_LABEL)
 })
 
+test('步骤上移/下移（ActionMacroConfigurationPanel 的 moveUp/moveDown）：越界原样，移动是一条', () => {
+  const steps = [action('a', 'A'), action('b', 'B'), action('c', 'C')]
+  assert.deepEqual(moveMacroStep(steps, 2, -1).map(s => s.id), ['a', 'c', 'b'])
+  assert.deepEqual(moveMacroStep(steps, 0, 1).map(s => s.id), ['b', 'a', 'c'])
+  assert.deepEqual(moveMacroStep(steps, 0, -1).map(s => s.id), ['a', 'b', 'c'], '第一行不能再上移')
+  assert.deepEqual(moveMacroStep(steps, 2, 1).map(s => s.id), ['a', 'b', 'c'], '最后一行不能再下移')
+  assert.deepEqual(moveMacroStep(steps, 0, 0).map(s => s.id), ['a', 'b', 'c'], 'delta 0 不动')
+  assert.deepEqual(steps.map(s => s.id), ['a', 'b', 'c'], '不就地改原数组')
+  // 接线：对话框有上/下移按钮并派发 moveStep，宿主把它落到宏表
+  const dialog = readFileSync('src/components/MacrosDialog.vue', 'utf8')
+  assert.ok(dialog.includes("@click=\"emit('moveStep', { name: current.name, index, delta: -1 })\""), '对话框没有上移按钮')
+  assert.ok(dialog.includes("@click=\"emit('moveStep', { name: current.name, index, delta: 1 })\""), '对话框没有下移按钮')
+  const host = readFileSync('src/macroHost.ts', 'utf8')
+  assert.ok(host.includes('function moveMacroStep(name: string, index: number, delta: number)'), '宿主没有 moveMacroStep')
+  const app = readFileSync('src/App.vue', 'utf8')
+  assert.ok(app.includes('@move-step="moveMacroStep($event.name, $event.index, $event.delta)"'), 'App 没有把 moveStep 接到宿主')
+})
+
 test('接线：菜单、录制钩子、对话框、动态子菜单都在', () => {
   const edit = readFileSync('src/menus/editMenu.ts', 'utf8')
   assert.ok(edit.includes('...createMacrosMenuRows(ctx.macros)'), '编辑菜单没有宏子菜单')
@@ -104,10 +130,11 @@ test('接线：菜单、录制钩子、对话框、动态子菜单都在', () =>
   const macrosMenu = readFileSync('src/menus/macrosMenu.ts', 'utf8')
   for (const id of ['edit.playbackLastMacro', 'edit.startStopMacroRecording', 'edit.editMacros', 'edit.playSavedMacros'])
     assert.ok(macrosMenu.includes(`id: '${id}'`), `宏菜单缺少 ${id}`)
-  // 录制钩子：菜单行 + 命令面板两处（对应 AnActionListener.beforeActionPerformed）
+  // 录制钩子：动作执行的两处（菜单行 + 命令面板）都在广播口上，宏录制是登记进管道的监听者
+  // （对应 `AnActionListener.beforeActionPerformed`；2026-10-04 起管道在 src/actionEvents.ts）。
   const menuUi = readFileSync('src/menuUi.ts', 'utf8')
-  assert.equal((menuUi.match(/recordActionStep\(/g) ?? []).length, 2, '菜单/命令面板两处都要记一步')
-  assert.ok(menuUi.includes("import { recordActionStep } from './macroHost'"), '录制钩子的来源不对')
+  assert.equal((menuUi.match(/fireBeforeActionPerformed\(/g) ?? []).length, 2, '菜单/命令面板两处都要广播')
+  assert.ok(menuUi.includes('addActionListener({ beforeActionPerformed: recordActionStep })'), '录制钩子没有登记进广播管道')
   // 打字也录（KeyPostProcessor 的等价物）：编辑器上报 + 宿主接住
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
   assert.ok(editor.includes('typing: [text: string]'), '编辑器没有上报输入文本')

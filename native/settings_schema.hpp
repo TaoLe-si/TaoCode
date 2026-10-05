@@ -11,7 +11,7 @@ namespace taocode {
 // 键表白名单（唯一一份：UI 补丁的严格校验与读盘剪枝共用）。inline constexpr：
 // extern constexpr 数组跨 TU 是不完整类型，无法构造 std::span（踩过：C2664/C2665）。
 inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
-    "fontSize", "tabSize", "wordWrap", "lineNumbers", "showIndentGuides", "bracketMatching",
+    "fontSize", "tabSize", "wordWrap", "lineNumbers", "showIndentGuides", "bracketMatching", "lineNumeration",
     "tabLimit", "tabsInOneRow", "hideTabsIfNeeded", "sortBookmarks", "useTabCharacter", "showWhitespaces", "formatOnSave", "uiZoomPercent",
     // 代码折叠（CodeFoldingSettings.java:7-11，@Storage("editor.xml")）：只登记本仓有消费者的两个
     // （COLLAPSE_IMPORTS / COLLAPSE_CUSTOM_FOLDING_REGIONS）。默认值在 settings_schema.cpp 里。
@@ -33,7 +33,7 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // BreadcrumbsConfigurable.java:24 + BreadcrumbsConfigurableUI.kt:44-70) 三项：
     // 显示开关（isBreadcrumbsShown）、位置（isBreadcrumbsAbove，只有上/下）、
     // 按语言开关（mapLanguageBreadcrumbs，只存被显式配置过的语言）。
-    "showBreadcrumbs", "breadcrumbsPlacement", "breadcrumbsLanguages",
+    "showBreadcrumbs", "breadcrumbsPlacement", "breadcrumbsLanguages", "showMembersInNavigationBar",
     // Editor | Error highlighting（`Errors` configurable + ErrorOptionsProvider 扩展点）：
     // TaoCode 的等价物是 LSP 诊断的显示开关。
     "showDiagnostics", "showErrorStripe",
@@ -70,8 +70,7 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // showStickyLines / stickyLinesLimit：EditorSettingsExternalizable.java:93 `SHOW_STICKY_LINES = true`、
     //   :94 `STICKY_LINES_LIMIT = 5`；属性名 :1231 "showStickyLines" / :1233 "stickyLinesLimit"，
     //   读出口 :508 areStickyLinesShown() 与 :546 getStickyLineLimit()。设置行见
-    //   StickyLinesConfigurable.kt:7-20。本仓的层数默认取 3 而非上游的 5（见 docs/settings-parity.md:53），
-    //   那是已登记的偏离，不在这一批改。
+    //   StickyLinesConfigurable.kt:7-20。
     "showStickyLines", "stickyLinesLimit",
     // diffContextLines：`diff.base`（DiffSettingsConfigurable.kt:30-58）的 settings.context.lines。
     //   它在 general 键表里也有一份（settings_schema.cpp:154），但**唯一写它的是编辑器设置页**
@@ -80,6 +79,12 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     //   → SourceControl.vue:553-554 拼 `git diff -U<n>`）。所以权威副本在编辑器档，
     //   general 那份留着是为了不破坏已存盘的旧 state，不是因为它在用。
     "diffContextLines",
+    // InlaySettingsConfigurable（`inlay.hints`，intellij.platform.lang.impl.xml:935-941
+    // `parentId="editor" id="inlay.hints"`）：上游按 provider 逐个勾（InlayProviderSettingsModel.isEnabled，
+    // platform/lang-api/.../settings/InlayProviderSettingsModel.kt:26），本仓唯一的 provider 是 LSP 的
+    // textDocument/inlayHint，按它的 kind 分三档（1 = Type，2 = Parameter，其余归第三档）。
+    // 键名与分组的唯一定义处是 src/inlayHints.ts 的 INLAY_HINT_SETTING_KEYS。
+    "showTypeInlayHints", "showParameterInlayHints", "showOtherInlayHints",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
@@ -87,6 +92,10 @@ inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     "backgroundSyncFiles", "autoSaveFiles", "autoSaveIfInactive", "isUseSafeWrite", "confirmExit",
     "isShowWelcomeScreen", "confirmOpenNewProject2", "processCloseConfirmation", "inactiveTimeout",
     "supportScreenReaders", "autoShowProcessPopup",
+    // 音频提示（无障碍）：IDEA `AudioCuesSettings.kt:17` 的 @State(name="AudioCues")，默认 off。
+    // `audioCuesMode` 三档（AudioCuesSettings.kt:75-79 的 AUTO/ON/OFF）；`audioCuesDisabled`
+    // 是 `AudioCuesSettingsState.disabledCues`（:69-72）的数组形态（存的是六个 cue 的 id）。
+    "audioCuesMode", "audioCuesDisabled",
     // ConsoleConfigurable (`Console`, lang-impl/.../execution/console/ConsoleConfigurable.java:43-73)：
     // 控制台行折叠规则 —— 要折叠的行 + 不折叠的例外两个列表。
     "foldConsoleLines", "foldExceptions",
@@ -102,7 +111,19 @@ inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {
     // SeFuzzyFileSearchProviderFactory.kt:28-31：注册表键 `search.everywhere.fuzzy.files.enabled`
     // 默认 false。同 autoShowProcessPopup 的处理 —— 上游只有注册表键、没有设置页入口，
     // TaoCode 没有注册表对话框，所以把它升格为持久化开关。
-    "fuzzyFileSearch"
+    "fuzzyFileSearch",
+    // XDebuggerDataViewSettings（xdebugger-impl/.../settings/XDebuggerDataViewSettings.java）：
+    // 调试器 Variables 视图的两格 —— 隐藏 null 值、命名变量按名排序；
+    // 另有 showValuesInline（编辑器行内值）与 showLibraryStackFrames（堆栈里的库帧）。
+    // XDebuggerGeneralSettings.java：confirmBreakpointRemoval / unmuteOnStop / evaluationDialogMode
+    // （EXPRESSION | CODE_FRAGMENT，字符串两档）。
+    "debuggerHideNullValues", "debuggerSortByName", "debuggerShowValuesInline",
+    "debuggerShowLibraryFrames", "debuggerConfirmBreakpointRemoval", "debuggerUnmuteOnStop",
+    "debuggerEvaluationMode",
+    // 受信任项目清单（IDEA `TrustedPaths`，platform-impl/.../ide/impl/TrustedPaths.kt:34-40 的
+    // `@State(name = "Trusted.Paths")` + `Map<String, Boolean>`）：显式信任/显式不信任的路径。
+    // 判据与执行门在 native/trusted_paths.cpp，前端纯逻辑在 src/trustedProjects.ts。
+    "trustedPaths"
 };
 
 

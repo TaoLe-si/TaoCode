@@ -66,7 +66,7 @@
   --header-menu-gap: 4px;
   --toolbar-row-inset: 5px;
   --toolbar-group-gap: 10px;
-  /* 状态栏高度 = 1px 顶边框 + max(20, 文本高)。来源：IdeStatusBarImpl.kt:266/:169/:803/:351
+  /* 状态栏高度 = 1px 顶边框 + max(20, 文本高)。来源：IdeStatusBarImpl.kt:266/:169-170/:803/:351
      （StatusBar.topBorderWidth=1、minIconHeight=scale(18+1+1)=20、preferredTextHeight）。
      默认缩放 11px 字体下 = 22px。 */
   --statusbar-height: 22px;
@@ -178,7 +178,13 @@
   --m-chrome-accent: var(--m-accent);
   --m-chrome-success: var(--m-success);
   --m-chrome-error: var(--m-error);
-  /* 补全弹窗（lookup）与菜单浮层同族：颜色在这里，度量在 §4 与 src/completionUi.ts。 */
+  /* 补全弹窗（lookup）与菜单浮层同族：颜色在这里，度量在 §4 与 src/completionUi.ts。
+     **这些值不是上游调色板的原样抄写**，2026-10-05 逐条核过，别再当成"照抄 expUI"：
+       · 上游弹层底色确实有 `LOOKUP_COLOR`：`expUI_lightScheme.xml:28` = `ffffff`（亮，我们同值）、
+         `expUI_darkScheme.xml:35` = `2b2d30`（深，我们是 `1b2331` —— 刻意往蓝灰调，与菜单弹层同族）；
+       · 上游的字色/命中色是 `CompletionPopup.foreground` / `matchForeground`（`expUI_light.theme.json:557-559`
+         = Gray2 `#27282E` / Blue4 `#3574F0`；`expUI_dark.theme.json:546-548` = Gray10 `#B4B8BF` / Blue8 `#548AF7`），
+         两档我们**都不是**原值：本仓按"浮层族共用一套"重新取了蓝灰一档。 */
   --m-pop-bg: #ffffff;
   --m-pop-fg: #232d40;
   --m-pop-match: #3c6ba8;
@@ -310,7 +316,7 @@
   /* 浮层族只有一档阴影：菜单、补全、各处下拉共用 --m-menu-shadow。
      对话框才用更重的 --shadow-3（它是窗中窗，需要更大的高度差）。 */
   --popup-shadow: var(--m-menu-shadow);
-  --popup-row-h: 24px;            /* New UI List.rowHeight */
+  --popup-row-h: 24px;            /* New UI List.rowHeight —— expUI_light.theme.json:376 / expUI_dark.theme.json:378 */
   /* 编辑器标签条一行的高度：JS 侧的同名常量在 src/tabStripLayout.ts（TAB_STRIP_ROW_HEIGHT），
      两边必须相等 —— tests/tab-strip-wrap.test.mjs 机检这一条。 */
   --tab-strip-row: 34px;

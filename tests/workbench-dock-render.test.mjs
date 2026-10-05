@@ -57,6 +57,12 @@ const editorState = orientation => ({
   // 标签条右端的「更多」下拉（src/components/TabEntryPoint.vue）：SSR 里给一个空成员表。
   tabEntryPointItems: () => [],
   bottomSelectValue: 'output', pickBottomOption: () => {},
+  // 输出标签条的「更多」下拉（App.vue 的 useToolContentTabs → hidden）：SSR 里没有可测量的可视区，
+  // 隐藏列表恒为空，模板读这三个绑定。
+  hiddenOutputTabs: [], hiddenTabsOpen: false, jumpToOutputTab: () => {},
+  // 标签提醒（src/tabAlerts.ts）：SSR 里没有提醒；模板读这两个绑定（TabInfo.fireAlert）。
+  tabAlerts: { visible: () => false, blinking: () => false },
+  tabAlertKey: id => `bottom:${id}`,
 })
 
 for (const orientation of ['horizontal', 'vertical']) {

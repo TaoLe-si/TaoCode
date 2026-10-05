@@ -104,12 +104,12 @@ test('状态栏弹层、通知工具窗口、气球都接上了同一组动作',
 
 test('Gradle 失败那条通知自带「重新同步 / 打开构建脚本 / 构建工具设置」', () => {
   const gradleHost = read('src/gradleHost.ts')
-  assert.match(gradleHost, /function notifyFailure\(label: string, error: string\): void/, '失败要发一条带按钮的通知，不只是灰字')
+  assert.match(gradleHost, /function notifyFailure\(directory: string, label: string, error: string\): void/, '失败要发一条带按钮的通知，不只是灰字')
   for (const label of ['重新同步', '打开构建脚本', '构建工具设置']) {
     assert.ok(gradleHost.includes(`label: '${label}'`), `失败通知少了「${label}」这个动作`)
   }
-  assert.match(gradleHost, /notifyFailure\('Gradle 同步', result\.value\.error\)/, '同步失败要真的发出去')
-  assert.match(gradleHost, /notifyFailure\('依赖加载', error\)/, '依赖那条命令的失败同样要发')
+  assert.match(gradleHost, /notifyFailure\(job\.directory, job\.kind === 'sync' \? 'Gradle 同步' : '依赖加载', error\)/, '同步失败要真的发出去')
+  assert.match(gradleHost, /job\.kind === 'dependencies' \? '依赖加载' : undefined/, '依赖那条命令的失败同样会经过同一个出口')
   // 本仓没有本地文档，就不放「Learn more」那类按钮：凭空发明的链接比没有按钮更糟。
   assert.equal(/了解更多|help\.jetbrains|https?:\/\/[a-z]/i.test(gradleHost), false, '不许出现凭空造的帮助链接')
 })

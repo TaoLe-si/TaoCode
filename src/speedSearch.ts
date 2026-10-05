@@ -117,5 +117,28 @@ export function speedSearchStepForKey(key: string): SpeedSearchStep | null {
   return null
 }
 
+/**
+ * 在**可见行的原索引表**里走一步（`SpeedSearchBase.java:683-693` 的 adjustSelection → `:695-706`
+ * 的 findTargetElement：↑↓Home/End 都只在"命中的那几条"之间移动，走完一圈回绕）。
+ *
+ * `visible` 是上游 `ListPopupModel` 那张表（`:44-48` `getOriginalIndex(filteredIndex)`，
+ * `:143-150` `refilter()` 重建它）：元素是原列表里的下标，过滤串为空时它就是全量。
+ * `from` 当前高亮的**原索引**。三种边界按上游：
+ * - 表空（一条都没命中）：不动 —— `ListPopupImpl.java:505` 在"压着过滤串且模型 size 为 0"时
+ *   直接 `return false`，既不选也不挪高亮。
+ * - `from` 不在表里（刚被打字过滤掉了）：向下从第一条可见行起、向上从最后一条可见行起
+ *   （`SpeedSearchBase.java:476-516` 的"先迈一步再找"在当前项不可选时等价于从端点起步）。
+ * - 正常：`(位置 ± 1 + 长度) % 长度` 回绕。
+ */
+export function stepVisibleIndex(visible: readonly number[], from: number, kind: SpeedSearchStep['kind']): number {
+  if (!visible.length) return from
+  if (kind === 'first') return visible[0]!
+  if (kind === 'last') return visible[visible.length - 1]!
+  const position = visible.indexOf(from)
+  const delta = kind === 'next' ? 1 : -1
+  if (position < 0) return delta > 0 ? visible[0]! : visible[visible.length - 1]!
+  return visible[(position + delta + visible.length) % visible.length]!
+}
+
 /** 搜索框里的空提示 = `editorsearch.search.hint`（`ApplicationBundle.properties:661` = `Search`）。 */
 export const SPEED_SEARCH_HINT = '搜索'

@@ -116,6 +116,11 @@ void apply_hunks(const std::filesystem::path& repo, const std::string& path, boo
 // any other file. Refuses untracked paths (there is nothing to roll back to).
 void revert(const std::filesystem::path& repo, const std::string& path);
 
+// `Git.Revert.In.Log`（VCS Log 提交行右键的「还原提交」）：把某次提交的改动**反过来**
+// 做成一个新提交（`git revert --no-edit <commit>`），历史只增不改。
+// 与上面的 `revert` 是两件事：那个回滚单个路径的工作区改动，这个回滚一次提交。
+void revert_commit(const std::filesystem::path& repo, const std::string& commit);
+
 // IDEA's "Reset Current Branch to…" with the three IDEA-visible modes:
 // soft (keep changes staged), mixed (keep changes unstaged), hard (discard all).
 // `target` is any commit-ish (a hash, a branch, HEAD~n). The branch name is

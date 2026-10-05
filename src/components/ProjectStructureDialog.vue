@@ -21,6 +21,8 @@ import { X } from 'lucide-vue-next'
 import ProjectStructurePane from './ProjectStructurePane.vue'
 import type { Entry, JavaProjectSettings, ProjectSettings } from '../bridge'
 import { iconSize } from '../uiIcons'
+// 项目名的默认来源（上游 `ProjectNameProvider`：目录名；取不到退回路径），与实例目录模型同一模块。
+import { defaultProjectName } from '../projectDirectories'
 
 const props = defineProps<{
   settings: ProjectSettings | null
@@ -43,7 +45,7 @@ const categories: Array<{ id: Category; label: string; hint: string }> = [
 ]
 const category = ref<Category>('project')
 const pane = ref<InstanceType<typeof ProjectStructurePane> | null>(null)
-const title = computed(() => props.root?.split('/').pop() || props.root || '未打开项目')
+const title = computed(() => props.root ? (defaultProjectName(props.root) || props.root) : '未打开项目')
 
 /** 对话框的 确定/应用 都走这里：面板自己判断脏值并 emit 保存，然后由 App 写回原生。 */
 function apply(): boolean {

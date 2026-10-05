@@ -85,12 +85,15 @@ test('§D 的四类理由必须真的写在文件里', () => {
 test('四档计数自洽，且与表尾那句一致', () => {
   const rows = verdictRows()
   const count = letter => rows.filter(row => row.verdict === letter).length
-  assert.equal(count('[x]'), 13)
-  assert.equal(count('[~]'), 47)
-  assert.equal(count('[ ]'), 1)
+  // 2026-10-04 本轮：CommitChecksProgressIndicatorTooltip 从 [~] 改判 [x]；VCS lane 再把
+  // CommitOptions/CommitOptionsPanel/CommitChecks/PostCommitChecksHandler 四条改判 [x]
+  // （选项存档层 + 慢检查推后开关 + 提交后检查，判据 tests/commit-options.test.mjs）。
+  assert.equal(count('[x]'), 18)
+  assert.equal(count('[~]'), 43)
+  assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 17)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 78)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 13 \+ `\[~\]` 47 \+ `\[ \]` 1 \+ `\[-\]` 17 = 78/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 18 \+ `\[~\]` 43 \+ `\[ \]` 0 \+ `\[-\]` 17 = 78/,
     '表尾的和数要与逐条表一致')
 })
 

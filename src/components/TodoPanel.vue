@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, ChevronRight, Eye, FileCode2, Filter, Folder, Group, ListChecks, LocateFixed, RefreshCw } from 'lucide-vue-next'
-import { isDesktop, request, type DocumentData, type SearchMatch, type SearchResult, type TodoPattern } from '../bridge'
+import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, ChevronRight, Eye, FileCode2, Filter, Folder, Group, Layers, ListChecks, LocateFixed, RefreshCw } from 'lucide-vue-next'
+import { isDesktop, request, type DocumentData, type GitChange, type GitStatus, type SearchMatch, type SearchResult, type TodoPattern } from '../bridge'
 import { buildTodoTree, flattenTodoRows, orderedItems, packageIds, type TodoItem, type TodoNode } from '../todoTree'
+import { filterTodoItemsByScope, markerMatches, matchingTodoPattern, TODO_CHANGE_LIST_SCOPE, todoItemColor, TODO_CURRENT_FILE_SCOPE } from '../todoView'
+import { TODO_MAX_DISPLAYED_LINES, todoContinuationLines, todoDisplayText, todoMarkerRegions } from '../todoMultiLine'
+import { firstSpeedSearchHit } from '../speedSearch'
+import { filterTodoItems, todoFilters } from '../todoFilters'
 import { iconSize } from '../uiIcons'
 
 // IDEA's Todo tool window (platform/todo TodoPanel): a vertical toolbar with the
 // occurrence walker, the marker filter, auto-scroll from source, expand/collapse, the
 // Group By popup and the preview toggle; the tree itself is packages > files > items and
 // a click selects (preview) while a double click jumps to source.
-const props = defineProps<{ root: string; active: boolean; patterns: TodoPattern[]; source?: { path: string; line: number } | null }>()
+const props = defineProps<{ root: string; active: boolean; patterns: TodoPattern[]; source?: { path: string; line: number } | null; scopes?: Array<{ name: string; pattern: string }>; moduleName?: string }>()
 const emit = defineEmits<{ open: [payload: { path: string; line: number }] }>()
 
 const items = ref<TodoItem[]>([])
@@ -22,26 +26,68 @@ const autoScroll = ref(false)
 const showPreview = ref(true)
 const groupByOpen = ref(false)
 // Empty means IDEA's "<All>" filter; otherwise the marker pattern to keep.
-const filterPattern = ref('')
+// 一格下拉同时承载 IDEA 的两层过滤（`SetTodoFilterAction` 的过滤器与单条标记）：值带前缀。
+const filterValue = ref('')
+const filterName = computed(() => filterValue.value.startsWith('filter:') ? filterValue.value.slice('filter:'.length) : '')
+const filterPattern = computed(() => filterValue.value.startsWith('pattern:') ? filterValue.value.slice('pattern:'.length) : '')
+// IDEA TodoPanel 的作用域过滤器（`TodoPanel` 的 scope 下拉，候选来自 Settings › 作用域）：
+// 空 = 「<All>」，否则用命名作用域的模式裁掉范围外的条目。
+const scopeName = ref('')
+// 多行 TODO（上游 `TodoConfiguration.java:48` `myMultiLine = true`，设置页那一格是
+// `TodoConfigurableUI.kt:15-22`）：一条 TODO 的描述可以延续到**下一行的注释**。
+// 本仓的扫描是文本正则，续行要把文件内容读出来才能判定，所以它挂在分组方式弹层里，
+// 打开时才对条目补续行（默认关 —— 与上游默认值相反是**有意**的：上游有索引，本仓要读文件）。
+const multiLine = ref(false)
+/** 一次最多补多少个文件的多行（每个文件一次 `file.read`），超出如实写在状态行里。 */
+const TODO_MULTILINE_FILE_LIMIT = 64
+/** 变更列表作用域的路径集（`git.status` 给的未提交变更，含重命名前身）。 */
+const changeListPaths = ref<string[]>([])
+const changeListNote = ref('')
+/** 多行补全被文件数上限截住时的说明。 */
+const multilineNote = ref('')
+/** 速度搜索的当前串（`TodoPanel.java:286` 的 `installTreeSpeedSearch`：打字即选中，不裁剪列表）。 */
+const speedQuery = ref('')
 const expanded = reactive(new Set<string>())
 const selected = ref<{ path: string; line: number } | null>(null)
 const preview = ref<{ path: string; line: number; lines: string[]; start: number } | null>(null)
 const previewError = ref('')
 
-const badge = (preview: string) => props.patterns.find(pattern => markerMatches(preview, pattern.pattern, pattern.caseSensitive))?.description ?? ''
 // The scan queries the markers as a regex alternation (`\b(TODO|FIXME[:\s])\b`), so the
-// badge and the filter have to test with the same semantics; a broken pattern falls back
-// to a literal search instead of throwing on every row.
-// IDEA TodoPattern.isCaseSensitive()：默认不区分大小写，勾上后按原样匹配。
-function markerMatches(text: string, pattern: string, caseSensitive = false) {
-  try { return new RegExp(`\\b(${pattern})\\b`, caseSensitive ? '' : 'i').test(text) }
-  catch { return caseSensitive ? text.includes(pattern) : text.toLowerCase().includes(pattern.toLowerCase()) }
-}
+// badge, the color and the filter all test with the same semantics（规则在 src/todoView.ts，
+// 坏正则退化为字面量包含而不是每行抛异常；IDEA TodoPattern.isCaseSensitive() 默认不区分大小写）。
+const badge = (preview: string) => matchingTodoPattern(preview, props.patterns)?.description ?? ''
+const itemColor = (preview: string) => todoItemColor(preview, props.patterns)
 
-const filtered = computed(() => filterPattern.value ? items.value.filter(item => markerMatches(item.text, filterPattern.value)) : items.value)
+const scoped = computed(() => filterTodoItemsByScope(items.value, scopeName.value, props.scopes ?? [], props.moduleName ?? '',
+  props.source?.path ?? '', changeListPaths.value))
+// 命名过滤器（`TodoFilter`）优先；直接选单条标记时退回原来的逐条匹配。
+const filtered = computed(() => {
+  if (filterName.value) return filterTodoItems(scoped.value, filterName.value, todoFilters.value, props.patterns)
+  return filterPattern.value ? scoped.value.filter(item => markerMatches(item.text, filterPattern.value)) : scoped.value
+})
 const tree = computed(() => buildTodoTree(filtered.value, { showPackages: showPackages.value, flattenPackages: flattenPackages.value }))
 const rows = computed(() => flattenTodoRows(tree.value, expanded))
 const occurrences = computed(() => orderedItems(tree.value))
+// 每行的显示形状（多行条目 = 主行 + 最多 10 条续行 + 「更多」标记，`MultiLineTodoRenderer.java:16,76`）。
+const displayRows = computed(() => rows.value.map(row => ({
+  row, display: row.item ? todoDisplayText(row.item.text, row.item.additional ?? []) : null,
+})))
+
+/** 预览行里标记词的位置（`TodoHighlightVisitor.java:96-107` 在本仓的可见面：只着色预览）。 */
+function markerSegments(line: string): Array<{ text: string; mark: boolean }> {
+  const regions = todoMarkerRegions(line, props.patterns)
+  if (!regions.length) return [{ text: line, mark: false }]
+  const parts: Array<{ text: string; mark: boolean }> = []
+  let cursor = 0
+  for (const region of regions) {
+    if (region.start < cursor) continue
+    if (region.start > cursor) parts.push({ text: line.slice(cursor, region.start), mark: false })
+    parts.push({ text: line.slice(region.start, region.start + region.length), mark: true })
+    cursor = region.start + region.length
+  }
+  if (cursor < line.length) parts.push({ text: line.slice(cursor), mark: false })
+  return parts
+}
 
 // A scan is one workspace walk, so its generation guard is what keeps a slow scan of
 // the previous project from overwriting the tree of the project now open.
@@ -56,13 +102,86 @@ async function scan() {
     const result = await request<SearchResult>('search.run', { query: `\\b(${markers})\\b`, regex: true, caseSensitive: false, wholeWord: false, include: '', exclude: '' })
     if (token !== scanToken) return
     items.value = result.matches.map((match: SearchMatch) => ({
-      path: match.path, line: match.line, text: match.preview.trim(), kind: badge(match.preview) }))
+      path: match.path, line: match.line, column: match.column, text: match.preview.trim(), kind: badge(match.preview) }))
     scanned.value = true
     // A fresh scan replaces the tree, so start from IDEA's fully-expanded view.
     expanded.clear()
     for (const id of packageIds(tree.value)) expanded.add(id)
+    if (multiLine.value) await applyMultiline(token)
   } catch (caught) { if (token === scanToken) error.value = caught instanceof Error ? caught.message : String(caught) }
   finally { if (token === scanToken) running.value = false }
+}
+
+// 多行 TODO 的补全：续行必须看文件里标记行的下一行是什么，所以逐文件 `file.read`
+// （上游用的是 TODO 索引，本仓没有；这就是 `src/todoMultiLine.ts` 文件头写明的差距）。
+// 条目按路径分组，一次读一个文件，读到的续行写回该文件里每条 TODO 的 `additional`。
+async function applyMultiline(token: number) {
+  const paths = [...new Set(items.value.filter(item => item.kind).map(item => item.path))]
+  const limited = paths.slice(0, TODO_MULTILINE_FILE_LIMIT)
+  multilineNote.value = paths.length > limited.length
+    ? `多行 TODO 只补了前 ${limited.length} 个文件（共 ${paths.length} 个）。` : ''
+  for (const path of limited) {
+    try {
+      const doc = await request<DocumentData>('file.read', { path })
+      if (token !== scanToken) return
+      const lines = doc.content.split(/\r?\n/)
+      for (const item of items.value) {
+        if (item.path !== path) continue
+        item.additional = todoContinuationLines(lines, item.line, item.column ?? 0, props.patterns)
+      }
+    } catch { /* 读不到的文件保持单行显示，不谎报 */ }
+  }
+  // items 的字段是被就地补的，重排一次引用才能让 computed 的树跟着变。
+  items.value = [...items.value]
+}
+
+// 变更列表作用域（`ChangeListTodosPanel.java:70-81` 跟的是默认变更列表）：本仓的变更集
+// 就是 `git.status` 的未提交改动；非仓库 / Git 失败时给空集并写清原因（不静默变成「全部」）。
+let changeToken = 0
+async function loadChangeList() {
+  if (scopeName.value !== TODO_CHANGE_LIST_SCOPE || !isDesktop) return
+  const token = ++changeToken
+  changeListNote.value = ''
+  try {
+    const status = await request<GitStatus>('git.status')
+    if (token !== changeToken) return
+    const changes = (status.changes ?? []) as Array<Pick<GitChange, 'path' | 'renameFrom'>>
+    const paths = [...new Set(changes.flatMap(change => [change.path, change.renameFrom].filter(Boolean) as string[]))]
+    changeListPaths.value = paths
+    if (!paths.length) changeListNote.value = '当前没有未提交的变更，变更列表作用域下不会有任务。'
+  } catch (caught) {
+    if (token !== changeToken) return
+    changeListPaths.value = []
+    changeListNote.value = `拿不到变更列表：${caught instanceof Error ? caught.message : String(caught)}`
+  }
+}
+watch(scopeName, name => {
+  if (name === TODO_CHANGE_LIST_SCOPE) void loadChangeList()
+  else { changeListPaths.value = []; changeListNote.value = '' }
+})
+watch(multiLine, on => { if (on && scanned.value) void applyMultiline(scanToken); else if (!on) { for (const item of items.value) item.additional = []; items.value = [...items.value] } })
+
+// 速度搜索（`TodoPanel.java:286` 的 `installTreeSpeedSearch`）：打字不裁剪列表，而是
+// **选中**下一个匹配的可见行（`SpeedSearchBase.java:679` 的 selectElement），命中的是
+// 可见行的文本 —— 包/文件节点也行，条目也行。
+const speedLabels = computed(() => rows.value.map(row => row.item ? row.item.text : row.node.label))
+function onTreeKeydown(event: KeyboardEvent) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return
+  if (event.key === 'Escape') { speedQuery.value = ''; return }
+  if (event.key === 'Backspace') { speedQuery.value = speedQuery.value.slice(0, -1); event.preventDefault(); return }
+  if (event.key.length === 1 && !/^\s$/.test(event.key)) {
+    speedQuery.value += event.key
+    jumpToSpeedHit()
+    event.preventDefault()
+    return
+  }
+  if (event.key === 'Enter' && selected.value) { open(selected.value); event.preventDefault() }
+}
+function jumpToSpeedHit() {
+  const hit = firstSpeedSearchHit(speedLabels.value, speedQuery.value)
+  if (hit < 0) return
+  const row = rows.value[hit]!
+  if (row.item) revealOccurrence({ path: row.item.path, line: row.item.line })
 }
 
 function nodeKey(node: TodoNode) { return node.id }
@@ -157,9 +276,13 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
       <div class="todo-toolbar" role="toolbar" aria-orientation="vertical" aria-label="任务视图工具栏">
         <button class="icon-button" title="上一个出现位置" aria-label="上一个出现位置" :disabled="!occurrences.length" @click="step(-1)"><ArrowUp :size="iconSize.control" /></button>
         <button class="icon-button" title="下一个出现位置" aria-label="下一个出现位置" :disabled="!occurrences.length" @click="step(1)"><ArrowDown :size="iconSize.control" /></button>
-        <label class="todo-filter-button" title="按标记过滤" :aria-label="`当前标记过滤：${filterPattern || '全部'}`">
+        <label class="todo-filter-button" title="按标记或过滤器过滤" :aria-label="`当前过滤：${filterName || filterPattern || '全部'}`">
           <Filter :size="iconSize.control" />
-          <select v-model="filterPattern" aria-label="标记过滤"><option value="">全部</option><option v-for="pattern in patterns" :key="pattern.pattern" :value="pattern.pattern">{{ pattern.description || pattern.pattern }}</option></select>
+          <select v-model="filterValue" aria-label="标记过滤"><option value="">全部</option><optgroup v-if="todoFilters.length" label="过滤器"><option v-for="filter in todoFilters" :key="filter.name" :value="`filter:${filter.name}`">{{ filter.name }}</option></optgroup><optgroup label="标记"><option v-for="pattern in patterns" :key="pattern.pattern" :value="`pattern:${pattern.pattern}`">{{ pattern.description || pattern.pattern }}</option></optgroup></select>
+        </label>
+        <label class="todo-filter-button" title="按作用域过滤" :aria-label="`当前作用域：${scopeName || '全部'}`">
+          <Layers :size="iconSize.control" />
+          <select v-model="scopeName" aria-label="作用域过滤"><option value="">全部作用域</option><option :value="TODO_CURRENT_FILE_SCOPE">当前文件</option><option :value="TODO_CHANGE_LIST_SCOPE">变更列表</option><option v-for="scope in scopes" :key="scope.name" :value="scope.name">{{ scope.name }}</option></select>
         </label>
         <button class="icon-button" :class="{ toggled: autoScroll }" :aria-pressed="autoScroll" title="自动滚动到源码位置" aria-label="自动滚动到源码位置" @click="autoScroll = !autoScroll"><LocateFixed :size="iconSize.control" /></button>
         <button class="icon-button" title="展开全部" aria-label="展开全部" @click="expandAll"><ChevronsDown :size="iconSize.control" /></button>
@@ -169,6 +292,7 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
           <div v-if="groupByOpen" class="groupby-popup" role="group" aria-label="分组方式">
             <label><input v-model="showPackages" type="checkbox" /><span>按包（目录）分组</span></label>
             <label :class="{ disabled: !showPackages }"><input v-model="flattenPackages" type="checkbox" :disabled="!showPackages" /><span>扁平化包</span></label>
+            <label><input v-model="multiLine" type="checkbox" /><span>多行任务</span></label>
           </div>
         </div>
         <button class="icon-button" :class="{ toggled: showPreview }" :aria-pressed="showPreview" title="预览" aria-label="预览" @click="showPreview = !showPreview"><Eye :size="iconSize.control" /></button>
@@ -179,31 +303,40 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
           <p v-if="error" class="todo-error">{{ error }}</p>
           <p v-if="!root" class="todo-note">尚未打开项目。</p>
         </template>
-        <div class="todo-scroll" role="tree" aria-label="任务列表" @click="groupByOpen = false">
+        <p v-if="multilineNote" class="todo-note" aria-live="polite">{{ multilineNote }}</p>
+        <p v-if="changeListNote" class="todo-note" aria-live="polite">{{ changeListNote }}</p>
+        <div class="todo-scroll" role="tree" aria-label="任务列表" tabindex="0"
+             @click="groupByOpen = false" @keydown="onTreeKeydown">
+          <p v-if="speedQuery" class="todo-speed" aria-live="polite">搜索：{{ speedQuery }}</p>
           <div v-if="running" class="todo-empty">扫描中…</div>
-          <template v-else-if="rows.length">
-            <template v-for="(row, index) in rows" :key="`${nodeKey(row.node)}:${row.item ? row.item.line : 'node'}:${index}`">
+          <template v-else-if="displayRows.length">
+            <template v-for="(cell, index) in displayRows" :key="`${nodeKey(cell.row.node)}:${cell.row.item ? cell.row.item.line : 'node'}:${index}`">
               <button
-                v-if="row.item" class="todo-node todo-row" role="treeitem"
-                :class="{ selected: selected?.path === row.item.path && selected?.line === row.item.line }"
-                :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
-                :aria-selected="selected?.path === row.item.path && selected?.line === row.item.line"
-                :title="`${row.item.path}:${row.item.line}`"
-                @click="select(row.item)" @dblclick="open(row.item)" @keydown.enter.prevent="open(row.item)"
+                v-if="cell.row.item" class="todo-node todo-row" role="treeitem"
+                :class="{ selected: selected?.path === cell.row.item.path && selected?.line === cell.row.item.line }"
+                :style="{ paddingLeft: `${6 + cell.row.depth * 14}px` }"
+                :aria-selected="selected?.path === cell.row.item.path && selected?.line === cell.row.item.line"
+                :title="`${cell.row.item.path}:${cell.row.item.line}`"
+                @click="select(cell.row.item)" @dblclick="open(cell.row.item)" @keydown.enter.prevent="open(cell.row.item)"
               >
-                <span v-if="row.item.kind" class="todo-kind">{{ row.item.kind }}</span>
-                <span class="todo-text">{{ row.item.text }}</span>
-                <span class="todo-pos">{{ row.item.line }}</span>
+                <span v-if="cell.row.item.kind" class="todo-color-dot" :style="{ background: itemColor(cell.row.item.text) }" aria-hidden="true"></span>
+                <span v-if="cell.row.item.kind" class="todo-kind">{{ cell.row.item.kind }}</span>
+                <span class="todo-text">
+                  <span class="todo-head">{{ cell.display?.head }}</span>
+                  <span v-for="(extra, extraIndex) in cell.display?.lines ?? []" :key="`${cell.row.item.line}:${extraIndex}`" class="todo-extra">{{ extra }}</span>
+                  <span v-if="cell.display?.more" class="todo-more">（还有更多行）</span>
+                </span>
+                <span class="todo-pos">{{ cell.row.item.line }}</span>
               </button>
               <button
-                v-else-if="row.node.kind === 'package'" class="todo-node package" role="group"
-                :style="{ paddingLeft: `${6 + row.depth * 14}px` }" :aria-expanded="row.expanded"
-                @click="togglePackage(row.node)" @keydown.enter.prevent="togglePackage(row.node)"
+                v-else-if="cell.row.node.kind === 'package'" class="todo-node package" role="group"
+                :style="{ paddingLeft: `${6 + cell.row.depth * 14}px` }" :aria-expanded="cell.row.expanded"
+                @click="togglePackage(cell.row.node)" @keydown.enter.prevent="togglePackage(cell.row.node)"
               >
-                <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: row.expanded }" /><Folder :size="iconSize.dense" class="folder-icon" /><span class="todo-node-label">{{ row.node.label }}</span>
+                <ChevronRight :size="iconSize.dense" class="tree-chevron" :class="{ expanded: cell.row.expanded }" /><Folder :size="iconSize.dense" class="folder-icon" /><span class="todo-node-label">{{ cell.row.node.label }}</span>
               </button>
-              <div v-else class="todo-node file" :style="{ paddingLeft: `${6 + (row.depth + 1) * 14}px` }">
-                <FileCode2 :size="iconSize.dense" /><span class="todo-node-label">{{ row.node.label }}</span><span class="todo-node-count">{{ row.node.items.length }}</span>
+              <div v-else class="todo-node file" :style="{ paddingLeft: `${6 + (cell.row.depth + 1) * 14}px` }">
+                <FileCode2 :size="iconSize.dense" /><span class="todo-node-label">{{ cell.row.node.label }}</span><span class="todo-node-count">{{ cell.row.node.items.length }}</span>
               </div>
             </template>
           </template>
@@ -218,7 +351,12 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
             :key="preview.start + index"
             class="preview-line"
             :class="{ current: preview.start + index + 1 === preview.line }"
-          >{{ preview.start + index + 1 }}  {{ line }}</span></pre>
+          >{{ preview.start + index + 1 }}  <span
+            v-for="(part, partIndex) in markerSegments(line)"
+            :key="`${preview.start + index}:${partIndex}`"
+            :class="{ marked: part.mark }"
+            :style="part.mark ? { color: itemColor(line) } : undefined"
+          >{{ part.text }}</span></span></pre>
         </section>
       </div>
     </div>
@@ -253,7 +391,19 @@ watch(() => autoScroll.value && props.source ? `${props.source.path}:${props.sou
 .todo-node-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo-node-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .todo-kind { flex-shrink: 0; color: var(--warning); }
+/* 颜色方案列（IDEA TodoPanel 的标记颜色）：模式自带的 #RRGGBB，缺省中性色。 */
+.todo-color-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
 .todo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.6 var(--font-mono); }
+/* 多行任务（`MultiLineTodoRenderer.java:16,64-76` 的等价形状）：主行在上、续行逐行跟在下面，
+   超过 10 行只给一行「更多」提示，和上游的 myMoreLabel 一样不硬塞。 */
+.todo-text { display: flex; flex-direction: column; align-items: flex-start; }
+.todo-head, .todo-extra, .todo-more { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-extra, .todo-more { color: var(--muted); }
+/* 速度搜索的当前串（`SpeedSearchBase` 那个浮动搜索框在本仓就是一行状态文字）。 */
+.todo-speed { margin: 0; padding: 2px var(--space-3); color: var(--secondary); background: var(--rail); border-bottom: 1px solid var(--line); font: 10px var(--font-mono); }
+.todo-scroll:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* 预览里标记词的上色（`TodoHighlightVisitor.java:96-107`）：颜色来自模式表，不写死。 */
+.preview-line .marked { font-weight: 600; background: var(--selected); }
 .todo-pos { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tree-chevron { flex-shrink: 0; transition: transform var(--dur-1) var(--ease); }
 .tree-chevron.expanded { transform: rotate(90deg); }

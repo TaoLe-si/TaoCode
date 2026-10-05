@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, CHECKS_FAILED_UNKNOWN, COMMIT_ACTION_TEXT,
-  checksFailedTitle, commitAnywayLabel, commitCheckReport, failuresRowText, saveDuringCommitQuestion } from '../src/commitChecks.ts'
+  TODO_ITEMS_FOUND, REVIEW_TODO_ACTION,
+  checksFailedTitle, commitAnywayLabel, commitCheckReport, failuresRowText, failureTexts, saveDuringCommitQuestion } from '../src/commitChecks.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -39,7 +40,7 @@ test('TODO 与提交信息的问题进"失败行"逐条列出来', () => {
   const report = commitCheckReport({
     ...base, todoHits: 3,
     messageProblems: [
-      { kind: 'subject', line: 0, start: 9, end: 12, message: '主题行不能超过 72 个字符', fixes: ['reformat'] },
+      { kind: 'subject', line: 0, start: 9, end: 12, message: '主题不能超过 72 个字符', fixes: ['reformat'] },
       { kind: 'separation', line: 1, start: 0, end: 0, message: '主题与正文之间缺少空行', fixes: ['blankLine'] },
     ],
     unsaved: ['src/a.ts'],
@@ -47,10 +48,25 @@ test('TODO 与提交信息的问题进"失败行"逐条列出来', () => {
   assert.equal(report.ok, false)
   assert.equal(report.blockMessage, '', '信息/暂存都在 ⇒ 错误行不该有内容')
   assert.equal(report.failures.length, 3, 'TODO 一条 + 信息两条')
-  assert.match(report.failures[0], /3 处 TODO/)
-  assert.match(report.failures[1], /^提交信息：主题行/)
+  assert.match(failureTexts(report.failures)[0], /^3 个 TODO$/, 'label.todo.items.found = {0} 个 TODO（不是自造的"处 TODO/FIXME（全工作区扫描）"）')
+  assert.match(failureTexts(report.failures)[1], /^提交信息：主题不能超过/)
   assert.deepEqual(report.unsaved, ['src/a.ts'], '未保存单独一档')
-  assert.match(failuresRowText(report.failures), /3 处 TODO.*主题行.*缺少空行/)
+  assert.match(failuresRowText(report.failures), /3 个 TODO.*主题不能超过.*缺少空行/)
+})
+
+test('failure 带详情动作：TODO 那一条是 CommitProblemWithDetails，信息那两条不是', () => {
+  // `TodoCommitProblem : CommitProblemWithDetails`（TodoCheckinHandler.kt:50-63）—— 它的
+  // `showDetailsLink` 用的是默认的 null（CommitCheck.kt:166），所以上游把**整条文字**渲染成链接
+  // （CommitProgressPanel.kt:456-458）。文案/动作名取中文包：
+  // `label.todo.items.found` = {0} 个 TODO、`todo.in.new.review.button` = 审查 TODO(_R)。
+  assert.equal(TODO_ITEMS_FOUND(3), '3 个 TODO')
+  assert.equal(REVIEW_TODO_ACTION, '审查 TODO(R)')
+  const report = commitCheckReport({
+    ...base, todoHits: 3,
+    messageProblems: [{ kind: 'subject', line: 0, start: 9, end: 12, message: '主题不能超过 72 个字符', fixes: ['reformat'] }],
+  })
+  assert.equal(report.failures[0].details, REVIEW_TODO_ACTION, 'TODO 那一条有详情动作 ⇒ 文字本身就是链接')
+  assert.equal(report.failures[1].details, null, '提交信息检查在上游是消息编辑器里的 inspection（BaseCommitMessageInspection.kt:46,97），不是 CommitCheck ⇒ 纯文本那一档，不编详情动作')
 })
 
 test('未保存文件**不拦**提交，但一定要说出来', () => {
@@ -89,22 +105,30 @@ test('文案常量取随 IDE 发货的中文包', () => {
 })
 
 test('接线：检查链只有一处；面板上没有常显的「运行提交检查」按钮，只有失败行上那把', () => {
-  const panel = read('src/components/SourceControl.vue')
-  assert.match(panel, /async function collectCommitChecks\(\): Promise<CommitCheckReport>/, '检查链的单一入口')
-  assert.equal((panel.match(/collectCommitChecks\(\)/g) ?? []).length, 4, '一处定义 + 提交 / 提交并推送 / 失败行那把刷新按钮三条调用路')
+  // 这一族已从面板按行号切片拆进 src/sourceControlCommitChecks.ts（模块化拆分，行为逐字未改），两处都读。
+  const panel = read('src/components/SourceControl.vue') + read('src/sourceControlCommitChecks.ts')
+  assert.match(panel, /async function collectCommitChecks\(withBlockReason = true, skip: CommitChecksSkip = skipFromState\(\)\)/, '检查链的单一入口（提交后那一轮不带空判，见 commitOptions）')
+  // 定义一处 + 四条调用路：失败行那把刷新按钮 / 提交后那一轮（runPostCommitChecks） /
+  // 提交那一轮的两条分支（「慢检查推后」开着与关着 —— 开着时**两条检查不跑但空判照跑**，
+  // `NonModalCommitWorkflowHandler.kt:177-184` 的 checkCommit() 不是检查、是前置闸）。
+  assert.equal((panel.match(/collectCommitChecks\(/g) ?? []).length, 5, '检查链只有这一处定义')
   assert.ok(!panel.includes('sc-checks-button'), '常显按钮是编造的（上游这条动作没有常显入口）—— 必须去掉')
   assert.match(panel, /v-if="checksFailures\.length" class="sc-check-failures"/, '失败行只在有 failure 时出现')
   assert.match(panel, /class="icon-button sc-rerun-checks"[^>]*@click="runCommitChecks"/, '失败行上那把刷新按钮')
   assert.match(panel, /:title="RERUN_CHECKS_TOOLTIP"/, '刷新按钮的提示 = tooltip.rerun.commit.checks')
   assert.match(panel, /setStatusText\(RUNNING_CHECKS_TEXT, null\)/, '跑检查时状态栏要说正在运行提交检查…')
-  assert.match(panel, /const checksSkipped = computed\(\(\) => checksFailures\.value\.length > 0\)/, 'willSkipCommitChecks 的等价物')
-  assert.match(panel, /checksSkipped\.value \? null : await collectCommitChecks\(\)/, '检查已失败 ⇒ 提交时跳过检查（仍然提交）')
-  assert.match(panel, /commitAnywayLabel\(\)/, '按钮文案走 action.commit.anyway.text')
-  assert.match(panel, /emit\('notify', checksFailedTitle\(\), true, undefined, report\.failures, actions\)/, '通知标题 = {0} 检查失败（并带上动作）')
+  // `willSkipCommitChecks()`（NonModalCommitWorkflowHandler.kt:229-233）读的是**上次检查的结果**
+  // （`isCommitChecksResultUpToDate`，`:83`），不是"失败行现在有没有内容"—— 后者会让改一下提交信息
+  // 就把「仍然提交」的名字和那把刷新按钮一起变没（上游 :316-319 的 clearError 只清错误行）。
+  assert.match(panel, /const checksSkipped = computed\(\(\) => willSkipCommitChecks\(checksResult\.value\)\)/, 'willSkipCommitChecks 的等价物 = 状态机那一档')
+  assert.match(panel, /const report = await runCommitChecksRound\(\)/, '提交那一轮走会话入口（跳过哪些相位由状态折算）')
+  assert.match(panel, /beginChecksRound\(false\)/, '会话开头：清失败行 + resetCommitChecksResult（:225 + :342）')
+  assert.match(panel, /commitActionText\(\{[^}]*amend: amend\.value, skipChecks: checksSkipped\.value/, '按钮名走 :226-237 那四档（含 amend 两支）')
+  assert.match(panel, /emit\('notify', checksFailedTitle\(COMMIT_ACTION_TEXT\), true, undefined, summary \?\? failureTexts\(report\.failures\), actions\)/, '通知标题 = {0} 检查失败（并带上动作；提交后那一轮的正文换成 postCommitCheckFailures）')
   assert.match(panel, /\{ label: SHOW_DETAILS_TEXT, run: \(\) => props\.showToolWindow\?\.\('git'\) \}/,
     '「显示详细信息」= 激活提交工具窗口（上游 showCommitCheckFailuresPanel）')
-  assert.match(panel, /if \(commitActions\) actions\.push\(\{ label: commitAnywayLabel\(\), run: \(\) => commit\(\) \}\)/,
-    '提交路径那条通知再加「仍然提交」（上游 commit.checks.failed.notification.commit.anyway.action）')
+  assert.match(panel, /if \(commitActions\) actions\.push\(\{ label: commitActionText\(\{ amend: amend\.value, skipChecks: true \}\), run: \(\) => commit\(\) \}\)/,
+    '提交路径那条通知再加「仍然{0}」（上游 commit.checks.failed.notification.commit.anyway.action；修正模式下是「仍然修正」）')
   assert.match(panel, /await confirmSaveDuringCommit\(stagedPaths\)/, '提交前要问"要不要立即保存"')
   assert.match(panel, /saveDuringCommitQuestion\(unsaved\)/, '问句来自纯模块')
 
@@ -114,8 +138,24 @@ test('接线：检查链只有一处；面板上没有常显的「运行提交�
   assert.match(read('src/components/ToolWindowView.vue'), /:dirty-paths="ctx\.dirtyPaths" :save-path="ctx\.savePath"/, '面板要拿到这两条通道')
 })
 
-test('面板的通知真的接得到宿主（此前 @notify 没绑 ⇒ 通知被静默丢掉）', () => {
-  const view = read('src/components/ToolWindowView.vue')
+test('失败行：一条一行，带详情动作的那条整条文字就是链接（上游 showDetailsLink 为 null 的那一档）', () => {
+  // 这一族已从面板按行号切片拆进 src/sourceControlCommitChecks.ts（模块化拆分，行为逐字未改），两处都读。
+  const panel = read('src/components/SourceControl.vue') + read('src/sourceControlCommitChecks.ts')
+  // FailuresPanel 把各条 failure 用 `<br/><br/>` 隔开（CommitProgressPanel.kt:465）⇒ 一条一行。
+  assert.match(panel, /<template v-for="\(failure, index\) in checksFailures"/, '失败行按条渲染')
+  assert.match(panel, /<br v-if="index" \/>/, '条与条之间换行（上游那个 <br/><br/>）')
+  // showDetailsLink == null ⇒ 整条 text 就是链接（CommitProgressPanel.kt:456-458）。
+  assert.match(panel, /<button v-if="failure\.details" type="button" class="sc-check-failure-link" :title="failure\.details"/,
+    '带详情动作的 failure 渲染成按钮；没有的不渲染（不许给纯文本那一档编链接）')
+  assert.match(panel, /<template v-else>\{\{ failure\.text \}\}<\/template>/, '没有详情动作的那几条就是纯文本')
+  // 落点：problem.showDetails(project)（NonModalCommitWorkflowHandler.kt:523）。本仓只有 TODO 预检
+  // 这一条有详情动作，它的上游落点是 TODO 工具窗口（TodoCheckinHandler.showTodoItems，:144-168）。
+  assert.match(panel, /function showFailureDetails\(failure: CommitCheckFailure\) \{\s*if \(failure\.details !== REVIEW_TODO_ACTION\) return\s*props\.showToolWindow\?\.\('todo'\)/,
+    '只给 TODO 那一条落点（打开 TODO 工具窗口）；别的 failure 走不到这里，也不给它们编落点')
+  assert.match(read('src/style.css'), /\.sc-check-failure-link \{[^}]*color: var\(--accent\)/, '链接那一条要穿链接色（面板里其它内联链接也是 --accent）')
+})
+
+test('面板的通知真的接得到宿主（此前 @notify 没绑 ⇒ 通知被静默丢掉）', () => {  const view = read('src/components/ToolWindowView.vue')
   assert.match(view, /@notify="ctx\.notifyFromPanel"/, 'SourceControl 的 notify 要绑到 ctx 上')
   assert.match(read('src/toolViewContext.ts'), /notifyFromPanel, showToolWindow,/, 'ctx 要有这两条通道')
   assert.match(read('src/App.vue'), /notify, notifyFromPanel, showToolWindow: \(id: string\) => showView/, 'App 把 showView 接成 showToolWindow')

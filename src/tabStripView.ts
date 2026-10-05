@@ -11,8 +11,8 @@
 //   · `observeTabStrips` 用 ResizeObserver 跟着窗口/分栏尺寸重算。
 // 拖放是另一个域（src/tabDragDrop.ts）；这里只读 `groups` 与分栏尺寸。
 import { nextTick, ref, watch } from 'vue'
-import type { Pane } from './editorGroups'
-import { MIN_TAB_WIDTH, TAB_STRIP_ROW_HEIGHT, layoutCompressibleMultiRow, layoutMultiRow, layoutScrollableMultiRow, layoutSingleRow, preferredTabWidth, scrollUnitsToShowTab, type MultiRowLayout, type TabStripLayout } from './tabStripLayout'
+import type { Pane } from './editorGroups.ts'
+import { MIN_TAB_WIDTH, TAB_STRIP_ROW_HEIGHT, layoutCompressibleMultiRow, layoutMultiRow, layoutScrollableMultiRow, layoutSingleRow, preferredTabWidth, scrollUnitsToShowTab, type MultiRowLayout, type TabStripLayout } from './tabStripLayout.ts'
 import type { Tab } from './editorTab'
 
 export interface TabStripViewDeps {

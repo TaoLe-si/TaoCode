@@ -10,13 +10,14 @@
 // 它们共享 `active` / `activePath` / `fileTreeRef`，所以合成一域。
 // 文件树的**右键动作**在 src/treeActions.ts；这里只有"刷新与定位"。
 import { computed, ref, watch } from 'vue'
-import { absolutePath } from './filenameWidget'
-import { request, type Entry } from './bridge'
-import { errorMessage } from './errors'
-import { shouldSelectInTree, type ProjectViewBehavior } from './projectViewBehavior'
-import { getProjectTreeState } from './projectTreeState'
+import { absolutePath } from './filenameWidget.ts'
+import { request, type Entry } from './bridge.ts'
+import { errorMessage } from './errors.ts'
+import { shouldSelectInTree, type ProjectViewBehavior } from './projectViewBehavior.ts'
+import { navBarCrumbs } from './navBarModel.ts'
+import { getProjectTreeState } from './projectTreeState.ts'
 import type { Tab } from './editorTab'
-import { planSelectIn, type SelectInRow, type SelectInTargetSpec } from './selectIn'
+import { planSelectIn, type SelectInRow, type SelectInTargetSpec } from './selectIn.ts'
 
 export interface EditorSideViewsDeps {
   notify: (message: string, error?: boolean) => void
@@ -117,10 +118,23 @@ function showNavBar() {
 }
 function openBreadcrumb(segmentIndex: number) {
   if (!active.value) return
-  const dir = active.value.path.split('/').slice(0, segmentIndex + 1).join('/')
+  // 段路径取导航栏模型（src/navBarModel.ts 的 navBarCrumbs），不再在这里重切一遍路径：
+  // 链是 [根, 目录…, 文件]，DOM 里根按钮单列，所以第 index 个目录段 = chain[index + 1]。
+  const crumb = navBarCrumbs(active.value.path, workspace.value?.name ?? '')[segmentIndex + 1]
+  if (!crumb) return
   explorer.value = true
   leftView.value = 'files'
-  fileTreeRef.value?.reveal(dir)
+  fileTreeRef.value?.reveal(crumb.path)
+}
+/**
+ * `BreadcrumbsBar` 的 `reveal` 事件落点：组件自己已经算好了段（根 / 目录 / 文件），
+ * 这里只负责把它送到项目视图（上游 `NavBarItem.activate` 的"在项目树里定位"那一面）。
+ * 根段传空串 = 只打开项目视图不做定位（与原先根按钮只切 `explorer`/`leftView` 同口径）。
+ */
+function revealBreadcrumbPath(path: string) {
+  explorer.value = true
+  leftView.value = 'files'
+  if (path) fileTreeRef.value?.reveal(path)
 }
   // 卸载时清掉待触发的防抖（`let markdownTimer` 已随本域搬进来，宿主拿不到它）。
   function cancelMarkdownRefresh() { if (markdownTimer !== undefined) { window.clearTimeout(markdownTimer); markdownTimer = undefined } }
@@ -183,7 +197,7 @@ function openBreadcrumb(segmentIndex: number) {
   }
   return {
     cancelMarkdownRefresh, refreshMarkdownNow, refreshMarkdownSoon, toggleMarkdownPreview,
-    refreshTree, selectInTree, openBreadcrumb, showNavBar,
+    refreshTree, selectInTree, openBreadcrumb, revealBreadcrumbPath, showNavBar,
     selectInOpen, selectInAt, selectInRows, openSelectIn, closeSelectIn, pickSelectIn,
   }
 }

@@ -7,12 +7,12 @@
 // 三类结果状态，并且都走同一条 `git.*` 原生通道。
 // 状态栏的分支 widget（`refreshGitWidget`）留在 App.vue：它是 30 秒轮询的常驻部件，不是动作。
 import { computed, nextTick, ref } from 'vue'
-import { request, type DiffRow, type GitAheadBehind, type GitBlame, type GitBlameLine } from './bridge'
-import { blameAnnotations, type BlameAnnotation } from './blameAnnotations'
-import { buildDiffRows, generateUnifiedDiff } from './diffText'
+import { request, type DiffRow, type GitAheadBehind, type GitBlame, type GitBlameLine } from './bridge.ts'
+import { blameAnnotations, type BlameAnnotation } from './blameAnnotations.ts'
+import { buildDiffRows, generateUnifiedDiff } from './diffText.ts'
 // 「比较对象…」（上游 `CompareFilesAction` 的单文件分支）。
-import { SELECT_FILE_TO_COMPARE, defaultCompareSelection, LAST_USED_FILE_KEY } from './compareFiles'
-import { errorMessage } from './errors'
+import { SELECT_FILE_TO_COMPARE, defaultCompareSelection, LAST_USED_FILE_KEY } from './compareFiles.ts'
+import { errorMessage } from './errors.ts'
 import type { Tab } from './editorTab'
 
 export interface VcsActionsDeps {
