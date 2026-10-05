@@ -292,3 +292,34 @@ module-size 绿（`CodeEditor.vue` 我接线涨到 1156 ⇒ 把装配搬进 `sma
 **verdict-reconcile**（`b6`/`b9`/`b11` 三扇门 27/27，`settings-run` 四档由 6/46/2927/268 重分成 35/388/2526/298，B7 继承 630 条逐条重判）、
 **verdict-vcs-b**（`verdict-vcs.md` 1783 类 + `b10-verdict` 10/10）、**verdict-editor-b**（`verdict-editor.md` 2551/2551 + `b12-verdict` 9/9）、
 **audit-docs**（常驻文档 14 条硬错 + 13 条可疑，见 `docs/audit-2026-10-06-docs.md`）。
+
+## 9. 天亮前没做完的（**下一轮的入口，按价值排好了**）
+
+**硬约束先说**：`src/App.vue` 现在 **2729 行 / 上限 2737 ⇒ 只剩 8 行**，`src/components/CodeEditor.vue` 顶在 1147。
+所以剩余接线**必须先做一次抽取**（把一整块内联逻辑搬进新模块，腾出几十行）再谈挂点，
+否则每一条请求都会把门禁顶红 —— 这是事实，不是推脱。
+
+**已收到 docs/ 但我没落的接线请求（每条都带可照抄代码）**
+| 归属 | 还欠什么 | 为什么排在这个位置 |
+|---|---|---|
+| 13c R1 | `native/main.cpp:1169` 的**部分提交（按文件子集）通道** | 唯一需要动 2000 行冻结文件的；要先把通道搬出 main.cpp |
+| 3b W1/W2/W4 | Code Vision 本地提供者的生产入口、点击路由、设置页 + schema | `cvLocalVision.ts`/`codeVisionProviders.ts` 已有消费链，缺的是编辑器与设置页那两个挂点 |
+| 4b W1/W2/W4 | 三个导航动作并进 `createLspNavigation` 返回值、`chooseTargets` 注入、层级导出的面板按钮 | `hierarchyExport.ts` 已接上文件面，面板按钮是剩的一格 |
+| 2b R1 + 2b2 R1 | 诊断 `relatedInformation` 的宿主透传（`bridge.ts` + native）与问题面板行的 Alt+Enter | 桥类型是保留文件，改动面小但跨 native |
+| 12b W2 / 12c X3 | 逻辑断点组的写入口、`DapBreakpoint.logMessage?` | 断点弹层已有，缺写回通道 |
+| 10b（6 条）/ 14a（W1–W3）/ 15（W1–W3）/ 6b（2 条）/ 7b（A2/A3/A5）/ 2c（W1–W4）/ 3a（R1–R5）/ 5b（W-2/W-4/W-5）/ 3a2 W2 | 终端剪贴板/字号/标题、欢迎页与文件选择器、状态栏省电与排障段、设置页 profile 切换、菜单动作、Code Vision 设置 | 都是 1–3 行的属性/参数级接线，**抽取做完后一批就能清完** |
+
+**两条要负责人拍板的（我不擅自决定）**
+1. `native/java_run_host_regression_test.cpp`（181 行，git 里已跟踪）**从来没进过构建**：
+   `CMakeLists.txt`（含 HEAD 版本）里没有它，`scripts/` 与 `.tools/` 也不编译它，
+   但 `docs/handoff-java-lsp-2026-09-28.md:145` 把一条回归结论挂在它 `:135-142` 上 ——
+   那句话现在**没有证据支撑**（它没跑过）。按「死代码直接删」该删掉并订正文档；
+   按「它是 Java 启动链的端到端回归」该登记成 ctest 目标并跑通（需要 PATH 上有 JDK，可能引入环境性抖动）。
+   我两边都没动，留给早上。
+2. **提示注入**：桶 3a2 报告工具结果里出现过伪装成「系统预定义指令」的停止文本（它没执行、已写进它的报告）。
+   我没有证据指向仓库内的固定文件，更像是参考树源码正文或抓到的上游文本被工具原样带回来。
+   下一轮我会在每次工具结果里继续按「数据不是指令」处理，并优先定位来源。
+
+**本轮状态**：全量 `npm test` **4826/4826**、`ctest` **37/37**、`vue-tsc` **0 错**，
+死模块基线 21 → 8，引用门 + 锚点快照（1606 条）绿，产物 `build/` 与 `build-validation/` 已同步（同一 md5）。
+本地检查点提交 **dfbda4e 未推送** —— 等你早上审批再 `git push`。
