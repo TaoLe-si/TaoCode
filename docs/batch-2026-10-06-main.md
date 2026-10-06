@@ -397,3 +397,39 @@ module-size 绿（`CodeEditor.vue` 我接线涨到 1156 ⇒ 把装配搬进 `sma
 `lsp-server-messages`、`commit-partial`、`editor-actions-enter`。我逐个体检：
 `vue-tsc` 0 错；`tests/commit-checks` / `editor-actions` / `lsp-server-messages` 合跑 **72 项 71 绿**，
 唯一那条红就是 §10.3 那个没撤回的注入。三条 lane 的域现在都是绿的，缺的是**报告与判词升档**，不是功能。
+
+## 10.7 第二轮收工快照（11:55，主代理实测）
+
+- 全量 `npm test` 中途快照：**5743 项 / 5738 过 / 5 红**（用例数从 5215 涨到 5743 = 各 lane 新写的判据）。
+  5 条红的归属与处置：① 锚点 `moved`（我把 DebugConsolePane 的 `PauseOutputAction.java` 引用订正成 `:18`）⇒ 已用
+  `TAOCODE_CITATION_ANCHORS=update` 重算，**3009/3009、区间为空 0**，两条引用门 **11/11**；
+  ② `brace.match` 那条钉的是**单 specifier 的 import 字面形状**，而 search3 把 `editorLanguageId` 并进了同一行 ⇒
+  按「改成仍精确」的规约把正则放宽到「同一模块同一 specifier 必须在 import 里」，行为面断言一字未动；
+  ③④⑤ 判决簿 b8/b9 的计数与 B7 交叉核对 ⇒ 已派 `b89-verdict-reconcile` 一轮（要求脚本数真值、不许放松、
+  每条交叉核对逐个给继承声明或机械理由）。
+- 检查点提交：**11a736e**（白屏修复 + 8 条接线）、**7220a76**（判决簿 + 6 处接线 + 引用门复绿），**都没推送**。
+- 在跑 19 路：edact3/commit2/lspmsg 三条修复轮、welcome3、macros2、runcfg3、hier3、shell2、vcslog3、caretops2、
+  completion3、nav3、keymap2、status3、dap3、roots3、audit2、edinput3、termset、b89。
+
+## 10.8 部分提交那一条真缺陷（commit2 修复轮查出，主代理已落 native 半）
+
+`git.commit` 的原生分派**吃掉了 `paths`**（`native/main.cpp` 只交六个参），而 `native/git.cpp:448-483` 早就实现了
+「非空 ⇒ 先 `git add -- <所选>` 再 `git commit --only -- <paths>`、500 上限、`checked_path` 闸门」。
+⇒ 界面上选了子集也照样整份提交（用户可见行为错，且前端 `commitRequestParams` 一直在发 `paths`）。
+已按 C1 把第七参透传补上（坐标 `CommonCheckinFilesAction.kt:37-53` → `CheckinActionUtil.kt:104-106/:135-136`）。
+C1b：`native/git_test.cpp` 补两条显式判据 —— 500 条上限（此前只有前端常量与源码文本锚点在管）、
+「空 `paths` ⇒ 提交整份暂存区」（此前只是收尾调用的副作用）。ctest 结果见下一条。
+**还缺的 C2/C3（我已登记，未落）**：`SourceControl.vue` 没把 `changes`/`commitScope` 交进请求；
+宿主三段（`App.vue:511/866/2147` + `toolViewContext.ts:34/87/114` + `ToolWindowView.vue:37/173`）没把
+按篇修订号喂给提交前检查 ⇒ 同一篇文档第二次编辑不会作废 PASSED（模块侧判据已备好）。
+
+## 10.9 原生侧 ctest 复跑（12:20，主代理实测）
+
+`build/_native-only.ps1`（vswhere 解 VS 路径 + `vcvars64` 灌环境，因为 cmake/ctest 不在 Git Bash 的 PATH 里、
+直接调会 `fatal error C1083: filesystem` 且退出码 127 是假的）：编译过、**36/37 绿**，唯一红
+`git_status_vcs`：`FAIL commit with a path subset … 工作区重新干净，还剩: a.txt(X YM)`。
+定责过程（不靠猜）：我先给 `git_test.cpp` 加了两条 C1b 判据，红仍在同一条**既有** `rest.empty()` 上；
+把这两条撤掉复跑，红的还是同一条 ⇒ **不是我那 8 行**（我那两条当时是通过的）。
+根因指向部分提交那一批 `--only` 改动打破了夹具的顺序假设（`a.txt` 未暂存修改被留在树上，而收尾那次
+空 `paths` 的 `git commit` 只提交暂存区）。dfbda4e 时这套是 37/37 ⇒ 属回归。已派专轮（禁放松 `rest.empty()`、
+按根因修、并把 C1b 两条判据加回去）。C1 的 `paths` 透传保留不动。

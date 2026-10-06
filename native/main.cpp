@@ -1167,9 +1167,12 @@ struct App : taocode::dap::RouteHost {
                 break;
             }
             case "git.commit"_h: {
+                // 「提交文件…」（CommonCheckinFilesAction.kt:37-53 → CheckinActionUtil.kt:104-106、:135-136）：
+                // 非空 = 只有这些路径进这次提交（git commit --only -- <paths>）；缺这个键就是整份暂存区。
                 taocode::git::commit(fs::path(wide(require_repo_root())), params.value("message", std::string()),
                                      params.value("amend", false), params.value("signoff", false),
-                                     params.value("author", std::string()), params.value("authorEmail", std::string()));
+                                     params.value("author", std::string()), params.value("authorEmail", std::string()),
+                                     params.value("paths", std::vector<std::string>()));
                 result = {{"ok", true}};
                 break;
             }
