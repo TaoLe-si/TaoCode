@@ -73,7 +73,7 @@ test('尖括号那一档只给能核到的语言（Java）；其它语言一律�
 // ── 接线：命令表与菜单行必须同名（菜单点得到 = 键盘也做得到，不是放假行） ──────────────
 test('brace.match 进了 editingCommands，编辑菜单用同一个名字', () => {
   const commands = read('src/editorCommands.ts')
-  assert.match(commands, /import \{ matchBraceCommand \} from '\.\/editorMatchBrace\.ts'/)
+  assert.match(commands, /import \{[^}]*\bmatchBraceCommand\b[^}]*\} from '\.\/editorMatchBrace\.ts'/)
   assert.match(commands, /'brace\.match': matchBraceCommand,/, '命令表里没有这一条 ⇒ 菜单行是假的')
   const menu = read('src/menus/editMenu.ts')
   assert.match(menu, /ctx\.editable\('brace\.match', '移动到配对的括号', 'Ctrl Shift M',/,

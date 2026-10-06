@@ -392,6 +392,6 @@ new（在其后补一行；文案 = 上游 `ApplicationBundle.properties:396` �
 4. `src/components/TerminalPanel.vue:89/:326/:318/:120-121/:308/:535/:546/:704` —— 取数换成设置（第 2 条），
    并在 `src/App.vue:2272` 挂 `:settings="editorSettings"`。
 5. `src/components/TerminalPanel.vue:294` + `src/components/RunConsole.vue:145` —— ANSI 覆盖第四参（第 3 条，模块侧已就位）。
-6. `src/components/CodeEditor.vue:853-868` + `src/menus/editMenu.ts` 的 `enabled` + `:1107` 的 `replace-mode` ——
+6. `src/components/CodeEditor.vue:853-868` + `src/menus/editMenu.ts` 的 `enabled` + `:1106` 的 `replace-mode` ——
    大文件动作门禁（第 4 条，模块侧已就位：`src/largeFileMode.ts:66/:81/:88`）。
 7. 第 5、6 条：建议**撤掉/改判**（理由与证据见对应小节），不留悬案。

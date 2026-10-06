@@ -151,3 +151,150 @@ W-3 判词升档文案）。**没有改 `scripts/verdict_table.py`，没有改 `
    纯文本段落里带 `\t` 时本仓折行点会偏半格，改一个入参就能对齐口径，判据可写「同样落点，带 tab 的行比不带 tab 的行早断」。
 2. 引号门槛 (b) 想真正判准需要 token 流 —— 本仓有 `@codemirror/language` 的 `syntaxTree`，
    Java/JSON/HTML 三种语言能拿到真实 token；把「近似」换成「有语法树时用语法树、没有时退回近似」是纯模块活。
+
+---
+
+# §10 收口复核（2026-10-06 第二任：只做收尾，不新起功能）
+
+上面 §1–§9 是**第一任**（撞预算那位）写的。本 §10 由收口代理**重新实测**：每个落点行号都自己打开文件数过、
+每条上游坐标都自己 `awk` 出那几行对过、门禁数字都是本轮自己跑的。原 §1–§9 一个字没改（规约 §1 要求留痕而不是覆盖）；
+**发现 §1/§2 的行号有 9 处漂移**，勘误在 §10.6，判词与结论本身没有一条被推翻。
+
+## 10.1 判词表（条目原文 → 现状 → 证据 `文件:行号` → 档位建议）
+
+「条目原文」取自保留文件 `docs/inventory/verdict-platform_rest.md:55`（`lp/editor-actions` 那一行，本批**不改**它，
+升档写法给在 `docs/wiring-requests-2026-10-06-edact3.md` W-3）。行号按本轮工作区（该文件同时被别的代理在改，
+建议按原文子串定位，别只信行号）。
+
+| 条目原文（判词里的说法） | 现状（本轮实测） | 证据：本仓 `文件:行号` | 证据：上游 `文件:行号`（本轮亲自取过那几行） | 档位建议 |
+| --- | --- | --- | --- | --- |
+| ②「回车家族 `enter/*`（`EnterBetweenBracesHandler`/`EnterAfterUnmatchedBraceHandler`/`EnterInStringLiteralHandler`/`EnterInLineCommentHandler`）**没有 IDEA 语义**（`basicSetup` 的换行缩进承担）」 | **已不是这样**：四条都有实现，且问法次序做成了数据表 + 表驱动循环（`order="last"` 的效果也在表里） | `src/enterHandlerOrder.ts:43`（五档）、`:71-122`（7 条注册：`rank` 1–7 落在 `:73/:80/:87/:94/:101/:109/:116`）、`:139-141`（`preprocessSteps`）、`:158-170`（循环）、`:173-175`（要不要插换行）；`src/enterHandlers.ts:98-100`（import 表）、`:412-424`（`EnterContext`）、`:430-478`（`ENTER_IMPLS` 四支：①`:432` ②`:446` ③`:456` ④`:468`）、`:489-502`（`applyEnterHit`）、`:510-529`（命令，循环在 `:527`） | `platform/lang-impl/src/com/intellij/codeInsight/editorActions/EnterHandler.java:136`（`for (delegate : EP_NAME.getExtensionList())`）、`:142-144`（`Stop` ⇒ `return`）、`:145-153`（非 `Continue` ⇒ 置 `forceIndent`/`forceSkipIndent` 后 `break`）；`enter/EnterHandlerDelegate.java:17`（接口）、`:25-26`（`enum Result { Default, Continue, DefaultForceIndent, DefaultSkipIndent, Stop }`） | ② 由「没有 IDEA 语义」改成「已做，6 条里 4 条移植 + 2 条如实记未做」；族档 `lp/editor-actions` 仍留 `[~]`（欠 `EnterAfterJavadocTagHandler` 与 tab 宽度那一档） |
+| ①「缺：逐语言 `TypedHandlerDelegate`/**`QuoteHandler`**/`BraceMatcher` 扩展点」 | **「逐语言 `QuoteHandler`」这半已做**：20 条逐语言注册 + 两条「这次不补配对」的门槛进了链路；`BraceMatcher` 那半属别的批（`src/editorBrackets.ts`） | `src/quoteHandlerRegistry.ts:62`（三个触发字符）、`:64-166`（20 条注册）、`:175-178`（门槛 a）、`:188-197`（门槛 b）、`:200-207`（两条合并）、`:210-218`（按语言查表 + `isJavaLikeQuoteLanguage`）；`src/editorTyping.ts:54`（import）、`:129-149`（`quoteAction`，门槛在 `:147`）、`:158-165`（`AUTOINSERT_PAIR_QUOTE` 降级）、`:180-240`（`smartQuotes`，开关问在 `:193`、语言档传在 `:216`）；face 三支 `src/editorQuoteFaces.ts:37/:58/:63/:79/:92/:100/:105` | `TypedQuoteImpl.java:52`（`'"' == charTyped \|\| '\'' == charTyped \|\| '`' == charTyped`）、`:89-97`（`javaLike.isAppropriateElementTypeForLiteral`）、`:104-105` 与 `:117-118`（`!Character.isUnicodeIdentifierPart(...)`）；`JavaQuoteHandler.java:31`（`implements JavaLikeQuoteHandler, MultiCharQuoteHandler`）、`:33-36`（那张 token 集） | ① 拆成两写：`QuoteHandler` 逐语言那一半 `[x]`；`TypedHandlerDelegate` 全族维持「部分」 |
+| ⑥「其余无落点：… `FillParagraphAction`（**纯文本可做，未做**） …」 | **过期**：早已落盘且命令 + 菜单都在，本批只做逐行复核与一档差档登记 | `src/editorFillParagraph.ts:39`（`RIGHT_MARGIN` 默认 120）、`:61-74`（段落边界）、`:81-99`（折行，两条跳过在 `:89-91`）、`:107-121`（一次填充）、`:133-147`（命令，`:136` 判纯文本）、`:150-153`（`isPlainText`）；命令注册 `src/editorCommands.ts:39`（import）+ `:227`（`'paragraph.fill'`）；菜单行 `src/menus/editMenu.ts:114-122` | `fillParagraph/ParagraphFillHandler.java:208-210`（`return psiFile instanceof PsiPlainTextFile;`）；`fillParagraph/FillParagraphAction.java:20`（类声明）、`:43`（`isValidForFile`） | ⑥ 里 `FillParagraphAction` 从「未做」升 `[x]`；`docs/inventory/platform_rest_verdict_table.md:8005-8006` 两行「从未出现」应改判 `[x]` 并指本仓落点（生成物，交主代理重算） |
+| ⑥ 里同批点名的 `CodeBlockStart/End*` | **两支合并已接**（括号扫描 + 结构支持），结构那半按语言注册、本仓只有 Python 有档案 ⇒ 对用户不可见，但边是真的 | `src/editorCodeBlock.ts:41`（import）、`:168-173`（`codeBlockTarget`，`:169` 问结构、`:171/:172` 合并）；`src/editorCommands.ts:45`（import facet）、`:175-…`（命令，`:179` 取 `state.facet(editorLanguageId)`）；`src/structuralCodeBlock.ts:471-474`（`findCodeBlockRange`）、`:480-484`（`mergeBlockEnd` = `Math.min`）、`:487-491`（`mergeBlockStart` = `Math.max`）；宿主挂载**已落地**：`src/components/CodeEditor.vue:486` 用 `editorLanguageIdExtension(props.language)` | `CodeBlockUtil.java:108-120`（`:110` 问 `CodeBlockSupportHandler.findCodeBlockRange`、`:111-116` 两支互备、`:118` `Math.min`）、`:176-188`（`:178`、`:186` `Math.max`） | `CodeBlockStart/End` 从「无落点」升 `[~]`（能打开的语言里退化成括号档，理由写在 `src/editorCodeBlock.ts:162-166`） |
+
+**族级判词**：`lp/editor-actions` 建议 **`[~]`**（不是 `[x]`）。还差的具体三档：
+① `EnterAfterJavadocTagHandler`（要 javadoc PSI）；② `wrapToMargin` 的制表符视觉宽度（`LineWrappingUtil.java:112-113`）；
+③ 三格设置的**宿主那一行**（见 W-1，接上前那三格仍是空旋钮）。
+
+## 10.2 改动文件清单（`git show 11a736e~1` 为「前」，工作区为「后」）
+
+本域代码全部在 **11a736e** 这一次混合提交里（12 路并行的收口提交），所以「前」取该提交的父本 `dfbda4e`：
+差值里可能混着别的域在同一文件上的改动，逐条标注。
+
+| 文件 | 前（`11a736e~1`） | 后（本轮实测 `wc -l`） | 归属 |
+| --- | --- | --- | --- |
+| `src/enterHandlerOrder.ts` | 新文件 | **175** | 本域（edact3 新建） |
+| `src/quoteHandlerRegistry.ts` | 新文件 | **218** | 本域（edact3 新建） |
+| `src/structuralCodeBlock.ts` | 新文件 | **491** | 搜索域 `search2` 建、本域接其 B 半消费方 |
+| `src/enterHandlers.ts` | 290 | **530** | 本域（第一任 §2 记的「前 486」是它**运行时**的工作区中间态，见 10.6） |
+| `src/editorTyping.ts` | 185 | **255** | 本域（第一任估的 229 偏低） |
+| `src/editorCodeBlock.ts` | 150 | **173** | 本域 |
+| `src/editorCommands.ts` | 263 | **280** | 本域 + 别的域在同文件的在途改动 |
+| `src/editorFillParagraph.ts` | 153 | **153** | 本域复核，**本批没改**（第一任同样只复核） |
+| `src/editorQuoteFaces.ts` | 110 | **110** | 承前批，本批没改 |
+| `src/editorEnterBlockComment.ts` | 212 | **216** | 本域（第 4 实参注释）+ 别的域 |
+| `tests/editor-enter-order.test.mjs` | 新文件 | **125**（8 条） | 本域新建 |
+| `tests/quote-handler-registry.test.mjs` | 新文件 | **123**（7 条） | 本域新建 |
+| `tests/structural-code-block.test.mjs` | 新文件 | **204**（15 条） | 搜索域交付，本域跑它做零消费方核对 |
+| `tests/editor-code-block.test.mjs` | 81 | **214**（17 条） | 本域 +4 条、搜索域 facet 4 条 |
+| `tests/editor-enter-handlers.test.mjs` | 145 | **234** | 本域（2 条源码形状断言跟着重构） |
+| `tests/editor-enter-block-comment.test.mjs` | 142 | **158** | 本域（1 条锚点跟着调用点改） |
+| `tests/editor-quote-faces.test.mjs` | 102 | **130** | 承前 + 本域 1 个锚点 |
+| `tests/editor-fill-paragraph.test.mjs` | 74 | **74** | 本批没改 |
+| `src/components/EditorEnterKeysFields.vue` | 新文件 | **35** | `setkeys` 域（与本域的两条开关系，见 W-1） |
+
+派单点名的 `src/editorActions*.ts` **在本仓不存在**（`ls src \| grep -i editoraction` 空）；本域的文件名是
+`src/enterHandlers.ts` / `src/enterHandlerOrder.ts` / `src/editorCommands.ts` / `src/editorTyping.ts`。
+同理 `tests/editor-actions` 也没有同名文件 ⇒ 本轮「本域测试」按 §3 那张表列的 10 个文件跑（见 10.3）。
+
+## 10.3 门禁数字（**本轮自己实跑**，不是抄第一任的）
+
+| 命令 | 本轮数字 | 与第一任 §3 的差异 |
+| --- | --- | --- |
+| `node --test`（本域 10 个文件：enter-handlers / enter-block-comment / enter-order / quote-faces / quote-handler-registry / fill-paragraph / code-block / smart-enter / brackets / inline-completion-typing） | **104 条 / 104 pass / 0 fail** | 与第一任**完全一致** |
+| 同上 + `tests/structural-code-block.test.mjs`（11 个文件） | **119 条 / 119 pass / 0 fail** | 第一任没把搜索域那份算进本域 |
+| `node --test tests/commit-check*.test.mjs tests/editor-commands.test.mjs`（派单体检里点到的两条相邻面） | **78 条 / 78 pass / 0 fail** | 新增记录（本域没动这些文件，只是确认没被我牵连） |
+| `npx vue-tsc -b --force` | 起手（本轮 10:5x）**0 错**；收工复跑 **4 错**：`src/components/RunConsole.vue(278,27)/(285,23)/(347,26)` TS2304 `request`、`src/lspProgress.ts(147,32)` TS2304 `lspServerMessages` | 四条**都不在本域**（那两个文件此刻是 `M` 在途，别的代理正在改）；本域改过的 9 个文件 **0 错**。第一任当时记的是 2 条（`refactorPreview.ts`/`workspaceLifecycle.ts`），那两条现已消失 ⇒ 并行收口的正常漂移 |
+| `node --test tests/module-size.test.mjs` | **5 / 5 绿** | 一致；上限未动、无豁免。新模块 175/218/491 行都低于 900 |
+| `node .tools/find-orphan-modules.mjs --gate` | **已登记孤儿 8 / 基线 8 · 新增 0 · 本轮清掉 0 ⇒ 门禁绿**（词法自检 0 异常） | 第一任记的「登记 9」是当时的中间态；现在基线是 8 条（`popupLiveUpdate.ts` 那行被 tw3 按死代码处置删掉了） |
+| `node .tools/find-param-props.mjs` | **共 0 处参数属性** | 一致 |
+| `node .tools/find-ts-in-mjs.mjs` | **干净：`tests/*.mjs` 全部是纯 JavaScript** | 一致 |
+| `node .tools/find-missing-ext.mjs` | **扫描 1303 个文件，干净** | 第一任 1302 ⇒ 期间别人加了 1 个文件，非本域 |
+| `node --test tests/source-citations.test.mjs tests/source-citation-anchors.test.mjs` | 11 条 / **10 pass / 1 fail**。失败的是 `moved :: src/components/DebugConsolePane.vue \| platform/execution-impl/src/com/intellij/execution/actions/PauseOutputAction.java:19-19`（快照里有、仓里指不到） | 第一任记的 3 条 fail（vcs2 两条假路径 + bucket14b/settings-parity/trustedProjects 的 moved）已由 citefix 与本域无关的代理收掉；**剩这一条是他域（调试台）在途**，`src/components/DebugConsolePane.vue` 与 `docs/inventory/citation-anchors.json`（+45 行）都是 `M`。本域两条 `batch`/`wiring` 文档里的引用**全部**过了 `source-citations.test.mjs`（该条 11 条里 pass 的一部分：「仓里每一条带路径的上游引用都指得到」✔） |
+| 20 条引号注册的行号自证（本轮重跑） | 脚本逐条取「文件:行号 ±2 行」比对 ⇒ **`rows=20 bad=0`** | 与第一任「ALL 20 ROWS OK」一致；本轮脚本落在 `build/`，用完已删 |
+
+## 10.4 反向验证（本轮**重新注入**三条，不是复述第一任的 §4）
+
+| 注入 | 做法（都是「剪掉本域新接的边」，没动任何断言） | 结果 | 撤掉后 |
+| --- | --- | --- | --- |
+| A 代码块合并边 | `src/editorCodeBlock.ts:169` 的 `findCodeBlockRange(text, caret, language)` 换成 `null` | `tests/editor-code-block.test.mjs` **17 条 / 13 pass / 4 fail**（红的正是「合并块尾取 min」`:118`、「括号那半扫不到 ⇒ 用结构那半」、「语言档经 facet 传到命令」、「嵌套复合语句」） | 17/17 复绿 |
+| B 引号两条门槛 | `src/editorTyping.ts:147` 的 `if (pairInsertionSuppressed(…)) return 'plain'` 注释掉 | `tests/quote-handler-registry.test.mjs` **7 条 / 6 pass / 1 fail**（「接进了引号链路：`abc\|def` 中间敲引号」） | 7/7 复绿 |
+| C 回车次序表 | `src/enterHandlers.ts:527` 的 `preprocessEnter(ENTER_HANDLER_ORDER, …)` 换成「只把表里 `blockComment` 那一条丢进循环」 | `tests/editor-enter-order.test.mjs + tests/editor-enter-handlers.test.mjs` **22 条 / 17 pass / 5 fail**（含「回车四条按上游有效次序问」与字面量/开关两条） | 22/22 复绿 |
+| 全域 | 撤掉三条注入后 `node --test`（11 个文件） | —— | **119 条 / 119 pass / 0 fail** |
+| 还原自证 | `git diff --stat -- src/editorCodeBlock.ts src/editorTyping.ts src/enterHandlers.ts` | **空**（三个文件逐字回到提交状态，没有 `git checkout/reset`，全靠 Edit 还原） | —— |
+
+## 10.5 零消费方自查（派单点名那两条：结论都是**不是孤儿，不删**）
+
+- `src/quoteHandlerRegistry.ts`（218 行）：**有真实生产消费方** —— `src/editorTyping.ts:54` 值 import
+  `isJavaLikeQuoteLanguage`、`pairInsertionSuppressed`，调用点 `src/editorTyping.ts:147`（`quoteAction` 补配对之前）。
+  另有测试 `tests/quote-handler-registry.test.mjs`。**不删**；`.tools/orphan-baseline.txt` 未改（8 条不变）。
+  上一轮报的「孤儿红」是它刚落盘、`editorTyping.ts` 那条 import 还没写的时候；现在链已接。
+- `src/structuralCodeBlock.ts`（491 行）：**两半都有生产消费方** —— B 半（代码块）
+  `src/editorCodeBlock.ts:41` import + `:169` 调用（宿主经 `src/components/CodeEditor.vue:486` 的语言档 facet 把 `language` 送到）；
+  A 半（结构化搜索）`src/structuralSearchModifiers.ts:47` import + `:402/:405` 调用
+  （`src/structuralSearchConstraints.ts:347-348` 记的是同一条边）。**不删**。
+- `src/enterHandlerOrder.ts`（175 行）：`src/enterHandlers.ts:98-100` import、`:527` 用表跑循环；宿主在
+  `src/components/CodeEditor.vue:115-117`（`smartEnterCommand`）+ 键位 `Enter`（`tests/editor-enter-block-comment.test.mjs:140` 钉着）。
+- 门禁实况：`已登记 8 / 基线 8 · 新增 0 · 清掉 0` ⇒ **绿**。本域三个新文件都不在孤儿名单里。
+- **本轮唯一的「只过自己测试」观察**（文件级门禁抓不到，导出级）：`src/structuralCodeBlock.ts:459`
+  `pythonCompoundKeywordRanges` 生产侧零消费方，只有 `tests/structural-code-block.test.mjs:19-20/127/133/143/149`。
+  上游对应用途是 `AbstractCodeBlockSupportHandler.java:66-76` 的 `getCodeBlockMarkerRanges`（块面标记），本仓没有那个面。
+  **本域不删**：那是搜索域（`search2`）交付的文件与判据，删它要连删 5 处断言，属越界 ⇒ 交主代理拍板（写法给在 W-4）。
+- UI：本域一行界面都没动，没有新控件。相邻的 `EditorEnterKeysFields.vue`（`setkeys` 域交付）已由
+  `src/components/SettingsDialog.vue:781` 渲染 ⇒ 不是零消费方组件；但那三格的**执行侧**还差保留文件里的一行 ⇒ 见 W-1。
+
+## 10.6 勘误 / 留痕（规约 §1：改别人的结论要留痕）
+
+第一任 §1/§2 的**结论**（哪条做了、哪条没做、上游行号）本轮逐条复核，**没有一条被推翻**；
+`src/*` 的**行号有 9 处漂移**（并行编辑把行推下去了，属正常，不影响判词）。原写 → 实测：
+
+| 位置 | 原写 | 实测（本轮数过） |
+| --- | --- | --- |
+| §1 enter 行「EP 声明与 7 条注册」 | `src/enterHandlerOrder.ts:69-141` | 表体 `:71-122`（`ENTER_RESULTS` 在 `:43`，`preprocessSteps` 在 `:139-141`） |
+| §1 enter 行「逐个问 + break」 | `src/enterHandlerOrder.ts:163-175`、`src/enterHandlers.ts:505-530` | `preprocessEnter` 在 `:158-170`；`smartEnterCommand` 在 `:510-529`（`:505-509` 是它的注释） |
+| §1 enter 行「五档 `Result`」 | `src/enterHandlerOrder.ts:47-52`（表里 `result`/`resultAt` 两列） | `result` 列 `:61-62`、`resultAt` 列 `:63-64`；`:47-52` 是 `EnterPhase` 与接口开头 |
+| §1 enter 行「两条开关」 | `src/enterHandlers.ts:104-113`、`:449-451`、`:470-481` | `EnterLanguage` `:103-118`（`blockCloseOnEnter` `:110`、`insertBraceOnEnter` `:113`）；花括号那条的把关行在 `:457`；块注释那一支 `:468-477`（开关实参 `:471`）。`:449-451` 其实是**行注释**支的 `caretAdvance` |
+| §1 quote 行「门槛 (a)」 | `src/quoteHandlerRegistry.ts:182-187` | `nextCharBlocksPair` 在 `:175-178`（`:180-187` 是门槛 (b) 的注释） |
+| §1 quote 行「门槛 (b)」 | `src/quoteHandlerRegistry.ts:189-207` | `appropriateElementForLiteral` `:188-197`、`pairInsertionSuppressed` `:200-207`（写 189 起会漏掉函数声明那一行） |
+| §1 quote 行「三级取 handler」 | `src/quoteHandlerRegistry.ts:44-58`（头注释）、`:56`（`QUOTE_TRIGGER_CHARS`） | 头注释里对应段落 `:9-16`；`QUOTE_TRIGGER_CHARS` 在 `:62` |
+| §1 quote 行「注册表」 | `src/quoteHandlerRegistry.ts:60-179` | `QUOTE_HANDLER_REGISTRATIONS` `:64-166` |
+| §1 codeblock 行「两支合并」 | `src/editorCodeBlock.ts:32-40`（import）、`:147-168`（`codeBlockTarget`） | import 在 `:41`（`:34-40` 是注释）；`codeBlockTarget` `:168-173`（doc 注释 `:153-167`） |
+| §1 paragraph 行「命令注册」 | `src/editorCommands.ts:39` | `:39` 是 import；命令表里的落点是 `:227`（`'paragraph.fill'`） |
+
+另两处**订正别人的结论**（不是行号漂移）：
+
+1. `docs/wiring-requests-2026-10-06-editorinput.md:58-59`（editorinput 域的 W-1）断言：
+   「`tests/editor-enter-block-comment.test.mjs` 末条钉的是 `smartEnterCommand(() => smartEnterLanguageFor(` 这个形状，
+   **改成上面那段仍然匹配**」—— **实测不成立**。该条断言是
+   `tests/editor-enter-block-comment.test.mjs:147` `/smartEnterCommand\(\(\) => smartEnterLanguageFor\(/`，
+   而它给的「改法一」把箭头函数换成了 `smartEnterCommand(() => { const style = … })`，那串字面量就不再出现 ⇒
+   照抄会让那条判据变红。本轮把**两条**可照抄写法（保形状的 / 改断言的）都给在 W-1，并按规约给出不放松的替换断言原文。
+2. `docs/wiring-requests-2026-10-06-editorinput.md:55-57`（同一条 W-1 的「行数提醒」）说改法一净 +3 行会顶到
+   `CodeEditor.vue` 的 1147 行上限 —— 本轮核对 `tests/module-size.test.mjs` 里 `CodeEditor.vue` 的上限仍是**已登记值、只许降**，
+   所以那条提醒成立；本轮给的写法把装配留在 `src/enterHandlers.ts`（本域文件，不占宿主行数）。
+
+## 10.7 本域收口后的「做不到 / 待接线」增补
+
+| 条目 | 具体卡在哪一环（本轮核实过） |
+| --- | --- |
+| 三格设置没有执行侧 | 键（`src/settingsModel.ts:427/429/431`，默认值同在 `:223`）与界面（`src/components/EditorEnterKeysFields.vue:29/31/33`，挂在 `src/components/SettingsDialog.vue:781`）都在，消费方也在（`src/editorTyping.ts:181/193`、`src/enterHandlers.ts:457/471`），**只差 `src/components/CodeEditor.vue:115-117` 与 `:968` 那两行** —— 两个文件都是保留文件 ⇒ W-1。 |
+| `SURROUND_SELECTION_ON_QUOTE_TYPED` | 上游默认 true（`CodeInsightSettings.java:137`，问在 `SelectionQuotingTypedHandler.java:47`），本仓 `settingsModel.ts` 无此键 ⇒ `wrap` 恒开；补键要动保留文件（且要按「旧存档缺键补默认」的规矩走）。 |
+| `SMART_INDENT_ON_ENTER` | 同上：没有键 ⇒ `Default` 与 `DefaultForceIndent` 两档在本仓观察不到差别（`EnterHandler.java:163-174` 的差别只在该键关掉时存在）。表里如实记两档。 |
+| `pythonCompoundKeywordRanges` 只有测试消费方 | 见 10.5 末条：属搜索域文件 ⇒ 不越界删；处置写法给在 W-4。 |
+| 全仓 `vue-tsc` 收工 4 错 / 引用门 1 条 `moved` | 都不在本域（10.3 各行给了文件与原因）；本轮**没有**为了让数字好看去动别人的文件，也没重算快照（`docs/inventory/citation-anchors.json` 是别人在途的 `M`）。 |
+| Python 结构支持的用户可见性 | 本仓编辑器没有 Python 语言档（`src/editorLanguage.ts:15-21`）⇒ 合并边接了但真实文档触发不了；判据是单元级（直接给 `codeBlockTarget(…, 'python')`），不宣称用户可见。 |
+
+**需要主代理接的线**：`docs/wiring-requests-2026-10-06-edact3.md`（W-1 三格设置的宿主两行 + 同步判据、
+W-2 状态记录（已落地，无需再接）、W-3 判词升档逐字改法、W-4 `pythonCompoundKeywordRanges` 的处置）。
+

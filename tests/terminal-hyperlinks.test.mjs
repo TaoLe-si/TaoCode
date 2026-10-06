@@ -143,7 +143,13 @@ test('消费链：面板装了 link provider、OSC 8 handler、中键粘贴与 L
   assert.match(panel, /instance\.registerLinkProvider\(/)
   assert.match(panel, /terminalHyperlinkRanges\(text\)/)
   assert.match(panel, /terminalLinkActivatable\(target, isDesktop\)/, '点不开的命中不画成链接')
-  assert.match(panel, /request\('shell\.openUrl', \{ url \}\)/, '打开链接的唯一出口是宿主')
+  // 原钉的是面板里那一行 `request('shell.openUrl', { url })`（那时每条出口各自直连宿主）。
+  // 2026-10-06 welcome3 把 URL 出口收成一条（`src/externalLinkLauncher.ts`，上游只有一个
+  // `browse()`、判定就长在它里面）⇒ 运输那一行搬了家：按规约把锚点指向新文件，断言体一字不动，
+  // 面板这一侧改钉「调用的是那一条出口」。
+  const launcher = readFileSync(new URL('../src/externalLinkLauncher.ts', import.meta.url), 'utf8')
+  assert.match(launcher, /request\('shell\.openUrl', \{ url \}\)/, '打开链接的唯一出口是宿主')
+  assert.match(panel, /await openExternalUrl\(url\)/, '面板不再自己直连宿主：未信任项目里点链接也先过那一句')
   assert.match(panel, /addEventListener\('mousedown', \(event\) => onMiddleClick\(pane, event as MouseEvent\), true\)/,
     '中键粘贴要在捕获阶段抢在 xterm 之前')
   assert.match(panel, /ON_LINUX && terminalCopyOnSelect\(true\)/, '选中即复制只有 Linux')

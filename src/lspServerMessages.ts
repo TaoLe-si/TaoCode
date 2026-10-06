@@ -30,6 +30,10 @@
 //
 // 「声明了能力却没有处理器」在这一层是可观察的：注册表里没有对应方法的处置 ⇒ 这条消息进
 // `lspServerMessageDrops`（丢弃计数）并留一行「语言服务」日志，**不再**被当成 showMessage 弹出去。
+// 同一层的第二道检查是队列本身：`lspServerMessages` 是 reactive 的，否则唯一消费方
+// （`src/progressNotices.ts`）那个 `watch(() => length)` 永远不会醒 —— 消息堆在队列里静默消失，
+// 而丢弃计数抓不到它（这一条 2026-10-06 收尾时实测并修掉，判据在
+// `tests/lsp-server-messages.test.mjs` 的端到端那条）。
 // 本模块只认宿主 `lsp.message` 事件里带了 `method` 的那些；不带 method 的按改动之前的行为走
 // showMessage（旧宿主 / 预览通道的形状，`tests/lsp-progress.test.mjs` 钉着这条）。
 import { reactive } from 'vue'
@@ -228,8 +232,18 @@ export interface LspServerMessage {
   requestKey: string
 }
 
-/** 通知队列：与拆分前同一个数组，条目上多了四个分派字段（消费方按老字段读即可，新字段是给归组与回选用的）。 */
-export const lspServerMessages: LspServerMessage[] = []
+/**
+ * 通知队列：与拆分前同一个数组，条目上多了四个分派字段（消费方按老字段读即可，新字段是给归组与回选用的）。
+ *
+ * **必须是 reactive 的数组**：唯一的消费方（`src/progressNotices.ts` 的 `wireLspProgressNotices`）用的是
+ * `watch(() => lspServerMessages.length, …)`。Vue 的 `watch` 只跟踪**响应式**依赖，普通数组的 `push`
+ * 不登记任何依赖 ⇒ 那个 watcher 一次也不会醒：消息照旧进队列，通知面一行都不显示，连 watcher 循环体里
+ * 那句 `logLspServerMessage(message)` 也不会执行 —— Error/Warning 级的 showMessage/logMessage 于是
+ * 既没有气球也没有日志行。这是「声明了 capability 却没处理器」的**第二种**形状：处理器在、通道是死的，
+ * 而且丢弃发生在队列这一头，`lspServerMessageDrops` 抓不到它（那条只抓「方法没人接」）。
+ * 判据：`tests/lsp-server-messages.test.mjs` 的端到端那条（真跑 watcher，量到 `notifyProgress` 被叫几次）。
+ */
+export const lspServerMessages = reactive<LspServerMessage[]>([])
 
 /** 已经整理过形状的一条消息（处理器拿到的都是这个，不会再出现 undefined）。 */
 export interface LspServerMessageEnvelope extends LspServerMessage {
@@ -302,6 +316,14 @@ function handleShowMessage(message: LspServerMessageEnvelope): void {
  * 与上游的一处如实差异：上游 Info/Log 也 doNotify，只是落到 `LOG_INFO_TRACE` 那个
  * displayType=NONE、isLogByDefault=false 的组（用户看不见，除非自己打开通知中心）；
  * 本仓的通知面没有「静默组」这一档，所以那一条只写日志 —— 分档（谁可见）是一样的。
+ *
+ * 另一处**当前还没到位**的差异（留痕，别当成已做）：队列条目自带的 `group`/`displayId`
+ * 要由通知面读走才会真正分组，而 `src/progressNotices.ts` 现在把 displayId 写死成
+ * `lsp:message:<语言>`（= 组「LSP window/showMessage」，BALLOON）。于是 Error/Warning 级的
+ * logMessage 目前**会弹一个气球**，上游那一组是 `:467` 注释的「no balloon, only write to the
+ * Notifications tool window」⇒ 多弹一个、不少一条。这是「先让它看得见，再让它分得对」的次序：
+ * 队列没 reactive 之前这些消息一条都没出现过。接线见
+ * docs/wiring-requests-2026-10-06-lspmsg.md 的 R1a（一行 `displayId: message.displayId || …`）。
  */
 function handleLogMessage(message: LspServerMessageEnvelope): void {
   if (message.severity <= 2) {

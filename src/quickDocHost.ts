@@ -26,6 +26,7 @@ import { parseQuickDoc, isSafeDocImageSource, isInlineDocImageSource, type DocIm
 import { isSymbolDocReference, resolveDocSymbolTarget, type DocSymbolQueries, type DocSymbolTarget } from './docSymbolTarget.ts'
 import { docHoverPolicy, DOC_AUTO_UPDATE_QUIESCENCE_MS, shouldRefreshDocPage, toggleDocHoverPolicy, type DocHoverPolicy } from './docHoverPolicy.ts'
 import { errorMessage } from './errors.ts'
+import { openExternalUrl } from './externalLinkLauncher.ts'
 import { createHoverDocumentation, type HoverCache } from './hoverDocumentation.ts'
 import { imageMimeFor, resolveImagePath } from './literalPreview.ts'
 import { serverHintFor } from './lsSessionHost.ts'
@@ -242,12 +243,14 @@ export function createQuickDocHost(deps: QuickDocHostDeps) {
   /**
    * `DocumentationViewExternalAction`（`DocumentationViewExternalAction.kt:14-23`）：
    * 没有当前外部 URL 时**不做任何事**，也不报错 —— 上游那时这个动作根本不可见。
+   * 打开走 `src/externalLinkLauncher.ts` 那一条出口（上游的「未信任先问那一句」就长在
+   * `browse()` 里，`BrowserLauncherAppless.kt:99`），这里只把注入的 `request` 当作最后的运输。
    */
   async function openExternalDoc() {
     const url = quickDoc.value ? currentExternalUrl(quickDoc.value.layout) : null
     if (!url) return
     if (!isDesktop) { notify(`浏览器预览里不能打开外部链接：${url}`, true); return }
-    try { await request('shell.openUrl', { url }) }
+    try { await openExternalUrl(url, next => request('shell.openUrl', { url: next })) }
     catch (error) { notify(errorMessage(error), true) }
   }
   /** 这个动作现在该不该可点（`isEnabledAndVisible`，`DocumentationViewExternalAction.kt:15`）。 */

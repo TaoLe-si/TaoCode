@@ -228,6 +228,23 @@ test('执行顺序：先清行尾、再判末行 ⇒ "x   " 结尾落成 "x\\n"�
   assert.equal(result.changed, true)
 })
 
+test('设置项「光标所在行保留行尾空白」= 关 ⇒ 光标那一行照样清、且不记延后行（TrailingSpacesStripper.java:70 → :229 的 skipCaretLines）', () => {
+  // 上游这一格不是「判不判」，是「传不传光标」：`:70` 把 `isKeepTrailingSpacesOnCaretLine()` 当第三个实参，
+  // `:229` 的 `skipCaretLines ? caretOffsets : null` 关掉时直接不传 ⇒ `StripTrailingSpacesUtil.java:78-84` 走不到。
+  for (const [keep, expected, stripped, deferred] of [
+    [true, 'abc   \ndef', [1], [0]],
+    [false, 'abc\ndef', [0, 1], []],
+  ]) {
+    const result = applySaveTextTransforms({
+      path: 'a.txt', text: 'abc   \ndef   ', caretOffsets: [5],   // 光标落在第 0 行的行尾空白里
+      options: { ...UPSTREAM_DEFAULTS, changedLinesOnly: false, keepTrailingSpacesOnCaretLine: keep },
+    })
+    assert.equal(result.text, expected, `keepTrailingSpacesOnCaretLine=${keep} 时的正文`)
+    assert.deepEqual(result.strippedLines, stripped)
+    assert.deepEqual(result.deferredLines, deferred)
+  }
+})
+
 test('两条都关 ⇒ 正文一字不动（None 档 + 不补末行换行）', () => {
   const options = saveTrimOptionsFromSettings({ stripTrailingSpaces: STRIP_TRAILING_SPACES_NONE })
   const result = applySaveTextTransforms({ path: 'a.txt', text: 'a   \nb', options })

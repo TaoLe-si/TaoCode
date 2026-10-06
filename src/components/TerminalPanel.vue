@@ -28,7 +28,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { BridgeError, isDesktop, request, subscribeTerm, subscribeTermExit, term } from '../bridge'
+import { BridgeError, isDesktop, subscribeTerm, subscribeTermExit, term } from '../bridge'
 import { iconSize } from '../uiIcons'
 import { copyToClipboard, readClipboardHistory, readClipboardText } from '../clipboard'
 import { resolveTerminalThemeName, terminalPalette, terminalXtermTheme } from '../terminalColors'
@@ -38,6 +38,7 @@ import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, resetTe
 import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalCopyOnSelect, terminalHistoryEntries, terminalIsMiddleButton, terminalPasteOnMiddleClick, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
 import { terminalHyperlinkRanges, terminalLinkActivatable, terminalLinkTarget, terminalLinkTooltip, terminalOsc8Target } from '../terminalHyperlinks'
 import { buildSettingsAwareFullTitle, buildSettingsAwareTitle, nextTerminalTabName, renameTerminal, setApplicationTitle, TERMINAL_SHOW_APP_TITLE_DEFAULT, TERMINAL_TAB_BASE_NAME, terminalRenameInitialValue, titleChanged, type TerminalTitleSettings, type TerminalTitleState } from '../terminalTitle'
+import { openExternalUrl } from '../externalLinkLauncher.ts'
 import AnchoredMenu from './AnchoredMenu.vue'
 
 const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
@@ -361,13 +362,14 @@ function onMiddleClick(pane: Pane, event: MouseEvent) {
   void pasteFromClipboard()
 }
 /**
- * 终端链接的落点动作：交给宿主的系统默认处理器（上游 `OpenUrlHyperlinkInfo.java:69-72` 的
- * `navigate` = `BrowserLauncher.browse(url, ...)`；本仓那一端是 `shell.openUrl`）。
+ * 终端链接的落点动作：交给本仓那**一条** URL 出口（上游 `OpenUrlHyperlinkInfo.java:69-72` 的
+ * `navigate` = `BrowserLauncher.browse(url, ...)`，判定就长在 browse 里面 ⇒ 这里不自己 `shell.openUrl`，
+ * 否则未信任项目里点一条链接就绕过 welcome2 R2 那一问）。
  * 「逐个浏览器打开」与「复制链接」那两条右键菜单项**没搬**，理由写在 `src/terminalHyperlinks.ts` 文件头第 2 条。
  */
 async function openTerminalUrl(url: string) {
   if (!isDesktop) { note.value = '浏览器预览不能调用系统默认程序打开链接。'; return }
-  try { await request('shell.openUrl', { url }) }
+  try { await openExternalUrl(url) }
   catch (error) { note.value = error instanceof BridgeError ? `${error.code}: ${error.message}` : `打不开 ${url}。` }
 }
 /**

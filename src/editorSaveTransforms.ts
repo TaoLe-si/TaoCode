@@ -501,7 +501,10 @@ export function applySaveTextTransforms(input: SaveTransformInput): SaveTransfor
       text,
       changedLinesOnly: input.options.changedLinesOnly,
       savedText: input.savedText,
-      caretOffsets: input.caretOffsets,
+      // 上游把这一格做成「传不传光标」而不是「判不判」：`TrailingSpacesStripper.java:70` 的第三个实参是
+      // `options.isKeepTrailingSpacesOnCaretLine()`，它在 `:229` 变成 `skipCaretLines ? caretOffsets : null`
+      // ⇒ 关掉那一格时光标所在行**照样清**，`deferredLines` 也必须为空（`StripTrailingSpacesUtil.java:78-84` 走不到）。
+      caretOffsets: input.options.keepTrailingSpacesOnCaretLine ? input.caretOffsets : undefined,
       trailingSpacesToLeave: input.trailingSpacesToLeave,
       strippingNotAllowed: input.strippingNotAllowed,
       enforcedRemoval: input.enforcedRemoval,

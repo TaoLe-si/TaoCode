@@ -107,6 +107,18 @@ export interface EditMenuContext {
     ] },
     { id: 'edit.rule2', rule: true },
     ctx.editable('selectAll', '全选', 'Ctrl A', 'select all 全选'),
+    // 在所选各行行尾加光标（上游 `EditorAddCaretPerSelectedLine`：注册
+    // `platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:358`，菜单
+    // `platform/platform-impl/resources/idea/PlatformActions.xml:485-487` 的 `EditSelectGroup` 里紧跟
+    // `$SelectAll` ⇒ 本仓也放在「全选」之后一行）。文案
+    // `platform/platform-resources-en/src/messages/ActionsBundle.properties:130`
+    // = `Add Carets to Ends of Selected Lines`（中文包不在本地树 ⇒ 标签是英文原文直译；
+    // 该 id **没有** `.description` 条目 ⇒ 不编描述）。
+    // 键位栏**留空**：上游有键（`platform/platform-resources/src/keymaps/$default.xml:155-157` = `shift alt G`），
+    // 但本仓的键位面（`src/keymap.ts` / `src/keymapBindings.ts` / `src/components/CodeEditor.vue`）都是保留文件
+    // ⇒ 摘到键之前不写一个按下去没反应的加速键（判据 `tests/editor-line-ops.test.mjs` 的门禁同款），
+    // 接线请求见 `docs/wiring-requests-2026-10-06-caretops.md` 的 R3。
+    ctx.editable('caret.perLine', '在所选各行末尾添加光标', '', 'add carets to ends of selected lines 多光标 行尾 EditorAddCaretPerSelectedLine'),
     { id: 'edit.rule3', rule: true },
     ctx.editable('case.toggle', '切换大小写', 'Ctrl Shift U', 'case upper lower 大小写'),
     ctx.editable('line.join', '合并行', 'Ctrl Shift J', 'join lines 合并行'),

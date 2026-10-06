@@ -6,12 +6,17 @@
 // 上游语义（逐条对齐，测试在 `tests/file-type-registry.test.mjs`）：
 //   · 三条关联表分开存：扩展名（**大小写不敏感**，`FileTypeAssocTable.myExtensionMappings`）、
 //     精确文件名（大小写敏感 + 忽略大小写两张）、通配模式（`WildcardFileNameMatcher`）；
+//     分流的地方是 `addAssociation`（`jps/model-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeAssocTable.java:90-101`），
+//     词条怎么分类见 `jps/model-impl/src/org/jetbrains/jps/model/fileTypes/impl/FileNameMatcherFactoryImpl.java:14-27`；
 //   · `getFileTypeByFileName` 的优先级照 `FileTypeAssocTable.findAssociatedFileType`（:159-175）：
-//     精确名（含忽略大小写）→ 通配模式（**更具体的在前**，同长时 `?` 先于 `*`）→ 扩展名；
+//     精确名（含忽略大小写）→ 通配模式（**更具体的在前**：长度降序、同长时 `?` 先于 `*`，
+//     两级方向不同 —— 见 `specificityKey` 那段）→ 扩展名；
 //   · `getFileTypeByExtension` 查不到回 Unknown（本仓回 null，调用方自己决定兜底）；
 //   · 变更广播 `beforeFileTypesChanged` / `fileTypesChanged`（`FileTypeEvent` 带 added/removed）；
-//   · 忽略清单 `getIgnoredFilesList`/`setIgnoredFilesList` 是分号分隔的掩码
-//     （`IgnoredPatternSet`：`*.pyc;*.class`），`isFileIgnored` 按同一张模式表判定；
+//   · 忽略清单 `getIgnoredFilesList`/`setIgnoredFilesList` 是分号分隔的掩码，`isFileIgnored` 按同一张
+//     模式表判定；**清单本身按模式遮蔽去重**（一条新词条只要已被现有掩码匹配到就根本不进清单，
+//     `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/copy1/IgnoredPatternSet.java:47-53`），
+//     所以 `*.pyc` 在场时 `foo.pyc` 加不进去 —— 见 `addIgnoreMask`；
 //   · `FileTypeConsumer.consume(type, "java;kt")` 分号分隔的扩展名/文件名一条条认领
 //     （`FileTypeConsumer.EXTENSION_DELIMITER = ";"`）。
 //
@@ -145,10 +150,29 @@ function maskToRegExp(pattern: string): RegExp {
   return new RegExp(`^${source}$`)
 }
 
-/** 模式的具体度排序（上游 IJPL-149806 的比较器：模式串长的在前，同长时 `?` 先于 `*`）。 */
-function specificityScore(matcher: FileNameMatcher): string {
-  const text = matcher.kind === 'wildcard' ? matcher.pattern : ''
-  return text.length.toString().padStart(6, '0') + text.replace(/\?/g, '\uFFFE').replace(/\*/g, '\uFFFF')
+/**
+ * 一条模式在通配表里的排序键 —— 上游 `FileTypeAssocTable.addAssociation` 末尾那条比较器
+ * （`jps/model-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeAssocTable.java:113-120`，
+ * 上游注释点名它是为修 IJPL-149806）：
+ *   1. `comparing(pair -> pair.first.getPresentableString().length(), reverseOrder())`（`:114-115`）
+ *      —— 串**长的在前**（更具体）；
+ *   2. `.thenComparing(pair -> getPresentableString().replace("?", "\uFFFE").replace("*", "\uFFFF"))`
+ *      （`:116-117`）—— `thenComparing` 默认是**升序**，而 `\uFFFE` < `\uFFFF`，
+ *      所以同长时带 `?` 的那条排在带 `*` 的前面。
+ * **订正（本轮亲开上游核实）**：原文件头写的规则「同长时 `?` 先于 `*`」是对的，
+ * 代码却把两级并成一个字符串键后整体**降序**比 ⇒ 同长时 `*` 反而抢在 `?` 前面，与上游第 2 级方向相反。
+ */
+function specificityKey(matcher: FileNameMatcher): { length: number; text: string } {
+  const pattern = presentableMatcher(matcher)
+  return { length: pattern.length, text: pattern.replace(/\?/g, '\uFFFE').replace(/\*/g, '\uFFFF') }
+}
+
+/** 上游那条比较器的等价物：长度**降序**，同长再按转义后的串**升序**（两级方向不同）。 */
+function compareSpecificity(
+  left: { length: number; text: string }, right: { length: number; text: string },
+): number {
+  if (left.length !== right.length) return right.length - left.length
+  return left.text < right.text ? -1 : left.text > right.text ? 1 : 0
 }
 
 /** `FileNameMatcher.getPresentableString()` 的等价物（冲突提示里给人看的那一段）。 */
@@ -246,7 +270,7 @@ export class FileTypeManager {
   private readonly extensions = new Map<string, string>()   // 扩展名（小写）→ 类型 id
   private readonly exactNames = new Map<string, string>()
   private readonly exactNamesIgnoreCase = new Map<string, string>()
-  private wildcards: { matcher: FileNameMatcher; id: string; regex: RegExp; score: string }[] = []
+  private wildcards: { matcher: FileNameMatcher; id: string; regex: RegExp; key: { length: number; text: string } }[] = []
   /**
    * HashBang（shebang）模式表：模式 → 类型（上游 `FileTypeAssocTable.addHashBangPattern`，
    * 由 `FileTypeManagerImpl.java:644-647` / `:1374-1389` 灌；`standard` 那一档对应
@@ -430,8 +454,8 @@ export class FileTypeManager {
       else this.exactNames.set(matcher.fileName, id)
     } else {
       this.wildcards = this.wildcards.filter(entry => entry.matcher.kind !== 'wildcard' || entry.matcher.pattern !== matcher.pattern)
-      this.wildcards.push({ matcher, id, regex: maskToRegExp(matcher.pattern), score: specificityScore(matcher) })
-      this.wildcards.sort((a, b) => a.score < b.score ? 1 : a.score > b.score ? -1 : 0)
+      this.wildcards.push({ matcher, id, regex: maskToRegExp(matcher.pattern), key: specificityKey(matcher) })
+      this.wildcards.sort((left, right) => compareSpecificity(left.key, right.key))
     }
     // 3. 关联换了主人且这次判定**已获批准** ⇒ 给旧持有方记账（`RemovedMappingTracker.add`，`:98-114`）。
     if (conflict?.approved && oldType && conflict.resolved === id) tracker.add(matcher, oldType.name, true)
@@ -649,16 +673,32 @@ export class FileTypeManager {
     return this.ignoredMasks.join(';')
   }
 
-  /** `setIgnoredFilesList`：整表替换，去重保序（`IgnoredPatternSet.setIgnoreMasks`）。 */
+  /**
+   * `IgnoredPatternSet.addIgnoreMask`
+   * （`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/copy1/IgnoredPatternSet.java:47-53`）
+   * —— 那条**遮蔽闸**在 `:49`：新词条先拿它自己的字符串去问现有掩码表
+   * （`ignorePatterns.findAssociatedFileType(ignoredFile) == null` 才继续），
+   * 只要已经被某条掩码盖住，它**连 `masks` 集合都不进**（`:50-51` 两行都不执行）。
+   * 所以清单里已有 `*.pyc` 时再加 `foo.pyc`，`foo.pyc` 不会留下任何痕迹：
+   * 既不进 `getIgnoreMasks()`（`:34-36`），也就不会被 `FileTypeManagerImpl.getState()` 持久化
+   * （`FileTypeManagerImpl.java:1434-1438` 存的正是那张表）。
+   * 完全重复的词条同样被这道闸挡掉（`*.pyc` 自己就能被 `*.pyc` 匹配到 ——
+   * `ExtensionFileNameMatcher.acceptsCharSequence` 就是 `endsWithIgnoreCase`，
+   * `jps/model-api/src/com/intellij/openapi/fileTypes/ExtensionFileNameMatcher.java:20-22`），
+   * 上游那边还额外是个 `LinkedHashSet`（`:24`）。
+   * 返回这条词条**有没有被收进清单**（被盖住 / 空词条返回 false）。
+   */
+  addIgnoreMask(mask: string): boolean {
+    const value = mask.trim()
+    if (!value || this.isFileIgnored(value)) return false
+    this.ignoredMasks.push(value)
+    return true
+  }
+
+  /** `setIgnoredFilesList`（`FileTypeManagerImpl.java:1148-1152`）⇒ `IgnoredPatternSet.setIgnoreMasks`（同文件 `:46-53`）：清空整表后按分号词条一条条走 `addIgnoreMask`。 */
   setIgnoredFilesList(list: string): void {
-    const seen = new Set<string>()
     this.ignoredMasks = []
-    for (const token of list.split(';')) {
-      const mask = token.trim()
-      if (!mask || seen.has(mask)) continue
-      seen.add(mask)
-      this.ignoredMasks.push(mask)
-    }
+    for (const token of list.split(';')) this.addIgnoreMask(token)
   }
 
   /** `isFileIgnored(name)`：掩码表按同一套匹配规则判（精确名 / 通配 / 扩展名）。 */

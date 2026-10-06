@@ -126,7 +126,8 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   watch(message, () => { commitCheckError.value = '' })
   // `resetCommitChecksResult()`（`:246-249`）的触发条件在 `:200-226`：VFS 或文档变了、而且变的文件
   // 是"会影响检查结果"的那些（`:191-199`：在 VCS 下、在内容里、状态不是 IGNORED）。本仓的等价信号 =
-  // 变更集指纹（`commitChecksFingerprint`）—— 已经 UNKNOWN 就早退（`:202`/`:218`）。
+  // 变更集指纹（`commitChecksFingerprint`）—— 已经 UNKNOWN 就早退（`:205`/`:218`；留痕：原写 `:202`，
+  // commit2 逐行重开 NonModalCommitWorkflowHandler.kt 核实后改指早退那两行）。
   // 第二个参数是**未保存清单**（`:216-225` 的 documentChanged 在本仓的代理，只覆盖第一次编辑）；
   // 第三个参数是宿主的修订计数，接上线后每一次键入都会让这一轮结果作废；
   // 第四个参数是**按文档的修订号**（`Document.java:184-192`）：同一篇第二次编辑也变，别的文档变了不算。

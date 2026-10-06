@@ -1,9 +1,8 @@
 // 提交图的**行内图形单元**（每行的列 + 单元类型）与折叠显示档的求值都在这一个模块里。
-// 接线状态（2026-10-06 vcslog2 批）：`buildLogGraph` 的返回值新增 `units`，`rows`/`width` 形状没动 ⇒
-// `src/components/VcsLogTable.vue` 现在照旧画 `row.down/up/pass/stub`，还没改读 `units`，也还没把
-// 折叠后的可见列表换成 `collapseLinearGraph()`（不换就没有那条虚线边）。这两条都写在
-// `docs/wiring-requests-2026-10-06-vcslog2.md`（组件文件不归本代理改），判据在
-// `tests/vcs-log-graph-cells.test.mjs`。
+// 接线状态（2026-10-06 vcslog3 批已接）：`src/components/VcsLogTable.vue` 折叠走 `collapseLinearGraph()`
+// （折叠跨度在图里 ⇒ 两端之间那条虚线边不再丢），渲染走 `graph.units`（经 `src/vcsLogGraphRender.ts`
+// 把单元翻译成线/圆）。形状判据在 `tests/vcs-log-graph-cells.test.mjs`，渲染判据在
+// `tests/vcs-log-graph-render.test.mjs`。
 import type { GitFullCommit } from './bridge'
 
 const palette = ['#4FC1E9', '#A0D468', '#FFCE54', '#FC6E51', '#ED5565', '#AC92EC', '#48CFAD', '#EC87C0', '#5D9CEC', '#E8636F']
@@ -217,7 +216,15 @@ export function graphUnitsOfRows(rows: readonly GraphRow[], graphInformation = t
       emitted.add(key)
       units.push(unit)
     }
-    for (const edge of row.pass) pushEdge('down', edge.lane, edge.lane, next, edge.style ?? 'solid', false, edge.color)
+    // 穿行的那条边在本行要发**上下两段**（上游同一支边在同一行里 DOWN 与 UP 各 add 一次，
+    // `platform/vcs-log/graph/src/com/intellij/vcs/log/graph/impl/print/PrintElementGeneratorImpl.kt:151-168`
+    // 的 `if (down != null)` 与 `if (up != null)` 两个分支），画师按 `type` 只画自己那一半
+    // （`platform/vcs-log/impl/src/com/intellij/vcs/log/paint/SimpleGraphCellPainter.kt:158-168`）。
+    // 原写「pass 只发 DOWN 一个单元」—— 少了上半段那一半 ⇒ 按 units 渲染时长边的中间行只有下半截（梳齿）。
+    for (const edge of row.pass) {
+      pushEdge('down', edge.lane, edge.lane, next, edge.style ?? 'solid', false, edge.color)
+      pushEdge('up', edge.lane, edge.lane, prev, edge.style ?? 'solid', false, edge.color)
+    }
     for (const edge of row.down) pushEdge('down', edge.from, edge.to, next, edge.style ?? 'solid', false, edge.color)
     for (const edge of row.up) pushEdge('up', edge.lane, edge.lane, prev, edge.style ?? 'solid', false, edge.color)
     for (const edge of row.stub) pushEdge('down', edge.lane, edge.lane, undefined, edge.style ?? 'solid', true, edge.color)
@@ -307,9 +314,9 @@ export function collapseLinearBranches(list: readonly GitFullCommit[], collapsed
 
 /**
  * 折叠态的**一次成型**出口：可见列表 + 已经连上虚线的图。
- * `VcsLogTable.vue` 现在是分两步调（先 `collapseLinearBranches` 再 `buildLogGraph`）——
- * 那两步之间丢的就是上游那条 DOTTED 边（中间提交被过滤掉 ⇒ 父哈希不在可见行里 ⇒ 边根本不生成），
- * 所以接线要换成这一个调用；请求写在 `docs/wiring-requests-2026-10-06-vcslog2.md`。
+ * `VcsLogTable.vue` 的 `folded` / `graph` 两个 computed 吃的就是这一个调用 —— 分成两步
+ * （先 `collapseLinearBranches` 再 `buildLogGraph`）丢的就是上游那条 DOTTED 边：中间提交被过滤掉 ⇒
+ * 父哈希不在可见行里 ⇒ 边根本不生成。落地的渲染侧判据在 `tests/vcs-log-graph-render.test.mjs`。
  */
 export function collapseLinearGraph(list: readonly GitFullCommit[], collapsed: boolean, options: GraphOptions = {}) {
   const visible = collapseLinearBranches(list, collapsed)

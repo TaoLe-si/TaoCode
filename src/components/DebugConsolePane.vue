@@ -2,7 +2,7 @@
 // 调试控制台（从 `DebugPanel.vue` 拆出 —— 面板贴着机检上限，与断点区/源文件清单同一拆法）。
 //
 // 本轮补的是上游控制台工具栏上的「Pause output」——
-// `platform/execution-impl/src/com/intellij/execution/actions/PauseOutputAction.java:19`
+// `platform/execution-impl/src/com/intellij/execution/actions/PauseOutputAction.java:18`
 // （ToggleAction）/ `:31-43`（读写 `ConsoleView.isOutputPaused` / `setOutputPaused`）/
 // `:44-52`（可用与「有延迟输出」判据）/
 // `platform/execution-impl/resources/intellij.platform.execution.impl.actions.xml:72`（`id="PauseOutput"`）。

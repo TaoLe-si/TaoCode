@@ -58,6 +58,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, X } from 'lucide-vue-next'
 import { request } from '../bridge'
+import { openExternalUrl } from '../externalLinkLauncher.ts'
 import {
   applyRunInstanceSnapshot, clearRunOutput, closeRunView, runConsoleEncoding,
   runInstanceDisplayName, runningListEnabled, runningListRows, RUNNING_LIST_LABELS, runOutputPaused,
@@ -221,8 +222,9 @@ function jumpLink(link: RunHyperlink) {
 const consoleNote = ref('')
 /**
  * 控制台里一条 URL 命中的落点（两条出口，判定都在 `src/consoleHyperlinks.ts`）：
- * `file:` 那一支复用面板现成的 jump 通道，其余交给宿主的系统默认处理器
- * （上游 `OpenUrlHyperlinkInfo.java:69-72` 的 `navigate` = `BrowserLauncher.browse`）。
+ * `file:` 那一支复用面板现成的 jump 通道，其余走本仓那**一条** URL 出口
+ * （上游 `OpenUrlHyperlinkInfo.java:69-72` 的 `navigate` = `BrowserLauncher.browse`，
+ * 「未信任项目里先问那一句」就长在 browse 里 —— `src/externalLinkLauncher.ts` 的模块注释）。
  * 点不开的命中根本不会被画成链接，所以这里没有第三条分支。
  */
 function activateConsoleUrl(link: ConsoleUrlLink) {
@@ -232,7 +234,7 @@ function activateConsoleUrl(link: ConsoleUrlLink) {
   void openConsoleUrl(action.payload)
 }
 async function openConsoleUrl(url: string) {
-  try { await request('shell.openUrl', { url }) }
+  try { await openExternalUrl(url) }
   catch (error) { consoleNote.value = error instanceof Error ? `${error.name}: ${error.message}` : `打不开 ${url}。` }
 }
 /**

@@ -234,8 +234,14 @@ test('收起线性分支：只隐藏线性链的中间行，展开逐字回到�
 
 test('接线：齿轮那六条真的接到表格/变更面板/分栏上，收起接到图选项上', () => {
   const table = read('src/components/VcsLogTable.vue')
-  assert.match(table, /buildLogGraph\(visible\.value, \{ showLongEdges: props\.showLongEdges !== false \}\)/)
-  assert.match(table, /collapseLinearBranches\(props\.commits, props\.collapsed === true\)/)
+  // 原写两条「分两步」的形状（`collapseLinearBranches` 再 `buildLogGraph`）：那正是 vcslog2 请求 1 要换掉的写法，
+  // 两步之间丢掉的是上游收起时同一次修改里补的那条 DOTTED 边（CollapsedActionManager.java:231）。
+  // 接线后钉的是**一次成型**那一步，强度没降：仍是逐字整段调用式正则（不是 includes），
+  // 虚线是否真的画出来由 tests/vcs-log-graph-render.test.mjs 渲真组件核。
+  assert.match(table, /collapseLinearGraph\(props\.commits, props\.collapsed === true,/)
+  assert.match(table, /const graph = computed\(\(\) => folded\.value\.graph\)/)
+  assert.match(table, /graph\.value\.units\.map\(units => paintGraphRow\(units\)\)/, '每行按 graph.units 画，不再吃 row.pass/down/up')
+  assert.match(table, /:stroke-dasharray="stroke\.dash"/, '虚线单元真的落成 stroke-dasharray')
   assert.match(table, /logRefsToShow\(commit\.refs \?\? \[\]/, '引用画哪几个由模型判')
   assert.match(table, /:title="logCommitTooltip\(/, 'tooltip 挂在行上')
   assert.match(table, /<SpeedSearchBar :open="searchOpen"/, '速度搜索框（复用书签面板同一件）')

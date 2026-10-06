@@ -27,9 +27,12 @@ import {
   resetLspServerMessageDrops, resolveLspMessageRequestAnswer, setLspMessageActionsClickable,
   pendingLspMessageRequestCount, chooseLspMessageAction, lspMessageActionsClickable,
   expireLspMessageRequestsOnStop,
+  lspServerMessages as queueFromNewModule,
 } from '../src/lspServerMessages.ts'
 import { handleLspProgressEvent, lspServerMessages } from '../src/lspProgress.ts'
+import { wireLspProgressNotices } from '../src/progressNotices.ts'
 import { clearLspLog, lspLogEntries } from '../src/lspServerLog.ts'
+import { nextTick } from 'vue'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -250,6 +253,67 @@ test('接线：桥那一行没动、进度模块把整条交出来、注册表�
   assert.match(read('src/lspServerMessages.ts'), /import \{ clearAllLspCaches \} from '\.\/lspPerFileCache\.ts'/)
   const notices = read('src/progressNotices.ts')
   assert.match(notices, /lspServerMessages\.splice/, '消费方还在读同一条队列（拆模块没改消费方）')
+  resetSurface()
+})
+
+/**
+ * 队列只有一份：新模块那份与进度模块转出的那条必须是同一个对象。
+ * 拆模块时最容易留下的两种「旧通道」是：①进度模块自己还留一份数组，②消费方读的是别名而不是同一份。
+ * ①由 push 的 grep 钉住，②由对象同一性钉住 —— 两条都成立时「收敛成一份」才是可验证的事实，不是口号。
+ */
+test('消息队列只有一份：两条 import 路径拿到的是同一个数组，进度模块不再自己产出第二条队列', () => {
+  resetSurface()
+  assert.equal(queueFromNewModule, lspServerMessages, '新模块与 `lspProgress` 转出的是同一个对象（没有第二份数据要收敛）')
+  const progressSource = read('src/lspProgress.ts')
+  assert.match(progressSource, /export \{[\s\S]*?lspServerMessages,[\s\S]*?\} from '\.\/lspServerMessages\.ts'/,
+    '进度模块只做转出（兼容既有 import 路径），不是另一条通道')
+  assert.ok(!/lspServerMessages\.push/.test(progressSource), '进度模块不再往队列里放东西（两个主人 = 一条消息两份状态）')
+  handleLspProgressEvent('lsp.message', { language: 'java', severity: 1, message: '同一份队列', method: 'window/showMessage' })
+  assert.equal(queueFromNewModule.length, 1, '新模块那一头看得见这一条')
+  assert.equal(lspServerMessages.length, 1, '消费方用的那一头也看得见同一条')
+  resetSurface()
+})
+
+/**
+ * 队列的**响应式**是通道的一部分：消费方挂的是 `watch(() => lspServerMessages.length, …)`，
+ * 普通数组的 push 不登记任何依赖 ⇒ watcher 一次都不醒 ⇒ 消息堆在队列里静默消失，
+ * 且这一类丢弃发生在队列这一头，`lspServerMessageDrops` 抓不到（它只抓「方法没人接」）。
+ * 上一批只做到了「有人接」，这一条钉住「接上之后真送得出去」。
+ */
+test('队列声明成 reactive 数组：否则消费方那个 watch 永远不醒（静默丢弃的第二种形状）', () => {
+  resetSurface()
+  const source = read('src/lspServerMessages.ts')
+  assert.match(source, /export const lspServerMessages = reactive<LspServerMessage\[\]>\(\[\]\)/,
+    '队列必须是 reactive 的数组')
+  assert.ok(!/export const lspServerMessages: LspServerMessage\[\] = \[\]/.test(source),
+    '不许退回普通数组（退回了通知面就一行都收不到）')
+  assert.match(read('src/progressNotices.ts'), /watch\(\(\) => lspServerMessages\.length/,
+    '消费方确实是按 length 挂 watcher（这条锚点跟着那一侧一起改）')
+  resetSurface()
+})
+
+/**
+ * 端到端：真调 `wireLspProgressNotices`（`src/notifications.ts:114` 在生产上就是这一行），
+ * 端口换成记录用的假函数，量「一条服务器消息 → 一个通知行」这件事到底发生没有。
+ * 上一批的判据全部停在「队列里有没有这一条」，而这一批的缺陷正好在「队列有人读吗」那一侧 ——
+ * 只测前半截的话，普通数组那个 bug 会一路绿到线上。
+ */
+test('端到端：服务器消息真的走通到通知面（watcher 醒、通知行写出来、日志留痕、队列被读空）', async () => {
+  resetSurface()
+  const written = []
+  wireLspProgressNotices(entry => written.push(entry))
+  handleLspProgressEvent('lsp.message', { language: 'java', severity: 1, message: '导入失败', method: 'window/showMessage' })
+  handleLspProgressEvent('lsp.message', { language: 'java', severity: 2, message: '构建脚本有问题', method: 'window/logMessage' })
+  assert.equal(written.length, 0, 'watch 是 pre flush：这一拍还没轮到消费方')
+  assert.equal(lspServerMessages.length, 2, '两条都还在队列里等着被读')
+  await nextTick()
+
+  const rows = written.filter(entry => entry.displayId === 'lsp:message:java')
+  assert.deepEqual(rows.map(entry => [entry.message, entry.error]), [['导入失败', true], ['构建脚本有问题', true]],
+    '两条都变成通知行，Error/Warning 标成错误样式（progressNotices 的 severity<=2 规则）')
+  assert.deepEqual(lspServerMessages, [], '消费方把这批读走了（watcher 真醒了 = 通道是活的）')
+  assert.deepEqual(lspLogEntries.value.filter(entry => entry.kind === 'message').map(entry => entry.text),
+    ['导入失败', '构建脚本有问题'], '通知面那一拍同时把消息写进「语言服务」日志（Error/Warning 不再只停在队列里）')
   resetSurface()
 })
 

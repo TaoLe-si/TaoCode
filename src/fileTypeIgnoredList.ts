@@ -16,11 +16,23 @@
 //   · 删除后选中位置跟着上移，越界时回到最后一条（`removePattern`，`:76-87`）；
 //   · 存储形态是**分号分隔的一串**（`getValues` 的 `String.join(";")`，`:98-100`；
 //     `setValues` 的 `split(";")`，`:102`），与 `IgnoredPatternSet.setIgnoreMasks`
-//     （`IgnoredPatternSet.java:43-49`）同一套 StringTokenizer 语义；
+//     （`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/copy1/IgnoredPatternSet.java:46-53`）
+//     同一套 StringTokenizer 语义；
+//     **订正**：原先引的「`IgnoredPatternSet.java:43-49`」既没写包路径、行号又指到别处 ——
+//     `FileTypeManagerImpl.java:47` 显式 import 的是 `impl.copy1` 那一份（`jps/model-impl` 下还有一份同名的，
+//     `setIgnoreMasks` 在它的 `:38-45`），两份的 StringTokenizer 循环都不是 43-49；
+//   · 清单**按模式遮蔽去重**（同一文件 `addIgnoreMask`，`:47-53`）：新词条先拿它自己当文件名去问现有掩码表
+//     （`:49` 的 `findAssociatedFileType(ignoredFile) == null`），已被盖住就连清单都不进 ——
+//     所以 `*.pyc` 在场时加 `foo.pyc`，`foo.pyc` 根本不留痕（编辑期不报错，落盘时才消失，
+//     与上游一致：面板只管往 model 里放，`apply()` 写进 FileTypeManager 后 `reset()` 再读回来）；
 //   · 生效与「有没有改动」按**集合**比，不按串比（`FileTypeManagerImpl.java:1154-1163`
 //     的 `isIgnoredFilesListEqualToCurrent`：`StringTokenizer` 拆完丢进 `HashSet` 再比）；
-//   · 默认清单（`FileTypeManagerImpl.java:142-144` 的 `DEFAULT_IGNORED`，17 条，
-//     `FileTypesTest.java:1127-1130` 断言它必须已排序）在用户从没改过时就是它。
+//   · 默认清单（`FileTypeManagerImpl.java:142-144` 的 `DEFAULT_IGNORED`，17 条，`:139` 那句
+//     `// must be sorted` + `FileTypesTest.java:1127-1130` 断言它必须已排序）在用户从没改过时就是它；
+//   · **和默认表一样时不持久化**（`getState`：整表 `sort(null)` 后 `isEqualToDefaultIgnoreMasks` 为真就
+//     连 `ignoreFiles` 这个元素都不写，`FileTypeManagerImpl.java:1434-1438`；
+//     比法是「排序后逐位 `equalsIgnoreCase`」，同文件 `:1494-1504`）——
+//     本仓的等价物：`writeStored` 在这种时候**清掉**存储键，读回来就是 `DEFAULT_IGNORED_FILES`。
 //
 // **匹配口径**（订正「文件名称模式 vs 路径模式」这条待办）：上游只按**文件名**判
 // （`IgnoredFileCache.java:80-82` 的 `calcIgnored` 把 `file.getNameSequence()` 交给判定），
@@ -31,8 +43,9 @@
 // 本仓没有 PSI/虚拟文件层，接不上（见报告的「做不到」）。
 //
 // 持久化：宿主设置表（`native/settings_schema.cpp`）的已知键里没有这一段，
-// 本仓沿用同桶的既有做法（`src/fileTypeOverrides.ts:34`、`src/macros.ts`、
-// `src/externalToolsRecords.ts`）—— 应用级 localStorage 一份 JSON 数组。
+// 本仓沿用同桶的既有做法（`src/fileTypeOverrides.ts` 的 `FILE_SETS_KEY`、`src/macros.ts`、
+// `src/externalToolsRecords.ts`）—— 应用级 localStorage 一条键，值是**分号分隔的一串**
+// （`ignoreListText`，与上游 `getIgnoredFilesList()` 同形）；与默认表逐位相同时**不留键**（见 `writeStored`）。
 import { fileTypeManager } from './fileTypeRegistry.ts'
 
 /** `FileTypeManagerImpl.DEFAULT_IGNORED`（`:142-144`）逐条照抄，顺序也照它（上游断言它已排序）。 */
@@ -125,6 +138,24 @@ export function sortIgnoredPatterns(patterns: readonly string[]): string[] {
   return [...patterns].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
 }
 
+/**
+ * 整表排序后与**上游默认表逐位比大小写不敏感** —— 上游 `FileTypeManagerImpl.isEqualToDefaultIgnoreMasks`
+ * （`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:1494-1504`）：
+ *   · 先比条数（`:1495-1497`），条数不同直接 false；
+ *   · 再按下标逐位 `DEFAULT_IGNORED.get(i).equalsIgnoreCase(newList.get(i))`（`:1499-1502`）。
+ * 注意它**不是**「按集合比」：位置也要对上（调用方 `getState` 传进来的已经 `sort(null)` 过，
+ * 同文件 `:1434-1436`），大小写不同仍算默认表（`cvs` 与 `CVS` 算一样）。
+ * 消费点只有一个：`writeStored` 据此决定「要不要持久化」—— 与上游「相等就不写 `ignoreFiles` 元素」同一条纪律。
+ */
+export function isEqualToDefaultIgnoreList(patterns: readonly string[]): boolean {
+  const sorted = sortIgnoredPatterns(patterns)
+  if (sorted.length !== DEFAULT_IGNORED_FILES.length) return false
+  for (let index = 0; index < sorted.length; index++) {
+    if (DEFAULT_IGNORED_FILES[index].toLowerCase() !== sorted[index].toLowerCase()) return false
+  }
+  return true
+}
+
 /** 一次编辑的结果：新清单 + 有没有被拒（拒时带上游那句文案）+ 该选中哪条。 */
 export interface IgnoredEditOutcome {
   patterns: string[]
@@ -185,9 +216,19 @@ function readStored(): string[] | null {
   }
 }
 
+/**
+ * 落盘。**两条上游纪律**：
+ *   1. 传进来的必须是**生效后**的那张表（`applyIgnoredPatterns` 从注册表读回来，见那儿）——
+ *      上游 `getState` 存的就是 `ignoredPatterns.getIgnoreMasks()`（`FileTypeManagerImpl.java:1434`），
+ *      被遮蔽闸挡掉的词条从来没进过那张表；
+ *   2. 与默认表逐位相同 ⇒ **不写存储**（清掉键；上游 `:1436-1438` 连 `ignoreFiles` 元素都不加）。
+ *      读回来即 `DEFAULT_IGNORED_FILES`，等价于上游「没存过就用 `DEFAULT_IGNORED`」（`:165`）。
+ */
 function writeStored(patterns: readonly string[]): void {
   try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(IGNORED_LIST_KEY, ignoreListText(patterns))
+    if (typeof localStorage === 'undefined') return
+    if (isEqualToDefaultIgnoreList(patterns)) localStorage.removeItem(IGNORED_LIST_KEY)
+    else localStorage.setItem(IGNORED_LIST_KEY, ignoreListText(patterns))
   } catch {
     // 存储不可用只影响跨会话持久化，本次会话的忽略照常生效。
   }
@@ -206,13 +247,17 @@ function applyToManager(patterns: readonly string[]): void {
 /**
  * 应用一次改动（设置页的 OK 只做这一件事）：与当前生效清单按集合相同就什么都不做
  * （上游 `apply()` 的 `:200-202` 也是先问 `isIgnoredFilesListEqualToCurrent` 才写）。
+ * **落盘的是注册表里真正生效的那张表**，不是传进来的那份：`setIgnoredFilesList` 逐词条过遮蔽闸
+ * （`IgnoredPatternSet.addIgnoreMask`，`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/copy1/IgnoredPatternSet.java:47-53`），
+ * 被现有掩码盖住的那条在上游连清单都进不去，所以也不该被持久化 ——
+ * 与 `getState` 存 `getIgnoreMasks()`（`FileTypeManagerImpl.java:1434`）同一口径。
  * 返回**是否真的写进了注册表**。
  */
 export function applyIgnoredPatterns(patterns: readonly string[]): boolean {
   const sorted = sortIgnoredPatterns(patterns)
   const changed = !isIgnoreListEqualToCurrent(ignoreListText(sorted), ignorePatternsFromList(fileTypeManager.getIgnoredFilesList()))
-  writeStored(sorted)
   if (changed) applyToManager(sorted)
+  writeStored(ignorePatternsFromList(fileTypeManager.getIgnoredFilesList()))
   return changed
 }
 

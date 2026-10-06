@@ -54,6 +54,9 @@ import { reverseLinesCommand, sortLinesCommand, uniqueLinesCommand } from './edi
 // 上游 `CloneCaretActionHandler.java:76-81` 是收回最外圈；且它要真 EditorView（`view.moveVertically`），
 // 纯函数版能在测试里跑。命令名 `cursor.above`/`cursor.below` 不变 ⇒ 冻结的键位表不用动。
 import { cloneCaretAboveCommand, cloneCaretBelowCommand } from './editorCaretClone.ts'
+// 在所选各行行尾加光标（上游 `EditorAddCaretPerSelectedLine`，AddCaretPerSelectedLineAction.java:22-54）：
+// 规则在 src/editorCaretPerLine.ts（同族的上限常量 `MAX_CARET_COUNT` 也从那里复用，不写第二份）。
+import { addCaretPerSelectedLineCommand } from './editorCaretPerLine.ts'
 
 // StateCommand only needs {state, dispatch}, which an EditorView satisfies.
 const fromState = (command: StateCommand): Command => view => command(view)
@@ -237,6 +240,10 @@ export const editingCommands: Record<string, Command> = {
   // 克隆光标上/下（上游 `EditorCloneCaretAbove`/`EditorCloneCaretBelow`）：名字沿用仓里既有的两条，
   // 实现在 src/editorCaretClone.ts（语义按 CloneCaretActionHandler 的层级逻辑，不是 CodeMirror 那两条）。
   'cursor.above': cloneCaretAboveCommand, 'cursor.below': cloneCaretBelowCommand, 'occurrence.select': selectMatches,
+  // 在所选各行行尾加光标（上游 `EditorAddCaretPerSelectedLine`，菜单位置 `PlatformActions.xml:485-487`
+  // 紧跟 `$SelectAll`）。键位 `$default.xml:155-157` = `shift alt G` —— 键位面是保留文件 ⇒ 已提接线请求，
+  // 菜单行先把这条命令接住（与 `line.sort` 一族同一做法），键位栏留空。
+  'caret.perLine': addCaretPerSelectedLineCommand,
   // 扩展选区（含块注释智能选择器）。菜单行同名，见 src/menus/editMenu.ts。
   'selection.extend': extendSelectionCommand(true), 'selection.extendLeft': extendSelectionCommand(false),
   // 移动到配对的括号（上游 `EditorMatchBrace`，`$default.xml:1146-1148` 的 Ctrl+Shift+M）。

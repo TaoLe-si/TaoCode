@@ -54,6 +54,13 @@ export const JAR_APPLICATION_TYPE_LABEL = 'JAR Application'
 export const JAR_APPLICATION_TYPE_DESCRIPTION = "Configuration to run a JAR file using the 'java-jar' command"
 /** 上游帮助页（`JarApplicationConfigurationType.getHelpTopic`，`:31-33`）。 */
 export const JAR_APPLICATION_HELP_TOPIC = 'reference.dialogs.rundebug.JarApplication'
+/**
+ * **本仓前端**的 JAR 类型 id（`RunConfig['type']` 那一族里的小写短 id，与 shell/application/debug/compound 同一风格）。
+ * 上游注册的 id 是上面那个 `'JarApplication'`（`JarApplicationConfigurationType.java:20` 的
+ * `super("JarApplication", ExecutionBundle.message("jar.application.configuration.name"), …)`）——
+ * 两个不是同一个东西：上游那个是 `ConfigurationType`/factory 的 id，本仓这个是「配置记录里写的类型值」。
+ */
+export const JAR_RUN_CONFIG_TYPE_ID = 'jar'
 
 /** bean 的七个字段（`JarApplicationConfiguration.java:270-278`）。 */
 export interface JarApplicationConfiguration {
@@ -232,4 +239,104 @@ export function splitParameters(text: string): string[] {
   }
   if (started) out.push(token)
   return out
+}
+
+// ── 本仓 `RunConfig` 形状的那一套（配置记录 ⇄ 表单 ⇄ 落盘 ⇄ 执行参数） ─────────────────────
+//
+// 上面那半守的是**上游的 bean**（`JarApplicationConfiguration` 的七个字段）；这一半守的是**本仓的记录形状**：
+// JAR 配置在 `src/settingsModel.ts` 的 `RunConfig` 里不新增字段（`native/settings_schema.cpp` 的 `known_keys`
+// 因此不用扩），入口写在现成的两格里 ——
+//   · `program` = Java 可执行文件（上游表单的 JRE 那一格，`JarApplicationConfigurable.java:67-71` 的 `JrePathEditor`）；
+//   · `args`    = VM 参数 → `-jar` → JAR 路径 → 程序参数（与 `jarRunArgs():187` 产出的 argv **完全同形**）。
+// 落点（五处，全部由本模块给单一事实来源）：新建配置表单 = `src/runConfigEditors.ts` 的
+// `RUN_CONFIG_TYPE_FAMILY_EDITORS.jar`、schema 校验 = `src/runConfigurationSchema.ts` 的
+// `normalizeRunConfigurations`（调 `jarRunConfigProblem`）、持久化 = 同一份清单 `RUN_CONFIG_TYPE_IDS`、
+// 执行参数 = 本文件的 `jarRunConfigParams`、树里显示 = `src/runConfigTree.ts` 的 `RUN_CONFIG_TYPE_FAMILY_LABELS`。
+// 判据 tests/jar-run.test.mjs + tests/run-config-types.test.mjs。
+
+/**
+ * JAR 配置读得懂的最小形状。**故意把 `type` 放宽成 `string`**：
+ * `settingsModel.ts` 的 `RunConfig['type']` 联合里现在还没有 `'jar'`（保留文件，接线请求见
+ * `docs/wiring-requests-2026-10-06-runcfg3.md`），直接写 `config.type === 'jar'` 会撞 TS2367
+ * 「两种类型没有重叠」；结构上 `RunConfig` 满足这个接口 ⇒ 联合加宽之后调用方一个字都不用改。
+ */
+export interface JarRunConfigLike {
+  name: string
+  type?: string
+  command: string
+  program?: string
+  args?: string[]
+  cwd?: string
+  env?: string[]
+}
+
+/** 这条配置是不是 JAR 配置（字符串比较，绕开上面那个 TS2367）。 */
+export function isJarRunConfig(config: { type?: string }): boolean {
+  return config.type === JAR_RUN_CONFIG_TYPE_ID
+}
+
+/**
+ * 取 JAR 路径：`args` 里 `-jar` 后面那一段；只有 `command` 时按 `splitParameters` 切成 argv 再找
+ * （表单允许把整串写在命令格里 `java -jar build/app.jar`，与 `jarRunCommand():192-196` 同形）。
+ * 找不到返回**空串** —— 空串不是「静默跳过」的意思，调用方必须报错（`jarRunConfigProblem` / `jarRunConfigParams`）。
+ * `-jar` 出现在最后一位（后面没有值）也算没填。
+ */
+export function jarRunConfigPath(config: JarRunConfigLike): string {
+  const argv = config.args?.length ? config.args : splitParameters(config.command)
+  for (let index = 0; index + 1 < argv.length; ++index)
+    if (argv[index] === '-jar') return (argv[index + 1] ?? '').trim()
+  return ''
+}
+
+/**
+ * JAR 配置的**入口判据**：没有 JAR 路径 ⇒ 明确报错，不静默。
+ * 严重级别取上游的致命档（`RunConfiguration.java:156-167` 的 `RuntimeConfigurationError`，注释写明「致命，无法执行」）：
+ * 上游 `JarApplicationConfiguration.java:128-131` 只对**文件不存在**给 warning（那是 jarPath 已经填了的情况），
+ * 而 jarPath 空串时 `JarApplicationCommandLineState.java:24` 的 `params.setJarPath(...)` 拼出来的是
+ * 一条没有 jar 的 `java` 命令行 —— 本仓提前在编辑器/落盘/启动三处都报同一句，不把它留到进程里炸。
+ * 文案点名上游表单那一格（`label.path.to.jar` = `Path to &JAR`，`ExecutionBundle.properties:564`）。
+ */
+export function jarRunConfigProblem(config: JarRunConfigLike): string | null {
+  if (!isJarRunConfig(config)) return null
+  if (!jarRunConfigPath(config))
+    return `JAR 配置「${config.name}」没有 JAR 路径：参数里要写 -jar <路径>（上游表单的 Path to JAR 那一格）。`
+  return null
+}
+
+export interface JarRunConfigParamsOptions {
+  /** 项目 JDK（`projectSettings.java.jdkHome`）：配置的「Java 可执行文件」那格空着时的退化，
+   *  与上游 `JarApplicationCommandLineState.java:20-21` 的 `createProjectJdk(project, jreHome)` 同一口径。 */
+  jdkHome?: string
+}
+
+/** argv 的第一段是不是 java 启动器（`command` 那一格常写整串，`program` 要单独给时得把它剥掉）。 */
+function isJavaLauncher(token: string): boolean {
+  const name = (token.split(/[\\/]/).pop() ?? '').toLowerCase()
+  return /^(java|javaw)(\.exe)?$/.test(name)
+}
+
+/**
+ * JAR 配置的**执行参数**（本仓启动链路要的那三个字段：`program` + `args` + 不走 shell）。
+ * 与上面 bean 版 `jarRunArgs()` 的分工：那条在 JDK 空时返回 `[]`（静默，判据 `tests/jar-run.test.mjs:89` 钉着），
+ * 这一条给的是「为什么跑不了」—— 缺 JAR 路径或缺 Java 可执行文件都**抛错**。
+ * 顺序照 `jarRunArgs():187`：VM 参数 → `-jar` 路径 → 程序参数。
+ */
+export function jarRunConfigParams(config: JarRunConfigLike, options: JarRunConfigParamsOptions = {}): { program: string; args: string[]; shell: false } {
+  const problem = jarRunConfigProblem(config)
+  if (problem) throw new Error(problem)
+  const jdkHome = (options.jdkHome ?? '').trim()
+  const program = (config.program ?? '').trim() || (jdkHome ? javaExecutable(jdkHome) : '')
+  if (!program)
+    // 上游这里退到项目 JDK；本仓没有 JDK 就没有 `java`，不能给一条跑不了还装作跑得了的参数。
+    // 文案里的坐标：JRE 那一格 = `JarApplicationConfigurable.java:67-71` 的 `JrePathEditor`，
+    // 判据 = `JavaParametersUtil.java:214-220`（'' is not a valid JRE home）。
+    throw new Error(`JAR 配置「${config.name}」没有 Java 可执行文件：填「Java 可执行文件」那一格，或在项目设置里选 JDK（上游 JRE 那一格）。`)
+  const argv = (config.args?.length ? [...config.args] : splitParameters(config.command))
+  if (argv.length && isJavaLauncher(argv[0]!) && program.toLowerCase().includes(argv[0]!.toLowerCase())) argv.shift()
+  return { program, args: argv, shell: false }
+}
+
+/** 工作目录（本仓形状：`cwd`；上游 `WORKING_DIRECTORY` 空就是空，见 `jarWorkingDirectory()`）。 */
+export function jarRunConfigWorkingDirectory(config: JarRunConfigLike): string {
+  return (config.cwd ?? '').trim()
 }

@@ -8,8 +8,9 @@
 //   （`beginProject` / `submitProject` / `cancelProject`）。
 // 它们共享 `confirmLeave`（离开前的未保存确认）与同一批 `appError` / `busy` 状态，是一个闭环。
 // 注意：`openFile`（编辑器骨架）、会话恢复（src/sessionSnapshot.ts）各自属于别的域。
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { importFoldState } from './editorFoldingState.ts'
+import { restoreCodeVisionSettings } from './codeLensSettings.ts'
 import { cloneProgress, defaultGeneralSettings, defaultProjectSettings, isDesktop, normalizeEditorSettings, request,
          type AppState, type Entry, type GeneralSettingsState, type PluginList, type ProjectForm, type ProjectSettings, type Workspace } from './bridge.ts'
 import type { SyntheticNode } from './components/FileTree.vue'
@@ -20,8 +21,11 @@ import { errorMessage } from './errors.ts'
 import { normalizeSettingsShape } from './settingsInspector.ts'
 import type { Tab } from './editorTab'
 import { isProjectTrusted, mergeTrustEntries, needsTrustPrompt, rememberSessionTrust, rememberTrust,
+         applyTrustDecision, isProjectLocationOfferedForTrust, trustDecisionPaths,
          sessionTrustEntries, trustBlockReason,
-         type TrustChoice, type TrustedPathEntry } from './trustedProjects.ts'
+         type ExternalLinkChoice, type TrustChoice, type TrustedPathEntry } from './trustedProjects.ts'
+import { installExternalLinkGate, openExternalUrl, type ExternalLinkPromptRequest } from './externalLinkLauncher.ts'
+import type { AppInfo } from './helpActions.ts'
 import { EnvironmentKeyRegistry, createHeadlessEnvironmentService } from './environmentKeys.ts'
 import { checkRequiredEnvironmentKeysActivity, registerStartupActivity, resetStartupProgress,
          runStartupActivities, type StartupActivityContext } from './startupActivities.ts'
@@ -95,7 +99,18 @@ export function createWorkspaceLifecycle(deps: WorkspaceLifecycleDeps) {
 // 设置页那张表是**两个存储并起来**的（`platform/platform-impl/src/com/intellij/ide/impl/TrustedHostsConfigurable.kt:66-71`）、
 // 应用时按差集各回各家（同文件 `:80-89`）⇒ 本仓读写同一份模块级数组，行为与那两行等价。
 const trustPrompt = ref<{ root: string; name: string } | null>(null)
-let trustResolver: ((choice: TrustChoice, remember: boolean) => void) | null = null
+let trustResolver: ((choice: TrustChoice, remember: boolean, trustAll: boolean) => void) | null = null
+/**
+ * IDE 自己的配置目录（`app.info` 的 `profile`，见 `src/helpActions.ts:23` 与
+ * `native/diagnostics.cpp:81-88` 的 init(profile)）：trust-all 那一条门禁的输入
+ * （`platform/platform-impl/src/com/intellij/ide/trustedProjects/TrustedProjects.kt:103-107`
+ * —— 项目在配置目录里时**不提供**「信任这个位置」，理由同文件 `:98-102`：镜像项目共用父目录）。
+ * 取不到（浏览器预览、`app.info` 失败）就是 null ⇒ 那一格不画：宁缺一格，不给假的一格。
+ */
+const trustConfigDir = ref<string | null>(null)
+/** 勾选框可给性：本宿主接得住第三个回值（这一行就是「接得住」）+ 这一项允许被提供。 */
+const trustCanTrustAll = computed(() =>
+  Boolean(trustConfigDir.value) && isProjectLocationOfferedForTrust(trustPrompt.value?.root ?? '', trustConfigDir.value))
 /** 门禁吃的清单 = 持久那一份 + 会话那一份（会话那份的真源在 `trustedProjects`）。 */
 function trustEntries(): TrustedPathEntry[] {
   return mergeTrustEntries(generalSettings.value?.trustedPaths, sessionTrustEntries())
@@ -125,26 +140,73 @@ async function confirmTrust(result: Workspace): Promise<boolean> {
     return true
   }
   if (trustPrompt.value) return true
-  const [choice, remember] = await new Promise<[TrustChoice, boolean]>(resolve => {
-    trustResolver = (nextChoice, nextRemember) => resolve([nextChoice, nextRemember])
+  const [choice, remember, trustAll] = await new Promise<[TrustChoice, boolean, boolean]>(resolve => {
+    trustResolver = (nextChoice, nextRemember, nextTrustAll) => resolve([nextChoice, nextRemember, nextTrustAll])
     trustPrompt.value = { root, name: result.name || root }
   })
   trustPrompt.value = null
   trustResolver = null
   if (choice === 'cancel') return false
-  if (remember) await saveTrustedPaths(rememberTrust(entries, root, choice === 'trust'))
+  // 勾了「以后不再询问」才落库；落哪几条路径由 `trustDecisionPaths` 判（`TrustedProjectsDialog.kt:64-73`
+  // 的逐行等价物：答「信任并打开」记项目根，勾了 trust-all 且父目录不在配置目录里才**多记父目录**；
+  // 答「安全模式」记 false 且不吃 trust-all；取消在上面那行就已经 return 了，什么都不记 = `:95`）。
+  if (remember) await saveTrustedPaths(applyTrustDecision(entries, trustDecisionPaths(choice, root, trustAll, trustConfigDir.value)))
   else rememberSessionTrust(root, choice === 'trust')
   if (choice === 'distrust')
     notify(`已用安全模式打开 ${result.name || root}：构建、运行、调试与终端已禁用。`, true)
   return true
 }
-function resolveTrustPrompt(choice: TrustChoice, remember: boolean) { trustResolver?.(choice, remember) }
+function resolveTrustPrompt(choice: TrustChoice, remember: boolean, trustAll: boolean) { trustResolver?.(choice, remember, trustAll) }
+// ── 打开外部链接前的那一句（接线请求 welcome2 的 R2：上游 `browse()` 里那句 `canBrowse`）──
+//
+// 本仓的 URL 出口有五条（`src/App.vue` 的编辑器文档链接与「导出 HTML 后在浏览器里看」、
+// 终端 Ctrl+单击、运行控制台的 URL 命中、快速文档「在浏览器里看」）。上游只有一个
+// `BrowserLauncher.browse`，判定就长在它里面（`BrowserLauncherAppless.kt:99`）⇒ 这里把
+// **门禁装进那条唯一的出口**（`src/externalLinkLauncher.ts`），五个调用点各自只交出一条 URL：
+// 三个不在保留文件里的调用点本轮已经改完（TerminalPanel / RunConsole / quickDocHost），
+// `src/App.vue` 那两处只剩把 `request('shell.openUrl', …)` 换成 `openExternalUrl(…)`（见接线请求）。
+//
+// 弹框复用 `TrustedProjectDialog.vue` 的 `mode="link"` 那一档（组件早就备着）。
+const linkPrompt = ref<{ url: string; root: string; name: string; resolve: (choice: ExternalLinkChoice) => void } | null>(null)
+/**
+ * 弹那三颗按钮并等回答。已经挂着一句时**不叠第二扇模态**（上游 `canBrowse` 用的就是模态框）：
+ * 后到的那一句按「取消」答（`BrowserLauncherImpl.kt:85`：其它答案 = 不开）。
+ */
+function askExternalLink(prompt: ExternalLinkPromptRequest): Promise<ExternalLinkChoice> {
+  if (linkPrompt.value) return Promise.resolve<ExternalLinkChoice>('cancel')
+  return new Promise<ExternalLinkChoice>(resolve => {
+    linkPrompt.value = { url: prompt.url, root: workspace.value?.root ?? '', name: workspace.value?.name ?? '', resolve }
+  })
+}
+function resolveLinkPrompt(choice: ExternalLinkChoice) {
+  const pending = linkPrompt.value
+  linkPrompt.value = null
+  pending?.resolve(choice)
+}
+// 装配即安装：这一域建出来那一刻，五条 URL 出口就都带着判定（`entries`/`save` 用的就是本域那两份，
+// 所以宿主不再需要自己传 —— 剩下的那一行只是把 `mode="link"` 那颗框挂进模板）。
+installExternalLinkGate({
+  root: () => workspace.value?.root,
+  entries: () => trustEntries(),
+  ask: askExternalLink,
+  save: entries => { void saveTrustedPaths(entries) },
+})
 async function refreshAppState() {
   const state = await request<AppState>('app.state')
   recentProjects.value = state.recentProjects
   // 老版本把「不显示面包屑」编码进 breadcrumbsPlacement（三值），源码里位置只有上下两个值；
   // 在读盘这一处迁移回 showBreadcrumbs + placement，避免旧值在下次保存时被原生校验拒绝。
   editorSettings.value = normalizeEditorSettings(state.settings)
+  // Code Vision 的四把键灌进运行时真值表（`src/codeLensSettings.ts`）：上游那份是应用级
+  // `PersistentStateComponent`（CodeVisionSettings.kt:14 的 `@State(name = "CodeVisionSettings", storages = [Storage("editor.xml")])`），
+  // 读盘即生效；本仓渲染侧只认那张运行时表（`src/codeLensExtension.ts` 的 `buildDecorations`）。
+  // 旧存档缺键由原生侧补默认（native/settings_schema.cpp:414-417），所以这里**不许**按字段数量判损坏。
+  restoreCodeVisionSettings({
+    codeVisionEnabled: editorSettings.value.codeVisionEnabled,
+    disabledGroups: editorSettings.value.codeVisionDisabledGroups,
+    enabledGroups: editorSettings.value.codeVisionEnabledGroups,
+    codeVisionVisibleEntries: editorSettings.value.codeVisionVisibleEntries,
+  })
   // 与 editorSettings 同一处收口：旧版本留下的未知键、手改坏的类型不进内存（见 src/settingsInspector.ts）。
   generalSettings.value = normalizeSettingsShape(defaultGeneralSettings, state.general).value
   gitAvailable.value = state.gitAvailable
@@ -172,6 +234,12 @@ async function bootstrap() {
     if (isDesktop) {
       try { pluginList.value = (await request<PluginList>('plugin.list')).plugins }
       catch { pluginList.value = [] }
+      // trust-all 那一格的前提：IDE 自己的配置目录（上游 `TrustedProjects.kt:103-107` 要拿它排除
+      // 「项目就在配置目录里」那一种）。`app.info` 的 `profile` 就是那一个目录（`native/diagnostics.cpp`
+      // 的 init(profile) 与 `app_info` 用的同一份）。读不到就留 null ⇒ 那一格不画。
+      void request<AppInfo>('app.info')
+        .then(info => { trustConfigDir.value = info.profile })
+        .catch(() => { trustConfigDir.value = null })
     }
     // `configuration` 阶段的启动活动（上游 `StartupManagerImpl` 在项目打开前跑这一档）：
     // 目前只有 headless 环境的必需键检查（`CheckKeysStartupActivity`），没有注册键时是空跑。
@@ -436,6 +504,10 @@ registerPreloadingActivity({ id: 'taocode.warmJdkCache', preload: () => { void a
     refreshAppState, refreshRecent, bootstrap, confirmLeave, answerLeave, activateWorkspace,
     syntheticNodes, refreshSyntheticNodes, openWorkspace, closeWorkspace, forgetProject, forgetProjects,
     defaultProjectParent, beginProject, browseParent, submitProject, cancelProject,
-    trustPrompt, resolveTrustPrompt, projectTrustBlock,
+    // 信任这一族：`trustEntries`/`saveTrustedPaths` 是宿主那几条 URL 出口的依赖（welcome2 R2 的前置、
+    // trust4 的 T1），`linkPrompt`/`resolveLinkPrompt` 挂 `mode="link"` 那颗框，
+    // `openExternalUrl` 从这一域**转出去**（门禁就装在本域，宿主因此不必再 import 那个模块）。
+    trustPrompt, resolveTrustPrompt, projectTrustBlock, trustEntries, saveTrustedPaths,
+    trustConfigDir, trustCanTrustAll, linkPrompt, resolveLinkPrompt, openExternalUrl,
   }
 }

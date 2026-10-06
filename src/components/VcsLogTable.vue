@@ -4,7 +4,8 @@ import { useLogViewport } from '../vcsLogViewport'
 import VcsLogColumns from './VcsLogColumns.vue'
 import SpeedSearchBar from './SpeedSearchBar.vue'
 import type { GitFullCommit } from '../bridge'
-import { buildLogGraph, collapseLinearBranches, lanePath, laneX, logDate, rootColor, ROW_H } from '../vcsLogGraph'
+import { collapseLinearGraph, logDate, rootColor, ROW_H } from '../vcsLogGraph'
+import { GRAPH_LINE_WIDTH, paintGraphRow } from '../vcsLogGraphRender'
 import { visibleColumns, type LogColumn } from '../vcsLogColumns'
 import { logCommitTooltip, logRefsToShow, logSpeedSearchColumns } from '../vcsLogPresentation'
 import { speedSearchMatches } from '../speedSearch'
@@ -17,8 +18,14 @@ const list = ref<HTMLElement>()
 const viewportWidth = ref(0)
 const columnRows = computed(() => visible.value.map(commit => ({ ...commit, date: logDate(commit.date) })))
 // 「收起线性分支」= 从**已加载这一页**里去掉线性链的中间节点（上游 `COLLAPSE_ALL` 的 hideNode，
-// 见 `src/vcsLogGraph.ts` 的 `collapseLinearBranches`）。表、视口、键盘导航、aria 全按这一份走。
-const visible = computed(() => collapseLinearBranches(props.commits, props.collapsed === true))
+// `platform/vcs-log/graph/src/com/intellij/vcs/log/graph/collapsing/CollapsedActionManager.java:230`），
+// 并在同一次修改里于链的两端补一条 `GraphEdgeType.DOTTED` 边（同文件 `:231`）⇒ 折叠后两端之间是**虚线**，
+// 不是两段互不相连的行。两件事都在 `collapseLinearGraph()` 里一次做完（分两步调会丢掉那条边：
+// 被收起的提交不在可见列表 ⇒ `buildLogGraph` 查不到父哈希 ⇒ 边不生成）。
+// 表、视口、键盘导航、aria 全按这一份 visible 走。
+const folded = computed(() => collapseLinearGraph(props.commits, props.collapsed === true,
+  { showLongEdges: props.showLongEdges !== false, graphInformation: true }))
+const visible = computed(() => folded.value.visible)
 let resizeObserver: ResizeObserver | undefined
 onMounted(() => {
   if (!list.value) return
@@ -31,7 +38,11 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 const { start, end, update, reveal } = useLogViewport(list, computed(() => visible.value.length), () => emit('more'))
 // 勾掉的列（`Vcs.Log.ToggleColumns`）在行里也不画 —— 表头与单元格是同一份判据。
 const columns = computed(() => visibleColumns(['commit', 'author', 'date', 'hash'], props.hidden ?? []))
-const graph = computed(() => buildLogGraph(visible.value, { showLongEdges: props.showLongEdges !== false }))
+const graph = computed(() => folded.value.graph)
+// 每行的图形单元 → SVG 图元（`src/vcsLogGraphRender.ts`，几何全在那边，与上游画师同一套算法）。
+// 索引按 `graph.rows` 一一对齐：虚拟滚动切出来的 `index` 要加回 `start` 才对上 units。
+const paint = computed(() => graph.value.units.map(units => paintGraphRow(units)))
+const paintOf = (index: number) => paint.value[index] ?? { strokes: [], marks: [] }
 // 一个提交要画哪几个引用：`Vcs.Log.ShowTagNames` + `Vcs.Log.CompactReferencesView`（判据在
 // `src/vcsLogPresentation.ts` 的 `logRefsToShow`）。
 const refsOf = (commit: GitFullCommit) => logRefsToShow(commit.refs ?? [], {
@@ -141,11 +152,17 @@ defineExpose({ focusHash })
            勾上 = 引用进提交格里一条**左对齐的定宽列**（消息不再被 chip 挤走），不勾 = chip 挨在消息左侧 inline。 -->
       <span class="commit-cell" :class="{ aligned: alignLabels }">
         <svg class="graph" :width="graph.width" :height="ROW_H" :viewBox="`0 0 ${graph.width} ${ROW_H}`" aria-hidden="true">
-          <line v-for="(line, i) in row.pass" :key="`p${i}`" :x1="laneX(line.lane)" y1="0" :x2="laneX(line.lane)" :y2="ROW_H" :stroke="line.color" stroke-width="1.5" />
-          <line v-for="(stub, i) in row.up" :key="`u${i}`" :x1="laneX(stub.lane)" y1="0" :x2="laneX(stub.lane)" :y2="ROW_H / 2" :stroke="stub.color" stroke-width="1.5" />
-          <line v-for="(stub, i) in row.stub" :key="`s${i}`" :x1="laneX(stub.lane)" :y1="ROW_H / 2" :x2="laneX(stub.lane)" :y2="ROW_H" :stroke="stub.color" stroke-width="1.5" />
-          <path v-for="(edge, i) in row.down" :key="`d${i}`" :d="lanePath(edge.from, edge.to)" fill="none" :stroke="edge.color" stroke-width="1.5" />
-          <circle :cx="laneX(row.lane)" :cy="ROW_H / 2" r="3.5" :fill="row.color" />
+          <!-- 每一格画的是 `graph.units[这一行]` 翻译出来的图元（= 上游那一行的 PrintElement 集合）：
+               先线段（竖线/弯线/终端箭头）后圆（节点）⇒ 与上游"节点排在最后、画在边之上"同一顺序
+               （`platform/vcs-log/graph/src/com/intellij/vcs/log/graph/impl/print/PrintElementGeneratorImpl.kt:128`、`:171`）。
+               弯线画到格外两倍长、由本格裁掉一半，所以相邻两格在格边界上正好对接
+               （`platform/vcs-log/impl/src/com/intellij/vcs/log/paint/SimpleGraphCellPainter.kt:163-169`）。
+               `stroke-dasharray` 只在**非实线且不带箭头**时出现（同文件 `:127-134`）⇒ 折叠跨度那条 DOTTED 边是虚的。 -->
+          <line v-for="(stroke, i) in paintOf(index + start).strokes" :key="`e${i}`"
+            :x1="stroke.x1" :y1="stroke.y1" :x2="stroke.x2" :y2="stroke.y2" :stroke="stroke.color"
+            :stroke-width="GRAPH_LINE_WIDTH" :stroke-dasharray="stroke.dash" />
+          <circle v-for="(mark, i) in paintOf(index + start).marks" :key="`m${i}`"
+            :cx="mark.cx" :cy="mark.cy" :r="mark.r" :fill="mark.color" :class="{ 'head-gap': mark.kind === 'gap' }" />
         </svg>
         <span v-if="alignLabels" class="labels">
           <span v-for="r in refsOf(row.commit)" :key="`a${r.type}:${r.name}`" class="ref" :class="r.type"
@@ -179,6 +196,13 @@ defineExpose({ focusHash })
 /* `Vcs.Log.AlignLabels` 勾上后引用进提交格里这一条定宽列（左对齐，消息不再被 chip 挤走）。 */
 .labels { display: flex; flex: 0 0 120px; align-items: center; justify-content: flex-start; gap: 4px; overflow: hidden; }
 .graph, .ref { flex-shrink: 0; }
+/* 弯线按上游画到格外两倍长（`SimpleGraphCellPainter.kt:163-169`），靠本格把超出 26px 的那一半裁掉 ⇒ 相邻两格才接得上。 */
+.graph { overflow: hidden; }
+/* 头节点中间那一层填的是**这一格的背景色**（上游 `HeadNodePainter.kt:50-54` 用 commitStyle.background）
+   ⇒ 底色跟着行状态走：常态 = 面板底下那层（`src/style.css` 的 body 底色），悬停/选中 = 行自己那两层底色。 */
+.head-gap { fill: var(--editor); }
+.log-row:hover .head-gap { fill: var(--hover); }
+.log-row.selected .head-gap { fill: var(--selection); }
 .ref { border: 1px solid currentColor; border-radius: var(--radius-pill); padding: 0 4px; color: var(--accent); font-size: 10px; line-height: 16px; }
 .ref.remote { color: var(--secondary); }
 .ref.tag { color: var(--warning); }

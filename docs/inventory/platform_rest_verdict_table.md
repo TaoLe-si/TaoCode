@@ -2,8 +2,8 @@
 
 | 档 | 类数 |
 |---|---:|
-| [x] | 22 |
-| [~] | 5423 |
+| [x] | 27 |
+| [~] | 5418 |
 | [ ] | 0 |
 | [-] | 15129 |
 | 合计 | 20574 |
@@ -9094,10 +9094,10 @@
 | `LocalizationStateServiceImpl` | lp/psi | `[-]` | 0 |  |  |  | 从未出现 |
 | `SmartEnterProcessorWithFixers` | lp/psi | `[-]` | 0 |  |  |  | 从未出现 |
 | `CacheBuilderRegistryImpl` | lp/psi | `[-]` | 0 |  |  |  | 从未出现 |
-| `CustomFoldingRegionsPopup` | lp/custom-folding | `[~]` | 0 |  |  |  | 从未出现 |
-| `GotoCustomRegionAction` | lp/custom-folding | `[~]` | 0 |  |  |  | 从未出现 |
-| `NetBeansCustomFoldingProvider` | lp/custom-folding | `[~]` | 0 |  |  |  | 从未出现 |
-| `VisualStudioCustomFoldingProvider` | lp/custom-folding | `[~]` | 0 |  |  |  | 从未出现 |
+| `CustomFoldingRegionsPopup` | lp/custom-folding | `[x]` | 0 |  |  |  | 从未出现 |
+| `GotoCustomRegionAction` | lp/custom-folding | `[x]` | 0 |  |  |  | 从未出现 |
+| `NetBeansCustomFoldingProvider` | lp/custom-folding | `[x]` | 0 |  |  |  | 从未出现 |
+| `VisualStudioCustomFoldingProvider` | lp/custom-folding | `[x]` | 0 |  |  |  | 从未出现 |
 | `DocumentationImageResolver` | lp/documentation | `[~]` | 0 |  |  |  | 从未出现 |
 | `QuickDocHighlightingHelper` | lp/documentation | `[~]` | 0 |  |  |  | 从未出现 |
 | `QuickDocSyntaxHighlightingHandler` | lp/documentation | `[~]` | 0 |  |  |  | 从未出现 |
@@ -9164,7 +9164,7 @@
 | `util` | lp/documentation | `[~]` | 0 |  |  |  | 真实代码 |
 | `DefaultTargetSymbolDocumentationTargetProvider` | lp/documentation | `[~]` | 0 |  |  |  | 从未出现 |
 | `package-info` | lp/documentation | `[~]` | 0 |  |  |  | 从未出现 |
-| `CustomFoldingSurroundDescriptor` | lp/custom-folding | `[~]` | 0 |  |  |  | 从未出现 |
+| `CustomFoldingSurroundDescriptor` | lp/custom-folding | `[x]` | 0 |  |  |  | 从未出现 |
 | `ModCommandExecutorImpl` | lp/psi | `[-]` | 0 |  |  |  | 从未出现 |
 | `AbstractGithubTagDownloadedProjectGenerator` | lp/language-specific | `[-]` | 0 |  |  |  | 从未出现 |
 | `GithubDownloadUtil` | lp/language-specific | `[-]` | 0 |  |  |  | 从未出现 |

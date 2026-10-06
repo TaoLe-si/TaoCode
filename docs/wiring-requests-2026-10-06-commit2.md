@@ -7,8 +7,14 @@
 | 编号 | 目标文件（保留 / 他人面） | 目标行号 | 模块侧状态 |
 |---|---|---|---|
 | C1 | `native/main.cpp` | 1169-1175 | 原生函数与校验都在位，只差这一处透传（与 vcs2 W1 同一条，本批重新核对过坐标） |
+| C1b | `native/git_test.cpp` | 351 之后（插入一整段 `run(...)`） | R1 两档里 native 还缺的**显式**判据：500 上限的边界与"空 `paths` 不加 `--only`"（`git.cpp` 本体无需改动） |
 | C2 | `src/components/SourceControl.vue` | 88 / 336-343 / 461-467 | 三个新入参都做成可选，面板不传 = 本批之前的形状逐字一致 |
 | C3 | `src/App.vue` + `src/toolViewContext.ts` + `src/components/ToolWindowView.vue` | 511、866、2147 / 34、87、114 / 37、173 | 文档修订号的宿主来源 |
+
+> 2026-10-06 收尾批（写 `docs/batch-2026-10-06-commit2.md` 的那一路）复核并补写：C1 里
+> "JSON 参数类型错误已被兜成 `INVALID_REQUEST`" 的坐标原写 `1506-1510`，逐行重开
+> `native/main.cpp` 后改指 **`:1508-1510`**（`:1506-1508` 是 `WorkspaceError` 那一档）；
+> 新增 **C1b**（native 判据缺口）与文末 **「两档期望行为」** 取证表。其余段落坐标复核为真。
 
 **上游基准**（全部亲自打开过；相对 `D:\Backup\Downloads\intellij-community-master\intellij-community-master`）：
 - `platform/vcs-impl/src/com/intellij/openapi/vcs/actions/commit/CommonCheckinFilesAction.kt:37-53`（`actionPerformed`
@@ -47,8 +53,9 @@
 - `native/git.cpp:448-483`：`paths.size() > 500` ⇒ `INVALID_REQUEST`（`:461`）、每条过 `checked_path`（`:464`，
   闸门本体 `:259-265`）、非空先 `git add -- <被选路径>`（`:465-469`，未跟踪的才进得了 pathspec）、
   再加 `--only` 并把 pathspec 放在 `--` 之后（`:472`、`:481`）；
-- `native/main.cpp:1506-1510`：`paths` 给的若是**非字符串数组**，`Json::exception` 已经被兜成
-  `INVALID_REQUEST` ⇒ **原生侧不需要新增校验**，只差透传。
+- `native/main.cpp:1508-1510`：`catch (const Json::exception&)` 把**非字符串数组**的 `paths` 兜成
+  `INVALID_REQUEST`（原写 `:1506-1510`，收尾批重开后改指这三行；`:1506-1508` 是 `WorkspaceError` 那一档）
+  ⇒ **原生侧不需要新增校验**，只差透传。
 
 **当前源码**（`native/main.cpp:1169-1175`，2026-10-06 本批核对）：
 
@@ -79,6 +86,56 @@
 
 `"git.commit"` 已在 git 方法白名单里（`native/main.cpp:1526` 一带的 `is_git_method`），不用改清单。
 不接的后果：前端 `commitRequestParams` 发得出 `paths`，宿主吃掉 ⇒ 界面选了子集也照样整份提交（用户可见行为错）。
+
+## C1b `native/git_test.cpp:351` 之后 —— R1 两档里 native 还缺的两条显式判据
+
+**只补测试，不改 `native/git.cpp`，也不动 `CMakeLists.txt`**（`git_test.cpp` 已在册）。
+现有覆盖（`native/git_test.cpp:309-351`）已经钉住：子集只提被选项、未跟踪能提进去、`../` 与 `--help` 被挡。
+还缺两条显式断言：① 500 条上限（`native/git.cpp:461`）在 native 侧一条测试都没引到，今天只有前端常量
+（`src/commitChecks.ts:449`）与源码文本锚点在管着它；② "空 `paths` ⇒ 不加 `--only`、提交整份暂存区"
+这条今天只是 `git_test.cpp:342` 那句收尾调用的**副作用**，没有断言。
+
+在 `native/git_test.cpp:351` 那句 `});`（子集用例的收尾）**之后**插入整段：
+
+```cpp
+    // R1 的两档里 native 侧缺的两条显式判据（2026-10-06 commit2 收尾批登记）：
+    // ① 上限 500 条（git.cpp:461）；② 空 paths = 整份暂存区、命令行里没有 --only（git.cpp:460,472）。
+    // 上游：CommonCheckinFilesAction.kt:37-53 → CheckinActionUtil.kt:104-106、:135-136、:159-167。
+    run("commit path subset: the 500 cap and the empty-subset whole-index form", [&] {
+        put(root / "cap-a.txt", "a\n");
+        put(root / "cap-b.txt", "b\n");
+        taocode::git::stage(root, "cap-a.txt");
+        taocode::git::stage(root, "cap-b.txt");
+        // ① 501 条：在交给 git 之前就拒掉，错误码是 INVALID_REQUEST（不是让 git 撞死成 GIT_FAILED）。
+        std::vector<std::string> too_many;
+        for (int index = 0; index < 501; ++index) too_many.push_back("cap-" + std::to_string(index) + ".txt");
+        bool refused = false;
+        try { taocode::git::commit(root, "cap overflow", false, false, "", "", too_many); }
+        catch (const taocode::WorkspaceError& error) { refused = error.code == "INVALID_REQUEST"; }
+        check(refused, "501 条被选路径在 native 侧就拒");
+        // ② 空 paths = 整份暂存区：两个已暂存的文件进**同一个**提交，且都不留在变更列表里。
+        taocode::git::commit(root, "whole index", false, false, "", "", {});
+        const auto rest = taocode::git::status(root);
+        check(rest.empty(), "整份暂存区那一条走的是没有 --only 的旧命令行，两个文件一起走");
+        check(taocode::git::log(root, "cap-a.txt", 1).at("commits")[0].at("subject").get<std::string>() == "whole index" &&
+              taocode::git::log(root, "cap-b.txt", 1).at("commits")[0].at("subject").get<std::string>() == "whole index",
+              "两个文件都在同一个提交里（不是子集提交）");
+    });
+```
+
+接完 C1 + C1b 后必须重跑 native（本批没动 `native/`，所以没跑）：
+`call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat"` → `npm run test:native`，
+**看日志里 `tests passed` 那行**，不信 npm 退出码。
+
+## C1 验收：R1 两档期望行为的取证表（主代理接完照着点一遍）
+
+| 档 | 前端（`src/commitChecks.ts:469-504`） | native（`native/git.cpp:448-483`） | 上游取证 |
+|---|---|---|---|
+| **空 `paths`**（宿主没给 / 给了 `[]` / 只有空白项） | 请求体里**连 `paths` 这个键都不出现**（`commitPathsToSubmit` 把空白项 `filter(Boolean)` 掉，`commitRequestParams` 只在 `paths.length` 非零时写键）⇒ 今天的 `git.commit` 请求体逐字不变 | `paths.empty()` ⇒ `scoped = false`（`:460`）⇒ **不跑** `git add`（`:465-469`）、**不加** `--only`（`:472`）、**不加** `--` 与 pathspec（`:481`）⇒ 提交整份暂存区 | 上游没有"空选中"这一档：`CheckinActionUtil.kt:159-162` 在 `selectedChanges` 与 `selectedUnversioned` 都空时取的是 `initialChangeList.changes ∩ filterChangesUnder(allChanges, pathsToCommit)` —— **整份变更列表**，不是子集 ⇒ 本仓"空 = 整份暂存区"与它同形 |
+| **含未跟踪文件** | **纳入而不是拒绝**：路径原样发（`CommitScopeRow.untracked` 不参与任何拒绝判断，`:480-492` 只拒 ignored 与对不上变更列表的）；判据 `tests/commit-checks.test.mjs:273-281` | `git commit --only -- <未跟踪路径>` 会报 `error: pathspec '…' did not match any file(s) known to git`（实测，写在 `native/git.cpp:457-459`）⇒ 先只对被选路径 `git add -- <paths>`（`:465-469`，不碰其它暂存项）再 `--only` 提交；ctest 判据 `native/git_test.cpp:326-331` | `CheckinActionUtil.kt:104-105` 把 `CHANGES` 与 `UNVERSIONED_FILE_PATHS_DATA_KEY` **各取一份**，同文件 `:159-167` 把 `selectedUnversioned` `concat` 进"这次包含的变更"；"有没有内容"那一判 also counts them：`AbstractCommitWorkflowHandler.kt:82` 的 `isCommitEmpty()` = `getIncludedChanges()` **和** `getIncludedUnversionedFiles()` 都空 ⇒ 只选新文件不是空提交（本仓对应 `src/commitCheck.ts:56-64`） |
+| （附）**被忽略的被选项** | 明确拒绝（`:484`），宿主没给 `changes` 时不做这一档 | native 拿不到 ignored 状态：`git.cpp:298-301` 的 `status()` 只有 `include_ignored` 打开才带 `--ignored=matching`，`commit()` 那一侧没有这份信息 ⇒ 判据只在前端 | `CommonCheckinFilesAction.kt:74-78`：`isActionEnabled` 要求 `status != FileStatus.IGNORED`（面板默认连列都不列它们） |
+
+---
 
 ## C2 `src/components/SourceControl.vue` —— 三个新入参（都可选）
 

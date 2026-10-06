@@ -8,7 +8,9 @@
 //   · `:238-239` `willSkipModificationCommitChecks()` = MODIFICATIONS_FAILED || POST_FAILED
 //   · `:241` `willSkipLateCommitChecks()` = POST_FAILED ／ `:243` `willSkipPostCommitChecks()` = POST_FAILED
 //   · `:246-249` `resetCommitChecksResult()` = 状态回 UNKNOWN ＋ 藏起失败通知
-//   · `:200-226` 两个监听（VFS 变化 / 文档变化）都先判 `isCommitChecksResultUpToDate == UNKNOWN` 早退（`:202`、`:218`），
+//   · `:200-226` 两个监听（VFS 变化 / 文档变化）都先判 `isCommitChecksResultUpToDate == UNKNOWN` 早退
+//     （早退那两行是 `:205` 与 `:218`。留痕：这里原写 `:202`，2026-10-06（commit2）重开该文件逐行核实：
+//     `:202` 是「reset commit checks on VFS updates」那条注释本身，不是早退行）；
 //     再只认"影响检查结果的文件"（`:191-199` `areFilesAffectsCommitChecksResult`：在 VCS 下、在内容里、状态不是 IGNORED）。
 //     **提交信息框里的键入不在这一条上**（那不是内容文件）⇒ 本仓也不能拿它当 reset。
 //   · `:337-342` 每次会话开头：`skip* = !isOnlyRunCommitChecks && willSkip*()`，然后 `resetCommitChecksResult()`
@@ -62,7 +64,7 @@ export function willSkipPostCommitChecks(state: RecentCommitChecks): boolean {
 /** `resetCommitChecksResult()`（`:246-249`）：一律回 UNKNOWN。 */
 export const resetCommitChecks = (): RecentCommitChecks => 'unknown'
 
-/** 这次变化值不值得 reset（`:202`/`:218` 的 `== UNKNOWN` 早退）：已经是 UNKNOWN 就不动状态。 */
+/** 这次变化值不值得 reset（`:205`/`:218` 的 `== UNKNOWN` 早退）：已经是 UNKNOWN 就不动状态。 */
 export function commitChecksShouldReset(state: RecentCommitChecks): boolean {
   return state !== 'unknown'
 }
