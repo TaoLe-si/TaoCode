@@ -258,6 +258,47 @@ test('removeTrailingBlankLines 只有契约字段、没有执行体（本批只�
   assert.equal(applySaveTextTransforms({ path: 'a.txt', text: 'a\n\n\n', options }).text, 'a\n\n\n')
 })
 
+// ---------------------------------------------------------------- 「光标所在行」那条格子的端到端链
+//
+// 派单第 3 条要核的就是这一条：**设置页 → 存 → 读 → 执行** 四段一段都不能缺。
+// 每一段单独都有别人家的判据（`tests/setkeys-batch.test.mjs` 钉键、本文件钉执行），
+// 这里钉的是「链」：任何一段被摘掉，本条就红。
+test('端到端：keepTrailingSpacesOnCaretLine 从设置页一路走到执行体（四段齐全）', () => {
+  const key = 'keepTrailingSpacesOnCaretLine'
+  // ① 设置页那一格（控件绑的是模型字段，不是自造的状态）。
+  const dialog = sourceOf(join('components', 'EditorSavePassesFields.vue'))
+  assert.match(dialog, new RegExp(`v-model="settings\\.${key}"`), '① 设置页没有这一格')
+  // ② 存：对话框的「应用」把整份 editor 设置发 `settings.update`，宿主白名单里有这个键。
+  const app = sourceOf('App.vue')
+  assert.match(app, /request<EditorSettings>\('settings\.update'/, '② 前端没有把 editor 设置发给宿主')
+  assert.match(sourceOf(join('..', 'native', 'settings_schema.hpp')), new RegExp(`"${key}"`), '② 宿主白名单里没有这个键')
+  // ③ 读：旧存档缺键按上游默认补（`EditorSettingsExternalizable.java:142` = true），不判损坏。
+  assert.match(sourceOf(join('..', 'native', 'settings_schema.cpp')), new RegExp(`\\{"${key}", true\\}`), '③ 宿主默认值不是上游的 true')
+  assert.match(sourceOf('settingsModel.ts'), new RegExp(`${key}: true`), '③ 前端默认值不是 true')
+  // ④ 执行：真值被喂进 pass，并且执行体真的按它决定「传不传光标」（TrailingSpacesStripper.java:70 → :229）。
+  const fileOps = sourceOf('editorFileOps.ts')
+  assert.match(fileOps, new RegExp(`${key}: editorSettings\\.value\\.${key}`), '④ editorFileOps 没把真值喂给 saveTrimOptionsFor')
+  assert.match(sourceOf('editorSaveTransforms.ts'),
+    new RegExp(`caretOffsets: input\\.options\\.${key} \\? input\\.caretOffsets : undefined`),
+    '④ 执行体没按这一格决定传不传光标 ⇒ 关了设置还是不清光标行')
+  // ⑤ 消费链的最后一环：这一格的真值**改变了落盘正文**（两段 pass 都受它管：
+  //   `:70 → :229` 决定清不清光标行，`:89-92` 决定末行纯空白时删掉还是补换行）。
+  const off = applySaveTextTransforms({
+    path: 'a.txt', text: 'a\n  ', caretOffsets: [3],
+    options: { ...UPSTREAM_DEFAULTS, changedLinesOnly: false, ensureNewLineAtEof: true, keepTrailingSpacesOnCaretLine: false },
+  })
+  assert.equal(off.text, 'a\n', '关掉这一格 ⇒ 光标那行的两个空格被清掉，于是末行已经空了，没有东西可补')
+  assert.equal(off.finalNewLine, 'unchanged')
+  assert.deepEqual(off.strippedLines, [1])
+  const on = applySaveTextTransforms({
+    path: 'a.txt', text: 'a\n  ', caretOffsets: [3],
+    options: { ...UPSTREAM_DEFAULTS, changedLinesOnly: false, ensureNewLineAtEof: true },
+  })
+  assert.equal(on.text, 'a\n  \n', '默认档（true）⇒ 光标行被挡着不删（:78-84），末行改走补换行（:94）')
+  assert.equal(on.finalNewLine, 'added')
+  assert.deepEqual(on.deferredLines, [1])
+})
+
 // ---------------------------------------------------------------- .editorconfig 的层级
 
 const configReader = files => async dir => {

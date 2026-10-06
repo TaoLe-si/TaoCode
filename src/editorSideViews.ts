@@ -139,19 +139,31 @@ function revealBreadcrumbPath(path: string) {
   // 卸载时清掉待触发的防抖（`let markdownTimer` 已随本域搬进来，宿主拿不到它）。
   function cancelMarkdownRefresh() { if (markdownTimer !== undefined) { window.clearTimeout(markdownTimer); markdownTimer = undefined } }
   // --- Select In（IDEA 的 Alt+F1 目标列表）-------------------------------------------------
-  // 目标只有"本仓真有落点"的六个，顺序与置灰判据都照抄上游；**书签**目标刻意不做：
-  // 上游 `BookmarksSelectInTarget.canSelect`（BookmarksSelectInTarget.kt:26-33）只认 FileBookmark，
-  // 而本仓的书签全是行书签（src/bookmarks.ts 的 `Bookmark { path; line }`），加上就是一条永远灰着的行。
+  // 目标只有"本仓真有落点"的六个，顺序与置灰判据都照抄上游。
+  // **书签**目标仍然不列，但理由换了（留痕）：原注释写"本仓的书签全是行书签"，
+  // 那条前提**已经变了** —— `src/bookmarks.ts:36` 的 `isFileBookmark`（没有 `line` 的那一档）
+  // 与 `toggleFileBookmark` 早已在树上，上游 `BookmarksSelectInTarget.canSelect`
+  // （`platform/bookmarks/src/com/intellij/ide/bookmark/ui/BookmarksSelectInTarget.kt:22-37`）
+  // 现在能对得上。仍然不列的真实原因只剩一条：这一行的 `selectable` 要读"当前文件有没有文件书签"，
+  // 而书签表在 `createBookmarkActions` 手里、没注进本模块（`EditorSideViewsDeps` 里没有那条形参）
+  // ⇒ 接线请求见 `docs/wiring-requests-2026-10-06-nav3.md` W-1（补一条形参 + 一行表项，权重
+  // `StandardTargetWeights.java:6` 的 BOOKMARKS_WEIGHT = 1.001，落在项目视图与文件结构之间）。
   const selectInOpen = ref(false)
   const selectInAt = ref<{ x: number; y: number } | null>(null)
   const selectInRows = computed<SelectInRow[]>(() => {
     const path = active.value?.path ?? ''
-    // 合成条目（`\u0000` 前缀）在磁盘上不存在 —— 上游的判据是 `RevealFileAction.findLocalFile` 非空。
-    const local = isDesktop && Boolean(workspace.value) && !!path && !path.startsWith('\u0000')
+    // 合成条目（`\u0000` 前缀：jar 条目、临时缓冲）在磁盘上不存在 ——
+    // 上游对这类条目的判据是 `RevealFileAction.findLocalFile` 非空（在资源管理器那一行），
+    // 项目视图那一行则是 `ProjectViewSelectInTarget.canSelect`
+    // （`platform/lang-impl/src/com/intellij/ide/impl/ProjectViewSelectInTarget.java:143-157`：
+    // 拿不到 VirtualFile ⇒ false，拿到了但 `!isValid()` ⇒ false）。
+    // ⇒ 两条共用同一个"这一格是真的文件"谓词：合成条目在**两行**里都置灰，而不是点下去没反应。
+    const inTree = Boolean(workspace.value) && !!path && !path.startsWith('\u0000')
+    const local = isDesktop && inTree
     const targets: SelectInTargetSpec[] = [
-      // ProjectViewSelectInGroupTarget.java:66 → ProjectConceptBundle.properties:12 "Project View"；
-      // 权重是接口的默认值 0（SelectInTarget.java:49-51）。
-      { id: 'project', label: '项目视图', weight: 0, selectable: Boolean(active.value) && Boolean(workspace.value) },
+      // ProjectViewSelectInGroupTarget.java:58-60 → ProjectConceptBundle.properties:12 "Project View"；
+      // 权重是接口的默认值 0（platform/platform-api/src/com/intellij/ide/SelectInTarget.java:49-51）。
+      { id: 'project', label: '项目视图', weight: 0, selectable: Boolean(active.value) && inTree },
       // StructureViewSelectInTarget.java:35-41 → IdeBundle.properties:305 "File Structure"，
       // canSelect = 有文件编辑器（`getFileEditorProvider() != null`）。权重 4。
       { id: 'structure', label: '文件结构', weight: 4, selectable: Boolean(active.value) },

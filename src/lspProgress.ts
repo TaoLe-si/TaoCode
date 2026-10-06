@@ -161,7 +161,7 @@ export function handleLspProgressEvent(event: string | undefined, data: LspProgr
 
 /**
  * 某条语言的服务器停了（停机/换项目/服务器起失败）：把它在跑的那些行整体清掉。
- * 上游对应 `cancelAllProgress()`（同一个文件 :331-339，注释写得很直白："so its background
+ * 上游对应 `cancelAllProgress()`（同一个文件 `:335-339`，函数上方的注释 `:330-334` 写得很直白："so its background
  * progresses don't keep running"）—— 不收的话界面里就永远留一条在转的行。
  * 返回被清掉的条目，调用方（消息窗口）可以据此补一条结论行。
  */

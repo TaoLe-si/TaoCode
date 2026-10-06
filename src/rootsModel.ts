@@ -26,6 +26,10 @@
 // **与上游的四处不等价**（都是本仓后端给的约束，写清楚免得日后被当抄漏）：
 //   1. 模块数量：本仓一个隐式模块（模块名 = 工作区目录名），`ModuleManagerImpl` 的模块图与
 //      `ModuleOrderEntry` 的模块间依赖没有存储面 ⇒ `orderEntries` 里**不出现**模块依赖条目。
+//      这条只适用于 `ModuleOrderEntry`（模块**间**依赖）；`ModuleSourceOrderEntry`（模块自己那条，
+//      `OrderEntriesBridge.kt:363`）与模块数量无关、每个模块都有一条 —— roots3 已按上游补上
+//      （`buildOrderEntries` 的 `moduleSource` 条目；上游那条恒在，本仓在它不贡献任何根时不出行，
+//      理由与「空组不出」同口径，见该函数注释）。
 //   2. 内容根数量：`JavaProjectSettings`（`src/settingsModel.ts:66`）只有 `sourcePaths` 一张扁平表，
 //      没有内容根字段。所以 `contentRootUrls` 恒为 `['']`（工作区根），但对象图按**复数**建
 //      （`RootContentEntry[]`），将来加字段就有多根的落点，不用改这一层。
@@ -72,8 +76,16 @@ export interface RootContentEntry {
   readonly excludes: RootExcludeFolder[]
 }
 
-/** 序根条目的种类（`OrderEntry` 的三个子类 + 模块自己的输出）。 */
-export type RootOrderEntryKind = 'jdk' | 'library' | 'module' | 'output' | 'testOutput'
+/**
+ * 序根条目的种类（`OrderEntry` 的三个子类 + 模块自己的源根条目 + 模块自己的输出）。
+ *
+ * `moduleSource` = `ModuleSourceOrderEntry`（`OrderEntriesBridge.kt:363`，`isSynthetic()` 恒真 `:380`）：
+ * 模块**自己**那一条，`getFiles(type)` 只在 SOURCES 下返 `rootModel.sourceRoots`、其余类型返空
+ * （`:365`）。roots3 补的就是这一条 —— 之前这一族只有 jdk/library/output，
+ * 面板上看不出「哪些根是模块自己贡献的」（`OrderRootComputer.java:58-63` 在枚举器里也是先处理它）。
+ * `module` = 模块间依赖（`ModuleOrderEntry`），本仓没有存储面 ⇒ 一条都不出，见文件头第 1 条不等价。
+ */
+export type RootOrderEntryKind = 'moduleSource' | 'jdk' | 'library' | 'module' | 'output' | 'testOutput'
 
 /** 一个序根条目（`OrderEntry.java:31/:52/:60`）。 */
 export interface RootOrderEntry {
@@ -187,12 +199,31 @@ export function buildContentEntry(input: RootModelInput, url: string): RootConte
 /**
  * 序根条目（`ModuleRootModel.getOrderEntries()`，`:58`）。
  *
- * 顺序：SDK → 库 → 模块输出。上游 `RootModelBase.getOrderEntries()` 把模块依赖排在库之前，
- * 本仓没有模块间依赖（文件头第 1 条不等价），所以 `module` 这一类**一条都不出**，
+ * 顺序：模块自己的源根条目 → SDK → 库 → 模块输出。上游 `RootModelBase.getOrderEntries()` 把模块
+ * 依赖排在库之前，本仓没有模块间依赖（文件头第 1 条不等价），所以 `module` 这一类**一条都不出**，
  * 不是漏了；输出条目放最后是因为面板上它属于「编译输出」而不是「依赖」。
+ * `moduleSource` 排最前 = 枚举侧「模块自己的条目先出现」（`OrderRootComputer.java:53-63` 的第一支）。
  */
 export function buildOrderEntries(input: RootModelInput): RootOrderEntry[] {
   const out: RootOrderEntry[] = []
+  // 模块自己那条源根条目（`ModuleSourceOrderEntryBridge`，`OrderEntriesBridge.kt:363-367`）。
+  // 上游这条**恒在**（`isSynthetic()` 恒真，`:380`）；本仓在它一个根都不贡献时不出这一行 ——
+  // 与 `rootModelRows` 既有「空组不出」（`:313`）同一口径，避免给面板放一条永远为空的行。
+  const ownSources = [...new Set((input.sourcePaths ?? []).map(normalizeRootPath).filter(Boolean))]
+  if (ownSources.length) {
+    out.push({
+      kind: 'moduleSource',
+      // `getPresentableName()`（`OrderEntriesBridge.kt:367`）取 `ProjectModelBundle.properties:40` 的
+      // `project.root.module.source=<Module source>`；本仓界面是中文 ⇒ 按英文原文直译。
+      presentableName: '<模块源码>',
+      // `isValid()`（`OrderEntry.java:55-60`）判的是「条目指向的东西在不在」，这条指向模块自己 ⇒ 恒真；
+      // 同一行 javadoc（`:56`）明说「条目有效不等于它的每个根都有效」，所以**不**拿源根存不存在来翻这条。
+      valid: true,
+      // `getFiles(type)`：只有 SOURCES 返模块自己的源根，其余类型是空数组（`OrderEntriesBridge.kt:365`）。
+      roots: { ...emptyRoots(), sources: ownSources },
+      comment: `模块自己贡献的源根（${ownSources.length} 条）`,
+    })
+  }
   const sdk = input.sdk ?? null
   if (sdk) {
     const roots = sdkRootsOf(sdk)
@@ -356,6 +387,7 @@ export function rootModelRows(model: ModuleRootModel, known: boolean): RootModel
 
 /** 条目 kinds 的中文标签（面板用；顺序与 `buildOrderEntries` 一致）。 */
 export const ORDER_ENTRY_LABELS: Record<RootOrderEntryKind, string> = {
+  moduleSource: '模块源码',
   jdk: 'SDK',
   library: '库',
   module: '模块依赖',

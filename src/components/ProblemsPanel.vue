@@ -513,6 +513,10 @@ function resetIntentions() { resetIntentionSettings() }
 // 这里保持同一口径（导 props.problems），避免"导出少了东西"这种不可见的偏差。
 const exporting = ref(false)
 const exportNote = ref('')
+// 导出文本的「详情」开关 = 上游 `ErrorViewTextExporter.java:21/:27-28` 的那颗 `myCbShowDetails`
+// （键 `checkbox.errortree.export.details` = "Details"，`IdeBundle.properties:143`；`:28` 缺省勾上，
+// 不勾时 `:77-78` 跳过每条消息 —— 规则本体在 src/errorTree.ts，这里只是宿主）。
+const exportDetails = ref(true)
 async function exportReport() {
   if (!props.problems.length || exporting.value) return
   exporting.value = true
@@ -539,7 +543,7 @@ async function exportText() {
       title: '导出问题为文本', filters: [{ name: '文本文件', pattern: '*.txt' }], name: errorReportFileName(new Date()),
     })
     if (!target) return
-    await request('app.writeExportFiles', { files: [{ path: target, content: errorTreeText(props.problems) }] })
+    await request('app.writeExportFiles', { files: [{ path: target, content: errorTreeText(props.problems, { details: exportDetails.value }) }] })
     exportNote.value = `已导出 ${props.problems.length} 条问题为文本：${target}`
   } catch (error) {
     exportNote.value = error instanceof Error ? error.message : String(error)
@@ -596,6 +600,7 @@ async function exportText() {
       <button class="subtle-button" :disabled="fixing || fixDisabled || !problems.length" title="对当前文件逐条应用无歧义的快速修复（Code Cleanup）" @click="emit('fixAll')">{{ fixing ? '修复中…' : '批量修复当前文件' }}</button>
       <button class="subtle-button" :disabled="exporting || !problems.length" title="把全部检查结果导出为自包含的 HTML 报告（IDEA: Export Inspection Results）" @click="exportReport">{{ exporting ? '导出中…' : '导出报告…' }}</button>
       <button class="subtle-button" :disabled="exporting || !problems.length" title="把全部问题导出为文本（按严重度分桶；IDEA 消息窗口的 Export to text file）" @click="exportText">导出文本…</button>
+      <label class="problems-profile-toggle" title="导出文本时带上每条消息（IDEA 导出对话框那颗 Details 复选框，ErrorViewTextExporter.java:28 缺省勾上；不勾只留分组标题）"><input aria-label="导出时包含每条消息" type="checkbox" :checked="exportDetails" @change="exportDetails = ($event.target as HTMLInputElement).checked" /><span>详情</span></label>
     </div>
     <!-- 「选项」弹层内容（上游 `ProblemsView.Options`：Show 段 = 严重度复选，Sort by 段 = 排序开关）。 -->
     <div v-if="optionsOpen" class="problems-ignore-editor">

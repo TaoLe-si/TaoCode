@@ -143,8 +143,9 @@ export function sortIgnoredPatterns(patterns: readonly string[]): string[] {
  * （`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:1494-1504`）：
  *   · 先比条数（`:1495-1497`），条数不同直接 false；
  *   · 再按下标逐位 `DEFAULT_IGNORED.get(i).equalsIgnoreCase(newList.get(i))`（`:1499-1502`）。
- * 注意它**不是**「按集合比」：位置也要对上（调用方 `getState` 传进来的已经 `sort(null)` 过，
- * 同文件 `:1434-1436`），大小写不同仍算默认表（`cvs` 与 `CVS` 算一样）。
+ * 注意它**不是**「按集合比」：调用方 `getState` 传进来的已经 `sort(null)` 过（同文件 `:1434-1436`），
+ * 所以**位置也要对上** —— 改大小写只有在「不改变排序位置」时才算默认表
+ * （`.git` ↔ `.GIT` 算一样；`CVS` ↔ `cvs` 会因为 `c` 排到 `_` 之后而位置错开 ⇒ 上游同样判不等）。
  * 消费点只有一个：`writeStored` 据此决定「要不要持久化」—— 与上游「相等就不写 `ignoreFiles` 元素」同一条纪律。
  */
 export function isEqualToDefaultIgnoreList(patterns: readonly string[]): boolean {

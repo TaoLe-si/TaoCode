@@ -54,3 +54,20 @@
   我会把「装订线不再裸发」写成一条 `readFileSync('src/App.vue')` 的 `assert.doesNotMatch(/dapSetBreakpoints\(/`，
   现在没写是因为**不许留只过自己测试的死断言**）。
 - **不需要新设置格、不需要 native 改动。**
+
+---
+
+## dap3 核对结论（2026-10-06 收尾轮，逐条打开文件核过）
+
+- **D1 = `[x]` 已闭环**（主代理落的）：本仓 `src/App.vue:1051` 现在是
+  `const round = await breakpointUpdater.queueFile(path, next, { now: true })`，`:99` 那批 import 里已带 `./dbgBreakpointUpdate`，
+  **全文件 `dapSetBreakpoints` 零命中**（`:43` 那长串里的那个也已经去掉）。判据两条都写上了并跑绿：
+  `tests/dbg-breakpoint-update.test.mjs` 的 `assert.doesNotMatch(app, /dapSetBreakpoints\(/)` 与
+  `assert.match(app, /breakpointUpdater\.queueFile\(path, next, \{ now: true \}\)/)` —— 该文件 28/28。
+- **本篇给的锚点已漂**：写的 `src/App.vue:1034` / `:99` / `:43` 是当时的行号，现在是 `:1051`（`toggleBreakpointAt` 末尾）。
+  留痕在此，不改上文（改了就没法证明「原写 X、实际 Y」）。上游那条引用
+  （`platform/xdebugger-impl/frontend/src/com/intellij/platform/debugger/impl/frontend/FrontendXLineBreakpointVisualizationManager.kt:291-294`）
+  dap3 逐行重数过：`:291` 是 `fun updateBreakpointNow(...)`、`:292` queue、`:293` `breakpointUpdateQueue.sendFlush()` ⇒ 成立。
+- 本篇「净 +5 行」实际净 +6 行；`src/App.vue` 现 2675 行（上限 2737，仍安全）。
+- 剩下的线只有 **T1**（`src/bridge.ts` 的 `logMessage?`）与 **T2**（`round.error` 要不要按 `applied` 分档），
+  都在 `docs/wiring-requests-2026-10-06-dap3.md`。

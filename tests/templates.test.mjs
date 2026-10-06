@@ -60,6 +60,26 @@ test('render resolves $END$, literal variables and defaulted slots', () => {
   assert.deepEqual(withVar.stops, [{ start: 4, end: 4 }], 'a slot with no default is a caret stop')
 })
 
+// 上游模板正文有一条美元转义：`TemplateTextLexer.flex:27` 把 `$$` 认成 ESCAPE_DOLLAR，
+// `TemplateBase.java:66-68` 落进插入文本的是一个字面 `$`。本仓以前原样输出 `$$`，
+// 设置页还写着「引擎没有转义机制」—— 那条文案这次一并订正。
+test('a doubled dollar is the escaped dollar sign, not a slot', () => {
+  const result = render('log("$$");$END$', '', {})
+  assert.equal(result.text, 'log("$");')
+  assert.deepEqual(result.stops, [], '转义不产生槽位')
+  assert.equal(result.caret, 'log("$");'.length, '光标位置按转义之后的文本算')
+  assert.equal(render('$$$NAME:value$', '', {}).text, '$value', '转义紧跟一个真槽位')
+  assert.equal(render('price: $$5', '', {}).text, 'price: $5')
+})
+
+// 本仓那段 `:默认值` 只在同一行内认（上游的 `$…$` token 里根本没有换行）。
+// 引擎与设置页以前各写一份词法：一个允许跨行、一个不允许 ⇒ 预览和展开会两套口径，这里是合流后的那一份。
+test('a slot default does not swallow a line break', () => {
+  const result = render('x$A:\nB$y', '', {})
+  assert.equal(result.text, 'x$A:\nB$y', '跨行的那一段不是槽位，原样留着')
+  assert.deepEqual(result.stops, [])
+})
+
 test('the completion list offers matching keywords and postfix keys', () => {
   const keys = candidates('for', 3, 'src/App.java').map(entry => entry.key)
   assert.ok(keys.includes('fori') && keys.includes('foreach'), 'longer keywords are suggested')

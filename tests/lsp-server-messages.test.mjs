@@ -7,7 +7,8 @@
 //     （返回 `CompletableFuture<MessageActionItem>`）、`:68-69` logMessage、`:86-99` 五条 refresh。
 //   · `platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt:377-382`（showMessageRequest，
 //     客户端答不出时 `completedFuture(null)`）、`:385-390`（showMessage）、`:393-404`（logMessage 分级）、
-//     `:341-371`（refresh 全部答 null）、`:424-456`（doNotify：只有按钮被点才 complete(actionItem)）、
+//     `:341-368`（refresh 一族全部答 null；同文件 `:369-374` 是第六条 `refreshTextDocumentContent`，
+//     IntelliJ 扩展，本仓不做）、`:424-456`（doNotify：只有按钮被点才 complete(actionItem)，`:454` 才 `.notify(project)`）、
 //     `:464`/`:470`/`:476`（三个通知组 id）。
 //   · `platform/lsp/src/api/LspClientCapabilities.kt:246-249`（window 能力：showMessage/showDocument/workDoneProgress）。
 //

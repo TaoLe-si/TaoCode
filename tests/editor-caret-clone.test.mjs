@@ -119,7 +119,7 @@ test('光标数上限：到顶就不再新增（editor.max.caret.count 默认 10
   assert.equal(cloneCaretPlan({ ...input(DOC, plan.ranges, plan.mainIndex, true), maxCarets: 2 }), null)
 })
 
-test('命令：走的是命令表里的 cursor.above / cursor.below（冻结键位表指向的就是这两个名字）', () => {
+test('命令：走的是命令表里的 cursor.above / cursor.below（键位按上游摘掉后，入口 = 命令表 + 菜单行）', () => {
   const up = run('cursor.above', EditorSelection.create([EditorSelection.cursor(14)]))
   assert.equal(up.ran, true)
   assert.deepEqual(up.heads, [11, 14])
@@ -127,8 +127,21 @@ test('命令：走的是命令表里的 cursor.above / cursor.below（冻结键�
   const down = run('cursor.below', EditorSelection.create([EditorSelection.cursor(14)]))
   assert.equal(down.ran, false, '最后一行往下没有行可克隆')
   const editor = readFileSync('src/components/CodeEditor.vue', 'utf8')
-  assert.match(editor, /key: 'Ctrl-Alt-Shift-Up', preventDefault: true, run: editingCommands\['cursor\.above'\]/)
-  assert.match(editor, /key: 'Ctrl-Alt-Shift-Down', preventDefault: true, run: editingCommands\['cursor\.below'\]/)
+  // R3 判决（2026-10-06 keymap2）：这两把键的上游主人是 `ResizeToolWindowUp`/`ResizeToolWindowDown`
+  // （platform/platform-resources/src/keymaps/$default.xml:879-884），而 `EditorCloneCaretAbove`/
+  // `EditorCloneCaretBelow` 在 `$default.xml` 里零命中（注册处
+  // platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:218-219，实现类
+  // platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretAbove.java:8-11 也不声明键位）
+  // ⇒ 编辑器 keymap 里再绑一次就是抢工具窗口的键。**原写法是 `assert.match`**（钉着那两行绑定存在），
+  // 它钉的是「与上游不同键位」的假一致形状，故按上游改成反向钉子：键位回潮就红，不算放松断言。
+  assert.doesNotMatch(editor, /key: 'Ctrl-Alt-Shift-Up'/, 'Ctrl+Alt+Shift+↑ 属 ResizeToolWindowUp，不许回到编辑器 keymap')
+  assert.doesNotMatch(editor, /key: 'Ctrl-Alt-Shift-Down'/, 'Ctrl+Alt+Shift+↓ 属 ResizeToolWindowDown，同上')
+  // 摘键 ≠ 删命令：命令表里两条还在，菜单行的键位栏是空串（上游也是只有动作没有键）。
+  const commands = readFileSync('src/editorCommands.ts', 'utf8')
+  assert.match(commands, /'cursor\.above': cloneCaretAboveCommand, 'cursor\.below': cloneCaretBelowCommand/)
+  const menu = readFileSync('src/menus/editMenu.ts', 'utf8')
+  assert.match(menu, /ctx\.editable\('cursor\.above', '在上行添加光标', ''/)
+  assert.match(menu, /ctx\.editable\('cursor\.below', '在下行添加光标', ''/)
 })
 
 test('命令：多光标（选区）也能克隆，且不会造出重叠的 selection', () => {

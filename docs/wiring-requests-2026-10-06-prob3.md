@@ -106,3 +106,53 @@
   `InspectionToolRegistrar` 的扩展点注册面（规则由服务器注册，宿主没有注册面）、
   `InspectionProfilerDataHolder` 的逐工具耗时`
 - 一句话说明：`.xml` 那条已经从"缺"变成"有"，留着会让下一个代理重做一遍。
+
+---
+
+## status3 复核（2026-10-06 桶 status3，逐条实测；报告见 `docs/batch-2026-10-06-status3.md`）
+
+| 项 | 判定 | 本轮实测的现场 |
+| --- | --- | --- |
+| **R1** | **仍缺**（本批另加了一条钉桩门禁） | `src/App.vue:2297` 的 `status-problems` 那一格仍逐字是 `{{ allProblems.filter(p => p.severity === 1).length }} 错误` / `…=== 2… 警告`；`problemCounts` 的生产消费方仍只有面板（`src/components/ProblemsPanel.vue:208`）。原请求写的 `src/problemsView.ts:475` 与 import 锚 `src/App.vue:90` **本轮复核仍然对得上** |
+| **R2.1** | **仍缺，但措辞要收窄** | `docs/inventory/verdict-daemon.md:31` 现在写的是「…`relatedInformation` 不透传，而 `LspDiagnostic` 类型在禁改文件 `src/bridge.ts:109`…」⇒ ① `relatedInformation` 这半句**今天仍然是真的**（`native/lsp_support.cpp:148-149` 本轮实测只带 `code`/`tags`，`:149` 之后没有 related）；② 句里的 `src/bridge.ts:109` **行号陈旧**，实测 interface 在 `:118`。所以这条订正只该改 `code`/`tags` 那半句与那个行号，别把 relatedInformation 也写成"已透传" |
+| **R2.2** | **仍缺** | `docs/inventory/verdict-daemon.md` 里「严重度过滤/文本过滤/按文件·目录」与「问题树的展开态没有可持久化对象」两句各命中 1 ⇒ 表还没升档。本仓侧证据仍成立：六档 `src/problemsView.ts:61`、三开关 `:194-199`、`collapsedGroups` `src/problemsPanelState.ts:37` |
+| **R2.3** | **仍缺** | 「缺：profile 的导入/导出」命中 1；本仓已在场（`src/inspectionProfileIo.ts`、面板检查配置弹层、`src/App.vue:2297` 行内的 `<InspectionProfileSwitcher />`，本轮在该行实测到） |
+
+### R1 · 逐字可粘（本轮按磁盘现状重取，含缩进）
+
+目标行：`src/App.vue:2297`（那一整行是压平的 `<footer …>`，下面是其中的**唯一子串**，替换它即可）。
+
+old（逐字原文）：
+
+```html
+<button v-if="showWidget('problems')" class="status-problems" title="打开问题面板" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ allProblems.filter(p => p.severity === 1).length }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ allProblems.filter(p => p.severity === 2).length }} 警告</span></button>
+```
+
+new（沿用上面那条 computed，脚本段 `src/App.vue` 里另加两行）：
+
+```html
+<button v-if="showWidget('problems')" class="status-problems" :title="`错误 ${problemCountsNow.errors} · 警告 ${problemCountsNow.warnings} · 信息 ${problemCountsNow.infos}（点击打开问题面板）`" aria-label="打开问题面板" @click="showOutput('problems')"><span class="sev-error">{{ problemCountsNow.errors }} 错误</span><span class="status-separator">|</span><span class="sev-warning">{{ problemCountsNow.warnings }} 警告</span></button>
+```
+
+```ts
+// import 段（紧跟 src/App.vue:90 的 `import { allProblems } from './problems'`）
+import { problemCounts } from './problemsView'
+// 状态栏那一格的严重度计数：与问题面板、HTML 报告同一把尺（级别归属只在 src/highlightLevels.ts 的 levelForSeverity 定义）
+const problemCountsNow = computed(() => problemCounts(allProblems.value))
+```
+
+**同批必须做的第二件事**（否则我的门禁会红，那是设计而不是事故）：
+`tests/problem-count-single-source.test.mjs` 里把 `PINNED` 的 `src/App.vue` 条目**删掉**，
+并把第二条用例的消费方清单改成 `['src/components/ProblemsPanel.vue', 'src/App.vue']`。
+
+### R1 的两处观察（本轮实测，都卡在保留文件，只登记不动手）
+
+1. 面板那格读的是**过滤后的可见表**（`problemCounts(rows.value)`，`rows` = 严重度/文本过滤 + 排序 + 焦点之后），
+   状态栏读的是**全表** ⇒ 用户勾掉某个严重度时两处必然不同数。上游状态栏那一格与树的过滤态无关
+   （`platform/lang-impl/src/com/intellij/codeInsight/daemon/impl/TrafficLightRenderer.kt:383` 的 count 取自 `status.errorCounts`）。
+   钉这条形状的是 `tests/problems-view.test.mjs:187`（**不是**我的文件，本轮没动）。要么统一到全表、要么把气泡措辞改成"可见"。
+2. 现网域（LSP severity 1..4 + profile 覆盖同档）两把尺**同数**；域外（0 / 负数 / 2.5）不同数
+   —— `tests/problem-count-single-source.test.mjs` 第三条用例把这两档都钉住了。"今天没错"不是"同一把尺"。
+3. 本仓还有**第三份**严重度映射：`src/inspectionReport.ts:29-30` 的 `SEVERITY_NAMES`/`SEVERITY_CLASSES`
+   （`{1:'错误',2:'警告',3:'提示',4:'信息'}`，缺省 `'信息'`），与 `levelForSeverity` 平行；
+   我的正则只钉"就地重数"那种形状，钉不到名字映射 ⇒ 请转给 inspectionReport 那条 lane 改读 `src/highlightLevels.ts`。

@@ -309,7 +309,12 @@ export interface JarRunConfigParamsOptions {
   jdkHome?: string
 }
 
-/** argv 的第一段是不是 java 启动器（`command` 那一格常写整串，`program` 要单独给时得把它剥掉）。 */
+/**
+ * argv 的第一段是不是 java 启动器。
+ * 为什么要剥：JAR 配置的可执行文件走 `program` 那一格，用户在命令格里写整串 `java -jar app.jar` 时
+ * 开头那个 `java` 只可能是启动器（不剥就会跑出 `C:/jdk/bin/java.exe java -jar app.jar` 这种必然失败的命令行）；
+ * 不是启动器名的第一段（自己包的 wrapper）一律保留，不能吃掉用户写的参数。
+ */
 function isJavaLauncher(token: string): boolean {
   const name = (token.split(/[\\/]/).pop() ?? '').toLowerCase()
   return /^(java|javaw)(\.exe)?$/.test(name)
@@ -317,7 +322,7 @@ function isJavaLauncher(token: string): boolean {
 
 /**
  * JAR 配置的**执行参数**（本仓启动链路要的那三个字段：`program` + `args` + 不走 shell）。
- * 与上面 bean 版 `jarRunArgs()` 的分工：那条在 JDK 空时返回 `[]`（静默，判据 `tests/jar-run.test.mjs:89` 钉着），
+ * 与上面 bean 版 `jarRunArgs()` 的分工：那条在 JDK 空时返回 `[]`（静默，判据 `tests/jar-run.test.mjs:95` 钉着），
  * 这一条给的是「为什么跑不了」—— 缺 JAR 路径或缺 Java 可执行文件都**抛错**。
  * 顺序照 `jarRunArgs():187`：VM 参数 → `-jar` 路径 → 程序参数。
  */
@@ -332,7 +337,9 @@ export function jarRunConfigParams(config: JarRunConfigLike, options: JarRunConf
     // 判据 = `JavaParametersUtil.java:214-220`（'' is not a valid JRE home）。
     throw new Error(`JAR 配置「${config.name}」没有 Java 可执行文件：填「Java 可执行文件」那一格，或在项目设置里选 JDK（上游 JRE 那一格）。`)
   const argv = (config.args?.length ? [...config.args] : splitParameters(config.command))
-  if (argv.length && isJavaLauncher(argv[0]!) && program.toLowerCase().includes(argv[0]!.toLowerCase())) argv.shift()
+  // 开头那个 `java` 一律剥掉：可执行文件由上面的 `program` 给（留着不剥就是一条 `java.exe java -jar …` 的必然失败命令行）。
+  // 不是启动器名的第一段（自己包的 wrapper）不动，免得吃掉用户写的参数。
+  if (argv.length && isJavaLauncher(argv[0]!)) argv.shift()
   return { program, args: argv, shell: false }
 }
 

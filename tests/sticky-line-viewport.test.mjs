@@ -16,8 +16,9 @@ import { ref } from 'vue'
 
 import {
   DEFAULT_SCOPE_MIN_LINES, MIN_SCOPE_MIN_SIZE, compareStickyScopes, emptyStickyPassState,
-  overlapsStickyWindow, scopeNotNarrow, stickyLinesPerView, stickyPanelFits, stickyPanelWindow,
-  stickyPassNeeded, stickyRevisionStamp, stickyScopeSpan, stickyVisualLines,
+  orderStickyViews, overlapsStickyWindow, primaryStickyView, scopeNotNarrow, stickyLinesPerView,
+  stickyPanelFits, stickyPanelWindow, stickyPassNeeded, stickyRevisionStamp, stickyScopeSpan,
+  stickyVisualLines,
 } from '../src/stickyLineViewport.ts'
 import { createStickyLines, stickyScopes, stickyWindowScopes } from '../src/stickyLines.ts'
 
@@ -190,4 +191,42 @@ test('createStickyLines 的按语言开关：给了表才关，不给就全开',
     language: () => 'java', stickyLanguages: () => ({ java: true }),
   })
   assert.deepEqual(off.stickyLines.value, [], '全局那条关掉时，按语言的 true 救不回来')
+})
+
+// ——— 视图优先级排序（判词 `lp/sticky-lines` 的「按视图优先级排序」那一档的**模块侧**）———
+//
+// 订正留痕（本轮逐行开参考树自数核对）：`platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/`
+// 整个目录里搜 `priority` **零命中**，上游也没有跨视图的排序 —— 模型挂在**文档**的 MarkupModel 上
+// （`StickyLinesModelImpl.java:93-100`），面板与可视区挂在**每个编辑器**上
+// （`StickyLinesManager.kt:15-34` 每 editor 一个 manager、`:86-99` 由自己的 visibleArea 驱动），
+// 谁也不给谁排先后。所以「优先级」这件事在本仓只能是**宿主给档位、模块给稳定序**：
+// 本仓的顶边渲染只有一个容器（`src/App.vue:2143` 那一格 `v-if="stickyLines.length && pane === focusedPane"`），
+// 多个分栏要合并成一份显示顺序时，模块不替宿主编「谁在上」。
+test('视图优先级：宿主给的档位升序，没给档位的排最后（不发明档位）', () => {
+  const views = [{ id: 'right', priority: 2 }, { id: 'main', priority: 1 }, { id: 'float' }]
+  assert.deepEqual(orderStickyViews(views).map(view => view.id), ['main', 'right', 'float'])
+  assert.equal(views[0].id, 'right', '纯函数：不改入参那一份数组')
+})
+
+test('同档（含都没给档）保持宿主给的先后 —— 稳定序，不按时钟/哈希漂', () => {
+  assert.deepEqual(orderStickyViews([{ id: 'z' }, { id: 'a' }, { id: 'm' }]).map(v => v.id), ['z', 'a', 'm'])
+  assert.deepEqual(orderStickyViews([{ id: 'z', priority: 1 }, { id: 'a', priority: 1 }]).map(v => v.id), ['z', 'a'])
+  assert.deepEqual(orderStickyViews([]), [], '没有视图就是空，不抛')
+})
+
+test('primaryStickyView：排在最前那一块 = 共享顶边该显示的那一份', () => {
+  assert.equal(primaryStickyView([{ id: 'b' }, { id: 'a', priority: 0 }])?.id, 'a')
+  assert.equal(primaryStickyView([{ id: 'only', firstVisibleLine: 9 }])?.id, 'only')
+  assert.equal(primaryStickyView([]), null, '没有视图 ⇒ 不画（本仓的规矩：没有数据源的格子不出现）')
+})
+
+test('stickyLinesPerView 的遍历序 = 优先级序（渲染层直接按 Map 的键序往下排）', () => {
+  const scopes = [scope('outer', 0, 60), scope('mid', 10, 50)]
+  const perView = stickyLinesPerView(scopes, [
+    { id: 'right', firstVisibleLine: 12, priority: 5 },
+    { id: 'left', firstVisibleLine: 12, priority: 1 },
+    { id: 'float', firstVisibleLine: 12 },
+  ], 3)
+  assert.deepEqual([...perView.keys()], ['left', 'right', 'float'], '键序即显示序')
+  assert.deepEqual(perView.get('left').map(entry => entry.name), ['outer', 'mid'], '排序不改每个视图自己算出的层')
 })

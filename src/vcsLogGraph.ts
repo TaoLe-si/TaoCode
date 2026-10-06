@@ -26,8 +26,18 @@ export interface GraphRow {
   down: Array<{ from: number; to: number; color: string } & GraphLineStyleUnit>
   /** 跨行的**长边**在起点那一行只画一段竖线（`SHOW_LONG_EDGES` 关掉时用它代替弯线）。 */
   stub: Array<{ lane: number; color: string } & GraphLineStyleUnit>
-  up: Array<{ lane: number; color: string } & GraphLineStyleUnit>
-  pass: Array<{ lane: number; color: string } & GraphLineStyleUnit>
+  /**
+   * 从上一行接进来的边。`above` = 这条边在**上一行**占的那一车道，往上一行取列就用它：
+   * 上一行正是这条边的起点行时给的是**起点车道**（那一行里这条边不占自己的元素位，上游
+   * `createEndPositionFunction` 查不到这条边就退到那个节点的列，
+   * `platform/vcs-log/graph/src/com/intellij/vcs/log/graph/impl/print/PrintElementGeneratorImpl.kt:183-187`），
+   * 否则给的是它自己在上一行的车道。两行各按自己那一行的列密排编号，只有上下两段引用**同一对列**
+   * 才能在格边界上接得上（画师 `platform/vcs-log/impl/src/com/intellij/vcs/log/paint/SimpleGraphCellPainter.kt:163-169`
+   * 那句 "paint non-vertical lines twice the size to make them dock with each other well"）。
+   */
+  up: Array<{ lane: number; above: number; color: string } & GraphLineStyleUnit>
+  /** 穿过这一行的边（同样带 `above`，理由见 `up`）。 */
+  pass: Array<{ lane: number; above: number; color: string } & GraphLineStyleUnit>
 }
 
 /**
@@ -156,8 +166,12 @@ export function buildLogGraph(list: GitFullCommit[], options: GraphOptions = {})
       continue
     }
     rows[edge.fromRow]?.down.push({ from: edge.from, to: edge.to, color: edge.color, style: edge.style })
-    rows[edge.targetRow]?.up.push({ lane: edge.to, color: edge.color, style: edge.style })
-    for (let row = edge.fromRow + 1; row < edge.targetRow; row++) rows[row]?.pass.push({ lane: edge.to, color: edge.color, style: edge.style })
+    // 上一行占的那一车道：紧邻上一行就是起点行 ⇒ 起点车道（那一行里这条边跟着节点走）；否则 ⇒ 它自己的车道。
+    const aboveLane = (row: number) => (edge.fromRow === row - 1 ? edge.from : edge.to)
+    rows[edge.targetRow]?.up.push({ lane: edge.to, above: aboveLane(edge.targetRow), color: edge.color, style: edge.style })
+    for (let row = edge.fromRow + 1; row < edge.targetRow; row++) {
+      rows[row]?.pass.push({ lane: edge.to, above: aboveLane(row), color: edge.color, style: edge.style })
+    }
   }
   let laneCount = 1
   for (const row of rows) laneCount = Math.max(laneCount, row.lane + 1)
@@ -223,10 +237,10 @@ export function graphUnitsOfRows(rows: readonly GraphRow[], graphInformation = t
     // 原写「pass 只发 DOWN 一个单元」—— 少了上半段那一半 ⇒ 按 units 渲染时长边的中间行只有下半截（梳齿）。
     for (const edge of row.pass) {
       pushEdge('down', edge.lane, edge.lane, next, edge.style ?? 'solid', false, edge.color)
-      pushEdge('up', edge.lane, edge.lane, prev, edge.style ?? 'solid', false, edge.color)
+      pushEdge('up', edge.lane, edge.above, prev, edge.style ?? 'solid', false, edge.color)
     }
     for (const edge of row.down) pushEdge('down', edge.from, edge.to, next, edge.style ?? 'solid', false, edge.color)
-    for (const edge of row.up) pushEdge('up', edge.lane, edge.lane, prev, edge.style ?? 'solid', false, edge.color)
+    for (const edge of row.up) pushEdge('up', edge.lane, edge.above, prev, edge.style ?? 'solid', false, edge.color)
     for (const edge of row.stub) pushEdge('down', edge.lane, edge.lane, undefined, edge.style ?? 'solid', true, edge.color)
     units.sort((a, b) => a.position - b.position)
     // HEAD 那一行的节点是 OUTLINE_AND_FILL（`GraphTableModel.kt:105` 判引用名 == HEAD，`:108` 换成头节点单元）。

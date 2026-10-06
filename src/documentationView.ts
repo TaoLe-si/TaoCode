@@ -275,32 +275,66 @@ export function parseQuickDoc(content: string, format?: DocFormat): QuickDocMode
     if (heading) blocks.push(docBlock('heading', heading[1].trim(), links))
     else blocks.push(docBlock('text', trimmed, links))
   }
-  // markdown 围栏代码块（```）、以及缩进里的 `    code` 不拆：这里只认围栏，避免把正文误判成代码。
+  // 围栏代码块按**行**进出，不按**段**。上游的切分粒度就是行：`DocMarkdownToHtmlConverter.kt:92`
+  // 把 markdown `lines()` 摊开、`:105-108` 逐行数 ``` 的出现次数（`StringUtil.getOccurrenceCount`）
+  // 并在整行是围栏那一行（`:35` 的 `FENCE_PATTERN = "\\s+```.*"`）翻转 `isInCode`；
+  // 块的最终形状交给 GFM 的逐行标记器（`doc/impl/DocFlavourDescriptor.kt:31-36` 的
+  // `DocumentationMarkerProcessor`）。
+  // 旧实现要求「一整段正好是一条 ```…``` 围栏」，于是
+  // 「```java\n签名\n```\n说明」这种**行间不空一行**的常见 hover 形状（jdt.ls / pyright 就这么给）
+  // 会把签名之后的全部正文吞进代码块，弹层只剩一块等宽文本。
   const merged: DocBlock[] = []
   let fence: { language: string; lines: string[] } | null = null
-  for (const block of blocks) {
-    const match = block.kind === 'text' ? /^```([\w-]*)\n([\s\S]*?)\n?```$/.exec(block.text) : null
-    if (match) {
-      merged.push({ kind: 'code', text: match[2], language: match[1] })
-      continue
-    }
-    if (block.kind === 'text' && block.text.startsWith('```')) {
-      const language = block.text.slice(3).split('\n')[0].trim()
-      fence = { language, lines: [block.text.split('\n').slice(1).join('\n')] }
-      continue
-    }
-    if (fence) {
-      fence.lines.push(block.text)
-      if (block.text.endsWith('```')) {
-        const body = fence.lines.join('\n\n').replace(/\n?```$/, '')
-        merged.push({ kind: 'code', text: body, language: fence.language })
-        fence = null
-      }
-      continue
-    }
-    merged.push(block)
+  let pending: string[] = []
+  /** 整行只有围栏（``` 之后最多一个 info string）—— CommonMark 与上游 `FENCE_PATTERN` 同一条形态。 */
+  const fenceLine = (line: string): string | null => {
+    const match = /^\s{0,3}```([^\s`]*)\s*$/.exec(line)
+    return match ? match[1] : null
   }
-  if (fence) merged.push({ kind: 'code', text: fence.lines.join('\n\n'), language: fence.language })
+  /** 围栏之外攒下来的行放成一个块（标题判据与改动前逐字同一条）。 */
+  const flushPending = (): void => {
+    if (!pending.length) return
+    const text = pending.join('\n').trim()
+    pending = []
+    if (!text) return
+    const heading = /^#{1,6}\s+(.*)$/.exec(text)
+    merged.push(heading ? docBlock('heading', heading[1].trim(), links) : docBlock('text', text, links))
+  }
+  const closeFence = (): void => {
+    if (!fence) return
+    merged.push({ kind: 'code', text: fence.lines.join('\n').replace(/\n+$/, ''), language: fence.language })
+    fence = null
+  }
+  for (const block of blocks) {
+    // 围栏的粒度是**行**，所以先把这一块还原成「带占位符的原文」再切行 —— 直接用 `block.text`
+    // 会把占位符已经折回的纯文本再喂给 `docBlock`，内联链接就地丢失（`parts` 也没了）。
+    const rawBlock = block.kind === 'text' ? docPartsToMarks(block.parts ?? [{ text: block.text }], links) : block.text
+    if (block.kind !== 'text') {
+      // HTML `<pre>` 那一路的 code 块与非围栏的 heading 块：围栏开着时它是代码体的一行，关着时原样是一块。
+      if (fence) { fence.lines.push(rawBlock); continue }
+      flushPending()
+      merged.push(block)
+      continue
+    }
+    for (const line of rawBlock.split('\n')) {
+      const info = fenceLine(line)
+      if (info !== null) {
+        if (fence) { closeFence(); continue }
+        flushPending()
+        fence = { language: info, lines: [] }
+        continue
+      }
+      if (fence) { fence.lines.push(line); continue }
+      pending.push(line)
+    }
+    // 段与段之间原本隔着一个空行：围栏还开着时把那一行留在代码体里（围栏里是可以有空行的）；
+    // 围栏关着时**一段就是一块**（与改动前逐字同形，不跨段攒正文）。
+    if (fence) fence.lines.push('')
+    else flushPending()
+  }
+  // 没闭合的围栏照旧按代码块收尾（上游的标记器对未闭合围栏也是开到文末）。
+  if (fence) closeFence()
+  else flushPending()
   return { blocks: merged, links, images }
 }
 

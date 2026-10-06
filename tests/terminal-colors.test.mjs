@@ -93,6 +93,53 @@ test('不传覆盖表时与改造前逐字节一致（默认路径没有行为�
   assert.deepEqual(terminalPalette('light', '#111111', '#eeeeee').attributes, terminalPalette('light', '#111111', '#eeeeee', undefined).attributes)
 })
 
+/**
+ * 判据（本批新增）：**设置里的真实形状**是 JSON 的字符串键（`'1'` 而不是 `1`），
+ * 而 `terminalPalette` 的第四参声明的是 `Record<number, string>`（`src/terminalColors.ts:81`）。
+ * 取值走 `overrides?.[index]`（同文件 `:111`），JS 把数字下标折成字符串 ⇒ 两种形状命中同一项。
+ * 这一条钉的就是「消费侧原样把设置对象递进去」这件事本身，不靠组件里的转换。
+ */
+test('覆盖表用 JSON 的字符串键（设置档的真实形状）：逐色号生效、未覆盖的不动、16 号以后不进表', () => {
+  const fromSettings = { '1': '#ff6600', '11': '#00ff88', '7': 'not-a-color', '16': '#123456', '3': '' }
+  const palette = terminalPalette('dark', undefined, undefined, fromSettings)
+  const baseline = terminalPalette('dark')
+  assert.equal(palette.attributes[1].foreground, '#ff6600')
+  assert.equal(palette.attributes[11].foreground, '#00ff88', '亮色档那 8 个里的 11 号（brightYellow）也能单独覆盖')
+  for (let index = 0; index < 16; index += 1) {
+    // 只有 1 与 11 变；其余（含给了坏值的 3/7、给了 16 号以后键的 16）都仍是内置表那一个。
+    const overridden = index === 1 || index === 11
+    assert.equal(palette.attributes[index].foreground,
+      overridden ? (index === 1 ? '#ff6600' : '#00ff88') : baseline.attributes[index].foreground,
+      `色号 ${index}${overridden ? ' = 被覆盖的那一号' : '：不许被别的色号带动（坏值也留内置表那一个）'}`)
+  }
+  assert.equal(palette.attributes[16], undefined, '16 号以后不进这张表（256 色现算）')
+  assert.equal(colorByAnsiIndex(palette, 16), '#000000', '立方色也不吃覆盖表')
+  const theme = terminalXtermTheme(palette)
+  assert.equal(theme.red, '#ff6600')
+  assert.equal(theme.brightYellow, '#00ff88')
+  assert.equal(theme.yellow, ANSI_DARK_COLORS[3], '空串 = 不覆盖')
+})
+
+/**
+ * 判据（本批新增）：**两个 palette 调用点真的把覆盖表交给第四参**（接线请求第 3 条的宿主半边）。
+ * 终端面板 `currentPalette()` 与运行控制台 `consolePalette`；两边都声明 `ansiOverrides` 入参，
+ * 面板还多一条「覆盖表换了就重算并应用到所有窗格」（上游 palette 每次取色号都回方案要 ⇒ 是活的，
+ * `JBTerminalSchemeColorPalette.kt:23-25`）。
+ */
+test('消费链：两个 palette 调用点都把覆盖表交给第四参', () => {
+  const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
+  const runConsole = readFileSync(new URL('../src/components/RunConsole.vue', import.meta.url), 'utf8')
+  assert.match(panel, /terminalPalette\(theme, root\.getPropertyValue\('--text'\)\.trim\(\), root\.getPropertyValue\('--editor'\)\.trim\(\), props\.ansiOverrides \?\? undefined\)/,
+    '终端：第四参 = 设置来的覆盖表')
+  assert.match(panel, /ansiOverrides\?: Record<string, string> \| null/, '终端：入参形状 = 设置档的字符串键表')
+  assert.match(panel, /watch\(\(\) => props\.ansiOverrides, \(\) => applyPalette\(\)\)/, '终端：换覆盖表要重算并应用到所有窗格')
+  assert.match(runConsole, /terminalPalette\(consoleTheme\.value, root\.getPropertyValue\('--text'\)\.trim\(\), root\.getPropertyValue\('--editor'\)\.trim\(\), props\.ansiOverrides \?\? undefined\)/,
+    '运行控制台：同一个第四参')
+  assert.match(runConsole, /terminalPalette\(consoleTheme\.value, undefined, undefined, props\.ansiOverrides \?\? undefined\)/,
+    '没有 document 的那一支也吃覆盖表（Node 侧与浏览器同一张表）')
+  assert.match(runConsole, /ansiOverrides\?: Record<string, string> \| null/, '控制台：入参形状同上')
+})
+
 test('消费链：TerminalPanel 新建终端带主题、换主题时应用到所有窗格', () => {
   const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
   assert.match(panel, /theme: terminalXtermTheme\(currentPalette\(\)\)/, '新建窗格要把调色板交给 xterm')

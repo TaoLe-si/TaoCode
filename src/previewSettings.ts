@@ -8,6 +8,10 @@
 //
 // 返回 `null` = 通过；否则返回给用户看的那一句话（调用方负责包成 `BridgeError`）。
 import { MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE } from './editorFontSize.ts'
+// 终端基准字号的界与桌面端（settings_editor_keys.hpp）、设置页那一格用同一对数：
+// 上游 EditorFontsConstants.java:11-13（scale(4)）/ :15-17（ide.editor.max.font.size 默认 40）。
+// terminalFontSize.ts 不 import 任何东西 ⇒ 这里没有环。
+import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from './terminalFontSize.ts'
 import { isBidiDirection } from './bidiTextDirection.ts'
 
 export function previewSettingsError(key: string, value: unknown, languages: readonly string[]): string | null {
@@ -38,9 +42,15 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       key === 'codeVisionEnabled' || key === 'codeVisionDisabledGroups' || key === 'codeVisionEnabledGroups' || key === 'codeVisionVisibleEntries' ||
       // 快速文档两档（都是布尔；键名见 src/docHoverPolicy.ts 的 DOC_HOVER_SETTING_KEYS）。
       key === 'showQuickDocOnMouseHover' || key === 'autoUpdateDocumentation' ||
+      // 终端字号两把：总闸是布尔（上游 EditorSettingsExternalizable.java:124 默认 false），
+      // 基准字号是整数 4..40（EditorFontsConstants.java:11-13 / :15-17）。
+      key === 'wheelFontChangeEnabled' || key === 'terminalBaseFontSize' ||
       key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick' || key === 'maximizeEditorOnTabDoubleClick' || key === 'pinnedTabsInSeparateRow'
     if (!accepted) return `无效设置：${key}`
     if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < MIN_EDITOR_FONT_SIZE || Number(value) > MAX_EDITOR_FONT_SIZE
+      // 终端基准字号与编辑器字号同一套界（EditorFontsConstants.java:11-13 / :15-17 = 4 / 40）。
+      // 漏这一支 = 它掉进末尾 `typeof value !== 'boolean'` 的兜底 ⇒ 浏览器预览能勾、永远存不下。
+      : key === 'terminalBaseFontSize' ? !Number.isInteger(value) || Number(value) < MIN_TERMINAL_FONT_SIZE || Number(value) > MAX_TERMINAL_FONT_SIZE
       : key === 'tabSize' ? ![2, 4, 8].includes(Number(value)) || typeof value !== 'number'
       : key === 'tabLimit' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 100
       : key === 'uiZoomPercent' ? !Number.isInteger(value) || Number(value) < 50 || Number(value) > 400

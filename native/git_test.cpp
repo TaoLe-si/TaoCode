@@ -189,6 +189,12 @@ int main() {
         const auto changes = taocode::git::status(root);
         const auto* a = [&] { for (const auto& c : changes) if (c.path == "a.txt") return &c; return static_cast<const Change*>(nullptr); }();
         check(a && !a->staged && a->work_status == "M", "a.txt should be unstaged but still modified");
+        // 收尾：上面那条判据要的形状就是「index 未改、工作区已改」= porcelain 的 `(X YM)`，
+        // 而空 paths 的那一发 `git commit` 只提交暂存区（`native/git.cpp:460` `scoped = !paths.empty()`，
+        // 走到 `git commit -m` 不带 `--only`），所以这种脏文件谁都清不掉，只能回滚。
+        // 共享同一个临时仓库，用例之间不许留脏东西 —— 它一路留到后面 `commit with a path subset`
+        // 那条收尾的全局干净判据上，把它挡红（2026-10-06 的原生回归）。
+        taocode::git::revert(root, "a.txt");
     });
 
     run("checkout creates and switches a branch", [&] {
@@ -233,6 +239,9 @@ int main() {
         bool restored = false;
         for (const auto& change : taocode::git::status(root)) if (change.path == "a.txt") restored = true;
         check(restored, "stash pop brought the change back");
+        // 收尾：pop 回来的正是那份**未暂存**改动（又是 `(X YM)`，`git stash pop` 默认不还原 index），
+        // 与上一条用例同理，谁也提交不掉它 ⇒ 当场回滚，别让它漂到后面的用例。
+        taocode::git::revert(root, "a.txt");
     });
 
     run("create_branch and merge integrate a topic branch", [&] {
@@ -338,6 +347,24 @@ int main() {
         try { taocode::git::commit(root, "option", false, false, "", "", {"--help"}); }
         catch (const taocode::WorkspaceError& error) { injected = error.code == "INVALID_REQUEST"; }
         check(injected, "路径永远不会被读成命令行选项");
+        // 一批 pathspec 的**条数**上限由 `native/git.cpp:461`（`paths.size() > 500` ⇒ INVALID_REQUEST）把住：
+        // `git add -- <paths>` 与 `git commit --only -- <paths>` 都把整批路径拼进**一发**命令行，
+        // 所以超限的那一发必须在**调 git 之前**就被拦下。真放到 git 那一层，这些不存在的 pathspec 会让
+        // `git add` 以 GIT_FAILED 失败 ⇒ 断言错误码是 INVALID_REQUEST 本身就等于"git 没被调用"。
+        const auto tip_before_limit = taocode::git::log(root, "", 1).at("commits")[0].at("hash").get<std::string>();
+        std::vector<std::string> too_many;
+        for (int i = 0; i < 501; ++i) too_many.push_back("scope-p" + std::to_string(i) + ".txt");
+        bool over_limit = false;
+        std::string limit_reason;
+        try { taocode::git::commit(root, "over the limit", false, false, "", "", too_many); }
+        catch (const taocode::WorkspaceError& error) { over_limit = error.code == "INVALID_REQUEST"; limit_reason = error.what(); }
+        check(over_limit, "一次最多 500 个所选文件（超限必须在调 git 之前就被拦下）");
+        check(limit_reason.find("500") != std::string::npos, "拒因要说清上限是多少，got: " + limit_reason);
+        check(taocode::git::log(root, "", 1).at("commits")[0].at("hash").get<std::string>() == tip_before_limit,
+              "被拦下的那一发既没调 git 也没生成提交");
+        // 收尾前先确认「确实还有没提交的东西」：少了这一句，下面那句 rest.empty() 会在
+        // "收尾的 commit 其实什么也没提交" 时假绿（空 paths 的 commit 只吃 index，scope-b 是唯一那一发）。
+        check(!taocode::git::status(root).empty(), "空 paths 这一发之前确实还有没提交的东西");
         // 收尾：把留在暂存区的那一份提交掉，后面的用例需要一个干净的 index。
         taocode::git::commit(root, "scoped: the rest");
         // 失败信息带上"还剩哪几个文件、porcelain 的 XY 是什么"：这一档 check 的是**整个**工作区，
@@ -451,8 +478,14 @@ int main() {
 
     run("rebase replays commits on top of another branch", [&] {
         const auto trunk = default_branch(root);
-        git(root, L"add -A");
-        git(root, L"commit -q -m pre-rebase 2>NUL");  // settle any leftovers; no-op when clean
+        // 清场：把别处可能留下的改动收进一个提交，好让后面的 checkout / rebase 站在干净的树上。
+        // 注释原话是 "no-op when clean"，但 `git commit` 在干净树上返回 1（nothing to commit），
+        // 本文件的 `git()` 辅助函数把任何非零退出都当失败抛出来 ⇒ 之前它只有在"树上确实有脏东西"时
+        // 才走得过去（一路靠上面用例漏下的 a.txt 蒙对）。先查 status，才让"clean 时什么都不做"成立。
+        if (!taocode::git::status(root).empty()) {
+            git(root, L"add -A");
+            git(root, L"commit -q -m pre-rebase");
+        }
         git(root, L"checkout -q -b rebase-base");
         put(root / "rebase.txt", "base\n");
         git(root, L"add rebase.txt");

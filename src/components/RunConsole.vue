@@ -104,6 +104,13 @@ const props = defineProps<{
   active: number
   lines: readonly RunConsoleLine[]
   isDesktop: boolean
+  /**
+   * 按 ANSI 色号（0–15）的用户自定义前景，与终端面板同一份（宿主传 `general.terminalAnsiColors`）。
+   * 键是 JSON 里的字符串形态（`'3'`）；上游 `JBTerminalSchemeColorPalette.kt:23-25` 每取一个色号都回
+   * 配色方案要 `ColoredOutputTypeRegistryImpl.getAnsiColorKey(index)`（`:24`），坏值由
+   * `src/terminalColors.ts:70-72` 的 `pickColor` 丢弃 ⇒ 缺这一格就是不覆盖，行为与改造前一致。
+   */
+  ansiOverrides?: Record<string, string> | null
 }>()
 const emit = defineEmits<{
   select: [instance: number]
@@ -141,9 +148,9 @@ function readConsoleTheme(): void {
   consoleTheme.value = resolveTerminalThemeName(document.documentElement.dataset.theme)
 }
 const consolePalette = computed<TerminalColorPalette>(() => {
-  if (typeof document === 'undefined') return terminalPalette(consoleTheme.value)
+  if (typeof document === 'undefined') return terminalPalette(consoleTheme.value, undefined, undefined, props.ansiOverrides ?? undefined)
   const root = getComputedStyle(document.documentElement)
-  return terminalPalette(consoleTheme.value, root.getPropertyValue('--text').trim(), root.getPropertyValue('--editor').trim())
+  return terminalPalette(consoleTheme.value, root.getPropertyValue('--text').trim(), root.getPropertyValue('--editor').trim(), props.ansiOverrides ?? undefined)
 })
 onMounted(() => {
   if (typeof document === 'undefined') return

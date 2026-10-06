@@ -27,7 +27,7 @@
 //     `AllIcons.Ide.External_link_arrow` 图标（渲染层用 lucide `ExternalLink`）。
 
 import type { DocBlock, DocImage, DocLink, DocPart, QuickDocModel } from './documentationView.ts'
-import { docPartsFromMarks, docPartsToMarks, docTextFromMarks, externalDocumentationLinks } from './documentationView.ts'
+import { docBlock, docPartsFromMarks, docPartsToMarks, docTextFromMarks, externalDocumentationLinks } from './documentationView.ts'
 import type { HoverDocumentation } from './hoverDocumentation.ts'
 
 /**
@@ -205,6 +205,71 @@ function trimDocParts(parts: DocPart[]): DocPart[] {
 /** markdown 分节横线：`---` / `***` / `___`（`DocComment` 的分节写法）。 */
 const SECTION_RULE = /^(?:-{3,}|\*{3,}|_{3,})$/
 
+/**
+ * 这一行是不是一行的**起点**（要新开一块）：
+ *   · `'tag'` —— 剥掉前导空白与注释的 `*` 之后以 `@` 开头（`DocCommentLineDataBuilder.java:69-75`）；
+ *   · `'rule'` —— 整行是 markdown 的分节横线；
+ *   · `null` —— 普通行（`@param x` 的续行就走这一支，并进上一节）。
+ */
+function sectionStartOf(line: string): 'tag' | 'rule' | null {
+  if (SECTION_RULE.test(line.trim())) return 'rule'
+  return docCommentLineOffsets(line) ? 'tag' : null
+}
+
+/** 整行就是一个粗体表头（`**返回**`）：`previousHeader` 认的正是这一形状。 */
+function isBoldHeaderLine(line: string): boolean {
+  return /^\*\*(.+)\*\*$/.test(line.trim())
+}
+
+/**
+ * 把**一整段**里的标签行与分节横线拆成各自的小块。
+ *
+ * 为什么要拆：上游的粒度是**一行**—— `getLines()` 逐个 `\n` 切行（`DocCommentLineDataBuilder.java:39-52`），
+ * 每一行走一遍 `parseLine`（`:66-107`）；而 `parseQuickDoc` 只按**空行**分段（markdown 的段落）。
+ * 语言服务给回来的 javadoc 常常是「说明。\n@param a 参数\n@return 结果」这种行间不空一行的原样文本，
+ * 于是不拆的话整段落进 `content`，`CLASS_SECTIONS` 那一格（`DocumentationMarkup.java:26-31`）
+ * 在最常见的形状下一行都出不来。
+ * 标签行之后的普通行**跟着这一节**（`:44-45` 那个在行与行之间传的 `isTagLine` 就是这件事：
+ * `@param x` 的说明换行续写时仍属于 `@param x`），横线单独成块（它前一块是表头、后一块是节正文）。
+ */
+function splitSectionLines(blocks: DocBlock[], links: DocLink[]): DocBlock[] {
+  const out: DocBlock[] = []
+  for (const block of blocks) {
+    if (block.kind !== 'text') { out.push(block); continue }
+    // 按**带占位符的原文**切行：链接的位置在 `\u0002…\u0003` 里，切完再还原成分段才不会贴错地方。
+    const raw = docPartsToMarks(block.parts ?? [{ text: block.text }], links)
+    const lines = raw.split('\n')
+    if (lines.length < 2) { out.push(block); continue }
+    let group: string[] = []
+    const flush = (): void => {
+      if (!group.length) return
+      const text = group.join('\n').trim()
+      group = []
+      if (text) out.push(docBlock('text', text, links))
+    }
+    for (let at = 0; at < lines.length; ++at) {
+      const line = lines[at] as string
+      const start = sectionStartOf(line)
+      if (start === 'rule') {
+        flush()
+        const rule = line.trim()
+        if (rule) out.push(docBlock('text', rule, links))
+        continue
+      }
+      if (start === 'tag') { flush(); group = [line]; continue }
+      // 粗体表头后面紧跟横线时它属于**下一节**（`previousHeader` 读的就是横线前那一块）：
+      // 不拆的话「总述。\n**返回**\n---\n值」里表头和总述挤在同一块，那一节照样开不出来。
+      const next = lines[at + 1]
+      if (isBoldHeaderLine(line) && next !== undefined && SECTION_RULE.test(next.trim())) {
+        flush(); group = [line]; continue
+      }
+      group.push(line)
+    }
+    flush()
+  }
+  return out
+}
+
 /** 一节还没成形时的样子：表头 + 起点正文（`@tag` 那种被拆出来的）+ 后续并进来的块。 */
 interface SectionDraft {
   header: string
@@ -229,8 +294,9 @@ function splitSections(blocks: DocBlock[], links: DocLink[]): { content: DocBloc
   const content: DocBlock[] = []
   const drafts: SectionDraft[] = []
   let current: SectionDraft | null = null
-  for (let index = 0; index < blocks.length; ++index) {
-    const block = blocks[index]
+  const list = splitSectionLines(blocks, links)
+  for (let index = 0; index < list.length; ++index) {
+    const block = list[index]
     if (block.kind !== 'text') {
       // 代码块/标题不参与分节切分：它们原样留在正文里。
       if (current) current.blocks.push(block)
@@ -238,9 +304,9 @@ function splitSections(blocks: DocBlock[], links: DocLink[]): { content: DocBloc
       continue
     }
     if (SECTION_RULE.test(block.text.trim())) {
-      const header = previousHeader(blocks, index)
+      const header = previousHeader(list, index)
       if (header) {
-        const previous = blocks[index - 1]
+        const previous = list[index - 1]
         if (current && current.blocks.length && current.blocks[current.blocks.length - 1] === previous) current.blocks.pop()
         else if (!current && content.length && content[content.length - 1] === previous) content.pop()
         current = { header, head: null, headParts: null, blocks: [] }
@@ -248,7 +314,10 @@ function splitSections(blocks: DocBlock[], links: DocLink[]): { content: DocBloc
         continue
       }
     }
-    if (block.text.startsWith('@')) {
+    // 标签行的判据与 `docCommentLineOffsets` 同一条（前导空白 + 注释的 `*` 先剥，
+    // `DocCommentLineDataBuilder.java:69-75`）—— 旧判据只看 `startsWith('@')`，
+    // 于是带星号前缀的 ` * @param a 说明` 永远进不了分节表。
+    if (docCommentLineOffsets(block.text)) {
       const parsed = parseDocCommentLineParts(block, links)
       // 描述为空时表头就是标签本身（`@return` / `@see` 这类没有主题词的）。
       const header = parsed.subject || parsed.tag

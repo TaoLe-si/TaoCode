@@ -32,7 +32,7 @@ import { iconSize } from '../uiIcons'
 import { dapBreakpoints } from '../bridge'
 import {
   assignBreakpointsToGroup, breakpointGroupNodes, breakpointGroupState, groupBreakpointsByFile,
-  groupNameOf, groupMoveTargets, isBreakpointEnabled, loadGroupState, moveGroupContents, pathsOf, saveGroupState, setBreakpointsEnabled, setDefaultBreakpointGroup,
+  groupNameOf, groupMoveTargets, isBreakpointEnabled, loadGroupState, moveGroupContents, pathsOf, resolveNewGroupName, saveGroupState, setBreakpointsEnabled, setDefaultBreakpointGroup,
   type BreakpointGroupNode,
 } from '../breakpointGroups'
 // 断点的唯一下发口（属性并入 + 勾选位过滤 + 同文件合并 + 册子维护），见 `src/dbgBreakpointUpdate.ts` 文件头。
@@ -141,8 +141,10 @@ function toggleGroup(node: BreakpointGroupNode) {
 }
 function moveToGroup(ref: string, value: string) {
   if (value === NEW_GROUP) {
-    const name = window.prompt('新建组名称', '')?.trim()
-    if (!name) return
+    const name = resolveNewGroupName(window.prompt('新建组名称', ''))
+    // 上游 `MoveToGroupAction` 的 `if (groupName == null) return`（`:547-549`）：取消 ⇒ 一条都不动；
+    // 空名按了确定则是 `<无组>`（`XBreakpointCustomGroupingRule.kt:24` 的 takeIf{isNotEmpty}）。
+    if (name === null) return
     assignBreakpointsToGroup([ref], name)
   } else assignBreakpointsToGroup([ref], value === NO_GROUP ? null : value)
   saveGroupState(storage, props.root ?? '')
@@ -150,12 +152,21 @@ function moveToGroup(ref: string, value: string) {
 /** 组节点上的「移至组」= 整组搬迁：上游 `MoveToGroupAction` 循环的是
  *  `getSelectedBreakpoints(true)`，而 `traverse = true` 那一支会对选中节点**先深遍历子树**
  *  （`BreakpointItemsTreeController.java:187-194`）⇒ 选中组节点改组 = 组里每条断点一起 `setGroup`，
- *  逐条那一格不动。子菜单第一项 `<无组>`（`BreakpointsDialog.java:332`）与「新建…」(`:338`) 对组同样成立。
- *  上游**没有**「组的改名/删除」两个动作（组只是断点上的字符串 ⇒ 见 src/breakpointGroups.ts 的 `moveGroupContents`），
+ *  逐条那一格不动。子菜单第一项 `<无组>`（`BreakpointsDialog.java:324`；**留痕**：这里原写 `:332`，
+ *  dap3 逐行数过参考树后 `:332` 是那条 stream 的 `.sorted()`，`res.add(new MoveToGroupAction(null))` 在 `:324`
+ *  —— 与 `src/breakpointGroups.ts` 里同一处订正对齐）与「新建…」(`:338`) 对组同样成立。
+ *  上游**没有**「组的改名/删除」两个动作（组只是断点上的字符串 ⇒ 见 src/breakpointGroups.ts 的 `moveGroupContents`；
+ *  全树 `grep -rn "RenameGroup\|RemoveGroupAction\|DeleteGroup" platform/xdebugger-impl` 零命中），
  *  所以这里也只有搬迁，不另造假控件。 */
 function moveWholeGroup(node: BreakpointGroupNode, value: string) {
   if (value === MOVE_GROUP) return
-  const target = value === NEW_GROUP ? window.prompt('新建组名称', '')?.trim() ?? '' : value === NO_GROUP ? '' : value
+  let target: string
+  if (value === NEW_GROUP) {
+    const name = resolveNewGroupName(window.prompt('新建组名称', ''))
+    // 上游 `:547-549`：取消 = 一条都不动。原来这里把取消折成空串 ⇒ 按一次 Esc 就把整组搬去「无组」。
+    if (name === null) return
+    target = name
+  } else target = value === NO_GROUP ? '' : value
   const moved = moveGroupContents(allRefs.value, node.name, target || null)
   if (moved.length) saveGroupState(storage, props.root ?? '')
 }

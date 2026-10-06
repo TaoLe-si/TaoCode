@@ -11,7 +11,7 @@
 
 ## N0 · 本轮自己落地的模块侧那一半（不需要接线，只登记）
 
-- 文件：`src/quickDocHost.ts:226-233`（自动更新那一拍的 `window.setTimeout` 回调体）+ `:27` 的 import 补 `shouldAutoUpdateDoc`。
+- 文件：`src/quickDocHost.ts:227-233`（自动更新那一拍的 `window.setTimeout` 回调体，新增的是 `:230-232`）+ `:27` 的 import 补 `shouldAutoUpdateDoc`。
 - 内容：去抖到期时**再问一次**档位，再决定要不要取文档。
 - 上游依据（本轮逐字打开）：`platform/lang-impl/src/com/intellij/lang/documentation/ide/impl/DocumentationToolWindowManager.kt:121`
   的 `if (!autoUpdate) {`、`:191` 与 `:219` 的 `if (autoUpdate) {` —— 三处读属性的位置都在**真正动手那一刻**，不在排程那一刻。
@@ -23,7 +23,7 @@
 ## N1 · `src/settingsPersistence.ts`：把两档从盘上灌回运行时单例（K-5 读回 = 桶 3a 的 R3 = 桶 lsp 的 L3）
 
 - 目标文件：`src/settingsPersistence.ts`（**不在本面**）
-- 目标行号：第 **86** 行 —— 本轮实测该行逐字是
+- 目标行号：第 **86** 行（本轮两次实测都是 86）—— 该行逐字是
   `      editorSettings.value = await request<EditorSettings>('settings.update', { settings })`
   （与桶 lsp 写的 `:86` 一致，**行号未漂**；全文件 `grep docHoverPolicyFromSettings` 本轮实测 **0 命中**）
 - **在第 86 行之后插两行**（可照抄）：
@@ -48,9 +48,8 @@
 ## N2 · `src/App.vue`：齿轮落盘 + 打开 `can-toggle-hover`（K-5 写回 = 桶 3a 的 R2 = 桶 lsp 的 L2）
 
 - 目标文件：`src/App.vue`（**保留文件**，本轮一行没动）
-- **订正行号（留痕）**：桶 lsp 那份写 `<QuickDocPopup>` 在 `:2372`、`saveSettingsPatch` 在 `:652`；
-  本轮实测分别是 **`:2396`** 与 **`:665`**（内容不变，行号漂了 24 / 13 行）。
-- 改法一（第 **2396** 行，只在行尾 `/>` 之前插两个属性，其余一字不动）：
+- **订正行号（留痕）**：桶 lsp 那份写 `<QuickDocPopup>` 在 `:2372`、`saveSettingsPatch` 在 `:652`；本轮两次实测分别是 **`:2396`** 与 **`:2397`**（该文件正被 `appvue` 改，每次数都会漂）与 **`:665`** —— 内容不变，落地前重读。
+- 改法一（第 **2397** 行（本轮末次实测），只在行尾 `/>` 之前插两个属性，其余一字不动）：
 
 ```
   :can-toggle-hover="true"
@@ -74,15 +73,13 @@ function applyDocHoverPolicy(patch: Record<string, boolean>) { void saveSettings
 - **为什么 `:can-toggle-hover` 必须和 N3 同批**：那颗按钮的生效点在 N3（hover 通道问 `shouldShowDocOnHover()`）。
   本轮实测 `src/components/QuickDocPopup.vue:148` 是 `v-if="canToggleHover"`，缺省为假 ⇒ 现在**不渲染**（合规）。
   N3 落地之前单独打开它 = 一枚勾了没反应的假控件（派单规约 §3 假控件禁令）。
-  `tests/doc-hover-policy.test.mjs:100` 与 `tests/setkeys-batch.test.mjs:181` 钉的就是「没有生效点不许渲染」。
+  `tests/doc-hover-policy.test.mjs:98` 与 `tests/setkeys-batch.test.mjs:181` 钉的就是「没有生效点不许渲染」。
 - 判据：`tests/doc-hover-policy.test.mjs`（齿轮与 emit 两条已在）；接完请加一条「`@policy-change` 的处理器走 `saveSettingsPatch`」。
 
 ## N3 · `src/components/CodeEditor.vue`：hover 通道改用共享的文档取用面（= 桶 3a 的 R1 = 桶 lsp 的 L1）
 
 - 目标文件：`src/components/CodeEditor.vue`（**保留文件**）
-- 目标行号：第 **511-516** 行 —— 本轮逐字实测这一段就是桶 lsp 抄的那六行（`:512` 发 `lsp.request` hover、
-  `:515` 把 `contents` 原样 `textContent` 贴进 tooltip；`:517` 是 `}, { hoverTime: 250, hideOnChange: true })`，
-  桶 lsp 那句「3a 写的 512-517 多数了一行」的订正**成立**）。
+- 目标行号：**第 505-510 行**（本轮收工时实测；桶 lsp 那份写的 511-516 已被同一时间窗里该域的其它改动**上移 6 行** ⇒ 留痕：原写 511-516、实测 505-510）。逐字实测：`:505` `try {`、`:506` 发 `lsp.request` 的 `kind: 'hover'`、`:507` `if (!result.available || !result.contents) return null`、`:508` `const contents = result.contents`、`:509` 把 `contents` 原样 `textContent` 贴进 tooltip、`:510` `} catch { return null }`、`:511` 才是 `}, { hoverTime: 250, hideOnChange: true })`（桶 lsp 那句「3a 写的 512-517 多数了一行」的订正**成立**，只是两端都要再减 6）。
 - 顶部 import 段补一行（`import { … } from '../bridge'` 那一段之后）：
 
 ```ts
@@ -91,7 +88,7 @@ function applyDocHoverPolicy(patch: Record<string, boolean>) { void saveSettings
 import { hoverDocStampOf, sharedDocHover } from '../docHoverContent.ts'
 ```
 
-- 第 **511-516** 行整段替换为：
+- 第 **505-510** 行整段替换为：
 
 ```ts
   // 「在鼠标移动时显示」这一档关掉时这里返回 null —— 与上游一致：不是改成显示别的，
@@ -117,16 +114,13 @@ import { hoverDocStampOf, sharedDocHover } from '../docHoverContent.ts'
   本轮实测**零生产消费方**（`hoverDocStampOf` 在整个 `src/` 里只被 `src/semanticHighlighting.ts:47` 的一句注释提到，不是 import）。
   不接 N3，`native/lsp_session.cpp` 已经透传出来的 hover `range` 与 `src/hoverDocumentation.ts` 的按区间命中
   （上游 `HoverResultCache.kt:11-12`）就永远没人读。
-- 行数提醒：`src/components/CodeEditor.vue` 现在 **1151 行 > 登记上限 1147**（`node --test tests/module-size.test.mjs`
-  开工起就红这一条）。上面这段是 +3 行的净增 ⇒ **先拆一处**（候选：把 hover 那整段抽成一个 `src/editorDocHover.ts`
-  模块，正好就是 N3 在做的事），**不要抬上限**。
+- 行数提醒：`src/components/CodeEditor.vue` 的登记上限是 **1147**，本批开工时它 **1151 行**（`node --test tests/module-size.test.mjs` 红的那一条就是它），本批期间该域自己把它降到 **1144** ⇒ 收工时门已复绿，但**只剩 3 行余量**。上面这段替换是 **+4 行的净增** ⇒ 落地时**顺手拆一处**（最自然的就是把 hover 那整段抽成 `src/editorDocHover.ts`，正好与 N3 同源），**不要抬上限、不要登记豁免**。
 
 ## N4 · `src/style.css`：弹层几何与 `DOC_POPUP_METRICS` 对不上（登记了上游真值但没人读）
 
 - 目标文件：`src/style.css`（保留文件）；目标行：**1321**
   `.quickdoc-popup { … width: 460px; max-height: 300px; … }`
-- 现状（本轮实测）：`src/quickDocLayout.ts:40-69` 的 `DOC_POPUP_METRICS` 抄的是上游真值，
-  本轮 grep 实测它在 `src/` 与 `src/components/` 里**没有任何生产消费方**（只有 `tests/doc-layout.test.mjs:82-94` 在钉数值）
+- 现状（本轮实测）：`src/quickDocLayout.ts:40-69` 的 `DOC_POPUP_METRICS` 抄的是上游真值，本轮 grep 实测它在 `src/` 与 `src/components/` 里**没有任何生产消费方**（只有 `tests/doc-layout.test.mjs:89-94` 在钉数值）
   ⇒ 「抄了不用」的那一半就是这一行 CSS。
 - 上游依据（本轮打开 `sed -n '44,77p'` 逐条对过）：
   `platform/lang-impl/src/com/intellij/codeInsight/documentation/DocumentationHtmlUtil.kt:46`（`contentOuterPadding = 14`）、
@@ -160,9 +154,8 @@ import { hoverDocStampOf, sharedDocHover } from '../docHoverContent.ts'
   `src/completionUi.ts` 的 `completionUi(sources)` 里按设置决定是否把 `.cm-completionInfo` 常驻（默认关，照 `:66` 的出厂档）。
   在那之前**不渲染**任何入口 —— 假控件禁令。
 
-## N6 · `tests/module-size.test.mjs` 那条红本批解不了（登记给主代理）
+## N6 · `tests/module-size.test.mjs`：开工红、收工绿（留痕给主代理）
 
-- 现象：`node --test tests/module-size.test.mjs` ⇒ 5 条里红 1 条：
-  `src/components/CodeEditor.vue 现在 1151 行 > 上限 1147`。
-- 归属：`src/components/CodeEditor.vue` 是别人的可改面且**开工时就已红**（本批 `git diff` 里没有它）。
-- 需要做的事：由该域自己拆一次（N3 的抽模块正好能顺手降它），**不要**抬上限或登记豁免（派单 §5）。
+- 开工实测：5 条里红 1 条 —— `src/components/CodeEditor.vue 现在 1151 行 > 上限 1147`（**别人名下**，本批 `git diff` 里没有该文件）。
+- 收工实测：**5 / 5 全绿**（该域在本批期间自己把它降到 1144）。上限一个没动、没有新增豁免。
+- 留给 N3 的约束：现在只剩 3 行余量，接 hover 通道时**必须顺手拆**，不要抬上限（派单 §5）。

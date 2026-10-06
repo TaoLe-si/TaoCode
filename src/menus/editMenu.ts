@@ -187,8 +187,13 @@ export interface EditMenuContext {
     // 这一行的键位栏先留空，等键位真的注册了再填（不编一个按下去没反应的加速键）。
     ctx.editable('brace.match', '移动到配对的括号', 'Ctrl Shift M', 'match brace 配对括号 匹配括号'),
     { id: 'edit.rule4', rule: true },
-    ctx.editable('cursor.above', '在上行添加光标', 'Ctrl Alt Shift ↑', 'multiple cursors column 多光标'),
-    ctx.editable('cursor.below', '在下行添加光标', 'Ctrl Alt Shift ↓', 'multiple cursors column 多光标'),
+    // 克隆光标上/下（上游 `EditorCloneCaretAbove`/`EditorCloneCaretBelow`）：**键位栏是空的**，
+    // 上游 `$default.xml` 里这两个动作没有任何键位（platform/platform-impl/resources/
+    // intellij.platform.ide.impl.actions.xml:218-219 只注册动作），而 Ctrl+Alt+Shift+↑/↓ 在上游是
+    // `ResizeToolWindowUp/Down`（`$default.xml:879-884`）⇒ 本仓那两行编辑器键位已摘，不编加速键
+    // （判决与证据 `docs/batch-2026-10-06-keymap2.md` R3；三态表在 `src/keymapBindings.ts` 的 `EDITOR_ACTIONS`）。
+    ctx.editable('cursor.above', '在上行添加光标', '', 'clone caret above 多光标 上行 EditorCloneCaretAbove'),
+    ctx.editable('cursor.below', '在下行添加光标', '', 'clone caret below 多光标 下行 EditorCloneCaretBelow'),
     ctx.editable('occurrence.next', '添加下一个匹配', 'Alt J', 'next occurrence multiple cursors 下一个匹配'),
     ctx.editable('occurrence.select', '选中所有相同内容', 'Ctrl Shift Alt J', 'all occurrences 所有匹配'),
     // 折叠这一族**不在编辑菜单里**：上游是 Code 菜单的 `FoldingGroup` 子菜单

@@ -197,14 +197,85 @@ test('每个 [~] 行都写清「还差什么」（缺/还差/未/没有…），
  * 与 B7 的交叉核对。本域清单（`settings-run.txt`）与 find/diff 域清单重叠 630 个上游路径，
  * 所以这 630 行**逐条**核，不再只核「嘴上说继承」的那些行：
  *   · 档位与 B7 相同 ⇒ 必须就地写「继承 B7 判决」，否则一致只是巧合，没人核对过；
- *   · 档位与 B7 不同 ⇒ 只允许两种机械可核的漂移：
+ *   · 档位与 B7 不同 ⇒ 只允许三种机械可核的漂移：
  *     (a) B7 判 `[-]` 而本域的 `[-]` 六个理由标记核对不上（§B 收紧：接口/抽象类按行为判，
  *         控件本体必须点名本仓 DOM 落点）⇒ 本行必须写「B7 判 [-]」并保留行为档；
- *     (b) B9 判 `[-]` 而 B7 判行为档，且本行路径确实落在测试源码集/生成目录里（机械硬标记优先）。
+ *     (b) B9 判 `[-]` 而 B7 判行为档，且本行路径确实落在测试源码集/生成目录里（机械硬标记优先）；
+ *     (c) **已登记的跨批升档未同步**（`REGISTERED_DRIFT`，2026-10-06 b89 新增）：别的批次把 B7 那一行
+ *         按行为升了档，而 B9 的镜像行还停在旧档，且 B9 那张文档不在本次可改面 ⇒ 逐条登记 +
+ *         证据机械复核（见下面那张表的注释），漂移修好后必须删条目，否则本用例红。
  * 原来的写法是「只核 why 里出现『继承 B7 判决』的行 + 下限 600 条」，而文档一条都没声明 ⇒
  * 实际交叉核对 0 条（下限把它判红，等于这条判据从来没跑过）；现在核对数由枚举重叠数决定，
  * 只增不减。反向验证：把某同档行的「继承 B7 判决」删掉 → 红；把某行档位乱改成 [~] → 红。
  */
+
+// —— 上面 (c) 档用的登记表：不是豁免名单，是「带证据、必须仍然成立、修好就失效」的待办 ——
+const UPSTREAM_ROOT = process.env.B9_UPSTREAM || 'D:/Backup/Downloads/intellij-community-master/intellij-community-master'
+const fileCache = new Map()
+const linesOf = relative => {
+  if (!fileCache.has(relative)) {
+    let text = null
+    try { text = read(relative).split('\n') } catch { text = null }
+    fileCache.set(relative, text)
+  }
+  return fileCache.get(relative)
+}
+const upstreamAvailable = existsSync(UPSTREAM_ROOT)
+const upstreamLines = relative => linesOf(join(UPSTREAM_ROOT, relative))
+/** 把一条 `路径:行号` 证据钉成「那一行必须含这个符号」。 */
+const EVIDENCE_SHAPE = ['file', 'line', 'token']
+function checkEvidence(name, evidence, source, label) {
+  for (const item of evidence) {
+    assert.deepEqual(Object.keys(item).sort(), EVIDENCE_SHAPE,
+      `${name}: ${label}证据 ${JSON.stringify(item)} 必须是 {file, line, token} 三件套（不许只写「见某文件」）`)
+    assert.ok(Number.isInteger(item.line) && item.line > 0, `${name}: ${label}证据的行号不是正整数：${item.file}:${item.line}`)
+    assert.ok(item.token.length >= 6, `${name}: ${label}证据的符号太短（${item.token}），锚不住那一行`)
+    const text = source(item.file)
+    assert.ok(text, `${name}: ${label}证据读不到文件 ${item.file}`)
+    assert.ok(text.length >= item.line,
+      `${name}: ${label}证据 ${item.file}:${item.line} 超出文件长度（${text.length} 行）`)
+    const line = text[item.line - 1]
+    assert.ok(line.includes(item.token),
+      `${name}: ${label}证据 ${item.file}:${item.line} 那一行是「${line.trim().slice(0, 70)}」，不含钉住的符号「${item.token}」`)
+  }
+}
+
+/**
+ * 已登记的跨域漂移。每条都由本用例逐条机械复核：
+ *   ① B7/B9 的档位必须仍然等于登记的这一对（任一侧再改判 ⇒ 登记失效 ⇒ 红，逼来人重登记或删条目）；
+ *   ② B9 那一行必须仍然写着「继承 B7 判决」（它是 B7 的镜像行，不是本域的独立判决）；
+ *   ③ `repo` 里每条 `文件:行号` 都要在磁盘上、且那一行仍含钉住的符号；
+ *   ④ `upstream` 里每条 `路径:行号` 同样逐行核（基准树不在本机时按本仓惯例跳过这一小步，①②③⑤照跑）；
+ *   ⑤ `batch` 要写清是哪一批升的档、`pending` 要指向一份**真实存在**的 wiring 请求（没同步的原因与补丁在哪儿）。
+ * 没被任何漂移命中的条目也判红 ⇒ 镜像行修好后，这张表必须跟着删干净。
+ */
+const REGISTERED_DRIFT = [
+  {
+    name: 'ApplyNonConflictsAction',
+    path: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt',
+    b7: '[x]',
+    b9: '[~]',
+    batch: '2026-10-06 fold3 lane（docs/batch-2026-10-06-merge3.md）把 B7 那一行按行为 [~] → [x]',
+    pending: 'docs/wiring-requests-2026-10-06-b89.md',
+    reason: '两桶按当前代码**确实应当同档 [x]**：B9 的镜像行仍写着「缺：自动接受全部不冲突改动」，'
+      + '而这一整条链在本仓已经落地（下面 repo 五条逐行开过）。漂移的原因是 settings-run 判决书不在'
+      + '本次可改面（改它要连带动头部四档和数与 §A/§B 小节标题，归 settings-run 那条 lane），'
+      + '所以按 (c) 档登记而不是改文档迁就测试。',
+    upstream: [
+      { file: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt', line: 31, token: 'hasNonConflictedChanges' },
+      { file: 'platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt', line: 35, token: 'applyNonConflictedChanges' },
+    ],
+    repo: [
+      { file: 'src/mergeResolve.ts', line: 408, token: 'resolveConflictsInText' },
+      { file: 'src/mergeResolve.ts', line: 427, token: 'onlyNonConflicts' },
+      { file: 'src/mergeResolve.ts', line: 450, token: 'APPLY_NON_CONFLICTS_TEXT' },
+      { file: 'src/changesMenuActions.ts', line: 67, token: 'applyNonConflicts' },
+      { file: 'src/mergeResolveHost.ts', line: 43, token: 'applyNonConflictingChanges' },
+      { file: 'src/components/SourceControl.vue', line: 227, token: 'applyNonConflicts' },
+    ],
+  },
+]
+
 test('与 B7 的 630 条重叠类逐条交叉核对（同档必须声明继承，异档必须给本域机械理由）', () => {
   const b7 = b7Rows()
   assert.equal(b7.size, 630, `B7 §G 应有 630 行，实为 ${b7.size}`)
@@ -212,6 +283,11 @@ test('与 B7 的 630 条重叠类逐条交叉核对（同档必须声明继承�
   assert.ok(shared.length >= 600, `与 B7 的枚举重叠只有 ${shared.length} 条，交叉核对覆盖太薄`)
   let declared = 0
   let justified = 0
+  let registered = 0
+  const hitDrift = new Set()
+  assert.deepEqual(
+    REGISTERED_DRIFT.map(item => item.path).filter((path, index, all) => all.indexOf(path) !== index),
+    [], '登记表里同一个上游路径登记了两遍（重复条目会让漂移只核一次）')
   for (const row of shared) {
     const upstream = b7.get(row.path)
     assert.equal(upstream.name, row.name, `${row.path} 在两份判决里类名不一致`)
@@ -243,17 +319,47 @@ test('与 B7 的 630 条重叠类逐条交叉核对（同档必须声明继承�
       justified += 1
       continue
     }
+    // (c) 已登记的跨批升档未同步：逐条机械复核，不给「写句理由就放行」的口子。
+    const drift = REGISTERED_DRIFT.find(item => item.path === row.path && item.name === row.name)
+    if (drift) {
+      assert.equal(upstream.verdict, drift.b7,
+        `${row.name}: 登记的 B7 档位是 ${drift.b7}，现值 ${upstream.verdict} ⇒ B7 又改判了，这条登记要么重写要么删掉`)
+      assert.equal(row.verdict, drift.b9,
+        `${row.name}: 登记的 B9 档位是 ${drift.b9}，现值 ${row.verdict} ⇒ 本域这一侧也变了，重新核对后再登记`)
+      // 只允许「镜像行落后于较新的一边」这一种方向：反过来用这张表就是拿登记表给降档擦屁股。
+      const RANK = { '[ ]': 0, '[~]': 1, '[x]': 2 }
+      assert.ok(RANK[drift.b9] < RANK[drift.b7],
+        `${row.name}: 登记的漂移方向不对（B9=${drift.b9} 必须严格低于 B7=${drift.b7}）⇒ B7 被降档不是「未同步」，要单独复核`)
+      assert.ok(row.why.includes('继承 B7 判决'),
+        `${row.name}: 登记为 B7 的镜像行，可 why 里没写「继承 B7 判决」⇒ 那它是本域独立判决，不该走这张登记表`)
+      assert.ok(drift.repo.length >= 2, `${row.name}: 本仓证据少于两条（登记表在空转）`)
+      assert.ok(drift.upstream.length >= 1, `${row.name}: 上游证据少于一条（登记表必须钉住上游那一行）`)
+      checkEvidence(row.name, drift.repo, rel => linesOf(rel), '本仓')
+      if (upstreamAvailable) checkEvidence(row.name, drift.upstream, rel => upstreamLines(rel), '上游')
+      assert.match(drift.batch, /^\d{4}-\d{2}-\d{2} /u, `${row.name}: batch 要以日期开头（哪一批升的档）`)
+      assert.ok(drift.reason.length >= 60, `${row.name}: 漂移理由不足 60 字 ⇒ 那是空口豁免，不是登记`)
+      assert.match(drift.pending, /^docs\/wiring-requests-/u, `${row.name}: pending 要指向一份 wiring 请求文档`)
+      assert.ok(existsSync(join(root, drift.pending)),
+        `${row.name}: 登记的未同步落点 ${drift.pending} 不存在 ⇒ 补丁没交接就不能算「已登记的漂移」`)
+      registered += 1
+      hitDrift.add(drift.name)
+      continue
+    }
     assert.fail(
       `${row.name}: 与 B7 档位漂移且无本域机械理由（B7=${upstream.verdict} B9=${row.verdict}）`,
     )
   }
+  assert.deepEqual(
+    REGISTERED_DRIFT.filter(item => !hitDrift.has(item.name)).map(item => item.name),
+    [], '这些登记已经不再对应任何真实漂移（镜像行同步好了、或档位又变了）⇒ 把条目从 REGISTERED_DRIFT 删掉：'
+      + REGISTERED_DRIFT.filter(item => !hitDrift.has(item.name)).map(item => item.name).join(', '))
   assert.equal(
-    declared + justified,
+    declared + justified + registered,
     shared.length,
-    `交叉核对没跑满：${declared} 条声明继承 + ${justified} 条有据漂移 != ${shared.length} 条重叠`,
+    `交叉核对没跑满：${declared} 条声明继承 + ${justified} 条有据漂移 + ${registered} 条已登记未同步 != ${shared.length} 条重叠`,
   )
   assert.ok(declared >= 300, `只有 ${declared} 条真的继承了 B7 的逐类判决，覆盖太薄`)
-  return { declared, justified, shared: shared.length }
+  return { declared, justified, registered, shared: shared.length }
 })
 
 test('判决把「三态」写进信号总账（引用注释 ≠ 移植）', () => {

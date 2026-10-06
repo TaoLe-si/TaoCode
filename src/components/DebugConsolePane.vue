@@ -3,9 +3,11 @@
 //
 // 本轮补的是上游控制台工具栏上的「Pause output」——
 // `platform/execution-impl/src/com/intellij/execution/actions/PauseOutputAction.java:18`
-// （ToggleAction）/ `:31-43`（读写 `ConsoleView.isOutputPaused` / `setOutputPaused`）/
-// `:44-52`（可用与「有延迟输出」判据）/
+// （ToggleAction）/ `:29-40`（读 `ConsoleView.isOutputPaused` `:31` / 写 `setOutputPaused` `:38`）/
+// `:48-65`（可用与「有延迟输出」判据，`:64` 是 `setEnabledAndVisible` ⇒ 不可用就整格不出现）/
 // `platform/execution-impl/resources/intellij.platform.execution.impl.actions.xml:72`（`id="PauseOutput"`）。
+// 后两组行号是 dap3 逐行重数过参考树的订正（原写法指歪了，留痕见 `docs/batch-2026-10-06-dap3.md`，
+// 钉住内容的判据在 `tests/debug-console-freeze.test.mjs`）。
 // 调试器标签页里的控制台就是这一个 ConsoleView（`XDebugSessionTab` 的内容面板），
 // 所以它记在 dbg/actions 判词里。规则在 `src/debugConsoleFreeze.ts`。
 //
@@ -13,11 +15,11 @@
 // 数在标题上写出来（上游 `hasDeferredOutput()`），恢复跟随的那一刻滚到底。
 import { computed, nextTick, ref, watch } from 'vue'
 import { Pause, Play } from 'lucide-vue-next'
-import { dapConsole } from '../bridge'
+import { dapConsole, dapState } from '../bridge'
 import { iconSize } from '../uiIcons'
 import {
   CONSOLE_CAN_PAUSE, PAUSE_OUTPUT_LABEL, deferredOutputNote, deferredLines,
-  markForPause, shouldFollowOutput, shouldRevealOnResume,
+  markForPause, pauseOutputVisible, shouldFollowOutput, shouldRevealOnResume,
 } from '../debugConsoleFreeze'
 
 const consoleBox = ref<HTMLElement>()
@@ -27,6 +29,11 @@ const markedAt = ref<number | null>(null)
 
 const note = computed(() => deferredOutputNote(dapConsole.length, markedAt.value))
 const pending = computed(() => deferredLines(dapConsole.length, markedAt.value))
+// 上游 `PauseOutputAction.update()` 走的是 `setEnabledAndVisible`（`:64`）：会话已结束、
+// 也没有暂停中的积压时，这一格**不出现**（本仓 `canPause()` 恒真，见 src/debugConsoleFreeze.ts）。
+const pauseAvailable = computed(() => pauseOutputVisible({
+  processRunning: dapState.running, hasDeferred: pending.value > 0,
+}))
 
 function scrollToBottom() {
   if (consoleBox.value) consoleBox.value.scrollTop = consoleBox.value.scrollHeight
@@ -39,8 +46,9 @@ watch(() => dapConsole.length, async () => {
 
 function togglePause() {
   const next = !paused.value
-  // 上游 `canPause()` 在本仓恒真（见 src/debugConsoleFreeze.ts），所以没有「点不动」的形态。
-  if (!CONSOLE_CAN_PAUSE) return
+  // 上游 `canPause()` 在本仓恒真（见 src/debugConsoleFreeze.ts）；「会话结束且无积压」那一档
+  // 在上游是 `setEnabledAndVisible(false)` ⇒ 按钮根本不存在，走不到这里（见模板的 `v-if`）。
+  if (!CONSOLE_CAN_PAUSE || !pauseAvailable.value) return
   if (shouldRevealOnResume(dapConsole.length, markedAt.value) && !next) {
     paused.value = false
     markedAt.value = markForPause(false, dapConsole.length)
@@ -55,8 +63,9 @@ function togglePause() {
 <template>
   <div class="debug-section-title">
     调试控制台
-    <!-- 上游 PauseOutputAction：控制台工具栏的「暂停输出」开关（冻结跟随滚动，不拦数据）。 -->
-    <button class="chip-x debug-console-action" :class="{ active: paused }"
+    <!-- 上游 PauseOutputAction：控制台工具栏的「暂停输出」开关（冻结跟随滚动，不拦数据）。
+         开关的出不出走 `pauseOutputVisible`（上游 `:53-64`：`canPause()` 与「进程没结束 或 有延迟输出」，末行 `setEnabledAndVisible`）。 -->
+    <button v-if="pauseAvailable" class="chip-x debug-console-action" :class="{ active: paused }"
             :title="paused ? '恢复输出（跟随滚动到底部）' : '暂停输出（不再跟随滚动，调试器仍在收）'"
             :aria-label="paused ? '恢复输出' : PAUSE_OUTPUT_LABEL" :aria-pressed="paused" @click="togglePause">
       <Play v-if="paused" :size="iconSize.chip" /><Pause v-else :size="iconSize.chip" />

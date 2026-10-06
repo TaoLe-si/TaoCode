@@ -1,5 +1,5 @@
 import type { RunConfig } from './settingsModel'
-import { isJarRunConfig, JAR_RUN_CONFIG_TYPE_ID, jarRunConfigProblem } from './jarRun.ts'
+import { JAR_RUN_CONFIG_TYPE_ID, jarRunConfigProblem } from './jarRun.ts'
 
 /**
  * 本仓运行配置类型的**唯一运行时段清单**（上游是 `ConfigurationType` 的注册表，
@@ -32,9 +32,12 @@ export const RUN_CONFIG_TYPE_FAMILY_IDS: readonly RunConfigTypeId[] = ['shell', 
 /** 家族里等宿主两处接线的那几个；宿主接完就把这一项删掉（`docs/wiring-requests-2026-10-06-runcfg3.md` 的 J1）。 */
 export const RUN_CONFIG_TYPE_IDS_HOST_PENDING: readonly RunConfigTypeId[] = [JAR_RUN_CONFIG_TYPE_ID]
 
-/** 今天真能落盘的清单 = 家族 − 宿主未接。表单、左树、schema、执行参数都以它为准。 */
-export const RUN_CONFIG_TYPE_IDS: readonly RunConfigTypeId[] =
-  RUN_CONFIG_TYPE_FAMILY_IDS.filter(id => !RUN_CONFIG_TYPE_IDS_HOST_PENDING.includes(id))
+/** 今天真能落盘的清单 = 家族 − 宿主未接。表单、左树、schema、执行参数都以它为准。
+ *  元素类型取 `settingsModel.ts` 的联合（那条 `id is …` 判据就是「不在 pending 里 ⇒ 宿主接得了」）：
+ *  pending 里剩什么就投影掉什么 ⇒ 摘掉一项之前 jar 不会漏进 UI。 */
+export const RUN_CONFIG_TYPE_IDS: readonly NonNullable<RunConfig['type']>[] =
+  RUN_CONFIG_TYPE_FAMILY_IDS.filter((id): id is NonNullable<RunConfig['type']> =>
+    !RUN_CONFIG_TYPE_IDS_HOST_PENDING.some(pending => pending === id))
 
 /** 配置记录里的 type 归一成 `RunConfigTypeId`（缺省按 shell，与左树分组同一口径）。 */
 export function runConfigTypeIdOf(type: RunConfig['type'] | undefined): RunConfigTypeId {
@@ -60,10 +63,22 @@ export function normalizeRunConfigurations(raw: unknown): RunConfig[] {
   const keys = new Set(['name', 'type', 'command', 'program', 'args', 'cwd', 'env', 'beforeLaunch', 'adapter', 'folder', 'allowRunningInParallel', 'configurations'])
   if (!Array.isArray(raw) || raw.length > 40) throw new Error('运行配置必须是数组，最多 40 个。')
   const configs = raw as RunConfig[]
+  // JAR 那一族的**入口判据排在最前**（`src/jarRun.ts` 的 `jarRunConfigProblem`）：
+  // 「参数里没写 -jar <路径>」这种人写的错要报成人看得懂的那一句，不能被下面的「字段无效」糊过去。
+  // 上游同族判据：`JarApplicationConfiguration.java:128-131` 只对**文件不存在**给 warning（jarPath 已填的情况），
+  // 而 jarPath 空时 `JarApplicationCommandLineState.java:24` 拼出来的是一条没有 jar 的命令行
+  // ⇒ 本仓按 `RunConfiguration.java:156-167` 的致命档（RuntimeConfigurationError）报，不静默。
+  for (const config of configs) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) continue
+    const problem = jarRunConfigProblem(config)
+    if (problem) throw new Error(problem)
+  }
   if (configs.some(config => !config || typeof config !== 'object' || Array.isArray(config)
     || Object.keys(config).some(key => !keys.has(key)) || !text(config.name, 80, true)
     || !text(config.command, 4096, config.type !== 'compound' && !config.program)
-    || (config.type !== undefined && !RUN_CONFIG_TYPE_IDS.includes(config.type))
+    // 「模块侧已登记、宿主还没接」的类型在这里**先放过**，由下面那条指名道姓的错接手；
+    // 清单外的 id（打错的、别处来的）仍然落进「字段无效」这一句。
+    || (config.type !== undefined && !RUN_CONFIG_TYPE_IDS.includes(config.type) && !isHostPendingType(config.type))
     || (config.program !== undefined && !text(config.program, 1024))
     || (config.cwd !== undefined && !text(config.cwd, 1024))
     || (config.args !== undefined && !list(config.args, 256, 1024))
@@ -75,6 +90,14 @@ export function normalizeRunConfigurations(raw: unknown): RunConfig[] {
       || config.beforeLaunch.some(step => !step || typeof step !== 'object' || Array.isArray(step)
         || Object.keys(step).some(key => key !== 'name' && key !== 'command') || !text(step.name, 80, true) || !text(step.command, 4096, true)))))) {
     throw new Error('运行配置字段无效；名称必须非空、唯一，普通配置的命令与程序不能同时为空。')
+  }
+  // 形状都对、但宿主那两处还没接的类型：报**指名道姓**的那一句（不是「字段无效」，也不是默默收下再让宿主整份拒掉）。
+  // 这一条挡的就是「前端建得出、存档被 INVALID_SETTINGS 拒掉」那个老形状 —— 摘掉
+  // `RUN_CONFIG_TYPE_IDS_HOST_PENDING` 里那一项之前，先把 `src/settingsModel.ts` 的联合与
+  // `native/settings_schema.cpp` 的白名单接上（`tests/run-config-types.test.mjs` 的 gate 同步那条钉着三处必须一起动）。
+  for (const config of configs) {
+    if (isHostPendingType(config.type))
+      throw new Error(`运行配置类型 '${config.type}' 模块侧已登记、宿主还没接（type 联合与原生白名单两处），这类配置现在存不下去。`)
   }
   const byName = new Map(configs.map(config => [config.name, config]))
   if (byName.size !== configs.length) throw new Error('运行配置名不能重复。')

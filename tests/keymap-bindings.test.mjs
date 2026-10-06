@@ -220,3 +220,100 @@ test('导航三条新键位：可用性与菜单行 enabled 同源，且上游�
   assert.equal(findKeyBinding(event('t', { ctrlKey: true, shiftKey: true }), state)?.id, 'navigate.test')
   assert.equal(findKeyBinding(event('Home', { ctrlKey: true, altKey: true }), state)?.id, 'navigate.related')
 })
+
+// R3 判决（2026-10-06 keymap2）：`Ctrl+Alt+Shift+↑/↓` 的上游主人是 `ResizeToolWindowUp`/
+// `ResizeToolWindowDown`（platform/platform-resources/src/keymaps/$default.xml:879-884），
+// `EditorCloneCaretAbove`/`EditorCloneCaretBelow` 在 `$default.xml` 里**零命中**（注册只在
+// platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:218-219，实现类
+// platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretAbove.java:8-11 与
+// CloneCaretActionHandler.java:24 都不在代码里声明键位）⇒ 本仓那两行编辑器键位已摘、
+// 菜单两行的键位栏清空、`EDITOR_ACTIONS` 的两条从 `repo` 降到 `none`。
+// 这一条钉住摘干净之后的真值表：键位回潮、display 残留、菜单格子复活、上游主人那条链被删，都红。
+test('克隆光标那对不占工具窗口调整大小的键（R3 摘键后的真值表）', () => {
+  const editor = readFileSync(new URL('src/components/CodeEditor.vue', root), 'utf8').split('\n')
+  const menu = readFileSync(new URL('src/menus/editMenu.ts', root), 'utf8')
+  const dispatch = readFileSync(new URL('src/keymap.ts', root), 'utf8')
+  const arrows = { 'cursor.above': ['Ctrl-Alt-Shift-Up', 'ArrowUp'], 'cursor.below': ['Ctrl-Alt-Shift-Down', 'ArrowDown'] }
+  for (const [id, [cm, arrow]] of Object.entries(arrows)) {
+    const action = EDITOR_ACTIONS.find(item => item.id === id)
+    assert.ok(action, `${id} 还在编辑器一族的表里（摘的是键，不是命令）`)
+    assert.equal(action.key.source, 'none', `${id}：上游 $default.xml 无绑定 ⇒ none 档`)
+    // 逐字符：none 档不许留下任何键位文案（残留 = 屏幕上有个按不动的格子）。
+    assert.equal(action.key.display, undefined, `${id} 的 none 档不许带 display`)
+    assert.equal(action.key.cm, undefined, `${id} 的 none 档不许带 cm 写法`)
+    assert.equal(action.key.boundAt, undefined, `${id} 的 none 档不许带 boundAt`)
+    assert.ok(action.key.upstream.includes('无绑定'), `${id} 的 none 档要写明键位表里查不到`)
+    assert.match(action.key.upstream, /\$default\.xml:87(9)|\$default\.xml:88(2)/,
+      `${id} 要写明这把键在上游归 ResizeToolWindow*`)
+    assert.ok(menu.includes(`ctx.editable('${id}', '${action.label}', '', `),
+      `${id} 的菜单行键位栏必须是空串（与注册条目同源，见上一条测试）`)
+    assert.equal(editor.some(line => line.includes(`key: '${cm}'`)), false, `${cm} 还绑在编辑器 keymap 里`)
+    assert.equal(keymapKeys(id), '', `${id} 不该出现在全局键位表里`)
+    assert.equal(findKeyBinding(event(arrow, { ctrlKey: true, altKey: true, shiftKey: true }), state), null,
+      `${arrow} + Ctrl+Alt+Shift 不在表里（主人是 if 链的 stretchToolWindow）`)
+  }
+  // 摘键 ≠ 丢键：上游那把键在本仓仍然由 `stretchToolWindow` 接单，四个方向一个都不许少。
+  for (const direction of ['left', 'right', 'up', 'down']) {
+    assert.ok(dispatch.includes(`stretchToolWindow('${direction}')`), `Ctrl+Alt+Shift+方向键的 ${direction} 一档要从分派链里消失`)
+  }
+  // 整族门：表里任何一条都不许抢 Ctrl+Alt+Shift+方向键（上游四个方向全给了 ResizeToolWindow*）。
+  const stolen = KEY_BINDINGS.filter(binding => /^arrow/i.test(binding.chord.key)
+    && binding.chord.alt === true && binding.chord.shift === true)
+  assert.deepEqual(stolen.map(binding => binding.id), [], 'Ctrl+Alt+Shift+方向键整族属 ResizeToolWindow*，表里不许出现')
+})
+
+// R4（问题面板选中行的 Alt+Enter · 桶 2 的 2b2）：本轮**逐条重核**那两件前置，不看文档。
+// ① 面板的出口**已经在了** —— `src/components/ProblemsPanel.vue` 现在有
+//    `function openMenuForSelected()` 与 `defineExpose({ openMenuForSelected })`
+//    （请求文档 R4 原先写「现在没有任何 defineExpose」，那是**旧的**，这里按实际留痕）。
+// ② 宿主仍然**没有**「此刻焦点在问题面板」这一位：`KeyBindingState` 还是 workspace/editor/lsp 三面
+//    （`src/keymapBindings.ts:26-30`），而宿主渲染 `<ProblemsPanel>` 时连模板 ref 都没给 ⇒
+//    没人能调那个出口，`when` 也无从写起。
+// ⇒ 缺②就不进表：写进去就是一条命中后只 `preventDefault` 不干事的假绑定（本仓铁律）。
+// App.vue 那一路到位（模板 ref + 焦点位塞进 `createKeymap`）时，这条测试与键位表一起改，
+// 照抄配方在 `docs/wiring-requests-2026-10-06-keymap.md` R4。
+test('问题面板的 Alt+Enter：两件前置只到了一件，缺焦点位就不进表（R4 判定）', () => {
+  const panel = readFileSync(new URL('src/components/ProblemsPanel.vue', root), 'utf8')
+  const host = readFileSync(new URL('src/App.vue', root), 'utf8')
+  // 前置①：面板已经把「对当前聚焦行开操作菜单」出口给到动作层。
+  assert.match(panel, /function openMenuForSelected\(\)/)
+  assert.match(panel, /defineExpose\(\{ openMenuForSelected \}\)/)
+  // 前置②（仍缺）：宿主既没拿面板实例（无模板 ref），也没把面板焦点位喂进 `createKeymap`。
+  assert.equal(/<ProblemsPanel[^>]*\sref="/.test(host), false,
+    'App.vue 已给 <ProblemsPanel> 模板 ref ⇒ 前置②到位，请把 Alt+Enter 落进 KEY_BINDINGS 并同步本条')
+  assert.equal(/problems\??:/.test(readFileSync(new URL('src/keymapBindings.ts', root), 'utf8')), false,
+    'KeyBindingState 里不许先躺一个没人给的 problems 位（先接线、后进表）')
+  // 表里此刻不许有 Alt+Enter 的第二位主人：编辑器那一档在 CodeEditor.vue 的 keymap 里，不在表里。
+  assert.equal(findKeyBinding(event('Enter', { altKey: true }), state), null,
+    'Alt+Enter 属编辑器的 ShowIntentionActions（$default.xml:480-482），面板那一档没接线前不进表')
+  const altEnter = KEY_BINDINGS.filter(binding => binding.chord.key.toLowerCase() === 'enter' && binding.chord.alt === true)
+  assert.deepEqual(altEnter.map(binding => binding.id), [], 'Alt+Enter 只能有一个主人：面板焦点位到位之前不许进表')
+  // 可用性谓词只许读真实存在的状态位：读到表外的字段会得到 undefined，`findKeyBinding` 里
+  // `binding.when && !binding.when(state)` 就把这一格永远跳过 —— 一条永远按不到的死绑定。
+  for (const binding of KEY_BINDINGS) {
+    if (!binding.when) continue
+    for (const combo of [{ workspace: false, editor: false, lsp: false }, { workspace: true, editor: true, lsp: true }]) {
+      assert.equal(typeof binding.when(combo), 'boolean', `${binding.id} 的 when 读到了 KeyBindingState 之外的状态位`)
+    }
+  }
+})
+
+// `menuUi.ts` 里那句计数注释（「`keymapBindings.ts` 的 N 个动作 id 里有 M 个在 `src/menus/*` 找不到对应行」）
+// 数漂过一回：写的是 25/21，R1+R2 落了导航三条与编辑器一族之后表已经是 30 条。
+// R5 的处置 = 注释订正成实数，并把两个数**现算**钉在这里，以后加一条键位就跟着变，不再靠人肉数。
+test('menuUi 与 searchEverywhereHost 的计数注释与键位表同步（数字不许漂）', () => {
+  const comment = readFileSync(new URL('src/menuUi.ts', root), 'utf8')
+    .match(/`keymapBindings\.ts` 的 (\d+) 个动作 id 里有 \*\*(\d+) 个\*\*在 `src\/menus\/\*` 找不到对应行/)
+  assert.ok(comment, 'menuUi.ts 那句计数注释的写法变了 ⇒ 这条门控就空转了，改注释时一起改这里')
+  const menuTexts = readdirSync(new URL('src/menus', root)).filter(file => file.endsWith('.ts'))
+    .map(file => readFileSync(new URL(`src/menus/${file}`, root), 'utf8'))
+  const orphanIds = KEY_BINDINGS.filter(binding => !menuTexts.some(text => text.includes(`'${binding.id}'`)))
+    .map(binding => binding.id)
+  assert.equal(Number(comment[1]), KEY_BINDINGS.length, '注释里的总数与表的条数不一致')
+  assert.equal(Number(comment[2]), orphanIds.length, '注释里「找不到对应行」的条数与实际不一致')
+  const hostComment = readFileSync(new URL('src/searchEverywhereHost.ts', root), 'utf8')
+    .match(/那 (\d+) 个只有键位、没有菜单行的动作/)
+  assert.ok(hostComment, 'searchEverywhereHost.ts 那句「那 N 个」的写法变了 ⇒ 同上，一起改这里')
+  assert.equal(Number(hostComment[1]), orphanIds.length, 'searchEverywhereHost.ts 的计数与表不一致')
+})
+

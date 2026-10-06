@@ -13,10 +13,13 @@
 // 与上游的差别（少的那部分在判词表里记着）：上游还有 Windows Defender 排除项那一格
 // （`TrustedProjectsDialog.kt:76-93`），本仓宿主没有 Defender 通道；文件级信任
 // （`confirmOpeningUntrustedFile` `:89-108`）本仓的存储只有目录级，做不到。
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { CircleAlert, CircleHelp, Info, TriangleAlert } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { MESSAGE_TYPE_ICON, messageButtons, messageDialogModel, shouldRememberChoice, type ExitActionType } from '../messageDialog'
+// 挂载状态报给那一条 URL 出口（宿主还没挂 `mode="link"` 时不能让问句永远 pending）：
+// 见 `src/externalLinkLauncher.ts` 的 `linkDialogIsMounted`。
+import { markLinkDialogMounted } from '../externalLinkLauncher.ts'
 import {
   EXTERNAL_LINK_LABELS, EXTERNAL_LINK_TITLE, TRUST_BUTTONS, TRUST_DIALOG_TITLE,
   TRUST_REMEMBER_LABEL, externalLinkMessage, isProjectLocationOfferedForTrust, trustAllLabel, trustDialogMessage,
@@ -46,6 +49,12 @@ const emit = defineEmits<{
 const remember = ref(false)
 const trustAll = ref(false)
 const linkMode = computed(() => props.mode === 'link')
+// 「这颗框此刻在不在屏幕上」报给那一条 URL 出口（`src/externalLinkLauncher.ts`）：
+// 门禁是装配时就装上的，而这一档弹框要等宿主把它挂进模板（接线请求 welcome3 的 W1 第 4 条）。
+// 没有这个信号，宿主还没挂框的那段时间里问句会永远 pending ⇒ 链接点了没反应（比接线前更糟）。
+// 报的只有 `mode="link"` 这一档：startup 那一档答的是 `TrustChoice`，另一张表，不算「外链问句在屏上」。
+onMounted(() => { if (linkMode.value) markLinkDialogMounted(true) })
+onBeforeUnmount(() => { if (linkMode.value) markLinkDialogMounted(false) })
 /** 这一格画不画：宿主接得住（`canTrustAll`）+ 这一项允许被提供（父目录不在配置目录里）。 */
 const trustAllAvailable = computed(() =>
   !linkMode.value && props.canTrustAll === true && isProjectLocationOfferedForTrust(props.root, props.configDir ?? null))

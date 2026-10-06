@@ -69,6 +69,26 @@ test('序根条目：SDK → 库 → 模块输出；没有模块依赖就不出�
   assert.equal(entries.every(entry => entry.kind !== 'module'), true, '本仓没有模块间依赖的存储面 ⇒ 不放假条目')
 })
 
+// roots3 补的第二条：`ModuleSourceOrderEntry`（模块自己那条源根条目）。判据在改前是红的
+// （`buildOrderEntries` 根本没这一支；面板树行里 SDK 之前什么都没有）。
+test('模块自己的源根条目：只贡献 SOURCES、恒有效、一个根都没配就不出这一行', () => {
+  const entries = buildOrderEntries({
+    moduleName: 'app', sourcePaths: ['src/main/java', 'src\\test\\java', 'src/main/java'],
+    files: ['src/test/java/T.java'],
+  })
+  assert.deepEqual(entries.map(item => [item.kind, item.presentableName, item.valid]), [['moduleSource', '<模块源码>', true]],
+    'presentableName = ProjectModelBundle.properties:40 的 `<Module source>` 直译（OrderEntriesBridge.kt:367）')
+  assert.deepEqual(entries[0].roots.sources, ['src/main/java', 'src/test/java'], '去重、反斜杠归一、保持配置顺序')
+  assert.deepEqual([entries[0].roots.classes, entries[0].roots.javadoc, entries[0].roots.annotations], [[], [], []],
+    'getFiles(type) 只在 SOURCES 下给根，其余类型空数组（OrderEntriesBridge.kt:365）')
+  assert.equal(entries[0].valid, true,
+    'src/main/java 不在磁盘清单上也不翻这条（OrderEntry.java:56「条目有效不等于每个根都有效」）')
+  assert.equal(orderEntryText(entries[0]), '模块源码')
+  assert.equal(buildOrderEntries({ moduleName: 'app', sourcePaths: ['  ', ''] }).length, 0, '没配源根 ⇒ 不出永远为空的行')
+  const withSdk = buildOrderEntries({ moduleName: 'app', sourcePaths: ['src'], sdk: createSdk('21', JAVA_SDK_TYPE, '/jdk21', '21') })
+  assert.deepEqual(withSdk.map(item => item.kind), ['moduleSource', 'jdk'], '模块自己的条目排在 SDK 之前（OrderRootComputer.java:58-63）')
+})
+
 test('序根条目的有效性口径：空库无效、未构建的输出目录不报无效（OrderEntry.java:60）', () => {
   const entries = buildOrderEntries({
     moduleName: 'app',
@@ -133,6 +153,7 @@ test('面板树行：内容根 → 按类型分组 → 组内逐根 → 排除�
     [2, 'node_modules'],
     [2, 'out'],
     [0, '模块「app」的序根条目'],
+    [1, '<模块源码>'],
     [1, '21'],
     [1, 'a.jar'],
   ])
@@ -140,8 +161,10 @@ test('面板树行：内容根 → 按类型分组 → 组内逐根 → 排除�
   assert.equal(rows[2].kind, 'sources')
   assert.equal(rows[4].kind, 'tests')
   assert.equal(rows[6].comment, '按目录名「build」排除')
-  assert.equal(rows[10].orderEntryKind, 'jdk')
-  assert.equal(rows[10].count, 2, 'SDK 条目贡献 classes + sources 两个根')
+  assert.equal(rows[10].orderEntryKind, 'moduleSource', '模块自己那条源根条目排在序根组的第一行（OrderEntriesBridge.kt:363-367）')
+  assert.equal(rows[10].count, 2, '源根条目只贡献 SOURCES 那两条（:365 其余类型返空数组）')
+  assert.equal(rows[11].orderEntryKind, 'jdk')
+  assert.equal(rows[11].count, 2, 'SDK 条目贡献 classes + sources 两个根')
   const unknown = rootModelRows(model, false)
   assert.equal(unknown[0].count, null, '清单没到时不编数字')
   assert.equal(unknown[2].count, null)
@@ -156,5 +179,7 @@ test('多个源根同名分类时按配置顺序排在同一组里，条目 key 
   assert.deepEqual(model.contentEntries[0].sources.map(item => [item.kind, item.path]), [
     ['sources', 'src/main/java'], ['resources', 'src/main/resources'], ['tests', 'src/test/java'], ['generated', 'target/generated-sources/annotations'],
   ], '源根列表保持配置顺序（分组才按标签表顺序）')
-  assert.deepEqual(ORDER_ENTRY_LABELS, { jdk: 'SDK', library: '库', module: '模块依赖', output: '输出', testOutput: '测试输出' })
+  assert.deepEqual(ORDER_ENTRY_LABELS, {
+    moduleSource: '模块源码', jdk: 'SDK', library: '库', module: '模块依赖', output: '输出', testOutput: '测试输出',
+  }, '标签表按 `RootOrderEntryKind` 全覆盖（roots3 加了 moduleSource）')
 })

@@ -235,6 +235,16 @@ export function toolWindowTasks(deps: ToolWindowAvailability, suppressedIds: rea
 /**
  * 底部面板的**标签顺序**：前面几个是固定的内容标签，后面跟着"停靠在底部的工具窗口"。
  *
+ * `'references'` 这一格**不是**一条注册窗口（所以它不在上面那张 `TOOL_WINDOW_REGISTRY` 里）：
+ * IDEA 那边被注册的是**装它的窗口** —— Find（`ToolWindowId.FIND`），而且是**按需注册**的
+ * （`platform/lang-impl/src/com/intellij/usageView/impl/UsageViewContentManagerImpl.java:120-136`，
+ * `:129` 那句 `registerToolWindow(ToolWindowId.FIND, …)`，`:132` 还写着 `shouldBeAvailable = false`），
+ * 每次搜索只是往那个窗口的 ContentManager 里 `addContent`（同文件 `:149-190`；用法视图那条由
+ * `platform/usageView-impl/src/com/intellij/usages/impl/UsageViewManagerImpl.java:145-163` 递进来）。
+ * 本仓的那个 ContentManager 就是底部这一格（条目住在 `src/referenceContents.ts`），
+ * 而**内容组件**与别的窗口内容一样由 `src/components/ToolWindowView.vue` 渲染
+ * （`view === 'references'` → `ReferencePanel.vue`），也就是文件头说的"第 2 处：内容挂载点"。
+ *
  * `'about'` **不在**这里 —— IDEA 的「关于」是「帮助 › 关于」的**对话框**（`AboutAction`），
  * 不是工具窗口；本仓把它塞进底部面板是一处错放，已删除（`AboutDialog.vue` 本来就有）。
  *

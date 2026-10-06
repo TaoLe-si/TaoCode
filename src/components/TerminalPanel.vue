@@ -21,6 +21,14 @@
 //     与 `URLUtil.java:50-62`）。Ctrl/⌘+单击交给宿主的 `shell.openUrl`；只有面板真能做事的命中才画成链接。
 //   · `src/terminalClipboard.ts` 的两条鼠标行为 —— 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304`）
 //     与「Linux 上选中即复制」（同文件 `:297-299`，上游就只给 Linux）。
+// 2026-10-06 第三轮（termset，消费侧收尾）：字号的两把键与 ANSI 逐色号覆盖都改成**从设置来**。
+//   · `settings.wheelFontChangeEnabled` → `terminalWheelZoomApplies`（`src/terminalFontSize.ts:79`）；
+//     上游 `EditorSettingsExternalizable.java:124` 的默认档是 **false**（本轮订正了这里原先那句
+//     「先按上游的『开着』处理」，占位常量 `WHEEL_FONT_ZOOM_ENABLED` 已撤）。
+//   · `settings.terminalBaseFontSize` → `resetTerminalFontSize(base)`（同文件 `:71`）与建实例/读数那几处取数；
+//     `TERMINAL_BASE_FONT_SIZE`（`:47`）退为「没有设置时的那一档」，值不改。
+//   · `ansiOverrides` → `terminalPalette` 的第四参（`src/terminalColors.ts:81/:104/:111`）。
+//   供给侧（键本身、native 校验、设置页行、App.vue 挂载）全在 docs/wiring-requests-2026-10-06-termset.md R-1…R-4。
 // 布局：窗格按 `terminalGridSize()` 排成 CSS 网格（上游是 splitter 树，架构不等价 ⇒ 取同一件可见的事）。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Columns2, Pencil, Plus, RotateCcw, RotateCw, Rows2, Search, Shrink, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
@@ -34,14 +42,28 @@ import { copyToClipboard, readClipboardHistory, readClipboardText } from '../cli
 import { resolveTerminalThemeName, terminalPalette, terminalXtermTheme } from '../terminalColors'
 import { createTerminalActions, terminalAction, terminalActionKeyFor, terminalActionTitle, type TerminalActionContext, type TerminalActionId } from '../terminalActions'
 import { canTerminalSplit, nextTerminalPaneCell, paneIndexAfterSplit, terminalGridSize, type TerminalPaneCell, type TerminalSplitOrientation } from '../terminalSplits'
-import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, resetTerminalFontSize, TERMINAL_BASE_FONT_SIZE, terminalFontSizeForWheel, terminalFontSizeTitle, terminalWheelZoomApplies } from '../terminalFontSize'
+import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, resetTerminalFontSize, TERMINAL_BASE_FONT_SIZE, terminalFontSizeForWheel, terminalFontSizeTitle, terminalWheelZoomApplies } from '../terminalFontSize'
 import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalCopyOnSelect, terminalHistoryEntries, terminalIsMiddleButton, terminalPasteOnMiddleClick, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
 import { terminalHyperlinkRanges, terminalLinkActivatable, terminalLinkTarget, terminalLinkTooltip, terminalOsc8Target } from '../terminalHyperlinks'
 import { buildSettingsAwareFullTitle, buildSettingsAwareTitle, nextTerminalTabName, renameTerminal, setApplicationTitle, TERMINAL_SHOW_APP_TITLE_DEFAULT, TERMINAL_TAB_BASE_NAME, terminalRenameInitialValue, titleChanged, type TerminalTitleSettings, type TerminalTitleState } from '../terminalTitle'
 import { openExternalUrl } from '../externalLinkLauncher.ts'
 import AnchoredMenu from './AnchoredMenu.vue'
 
-const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
+/**
+ * 面板读的两格编辑器设置 + 一张 ANSI 覆盖表，都由宿主传进来（`src/App.vue` 挂 `:settings` / `:ansi-overrides`）。
+ * · `wheelFontChangeEnabled` = 上游 `IS_WHEEL_FONTCHANGE_ENABLED`（**默认 false**，
+ *   `platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:124`，
+ *   getter 同文件 `:1043`；滚轮那道门的用法 `platform/execution-impl/src/com/intellij/terminal/JBTerminalPanel.java:382`）。
+ *   键的真源在 `src/settingsModel.ts` 的 `EditorSettings`（保留文件 ⇒ 这里只声明消费侧需要的这一小片结构，
+ *   宿主把整本 `editorSettings` 传进来即可）。
+ * · `terminalBaseFontSize` = 终端基准字号；上游那一档住在配色方案的 consoleFontSize
+ *   （`TerminalUiSettingsManager.kt:123-132` 的 `detectFontSize()`），本仓没有可编辑方案 ⇒ 落成一格显式设置。
+ * · `ansiOverrides` = 按 ANSI 色号（0–15）的自定义前景，键是 JSON 里的字符串形态（`'3'`），
+ *   对应上游 `JBTerminalSchemeColorPalette.kt:23-25` 每取一个色号都回配色方案要
+ *   `ColoredOutputTypeRegistryImpl.getAnsiColorKey(index)`（`:24`）；坏值由 `src/terminalColors.ts:70-72`
+ *   的 `pickColor` 丢弃 ⇒ 留内置那两套表的对应项。
+ */
+const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean>; settings?: { wheelFontChangeEnabled?: boolean; terminalBaseFontSize?: number }; ansiOverrides?: Record<string, string> | null }>()
 const emit = defineEmits<{ focusTerminal: [] }>()
 
 interface Pane {
@@ -83,11 +105,24 @@ const splitCounts = new Map<number, { rights: number; downs: number }>()
 /**
  * 上游那台总闸是 `EditorSettingsExternalizable.isWheelFontChangeEnabled()`
  * （`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:1043`，
- * Settings › Editor › General › 「Change font size with Ctrl+Mouse Wheel」）。
- * 本仓设置页没有这一格（`src/settingsModel.ts` 是保留文件）⇒ 先按上游的「开着」处理，
- * 设置项本身已写进接线请求（docs/wiring-requests-2026-10-06-bucket10b.md）。
+ * Settings › Editor › General › 「Change font size with Ctrl+Mouse Wheel」，字段与默认档同文件 `:124`
+ * = `IS_WHEEL_FONTCHANGE_ENABLED = false`）。
+ * 留痕：本轮之前这里写的是占位常量 `WHEEL_FONT_ZOOM_ENABLED = true`，注释还写着「先按上游的『开着』处理」——
+ * **那句对上游默认值的转述是错的**（`EditorSettingsExternalizable.java:124` 实测是 `false`），
+ * 现在改成读设置项 `settings.wheelFontChangeEnabled`，宿主没传时缺省 **false**（与上游同档：
+ * 关掉时这次滚动照常滚缓冲区，门在 `JBTerminalPanel.java:382`）。
  */
-const WHEEL_FONT_ZOOM_ENABLED = true
+const wheelFontZoomEnabled = computed(() => props.settings?.wheelFontChangeEnabled ?? false)
+/**
+ * 终端基准字号 = 设置里那一档；缺省/坏值都退回本仓内置的 `TERMINAL_BASE_FONT_SIZE`（13）。
+ * 界取 `src/terminalFontSize.ts:37/:40`（上游 `EditorFontsConstants.java:11-17` 的 4 / 40）：
+ * 越界的基准值会让每次复位都跳到一个 xterm 不接受的数，所以宁可不采纳。
+ */
+const baseFontSize = computed(() => {
+  const raw = props.settings?.terminalBaseFontSize
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= MIN_TERMINAL_FONT_SIZE && raw <= MAX_TERMINAL_FONT_SIZE
+    ? raw : TERMINAL_BASE_FONT_SIZE
+})
 
 /**
  * 上游 `SystemInfo.isLinux` 的本仓等价判断（`JBTerminalSystemSettingsProviderBase.java:297-299` 的
@@ -118,8 +153,8 @@ function actionContext(): TerminalActionContext {
     tabCount: panes.value.length,
     hasSelection: hasSelection.value,
     historyCount: historyEntries.value.length,
-    fontSize: current?.fontSize ?? TERMINAL_BASE_FONT_SIZE,
-    baseFontSize: TERMINAL_BASE_FONT_SIZE,
+    fontSize: current?.fontSize ?? baseFontSize.value,
+    baseFontSize: baseFontSize.value,
   }
 }
 const registry = computed(() => createTerminalActions(actionContext()))
@@ -292,7 +327,7 @@ function currentPalette() {
   if (typeof document === 'undefined') return terminalPalette('light')
   const root = getComputedStyle(document.documentElement)
   const theme = resolveTerminalThemeName(document.documentElement.dataset.theme)
-  return terminalPalette(theme, root.getPropertyValue('--text').trim(), root.getPropertyValue('--editor').trim())
+  return terminalPalette(theme, root.getPropertyValue('--text').trim(), root.getPropertyValue('--editor').trim(), props.ansiOverrides ?? undefined)
 }
 function applyPalette() {
   const theme = terminalXtermTheme(currentPalette())
@@ -306,7 +341,7 @@ function setFontSize(pane: Pane, size: number) {
   refit()
 }
 /** 工具条上那格字号读数（临时缩放时 title 会说「临时缩放」，上游 `TerminalFontSizeProvider` 的语义）。 */
-const fontSizeShown = computed(() => selected.value?.fontSize ?? TERMINAL_BASE_FONT_SIZE)
+const fontSizeShown = computed(() => selected.value?.fontSize ?? baseFontSize.value)
 function stepFontSize(id: TerminalActionId) {
   const pane = selected.value
   if (!pane) return
@@ -316,15 +351,16 @@ function stepFontSize(id: TerminalActionId) {
 function resetFontSize() {
   const pane = selected.value
   if (!pane) return
-  setFontSize(pane, resetTerminalFontSize(TERMINAL_BASE_FONT_SIZE))
+  setFontSize(pane, resetTerminalFontSize(baseFontSize.value))
 }
 
 /**
  * Ctrl+滚轮 = 缩放，且这次滚动**不再滚缓冲区**（`JBTerminalPanel.java:381-390` 那条分支直接 return）；
- * 新字号越界就保持原值（`:384-386`）。总闸关着时什么都不拦，照常滚缓冲区。
+ * 新字号越界就保持原值（`:384-386`）。总闸（`settings.wheelFontChangeEnabled`，上游默认 **false**，
+ * `EditorSettingsExternalizable.java:124`）关着时什么都不拦，照常滚缓冲区（同文件 `:382` 那个 && 的前半个条件）。
  */
 function onWheel(pane: Pane, event: WheelEvent) {
-  if (!terminalWheelZoomApplies(event, WHEEL_FONT_ZOOM_ENABLED)) return
+  if (!terminalWheelZoomApplies(event, wheelFontZoomEnabled.value)) return
   event.preventDefault()
   const next = terminalFontSizeForWheel(pane.fontSize, event.deltaY)
   if (next === pane.fontSize) return
@@ -534,7 +570,7 @@ function attachPane(id: number, defaultTitle: string, group?: number): Pane {
   view.className = 'terminal-view'
   view.hidden = true
   stage.value!.appendChild(view)
-  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: TERMINAL_BASE_FONT_SIZE, scrollback: 5000, theme: terminalXtermTheme(currentPalette()), linkHandler: osc8LinkHandler() })
+  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: baseFontSize.value, scrollback: 5000, theme: terminalXtermTheme(currentPalette()), linkHandler: osc8LinkHandler() })
   const fit = new FitAddon()
   const search = new SearchAddon()
   instance.loadAddon(fit)
@@ -545,7 +581,7 @@ function attachPane(id: number, defaultTitle: string, group?: number): Pane {
   const created: Pane = {
     id, title: { defaultTitle }, view, instance, fit, search,
     off: () => undefined, offExit: () => undefined, group: group ?? ++groups, exited: false, exitCode: null,
-    fontSize: TERMINAL_BASE_FONT_SIZE,
+    fontSize: baseFontSize.value,
   }
   view.addEventListener('focusin', () => { selected.value = created; hasSelection.value = created.instance.hasSelection() })
   view.addEventListener('contextmenu', event => openMenu(created, event as MouseEvent))
@@ -675,6 +711,19 @@ onMounted(async () => {
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 watch(() => props.active, value => { if (value) refit() })
+/**
+ * 设置里的基准字号换了：把**没被临时缩放**的窗格跟到新档（上游那一档由 `detectFontSize()` 现算，
+ * 改动会立刻反映到现有终端，`TerminalUiSettingsManager.kt:123-132`）；
+ * 正在临时缩放的窗格保持自己的临时值（`TerminalFontSizeProvider.kt:16-25` 的 temporary zoom 语义）。
+ */
+watch(baseFontSize, (next, previous) => {
+  for (const pane of panes.value) if (pane.fontSize === previous) setFontSize(pane, next)
+})
+/**
+ * ANSI 覆盖表换了 ⇒ 重新算调色板并应用到所有窗格（与 `data-theme` 切换同一条路径）。
+ * 上游同样是「活的」：`JBTerminalSchemeColorPalette.kt:23-25` 每次取色号都回配色方案要，方案一改终端跟改。
+ */
+watch(() => props.ansiOverrides, () => applyPalette())
 onBeforeUnmount(() => {
   disposed = true
   observer?.disconnect()
@@ -703,7 +752,7 @@ onBeforeUnmount(() => {
       <button v-if="shownAs('terminal.tab.left')" class="icon-button" :title="why('terminal.tab.left', '向左移动标签')" :aria-label="why('terminal.tab.left', '向左移动标签')" :disabled="!can('terminal.tab.left')" @click="selected && moveTab(selected, false)"><ArrowLeft :size="iconSize.menu" /></button>
       <button v-if="shownAs('terminal.tab.right')" class="icon-button" :title="why('terminal.tab.right', '向右移动标签')" :aria-label="why('terminal.tab.right', '向右移动标签')" :disabled="!can('terminal.tab.right')" @click="selected && moveTab(selected, true)"><ArrowRight :size="iconSize.menu" /></button>
       <button v-if="shownAs('terminal.search')" class="icon-button" :class="{ active: searchOpen }" :title="why('terminal.search', '在终端中查找')" :aria-label="why('terminal.search', '在终端中查找')" :disabled="!can('terminal.search')" @click="toggleSearch"><Search :size="iconSize.control" /></button>
-      <span v-if="shownAs('terminal.font.reset')" class="terminal-font" :title="terminalFontSizeTitle(fontSizeShown, TERMINAL_BASE_FONT_SIZE)">{{ fontSizeShown }}px</span>
+      <span v-if="shownAs('terminal.font.reset')" class="terminal-font" :title="terminalFontSizeTitle(fontSizeShown, baseFontSize)">{{ fontSizeShown }}px</span>
       <button v-if="shownAs('terminal.font.decrease')" class="icon-button" :title="why('terminal.font.decrease', '缩小终端字号')" :aria-label="why('terminal.font.decrease', '缩小终端字号')" :disabled="!can('terminal.font.decrease')" @click="stepFontSize('terminal.font.decrease')"><ZoomOut :size="iconSize.control" /></button>
       <button v-if="shownAs('terminal.font.increase')" class="icon-button" :title="why('terminal.font.increase', '放大终端字号')" :aria-label="why('terminal.font.increase', '放大终端字号')" :disabled="!can('terminal.font.increase')" @click="stepFontSize('terminal.font.increase')"><ZoomIn :size="iconSize.control" /></button>
       <button v-if="shownAs('terminal.font.reset')" class="icon-button" :title="why('terminal.font.reset', '复位终端字号')" :aria-label="why('terminal.font.reset', '复位终端字号')" :disabled="!can('terminal.font.reset')" @click="resetFontSize"><RotateCcw :size="iconSize.control" /></button>

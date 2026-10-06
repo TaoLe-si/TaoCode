@@ -95,6 +95,34 @@ test('the text-mixing and file macros behave like their upstream classes', () =>
   assert.equal(calc('fileName', [], { path: 'src\\App.java' }), 'App.java', '反斜杠路径同样认')
 })
 
+// 带参数那一条是 `new SimpleDateFormat(pattern).format(new Date(time))`（`CurrentDateMacro.java:33-34`）：
+// 认得出的字母出真实字段；认不出的字母上游**抛** `IllegalArgumentException`，被 `:36-38` 接住变成那句
+// `Problem when formatting date/time for pattern "…"`，不是把字母原样打印出来。
+test('the date pattern covers every letter it knows and rejects the rest', () => {
+  const millis = { path: '', now: () => new Date(2026, 9, 6, 9, 5, 0, 7) }
+  assert.equal(calc('date', ['HH:mm:ss.SSS'], millis), '09:05:00.007', 'S = 毫秒')
+  assert.equal(calc('date', ['D'], millis), '279', 'D = 一年中的第几天（10 月 6 日 = 279）')
+  assert.equal(calc('date', ['yyyyMMdd'], millis), '20261006', '字母段的宽度就是补零的宽度')
+  const midnight = { path: '', now: () => new Date(2026, 0, 1, 0, 0, 0) }
+  assert.equal(calc('time', ['k K a'], midnight), '24 0 AM', 'k = 1-24 时、K = 0-11 时：零点分别是 24 和 0')
+  assert.equal(calc('date', ["'Z' yyyy"], millis), 'Z 2026', '引号档整体是原文，不参与字母表判定')
+  assert.equal(calc('date', ['pp'], millis),
+    'Problem when formatting date/time for pattern "pp": Unsupported pattern letter',
+    '认不出的字母不能原样打印：用户要的是那句报错，不是半截日期')
+})
+
+// `StringUtil.java:605-611` 的 `isPrintableUnicode` 除了 UNASSIGNED/CONTROL/FORMAT/PRIVATE_USE/SURROGATE
+// 与 LINE/PARAGRAPH_SEPARATOR，还把**两个变体选择符块**算作不可打印。
+test('escapeString treats variation selectors as non-printable', () => {
+  assert.equal(calc('escapeString', ['a\uFE0Fb']), 'a\\uFE0Fb', 'VS16 属于 U+FE00-FE0F 那块')
+  assert.equal(calc('escapeString', ['\uFE0E']), '\\uFE0E')
+  assert.equal(calc('escapeString', ['\uDB80\uDC00']), '\\uDB80\\uDC00',
+    'VS 补充块（U+E0100-E01EF）本来就是代理对的两半，各自成一个 \\uDxxx')
+  assert.equal(calc('escapeString', ['\u2764\uFE0F']), '\u2764\\uFE0F',
+    '表情本体是可打印的 So，只有紧跟的选择符被转义')
+  assert.equal(calc('escapeString', ['a\u00A0b']), 'a\u00A0b', 'Zs 不在上游那份排除表里 ⇒ 原样留着')
+})
+
 test('date and time read the injected clock and honour an explicit pattern', () => {
   assert.equal(calc('date', []), '2026/10/6')
   assert.equal(calc('time', []), '9:05')

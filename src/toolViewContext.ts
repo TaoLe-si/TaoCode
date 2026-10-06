@@ -13,6 +13,11 @@ import { addBookmarkToNamedList, runWithChosenList } from './bookmarkListActions
 import { requestBookmarkEdit } from './bookmarkActions.ts'
 import { isDesktop, type BookmarksViewState } from './bridge.ts'
 import { getProjectTreeState } from './projectTreeState.ts'
+// 引用面板（Find 窗口那条用法视图 Content）的数据源：条目存储与行模型都在这个模块里，
+// 宿主只负责"挂不挂这一格"，状态不在这里再存一份。
+import { collapseAllUsageGroups, expandAllUsageGroups, referenceRows, referencesSpeedSearch,
+         selectedReferences, toggleUsageGroup } from './referenceContents.ts'
+import { caretSourceWithCharacter } from './structureFollow.ts'
 import type { ToolWindowViewContext } from './components/ToolWindowView.vue'
 
 /** 面板能从宿主拿到什么：每一项都是宿主里同名变量的**引用**（不是快照）。 */
@@ -113,7 +118,15 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   sortedBookmarks: sortedAll.value,
   historyEpoch: historyEpoch.value,
   todoPatterns: projectSettings.value.todoPatterns,
-  todoSource: todoSource.value,
+  // 结构视图的「跟随编辑器光标」除了行还要**列**：上游选中光标**偏移量**底下那个元素
+  // （`StructureViewComponent.java:655` 的 `scrollToSelectedElement()` → `:690-692` 的
+  // `doFindSelectedElement()` = `myTreeModel.getCurrentEditorElement()`），只给行的时候本仓
+  // 判定会退化（`src/outlineView.ts:142-154` 的 `pickCaretCandidate`），同一行两个符号就选不准。
+  // 宿主那份 `todoSource` 只有 `{path, line}` 且 `src/App.vue` 是保留文件 ⇒ 列从**同一个**
+  // 活动标签页对象上取（宿主在 `@cursor` 里把编辑器给的 1 基列写进了 `active.column`，
+  // 值来自 `src/components/CodeEditor.vue:1022`），换算与缺列兜底都在 `src/structureFollow.ts`。
+  // TODO 面板只读 `path`/`line`，多这一栏对它无影响（两个面板看的还是同一个光标）。
+  todoSource: caretSourceWithCharacter(todoSource.value, active.value?.column),
   treeEntries: workspace.value?.entries ?? [],
   syntheticNodes: syntheticNodes.value,
   indentGuides: editorSettings.value.showTreeIndentGuides,
@@ -181,6 +194,19 @@ export function createToolViewContext(ctx: ToolViewContext): ToolWindowViewConte
   ],
   onFoldAll: () => fileTreeRef.value?.collapseAll(),
   onExpandAll: () => fileTreeRef.value?.expandAll(),
+  // --- 引用面板（`view === 'references'`）：全部读 `src/referenceContents.ts` 那一份状态 -----------
+  // 为什么在这儿读而不是让面板自己 import：本仓所有工具窗口面板的输入面就是这张 ctx
+  // （文件头那条约定），面板保持无状态、能被真渲染单独核。
+  // 选中的那条 = `ContentManager.getSelectedContent()`（`UsageViewContentManagerImpl.java:208-214`），
+  // 行是它那份 `referenceRows`（摊平 + 折叠 + 过滤），条数是它自己的 payload（不是几批结果的和）。
+  referenceRows: referenceRows.value,
+  referenceCount: selectedReferences.value?.payload.length ?? 0,
+  referenceQuery: referencesSpeedSearch.value,
+  referenceSearching: selectedReferences.value?.searching === true,
+  onReferenceToggleGroup: (key: string) => toggleUsageGroup(key),
+  onReferenceCollapseAll: () => collapseAllUsageGroups(),
+  onReferenceExpandAll: () => expandAllUsageGroups(),
+  onReferenceSpeedSearch: (value: string) => { referencesSpeedSearch.value = value },
   onExpandRecursively: () => void fileTreeRef.value?.expandRecursively(),
   canExpandRecursively: () => fileTreeRef.value?.canExpandRecursively() ?? false,
   // IDEA 的 SelectInProjectView：把当前文件在项目视图里选中（必要时展开到它）。

@@ -166,3 +166,15 @@
 `NoticeList`），并且本仓的 `presentationMode` 会把整个 footer 隐藏（`App.vue` 状态栏那一条 `v-if`），
 照抄那条闸 = 默认配置下用户失去唯一的收通知入口。⇒ **登记差异、不照抄**，理由写进
 `src/statusWidgets.ts` 表头（同一处还登记了勾选清单里五个名字按上游 bundle 订正的逐条出处）。
+
+---
+
+## status3 复核（2026-10-06 桶 status3；报告见 `docs/batch-2026-10-06-status3.md`）
+
+| 项 | 判定 | 本轮实测 |
+| --- | --- | --- |
+| 请求 1（`Messages`/`messageDialog` 宿主） | **仍缺 ⇒ 本批复述并订正锚点** | `src/App.vue` grep `messageDialog\|showMessage\|MessageHost` ⇒ **0 命中**；`src/components/MessageDialog.vue` **不存在**；`src/messageDialog.ts` 的唯一消费者仍是 `src/components/TrustedProjectDialog.vue`。上面 `:29-86` 那段可照抄实现**本轮逐字复核过出口名仍然对得上磁盘**（`messageButtons` / `messageDialogModel` / `shouldRememberChoice` / `ExitActionType` / `MessageDialogType`）。**锚点订正**：挂载邻居现在是 `src/App.vue:2646`（原写 2622）、`createProgressPanel` 的 import 在 `:124`、调用在 `:636`（原写 623）；`:41` 的 `TrustedProjectDialog` import 仍对 |
+| 请求 2（通知设置页） | **仍缺** | `src/settingsTreeMeta.ts` grep `notification` ⇒ **0 命中**；`src/components/NotificationsSettingsPage.vue` 不存在；连带效果仍成立 —— `src/notificationEventLog.ts:111-112` 明确不渲染「设置…」（本轮实测那两行还在）。「不再询问」清单仍寄居在 `src/components/EventLogPanel.vue`。**上游 `NotificationsConfigurable.java` 的逐控件表本批也没数** ⇒ 页面结构仍不许照编 |
+| 请求 3（`bridge` 假控件） | **已闭环 ⇒ 可关闭** | `src/statusWidgets.ts` 注册表里已无 `bridge`（只剩 `:25-36` 的留痕注释）；`tests/statusbar-popup-motion-parity.test.mjs:40` ⇒ `const KNOWN_GAPS = new Map()`（空）；`tests/status-widgets-registry.test.mjs` 那条「`bridge` 已删，存档里残留的键也不复活它」本轮实跑绿 |
+| 请求 4（治理 3 条） | `[-]` 不在本域 | 4.1 的 `build/` 白名单、4.2/4.3 都归主代理与折叠属主；本批未重复核，**不要按本批的报告认为它们已处理** |
+| 附（通知区那条闸） | 维持"登记不照抄" | 本轮复核：状态栏那颗通知芯片仍在 `src/App.vue:2297` 行内（`showWidget('notices')` 那一条），`presentationMode` 仍把整个 `<footer>` 隐藏 ⇒ 结论不变 |

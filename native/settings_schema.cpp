@@ -416,7 +416,7 @@ Json editor_defaults_impl() {
             {"codeVisionEnabled", true}, {"codeVisionDisabledGroups", Json::array()},
             {"codeVisionEnabledGroups", Json::array()}, {"codeVisionVisibleEntries", 5},
             // 快速文档两档，上游默认都是开（:76 与 DocumentationToolWindowManager.kt:55）。
-            {"showQuickDocOnMouseHover", true}, {"autoUpdateDocumentation", true}};
+            {"showQuickDocOnMouseHover", true}, {"autoUpdateDocumentation", true}, {"wheelFontChangeEnabled", false}, {"terminalBaseFontSize", 13}};  // 终端字号两把：总闸 false = EditorSettingsExternalizable.java:124 的 IS_WHEEL_FONTCHANGE_ENABLED（门 JBTerminalPanel.java:382），基准 13 = 本仓内置档 src/terminalFontSize.ts:47（界 4..40 = EditorFontsConstants.java:11-17）。逐条出处见 settings_schema.hpp 的 EDITOR_SETTING_KEYS 尾部。
 }
 
 // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发 todo/fixme 两条（已核对源码），

@@ -141,6 +141,34 @@ export function smartEnterLanguageFor(
   }
 }
 
+// 注释标记的两个取值口（行内语法优先、退回按文件名猜）—— 原来这两次调用写在
+// `src/components/CodeEditor.vue` 里，那个文件顶在 1147 行的登记上限（`tests/module-size.test.mjs:135`）
+// ⇒ 装配整体搬进本模块，宿主只留一行，两条开关也才递得进来（见 `smartEnterLanguageForView`）。
+import { commentStyleFor, commentStyleFromState } from './commentToggle.ts'
+
+/**
+ * 宿主的**一行**装配：从当前视图取注释词法（行内语法优先，判不到时按文件名猜）、按语言决定
+ * 字面量那一档，再把两条上游开关盖上去。
+ *
+ * 两条开关的出处（都已在 `EnterLanguage` 上落好字段名，本函数只是把 `EditorSettings` 的键名翻过去）：
+ *   · `closeCommentOnEnter`（`src/settingsModel.ts:429`）= `CodeInsightSettings.java:132`
+ *     `CLOSE_COMMENT_ON_ENTER`，把关点在 `enter/EnterInBlockCommentHandler.java:62`；
+ *   · `insertBraceOnEnter`（`src/settingsModel.ts:431`）= `CodeInsightSettings.java:130`
+ *     `INSERT_BRACE_ON_ENTER`，把关点在 `enter/EnterAfterUnmatchedBraceHandler.java:84-86`。
+ * 缺省（宿主没给设置）按上游默认 true 走 ⇒ 不接这条也不会把既有行为改坏。
+ */
+export function smartEnterLanguageForView(
+  view: EditorView | null | undefined, path: string, language?: string,
+  settings?: { closeCommentOnEnter?: boolean; insertBraceOnEnter?: boolean },
+): EnterLanguage {
+  const style = view ? commentStyleFromState(view.state, view.state.selection.main.head) : null
+  return {
+    ...smartEnterLanguageFor(style ?? commentStyleFor(undefined, path), language),
+    blockCloseOnEnter: settings?.closeCommentOnEnter ?? true,
+    insertBraceOnEnter: settings?.insertBraceOnEnter ?? true,
+  }
+}
+
 function shiftForward(text: string, from: number, chars: string): number {
   let at = from
   while (at < text.length && chars.includes(text[at]!)) ++at

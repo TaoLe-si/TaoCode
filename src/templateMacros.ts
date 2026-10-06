@@ -168,10 +168,13 @@ function joinWords(text: string, separator: string, transformWord: (word: string
  * `StringUtil.java:549-618` 的 `escapeStringCharacters`（`additionalChars` = `"`、
  * `escapeSlash` 与 `escapeUnicode` 都开着的单参重载，`:614-618`）。
  * 不可打印 = `Character.getType` 的 UNASSIGNED/CONTROL/FORMAT/PRIVATE_USE/SURROGATE 加
- * LINE/PARAGRAPH_SEPARATOR（`:605-611`），这里用等价的 Unicode 类别集合表达。
+ * LINE/PARAGRAPH_SEPARATOR，**再加两个变体选择符块**（`isPrintableUnicode` 的
+ * `:605-611`：`block != VARIATION_SELECTORS && block != VARIATION_SELECTORS_SUPPLEMENT`），
+ * 这里用等价的 Unicode 类别集合表达：`\p{Variation_Selector}` 就是那两个块（U+FE00-FE0F 与
+ * U+E0100-E01EF）的并集；后一块在 JS 里本来就是代理对的两半，已被 `\p{Cs}` 覆盖，写在一起是留个证据。
  * 逐**码元**处理（与 Java 的 `charAt` 同口径，代理对的两半各自成 `\uDxxx`）。
  */
-const NON_PRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Cn}\p{Zl}\p{Zp}]/u
+const NON_PRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Cn}\p{Zl}\p{Zp}\p{Variation_Selector}]/u
 const ESCAPE_TABLE: Record<string, string> = { '\b': '\\b', '\t': '\\t', '\n': '\\n', '\f': '\\f', '\r': '\\r' }
 // 不导出：外部没有消费方，行为由 `escapeString` 那条宏钉住（tests/template-macros.test.mjs）。
 function escapeStringCharacters(text: string): string {
@@ -196,15 +199,25 @@ function escapeStringCharacters(text: string): string {
  * 无参数那一条上游是 `DateFormatUtil.formatDate/formatTime`，而它读的是**区域设置**
  * （`DateFormatUtil.java:103-109` → `formats().date()`）；本仓没有区域设置页，于是沿用本仓已经钉死的
  * 同一档（`src/fileTemplateVars.ts:112-113`：`yyyy/M/d`、`H:mm`），并在这里写明那是**本仓档**不是上游档。
- * 带参数 = `SimpleDateFormat(pattern)`；本仓实现常用字母子集，认不出的字母走上游那条异常文案
- * （`CurrentDateMacro.java:36-38`），不静默产出错日期。
+ * 带参数就是 `new SimpleDateFormat(pattern).format(new Date(time))`（`CurrentDateMacro.java:33-34`），
+ * 异常走 `:36-38` 的那句 `Problem when formatting date/time for pattern "…": + e.getMessage()`。
+ * 两档本仓的取法：认得出的字母（`y M d D H h K k m s S E a`，JDK 的字段表）出真实字段；
+ * **其余字母一律报那句错**，不当原文吐出去（以前本仓把认不出的字母原样打印，用户看到的是 `pp` 这种
+ * 半截日期，而上游在这里是抛 `IllegalArgumentException`）；非字母（`-`、`:`、空格）才是原文。
+ * 引号档（`''` 与 `'…'`）里的字符整体是原文，**不参与**这条判定 —— 判定因此必须落在扫描循环里，
+ * 不能在入口先对整串做一次正则（那样 `'Z'` 会被误报）。
+ * 尾巴 `Unsupported pattern letter` 是 `e.getMessage()` 的**本仓替身**：JDK 源码不在本地树，
+ * 那句原文无法核实，写在报告的「无法核实」里。
  */
-const UNSUPPORTED_PATTERN_LETTER = /[GzZDSweku]/
+const patternError = (pattern: string): string =>
+  `Problem when formatting date/time for pattern "${pattern}": Unsupported pattern letter`
+
+/** `D` = 一年中的第几天（1 起）；用 UTC 差值算，避开夏令时的整天偏移。 */
+const dayOfYear = (date: Date): number =>
+  Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    - Date.UTC(date.getFullYear(), 0, 1)) / 86400000) + 1
 
 function formatDateTimePattern(pattern: string, date: Date): string {
-  if (UNSUPPORTED_PATTERN_LETTER.test(pattern)) {
-    return `Problem when formatting date/time for pattern "${pattern}": Unsupported pattern letter`
-  }
   const pad = (value: number, width: number): string => String(Math.abs(value)).padStart(width, '0')
   const year = date.getFullYear()
   const month = date.getMonth() + 1
@@ -234,13 +247,20 @@ function formatDateTimePattern(pattern: string, date: Date): string {
       case 'y': output += run <= 2 ? pad(year % 100, run) : pad(year, run); break
       case 'M': output += run <= 2 ? emit(String(month), run) : run === 3 ? monthShort[month - 1]! : monthFull[month - 1]!; break
       case 'd': output += emit(String(date.getDate()), run); break
+      case 'D': output += emit(String(dayOfYear(date)), run); break
       case 'H': output += emit(String(hours24), run); break
       case 'h': output += emit(String(hours12), run); break
+      case 'k': output += emit(String(hours24 === 0 ? 24 : hours24), run); break
+      case 'K': output += emit(String(hours24 % 12), run); break
       case 'm': output += emit(String(date.getMinutes()), run); break
       case 's': output += emit(String(date.getSeconds()), run); break
+      case 'S': output += emit(String(date.getMilliseconds()), run); break
       case 'E': output += run <= 3 ? dayShort[date.getDay()]! : dayFull[date.getDay()]!; break
       case 'a': output += hours24 < 12 ? 'AM' : 'PM'; break
-      default: output += char.repeat(run); break
+      // 上面的 case 就是那份字母表；走到 default 的字母 = JDK 的
+      // `IllegalArgumentException: Illegal pattern character`。非字母（`-`、`:`、空格…）才是原文。
+      default: if (/[A-Za-z]/.test(char)) return patternError(pattern)
+        output += char.repeat(run); break
     }
     index += run
   }

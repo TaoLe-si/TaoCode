@@ -19,14 +19,21 @@
 // docs/wiring-requests-2026-10-06-runcfg2.md R1）；少落一处，本文件的判据就红 ——
 // 免得「建得出 jar 配置、存不下去」这种形状第二次出现。
 // 第五处是 C++、跑不了 TS 的 import，所以按文本读那张白名单（前四条判据是 import 进来的真值）。
+//
+// 2026-10-06 第三批（runcfg3）：JAR 在**模块侧**已经做完，五处都从同一份家族清单投影，
+// 宿主那两处（type 联合 + 原生白名单，都是保留文件）由 `RUN_CONFIG_TYPE_IDS_HOST_PENDING` 挡住。
+// 新增的判据：`JAR 那一族五处一致`、`gate 与宿主两处必须同步`、`JAR 缺入口四层都报错`。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const { RUN_CONFIG_EDITORS, runConfigEditorFor, runConfigFieldsFor, checkRunConfiguration, targetOptionLabel } =
+const { RUN_CONFIG_EDITORS, RUN_CONFIG_TYPE_FAMILY_EDITORS, runConfigEditorFor, runConfigFieldsFor, checkRunConfiguration, targetOptionLabel } =
   await import('../src/runConfigEditors.ts')
-const { RUN_CONFIG_TYPES, runConfigTypeLabel } = await import('../src/runConfigTree.ts')
-const { RUN_CONFIG_TYPE_IDS, normalizeRunConfigurations } = await import('../src/runConfigurationSchema.ts')
+const { RUN_CONFIG_TYPES, RUN_CONFIG_TYPE_FAMILY_LABELS, buildRunConfigTree, runConfigClosure, runConfigTypeLabel } = await import('../src/runConfigTree.ts')
+const { RUN_CONFIG_TYPE_IDS, RUN_CONFIG_TYPE_FAMILY_IDS, RUN_CONFIG_TYPE_IDS_HOST_PENDING, normalizeRunConfigurations } =
+  await import('../src/runConfigurationSchema.ts')
+const { JAR_RUN_CONFIG_TYPE_ID, JAR_APPLICATION_TYPE_LABEL, jarRunConfigPath, jarRunConfigProblem, jarRunConfigParams } =
+  await import('../src/jarRun.ts')
 
 /** `src/settingsModel.ts` 里 `RunConfig['type']` 的联合成员（文本解析，保留文件由主代理持有）。 */
 function runConfigTypeUnionFromModel() {
@@ -148,4 +155,110 @@ test('第五处：宿主 settings_schema.cpp 的 type 白名单与 schema 清单
   assert.deepEqual([...ids].sort(), [...RUN_CONFIG_TYPE_IDS].sort(), '原生白名单与 RUN_CONFIG_TYPE_IDS 不一致')
   assert.deepEqual(ids, [...RUN_CONFIG_TYPE_IDS], '两边顺序也要一致（报错文案按这个顺序念出来）')
   for (const id of RUN_CONFIG_TYPE_IDS) assert.ok(message.includes(id), `报错文案要点出 ${id}`)
+})
+
+// ── 2026-10-06 第三批（runcfg3）：JAR 那一族 ────────────────────────────────────────────
+//
+// 派单要求的「五处一致」在本仓的具体落点（每处都指得到模块里的一个真实导出）：
+//   ① 新建配置表单 = `RUN_CONFIG_TYPE_FAMILY_EDITORS.jar`（`src/runConfigEditors.ts`）
+//   ② schema 校验 = `normalizeRunConfigurations`（`src/runConfigurationSchema.ts`，JAR 走 `jarRunConfigProblem`）
+//   ③ 持久化    = 同一份 `RUN_CONFIG_TYPE_IDS`（前端门）+ 宿主白名单（第五处，保留文件）
+//   ④ 执行参数  = `jarRunConfigParams` / `jarRunConfigPath`（`src/jarRun.ts`）
+//   ⑤ 树里显示  = `RUN_CONFIG_TYPE_FAMILY_LABELS` → `RUN_CONFIG_TYPES` → `buildRunConfigTree`
+// 上游坐标（本批亲自开过）：`java/execution/impl/src/com/intellij/execution/jar/JarApplicationConfigurationType.java:19-23`
+// （id `JarApplication` + name/description/icon）、`JarApplicationConfigurable.java:47-49/73/81`（表单四格的行序与标签）、
+// `JarApplicationConfiguration.java:270-278`（bean 七个字段）、`JarApplicationCommandLineState.java:18-25`（argv 形状）、
+// `platform/execution/resources/messages/ExecutionBundle.properties:54-55/564`。
+const jarConfig = (fields = {}) => ({
+  name: '跑 app.jar', type: JAR_RUN_CONFIG_TYPE_ID, command: '',
+  program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], ...fields,
+})
+
+/** 跑一段并把它抛出的**消息**交回来（要核的是「报的是哪一句」，不是「有没有抛」）。 */
+function thrownMessage(run) {
+  try {
+    run()
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+  return assert.fail('本应抛错，却没有抛')
+}
+
+test('家族清单 = 已接 + 宿主未接，两处不重不漏（pending 摘掉一项就是五处一起开）', () => {
+  const family = [...RUN_CONFIG_TYPE_FAMILY_IDS]
+  assert.ok(family.includes(JAR_RUN_CONFIG_TYPE_ID), 'JAR 必须在家族清单里：模块侧已经做完，只剩宿主两处')
+  for (const id of family) {
+    const accepted = RUN_CONFIG_TYPE_IDS.includes(id)
+    const pending = RUN_CONFIG_TYPE_IDS_HOST_PENDING.includes(id)
+    assert.notEqual(accepted, pending, `${id} 要么已接、要么等宿主，不能两处都有或都没有`)
+  }
+  assert.deepEqual(family.filter(id => RUN_CONFIG_TYPE_IDS_HOST_PENDING.includes(id)), [...RUN_CONFIG_TYPE_IDS_HOST_PENDING],
+    'pending 里的每一项都得是家族成员（写错 id 就是永远接不上）')
+  // 已接那份保持家族顺序（左树固定顺序与宿主报错文案都按这个顺序念）。
+  assert.deepEqual([...RUN_CONFIG_TYPE_IDS], family.filter(id => RUN_CONFIG_TYPE_IDS.includes(id)))
+})
+
+test('JAR 那一族五处一致：表单 / schema / 持久化 / 执行参数 / 树里显示都指同一个 id', () => {
+  // ① 新建配置表单：字段表按家族穷尽 ⇒ 家族加 id 而这里少一行就编译不过。
+  const editor = RUN_CONFIG_TYPE_FAMILY_EDITORS[JAR_RUN_CONFIG_TYPE_ID]
+  assert.equal(editor.typeId, JAR_RUN_CONFIG_TYPE_ID)
+  assert.equal(editor.tabTitle, '配置', '上游内建页签标题（ConfigurationSettingsEditor.java:86 的 zh 文案）')
+  assert.equal(editor.primary, 'program', 'JAR 靠「Java 可执行文件」那一格跑起来')
+  assert.deepEqual(editor.fields.map(field => field.id), ['program', 'args', 'cwd', 'env', 'beforeLaunch'],
+    '表单顺序 = 上游 JarApplicationConfigurable 的行序折算（JRE → Path to JAR/参数 → 工作目录 → 环境变量）')
+  for (const field of editor.fields) {
+    assert.ok(field.label && field.placeholder, `jar 的 ${field.id} 要有标签与占位文案`)
+    assert.notEqual(field.id, 'adapter', 'JAR 不画调试适配器那一格（上游那型没有 debugger 字段，本仓 debug 类型才要）')
+    assert.notEqual(field.id, 'members', 'JAR 不是复合配置')
+  }
+  // ②③ schema 校验 + 持久化：人写的错报成人看得懂的那一句，而不是通用的「字段无效」。
+  assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig({ args: ['-jar'] })])), /没有 JAR 路径/)
+  assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig({ args: [], command: 'java' })])), /没有 JAR 路径/,
+    '只在命令格里写了 java（没有 -jar 那一截）同样是缺入口')
+  assert.match(thrownMessage(() => normalizeRunConfigurations([jarConfig()])), /宿主还没接/,
+    '形状没问题的 jar 记录仍要被 gate 挡下（宿主白名单不认 jar ⇒ 现在存不下去，不能建得出再炸）')
+  // ④ 执行参数：VM 参数 → -jar 路径 → 程序参数（与 jarRunArgs 同形），缺入口就抛而不是给一条空命令行。
+  assert.deepEqual(jarRunConfigParams(jarConfig()), { program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], shell: false })
+  assert.equal(jarRunConfigPath(jarConfig({ args: [], command: 'java -jar "build/my app.jar" --port 8080' })), 'build/my app.jar')
+  assert.throws(() => jarRunConfigParams(jarConfig({ args: [] })), /没有 JAR 路径/)
+  assert.throws(() => jarRunConfigParams(jarConfig({ program: '' })), /没有 Java 可执行文件/)
+  assert.deepEqual(jarRunConfigParams(jarConfig({ program: '' }), { jdkHome: 'C:/jdk' }).program, 'C:/jdk/bin/java.exe',
+    'JRE 那格留空 ⇒ 退到项目 JDK（上游 JarApplicationCommandLineState.java:20-21 的 createProjectJdk）')
+  // ⑤ 树里显示：家族标签穷尽，已接清单是它按 gate 投影出来的结果。
+  assert.equal(RUN_CONFIG_TYPE_FAMILY_LABELS[JAR_RUN_CONFIG_TYPE_ID], JAR_APPLICATION_TYPE_LABEL)
+  assert.equal(RUN_CONFIG_TYPE_FAMILY_LABELS[JAR_RUN_CONFIG_TYPE_ID], 'JAR Application', '上游 bundle 原文（ExecutionBundle.properties:55）')
+  for (const id of RUN_CONFIG_TYPE_FAMILY_IDS) {
+    assert.ok(RUN_CONFIG_TYPE_FAMILY_LABELS[id] && RUN_CONFIG_TYPE_FAMILY_LABELS[id] !== id, `${id} 要有标签，不许拿 id 顶`)
+    assert.ok(RUN_CONFIG_TYPE_FAMILY_EDITORS[id], `${id} 要有字段表`)
+  }
+  assert.deepEqual(RUN_CONFIG_TYPES.map(entry => entry.id), [...RUN_CONFIG_TYPE_IDS],
+    '左树那份类型清单必须就是已接清单（摘掉 pending 后 jar 自动出现在树上与「添加」菜单里）')
+})
+
+test('JAR 缺入口时**表单实时校验**与**启动链路**都报错，不静默起跑', () => {
+  // 表单：逐类型校验取的是致命档（上游 RunConfiguration.java:156-167 的 RuntimeConfigurationError = 无法执行）。
+  const problem = checkRunConfiguration(jarConfig({ program: 'java.exe', args: ['-jar'] }), [])
+  assert.equal(problem.severity, 'error')
+  assert.match(problem.message, /没有 JAR 路径/)
+  assert.equal(checkRunConfiguration(jarConfig(), [jarConfig()]), null, '形状齐的 jar 记录在编辑器层没有拦路问题')
+  // 启动：`runConfigClosure` 落 schema 同一道门（src/runConfigTree.ts 里那句 normalizeRunConfigurations）。
+  assert.match(thrownMessage(() => runConfigClosure(jarConfig({ args: ['-jar'] }), [])), /没有 JAR 路径/)
+  assert.match(thrownMessage(() => runConfigClosure(jarConfig(), [])), /宿主还没接/)
+})
+
+test('宿主没接 JAR 时左树不列 jar 配置（宁可不出现，也不放一个点不动的假类型节点）', () => {
+  assert.deepEqual(buildRunConfigTree([jarConfig()]).map(group => group.id), [],
+    'gate 关着 ⇒ 树里不出现 jar 类型节点（表单的「添加」菜单同理，两处读的都是 RUN_CONFIG_TYPES）')
+  assert.deepEqual(buildRunConfigTree([{ name: 'shell 一条', type: 'shell', command: 'echo hi' }]).map(group => group.id), ['shell'])
+})
+
+test('JAR 的 gate 与宿主两处必须同步：宿主接了却留着 pending（或前端先接）都算红', () => {
+  const { ids } = nativeRunConfigTypeWhitelist()
+  const modelTypes = runConfigTypeUnionFromModel()
+  for (const id of RUN_CONFIG_TYPE_FAMILY_IDS) {
+    const hostAccepts = ids.includes(id) && modelTypes.includes(id)
+    assert.equal(RUN_CONFIG_TYPE_IDS.includes(id), hostAccepts,
+      `${id}：前端清单与宿主两处不一致 ⇒ 改 settingsModel 的 type 联合与 native/settings_schema.cpp 的白名单时，`
+      + '要同时把 src/runConfigurationSchema.ts 的 RUN_CONFIG_TYPE_IDS_HOST_PENDING 里那一项删掉')
+  }
 })

@@ -4,11 +4,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   JAR_APPLICATION_TYPE_DESCRIPTION, JAR_APPLICATION_TYPE_ID, JAR_APPLICATION_TYPE_LABEL, JAR_FORM_FIELDS,
-  jarCanRunOn, jarEnvironment, jarRunArgs, jarRunCommand, jarTemplateConfiguration, jarValidation, splitParameters,
+  isJarRunConfig, jarCanRunOn, jarEnvironment, jarRunArgs, jarRunCommand, jarRunConfigParams, jarRunConfigPath,
+  jarRunConfigProblem, jarRunConfigWorkingDirectory, jarTemplateConfiguration, jarValidation, JAR_RUN_CONFIG_TYPE_ID, splitParameters,
 } from '../src/jarRun.ts'
 import { javaExecutable } from '../src/javaRun.ts'
 
 const withJar = (over = {}) => ({ ...jarTemplateConfiguration('C:/proj'), jarPath: 'C:/proj/app.jar', ...over })
+/** 本仓 `RunConfig` 形状的那条 JAR 记录（`src/settingsModel.ts` 的字段，不新增键）。 */
+const jarRecord = (over = {}) => ({
+  name: '跑 app.jar', type: JAR_RUN_CONFIG_TYPE_ID, command: '',
+  program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], ...over,
+})
 
 const envWith = (files, dirs = files) => ({
   fileExists: path => files.includes(path),
@@ -113,4 +119,70 @@ test('环境变量：passParentEnvs=false 时只留配置里显式给的（JarAp
     '默认继承父进程，去重后保持顺序',
   )
   assert.deepEqual(jarEnvironment({ ...config, passParentEnvs: false }, ['A=1'], ['PATH=x']), ['A=1'])
+})
+
+// ── 本仓 `RunConfig` 形状那一套（表单 / schema / 持久化 / 执行参数 共用的单一来源） ──────────
+//
+// 上面那半守的是**上游 bean**（`JarApplicationConfiguration.java:270-278` 的七个字段），这一半守的是
+// 本仓把 JAR 折算成现成字段后的形状：`program` = Java 可执行文件（上游 JRE 那一格，
+// `JarApplicationConfigurable.java:67-71` 的 `JrePathEditor`）、`args` = VM 参数 → `-jar` → 路径 → 程序参数
+// （与 `jarRunArgs():187` 产出的 argv 同形）。五处一致的判据本体在 tests/run-config-types.test.mjs，
+// 这里只核这几个纯函数自己。
+
+test('类型判定按字符串：联合里还没加 jar 时也要能认出 jar 记录（绕开 TS2367 的那个形状）', () => {
+  assert.equal(isJarRunConfig(jarRecord()), true)
+  assert.equal(isJarRunConfig({ name: 'a', type: 'application', command: '', program: 'a.exe' }), false)
+  assert.equal(isJarRunConfig({ name: 'a', command: 'x' }), false, 'type 缺省不是 jar')
+  assert.equal(JAR_RUN_CONFIG_TYPE_ID, 'jar', '本仓前端的 id；上游注册的 id 是 JarApplication（JAR_APPLICATION_TYPE_ID）')
+})
+
+test('JAR 路径取 args 里的 -jar 那一段；只有命令串时按 parse 口径切', () => {
+  assert.equal(jarRunConfigPath(jarRecord()), 'build/app.jar')
+  assert.equal(jarRunConfigPath(jarRecord({ args: ['-Xmx512m', '-jar', 'C:/my proj/app.jar', '--port', '8080'] })), 'C:/my proj/app.jar')
+  assert.equal(jarRunConfigPath(jarRecord({ args: [], command: 'java -jar "build/my app.jar" --x' })), 'build/my app.jar')
+  assert.equal(jarRunConfigPath(jarRecord({ args: ['-jar'] })), '', '末尾光一个 -jar = 没填路径，不算路径')
+  assert.equal(jarRunConfigPath(jarRecord({ args: ['-jar', ''] })), '', '空串路径同样算没填')
+  assert.equal(jarRunConfigPath(jarRecord({ args: [], command: '' })), '')
+})
+
+test('缺 JAR 路径 ⇒ 明确报错；非 jar 类型一律不报（这条不能把别的类型也拦了）', () => {
+  assert.match(jarRunConfigProblem(jarRecord({ args: ['-jar'] })), /没有 JAR 路径/)
+  assert.ok(jarRunConfigProblem(jarRecord({ args: ['-jar'] })).includes('跑 app.jar'), '报错要点出是哪条配置')
+  assert.ok(jarRunConfigProblem(jarRecord({ args: ['-jar'] })).includes('Path to JAR'), '文案指得到上游表单那一格（ExecutionBundle.properties:564）')
+  assert.equal(jarRunConfigProblem(jarRecord()), null)
+  assert.equal(jarRunConfigProblem({ name: 'a', type: 'shell', command: 'echo hi' }), null)
+})
+
+test('执行参数：program + args + shell=false，顺序与 jarRunArgs 同形（VM 参数 → -jar 路径 → 程序参数）', () => {
+  assert.deepEqual(jarRunConfigParams(jarRecord()), { program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], shell: false })
+  assert.deepEqual(
+    jarRunConfigParams(jarRecord({ args: ['-Xmx512m', '-jar', 'app.jar', '--port', '8080'] })),
+    { program: 'C:/jdk/bin/java.exe', args: ['-Xmx512m', '-jar', 'app.jar', '--port', '8080'], shell: false },
+  )
+  // 只有命令串（整行写在命令格）：剥掉开头那个 java 启动器，因为可执行文件单独走 program。
+  assert.deepEqual(
+    jarRunConfigParams(jarRecord({ program: 'C:/jdk/bin/java.exe', args: [], command: 'java -jar app.jar -x' })),
+    { program: 'C:/jdk/bin/java.exe', args: ['-jar', 'app.jar', '-x'], shell: false },
+  )
+  // 开头不是 java/javaw（自己包的 wrapper）⇒ **不剥**，用户的参数一个字都不能被吃掉。
+  assert.deepEqual(jarRunConfigParams(jarRecord({ program: 'C:/jdk/bin/java.exe', args: [], command: 'wrapper.exe -jar app.jar' })).args,
+    ['wrapper.exe', '-jar', 'app.jar'])
+})
+
+test('执行参数不许静默：缺 JAR 路径 / 既没填可执行文件也没有项目 JDK 都抛错', () => {
+  assert.throws(() => jarRunConfigParams(jarRecord({ args: ['-jar'] })), /没有 JAR 路径/)
+  assert.throws(() => jarRunConfigParams(jarRecord({ program: '' })), /没有 Java 可执行文件/)
+  // JRE 那格留空 ⇒ 退到项目 JDK（上游 JarApplicationCommandLineState.java:20-21 的 createProjectJdk(project, jreHome)）。
+  assert.deepEqual(jarRunConfigParams(jarRecord({ program: '' }), { jdkHome: 'C:/jdk' }),
+    { program: 'C:/jdk/bin/java.exe', args: ['-jar', 'build/app.jar'], shell: false })
+  assert.deepEqual(jarRunConfigParams(jarRecord(), { jdkHome: 'C:/ignored' }).program, 'C:/jdk/bin/java.exe',
+    '配置自己填了就用配置的，不被项目 JDK 覆盖')
+  // 对照：bean 版 jarRunArgs 在 JDK 空时给的是**空数组**（静默），本仓启动链路要的是原因，所以两层并存。
+  assert.deepEqual(jarRunArgs({ config: withJar() }), [])
+})
+
+test('工作目录：cwd 空就空（上游 WORKING_DIRECTORY 空不擅自填项目根，见 jarTemplateConfiguration 的 onNewConfigurationCreated）', () => {
+  assert.equal(jarRunConfigWorkingDirectory(jarRecord({ cwd: 'C:/proj/out ' })), 'C:/proj/out')
+  assert.equal(jarRunConfigWorkingDirectory(jarRecord({ cwd: '' })), '')
+  assert.equal(jarRunConfigWorkingDirectory(jarRecord()), '')
 })

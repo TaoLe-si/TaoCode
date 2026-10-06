@@ -67,3 +67,40 @@ test('空内容不炸，图片 alt 为空也算一条', () => {
   assert.deepEqual(parseQuickDoc(''), { blocks: [], links: [], images: [] })
   assert.deepEqual(parseQuickDoc(undefined), { blocks: [], links: [], images: [] })
 })
+
+// 判据（本轮新增）：围栏代码块按**行**进出，不按**段**。上游把 markdown 摊成
+// `lines()` 逐行数 ```（`DocMarkdownToHtmlConverter.kt:92,105-108`，整行是围栏才翻面 `isInCode`），
+// 块的最终形状由 GFM 的逐行标记器决定（`doc/impl/DocFlavourDescriptor.kt:31-36`）。
+// 这条**在本轮改动前会红**：旧实现要求整段正好是 ```…```，签名后面不空一行时
+// 正文被吞进代码块（jdt.ls / pyright 的 hover 就是这个形状）。
+test('围栏后面不空一行也得住：签名进 code、正文另起一块（DocMarkdownToHtmlConverter.kt:92,105-108）', () => {
+  const NL = '\n'
+  const after = parseQuickDoc(['```java', 'void foo(int a)', '```', '说明。'].join(NL))
+  assert.deepEqual(after.blocks.map(block => [block.kind, block.text]), [['code', 'void foo(int a)'], ['text', '说明。']])
+  assert.equal(after.blocks[0].language, 'java', 'info string 是语言标注')
+  // 同一形状再来一条正文：被吞掉的会是这两段而不是第一段。
+  const tail = parseQuickDoc(['```ts', 'const x = 1', '```', '第一段', '第二段'].join(NL))
+  assert.deepEqual(tail.blocks.map(block => [block.kind, block.text]),
+    [['code', 'const x = 1'], ['text', '第一段\n第二段']])
+})
+
+test('围栏里的空行留在代码体、围栏外的空行照旧分段', () => {
+  const NL = '\n'
+  const blank = parseQuickDoc(['```md', 'a', '', 'b', '```', '说明'].join(NL))
+  assert.deepEqual(blank.blocks.map(block => [block.kind, block.text]), [['code', 'a\n\nb'], ['text', '说明']])
+  const two = parseQuickDoc(['```a', 'x', '```', '', '正文', '', '```b', 'y', '```'].join(NL))
+  assert.deepEqual(two.blocks.map(block => [block.kind, block.text, block.language]),
+    [['code', 'x', 'a'], ['text', '正文', undefined], ['code', 'y', 'b']])
+})
+
+test('句子里出现的三个反引号不开围栏（整行只有 ``` 才是围栏）', () => {
+  const inline = parseQuickDoc('用 ``` 包住名字')
+  assert.deepEqual(inline.blocks.map(block => [block.kind, block.text]), [['text', '用 ``` 包住名字']])
+  assert.equal(inline.blocks[0].parts, undefined, '没链接就不给 parts（形状与改动前一致）')
+  // 折回显示名之后带链接的那一句也必须保住 `parts`：围栏循环是按行切块的，
+  // 拿已经折回的纯文本再切一次就会把内联链接整条丢掉。
+  const marked = parseQuickDoc(['```java', 'void a()', '```', '见 {@link Foo} 结束'].join('\n'))
+  assert.deepEqual(marked.blocks.map(block => block.kind), ['code', 'text'])
+  assert.equal(marked.links.length, 1)
+  assert.notEqual(marked.blocks[1].parts, undefined, '正文块的分段没了，链接就点不动')
+})

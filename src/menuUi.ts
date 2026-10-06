@@ -81,10 +81,12 @@ export interface MenuUiDeps {
  * 只有键位入口、**不在任何菜单里**的动作：上游 `ActionManager` 里有、`getAction(id)` 拿得到，
  * 但菜单树里没有对应行（IDEA 的键位面板就是按这个集合列出可改键的动作）。
  *
- * 键位动作是**每次按键**才注册进注册表的（`keymap.ts:384` 的 `registerKeymapActions`）。
- * `keymapBindings.ts` 的 25 个动作 id 里有 **21 个**在 `src/menus/*` 找不到对应行 ——
+ * 键位动作是**每次按键**才注册进注册表的（`keymap.ts:418` 的 `registerKeymapActions`）。
+ * `keymapBindings.ts` 的 30 个动作 id 里有 **21 个**在 `src/menus/*` 找不到对应行 ——
  * 转到行 / 快速文档 / 提取方法 / 按名字运行检查 / 打开设置 / 追溯 / 关闭标签页…，
  * 也就是说这些动作原先在「查找操作」与 Search Everywhere 里**一个都搜不到**。
+ * （两个数字都由 `tests/keymap-bindings.test.mjs` 的「menuUi 的计数注释与键位表同步」现算，
+ * 加一条键位就跟着变；上一版写的是 25/21，R1+R2 落了导航三条与编辑器一族之后就漂成了 25。）
  *
  * 注册表不是响应式的（`ACTIONS.presentationVersion` 是普通数字，读它不构成 Vue 依赖），
  * 所以这一段只能在**搜索面板打开的那一刻**重算 —— 见 `refreshActionRegistryIndex`。

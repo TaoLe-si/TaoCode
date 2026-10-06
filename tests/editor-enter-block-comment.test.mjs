@@ -142,12 +142,20 @@ test('Enter 键确实绑在回车家族上（上游 EditorEnter，$default.xml:8
   // 语言工厂必须把**块注释**那一半也喂进来：只给 `line` 时第②步在真实编辑器里永远问不到
   // （上游要的是 `CodeDocumentationAwareCommenter`，`EnterInBlockCommentHandler.java:38-39`；
   //  四件套对应关系 `JavaCommenter.java:27-28/:32-33/:62-63/:67-68`）。
-  assert.match(view, /import \{ smartEnterCommand, smartEnterLanguageFor \} from '\.\.\/enterHandlers'/,
+  // 订正（2026-10-06 · edinput3）：宿主那一行改成了 `smartEnterLanguageForView(view, path, language, settings)`
+  // —— 注释词法的两次调用搬进了模块（`CodeEditor.vue` 顶在 1147 行上限，要给它腾出拆行/列模式两行键位），
+  // 意图没变：块注释那一半仍必须由 enterHandlers 那个出口喂进来。断言跟着换成新出口名，**没有放松**。
+  assert.match(view, /import \{ smartEnterCommand, smartEnterLanguageForView \} from '\.\.\/enterHandlers'/,
     'CodeEditor 没引词法装配出口 ⇒ 编辑器里按 Enter 不会补 */、也不会续行 `* `')
-  assert.match(view, /smartEnterCommand\(\(\) => smartEnterLanguageFor\(/,
-    'smartEnter 的语言工厂没走 smartEnterLanguageFor ⇒ 块注释那一半（第②步）在真实编辑器里问不到')
+  assert.match(view, /smartEnterCommand\(\(\) => smartEnterLanguageForView\(view, props\.path, props\.language, props\.settings\)\)/,
+    'smartEnter 的语言工厂没走模块出口 ⇒ 块注释那一半（第②步）在真实编辑器里问不到；'
+    + '少传 props.settings 就是设置页那两格（closeCommentOnEnter / insertBraceOnEnter）没有消费方')
   const handlers = readFileSync(join(root, 'src/enterHandlers.ts'), 'utf8')
   assert.match(handlers, /export function smartEnterLanguageFor/, '装配出口被搬走了')
+  // 两条开关（上游 `CodeInsightSettings.java:130`/`:132`，本仓 `settingsModel.ts:429`/`:431`）要在模块里
+  // 真的落到 `EnterLanguage` 那两个字段上，缺省按上游默认 true。
+  assert.match(handlers, /blockCloseOnEnter: settings\?\.closeCommentOnEnter \?\? true/, 'closeCommentOnEnter 没落到 blockCloseOnEnter')
+  assert.match(handlers, /insertBraceOnEnter: settings\?\.insertBraceOnEnter \?\? true/, 'insertBraceOnEnter 没落到 insertBraceOnEnter')
   // 订正（2026-10-06）：出口原来是一行 `return { line, block }`，现在多带回连接符那一格
   // （`EnterLanguage.stringConcat`，上游 `EnterInStringLiteralHandler.java:39-42` 的门槛），
   // 形状从单行变成多行 ⇒ 断言只核「块注释那一半有没有被翻成 lexicon」这条实质，不核整行字面。

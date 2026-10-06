@@ -99,3 +99,19 @@ test('接线：两档都有真消费方，没有消费链路的开关不渲染�
   assert.match(popup, /emit\('policy-change'/, '齿轮改了没有把补丁交给宿主持久化')
   assert.match(source('src/docHoverContent.ts'), /shouldShowDocOnHover\(\)/, 'hover 那档闸没有被取用面消费')
 })
+
+// 判据（本轮新增）：档位问在**去抖之后**，不是只问在排程之前。上游三处读属性的位置都在
+// 真正动手那一刻（`DocumentationToolWindowManager.kt:121` 的 `if (!autoUpdate)`、`:191`、`:219`）。
+// 少了这一句：弹层开着、光标一动就排下 300ms 的一拍，用户在这 300ms 里把齿轮关掉，
+// 那一拍照样会换掉这一页 —— 「我关了，它还是自己翻了」。
+test('自动更新：去抖到期时再问一次档位，关掉之后已经排下去的那一拍不再刷新一页', () => {
+  const host = source('src/quickDocHost.ts')
+  const start = host.indexOf('autoTimer = window.setTimeout(')
+  assert.ok(start >= 0, '自动更新那一拍没有走去抖')
+  const end = host.indexOf('}, DOC_AUTO_UPDATE_QUIESCENCE_MS)', start)
+  assert.ok(end > start, '去抖的时长用的是那个有出处的常量')
+  const body = host.slice(start, end)
+  assert.match(body, /if \(!shouldAutoUpdateDoc\(\)\)/, '到期时没有再问一次「自动更新」档')
+  assert.ok(body.indexOf('shouldAutoUpdateDoc') < body.indexOf('void showAt('), '档位必须问在取文档之前')
+  assert.match(source('src/docHoverPolicy.ts'), /export function shouldAutoUpdateDoc\(/, '谓词本身还在（消费方别改成读字段）')
+})

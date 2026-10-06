@@ -125,6 +125,10 @@ test('smartQuotes 与 angleBraceHighlight 都进了编辑器的扩展面（不�
   const view = readFileSync(new URL('../src/components/CodeEditor.vue', import.meta.url), 'utf8')
   assert.match(view, /import \{ insertedText, smartQuotes \} from '\.\.\/editorTyping'/)
   assert.match(view, /import \{ angleBraceHighlight, rainbowBrackets \} from '\.\.\/editorBrackets'/)
-  assert.match(view, /smartQuotes\(\(\) => props\.language\), angleBraceHighlight\(\(\) => props\.language\)/,
-    '两个扩展没挂进 extensions ⇒ 引号链路与尖括号配对在真实编辑器里没有入口')
+  // 订正（2026-10-06 · edinput3）：`smartQuotes` 的实参从 1 个变 2 个 —— 第二个就是
+  // `autoInsertPairQuote`（`CodeInsightSettings.java:140`，本仓 `settingsModel.ts:427`，界面
+  // `EditorEnterKeysFields.vue:29`），设置页那一格从此有消费方。断言跟着钉成新形状，**没有放松**。
+  assert.match(view, /smartQuotes\(\(\) => props\.language, \(\) => props\.settings\.autoInsertPairQuote\), angleBraceHighlight\(\(\) => props\.language\)/,
+    '两个扩展没挂进 extensions ⇒ 引号链路与尖括号配对在真实编辑器里没有入口；'
+    + '第二个实参没问 autoInsertPairQuote ⇒ 关掉「插入成对引号」仍然会补一对，那一格就是假的')
 })

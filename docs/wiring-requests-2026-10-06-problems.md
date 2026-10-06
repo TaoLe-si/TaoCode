@@ -179,3 +179,19 @@ const problemsFocus = ref<{ grouping: string; key: string; label: string } | nul
 >
 > 另：R5 表里那几行"候选（不存在）"的写法会被 `.tools` 的取证脚本按名字收进
 > `build/missing-names.md`，建议保留但**别再加行号**（加了就变成引用门的一条红）。
+
+---
+
+## status3 复核（2026-10-06 桶 status3；报告见 `docs/batch-2026-10-06-status3.md`）
+
+| 项 | 判定 | 本轮实测 |
+| --- | --- | --- |
+| R1 `relatedInformation` 透传 | **仍缺** | `native/lsp_support.cpp:148-149` 仍只带 `code`/`tags`，`:149` 之后没有 related；`src/bridge.ts:118` 的 interface 逐字仍是 `… code?: string \| number; tags?: number[] }`（没有 `related` / `codeDescriptionHref`）⇒ 上面那段可照抄 cpp 与整行替换**仍然有效**（插入锚 `:149`→`:150` 本轮复核一致）。前端消费链没动：`src/problems.ts` 的 `relatedFrom`、`src/problemRelatedInformation.ts`、面板行菜单那一节都在原地等数据 |
+| R2 状态栏「按检查项」芯片 | **仍缺** | `src/App.vue:2297` 的 `status-right` 里本轮实测**只有**一枚 `status-problems`（没有第二枚未使用芯片、也没有 `unusedDeclarationCount`）。目标行按本轮订正为 `:2297`（原写 2273）。数据面仍然齐：`src/inspectionIdentity.ts` 的 `problemKindOf`、`src/problemsView.ts` 的 `problemCounts`、`src/inspectionProfile.ts` 的 `inspectionItems` ⇒ **不要再新写聚合函数** |
+| R3 Alt+Enter 打开面板「操作」菜单 | **仍缺（组件侧已备好，行号订正）** | 组件侧本轮实测：`src/components/ProblemsPanel.vue:302` 是 `openMenuForSelected()`、`:310` 是 `defineExpose({ openMenuForSelected })`（原写 `:274-289`）。宿主侧三处都还缺：`src/App.vue:2239` 的挂载**没有** `ref`；`grep problems.view.quickFixes` 在 `src/actionRegistry.ts` 与 `src/keymapBindings.ts` ⇒ **0 命中** |
+| R4 面板焦点态抛给状态栏 | **仍缺（组件侧已备好，行号订正）** | 组件侧本轮实测：`src/components/ProblemsPanel.vue:89` 的 `focusChange` 声明、`:131` 的抛出（原写 `:85-90`/`:124-127`）。宿主侧：`src/App.vue:2239`（原写 2214）没有 `@focus-change`，也没有 `problemsFocus` 那个 ref |
+| R5 上游路径改正 | **前提变了 ⇒ 关闭** | 本轮复核：`src/diagnosticsPanel.ts` **不存在**（`ls` 无命中）⇒ 代码改动量 0；表里那 6 条"实测存在的位置"上一批已逐条命中，本仓没有引用点。真正缺口是"本仓没有本地检查引擎宿主"，与路径写法无关 |
+
+> 提醒下一位：R1/R2/R3/R4 的落点本轮**都在别人名下或保留文件**，status3 一个字没动。
+> 另登记一条同族的新观察（不在本请求里）：`src/inspectionReport.ts:29-30` 是本仓**第三份**严重度→名字/样式映射，
+> 与 `src/highlightLevels.ts` 的 `levelForSeverity` 平行；建议改读那一份，理由与 `docs/wiring-requests-2026-10-06-prob3.md` 的 R1 同族。

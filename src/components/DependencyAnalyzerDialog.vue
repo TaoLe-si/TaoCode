@@ -131,7 +131,7 @@ header .icon-button { margin-left:auto; }
 .scope-chip.off { color:var(--muted); text-decoration:line-through; }
 .analyzer-body { display:flex; flex:1; min-height:0; border-top:1px solid var(--line); }
 .analyzer-list { flex:1; min-width:0; margin:0; padding:2px; overflow:auto; list-style:none; font:11px/1.7 var(--font-mono); }
-.analyzer-list li { display:flex; align-items:center; gap:4px; padding:1px 4px; cursor:pointer; }
+.analyzer-list li { display:flex; align-items:center; gap:4px; padding:1px 4px; cursor:pointer; transition: background-color var(--dur-1) var(--ease); }
 .analyzer-list li:hover { background:var(--hover); }
 .analyzer-list li.selected { background:var(--selected); }
 .analyzer-list li.warning .name { color:var(--warning, var(--error)); }

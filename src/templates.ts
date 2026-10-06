@@ -144,9 +144,13 @@ function indentOf(line: string) {
   return /^ */.exec(line)![0]
 }
 
-// 槽位词法（本仓的既有契约，`$NAME$` / `$NAME:默认值$` / `$END$` / `$EXPR$`）。
+// 槽位词法（本仓的既有契约，`$NAME$` / `$NAME:默认值$` / `$END$` / `$EXPR$`）+ 上游那条**美元转义**：
+// `TemplateTextLexer.flex:27` 把 `$$` 认成 ESCAPE_DOLLAR，`TemplateBase.java:66-68` 落进正文的是一个字面 `$`。
+// 默认值那一段不跨行 —— 上游的 `$…$` token 只有 `{ALPHA|DIGIT}+`（`TemplateTextLexer.flex:21-23`），
+// 里面本来就不可能有换行；本仓那个 `:默认值` 是压缩出来的第三段，同样只在**同一行**内认。
+// 导出给设置页用：预览与 `render()` 必须共用一份词法，否则「页面上说不是槽位」和「引擎插进了槽位」会两套口径。
 // 宏只活在「默认值那一段」里，识别与求值都在 src/templateMacros.ts。
-const pattern = /\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$]*))?\$/g
+export const TEMPLATE_TEXT_TOKEN = /\$\$|\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$\n]*))?\$/g
 
 // Re-indent continuation lines and replace `$NAME$` / `$NAME:默认值$` / `$END$`.
 // `context` 只给宏用（文件路径与时间源）；不传也照常展开，文件类宏那时取不到路径就是空串。
@@ -156,11 +160,12 @@ export function render(body: string, indent: string, vars: Record<string, string
     return part.length ? indent + part : part
   }).join('\n')
   const stops: Stop[] = []
-  const matches = [...shifted.matchAll(pattern)]
+  const matches = [...shifted.matchAll(TEMPLATE_TEXT_TOKEN)]
   // 上游的取值顺序在这里保持：`vars`（预定义变量表）先命中就不算宏
   // （`TemplateStateBase.java:79-84`），剩下的槽位才交给宏表做定形迭代。
   const slots: TemplateSlotDefinition[] = []
   for (const match of matches) {
+    if (match[0] === '$$') continue          // 转义出来的那个 `$` 不是槽位
     const name = match[1]!
     if (name === 'END' || Object.prototype.hasOwnProperty.call(vars, name)) continue
     slots.push({ name, rawDefault: match[2] ?? '' })
@@ -172,6 +177,7 @@ export function render(body: string, indent: string, vars: Record<string, string
   for (const match of matches) {
     text += shifted.slice(cursor, match.index)
     cursor = (match.index ?? 0) + match[0].length
+    if (match[0] === '$$') { text += '$'; continue }   // `TemplateBase.java:66-68`
     const name = match[1]!
     if (name === 'END') { end = text.length; continue }
     const known = Object.prototype.hasOwnProperty.call(vars, name)

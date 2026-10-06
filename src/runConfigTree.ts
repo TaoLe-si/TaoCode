@@ -10,21 +10,30 @@
 // 抽成纯函数的原因：树的分组规则（类型 → 文件夹 → 配置）、唯一名、文件夹名校验都是可测逻辑，
 // 组件只负责渲染与交互。
 import { stableRunConfig, type RuntimeRunConfig as RunConfig } from './runTargets.ts'
-import { normalizeRunConfigurations, RUN_CONFIG_TYPE_IDS } from './runConfigurationSchema.ts'
+import { normalizeRunConfigurations, RUN_CONFIG_TYPE_IDS, type RunConfigTypeId } from './runConfigurationSchema.ts'
+import { JAR_APPLICATION_TYPE_LABEL, JAR_RUN_CONFIG_TYPE_ID } from './jarRun.ts'
 
-/** IDEA 的 ConfigurationType 在 TaoCode 的对应物（标签沿用面板里的中文名）。
- *  id 清单只有一份（`runConfigurationSchema.ts` 的 `RUN_CONFIG_TYPE_IDS`），这里只给中文名；
- *  `Record<NonNullable<RunConfig['type']>, string>` 是**穷尽**的 ⇒ 联合里加类型就必须在这里补标签，
- *  否则编译不过（与 `RUN_CONFIG_EDITORS` 同一约束）。 */
-const RUN_CONFIG_TYPE_LABELS: Record<NonNullable<RunConfig['type']>, string> = {
+/** 每个类型的中文名，**按家族穷尽**（`Record<RunConfigTypeId, string>`）：
+ *  `src/runConfigurationSchema.ts` 的 `RUN_CONFIG_TYPE_FAMILY_IDS` 加一项而这里没补标签 ⇒ 编译不过，
+ *  这就是「树里显示」那一处的机器门。JAR 那一条的标签直接取上游 bundle 的原文
+ *  （`jar.application.configuration.name`，`java/execution/impl/src/com/intellij/execution/jar/JarApplicationConfigurationType.java:20`
+ *  + `platform/execution/resources/messages/ExecutionBundle.properties:55` = `JAR Application`）；
+ *  本地化包不在本地树 ⇒ 不编中文，与 `src/jarRun.ts:52` 同一份常量。 */
+export const RUN_CONFIG_TYPE_FAMILY_LABELS: Record<RunConfigTypeId, string> = {
   shell: 'Shell 命令',
   application: '应用程序',
   debug: '调试',
   compound: '复合配置',
+  [JAR_RUN_CONFIG_TYPE_ID]: JAR_APPLICATION_TYPE_LABEL,
 }
 
+/** 树/编辑器能用到的类型 = **宿主已接**的那几个（gate 在 `src/runConfigurationSchema.ts`）。
+ *  pending 里的 jar 在这里不出现 ⇒ 左树不出类型节点、下拉里点不到，也就不会建出一份存不下去的配置。 */
 export const RUN_CONFIG_TYPES: Array<{ id: NonNullable<RunConfig['type']>; label: string }> =
-  RUN_CONFIG_TYPE_IDS.map(id => ({ id, label: RUN_CONFIG_TYPE_LABELS[id] }))
+  RUN_CONFIG_TYPE_IDS.map(id => ({ id, label: RUN_CONFIG_TYPE_FAMILY_LABELS[id] }))
+
+/** 家族标签（含 pending 的 jar）：`tests/run-config-types.test.mjs` 用它核「五处一致」的「树里显示」那一处，
+ *  宿主接完后它投影出来的就是上面那份 `RUN_CONFIG_TYPES`（同一个 id、同一个标签）。 */
 
 /** 参数字段必须可逆（IDEA ParametersListUtil.join/parse），不能用空格 split 破坏 classpath。
  * TaoCode 运行在 Windows：这里与 run_host 的 CRT 双引号/反斜杠规则对应，不执行 shell 展开。

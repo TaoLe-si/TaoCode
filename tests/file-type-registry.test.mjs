@@ -92,6 +92,50 @@ test('忽略清单：分号掩码、去重、精确名/通配/扩展名三种掩
   assert.equal(manager.isFileIgnored('a.log'), false)
 })
 
+// 上游那道「遮蔽闸」：`IgnoredPatternSet.addIgnoreMask`
+// （`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/copy1/IgnoredPatternSet.java:47-53`）
+// 先拿**新词条自己当文件名**去问现有掩码表（`:49` 的 `findAssociatedFileType(ignoredFile) == null`），
+// 只要已经被盖住，`:50-51` 两行都不执行 ⇒ 它连 `masks` 集合都进不去，
+// 于是 `getIgnoreMasks()`（`:34-36`）与 `FileTypeManagerImpl.getState()` 存的那份（`:1434`）里都没有它。
+test('忽略清单的遮蔽闸：已被现有掩码盖住的词条不进清单，也不是按字符串去重', () => {
+  const manager = new FileTypeManager()
+  manager.setIgnoredFilesList('*.pyc')
+  assert.equal(manager.addIgnoreMask('build.pyc'), false, '`*.pyc` 已经盖住 `build.pyc`（扩展名匹配器 = endsWithIgnoreCase）')
+  assert.equal(manager.getIgnoredFilesList(), '*.pyc', '被盖住的那条不留任何痕迹：不进清单 ⇒ 也不会被持久化')
+  assert.equal(manager.addIgnoreMask('*.pyc'), false, '同一道闸顺带去重：`*.pyc` 自己就被 `*.pyc` 匹配到')
+  assert.equal(manager.addIgnoreMask('*.class'), true, '没被盖住的照常收')
+  assert.equal(manager.addIgnoreMask('   '), false, '空词条不收')
+  // 证明判的是**掩码匹配**、不是字符串相等：把遮蔽者换掉后同一条就该收进来了
+  // （上游 `unignoreMask` 重建整表也是这个意思，`FileTypeManagerImpl.java:1322-1329`）。
+  manager.setIgnoredFilesList('*.class')
+  assert.equal(manager.addIgnoreMask('build.pyc'), true, '遮蔽者不在了就要收 —— 反向验证上面那条 false 不是字符串去重')
+  assert.equal(manager.getIgnoredFilesList(), '*.class;build.pyc')
+})
+
+// 上游 `FileTypeAssocTable.addAssociation` 末尾那条比较器（为一修 IJPL-149806）：
+//   `jps/model-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeAssocTable.java:113-120`
+//   第一级 `comparing(presentableString().length(), reverseOrder())` = **长的在前**；
+//   第二级 `.thenComparing(presentableString().replace("?" -> \uFFFE).replace("*" -> \uFFFF))` = **升序**，
+//   而 \uFFFE < \uFFFF ⇒ 同长时带 `?` 的那条排在带 `*` 的前面。两级方向不同，本仓原来把它们
+//   并成一个字符串键整体降序比 ⇒ 同长时 `*` 抢了 `?` 的位置（注释写对了、代码写反了）。
+test('通配表排序：长度降序；同长时 `?` 先于 `*`，且与注册顺序无关', () => {
+  const starFirst = new FileTypeManager([
+    type('Star', 'Star', 'other', [{ kind: 'wildcard', pattern: '*at.ts' }]),
+    type('Quest', 'Quest', 'other', [{ kind: 'wildcard', pattern: '?at.ts' }]),
+  ])
+  assert.equal(starFirst.getFileTypeByFileName('cat.ts').id, 'Quest', '两条都是 6 长 ⇒ 走第二级：`?` 在前')
+  const questFirst = new FileTypeManager([
+    type('Quest', 'Quest', 'other', [{ kind: 'wildcard', pattern: '?at.ts' }]),
+    type('Star', 'Star', 'other', [{ kind: 'wildcard', pattern: '*at.ts' }]),
+  ])
+  assert.equal(questFirst.getFileTypeByFileName('cat.ts').id, 'Quest', '结论由排序键定，不该看注册顺序')
+  const byLength = new FileTypeManager([
+    type('Near', 'Near', 'other', [{ kind: 'wildcard', pattern: '*at.ts' }]),
+    type('Far', 'Far', 'other', [{ kind: 'wildcard', pattern: '*cart.ts' }]),
+  ])
+  assert.equal(byLength.getFileTypeByFileName('cart.ts').id, 'Far', '第一级优先：8 长的比 6 长的具体')
+})
+
 test('parseFileNameMatcher：`*.foo` → 扩展名、普通词 → 精确名、带通配符（含 `*.d.ts`）→ 通配', () => {
   assert.deepEqual(parseFileNameMatcher('*.cpp'), { kind: 'extension', extension: 'cpp' })
   assert.deepEqual(parseFileNameMatcher('.gitignore'), { kind: 'exact', fileName: '.gitignore' })

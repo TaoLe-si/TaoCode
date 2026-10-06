@@ -48,6 +48,36 @@
 （头部「当前已判 N 行」/四档和数同样动态）都应绿；`docs/inventory/settings-run_verdict_table.md` 与本请求无关
 （那是族级生成物，`scripts/verdict_table.py settings-run` 的产物，§G 手写表被护栏排除在比对之外）。
 
+## W-2（b89 收工前一度出现的第三条红 —— 已由该 lane 自行同步，本条只留痕，不需要接线）
+
+b89 的两条派单红修完并复跑绿之后，并行提交 `dfbda4e`（「15 路并行移植收口」）改了
+`docs/inventory/verdict-settings-run.md` 的 §G 档位却没跟着改头部与小节标题 ⇒
+`tests/b9-verdict.test.mjs:94`「四档相加等于总数，且文档头部的和数与表一致」变红：
+
+```
+AssertionError: 头部和数没跟着改：头部 35 + 388 + 2526 + 298，§G 实为 35 + 407 + 2507 + 298
+```
+
+b89 用脚本逐条重数该文档 §G 的 3247 行（与 `tests/b9-verdict.test.mjs` / `tests/b11-verdict.test.mjs` 同一解析口径）：
+`[x]` **35**、`[~]` **407**、`[ ]` **2507**、`[-]` **298**（合计 3247 ✓，头部那句「当前已判 **3247** 行」也 ✓）。
+⇒ 文档自己缺两处同步（b89 不可改这份，规则 §2）：
+
+1. `docs/inventory/verdict-settings-run.md:11`
+   `> 四档合计 **[x] 35 + [~] 388 + [ ] 2526 + [-] 298 = 3247**`
+   → `> 四档合计 **[x] 35 + [~] 407 + [ ] 2507 + [-] 298 = 3247**`
+2. `:55` `## B. 部分移植（`[~]`，全表 388 类）` → `全表 407 类`
+
+（`## C. 未移植与缺失设置项（`[ ]` + 上游设置键对照）` 的标题不带数字，无需改；`:43` §A＝35 ✓、`:196` §D＝298 ✓ 已经对得上。）
+
+**状态：已在 b89 收工前由 settings-run lane 自己同步**（工作区 `M docs/inventory/verdict-settings-run.md`），
+b89 复核：§G 逐条重数＝`[x]` 35 / `[~]` **408** / `[ ]` **2506** / `[-]` 298，与 `:11` 头部与 `:55` §B 标题逐档相等，
+`node --test tests/b9-verdict.test.mjs` ⇒ tests 9 / pass 9 / fail 0。本节留在文件里是为了留痕（这条红是谁的、怎么没的）。
+
+顺带建议（不是本条红的必要条件）：把 `tests/b8-verdict.test.mjs` 里 b89 新加的「§A–§D 小节标题的
+「全表 N 类」必须与 §G 逐档实数逐字相等」那组断言同样搬到 `tests/b9-verdict.test.mjs` / `tests/b11-verdict.test.mjs`
+—— 本域这处漏同步（和 W-1 那次 §A/§B 停在 43/1044）正是同一类「只写在断言消息里、没人核」的缺陷。
+`tests/b11-verdict.test.mjs` 完全不在 b89 的可改面，所以这条只提不改。
+
 ## 为什么 b89 不自己改
 
 `docs/inventory/verdict-settings-run.md` 不在派单的可改面里，规则 §2 写「派单没写的一律只读」。

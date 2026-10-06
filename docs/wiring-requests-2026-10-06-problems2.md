@@ -167,3 +167,18 @@ const semanticSnapshots = new HighlightingSnapshotCache<{ resultId: string; data
 lsp lane 在途、宿主文件不许碰。前端消费链（`src/problems.ts`、`src/problemRelatedInformation.ts`、
 `src/components/ProblemsPanel.vue:738-743`）与判据（`tests/problem-related.test.mjs`）都还在原地等数据，
 宿主一旦透传就生效。R2/R3/R4 同理，目标文件仍分别是 `src/App.vue` / `src/keymapBindings.ts` / `src/actionRegistry.ts`。
+
+---
+
+## status3 复核（2026-10-06 桶 status3；报告见 `docs/batch-2026-10-06-status3.md`）
+
+| 项 | 判定 | 本轮实测 |
+| --- | --- | --- |
+| W1 高亮缓存注册表 + `semanticTokens` 分桶 | **仍缺** | 三个目标文件（`src/lspHighlightingCache.ts`、`src/lspNavigation.ts`、`src/components/CodeEditor.vue`）都不在 status3 名下，本轮未动。**现场提醒**：收工时 `npx vue-tsc -b --force` 报 `src/lspNavigation.ts` 的 4 条语法错（TS1005/TS1136/TS1109/TS1128，在本轮最后一次实跑里指向该文件的 `:320`/`:321`/`:666`）⇒ lsp lane 正在改同一个文件，本份"要接什么（2）"里那些行号（`:197`/`:223`/`:43-45`）在他们落地后必然漂，照抄前先重取 |
+| W2 重启时清整工程检查缓存 | **已闭环（上一批自证）** | 本轮**没有**重开 `src/lspPerFileCache.ts` / `src/lsSessionHost.ts` / `src/lspProgress.ts` / `src/workspaceDiagnostics.ts` ⇒ 维持上一批结论、不复述行号（规约 §1：没打开就不写行号）。末尾那条 `workspaceDiagnosticIds` 的 watch（`src/App.vue`，保留文件）status3 没动 |
+| W3 提醒 problems R1 | **仍缺** | 本轮亲测：`native/lsp_support.cpp:148-149` 只带 `code`/`tags`、`:149` 之后没有 related；`src/bridge.ts:118` 的 `LspDiagnostic` 仍无 `related`/`codeDescriptionHref` ⇒ R1 的两处照抄代码仍然有效 |
+
+status3 在问题视图域**闭环掉的一条**（原来挂在 status2 那份的 W4，不是本份）：
+`src/components/ProblemsPanel.vue` 的导出文本「详情」复选框已落地
+（state `:516-519`、调用点 `:546`、模板 `:603`），判据 `tests/problems-export-text-details.test.mjs`（6 条，含反向验证）。
+⇒ 面板这一侧不再需要为 `src/errorTree.ts` 的 `details` 分支补宿主。

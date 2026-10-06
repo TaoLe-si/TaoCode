@@ -5,7 +5,11 @@
 // 本仓列表项都是行断点 ⇒ 按文件分组；异常断点是共享状态里的独立分组（面板与对话框同一份勾选）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const REF = 'D:/Backup/Downloads/intellij-community-master/intellij-community-master'
 
 const { fileGroupLabel, groupBreakpointsByFile } = await import('../src/breakpointGroups.ts')
 const exception = await import('../src/exceptionBreakpoints.ts')
@@ -223,4 +227,62 @@ test('写入口接线：组节点那一格真的在弹层里，且没有上游�
   assert.match(view, /groupMoveTargetsOf\(row\.node\.name\)/, '目标清单没走规则层')
   assert.match(view, /<option :value="NEW_GROUP">新建…<\/option>/, '「新建…」是子菜单最后一项（上游 :338 在分隔线之后）')
   assert.doesNotMatch(view, /重命名组|删除组|renameGroup|removeGroup/, '上游没有这两个动作 ⇒ 不许造出来的假控件')
+})
+
+test('「新建…」的输入是三态，不是两态：取消 = 上游的 return，空名 = <无组>', () => {
+  // 上游 `MoveToGroupAction.actionPerformed`：`Messages.showInputDialog` 返回 null 时直接 return
+  // ⇒ 取消**不**碰任何断点；按了确定但名字是空串时走 `setGroup("")`，而空名在分组规则那边就是「没有组」。
+  assert.equal(groups.resolveNewGroupName(null), null, '取消（null）必须原样是 null ⇒ 调用方 return')
+  assert.equal(groups.resolveNewGroupName(''), '', '空名按确定 = 空串 = <无组>（上游不 return 这一支）')
+  assert.equal(groups.resolveNewGroupName('   '), '', '只有空白也算空名（组名会被 trim）')
+  assert.equal(groups.resolveNewGroupName(' 网络 '), '网络', '首尾空白去掉，中间保留')
+  // 空名落到规则层：assign 那边空串与 null 同义（`XBreakpointCustomGroupingRule.kt:24` 的 takeIf{isNotEmpty}）。
+  const refs = ['src/a.cpp:1', 'src/a.cpp:2']
+  groups.assignBreakpointsToGroup(refs, '甲')
+  try {
+    assert.deepEqual(groups.assignBreakpointsToGroup(refs, groups.resolveNewGroupName('')), refs)
+    assert.deepEqual(groups.groupNames(refs), [], '空名 = 组清空')
+  } finally {
+    groups.assignBreakpointsToGroup(refs, null)
+  }
+})
+
+test('接线：两处「新建…」都走同一个取消判据（原来组节点那条把取消当成搬到无组）', () => {
+  const view = readFileSync('src/components/BreakpointsDialog.vue', 'utf8')
+  const calls = view.match(/resolveNewGroupName\(window\.prompt\('新建组名称', ''\)\)/g) ?? []
+  assert.equal(calls.length, 2, '逐条的「所在组」与组节点的「移至组」两处都要问同一个判据')
+  const returns = view.match(/if \(name === null\) return/g) ?? []
+  assert.equal(returns.length, 2, '拿到取消后必须当场 return（上游 `:547-549` 那两行）')
+  // 旧形状：把取消折成空串（`?? ''`）= 按一次 Esc 整组搬去「无组」；`?.trim()` 后 `if (!name)` = 空名按确定也不动。
+  assert.doesNotMatch(view, /window\.prompt\([^)]*\)\?\.trim\(\)/, '又回到自己 trim ⇒ 取消与空名糊成一团')
+  assert.doesNotMatch(view, /window\.prompt\([^)]*\)\?\.trim\(\) \?\? ''/, '组节点那条又开始把取消当空名')
+  assert.match(view, /import \{[\s\S]*?resolveNewGroupName[\s\S]*?\} from '\.\.\/breakpointGroups'/, '没从规则层 import')
+})
+
+test('行号锚点：「移至组」族引用的上游行逐字对得上参考树（不在则跳过）', () => {
+  if (!existsSync(REF)) return
+  const dialog = 'platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/BreakpointsDialog.java'
+  const rule = 'platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/breakpoints/ui/grouping/XBreakpointCustomGroupingRule.kt'
+  const at = (path, n) => readFileSync(join(REF, path), 'utf8').split('\n')[n - 1].trim()
+  const pins = [
+    [dialog, 324, 'res.add(new MoveToGroupAction(null));'],
+    [dialog, 337, 'res.add(new Separator());'],
+    [dialog, 338, 'res.add(new MoveToGroupAction());'],
+    [dialog, 542, 'public void actionPerformed(@NotNull AnActionEvent e) {'],
+    [dialog, 545, 'groupName = Messages.showInputDialog(XDebuggerBundle.message("breakpoints.dialog.new.group.name"),'],
+    [dialog, 547, 'if (groupName == null) {'],
+    [dialog, 548, 'return;'],
+    [dialog, 551, 'for (BreakpointItem item : myTreeController.getSelectedBreakpoints(true)) {'],
+    [rule, 24, 'val name = proxy.getGroup()?.takeIf { it.isNotEmpty() }'],
+  ]
+  for (const [path, n, text] of pins) assert.equal(at(path, n), text, `${path.split('/').pop()}:${n} 不是那一行`)
+  // 本仓的引用形状必须指着上面这些实测行（裸行号不带路径 ⇒ 仓里的引用门控收不到，只能这样钉）。
+  const groups = readFileSync('src/breakpointGroups.ts', 'utf8')
+  const view = readFileSync('src/components/BreakpointsDialog.vue', 'utf8')
+  assert.match(groups, /BreakpointsDialog\.java:324/, '「<无组>」那一项没钉在实测的 :324')
+  for (const text of [groups, view]) {
+    assert.match(text, /:547-549/, '取消 = 上游 return 那两行没进引用')
+    assert.match(text, /:338/, '「新建…」那一项的行号没引用')
+  }
+  assert.match(view, /XBreakpointCustomGroupingRule\.kt:24/, '空名 = 无组 那条依据没引用')
 })

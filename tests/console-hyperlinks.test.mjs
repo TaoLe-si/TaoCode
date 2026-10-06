@@ -141,7 +141,13 @@ test('消费链：面板用这一层的切片表，两类链接各自可点，�
   assert.match(panel, /hyperlinked: segments\.some\(segment => Boolean\(segment\.link \|\| segment\.url\)\)/,
     '有任一可点片段才走切片分支，否则仍是 issue / 纯文本那两条旧路')
   assert.match(panel, /consoleLinkAction\(link\)/, '点击只走这一条派发')
-  assert.match(panel, /request\('shell\.openUrl', \{ url \}\)/, '浏览器命中的唯一出口是宿主')
+  // 原钉的是面板里那一行 `request('shell.openUrl', { url })`（那时每条 URL 出口各自直连宿主）。
+  // 2026-10-06 welcome3 把出口收成一条（`src/externalLinkLauncher.ts`：上游只有一个 `browse()`，
+  // 「未信任先问那一句」就长在它里面，`BrowserLauncherAppless.kt:99`）⇒ 按规约把锚点指向新文件、
+  // 断言体不动，面板这一侧改钉「调用的是那一条出口」。
+  const launcher = read('src/externalLinkLauncher.ts')
+  assert.match(launcher, /request\('shell\.openUrl', \{ url \}\)/, '浏览器命中的唯一出口是宿主')
+  assert.match(panel, /await openExternalUrl\(url\)/, '控制台不再自己直连宿主：未信任项目里点 URL 也先过那一句')
   assert.match(panel, /emit\('jump', action\.payload\)/, 'file: 命中复用控制台现成的 jump 通道')
   assert.match(panel, /v-else-if="segment\.url" class="run-issue-link"/,
     'URL 片段有独立的渲染分支，但样式与文件链接同一个（上游也是同一个 HYPERLINK 属性）')

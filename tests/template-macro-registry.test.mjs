@@ -142,6 +142,11 @@ test('消费链路：宏真的进展开、设置页真的读同一张表', () =>
   assert.match(templates, /from '\.\/templateMacros\.ts'/, 'render 没引宏表 ⇒ 宏只是注释')
   assert.match(templates, /resolveTemplateSlotValues\(slots, vars, context\)/, '槽位没交给宏表求值')
   assert.match(templates, /const macroContext: TemplateMacroContext = \{ path \}/, 'expand 没把文件路径传给宏')
+  // 正文词法只许有一份：`render()` 用的那份必须可复用，设置页读的就是它。
+  // （上游那份是 TemplateTextLexer.flex 的 VARIABLE / ESCAPE_DOLLAR 两个 token。）
+  assert.match(templates, /export const TEMPLATE_TEXT_TOKEN = /, '槽位词法没有可复用的导出源')
+  assert.match(page, /TEMPLATE_TEXT_TOKEN/, '设置页的槽位预览不是引擎那份词法')
+  assert.doesNotMatch(page, /const VARIABLE =/, '设置页不许再留第二份槽位词法（预览与展开会两套口径）')
   assert.match(page, /from '\.\.\/templateMacros\.ts'/)
   assert.match(page, /LIVE_TEMPLATE_MACROS[\s\S]{0,200}presentableName/, '设置页渲染的清单不是宏表本身')
   assert.match(page, /unknownMacroCall/, '看着像宏调用但没注册的那一格要提示用户')

@@ -189,6 +189,21 @@ export function assignBreakpointsToGroup(refs: readonly string[], name: string |
   return changed
 }
 
+/**
+ * 「新建…」那一项拿到的输入怎么解释 —— 上游 `MoveToGroupAction.actionPerformed`
+ * （`BreakpointsDialog.java:542-557`）里那两行是关键：
+ *   · `:545` `groupName = Messages.showInputDialog(breakpoints.dialog.new.group.name, …, AllIcons.Nodes.Folder)`
+ *   · `:547-549` `if (groupName == null) return` ⇒ **取消 = 一条断点都不动**（不 `setGroup`、不 rebuildTree）；
+ *   · 真按了确定、但名字是空串时上游**不 return**：`setGroup("")`，而空名在分组规则那边就是「没有组」
+ *     （`XBreakpointCustomGroupingRule.kt:24` 的 `proxy.getGroup()?.takeIf { it.isNotEmpty() }`）
+ *     ⇒ 等价于子菜单第一项 `MoveToGroupAction(null)`（`BreakpointsDialog.java:324`）的 `<无组>`。
+ * 所以三种输入必须是**三种**结果：取消 ⇒ `null`（调用方直接 return）；空名 ⇒ `''`（= 无组）；否则去掉首尾空白。
+ * 别把「取消」折成空串：那会让「按了一下 Esc」变成「整组搬到无组」（本仓组节点那一路原来就栽在这儿）。
+ */
+export function resolveNewGroupName(input: string | null): string | null {
+  return input === null ? null : input.trim()
+}
+
 /** 「设为默认」/「取消设置为默认」（上游 `SetAsDefaultGroupAction`）。 */
 export function setDefaultBreakpointGroup(name: string | null): void {
   const group = typeof name === 'string' ? name.trim() : ''
@@ -267,7 +282,8 @@ export function moveGroupContents(refs: readonly string[], from: string, to: str
   return assignBreakpointsToGroup(groupMembers(refs, from), group || null)
 }
 
-/** 「移至组」子菜单里的目标清单（上游 `:336-343`：distinct + sorted，中间插一条分隔线再给「新建…」）。 */
+/** 「移至组」子菜单里的目标清单（上游 `:325-335` 那份 distinct+sorted，`:337` 一条分隔线，`:338` 再接「新建…」）。
+ *  清单本身**只有已有组**：新建那一项走 `resolveNewGroupName`（同一个 `MoveToGroupAction` 家族的第三支）。 */
 export function groupMoveTargets(refs: readonly string[], exclude: string): string[] {
   return groupNames(refs).filter(name => name !== exclude)
 }

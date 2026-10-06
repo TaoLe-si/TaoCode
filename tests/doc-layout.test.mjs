@@ -197,3 +197,40 @@ test('接线：渲染层真的按 parts 贴内联链接，样式 class 名与上
   }
   assert.match(popup, /addExternalLinkIcons|ExternalLink/, '外部链接的外链箭头（DocumentationHtmlUtil.kt:152-159）没有落点')
 })
+
+// 判据（本轮新增）：分节表的粒度是**一行**，不是**一段**。上游 `getLines()` 逐个 `\n` 切行、
+// 每一行走一遍 `parseLine`（`DocCommentLineDataBuilder.java:39-52`、`:66-107`），
+// 而 `parseQuickDoc` 只按**空行**分段 ⇒ 「说明。\n@param a 参数\n@return 结果」这种行间不空一行的
+// 原样 javadoc（语言服务最常见的输出形状）在本轮改动前**一行节都出不来**：整段落进 `content`。
+test('一段里也要按行分节：@param / @return 不再整段吞进正文（:39-52 的行粒度）', () => {
+  const one = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc(['说明。', '@param a 参数', '@return 结果'].join(NL)))
+  assert.deepEqual(one.content.map(block => block.text), ['说明。'], '标签行不该和正文挤在同一块里')
+  assert.deepEqual(one.sections.map(section => [section.header, section.content]), [['a', '参数'], ['@return', '结果']])
+  // 普通多行段不许多切出块来（形状与改动前逐字一致）。
+  const plain = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc(['第一行', '第二行'].join(NL)))
+  assert.deepEqual(plain.content.map(block => block.text), ['第一行\n第二行'], '没有标签行的那一段照旧是一块')
+  assert.deepEqual(plain.sections, [])
+})
+
+test('标签行的续行进同一节；注释星号前缀先剥再判（:69-71、:44-45）', () => {
+  const wrapped = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc(['@param a 第一段', '续写的第二段'].join(NL)))
+  assert.deepEqual(wrapped.sections.map(section => section.content), ['第一段\n续写的第二段'], '续行属于上一条标签那一节，行分隔照原文')
+  assert.deepEqual(wrapped.content, [], '整段都是标签行时正文为空')
+  const starred = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc('* @param a 说明'))
+  assert.deepEqual(starred.sections.map(section => [section.header, section.content]), [['a', '说明']], '旧判据只看 startsWith(\'@\')，带星号的这一行原本整段落进正文')
+  assert.deepEqual(starred.content, [], '拆出来的那一节不该同时在正文里留一份')
+})
+
+test('横线夹在一段中间也开一节（表头 + --- + 正文不必各占一段）', () => {
+  const ruled = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc(['总述。', '**返回**', '---', '值'].join(NL)))
+  assert.deepEqual(ruled.sections.map(section => [section.header, section.content]), [['返回', '值']])
+  assert.deepEqual(ruled.content.map(block => block.text), ['总述。'])
+})
+
+test('按行拆块之后内联链接仍长在句子里（占位符切得动、也还原得回）', () => {
+  const linked = buildQuickDocLayout(createHoverDocumentation('x'), parseQuickDoc(['说明。', '@param a 见 {@link Foo} 结束'].join(NL)))
+  assert.equal(linked.sections.length, 1)
+  assert.equal(renderParts(linked.sections[0].parts), '见 [[Foo|internal]] 结束')
+  assert.equal(linked.sections[0].content, '见 Foo 结束', '纯文本形态与拆之前逐字一致')
+  assert.equal(clickable(linked).row.length, 0, '进了右格就不再在链接行重复一次')
+})

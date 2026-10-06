@@ -47,8 +47,10 @@ test('撤销是带 changes 的事务：CodeMirror 的 history.pop（本仓依赖
 test('宿主侧对重复通知幂等：最近更改位置按文件+行去重', () => {
   // 2026-10-06：两条最近位置环与 `rememberPlace` 整段搬到 src/appPlacesRing.ts（逐字等价），
   // 读取面带上那一半；下面那条断言本体一字未改。
-  const app = read('src/App.vue') + '\n' + read('src/appPlacesRing.ts')
-  const start = app.indexOf('function rememberPlace(place: Place) {')
+  // 同日 nav3 一批：「同文件 + 同行」这条判定从 `rememberPlace` 体内提到了同文件的纯函数
+  // `isSamePlace`（写入侧与读出侧共用一条规则 ⇒ 锚点跟着搬，断言体不动）。
+  const app = read('src/appPlacesRing.ts')
+  const start = app.indexOf('export const isSamePlace')
   assert.ok(start >= 0, '找不到 rememberPlace')
   const body = app.slice(start, start + 600)
   assert.match(body, /item\.path === place\.path && item\.line === place\.line/, '重复的行不该在最近更改里堆两条')

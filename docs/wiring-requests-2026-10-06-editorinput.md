@@ -1,5 +1,17 @@
 # 接线请求 2026-10-06 · editorinput（编辑器输入域：本批模块侧做完、只差别人面/保留文件那几行）
 
+## 复核状态（2026-10-06 · edinput3 收尾批次登记）
+
+| 条 | 状态 | 证据（本仓 文件:行号） |
+|---|---|---|
+| **W-1** 三格回车/引号设置 + 语言 id 传进来 | **已闭环**（edinput3 自己落地，无需再动保留文件） | `src/components/CodeEditor.vue:117`（`smartEnterLanguageForView(view, props.path, props.language, props.settings)`）与 `:966`（`smartQuotes(() => props.language, () => props.settings.autoInsertPairQuote)`）；装配本体 `src/enterHandlers.ts:160-172`。原文的「改法一净 +3 行」已被**先拆后加**替掉：注释词法两次调用搬进 `src/enterHandlers.ts` ⇒ 宿主那一段 6 行变 5 行（净 −1），`CodeEditor.vue` 由 1150 降到 **1144**（上限 1147）。判据：`tests/editor-enter-block-comment.test.mjs`（两条开关 + 新出口形状，**没放松**）与 `tests/editor-quote-faces.test.mjs`（把 `autoInsertPairQuote` 钉进正则）。 |
+| **W-2** `EditorAddCaretPerSelectedLine` | **步骤 1-3 已闭环；步骤 4（键位面）仍开** | 命令 `src/editorCaretPerLine.ts:85`、注册 `src/editorCommands.ts:246`、菜单行 `src/menus/editMenu.ts:121`（键位栏仍是 `''`）。仍缺：`src/keymapBindings.ts` 的 `EDITOR_ACTIONS` 一条 + `CodeEditor.vue` 的 `Shift-Alt-G` 行（**这两个都是保留/别人面**，见下面 W-2 原文第 4 步，插入点现在是 `src/components/CodeEditor.vue:908` 之后）。 |
+| **W-3** 语言档 facet 挂载 | **已闭环** | `src/components/CodeEditor.vue:480`：`view?.dispatch({ effects: language.reconfigure([extension, editorLanguageIdExtension(props.language)]) })`（与语法扩展同一条链，挂载点就是原文建议的 extensions 处）；出口 `src/editorMatchBrace.ts:51-56`，读它的判据 `tests/editor-match-brace.test.mjs`。原文说的「Java 的 `<>` 配对档拿不到语言」这一条已不成立。 |
+| **W-4** 拆行 / 列模式 Delete 的动作面登记 | 新开（edinput3 落地了命令与键位，缺动作表） | 见文末 W-4。 |
+| **W-5** 同一文件在两栏之间不同步 | 新开（判词 `lp/file-editor` ①） | 见文末 W-5。 |
+
+下面保留原文（含已经落地的写法），便于对账：**原文的「改法一/改法二」已由 edinput3 落地**，其余部分仍然有效。
+
 我的文件面只有编辑器输入那一族模块（`src/enterHandlers.ts`、`src/editorTyping.ts`、
 `src/editorEnterBlockComment.ts`、`src/editorMatchBrace.ts` 等）与对应测试。
 下面三条都**已经在我面内把消费方写好**，缺的是保留文件/别人名下的那几行；每条给
@@ -7,7 +19,7 @@
 
 ---
 
-## W-1 `src/components/CodeEditor.vue`：三格回车/引号设置 + 语言 id 传进来（**必须**，否则那三格还是假控件）
+## W-1 `src/components/CodeEditor.vue`：三格回车/引号设置 + 语言 id 传进来（已闭环 · 证据见上表）
 
 键与界面早就在，缺消费方（本批把消费方落在模块侧）：
 
@@ -154,7 +166,7 @@ export const addCaretPerSelectedLineCommand: Command = (view: EditorView): boole
    注意 `tests/keymap-bindings.test.mjs:17` 会核键位冲突（`keymapConflicts(KEY_BINDINGS)` 必须为空）——
    `Shift-Alt-G` 目前无人占，安全。
 
-## W-3（可选）`src/editorMatchBrace.ts` 那条语言 facet 至今没挂
+## W-3（可选）`src/editorMatchBrace.ts` 那条语言 facet 至今没挂 —— **已闭环 · 证据 `src/components/CodeEditor.vue:480`**
 
 `editorLanguageId` / `editorLanguageIdExtension`（`src/editorMatchBrace.ts:51-56`）没有任何生产消费方
 （`grep -rn editorLanguageId src` 只命中定义处），⇒ Java 的 `<>` 配对跳转（上游
@@ -169,3 +181,69 @@ export const addCaretPerSelectedLineCommand: Command = (view: EditorView): boole
 本批**没有**把新逻辑压在这条 facet 上（W-1 改法一走的是 `props.language` 实参），所以这条不接也不会让
 本批的行为变错；它只影响 `EditorMatchBrace` 的 Java `<>` 那一档。之前的接线请求里没有这条（我 grep 过
 `docs/wiring-requests-2026-10-06-*.md` 零命中），现补在这里。
+**闭环说明（2026-10-06 · edinput3）**：主代理已落 `src/components/CodeEditor.vue:480`，与语法扩展同一条
+`language.reconfigure([...])` 链；`editorLanguageIdExtension(undefined)` 返回 `[]`（`src/editorMatchBrace.ts:55`）
+⇒ 没有语言 id 的文件不会把 facet 写成空串。判据 `tests/editor-match-brace.test.mjs`，本批复核后**关闭这条**。
+
+---
+
+## W-4（新）拆行 `EditorSplitLine` 与列模式 Delete 的动作面登记（保留文件 `src/keymapBindings.ts`）
+
+命令与键位都已经在编辑器里落地（edinput3），缺的是「动作表 + Find Action」那两行，都在保留文件里：
+
+- 键位与实现：`src/components/CodeEditor.vue:907` `{ key: 'Ctrl-Enter', preventDefault: true, run: splitLineCommand(smartEnter) }`，
+  实现 `src/editorSplitLine.ts`（`splitLinePlan` / `splitLineCommand`）。上游
+  `platform/platform-impl/src/com/intellij/openapi/editor/actions/SplitLineAction.java:22/:30/:50-67`，
+  键位 `platform/platform-resources/src/keymaps/$default.xml:959-961 = control ENTER`。
+- 列模式 Delete：`src/components/CodeEditor.vue:908` `{ key: 'Delete', preventDefault: true, run: columnSelection.deleteForward }`，
+  实现 `src/editorColumnMode.ts`。上游 `DeleteInColumnModeHandler.java:18/:25/:30-34/:37`，
+  注册位 `platform/platform-impl/resources/intellij.platform.ide.impl.xml:1084`（**只有** `EditorDelete` ⇒ 不要给 Backspace 加同一档）。
+  这一条**没有自己的键位**（沿用 `Delete`），所以只需要动作表条目，不需要新键：
+
+`src/keymapBindings.ts` 的 `EDITOR_ACTIONS`（原 W-2 第 4 步同一张表）加两条，形状照 `:230-232` 的 `brace.match`：
+
+```ts
+  { id: 'line.split', upstreamId: 'EditorSplitLine', label: '拆分行',
+    keywords: 'split line 拆行 在光标处换行 EditorSplitLine',
+    command: 'line.split', key: { source: 'upstream', display: 'Ctrl Enter', cm: 'Ctrl-Enter',
+      boundAt: 'src/components/CodeEditor.vue:907',
+      upstream: '$default.xml:959-961 = control ENTER；实现 SplitLineAction.java:22-67' } },
+```
+
+⚠ 落地时有两件事必须一起做，否则这条就是假行：
+
+1. **命令表**：`command: 'line.split'` 要能在 `src/editorCommands.ts` 的 `editingCommands` 里查到。本批
+   **故意没有**往那张表里塞 `line.split`：表是模块级的单表，而拆行要把宿主那条回车链
+   （`smartEnter`，闭包在 `props`/`view` 上）当实参传进去，塞进表里就会出现「菜单那一档没有智能回车、
+   键位那一档有」的两种行为（上游只有一条动作）。要么照本批的做法让键位直接指模块导出的命令，
+   要么由主代理把 `smartEnter` 一起搬进 `editorCommands.ts`（那是另一个量级的改动，`CodeEditor.vue` 会因此再降几行）。
+2. 标签**不要**编描述文案：`ActionsBundle.properties` 里 `EditorSplitLine` 的 `.description` 我没有逐条核到，
+   本地树里能不能核到请由接的人确认（核不到就只写 `.text` 的直译）。
+
+判据现成：`tests/editor-split-line.test.mjs` 末条钉的就是宿主那一行；`tests/editor-column-mode.test.mjs`
+末条钉 Delete 那一行、并且钉「**不许**给 Backspace 加同一档」。
+
+## W-5（新）同一文件在两栏之间不同步（判词 `docs/inventory/verdict-platform_rest.md:228` 的 ①）
+
+事实：`src/editorSplits.ts:90`（`openInOppositeGroup`，上游 "split same"）让同一个 `Tab` 对象进两组，
+`src/App.vue` 因此把同一份 `content` 递给两个 `CodeEditor` 实例；但
+`src/components/CodeEditor.vue` 只在 `onMounted` 里读一次 `props.content`
+（`watch` 只挂在 `props.path` 上，见该文件 1050 行附近那一串 watch）⇒
+**两栏显示同一文件时，一栏改了另一栏不跟**，切换焦点也不重读。上游是
+`platform/lang-impl/src/com/intellij/openapi/fileEditor/impl/PsiAwareFileEditorManagerImpl`
+在内容变化时同步所有 `FileEditor`（判词原文即指这条）。
+
+这条要 `src/components/CodeEditor.vue` 加 watch ⇒ 只能由主代理落（本文件登记上限 1147、当前 1144，**有 3 行余量**）。
+可粘贴（插在 `watch(() => props.path, ...)` 那一行之后，**同行族**，净 +1 行）：
+
+```ts
+// 同一个 tab 在两栏里是同一个对象（src/editorSplits.ts 的 openInOppositeGroup）：外部把 content 改了
+// （另一栏存盘、磁盘同步、回滚）时这一栏要跟上，否则两栏各显示一份。只在**不是自己正在编辑**时替换。
+watch(() => props.content, value => { if (!replacing && view && view.state.doc.toString() !== value) api.setDraft(value) })
+```
+
+⚠ 三条坑：①`replacing` 是宿主 `setDraft` 自己按下的旗（见该文件里 `replacing = true` 那一处），
+不判它就会在存盘回调里把编辑器内容回灌一次、光标跳到文档尾；②这条 watch **必须**排在
+`api`（那块 `createEditorHostApi`/同名对象）声明之后，否则 setup 期求值源就 TDZ；
+③判据要配一条「两栏同一文件、外部改 content 后第二栏文档跟着变」的 SSR/纯逻辑判据 ——
+本批没做这条，因为落点在保留面上，模块侧无可拆的东西。

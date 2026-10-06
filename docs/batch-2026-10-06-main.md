@@ -458,3 +458,15 @@ logMessage 的 Error/Warning 落进 `lsp:message:`（BALLOON）组，而上游�
 （`LspServerNotificationsHandlerImpl.kt:467`）⇒ 每条服务器错误日志多一个气球。
 R1a/R1b/R2/R8/R9 都在 `docs/wiring-requests-2026-10-06-lspmsg.md`，等 status3 收工后一起落。
 另：`src/progressPanel.ts.bak` 是别的路留下的备份残留，未删（不是我的文件），登记在此。
+
+## 10.12 外部链接五出口已闭环（2315fd1）+ 下一件要一次做完的 J1
+
+W1 四条已落：`App.vue` 解构补 6 个出口、文档链接与「导出 HTML 后打开浏览器」改走 `openExternalUrl`、
+信任框补 `:can-trust-all` / `:config-dir`、挂上 `mode="link"` 第二扇模态；三条钉「未接线形状」的判据
+按落地形状反转（直连 2→0、正向钉两个调用点与三个属性）。域内 67/67、锚点重算 3192、引用门 11/11。
+
+**J1（下一件，必须四步同批，否则 gate 同步判据红）**：JAR 运行配置类型的宿主两处 ——
+`src/settingsModel.ts:26` 联合加 `jar` + `native/settings_schema.cpp:1011-1012` 白名单加同一条 +
+摘 `src/runConfigurationSchema.ts:33` 那一项 pending gate + 同步 `tests/run-config-types.test.mjs:134`。
+runcfg3 特意**没有**先动前端：那样会做出「前端建得出、宿主整份 `INVALID_SETTINGS` 拒掉」的假控件。
+J2（`runActions.ts:99` 的 `params.shell`）必须排在 J1 之后。

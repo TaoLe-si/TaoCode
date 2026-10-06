@@ -98,6 +98,23 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // 快速文档两档（EditorSettingsExternalizable.java:76 默认 true；DocumentationToolWindowManager.kt:55
     // 的 `documentation.auto.update` 默认 true）。键名由 src/docHoverPolicy.ts 的 DOC_HOVER_SETTING_KEYS 定死。
     "showQuickDocOnMouseHover", "autoUpdateDocumentation",
+    // 终端字号的两把（消费侧 src/components/TerminalPanel.vue:52-65 的入参声明 + :115/:121 两个 computed）。
+    // wheelFontChangeEnabled：上游字段
+    //   platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:124
+    //   `public boolean IS_WHEEL_FONTCHANGE_ENABLED = false;` ⇒ **默认 false**（getter 同文件 :1043、setter :1047-1051）。
+    //   门在 platform/execution-impl/src/com/intellij/terminal/JBTerminalPanel.java:382
+    //   （isWheelFontChangeEnabled() && EditorUtil.isChangeFontSize(e)，:387 缩放那次 return 掉不滚缓冲区）。
+    //   设置页那一格在「编辑器 › 常规」的 Mouse control 组：控件 EditorOptionsPanel.kt:91-94、
+    //   挂点同文件 :216，文案 platform/ide-core/resources/messages/ApplicationBundle.properties:396
+    //   = Change font size with Ctrl+Mouse Wheel in:（macOS 变体 :397，组名 :395 = Mouse Control）。
+    //   另一把 IS_WHEEL_FONTCHANGE_PERSISTENT（同文件 :125）管"缩放写不写回设置"，本仓缩放是会话内临时的
+    //   （TerminalFontSizeProvider.kt:16-18）⇒ 不落。
+    // terminalBaseFontSize：整数 4..40 = platform/editor-ui-ex/src/com/intellij/application/options/
+    //   EditorFontsConstants.java:11-13（min scale(4)）/ :15-17（max ide.editor.max.font.size 默认 40）。
+    //   上游那一档住在配色方案的 consoleFontSize（platform/execution-impl/src/com/intellij/terminal/
+    //   TerminalUiSettingsManager.kt:123-132 的 detectFontSize()/resetFontSize()，现算不落设置）⇒
+    //   本仓没有可编辑配色方案，落成一格显式设置，缺省 13 = src/terminalFontSize.ts:47 的内置档。
+    "wheelFontChangeEnabled", "terminalBaseFontSize",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {

@@ -3,10 +3,11 @@
 // 那个面板的四条判定（增/改/删/校验）+ `FileTypeManagerImpl` 的默认清单与「按集合比改动」。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 import {
   DEFAULT_IGNORED_FILES,
+  IGNORED_LIST_KEY,
   IGNORE_ERROR_EXISTS,
   IGNORE_ERROR_INVALID,
   applyIgnoredPatterns,
@@ -17,6 +18,7 @@ import {
   isIgnoreListEqualToCurrent,
   isIgnoredName,
   isPathIgnored,
+  isEqualToDefaultIgnoreList,
   isValidIgnorePattern,
   removeIgnoredPattern,
   restoreDefaultIgnoredPatterns,
@@ -163,4 +165,70 @@ test('main.ts 在挂界面之前灌忽略清单（不是等用户第一次进设
   // 不能再套一层 applyIgnoredPatterns（它会多写一次 localStorage，语义还是「用户改了清单」）：
   // 只看**行首的调用**，注释里那句「原写 applyIgnoredPatterns(loadIgnoredPatterns())」不算。
   assert.doesNotMatch(main, /^[ \t]*applyIgnoredPatterns\(/m)
+})
+
+// ── 默认表与上游**逐字**一致（本轮补的门）────────────────────────────────────────
+// 原来这条只钉了「17 条 + 已排序 + 与本文件里手抄的第二份相等」—— 那第二份和断言里的表是同一个
+// 人同一轮抄的，抄漏一条会两份一起错。这里改成**直接解析上游源码**：
+// `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:142-144`
+// 的 `DEFAULT_IGNORED = List.of(…)`（`:139` 那句 `// must be sorted`、
+// 排序断言在 `platform/platform-tests/testSrc/com/intellij/openapi/fileTypes/impl/FileTypesTest.java:1127-1130`）。
+const REF = 'D:/Backup/Downloads/intellij-community-master/intellij-community-master'
+const MANAGER_SOURCE = 'platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java'
+
+test('DEFAULT_IGNORED_FILES 与上游 DEFAULT_IGNORED 逐字一致（条数、顺序、大小写都不许漂）', () => {
+  if (!existsSync(`${REF}/${MANAGER_SOURCE}`)) return   // 参考树不在本机时跳过（与引用门同口径）
+  const source = readFileSync(`${REF}/${MANAGER_SOURCE}`, 'utf8')
+  const decl = source.match(/DEFAULT_IGNORED = List\.of\(([^;]*)\);/)
+  assert.ok(decl, '上游 DEFAULT_IGNORED 的声明形状变了 ⇒ 这条门要跟着人工核对，不许直接删')
+  const upstream = [...decl[1].matchAll(/"([^"]*)"/g)].map(item => item[1])
+  assert.deepEqual([...DEFAULT_IGNORED_FILES], upstream, '本仓那张默认表与上游源码里的字面表不一致')
+  assert.equal(upstream.length, 17)
+  assert.deepEqual([...upstream].sort(), upstream, '上游自己断言它已排序（FileTypesTest 那条），解析出来的也必须已排序')
+})
+
+test('与默认表「整表排序后逐位大小写不敏感」相等才算默认（isEqualToDefaultIgnoreMasks，:1494-1504）', () => {
+  assert.equal(isEqualToDefaultIgnoreList(DEFAULT_IGNORED_FILES), true)
+  assert.equal(isEqualToDefaultIgnoreList([...DEFAULT_IGNORED_FILES].reverse()), true, '上游先 sort(null) 再比 ⇒ 顺序不算差异')
+  assert.equal(isEqualToDefaultIgnoreList(DEFAULT_IGNORED_FILES.map(item => (item === '.git' ? '.GIT' : item))), true,
+    '比法是 equalsIgnoreCase ⇒ `.git` 与 `.GIT` 算同一张表（它排在 `.DS_Store` 与 `.hg` 之间，改大小写不动位置）')
+  assert.equal(isEqualToDefaultIgnoreList(DEFAULT_IGNORED_FILES.map(item => (item === 'CVS' ? 'cvs' : item))), false,
+    '反证「先排序再逐位」这条纪律：`cvs` 排到 `__pycache__` 后面 ⇒ 位置对不上就判不等（上游同理会 false）')
+  assert.equal(isEqualToDefaultIgnoreList(DEFAULT_IGNORED_FILES.slice(0, 16)), false, '少一条就不是默认表（先比 size）')
+  assert.equal(isEqualToDefaultIgnoreList([...DEFAULT_IGNORED_FILES, 'x']), false, '多一条同样判不等')
+  assert.equal(isEqualToDefaultIgnoreList(DEFAULT_IGNORED_FILES.map(item => (item === 'CVS' ? 'DVS' : item))), false,
+    '同条数、位置对上但内容不同 ⇒ false（不是按集合比的近似品）')
+})
+
+// 落盘的两条上游纪律：① 存的是**生效后**的表（被遮蔽闸挡掉的词条上游 `getState` 也拿不到，
+// `FileTypeManagerImpl.java:1434`）；② 与默认表相同 ⇒ 连 `ignoreFiles` 元素都不写（`:1436-1438`），
+// 本仓等价 = 清掉存储键 ⇒ `ignoredPatterns()` 回默认表（同文件 `:165` 的初值）。
+test('落盘的是生效后的那张表；与默认表相同就不留键；空清单要能跟「没存过」区分', () => {
+  const store = new Map()
+  const backup = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+    removeItem: key => store.delete(key),
+  }
+  const before = fileTypeManager.getIgnoredFilesList()
+  try {
+    assert.equal(applyIgnoredPatterns(['*.pyc', 'build.pyc']), true)
+    assert.equal(store.get(IGNORED_LIST_KEY), '*.pyc', '被 `*.pyc` 盖住的 build.pyc 不该留在盘上（上游那张表里就没有它）')
+    assert.deepEqual(ignoredPatterns(), ['*.pyc'])
+    assert.equal(isIgnoredName('build.pyc'), true, '虽然没落盘，判定照常生效（是同一张表的匹配结果）')
+
+    applyIgnoredPatterns(DEFAULT_IGNORED_FILES)
+    assert.equal(store.has(IGNORED_LIST_KEY), false, '和默认表一样 ⇒ 清掉键，别把 17 条抄进存储')
+    assert.deepEqual(ignoredPatterns(), [...DEFAULT_IGNORED_FILES], '没键就是上游那份 DEFAULT_IGNORED')
+
+    assert.equal(applyIgnoredPatterns([]), true)
+    assert.equal(store.get(IGNORED_LIST_KEY), '', '上游注释：empty means empty list —— 空清单要存成空串，与「没存过」区分')
+    assert.deepEqual(ignoredPatterns(), [], '空清单不回落默认表')
+  } finally {
+    fileTypeManager.setIgnoredFilesList(before)
+    if (backup === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = backup
+    store.clear()
+  }
 })

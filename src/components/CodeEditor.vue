@@ -74,7 +74,8 @@ import { overwriteExtension, overwriteTheme, toggleOverwrite } from '../editorOv
 import { editorSearchExtension } from '../editorSearchExtension'; import { bidiNotificationExtension } from '../editorBidiNotification'
 // 回车家族（上游 `enter/*` 里本仓原先没有的三条：行注释中间回车、未配对左花括号后回车、
 // 字符串里回车）与语句级上下移动（`MoveStatementUp`/`MoveStatementDown`）：键位见下面 keymap。
-import { smartEnterCommand, smartEnterLanguageFor } from '../enterHandlers'
+import { smartEnterCommand, smartEnterLanguageForView } from '../enterHandlers'
+import { splitLineCommand } from '../editorSplitLine'; import { createColumnSelection } from '../editorColumnMode'
 import { moveStatement } from '../editorStatementMove'
 // 自定义折叠区域的列表弹层（上游 `CustomFoldingRegionsPopup` / `GotoCustomRegionAction`，
 // 键位 Ctrl+Alt+. = `$default.xml:535-537`）。
@@ -110,11 +111,10 @@ const findCommand = (backwards: boolean) => findBarCommand(findBar, backwards)
 // 自定义折叠区域弹层（上游 `CustomFoldingRegionsPopup`）；扩展挂在 `view.dom` 上，自带收起规则。
 const customRegions = createCustomRegionsPopup(() => view)
 // 回车：上游那四条先问，都不接管时交回 CodeMirror 的 `insertNewlineAndIndent`。
-// 语言词法（行前缀 + 块注释四件套 `JavaCommenter.java:27-28/:32-33/:62-63/:67-68`）在
-// src/enterHandlers.ts 的 `smartEnterLanguageFor` 里装配；不给 `block` 等于第②步永远问不到（`EnterInBlockCommentHandler.java:38-39`）。
-const smartEnter = smartEnterCommand(() => smartEnterLanguageFor(
-  (view ? commentStyleFromState(view.state, view.state.selection.main.head) : null)
-    ?? commentStyleFor(undefined, props.path)))
+// 语言词法与两条开关（`CodeInsightSettings.java:130` 插成对的 `}`、`:132` 闭合块注释）都在
+// src/enterHandlers.ts 的 smartEnterLanguageForView 里装配 —— 那段装配原先占这里三行，
+// 本文件顶在 1147 行的登记上限（tests/module-size.test.mjs:135）⇒ 搬进模块，宿主只留一行。
+const smartEnter = smartEnterCommand(() => smartEnterLanguageForView(view, props.path, props.language, props.settings))
 const openFindBar = (replaceMode: boolean) => { findBar.open(replaceMode); nextTick(() => findBarBar.value?.focus?.()) }
 const findBarBar = ref<InstanceType<typeof EditorFindBar> | null>(null)
 // 光标行（0 基）：合并冲突条的计数要读它。清单与两个动作来自 createMergeState —— 清单取**实时文档**
@@ -154,20 +154,14 @@ const codeLens = createCodeLens({
   onCommand: (command, args) => emit('codeLens', { command, arguments: args }),
 })
 let replacing = false, foldedSeen = new Set<number>()   // foldedSeen：上一拍已折起的区间起点（音频提示只报新增，见 updateListener 的 `folded`）
-// IDEA's Column Selection Mode: Alt+Shift+Insert. rectangularSelection takes only an eventFilter,
-// so reconfiguring the Compartment between "accept every left-drag" and none is what changes behavior.
-const columnMode = new Compartment
-let columnActive = false
+// IDEA's Column Selection Mode（Alt+Shift+Insert）：模式位、鼠标过滤（只认左键，与改动前同一档）、
+// 状态栏那一条通知，以及上游 `DeleteInColumnModeHandler`（intellij.platform.ide.impl.xml:1084）的
+// Delete 那一档 —— 全在 src/editorColumnMode.ts。本文件顶在 1147 行的登记上限
+// （tests/module-size.test.mjs:135），要加 Delete 那行键位就得先把等量代码搬出去。
+const columnSelection = createColumnSelection(() => view, active => emit('columnMode', active))
 // ToggleReadOnlyAttributeAction: the compartment holds EditorState.readOnly for the
 // buffer, reconfigured when the attribute flips on disk.
 const readOnlyMode = new Compartment
-function toggleColumnSelection() {
-  columnActive = !columnActive
-  view?.dispatch({ effects: columnMode.reconfigure(columnActive ? rectangularSelection({ eventFilter: event => event.button === 0 }) : []) })
-  // IDEA's ColumnSelectionModePanel shows this state in the status bar, so the mode
-  // has to be observable from outside the editor.
-  emit('columnMode', columnActive)
-}
 let lspTimer: number | undefined
 function scheduleLspChange() {
   if (!props.lspEnabled || heavy) return
@@ -427,8 +421,8 @@ function adjustSelection(grow: boolean) {
   return true
 }
 defineExpose({
-  columnModeActive: () => columnActive,
-  toggleColumnSelection,
+  columnModeActive: columnSelection.active,
+  toggleColumnSelection: columnSelection.toggle,
   command: (name: string) => runEditorCommand(view, editorActions, name),
   // 查找/替换的菜单入口（编辑 › 查找 / 替换）：与 Ctrl+F / Ctrl+R 走同一个控制器。
   openFind: () => findBar.open(false),
@@ -727,7 +721,7 @@ const editorActions: Record<string, Command> = {
   typeDeclaration: emitSemantic('typeDefinition'),
   evaluate: emitEvaluate,
   'template.expand': expandTemplate,
-  'column.select': () => { toggleColumnSelection(); return true },
+  'column.select': columnSelection.toggle,
   'edit.last': lastEditLocation,
   // 切换插入/覆盖（Insert 键与 Code 菜单走同一个实现）。
   'editor.overwrite': editor => { toggleOverwrite(editor); return true },
@@ -862,8 +856,8 @@ onMounted(() => {
           // Esc：栏开着就关栏（上游 `EscapeHandler.java:41` 清 headerComponent）；
           // 没开时返回 false，让出给窗口级那些 Esc 语义，不吞键。
           { key: 'Escape', preventDefault: true, run: () => { if (!findBar.state.open) return false; findBar.close(); return true } },
-          { key: 'Ctrl-Alt-Shift-Up', preventDefault: true, run: editingCommands['cursor.above']! },
-          { key: 'Ctrl-Alt-Shift-Down', preventDefault: true, run: editingCommands['cursor.below']! },
+          // Ctrl+Alt+Shift+↑/↓ **不绑给克隆光标**（R3 判决 2026-10-06）：上游那把键的主人是 `ResizeToolWindowUp`/`Down`
+          // （platform/platform-resources/src/keymaps/$default.xml:879-884）⇒ 编辑器再绑就是抢键；命令留着走菜单行与「查找操作」。
           { key: 'Alt-j', preventDefault: true, run: editingCommands['occurrence.next']! },
           { key: 'Ctrl-Shift-Alt-j', preventDefault: true, run: editingCommands['occurrence.select']! },
           // 折叠这一族（B4 = codeInsight/folding；键位逐条核过 $default.xml，对应表见
@@ -886,7 +880,7 @@ onMounted(() => {
           { key: 'Ctrl-.', preventDefault: true, run: editingCommands['fold.selection']! },
           { key: 'Ctrl-Shift-.', preventDefault: true, run: editingCommands['fold.block']! },
           { key: 'Ctrl-*', preventDefault: true, run: editingCommands['unfold.level1']! },
-          { key: 'Alt-Shift-Insert', preventDefault: true, run: () => { toggleColumnSelection(); return true } },
+          { key: 'Alt-Shift-Insert', preventDefault: true, run: columnSelection.toggle },
           // IDEA's template keys. Tab only consumes a pending slot; when there is none
           // the command returns false and normal indentation (or accepting a completion)
           // proceeds.
@@ -908,6 +902,10 @@ onMounted(() => {
           // 三条都不认得时本命令返回 false，键继续往 basicSetup 走（成对花括号之间多插一个换行
           // 那一条是 `insertNewlineAndIndent` 自己在做，见 src/enterHandlers.ts 的模块头）。
           { key: 'Enter', preventDefault: true, run: smartEnter },
+          // 拆行 = Ctrl+Enter（`$default.xml:959-961`）：整刀交给上面那条回车链，再把光标拽回切点
+          // （`SplitLineAction.java:57-65`）；列模式里 Delete 少删行尾那一条（`DeleteInColumnModeHandler.java:33`）。
+          { key: 'Ctrl-Enter', preventDefault: true, run: splitLineCommand(smartEnter) },
+          { key: 'Delete', preventDefault: true, run: columnSelection.deleteForward },
           // 语句级上下移动（`$default.xml:782-787`：MoveStatementDown = Ctrl+Shift+Down、
           // MoveStatementUp = Ctrl+Shift+Up；Alt+Shift+Up/Down 是 MoveLineUp/Down，上面已挂）。
           { key: 'Ctrl-Shift-ArrowUp', preventDefault: true, run: moveStatement(false) },
@@ -951,9 +949,9 @@ onMounted(() => {
         // 调试器值提示：常驻（不进 lsp 门），没挂起的调试会话时它自己返回 null，不弹。
         quickEvaluateHint,
         // Alt+drag always selects a rectangle; the compartment holds the persistent
-        // column-selection mode toggled by Alt+Shift+Insert.
+        // column-selection mode toggled by Alt+Shift+Insert（模式位与 Delete 那一档在 src/editorColumnMode.ts）。
         rectangularSelection(),
-        columnMode.of([]),
+        columnSelection.extension,
         // IDEA's read-only status table: a locked file edits nowhere. 大文件模式也走这里
         // （上游 `EditorModel.java:1017` 用 viewer 编辑器；「解除只读」按钮撤掉这层保护）。
         readOnlyMode.of(diskReadOnly || largeProtected ? EditorState.readOnly.of(true) : []),
@@ -965,7 +963,7 @@ onMounted(() => {
         // 逐语言的引号规则与 Java 泛型 `<>` 的配对高亮：两者都读 `getLanguage()` 的即时语言，常驻一条就够；
         // 不在表里的语言一律返回 false，交回 CodeMirror 的 `closeBrackets`。上游按 fileType 取 handler
         // （`QuoteHandlerEP.java:16-27` + `intellij.platform.lang.impl.xml:405/:408`；尖括号 `JavaPairedBraceMatcher.java:12/:26-34`）。
-        smartQuotes(() => props.language), angleBraceHighlight(() => props.language),
+        smartQuotes(() => props.language, () => props.settings.autoInsertPairQuote), angleBraceHighlight(() => props.language),
         debugLineExtension,
         semanticTokensField,
         // 行内调试值（暂停时在行尾显示当前帧变量值）。

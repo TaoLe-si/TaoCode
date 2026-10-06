@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Braces, FileText, Pencil, Plus, Trash2 } from 'lucide-vue-next'
-import { templatePattern, customPattern, templates as builtinLive, postfixTemplates as builtinPostfix, type CustomTemplate, type TemplateSettings } from '../templates'
+import { templatePattern, customPattern, TEMPLATE_TEXT_TOKEN, templates as builtinLive,
+  postfixTemplates as builtinPostfix, type CustomTemplate, type TemplateSettings } from '../templates'
 import { LIVE_TEMPLATE_MACROS, templateMacroOfExpression, unknownMacroCall } from '../templateMacros.ts'
 import { iconSize } from '../uiIcons'
 import FileTemplatesSettingsPage from './FileTemplatesSettingsPage.vue'
@@ -49,9 +50,10 @@ const shown = computed(() => {
 
 const draft = ref<CustomTemplate>({ key: '', body: '', description: '', languages: [] })
 const encoder = new TextEncoder()
-// Exactly what src/templates.ts `render()` recognises: $END$, $EXPR$ and any
-// $NAME$ or $NAME:默认值$ slot become caret stops, everything else stays literal.
-const VARIABLE = /\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$\n]*))?\$/g
+// 槽位词法只有一份：`src/templates.ts` 的 `TEMPLATE_TEXT_TOKEN`。`$$` 是上游那条美元转义
+// （`TemplateTextLexer.flex:27` 的 ESCAPE_DOLLAR → `TemplateBase.java:66-68` 落成一个字面 `$`），
+// 预览时把它先剔掉，剩下的才是会进 `render()` 的槽位。
+const slotTokens = (body: string) => [...body.matchAll(TEMPLATE_TEXT_TOKEN)].filter(token => token[0] !== '$$')
 // The same grammar seen from the inside: everything but END/EXPR that is not a bare
 // identifier (or `identifier:default`) never becomes a slot.
 const SLOT_SYNTAX = /^(?:END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::[^$\n]*)?$/
@@ -79,7 +81,7 @@ const capacityError = computed(() => editing.value !== null || props.settings.cu
   ? '' : '自定义模板最多 100 条，请先删除不再使用的条目。')
 const validDraft = computed(() => !keyError.value && !descriptionError.value && !bodyError.value && !capacityError.value)
 // Slots the engine will turn into tab stops, in the order they appear.
-const slots = computed(() => [...draft.value.body.matchAll(VARIABLE)]
+const slots = computed(() => slotTokens(draft.value.body)
   .map(match => match[1] === 'END' ? '' : match[1] === 'EXPR' ? 'EXPR（后置模板表达式）' : match[1])
   .filter((name, index, list) => name && list.indexOf(name) === index))
 // 上游「Edit Template Variables」表的 **Expression / Default value** 两列
@@ -89,7 +91,7 @@ const slots = computed(() => [...draft.value.body.matchAll(VARIABLE)]
 const slotRows = computed(() => {
   const rows: { name: string; detail: string }[] = []
   const seen = new Set<string>()
-  for (const match of draft.value.body.matchAll(VARIABLE)) {
+  for (const match of slotTokens(draft.value.body)) {
     const name = match[1]!
     if (name === 'END' || seen.has(name)) continue
     seen.add(name)
@@ -104,7 +106,7 @@ const slotRows = computed(() => {
 // 看着像宏调用、宏表里却没这个名字：那一格不会求值，按字面文本插入（宏清单只渲染宏表里那 21 条，
 // 上游注册了但本仓接不上的 12 条不在这里出现 —— 规约 §3「没有消费链路的宏不渲染」）。
 const unknownMacro = computed(() => {
-  for (const match of draft.value.body.matchAll(VARIABLE)) {
+  for (const match of slotTokens(draft.value.body)) {
     const found = unknownMacroCall(match[2] ?? '')
     if (found) return found
   }
@@ -122,6 +124,8 @@ const unresolved = computed(() => {
   while (index < body.length) {
     const start = body.indexOf('$', index)
     if (start < 0) break
+    // `$$` 是那条美元转义（`TemplateTextLexer.flex:27` → `TemplateBase.java:66-68`），不是写坏的槽位。
+    if (body[start + 1] === '$') { index = start + 2; continue }
     const end = body.indexOf('$', start + 1)
     const lineEnd = body.indexOf('\n', start)
     if (end < 0 || (lineEnd >= 0 && lineEnd < end)) { index = (lineEnd < 0 ? body.length : lineEnd) + 1; continue }
@@ -241,7 +245,7 @@ function toggleLanguage(language: string) {
       <p v-if="bodyError" class="lt-field-error" role="alert">{{ bodyError }}</p>
       <p v-else-if="slots.length" class="lt-slots" role="status">插入后可用 Tab 依次跳转的槽位：{{ slots.join('、') }}。</p>
       <p v-else class="lt-slots" role="status">没有槽位：展开后会原样插入这段文本，光标停在末尾。</p>
-      <p v-if="unresolved.length" class="lt-field-error" role="alert">这些写法不是槽位，展开时会原样输出：{{ unresolved.slice(0, 4).join(' 、 ') }}{{ unresolved.length > 4 ? ' …' : '' }}。正确写法是 $NAME$ 或 $NAME:默认值$；引擎没有转义机制，文本里真正需要的美元符号请改用描述性写法。</p>
+      <p v-if="unresolved.length" class="lt-field-error" role="alert">这些写法不是槽位，展开时会原样输出：{{ unresolved.slice(0, 4).join(' 、 ') }}{{ unresolved.length > 4 ? ' …' : '' }}。正确写法是 $NAME$ 或 $NAME:默认值$；需要一个字面的美元符号就写 $$ —— 上游模板正文的这条转义叫 ESCAPE_DOLLAR。</p>
       <p v-if="unknownMacro" class="lt-field-error" role="alert">「{{ unknownMacro }}」不是已注册的模板宏：那一格会按字面文本插入，不会求值。</p>
       <dl v-if="slotRows.length" class="lt-vars" aria-label="模板变量的取值">
         <div v-for="row in slotRows" :key="row.name" class="lt-var-row">

@@ -67,3 +67,40 @@
 **处置**：三条一起删（本仓的挂起是队列级单通道 `setSuspended`，逐任务批量接口没有触发者），
 或者在这里给每条写清"为什么必须留"。上游对应面供参考：`ProgressSuspenderTracker.kt` 的批量接口是给 `TaskToProgressSuspenderSynchronizer` 那种双向同步用的，
 本仓那条同步没做（见 W1 的"还差"）——**留着它们不等于那条功能就在了**，那是 §3 说的假控件形态。
+
+---
+
+## status3 复核（2026-10-06 桶 status3；报告见 `docs/batch-2026-10-06-status3.md`）
+
+三条**都仍然成立**，本轮逐条按磁盘重数了一遍（`src/progressSuspender.ts` / `src/backgroundTasks.ts` 都不在我的可改面 ⇒ 只复述、不动手）。
+
+| 项 | 判定 | 本轮实测的现场（行号 = 本轮 `grep -n` 取的） |
+| --- | --- | --- |
+| W1 判词过期 | **仍缺** | `grep -c "本仓任务不能暂停"` ⇒ `scripts/verdict_table.py:348` 命中 1、`docs/inventory/verdict-platform_rest.md:171` 命中 1 ⇒ 原请求里那段可照抄替换**仍然逐字可用**（被替换段的字符串本轮复核一致） |
+| W2 挂起原因显示源 | **仍缺** | `src/progressSuspender.ts:48`（`readonly suspendedText`）、`:52`（`text: () => string`）、`:86`（实现 `tempReason ?? suspendedText`）；`grep "suspender\.text"` 在 `src`+`tests`+`native` ⇒ **0 命中**（原写 `:49`/`:53` 各偏一行，按左表订正）。队列侧显示源本轮实测在 `src/backgroundTasks.ts:364-367`（文件自己的注释 `:235` 也指着这两行） |
+| W3 tracker 三条 | **仍缺** | `src/progressSuspender.ts:150-152`（`suspended()`）、`:154-156`（`suspendAll()`）、`:158-160`（`resumeAll()`）—— 三个名字在全仓只命中定义那几行 ⇒ 与 W2 同批处理（删或写理由） |
+
+### W2 走"接上上游口径"那条路时的逐字 old/new（本轮按磁盘重取，缩进照抄）
+
+old（`src/backgroundTasks.ts:367`，行首 10 个空格）：
+
+```
+          detail: `已挂起：${queueSuspendReason.value}${queuedCount.value > 0 ? `（还有 ${queuedCount.value} 个排队中）` : '（正在跑的那条会在下一个检查点让路）'}`,
+```
+
+new（挂起器优先、队列级兜底；`current` 就是 `queueRow` 那个 computed 里已有的当前条目）：
+
+```
+          detail: `已挂起：${current?.indicator.suspender?.text() ?? queueSuspendReason.value}${queuedCount.value > 0 ? `（还有 ${queuedCount.value} 个排队中）` : '（正在跑的那条会在下一个检查点让路）'}`,
+```
+
+⚠ 原请求那条告诫仍然有效：**响应式依赖只能是 `queueSuspendReason`**（`:184` 是 ref、`:208/:218/:279/:289` 是它的读写点；
+挂起器内部是普通 `let`），判据见 `tests/progress-queue-suspend.test.mjs:84-146`。
+走"不接"那条路就删 `src/progressSuspender.ts:48/:52/:86` 三个面并把 `src/backgroundTasks.ts:233-235` 那段注释改成"兜底文案没有显示面"。
+
+### 顺带（status3 在本域发现的同类死面，一并登记）
+
+`src/statusBarWidgets.ts:142` 的 `createStatusBarWidgetInstances` 唯一引用者仍是
+`tests/status-bar-widget-instances.test.mjs` —— 本仓状态栏组件是 `src/App.vue` 模板里直接渲染的，
+没有实例宿主 ⇒ "只过自己测试"那一档。它不在本批可改面（statusbar/status2 名下实现），
+要么给它一个 App.vue 侧宿主，要么按"死面直接删"处理；**别新写第三个只给自己测试的入口**。

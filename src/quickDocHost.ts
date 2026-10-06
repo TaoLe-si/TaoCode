@@ -24,7 +24,7 @@ import { request, type BinaryView, type LspDocumentSymbol, type LspWorkspaceSymb
 import { createDocHoverContent, registerSharedDocHover } from './docHoverContent.ts'
 import { parseQuickDoc, isSafeDocImageSource, isInlineDocImageSource, type DocImage, type DocLink } from './documentationView.ts'
 import { isSymbolDocReference, resolveDocSymbolTarget, type DocSymbolQueries, type DocSymbolTarget } from './docSymbolTarget.ts'
-import { docHoverPolicy, DOC_AUTO_UPDATE_QUIESCENCE_MS, shouldRefreshDocPage, toggleDocHoverPolicy, type DocHoverPolicy } from './docHoverPolicy.ts'
+import { docHoverPolicy, DOC_AUTO_UPDATE_QUIESCENCE_MS, shouldAutoUpdateDoc, shouldRefreshDocPage, toggleDocHoverPolicy, type DocHoverPolicy } from './docHoverPolicy.ts'
 import { errorMessage } from './errors.ts'
 import { openExternalUrl } from './externalLinkLauncher.ts'
 import { createHoverDocumentation, type HoverCache } from './hoverDocumentation.ts'
@@ -226,6 +226,10 @@ export function createQuickDocHost(deps: QuickDocHostDeps) {
     if (!shouldRefreshDocPage(lastShown, next)) return
     autoTimer = window.setTimeout(() => {
       autoTimer = undefined
+      // 档位是在去抖**之后**才问的（上游同样在真正刷新那一刻读属性：
+      // `DocumentationToolWindowManager.kt:121` 的 `if (!autoUpdate)`、`:191`/`:219` 的 `if (autoUpdate)`）。
+      // 少了这一句，用户在这 300ms 里把「选区更改时自动刷新文档」关掉，已经排下去的那一拍照样会刷新一页。
+      if (!shouldAutoUpdateDoc()) { lastShown = null; return }
       const current = active.value
       if (!current || !quickDoc.value || quickDoc.value.docPath !== current.path) return
       lastShown = { line: current.line, character: current.column }

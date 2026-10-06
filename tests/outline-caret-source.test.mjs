@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { caretSymbolInTree, outlineKey, treeOf } from '../src/outlineView.ts'
-import { caretCharacterInSymbolBasis } from '../src/structureFollow.ts'
+import { caretCharacterInSymbolBasis, caretSourceWithCharacter } from '../src/structureFollow.ts'
 
 const read = relative => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 
@@ -93,5 +93,46 @@ test('挂载点确实把编辑器光标喂给了结构视图（接线请求 W1 �
   assert.match(host, /const todoSource = computed\(\(\) => active\.value \? \{ path: active\.value\.path, line: active\.value\.line/,
     '宿主那份 = 编辑器 1 基行（列由接线请求 R1 补，见 docs/wiring-requests-2026-10-06-welcome2.md）')
   const ctx = read('../src/toolViewContext.ts')
-  assert.match(ctx, /todoSource: todoSource\.value/, '上下文透传同一份（ctx 是 computed ⇒ 光标动就重算）')
+  // 订正留痕（2026-10-06 hier3）：这里原写 `assert.match(ctx, /todoSource: todoSource\.value/)`，
+  // 而 welcome2 的 R-1 早写明「宿主补 `character` 时这条不许变红」—— 列这一栏最后是在**上下文层**
+  // 补的（`src/toolViewContext.ts` 不是保留文件），所以那条字面量必然要动。这里换成**更严**的形状：
+  // 仍然钉住「透传的是同一份 `todoSource.value`」（不是另起一个数据源），只是多要求它过一道补列。
+  assert.match(ctx, /todoSource: caretSourceWithCharacter\(todoSource\.value/, '上下文透传同一份，并补上编辑器给的列')
+})
+
+// ——— welcome2 R-1 的「列」那一栏：不必等宿主改 `src/App.vue` ———
+//
+// 上游选的是光标**偏移量**底下那个元素（`StructureViewComponent.java:655-661` 的
+// `scrollToSelectedElement()`，光标监听在 `:805-849` 的 `MyAutoScrollFromSourceHandler` 里装）。
+// 宿主那份 `todoSource`（`src/App.vue` 的 `const todoSource = computed(...)`）只有 `{path, line}`，
+// 而**列**就挂在同一个活动标签页对象上：`src/App.vue:2147` 的
+// `@cursor="(line, column) => { tab.line = line; tab.column = column }"`，
+// 值来自 `src/components/CodeEditor.vue:1022` 的 `emit('cursor', line.number, pos - line.from + 1)`
+// （CodeMirror 行/列都 1 基）。⇒ 上下文层从同一份 `active` 里取那一栏补第三个键，
+// 结构面板与 TODO 面板看的还是**同一个**光标源（TodoPanel 只读 path/line，多一个键不影响它）。
+test('caretSourceWithCharacter：光标源补上编辑器给的列，缺列时不写那个键', () => {
+  assert.deepEqual(caretSourceWithCharacter({ path: 'a/Sample.java', line: 12 }, 7),
+    { path: 'a/Sample.java', line: 12, character: 7 }, '列进来就是 {path, line, character}')
+  assert.deepEqual(caretSourceWithCharacter({ path: 'a/Sample.java', line: 12 }, undefined),
+    { path: 'a/Sample.java', line: 12 }, '没有列 ⇒ 保持宿主原来的形状（不是塞一个 0 假装在第 0 列）')
+  assert.equal(caretSourceWithCharacter(null, 3), null, '没有打开的文件 ⇒ 还是 null（面板据此不画那个开关）')
+  assert.equal(caretSourceWithCharacter(undefined, 3), null)
+})
+
+test('补上列之后：同一行两个符号时选中的是光标底下那一个（端到端）', () => {
+  const sameLine = [
+    sym('Class', 5, 5, 9, 0, 'public class Class'),
+    sym('alpha', 8, 5, 5, 8, 'int alpha'),
+    sym('beta', 8, 5, 5, 18, 'int beta'),
+  ]
+  const lineTree = treeOf(sameLine)
+  // 编辑器第 6 行（1 基）、第 21 列（1 基，= 0 基 20）正压在 `beta` 的名字上。
+  const withColumn = caretSourceWithCharacter({ path: 'Sample.java', line: 6 }, 21)
+  assert.equal(caretSymbolInTree(lineTree, withColumn.line - 1, caretCharacterInSymbolBasis(withColumn.character))?.key,
+    outlineKey(sameLine[2]), '有列 ⇒ 按偏移选中 beta')
+  // 只有行（补列之前宿主给的那一份）时判定退化成「同一行取文档序第一个」⇒ 选中 alpha，光标在 beta 上却亮着 alpha。
+  const withoutColumn = caretSourceWithCharacter({ path: 'Sample.java', line: 6 }, undefined)
+  assert.equal(withoutColumn.character, undefined, '缺列时那个键根本不出现')
+  assert.equal(caretSymbolInTree(lineTree, withoutColumn.line - 1, caretCharacterInSymbolBasis(withoutColumn.character))?.key,
+    outlineKey(sameLine[1]), '没列 ⇒ 退化档（这一对比就是补这一栏的理由）')
 })

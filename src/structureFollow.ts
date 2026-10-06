@@ -72,6 +72,39 @@ export function symbolLineContains(symbol: LspDocumentSymbol, line: number): boo
   return symbol.startLine <= line && symbol.endLine >= line
 }
 
+/** 面板与宿主之间那份**光标源**（`src/App.vue` 的 `todoSource` + 列）。 */
+export interface CaretSource { path: string; line: number; character?: number }
+
+/**
+ * 给宿主那份只有 `{path, line}` 的光标源补上**列**（`docs/wiring-requests-2026-10-06-welcome2.md`
+ * 的 R-1，在**上下文层**落，不要求宿主改 `src/App.vue`）。
+ *
+ * 为什么这一栏值钱：上游选中的是光标**偏移量**底下那个元素
+ * （`StructureViewComponent.java:655` 的 `scrollToSelectedElement()` → `:677` 的
+ * `scrollToSelectedElementLater()` → `:690-692` 的 `doFindSelectedElement()` =
+ * `myTreeModel.getCurrentEditorElement()`，光标监听装在 `:805-849` 的 `MyAutoScrollFromSourceHandler`
+ * 里，`:819-835` 的 `addEditorCaretListener`），只有行没有列时本仓只能退化成
+ * 「同一行取文档序第一个」（`src/outlineView.ts:142-154` 的 `pickCaretCandidate`：
+ * `startChar <= character` 的那些里挑起点最靠右的，一个都没有就取文档序第一个）——
+ * `int alpha; int beta;` 这种同一行两个符号，光标在 `beta` 上亮的却是 `alpha`。
+ *
+ * 列从哪儿来（都在本仓实测）：宿主 `src/App.vue` 的活动标签页对象带着编辑器给的 1 基列
+ * （`@cursor="(line, column) => { tab.line = line; tab.column = column }"`，值来自
+ * `src/components/CodeEditor.vue:1022` 的 `emit('cursor', line.number, pos - line.from + 1)`），
+ * 与 `todoSource.line` 是**同一个** tab 上的两栏 ⇒ 上下文层（`src/toolViewContext.ts`）
+ * 从同一份 `active` 取，不新起第二个数据源、也不改宿主那一行。
+ * 宿主没给列时**不写**那个键（面板读到的仍是 `{path, line}` 那一形状，
+ * 换算那一步 `caretCharacterInSymbolBasis(undefined) = 0` 自己兜住）；
+ * 没有光标源时给 `null` —— 面板据此**不画**「跟随编辑器光标」那个开关（不放假控件）。
+ */
+export function caretSourceWithCharacter(
+  source: { path: string; line: number } | null | undefined, character: number | undefined,
+): CaretSource | null {
+  if (!source) return null
+  return character === undefined ? { path: source.path, line: source.line }
+    : { path: source.path, line: source.line, character }
+}
+
 /**
  * 编辑器那一侧的列 → 符号区间的 LSP 列。
  *

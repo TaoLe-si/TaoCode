@@ -60,6 +60,18 @@ inline bool validate_editor_added_key(const std::string& key, const Json& value)
             fail("INVALID_SETTINGS", "codeVisionVisibleEntries must be an integer from 1 through 10.");
         return true;
     }
+    // terminalBaseFontSize：界 4..40 = platform/editor-ui-ex/src/com/intellij/application/options/
+    // EditorFontsConstants.java:11-13（min scale(4)）/ :15-17（max ide.editor.max.font.size 默认 40），
+    // 与本仓 settings_schema.cpp:47-51 的 fontSize 同一套，也与 JBTerminalPanel.java:384 判的同一对。
+    // 消费方 src/components/TerminalPanel.vue:121 的 baseFontSize 自己也会挡越界值
+    // （两侧都挡 ⇒ 手改 projects.json 也开不出一个 xterm 不接受的字号）。
+    // wheelFontChangeEnabled 是布尔，走 settings_schema.cpp 那条 "Editor flags must be JSON booleans" 兜底，
+    // 不在这里加分支。
+    if (key == "terminalBaseFontSize") {
+        if (!value.is_number_integer() || value.get<int>() < 4 || value.get<int>() > 40)
+            fail("INVALID_SETTINGS", "terminalBaseFontSize must be an integer from 4 through 40.");
+        return true;
+    }
     // Code Vision 的两个组集合（CodeVisionSettings.kt:45 `disabledCodeVisionProviderIds` 与 :50
     // `enabledCodeVisionProviderIds`）：**只装与出厂相反的那一半**，空数组是正常默认态。
     // 条目必须是本仓已知的组 id（两组，src/codeLensSettings.ts:48-50）；上限 8 只是挡住无限追加。

@@ -8,7 +8,7 @@
 //   （`beginProject` / `submitProject` / `cancelProject`）。
 // 它们共享 `confirmLeave`（离开前的未保存确认）与同一批 `appError` / `busy` 状态，是一个闭环。
 // 注意：`openFile`（编辑器骨架）、会话恢复（src/sessionSnapshot.ts）各自属于别的域。
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { importFoldState } from './editorFoldingState.ts'
 import { restoreCodeVisionSettings } from './codeLensSettings.ts'
 import { cloneProgress, defaultGeneralSettings, defaultProjectSettings, isDesktop, normalizeEditorSettings, request,
@@ -24,7 +24,7 @@ import { isProjectTrusted, mergeTrustEntries, needsTrustPrompt, rememberSessionT
          applyTrustDecision, isProjectLocationOfferedForTrust, trustDecisionPaths,
          sessionTrustEntries, trustBlockReason,
          type ExternalLinkChoice, type TrustChoice, type TrustedPathEntry } from './trustedProjects.ts'
-import { installExternalLinkGate, openExternalUrl, type ExternalLinkPromptRequest } from './externalLinkLauncher.ts'
+import { installExternalLinkGate, linkDialogIsMounted, openExternalUrl, type ExternalLinkPromptRequest } from './externalLinkLauncher.ts'
 import type { AppInfo } from './helpActions.ts'
 import { EnvironmentKeyRegistry, createHeadlessEnvironmentService } from './environmentKeys.ts'
 import { checkRequiredEnvironmentKeysActivity, registerStartupActivity, resetStartupProgress,
@@ -167,16 +167,35 @@ function resolveTrustPrompt(choice: TrustChoice, remember: boolean, trustAll: bo
 // `src/App.vue` 那两处只剩把 `request('shell.openUrl', …)` 换成 `openExternalUrl(…)`（见接线请求）。
 //
 // 弹框复用 `TrustedProjectDialog.vue` 的 `mode="link"` 那一档（组件早就备着）。
-const linkPrompt = ref<{ url: string; root: string; name: string; resolve: (choice: ExternalLinkChoice) => void } | null>(null)
+/** 弹框那一刻要显示的那一份（根与名字在问的时候钉住，渲染时不再回头看 `workspace`）。 */
+type LinkPromptState = { url: string; root: string; name: string; resolve: (choice: ExternalLinkChoice) => void }
+const linkPrompt = ref<LinkPromptState | null>(null)
 /**
- * 弹那三颗按钮并等回答。已经挂着一句时**不叠第二扇模态**（上游 `canBrowse` 用的就是模态框）：
- * 后到的那一句按「取消」答（`BrowserLauncherImpl.kt:85`：其它答案 = 不开）。
+ * 弹那三颗按钮并等回答。两条如实的分支：
+ *   · 已经挂着一句 ⇒ **不叠第二扇模态**（上游 `canBrowse` 用的就是模态框，
+ *     `BrowserLauncherImpl.kt:75-81`），后到的那句按「取消」答（`:85`：其它答案 = 不开）；
+ *   · 宿主还没把 `mode="link"` 那颗框挂进模板（接线请求 welcome3 的 W1 第 4 条还没落）⇒
+ *     不能让 Promise 永远 pending（那样终端/控制台/快速文档里的链接点了什么都没发生，
+ *     比接线前更糟）：等一拍让 Vue 挂载，没人挂就收掉状态、按「打开」放行并**说一句为什么没弹框**。
  */
-function askExternalLink(prompt: ExternalLinkPromptRequest): Promise<ExternalLinkChoice> {
-  if (linkPrompt.value) return Promise.resolve<ExternalLinkChoice>('cancel')
-  return new Promise<ExternalLinkChoice>(resolve => {
+async function askExternalLink(prompt: ExternalLinkPromptRequest): Promise<ExternalLinkChoice> {
+  if (linkPrompt.value) return 'cancel'
+  let answer: ((choice: ExternalLinkChoice) => void) | null = null
+  const pending = new Promise<ExternalLinkChoice>(resolve => {
+    answer = resolve
     linkPrompt.value = { url: prompt.url, root: workspace.value?.root ?? '', name: workspace.value?.name ?? '', resolve }
   })
+  await nextTick()
+  if (!linkDialogIsMounted()) {
+    linkPrompt.value = null
+    // `answer` 是在 Promise 执行体里被赋上的：TS 的控制流看不见那一手（会把它钉成 `null`），
+    // 所以这里按声明的那一型取回来再放行。
+    const settle = answer as ((choice: ExternalLinkChoice) => void) | null
+    settle?.('open')
+    notify('这一句「在浏览器里打开之前先问一次」还没有挂进界面（宿主欠一颗 mode="link" 的框），本次直接打开。', true)
+    return 'open'
+  }
+  return pending
 }
 function resolveLinkPrompt(choice: ExternalLinkChoice) {
   const pending = linkPrompt.value

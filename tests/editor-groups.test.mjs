@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
 // The module is TypeScript; strip types the way node 24 does for .ts imports.
-const { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, otherPane, tabClosingOrder } =
+const { createSplitModel, splitTabOutIn, unsplitModel, unsplitAllModel, closeTabInPane, dropTabOnGroup, otherPane, tabClosingOrder,
+        swapGroups, paneOfGroup, jumpTargetPane } =
   await import('../src/editorGroups.ts')
 
 const pathOf = tab => tab.path
@@ -164,4 +165,50 @@ test('dropping onto itself leaves the order unchanged', () => {
   const tab = model.groups[0].tabs.find(item => item.path === 'b')
   dropTabOnGroup(model, pathOf, 0, tab, 0, 'b')
   assert.deepEqual(model.groups[0].tabs.map(item => item.path), ['a', 'b', 'c'])
+})
+
+// —— 一次跳转落在哪一栏（nav3 一批补的用户可见行为：Back / Forward / 最近位置回原来那一栏）——
+// 上游依据（2026-10-06 逐行开参考树自数核对）：
+//   · `PlaceInfo` 记着自己当时所在的编辑器窗口：
+//     `platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/IdeDocumentHistoryImpl.kt:685-694`
+//     （`:689` 的 `window: EditorWindow?` 形参、`:694` 用 `WeakReference` 存），取用是 `:712` 的 `getWindow()`；
+//   · 跳回去时把这个窗口原样交给 `openFile`：同文件 `:572-579`
+//     （`val window = if (openMode != NEW_WINDOW) info.getWindow() else null`）
+//     ⇒ 窗口还在就回原来那一栏，窗口已经没了（弱引用指空）才落当前栏。
+test('paneOfGroup：认对象不认别的东西，未分栏时第二栏不算在屏幕上', () => {
+  const model = createSplitModel()
+  assert.equal(paneOfGroup(model, null), null, '没记住 = null')
+  assert.equal(paneOfGroup(model, { tabs: [], activePath: '' }), null, '不属于这两栏的对象 = null')
+  model.orientation = 'horizontal'
+  assert.equal(paneOfGroup(model, model.groups[0]), 0)
+  assert.equal(paneOfGroup(model, model.groups[1]), 1, '分栏中：第二栏在屏幕上')
+  model.orientation = 'none'
+  assert.equal(paneOfGroup(model, model.groups[1]), null, '未分栏：第二栏对象还在数组里，但它不在屏幕上（= 上游窗口已 Dispose）')
+})
+
+test('jumpTargetPane：记住的那栏还在就回那一栏，没了才落当前栏', () => {
+  const model = createSplitModel()
+  model.orientation = 'horizontal'
+  model.focused = 0
+  assert.equal(jumpTargetPane(model, pathOf, 'x.ts', model.groups[1]), 1, '跳转落在记住的第二栏')
+  model.orientation = 'none'
+  assert.equal(jumpTargetPane(model, pathOf, 'x.ts', model.groups[1]), 0, '那栏没了 ⇒ 回落当前栏（不猜、不开新栏）')
+  model.focused = 1
+  assert.equal(jumpTargetPane(model, pathOf, 'x.ts', null), 1, '压根没记住 ⇒ 当前栏')
+})
+
+test('jumpTargetPane：文件已经在哪一栏开着，那一栏优先于记住的栏', () => {
+  const model = createSplitModel()
+  model.orientation = 'horizontal'
+  model.groups[0].tabs = [{ path: 'a.ts' }]
+  assert.equal(jumpTargetPane(model, pathOf, 'a.ts', model.groups[1]), 0, '本仓一个文件不会在两栏各开一份编辑器状态')
+})
+
+test('jumpTargetPane 记的是对象：拖到左缘换序（swapGroups）之后仍跟着那一栏走', () => {
+  const model = createSplitModel()
+  model.orientation = 'vertical'
+  const second = model.groups[1]
+  assert.equal(jumpTargetPane(model, pathOf, 'x.ts', second), 1)
+  swapGroups(model)
+  assert.equal(jumpTargetPane(model, pathOf, 'x.ts', second), 0, '两栏内容对调 ⇒ 同一窗口对象现在排在前头，跳转跟着对象走')
 })

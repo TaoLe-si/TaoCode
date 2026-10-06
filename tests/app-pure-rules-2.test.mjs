@@ -12,7 +12,7 @@ import { createMenuKeyboard } from '../src/appMenuKeyboard.ts'
 import { createToolWindowActivation } from '../src/appToolWindowActivation.ts'
 import { createToolWindowDockPlacement } from '../src/appDockPlacement.ts'
 import { createToolWindowsHoverPopup } from '../src/appToolWindowHoverPopup.ts'
-import { createPlacesRing } from '../src/appPlacesRing.ts'
+import { createPlacesRing, PLACES_RING_LIMIT, recentPlacesList } from '../src/appPlacesRing.ts'
 import { affectedDirtyTabs } from '../src/appAffectedTabs.ts'
 import { linkPathWithinWorkspace } from '../src/appLinkPath.ts'
 import { saveFailureFor } from '../src/appSaveFailure.ts'
@@ -224,17 +224,36 @@ test('悬停弹层：同一条 300 ms 双向用 —— 起弹层、指针走进�
   assert.equal(popup.toolWindowsPopup.value, false, '关闭之后被取消的那条计时器不能再把弹层打开')
 })
 
-test('最近位置环：按文件 + 行去重、60 条上限、改动环只收 edited', () => {
+// 「最近位置环」这条判据**原写**：两条环都收同一个位置（第二条只多一个 `edited` 过滤）、
+// 写入时按「同文件 + 同行」**全局**去重、上限 60（搬走之前的字面量，没有上游依据）。
+// **实际**上游（2026-10-06 nav3 逐行开参考树自数核对）：
+//   · 一条命令只进一档 —— `onCommandFinished`：导航档在 `currentCommandIsNavigation && currentCommandHasMoves`
+//     时才 `commitBackPlace`（`platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/IdeDocumentHistoryImpl.kt:285-287`
+//     → `:388-402` → `putLastOrMerge(isChanged = false)`），有改动时才 `setCurrentChangePlace`
+//     （`:289-291` → `:311-341` → `:338` 的 `putLastOrMerge(isChanged = true)`）⇒ 打字留下的位置不再混进「最近位置」列表；
+//   · 写入侧只与**最新一条**合并（`putLastOrMerge` `:655-674`，比的是 `list.getLast()`），
+//     全局去重在**读出那一步**（`platform/platform-impl/src/com/intellij/ide/actions/RecentLocationsDataModel.kt:95`）；
+//   · 两档的上限都是注册表默认值 150（`platform/util/resources/misc/registry.properties:494`，
+//     读它的是同文件 `:76-77` 的 `BACK_QUEUE_LIMIT` / `CHANGE_QUEUE_LIMIT`）。
+// ⇒ 下面把断言改成**钉新形状**（不比原来松：条数、顺序、两档归属、合并半径都逐字钉）。
+test('最近位置环：一条命令只进一档、写入只并表头、上限 150、读出才全局去重', () => {
   const ring = createPlacesRing()
   const at = (line, edited) => ({ path: 'a/x.ts', line, edited })
   ring.rememberPlace(at(10, true))
   ring.rememberPlace(at(20, false))
   ring.rememberPlace(at(10, true))
-  assert.deepEqual(ring.places.value.map(item => item.line), [10, 20], '同一行不重复占两格，最近的那条挪到表头')
-  assert.deepEqual(ring.changePlaces.value.map(item => item.line), [10], '只带 edited 标记的进第二条环')
-  for (let line = 1; line <= 70; line++) ring.rememberPlace({ path: 'b/y.ts', line, edited: false })
-  assert.equal(ring.places.value.length, 60, '上限 60 条（与搬走之前同一个字面量）')
-  assert.equal(ring.places.value[0].line, 70, '最新在前')
+  assert.deepEqual(ring.places.value.map(item => item.line), [20], '导航档不收带 edited 的那一条（`:285-291` 的两支互斥）')
+  assert.deepEqual(ring.changePlaces.value.map(item => item.line), [10], '更改档只收 edited，且表头同位置合并成一条')
+  // 写入侧的合并半径 = 表头那一条（`putLastOrMerge` `:660-665` 的 `list.getLast()`）：
+  // 同一个位置夹在别的落点之后再来一次，环里**留两条**（用户看到的是 `:95` 读出去重后的结果）。
+  ring.rememberPlace(at(30, false))
+  ring.rememberPlace(at(20, false))
+  assert.deepEqual(ring.places.value.map(item => item.line), [20, 30, 20], '非表头的同位置不摘：环里可以有两条，读出去掉')
+  assert.deepEqual(recentPlacesList(ring.places.value).map(item => item.line), [20, 30], '读出那一步全局去重（`RecentLocationsDataModel.kt:95`）')
+  for (let line = 1; line <= PLACES_RING_LIMIT + 10; line++) ring.rememberPlace({ path: 'b/y.ts', line, edited: false })
+  assert.equal(PLACES_RING_LIMIT, 150, '上限取注册表默认值 150（registry.properties:494）')
+  assert.equal(ring.places.value.length, PLACES_RING_LIMIT, `超上限从表尾摘（上游 removeFirst，方向镜像）`)
+  assert.equal(ring.places.value[0].line, PLACES_RING_LIMIT + 10, '最新在前')
 })
 
 test('未保存缓冲闸门：目录连子树、文件只算自己', () => {

@@ -22,7 +22,11 @@
 //     - `:385-390` showMessage（日志 + 通知）；`:393-404` logMessage（Error/Warning 走
 //       LOG_ERRORS_WARNINGS 组，Info/Log 走 LOG_INFO_TRACE 组，注释原文
 //       `Do not spam user with all the logs from the server`）；`:407-414` logTrace。
-//     - `:341-371` 五条 refresh 全部 `completedFuture(null)`，并让对应缓存作废重取。
+//     - `:341-368` 五条 refresh 全部 `completedFuture(null)`，并让对应缓存作废重取
+//       （`:341` semanticTokens、`:348` codeLenses、`:353` inlayHints、`:360` inlineValues、`:362` diagnostics）。
+//       同文件 `:369-374` 还有**第六条** `refreshTextDocumentContent`（IntelliJ 扩展、不在 LSP 那五条里），
+//       本仓没有「服务器代管虚拟文件」那条链 ⇒ 不接（理由见报告的 `[-]` 行）。
+//       原写 `:341-371`，收尾时重新逐条数过（`:371` 落在第六条的体内，指不到五条的结尾）。
 //   · 三个通知组的 id：同文件 `:464`、`:470`、`:476`。本仓的注册表已在 `src/notificationGroups.ts`
 //     （那三条逐字对上），本模块只**复用**它，不再自己造一套组名或第二套通道。
 //   · 客户端能力：`platform/lsp/src/api/LspClientCapabilities.kt:246-249`

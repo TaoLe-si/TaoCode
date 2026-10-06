@@ -94,4 +94,33 @@ export function loadSfc(file) {
   return result
 }
 
+/**
+ * 「模板不内联」地编译一个 SFC，把编译产物里那份 `setup()` **真调起来**，
+ * 返回它的绑定表与捕获到的 emit 序列。
+ *
+ * 为什么需要：仓库里没有 DOM，SSR 只能渲染、点不动，所以 `<script setup>` 里的派发函数
+ * （Run Anything 弹层的 `pick()` 那一类）在 SSR 里没法验行为。`inlineTemplate: false` 时
+ * compiler-sfc 会把 setup 的绑定原样返回（`__returned__`），于是判据可以拿**组件真实的同一段源码**
+ * 跑：改错 emit 形状 → 判据变红。这仍然是测试夹具、不是生产代码；控件是否真的渲染出来
+ * 由 `loadSfc` + `renderToString` 那条路验。
+ *
+ * 注意：`onMounted` 一类钩子在这里没有组件实例，Vue 会打一条 dev 警告并直接返回（钩子不跑）。
+ */
+export function loadSetup(file, props = {}) {
+  const { descriptor } = parseSfc(readFileSync(file, 'utf8'), { filename: file })
+  const compiled = compileScript(descriptor, {
+    filename: file,
+    id: `${file.replace(/[^a-z]/gi, '')}setup`,
+    inlineTemplate: false,
+    fs: { fileExists: path => existsSync(path), readFile: path => readFileSync(path, 'utf8') },
+  })
+  const module = evaluate(compiled.content, file, loader(file))
+  const emitted = []
+  const bindings = module.default.setup(props, {
+    expose: () => {},
+    emit: (event, payload) => { emitted.push({ event, payload }) },
+  })
+  return { bindings, emitted, component: module.default }
+}
+
 export { placeholder }

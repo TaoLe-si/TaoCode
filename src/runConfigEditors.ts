@@ -28,7 +28,9 @@
 //     既有行为「保存时就拦」（RunConfigurationsDialog.vue 的既有 guard）+ 启动前再拦一次
 //     （src/runConfigTree.ts:131）。
 //   * 上游的配置类型远多于本仓的四种（Application/Shell Script/Maven/Gradle/Python/…），
-//     本仓只有 RUN_CONFIG_TYPES 里的 shell/application/debug/compound 四种，故表也只有四行。
+//     本仓**模块侧做完**的类型见 `RUN_CONFIG_TYPE_FAMILY_EDITORS`（shell/application/debug/compound/jar 五行），
+//     2026-10-06 第三批把 JAR 补进了家族表；UI 实际拿到的 `RUN_CONFIG_EDITORS` 只投影**宿主已接**的那些
+//     （gate 在 `src/runConfigurationSchema.ts` 的 `RUN_CONFIG_TYPE_IDS_HOST_PENDING`，见那里的分层注释）。
 //
 // 纯函数，判据 tests/run-config-types.test.mjs。
 
@@ -36,6 +38,8 @@ import { runConfigClosure, validateFolderName } from './runConfigTree.ts'
 import type { RuntimeRunConfig as RunConfig } from './runTargets.ts'
 import { validateTargetEnvironment, type TargetEnvironment } from './targetEnvironments.ts'
 import { languageRuntimeType } from './languageRuntimes.ts'
+import { RUN_CONFIG_TYPE_IDS, type RunConfigTypeId } from './runConfigurationSchema.ts'
+import { jarRunConfigProblem } from './jarRun.ts'
 
 export type RunConfigFieldId = 'command' | 'program' | 'args' | 'cwd' | 'adapter' | 'env' | 'beforeLaunch' | 'members'
 
@@ -51,7 +55,8 @@ export interface RunConfigFieldDef {
 }
 
 export interface RunConfigEditorDef {
-  typeId: NonNullable<RunConfig['type']>
+  /** 家族 id（含宿主未接的 jar）：`RUN_CONFIG_TYPE_FAMILY_EDITORS` 按它穷尽。 */
+  typeId: RunConfigTypeId
   /** 上游内建页签标题（zh 文案「配置」，ConfigurationSettingsEditor.java:86）。 */
   tabTitle: string
   /** 该类型的字段，顺序即表单顺序。 */
@@ -77,8 +82,21 @@ const BEFORE: RunConfigFieldDef = {
 }
 const MEMBERS: RunConfigFieldDef = { id: 'members', label: '成员配置', block: true }
 
+// JAR 那一族的两格：本仓不给 `RunConfig` 新增字段（上游那七个 bean 字段折算成现成的两格 + cwd/env），
+// 所以宿主的 `known_keys` 白名单不用扩。坐标见 `src/jarRun.ts` 末尾那一段的注释。
+const JAR_PROGRAM: RunConfigFieldDef = {
+  id: 'program', label: 'Java 可执行文件', placeholder: 'build/…/bin/java.exe',
+  hint: '上游 JAR 表单的 JRE 那一格（`JarApplicationConfigurable.java:67-71` 的 `JrePathEditor`）：本仓把可执行文件写在这格，换 JDK 就改这里；留空则退回项目设置里的 JDK。',
+}
+const JAR_ARGS: RunConfigFieldDef = {
+  id: 'args', label: 'JAR 与程序参数', placeholder: '-jar build/app.jar [程序参数]',
+  hint: 'VM 参数也写在同一串里（`-Xmx512m -jar app.jar`）—— 顺序与 `src/jarRun.ts` 的 `jarRunArgs` 一致：VM 参数 → `-jar` 路径 → 程序参数。上游「Path to JAR」那一格落在 `-jar` 后面那一段。',
+}
+
 /**
- * 逐类型的编辑器定义。
+ * 逐类型的编辑器定义，**按家族穷尽**（`Record<RunConfigTypeId, …>`）：
+ * `src/runConfigurationSchema.ts` 的 `RUN_CONFIG_TYPE_FAMILY_IDS` 加一项而这里没给字段表 ⇒ 编译不过。
+ * 这是「新建配置表单」那一处的机器门（第五处 = 宿主白名单，见 `tests/run-config-types.test.mjs`）。
  *  · shell       —— 上游 Shell Script 类型：脚本/命令是主体（`ShellRunConfiguration` 的
  *                  scriptText + interpreter），参数、工作目录、环境变量挂在同一层。
  *  · application —— 上游 Application 类型：主类 + 模块 + classpath + JRE + VM 选项 + 程序参数
@@ -86,8 +104,12 @@ const MEMBERS: RunConfigFieldDef = { id: 'members', label: '成员配置', block
  *  · debug       —— 同 application，另加一行调试适配器（**本仓自己的字段**：上游没有，
  *                  调试器由 ProgramRunner/XDebugger 决定，见 exec/xdebugger 族）。
  *  · compound    —— 上游只有一张成员表（`CompositeSettingsEditor`，CompoundRunConfiguration.kt:113）。
+ *  · jar         —— 上游 `JarApplicationConfigurable`：Path to JAR → 通用参数 → JRE → 模块 classpath
+ *                  （`JarApplicationConfigurable.java:73/81` 的两格标签）。本仓把 Path to JAR 并进参数串、
+ *                  JRE 那格落在「Java 可执行文件」，**模块 classpath 那一格不画**
+ *                  （`src/jarRun.ts:103-111` 已把它标 `available: false`：本仓运行配置没有模块概念）⇒ 没有假控件。
  */
-export const RUN_CONFIG_EDITORS: Record<NonNullable<RunConfig['type']>, RunConfigEditorDef> = {
+export const RUN_CONFIG_TYPE_FAMILY_EDITORS: Record<RunConfigTypeId, RunConfigEditorDef> = {
   shell: {
     typeId: 'shell', tabTitle: '配置', primary: 'command',
     fields: [COMMAND, ARGS, CWD, ENV, BEFORE],
@@ -105,7 +127,23 @@ export const RUN_CONFIG_EDITORS: Record<NonNullable<RunConfig['type']>, RunConfi
     fields: [MEMBERS],
     // 成员表的说明与提示由对话框提供（要列出可选项），这里只给静态部分。
   },
+  jar: {
+    typeId: 'jar', tabTitle: '配置', primary: 'program',
+    fields: [JAR_PROGRAM, JAR_ARGS, CWD, ENV, BEFORE],
+  },
 }
+
+/**
+ * UI 用的那张表 = 家族表里**宿主已接**的那几行（gate 在 `src/runConfigurationSchema.ts` 的
+ * `RUN_CONFIG_TYPE_IDS_HOST_PENDING`）。为什么不能直接把家族表给 UI：JAR 的宿主两处还没接
+ * （`src/settingsModel.ts` 的联合 + `native/settings_schema.cpp` 的白名单），
+ * 前端先给表单就是「点得出来、存不下去」那个老形状（规约 §3 不放假控件）。
+ * 摘掉 pending 里那一项，jar 这一行就自动出现在表单、左树与逐类型校验里。
+ */
+export const RUN_CONFIG_EDITORS = RUN_CONFIG_TYPE_IDS.reduce<Record<string, RunConfigEditorDef>>(
+  (table, id) => { table[id] = RUN_CONFIG_TYPE_FAMILY_EDITORS[id]; return table },
+  {},
+) as Record<NonNullable<RunConfig['type']>, RunConfigEditorDef>
 
 export function runConfigEditorFor(type: RunConfig['type'] | undefined): RunConfigEditorDef {
   return RUN_CONFIG_EDITORS[type ?? 'shell']
@@ -183,6 +221,14 @@ export function checkRunConfiguration(
   } else if (!config.command.trim() && !config.program?.trim()) {
     return { severity: 'error', message: '请填写命令或可执行程序。' }
   }
+
+  // JAR 那一族的**入口**判据（`src/jarRun.ts` 的 `jarRunConfigProblem` 是同一条，落盘与启动都走它）。
+  // 严重级别 = 上游致命档（`RunConfiguration.java:156-167`：RuntimeConfigurationError 定义就是「致命，无法执行」），
+  // 因为参数串里没有 `-jar <路径>` 时 `JarApplicationCommandLineState.java:24` 拼出来的是一条没有 jar 的命令行；
+  // 上游那条**只是 warning** 的是「JAR 文件不存在」（`JarApplicationConfiguration.java:128-131`），
+  // 那一条在本仓是 `src/jarRun.ts` 的 `jarValidation`（要摸盘 ⇒ 由调用方注入文件系统问询），不在这儿升级。
+  const jarProblem = jarRunConfigProblem(config)
+  if (jarProblem) return { severity: 'error', message: jarProblem }
 
   for (const entry of config.env ?? [])
     if (!entry.includes('=') || entry.startsWith('='))

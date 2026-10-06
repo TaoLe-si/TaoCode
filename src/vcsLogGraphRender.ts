@@ -89,8 +89,11 @@ export function paintGraphRow(units: readonly GraphUnit[]): GraphRowPaint {
     const x2 = vertical ? x1 : laneX(unit.otherPosition)
     const y2 = vertical ? (isDown ? ROW_H - gap : gap) : (isDown ? ROW_H + rowCenter : rowCenter - ROW_H)
     // `:127-134`：实线**或**带箭头都用实笔；只有既非实线又没箭头才换虚线笔。
+    // 边长按上游取法：竖线一律按**一个行高**算（`:131` 的 `if (x1 == x2) rowHeight`，
+    // 注释 `:220-221` "Exactly one dash and one space fits on the edge"），斜线按两点距离（本行那一段的两倍长端点）。
     const dashed = unit.style !== 'solid' && !unit.hasArrow
-    strokes.push({ x1, y1: rowCenter, x2, y2, color: unit.color, dash: dashed ? dashArray(Math.hypot(x2 - x1, y2 - rowCenter)) : undefined })
+    const edgeLength = vertical ? ROW_H : Math.hypot(x2 - x1, y2 - rowCenter)
+    strokes.push({ x1, y1: rowCenter, x2, y2, color: unit.color, dash: dashed ? dashArray(edgeLength) : undefined })
     if (unit.hasArrow) {
       // 箭头顶点：竖线用线段末端（`:161` 传的是 x2,y2），弯线用中点（`:168`）—— 上游 assert 弯线不是终端单元。
       const vx = vertical ? x2 : (x1 + x2) / 2

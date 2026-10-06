@@ -206,11 +206,21 @@ export interface EditorActionBinding {
  *     `EditorReverseLines`/`EditorUniqueLines` 任何键位表里都没有。
  *   · `EditorCloneCaretAbove` / `EditorCloneCaretBelow` ——
  *     同上 `:219`/`:218`；文案 `ActionsBundle.properties:121-122`/`:119-120`；
- *     `$default.xml` **无绑定**（只有 `keymaps/Sublime Text.xml:280`/`:284` 给过 `control alt UP/DOWN`），
+ *     实现类 `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretAbove.java:8-11`
+ *     与 `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretActionHandler.java:24`
+ *     都**不在代码里声明键位**（`CloneCaretAbove` 只是 `new EditorAction(handler)`，没有
+ *     `registerCustomShortcutSet`），`platform/ide-core/src/com/intellij/openapi/actionSystem/IdeActions.java:67-68`
+ *     里也只有动作 id 常量 ⇒ 这一族的键位只可能来自键位表。
+ *     `$default.xml` **无绑定**（整个 `platform/platform-resources/src/keymaps/` 十张表里只有
+ *     `Sublime Text.xml:280`/`:284` 给过 `control alt UP`/`DOWN`；插件方案
+ *     `plugins/keymaps/vscode-keymap/resources/keymaps/VSCode.xml:130-136` 给过
+ *     `ctrl alt up` + `shift ctrl alt up` —— 都不是出厂默认），
  *     而 `$default.xml:879-881`/`:882-884` 把 `control alt shift UP`/`DOWN` 给了
  *     `ResizeToolWindowUp`/`ResizeToolWindowDown` —— 本仓的全局分派表照的是上游那一条
- *     （`src/keymap.ts` 的 `stretchToolWindow`），这一族的本仓编辑器键位与之撞车，
- *     摘键请求见 `docs/wiring-requests-2026-10-06-keymap.md`（要动的是编辑器的 keymap 与菜单行，不属本 lane）。
+ *     （`src/keymap.ts` 的 `stretchToolWindow`）。**2026-10-06 判决（R3）= 摘键**：编辑器 keymap 里那两行
+ *     `Ctrl-Alt-Shift-Up`/`Down` 已删、菜单两行的键位栏已清空，这两条因此从 `repo` 档降到 `none` 档
+ *     （命令本身留着，入口 = 菜单行与「查找操作」，与上游「只有动作没有键」一致）；
+ *     判据 `tests/keymap-bindings.test.mjs` 的「克隆光标那对不占工具窗口调整大小的键」。
  *   · `EditorMatchBrace` —— `platform/lang-impl/resources/intellij.platform.lang.impl.actions.xml:23`；
  *     文案 `ActionsBundle.properties:161`（`Move Caret to Matching Brace`）；
  *     键位 `platform/platform-resources/src/keymaps/$default.xml:1146-1148` = `control shift M`。
@@ -223,13 +233,11 @@ export const EDITOR_ACTIONS: readonly EditorActionBinding[] = [
   { id: 'line.unique', upstreamId: 'EditorUniqueLines', label: '删除重复行', keywords: 'delete duplicate lines unique 删除重复行 去重 EditorUniqueLines',
     command: 'line.unique', key: { source: 'none', upstream: '上游注册 intellij.platform.ide.impl.actions.xml:264、文案 ActionsBundle.properties:175；$default.xml 与其余 keymaps/*.xml 均无绑定 ⇒ 本仓不编键位' } },
   { id: 'cursor.above', upstreamId: 'EditorCloneCaretAbove', label: '在上行添加光标', keywords: 'clone caret above 多光标 上行 EditorCloneCaretAbove',
-    command: 'cursor.above', key: { source: 'repo', display: 'Ctrl Alt Shift ↑', cm: 'Ctrl-Alt-Shift-Up', boundAt: 'src/components/CodeEditor.vue:865',
-      upstream: '本仓绑定：上游注册 intellij.platform.ide.impl.actions.xml:219、文案 ActionsBundle.properties:121-122，但 $default.xml 没有这个动作的键位（只有 Sublime Text.xml:280 给过 control alt UP）；同键 control alt shift UP 在上游是 ResizeToolWindowUp（$default.xml:879-881）⇒ 摘键请求已提' } },
+    command: 'cursor.above', key: { source: 'none', upstream: '上游注册 platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:219（`CloneCaretAbove`，动作组 PlatformActions.xml:200）、文案 ActionsBundle.properties:121-122；键位：`$default.xml` **无绑定**（`platform/platform-resources/src/keymaps/` 十张表里只有 `Sublime Text.xml:280` 给过 `control alt UP`，插件方案 `plugins/keymaps/vscode-keymap/resources/keymaps/VSCode.xml:130-132` 给过 `ctrl alt up`/`shift ctrl alt up`，都不是出厂默认），而 `$default.xml:879-881` 把 `control alt shift UP` 给了 `ResizeToolWindowUp` ⇒ 本仓那行编辑器键位已于 2026-10-06 摘掉（`src/components/CodeEditor.vue` 的 keymap），命令只走菜单行与「查找操作」' } },
   { id: 'cursor.below', upstreamId: 'EditorCloneCaretBelow', label: '在下行添加光标', keywords: 'clone caret below 多光标 下行 EditorCloneCaretBelow',
-    command: 'cursor.below', key: { source: 'repo', display: 'Ctrl Alt Shift ↓', cm: 'Ctrl-Alt-Shift-Down', boundAt: 'src/components/CodeEditor.vue:866',
-      upstream: '本仓绑定：上游注册 intellij.platform.ide.impl.actions.xml:218、文案 ActionsBundle.properties:119-120，但 $default.xml 没有这个动作的键位（只有 Sublime Text.xml:284 给过 control alt DOWN）；同键 control alt shift DOWN 在上游是 ResizeToolWindowDown（$default.xml:882-884）⇒ 摘键请求已提' } },
+    command: 'cursor.below', key: { source: 'none', upstream: '上游注册 platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:218（`CloneCaretBelow`，动作组 PlatformActions.xml:199）、文案 ActionsBundle.properties:119-120；键位：`$default.xml` **无绑定**（同上，只有 `Sublime Text.xml:284` 给过 `control alt DOWN`，插件方案 VSCode.xml:134-136 给过 `ctrl alt down`/`shift ctrl alt down`），而 `$default.xml:882-884` 把 `control alt shift DOWN` 给了 `ResizeToolWindowDown` ⇒ 本仓那行编辑器键位已摘' } },
   { id: 'brace.match', upstreamId: 'EditorMatchBrace', label: '移动到配对的括号', keywords: 'match brace 配对括号 匹配括号 EditorMatchBrace',
-    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/components/CodeEditor.vue:846',
+    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/components/CodeEditor.vue:845',
       upstream: '$default.xml:1146-1148 EditorMatchBrace = control shift M；注册 intellij.platform.lang.impl.actions.xml:23；文案 ActionsBundle.properties:161' } },
 ]
 

@@ -120,3 +120,38 @@
 - 若要让它进注册表（用户可显隐），必须**同时**在 `src/App.vue` 用 `showWidget('fatalError')` 包住它，
   否则门禁 `tests/statusbar-popup-motion-parity.test.mjs` 第一条（注册表每个 id 都要被模板消费）会红 ——
   本轮刚把那条门禁的 `KNOWN_GAPS` 清空（见批次报告 ①），**不会**再为新增死条目放行。
+
+---
+
+## status3 复核（2026-10-06 桶 status3；报告见 `docs/batch-2026-10-06-status3.md`）
+
+| 项 | 判定 | 本轮实测 |
+| --- | --- | --- |
+| W1 `Messages` 宿主 | **仍缺** | `src/App.vue` grep `messageDialog\|showMessage\|MessageHost` ⇒ 0；`src/components/MessageDialog.vue` 不存在；`src/messageDialog.ts` 仍只有 `src/components/TrustedProjectDialog.vue` 一个消费者。**锚点已漂**：`TrustedProjectDialog` 挂载现在是 `src/App.vue:2646`（原写 2622）、`createProgressPanel` import 在 `:124`、调用在 `:636`（原写 623）；`:41` 的 import 锚仍对。可照抄段仍在 `docs/wiring-requests-2026-10-06-statusbar.md` |
+| W2 通知设置页 | **仍缺** | `src/settingsTreeMeta.ts` grep `notification` ⇒ 0；页面文件不存在；`src/notificationEventLog.ts:111-112` 仍如实不渲染「设置…」（连带效果不变） |
+| W3 Gradle 任务体缺挂起检查点 | **仍缺**，逐字 old/new 见下 | `src/gradleHost.ts:207` 仍是 `run: async () => { await sync() },`（整块 `:204-208`，本轮实测缩进 8 空格） |
+| **W4 导出文本的「详情」勾选** | **已闭环（本批做完，不需要接线）** | `src/components/ProblemsPanel.vue:516-519` 加 `const exportDetails = ref(true)`（缺省勾上 = 上游 `ErrorViewTextExporter.java:28`）、`:546` 改传 `{ details: exportDetails.value }`、模板 `:603` 工具栏那颗复选框（复用既有 `.problems-profile-toggle`，`src/style.css` 未动）。判据 `tests/problems-export-text-details.test.mjs`（6 条），反向验证见批次报告 §4。**原请求写的 `:521`/`:513-524` 已漂，实测是 `:546`/`:533-547`** |
+| W5 内部错误芯片 | **仍缺（且可以不动）** | `src/App.vue:2297` 仍直接渲染 `<InternalErrorsChip …>`，没有 `showWidget('fatalError')`；上游 `FatalErrorWidgetFactory.java:33` 的 `isConfigurable()=false` 本轮复核仍在 ⇒ 维持现状也讲得通。要动就两处同批：`tests/statusbar-popup-motion-parity.test.mjs:40` 现在是 `const KNOWN_GAPS = new Map()`（空），不会再放行死条目 |
+
+### W3 · 逐字可粘（本轮按磁盘现状重取）
+
+old（`src/gradleHost.ts:207`，行首 8 个空格）：
+
+```ts
+        run: async () => { await sync() },
+```
+
+new（同一段缩进；`run` 的形参类型见 `src/backgroundTasks.ts:33-54`）：
+
+```ts
+        run: async indicator => {
+          await indicator.awaitResumed()
+          indicator.checkCanceled()
+          await sync()
+        },
+```
+
+上游依据本轮复核：`platform/platform-impl/src/com/intellij/openapi/progress/impl/ProgressSuspender.java:154`（`freezeIfNeeded`）、
+`platform/progress/shared/src/suspender/TaskSuspension.kt:24-28`。
+`src/backgroundTasks.ts:218` 那句 `while (queueSuspendReason.value !== null) await …` 是队列侧的等待环，
+任务体一旦带检查点，省电模式就能真的让路（现在只有"不再开新的"生效）。

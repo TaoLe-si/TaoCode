@@ -6,6 +6,7 @@
 import SearchPanel from './SearchPanel.vue'
 import TodoPanel from './TodoPanel.vue'
 import OutlinePanel from './OutlinePanel.vue'
+import ReferencePanel from './ReferencePanel.vue'
 import BookmarksPanel from './BookmarksPanel.vue'
 import DebugPanel from './DebugPanel.vue'
 import SourceControl from './SourceControl.vue'
@@ -15,6 +16,7 @@ import EventLogPanel from './EventLogPanel.vue'
 import FileTree from './FileTree.vue'
 import ProjectViewSortSettings from './ProjectViewSortSettings.vue'
 import type { getProjectTreeState } from '../projectTreeState'
+import type { UsageTreeRow } from '../usageViewGrouping'
 import { Check, ChevronsDownUp, ChevronsUpDown, Crosshair, Settings2 } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 
@@ -135,7 +137,9 @@ export interface ToolWindowViewContext {
   bookmarksView?: any
   onUpdateBookmarksView?: (patch: unknown) => void
   onFoldAll: () => void
-  onExpandAll: () => void
+  /** 「全部展开 / 全部折叠」的**归属**在 `gradle` 那一支（`GradlePanel`），不是项目树 —— 宿主里那两条
+   *  没有渲染点，所以改成可选（`onTreeExpandAll` / `onTreeFoldAll` 的请求见接线单 S-TW-1）。 */
+  onExpandAll?: () => void
   onExpandRecursively: () => void
   canExpandRecursively: () => boolean
   onSelectInProjectView: () => void
@@ -144,6 +148,28 @@ export interface ToolWindowViewContext {
   expandWithSingleClick: boolean
   onToggleCompactIndents: () => void
   onToggleExpandWithSingleClick: () => void
+  // --- 引用面板（Find 窗口的那条用法视图 Content）-------------------------------------------
+  // 上游的这份内容**不是**一个注册出来的工具窗口：IDEA 先把 Find 窗口按需注册
+  // （`platform/lang-impl/src/com/intellij/usageView/impl/UsageViewContentManagerImpl.java:120-136`，
+  // `registerToolWindow(ToolWindowId.FIND, …)`），每次搜索再往那个窗口的 ContentManager 里
+  // **addContent**（同文件 `:149-190`；用法视图那条由
+  // `platform/usageView-impl/src/com/intellij/usages/impl/UsageViewManagerImpl.java:145-163` 递进来）。
+  // 本仓的承接形状：底部那一格 = 那个 ContentManager（`src/referenceContents.ts` 存条目、
+  // `src/App.vue` 的标签条按条目画），**面板本身**归 `ToolWindowView` 宿主（下面这一支），
+  // 数据由 `src/toolViewContext.ts` 从 `referenceContents` 递进来 —— 与本仓其它窗口内容同一个口径。
+  // `references` 因此**不在** `TOOL_WINDOW_REGISTRY` 里（那一张是"窗口"注册表，这一条是"内容"）。
+  /** 选中那条内容的行（`referenceRows`：摊平 + 折叠态 + 过滤串都算好了）。 */
+  referenceRows?: UsageTreeRow[]
+  /** 选中那条内容的引用条数（区分「没有用法」与「过滤串一条不剩」两种空态）。 */
+  referenceCount?: number
+  /** 面板的过滤串（`referencesSpeedSearch`）。 */
+  referenceQuery?: string
+  /** `UsageView.isSearchInProgress()`（`UsageViewContentManagerImpl.java:170-172` 用的就是它）。 */
+  referenceSearching?: boolean
+  onReferenceToggleGroup?: (key: string) => void
+  onReferenceCollapseAll?: () => void
+  onReferenceExpandAll?: () => void
+  onReferenceSpeedSearch?: (value: string) => void
 }
 
 import { ref } from 'vue'
@@ -189,6 +215,9 @@ const props = defineProps<{
        （`NotificationsPanel.kt:538-613` / `:1106-1153`）；状态栏弹层仍是那张单列
        `NoticeList`。 -->
   <EventLogPanel v-else-if="view === 'notifications'" :entries="(ctx.noticeLog ?? []) as any" :root="ctx.root" @clear="ctx.onClearNotices" @expire="ctx.onExpireNotice?.($event)" @run="ctx.onRunNoticeAction?.($event)" />
+  <!-- 引用（Find 窗口的那条用法视图 Content）：面板只画行，条目存储/折叠态/过滤串都在
+       `src/referenceContents.ts`，由 `src/toolViewContext.ts` 递进 ctx（见上面那组字段的上游依据）。 -->
+  <ReferencePanel v-else-if="view === 'references'" :rows="ctx.referenceRows ?? []" :count="ctx.referenceCount ?? 0" :query="ctx.referenceQuery ?? ''" :searching="ctx.referenceSearching === true" @open="target => ctx.onReveal(target)" @toggle-group="(key: string) => ctx.onReferenceToggleGroup?.(key)" @collapse-all="ctx.onReferenceCollapseAll?.()" @expand-all="ctx.onReferenceExpandAll?.()" @speed-search="(value: string) => ctx.onReferenceSpeedSearch?.(value)" />
   <template v-else>
     <!-- ProjectViewToolbar is a tool-window TITLE action group.
          原来这里用 Teleport 把动作行搬进 dock 的标题栏（`#project-title-actions-left`），

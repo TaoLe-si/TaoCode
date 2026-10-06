@@ -29,11 +29,16 @@
 //     「PSI 没变但文档模型被回收重建」）。
 //
 // **无法核实**（不编）：判决原文写的是「`StickyLinesPass` 的 daemon 合帧与**按视图优先级排序**」。
-// 上游 `stickyLines` 目录里搜不到任何 priority 字样的排序（对该目录 grep priority 零命中），
+// 上游 `stickyLines` 目录里搜不到任何 priority 字样的排序（对该目录 grep priority 零命中，
+// 2026-10-06 hier3 本轮再核一次仍是零命中：`platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/`
+// 与 `platform/lang-impl/src/com/intellij/codeInsight/stickyLines/` 两处都搜过），
 // 能核实的只有两条：同一文档的层按 `StickyLinesModelImpl.java:287-296` 的比较器排（起始升序、
 // 同起点宽的在前），以及每个编辑器用自己的可视区独立算一份
-// （`StickyLinesManager.kt:86-99` + `VisualStickyLines.kt:33-42`）。本模块按这两条实现，
-// 「视图优先级」那一档留成 `stickyLinesPerView` 的入参顺序（宿主给什么顺序就按什么顺序，不替宿主编一个）。
+// （`StickyLinesManager.kt:86-99` + `VisualStickyLines.kt:33-42`）。本模块按这两条实现。
+// 订正留痕（2026-10-06 hier3）：这里原写「『视图优先级』那一档留成 `stickyLinesPerView` 的入参顺序」，
+// 实际那一档只解决了「不替宿主编」，没解决「宿主给了档位之后按什么序渲染」⇒ 本轮补上
+// `StickyView.priority` + `orderStickyViews` + `primaryStickyView`（档位仍由宿主给，
+// 模块只把它落成稳定序并让 `stickyLinesPerView` 的键序跟着走），上游依据不变（跨视图先后无法核实）。
 
 /** 默认最小作用域行数（`VisualStickyLines.kt:18-19` 的 `scopeMinSize = 5`）。 */
 export const DEFAULT_SCOPE_MIN_LINES = 5
@@ -52,6 +57,36 @@ export interface StickyView {
   lineHeight?: number
   /** 可视区高度（像素，`visibleArea.height`）。 */
   viewportHeight?: number
+  /**
+   * **宿主给的**显示优先级（小者在前）。上游没有这一档（对
+   * `platform/platform-impl/src/com/intellij/openapi/editor/impl/stickyLines/` 整目录 grep
+   * `priority` 零命中：模型挂在文档上 `StickyLinesModelImpl.java:93-100`，面板挂在**每个编辑器**上
+   * `StickyLinesManager.kt:15-34`，谁也不给谁排先后），所以档位只能由宿主说，
+   * 模块**不替宿主编**「哪个分栏在上/有焦点」；没给档位的视图一律排在给过的之后，
+   * 且保持宿主给的先后（本仓的顶边只有一个渲染容器，`src/App.vue:2143` 那一格）。
+   */
+  priority?: number
+}
+
+/**
+ * 按宿主给的档位把视图排成一个**稳定序**（判词 `lp/sticky-lines` 的「按视图优先级排序」那一档的
+ * 模块侧形态）：`priority` 升序、没给档位的排最后、同档（含都没给）保持入参先后 ——
+ * `Array.prototype.sort` 在 V8 里是稳定的，所以这里只改副本、不改入参数组。
+ * 上游能核实的只有「各编辑器各算各的」（`StickyLinesManager.kt:15-34`、`:86-99`），
+ * 跨视图的先后**无法核实** ⇒ 模块不发明档位（见上面 `StickyView.priority` 的留痕）。
+ */
+export function orderStickyViews(views: readonly StickyView[]): StickyView[] {
+  return [...views].sort((left, right) => {
+    if (left.priority === undefined && right.priority === undefined) return 0
+    if (left.priority === undefined) return 1
+    if (right.priority === undefined) return -1
+    return left.priority - right.priority
+  })
+}
+
+/** 共享顶边该显示哪一块的结果 = 排在最前的那一块；没有视图时给 null（渲染层据此不画那一格）。 */
+export function primaryStickyView(views: readonly StickyView[]): StickyView | null {
+  return orderStickyViews(views)[0] ?? null
 }
 
 type Scope = { startLine: number; endLine: number }
@@ -122,13 +157,15 @@ export function stickyVisualLines<T extends Scope>(scopes: readonly T[], view: S
 /**
  * 多分栏：同一个文档开在几个视图里时，每个视图按自己的可视区各算一份
  * （`StickyLinesManager.kt:20-34` 每编辑器一个 manager）。
- * `views` 的顺序由宿主给（哪个面板在上/有焦点只有 `App.vue` 知道），本模块不替它编。
+ * **键序 = `orderStickyViews` 的序**（宿主给的档位，小者在前，没给档位的保持入参先后排在最后）：
+ * 渲染层直接 `for (const [id, lines] of perView)` 就是显示序，不必再去重排一遍。
+ * 档位本身仍由宿主给，本模块不替它编「哪个面板在上/有焦点」（只有 `App.vue` 知道）。
  */
 export function stickyLinesPerView<T extends Scope>(
   scopes: readonly T[], views: readonly StickyView[], lineLimit: number,
 ): Map<string, T[]> {
   const out = new Map<string, T[]>()
-  for (const view of views) out.set(view.id, stickyVisualLines(scopes, view, lineLimit))
+  for (const view of orderStickyViews(views)) out.set(view.id, stickyVisualLines(scopes, view, lineLimit))
   return out
 }
 

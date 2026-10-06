@@ -11,8 +11,13 @@ import { clearLspDiagnostics, lspDiagnostics, request, setLspDiagnostics, type D
 import type { Tab } from './editorTab'
 import { BreakpointLocationCache } from './breakpointLocations.ts'
 import { errorMessage } from './errors.ts'
+// 最近位置的两档（导航档 / 更改档）与它们的上限、合并规则都在 src/appPlacesRing.ts；
+// 这里只把弹层要看的那一条列表按上游 `createPlaceLinePairs` 的口径取出来。
+import { recentPlacesList } from './appPlacesRing.ts'
+// 跳转落在哪个分栏（上游 `PlaceInfo.window` + `gotoPlaceInfo` 的 window 实参）。
+import { jumpTargetPane, type PaneGroup } from './editorGroups.ts'
 import { describeNavigationBoundary, navigateFrom, navigationPoints } from './navigateInFile.ts'
-import { locationSnippet } from './recentLocations.ts'
+import { locationSnippet, previousChangePlace } from './recentLocations.ts'
 // LSP 符号导航包装层（workspaceSymbol/documentSymbol 一族，见该模块头）：
 // 文件内/工作区符号的过滤（含 SpeedSearch 匹配器）、去重、排序与导航目标都走同一份规则。
 import { CLASS_LIKE_SYMBOL_KINDS, documentSymbolEntries, mergeWorkspaceSymbols, symbolNavigationTarget } from './lspSymbolBridge.ts'
@@ -55,7 +60,16 @@ type NavigationDocumentSymbol = LspDocumentSymbol & { selectionEndLine?: number;
 // App.vue 仍从这个模块导入它，保留同名导出以免动冻结文件。
 export const CLASS_KINDS = CLASS_LIKE_SYMBOL_KINDS
 
-export interface Place { kind: '文件' | '符号' | '书签'; path: string; line: number; label: string; edited?: boolean }
+/**
+ * 最近位置的一格。`pane` = 这一格当时所在的**分栏对象**（上游 `PlaceInfo` 的 `window` 字段，
+ * `platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/IdeDocumentHistoryImpl.kt:689`
+ * 存、`:694` 用弱引用存、`:712` 取；跳回去时作为 `openFile(window = …)` 的实参，见 `:572-579`）。
+ * 没有它 = 记录时拿不到分栏（书签一类的调用方），跳转回落到「已开着的那一栏 / 当前栏」。
+ */
+export interface Place { kind: '文件' | '符号' | '书签'; path: string; line: number; label: string; edited?: boolean; pane?: PaneGroup<Tab> | null }
+
+/** 导航栈（Back / Forward）里的一格：位置 + 当时所在的分栏。 */
+export interface NavSpot { path: string; line: number; pane: PaneGroup<Tab> | null }
 
 export interface LspNavigationDeps {
   notify: (message: string, error?: boolean) => void
@@ -242,20 +256,30 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     symbolRevision += 1
     // IdeDocumentHistory.placeChanged(EditorEvent.DocumentChange): every user edit
     // pushes the caret line onto the "changed places" ring.
-    rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true })
+    // 上游这一条**只进更改档**（`onCommandFinished` 的 `currentCommandHasChanges` 分支，
+    // `IdeDocumentHistoryImpl.kt:289-291`），本仓同口径（见 src/appPlacesRing.ts 的头注释）。
+    const editPane = paneShowing(tab.path)
+    rememberPlace({ kind: '文件', path: tab.path, line: Math.max(0, (editorFor(tab.path)?.getCursor().line ?? tab.line - 1)), label: tab.path, edited: true, pane: editPane })
+    // 记一笔改动 = 上游 `setCurrentChangePlace` 的收尾 `currentIndex = changePlaces.size`
+    // （`IdeDocumentHistoryImpl.kt:340`）⇒ 游标回到「最新那一条之后」，下一次 Ctrl+Shift+Backspace 从最新往旧走。
+    changeCursor = -1
     if (markdownPreviewOn.value && tab.path === activePath.value) refreshMarkdownSoon()
     scheduleAutoSave()
     scheduleSessionSave()  // drafts change on every keystroke, not just on dirty-flip
   }
-  // IDEA's "Last Edit Location" is project-wide (JumpToLastChangeAction reads
-  // IdeDocumentHistory.changePlaces), so Ctrl+Shift+Backspace follows edits across
-  // files; the per-editor handler only covers jumps inside one buffer.
+  // IDEA's "Last Edit Location" is project-wide (JumpToLastEditAction.java:15-19 读
+  // `IdeDocumentHistory.navigatePreviousChange()`，菜单可用判据同文件 `:29`), so Ctrl+Shift+Backspace
+  // follows edits across files; the per-editor handler only covers jumps inside one buffer.
+  // 更改档的游标（上游 `currentIndex`）住在「最新在前」的镜像一侧：-1 = 还没按过。见 `previousChangePlace`。
+  let changeCursor = -1
   function jumpLastEditLocation() {
     const current = active.value
-    const here = current ? `${current.path}:${Math.max(0, (editorFor(current.path)?.getCursor().line ?? current.line - 1))}` : ''
-    const place = changePlaces.value.find((item: any) => `${item.path}:${item.line}` !== here)
-    if (!place) { deps.notify('没有上次编辑位置。', true); return }
-    void revealLocation(place)
+    const here = current ? { path: current.path, line: Math.max(0, (editorFor(current.path)?.getCursor().line ?? current.line - 1)) } : null
+    const target = previousChangePlace(changePlaces.value as any[], changeCursor, here)
+    if (!target) { deps.notify('没有上次编辑位置。', true); return }
+    // 游标挪过去（上游 `:493`）—— 这一句是本仓原来缺的那半件：没有它，连续按只会在最新的两格里来回弹。
+    changeCursor = target.index
+    void revealLocation(target.place)
   }
   function stopLspFile(path: string) {
     if (outlineWarmupPath === path) outlineWarmup.cancel()
@@ -283,11 +307,31 @@ export function createLspNavigation(deps: LspNavigationDeps) {
     for (const path of [...lspDiagnostics.keys()]) clearLspDiagnostics(path)
     if (stopHost && isDesktop) void request('lsp.stop').catch(() => undefined)
   }
-  async function revealLocation(target: { path: string; line: number; column?: number; kind?: Place['kind']; label?: string }, record = true) {
+  /** 某个文件现在落在哪个分栏（没开着 = null）。上游没有这一层：VFS 一侧直接拿 FileEditor[]。 */
+  function paneShowing(path: string): PaneGroup<Tab> | null {
+    if (!path) return null
+    const index = groups.findIndex((group: any) => group.tabs.some((tab: any) => tab.path === path))
+    return index === 0 || index === 1 ? groups[index] as PaneGroup<Tab> : null
+  }
+  // 导航栈的上限 = 注册表 `editor.navigation.history.stack.size` 的默认值 150
+  // （`platform/util/resources/misc/registry.properties:494`，读它的是
+  // `IdeDocumentHistoryImpl.kt:76-77` 那两条常量）。
+  // 正向栈上游没有上限（`back()` 只 `forwardPlaces.add(current)`，`IdeDocumentHistoryImpl.kt:427-430`），
+  // 所以这里也只截 Back 栈。
+  const NAV_BACK_LIMIT = 150
+  /** 当前落点 = 当前分栏里当前编辑器的位置（上游 `getCurrentPlaceInfo()`）。 */
+  function currentNavSpot(): NavSpot {
+    return {
+      path: activePath.value,
+      line: Math.max(0, (active.value?.line ?? 1) - 1),
+      pane: groups[splitModel.focused] as PaneGroup<Tab> | null,
+    }
+  }
+  async function revealLocation(target: { path: string; line: number; column?: number; kind?: Place['kind']; label?: string; pane?: PaneGroup<Tab> | null }, record = true) {
     const epoch = deps.workspaceEpoch()
     if (record && activePath.value && (activePath.value !== target.path || (active.value?.line ?? 1) - 1 !== target.line)) {
-      navBack.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
-      if (navBack.value.length > 100) navBack.value.shift()
+      navBack.value.push(currentNavSpot())
+      if (navBack.value.length > NAV_BACK_LIMIT) navBack.value.shift()
       navForward.value = []
     }
     if (!hasTabPath(target.path)) {
@@ -297,25 +341,34 @@ export function createLspNavigation(deps: LspNavigationDeps) {
       // openFile records the fresh file at line 0; a jump owns the real destination.
       places.value = places.value.filter((item: any) => item.path !== target.path)
     }
-    // IDEA jumps in whichever pane already shows the file; otherwise the focused pane.
-    const pane = groups[0].tabs.some((tab: any) => tab.path === target.path) ? 0 as const : groups[1].tabs.some((tab: any) => tab.path === target.path) ? 1 as const : splitModel.focused
+    // IDEA jumps in whichever pane already shows the file；**没开着的那一栏 = 这一格记住的那一栏**
+    // （上游 `gotoPlaceInfo` 把 `PlaceInfo.getWindow()` 直接交给 `openFile(window = …)`，
+    // `IdeDocumentHistoryImpl.kt:572-579`；窗口没了就退回当前窗口）。规则本体在
+    // `src/editorGroups.ts` 的 `jumpTargetPane`。
+    const pane = jumpTargetPane(splitModel, (tab: Tab) => tab.path, target.path, target.pane ?? null)
     splitModel.focused = pane
     groups[pane].activePath = target.path
     await nextTick()
     if (epoch !== deps.workspaceEpoch()) return
     reveal.value = { path: target.path, line: target.line, ...(target.column ? { column: target.column } : {}) }
-    rememberPlace({ kind: target.kind ?? '文件', path: target.path, line: target.line, label: target.label ?? target.path })
+    rememberPlace({ kind: target.kind ?? '文件', path: target.path, line: target.line, label: target.label ?? target.path, pane: groups[pane] })
   }
   async function goBack() {
     const from = navBack.value.pop()
     if (!from) return
-    navForward.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
+    navForward.value.push(currentNavSpot())
     await revealLocation(from, false)
   }
   async function goForward() {
-    const to = navForward.value.pop()
+    // `getTargetForwardInfo()`（`IdeDocumentHistoryImpl.kt:454-473`）：栈顶那一条**就是当前位置**时
+    // 跳过它继续往下找（连续同位置不入导航档，见 `isSame` / `putLastOrMerge` `:655-674`），
+    // 否则 Forward 看起来"没反应"—— 跳的是自己。栈空了就停，不 pop 到 undefined。
+    const here = currentNavSpot()
+    let to = navForward.value.pop()
+    while (to && navForward.value.length && to.path === here.path && to.line === here.line) to = navForward.value.pop()
     if (!to) return
-    navBack.value.push({ path: activePath.value, line: Math.max(0, (active.value?.line ?? 1) - 1) })
+    navBack.value.push(here)
+    if (navBack.value.length > NAV_BACK_LIMIT) navBack.value.shift()
     await revealLocation(to, false)
   }
   // Menu and keyboard reach the two prompts through the same opener, which owns the
@@ -328,7 +381,11 @@ export function createLspNavigation(deps: LspNavigationDeps) {
   // RecentLocationsAction: the checkbox toggles navigation places vs change places, and
   // the popup title follows it ("Recent Locations" / "Recently Edited Locations").
   const placesEditedOnly = ref(false)
-  const placesList = computed(() => placesEditedOnly.value ? changePlaces.value : places.value)
+  // 取出的那一档 = 上游 `createPlaceLinePairs`（`RecentLocationsDataModel.kt:83-104`）：
+  // 沿环走一遍、**全局**跳过与已列出条目同位置的那些、攒够 `recentLocationsLimit`（默认 25）就停。
+  // 上限作用在过滤**之前**（上游 `ListWithFilter.wrap` 套在已经建好的模型外面，
+  // `RecentLocationsAction.java:146`），所以查询词只能在那 25 条里挑。
+  const placesList = computed(() => recentPlacesList(placesEditedOnly.value ? changePlaces.value : places.value))
   // RecentLocationsRenderer shows the caret line's snippet; buffers are live in memory.
   function placeSnippet(place: Place): { text: string; firstLine: number } {
     const tab = findTab(place.path)

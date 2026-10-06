@@ -306,26 +306,82 @@ export function modulesScope(input: ModuleScopeInput, moduleNames: readonly stri
 }
 
 /**
- * `ModuleWithDependenciesScope`（`:17-33`）：内容 + 依赖模块 + 库/SDK，由选项位决定。
- * 单模块下依赖闭包退化为自身，所以「带依赖」与「不带」的差别只在库/SDK 与测试根。
- * 入参是**已建好的模型**（上游入参是 Module，本仓等价物就是 `moduleScopeModel` 的产物）。
+ * 把「另一个模块的内容根」并进当前模型的根表（`ModuleWithDependenciesScope.kt:138-142` 的
+ * `putIfAbsent(root, i++)`：首次出现为准、出现顺序即优先级）。
+ * `keepLibraries` 决定库/SDK 根留不留（`ModuleScopeUtil.kt:31` 的 `withoutLibraries().withoutSdk()`
+ * 与 `ModuleWithDependentsScope.java:219-222` 的 `isSearchInLibraries()` 恒假是**两条不同的**
+ * **语义**，所以这一层只搬根表，不冒充上面那两个判据）。
  */
-export function moduleWithDependenciesScope(model: ModuleScopeModel, options: number): ModuleScopeModel {
-  const flags = scopeOptions(options)
-  if (flags.libraries) return model
-  // 上游在没有 LIBRARIES 时 `withoutLibraries().withoutSdk()`：库与 SDK 根都不参与。
-  return {
+function withModuleRoots(model: ModuleScopeModel, roots: readonly string[], keepLibraries: boolean): ModuleScopeModel {
+  const own = keepLibraries ? model.roots : model.roots.filter(root => root.rootType !== 'library' && root.rootType !== 'jdk')
+  const extra: ScopeRootDescriptor[] = []
+  let priority = own.length
+  for (const root of [...roots].sort((a, b) => b.length - a.length)) {
+    if (model.contentRoots.includes(root)) continue
+    extra.push({ root, rootType: 'content', orderEntryName: model.moduleName, priority: ++priority })
+  }
+  const stripped: ModuleScopeModel = keepLibraries ? model : {
     ...model,
     libraries: [],
     jdk: null,
-    roots: model.roots.filter(root => root.rootType !== 'library' && root.rootType !== 'jdk'),
+    roots: own,
     libraryNameOf: () => null,
     libraryRelativePath: () => null,
+    isInJdk: () => false,
     rootDescriptorOf: file => {
       const descriptor = model.rootDescriptorOf(file)
       return descriptor && descriptor.rootType !== 'library' && descriptor.rootType !== 'jdk' ? descriptor : null
     },
   }
+  if (!extra.length) return stripped
+  const byLength = [...extra].sort((a, b) => b.root.length - a.root.length)
+  const extraRootOf = (file: string): ScopeRootDescriptor | null => {
+    if (isAbsolutePath(file)) return null
+    for (const entry of byLength) if (isUnder(entry.root, file)) return entry
+    return null
+  }
+  return {
+    ...stripped,
+    contentRoots: [...stripped.contentRoots, ...extra.map(entry => entry.root)],
+    roots: mergeRootContainers([stripped.roots, extra]),
+    isInContent: file => stripped.isInContent(file) || extraRootOf(file) !== null,
+    contentRelativePath: file => {
+      const ownRoot = stripped.contentRoots.find(root => isUnder(root, file) && !isAbsolutePath(file))
+      const other = extraRootOf(file)
+      if (ownRoot === undefined && other === null) return null
+      if (ownRoot === undefined) return relativeTo(other!.root, file)
+      if (other === null || ownRoot.length >= other.root.length) return relativeTo(ownRoot, file)
+      return relativeTo(other.root, file)
+    },
+    rootDescriptorOf: file => stripped.rootDescriptorOf(file) ?? extraRootOf(file),
+  }
+}
+
+/**
+ * `ModuleWithDependenciesScope`（`:17-33`）：内容 + 依赖模块 + 库/SDK，由选项位决定。
+ * 选项语义逐条照 `ModuleScopeUtil.getOrderEnumeratorForOptions`（`ModuleScopeUtil.kt:27-35`）：
+ * `LIBRARIES` 没开 ⇒ 库与 SDK 根都不参与（`:31`）、`MODULES` 没开 ⇒ 不并依赖模块的根（`:32`）、
+ * `COMPILE_ONLY` 开着 ⇒ 只沿 `isExported()` 的模块边走（`:30`）。
+ * 依赖模块的根按 **SOURCES** 收（`ModuleWithDependenciesScope.kt:131-134`：
+ * `ModuleOrderEntry`/`ModuleSourceOrderEntry` 取 SOURCES，其余取 CLASSES）。
+ * 单模块（没有边）⇒ 闭包只有自己 ⇒ 与改动前逐字一致。
+ * 入参是**已建好的模型**（上游入参是 Module，本仓等价物就是 `moduleScopeModel` 的产物）。
+ *
+ * 未接的一半（如实）：`TESTS` 位的 `productionOnly()`（`ModuleScopeUtil.kt:33`）在本仓只作用于
+ * 依赖模块的**测试源根**，而本仓的多模块输入面只给了各模块的内容根
+ * （`ModuleScopeInput.moduleContentRoots`），没有各模块自己的源根表 ⇒ 这一位对依赖模块暂时无差别。
+ */
+export function moduleWithDependenciesScope(model: ModuleScopeModel, options: number): ModuleScopeModel {
+  const flags = scopeOptions(options)
+  const modules = dependencyModuleClosure(model, options)
+  const foreign: string[] = []
+  if (modules.length > 1) {
+    for (const name of [...modules].sort((a, b) => a.localeCompare(b))) {
+      if (name === model.moduleName) continue
+      for (const root of model.moduleContentRoots.get(name) ?? []) if (root && !foreign.includes(root)) foreign.push(root)
+    }
+  }
+  return withModuleRoots(model, foreign, flags.libraries)
 }
 
 /**
@@ -454,11 +510,51 @@ export function jdkScope(jdk: { name: string; home: string } | null): { name: st
   return { name: jdk.name, roots: [normalize(jdk.home)] }
 }
 
-/** `ModuleScopeUtil.calcModules` 的等价物：单显式模块下就是它自己。 */
-export function calcModules(model: ModuleScopeModel, options: number): string[] {
+/**
+ * `ModuleScopeUtil.calcModules`（`ModuleScopeUtil.kt:41-54`）的正向闭包那一半（roots3 补）：
+ *   · 枚举器**无条件先** `recursively()`（`ModuleScopeUtil.kt:29`）—— 递归不是 `MODULES` 位开的才做；
+ *   · `MODULES` 位没开 ⇒ `withoutDepModules()`（`:32`）⇒ 只剩根模块自己；
+ *   · `COMPILE_ONLY` 位开着 ⇒ `exportedOnly()`（`:30`）⇒ 非 `isExported()` 的模块边整条不看
+ *     （既不进集合，也不沿它继续递归：`OrderEnumerator.exportedOnly()` 滤的是被枚举的条目本身）；
+ *   · 收进来的是 `ModuleOrderEntry.getModule()`（`:45-47`）与
+ *     `ModuleSourceOrderEntry.getOwnerModule()`（`:48-50`，即根模块自己，恒排第一）。
+ *
+ * `ModuleWithDependenciesScope.kt:155-160` 的 `lazyModules` 就是把它按 (module, options) 挂着用。
+ * 本仓默认没有边（单隐式模块）⇒ 任何选项下都只返 `[本模块]`，与改动前逐字一致。
+ */
+export function dependencyModuleClosure(model: ModuleScopeModel, options: number): string[] {
   const flags = scopeOptions(options)
-  if (!flags.modules) return [model.moduleName]
-  return [model.moduleName]
+  const modules = new Set<string>([model.moduleName])
+  if (!flags.modules) return [...modules]
+  const exportedOnly = flags.compileOnly
+  const outgoing = new Map<string, ModuleOrderEntry[]>()
+  for (const entry of model.moduleOrderEntries) {
+    const list = outgoing.get(entry.from)
+    if (list) list.push(entry)
+    else outgoing.set(entry.from, [entry])
+  }
+  const queue: string[] = [model.moduleName]
+  const seen = new Set<string>([model.moduleName])
+  for (let i = 0; i < queue.length; ++i) {
+    for (const entry of outgoing.get(queue[i]!) ?? []) {
+      if (exportedOnly && !entry.exported) continue
+      modules.add(entry.to)
+      if (seen.has(entry.to)) continue
+      seen.add(entry.to)
+      queue.push(entry.to)
+    }
+  }
+  return [...modules]
+}
+
+/**
+ * `ModuleScopeUtil.calcModules` 的等价物（`:41-54`）。roots3 订正：此前两个分支都返
+ * `[model.moduleName]`（`if (!flags.modules) return [x]; return [x]`）—— 那等于把上游
+ * 「`MODULES` 位决定是否 `withoutDepModules()`」这一层判据钉死成恒等，传进来的边永远不会被走。
+ * 现在与 `dependencyModuleClosure` 同一实现，不再各写一份。
+ */
+export function calcModules(model: ModuleScopeModel, options: number): string[] {
+  return dependencyModuleClosure(model, options)
 }
 
 // ---------------------------------------------------------------- 给 `src/scopes.ts` 的文件系统视图

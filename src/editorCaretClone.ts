@@ -7,10 +7,13 @@
 //  · 文案 `platform/platform-resources-en/src/messages/ActionsBundle.properties:119-122`
 //    （`Clone Caret Below` / `Clone Caret Above`）。中文包不在本地参考树里 ⇒ 菜单行的中文是直译。
 //  · 键位：`platform/platform-resources/src/keymaps/$default.xml` **没有**这两条的绑定
-//    （只有 `platform/platform-resources/src/keymaps/Sublime Text.xml:280-285` 给过 Ctrl+Alt+↑/↓），
-//    而 `$default.xml:879-884` 把 Ctrl+Alt+Shift+↑/↓ 给了 `ResizeToolWindowUp/Down`。
-//    本仓那对键在 `src/components/CodeEditor.vue:865-866` 已经绑给 `cursor.above` / `cursor.below`
-//    （键位面是保留文件）⇒ 这里换的是**同名命令的实现**，键位栏保持仓库既有事实，不新编键。
+//    （只有 `platform/platform-resources/src/keymaps/Sublime Text.xml:280-285` 给过 Ctrl+Alt+↑/↓，
+//    插件方案 `plugins/keymaps/vscode-keymap/resources/keymaps/VSCode.xml:130-136` 给过 Ctrl+Alt+↑/↓
+//    与 Ctrl+Shift+Alt+↑/↓），而 `$default.xml:879-884` 把 Ctrl+Alt+Shift+↑/↓ 给了 `ResizeToolWindowUp/Down`。
+//    本仓原先把这对键绑在编辑器 keymap 上 ⇒ **2026-10-06 的 R3 判决是摘键**（那两行已从
+//    `src/components/CodeEditor.vue` 删掉，菜单两行的键位栏同时清空，登记降到 `EDITOR_ACTIONS` 的
+//    `none` 档），命令 `cursor.above`/`cursor.below` 与这里的实现都留着：入口 = 编辑菜单 + 「查找操作」，
+//    与上游「有动作、无键位」一致。证据与判据见 `docs/batch-2026-10-06-keymap2.md` R3。
 //  · 本体行为 `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretActionHandler.java`：
 //      - `:24` 继承的是 `EditorActionHandler`（不是 `ForEachCaret`）⇒ 键盘路径走 `targetCaret == null`
 //        那一支，也就是 `:64-101` 的「层级」逻辑。

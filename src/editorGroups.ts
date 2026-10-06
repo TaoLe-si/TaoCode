@@ -17,6 +17,30 @@ export function createSplitModel<T>(): SplitModel<T> {
 
 export function otherPane(pane: Pane): Pane { return pane === 0 ? 1 : 0 }
 
+// 一次跳转该落在哪个分栏 —— 上游的口径：`PlaceInfo` 记着自己当时所在的编辑器窗口
+// （`platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/IdeDocumentHistoryImpl.kt:685-694`
+// 的 `window: EditorWindow?`，用弱引用存、`:712` 的 `getWindow()` 取），
+// `gotoPlaceInfo` 把它原样交给 `openFile(window = …)`（`:572-579`：
+// `val window = if (openMode != NEW_WINDOW) info.getWindow() else null`）
+// ⇒ **Back / Forward / 最近位置都会回到原来那一栏**，那一栏已经没了（未分栏、被合掉）才落在当前栏。
+// 本仓记住的是 `PaneGroup` **对象本身**而不是下标：`swapGroups` 换的是两栏的内容顺序，
+// 上游的窗口引用同样不会因为界面重排就指错。
+export function paneOfGroup<T>(model: SplitModel<T>, group: PaneGroup<T> | null | undefined): Pane | null {
+  if (!group) return null
+  const index = model.groups.findIndex(entry => entry === group)
+  if (index !== 0 && index !== 1) return null
+  // 第二栏只有真的在分栏时才在屏幕上：`orientation === 'none'` 时它被清空但对象还在数组里。
+  if (index === 1 && model.orientation === 'none') return null
+  return index as Pane
+}
+
+export function jumpTargetPane<T>(model: SplitModel<T>, pathOf: (tab: T) => string, path: string, remembered: PaneGroup<T> | null = null): Pane {
+  // 文件已经在哪一栏开着就落在那一栏（本仓一个 tab 不会在两栏各开一份重复的编辑器状态）。
+  const shown = model.groups.findIndex(group => group.tabs.some(tab => pathOf(tab) === path))
+  if (shown === 0 || shown === 1) return shown as Pane
+  return paneOfGroup(model, remembered) ?? model.focused
+}
+
 // IDEA's "Clone or Split Right/Down": the new group starts as a clone of the focused
 // one; the selected tab then moves out — unless it is the only one, which leaves the
 // same file visible in both panes ("split same").

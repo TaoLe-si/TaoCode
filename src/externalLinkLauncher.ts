@@ -47,6 +47,25 @@ export interface ExternalLinkGate {
 
 let gate: ExternalLinkGate | null = null
 
+/**
+ * `mode="link"` 那颗框此刻**在不在屏幕上**（由 `src/components/TrustedProjectDialog.vue` 自己在
+ * `onMounted`/`onBeforeUnmount` 里报）。这不是可有可无的一格：门禁是装配时就装上的，
+ * 而弹框要等宿主把它挂进模板（保留文件 `src/App.vue`，接线请求 welcome3 的 W1）——
+ * 没有这个信号的话，宿主还没挂框的那段时间里问句 Promise 永远 pending，
+ * 终端/控制台/快速文档里的链接**点了什么都不发生**（比接线前更糟）。
+ * 有了它，「没挂框」就是一条能走到的分支：退回接线前的行为（直接开）并说一句可见提示。
+ */
+let linkDialogMounted = false
+
+/** 组件挂载状态（`mode="link"` 那一档才报，startup 那一档不算：它答的是 `TrustChoice` 另一张表）。 */
+export function markLinkDialogMounted(mounted: boolean): void {
+  linkDialogMounted = mounted
+}
+
+export function linkDialogIsMounted(): boolean {
+  return linkDialogMounted
+}
+
 /** 装配处安装/卸下门禁（重复安装以最后一次为准：宿主只有一个 `createWorkspaceLifecycle`）。 */
 export function installExternalLinkGate(next: ExternalLinkGate | null): void {
   gate = next

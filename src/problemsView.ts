@@ -471,7 +471,10 @@ export function groupMuteKeys(group: { key: string; rows: readonly ProblemRow[] 
   return [...keys]
 }
 
-/** 严重度计数（状态栏与面板标题同一套口径；级别归属见 `src/highlightLevels.ts`）。 */
+// 严重度计数：级别归属只在 `src/highlightLevels.ts` 的 `levelForSeverity` 一处定义，
+// 计数只在这函数里做一次。面板标题行已经在读它（`src/components/ProblemsPanel.vue` 的 `tableCounts`）；
+// 状态栏那一格**还没接**（`src/App.vue` 仍就地 `filter(p => p.severity === 1)`）⇒ 接线请求见
+// `docs/wiring-requests-2026-10-06-prob3.md` R1，钉桩见 `tests/problem-count-single-source.test.mjs`。
 export function problemCounts(rows: readonly ProblemRow[]): { errors: number; warnings: number; infos: number } {
   const at = new Map(levelCountsOf(rows).map(item => [item.id, item.count]))
   const one = (id: HighlightLevelId) => at.get(id) ?? 0

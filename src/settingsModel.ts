@@ -220,7 +220,7 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   // 受信任清单默认空 = 陌生目录第一次打开都要问（上游 `TrustedPaths.State` 默认空 map）。
   trustedPaths: [],
 }
-export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showMembersInNavigationBar: true, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 5, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true, lineNumeration: 'absolute', showTypeInlayHints: true, showParameterInlayHints: true, showOtherInlayHints: true, stripTrailingSpaces: 'Changed', ensureNewLineAtEof: false, keepTrailingSpacesOnCaretLine: true, autoInsertPairQuote: true, closeCommentOnEnter: true, insertBraceOnEnter: true, codeVisionEnabled: true, codeVisionDisabledGroups: [], codeVisionEnabledGroups: [], codeVisionVisibleEntries: 5, showQuickDocOnMouseHover: true, autoUpdateDocumentation: true }
+export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showMembersInNavigationBar: true, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 5, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true, lineNumeration: 'absolute', showTypeInlayHints: true, showParameterInlayHints: true, showOtherInlayHints: true, stripTrailingSpaces: 'Changed', ensureNewLineAtEof: false, keepTrailingSpacesOnCaretLine: true, autoInsertPairQuote: true, closeCommentOnEnter: true, insertBraceOnEnter: true, codeVisionEnabled: true, codeVisionDisabledGroups: [], codeVisionEnabledGroups: [], codeVisionVisibleEntries: 5, showQuickDocOnMouseHover: true, autoUpdateDocumentation: true, wheelFontChangeEnabled: false, terminalBaseFontSize: 13 }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
@@ -461,5 +461,38 @@ export interface EditorSettings { collapseImports: boolean; collapseCustomRegion
   /** `EditorSettingsExternalizable.java:76`，默认 **true**：鼠标停在符号上就弹文档。 */
   showQuickDocOnMouseHover: boolean;
   /** 注册表属性 `documentation.auto.update`（`DocumentationToolWindowManager.kt:55`），默认 **true**。 */
-  autoUpdateDocumentation: boolean
+  autoUpdateDocumentation: boolean;
+  // ---------------------------------------------------------------- 终端字号的两把（本批新增，接线请求 R-1）
+  // 上游真源本轮逐行打开过：`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:124`
+  // = `    public boolean IS_WHEEL_FONTCHANGE_ENABLED = false;`（getter 同文件 :1043、setter :1047-1051）。
+  // 那一格在「编辑器 › 常规」的 Mouse control 组：控件 `EditorOptionsPanel.kt:91-94`（`enableWheelFontChange`）、
+  // 挂点同文件 :216（`chkEnableWheelFontSizeChange = checkBox(enableWheelFontChange)`），组名 :214 用
+  // `group.advanced.mouse.usages`（`ApplicationBundle.properties:395` = Mouse Control），
+  // 文案 `ApplicationBundle.properties:396` = `Change font size with Ctrl+Mouse Wheel in:`（macOS 变体 :397）。
+  /**
+   * 上游字段 `IS_WHEEL_FONTCHANGE_ENABLED`（`EditorSettingsExternalizable.java:124`），默认 **false**。
+   * 上游消费门 `platform/execution-impl/src/com/intellij/terminal/JBTerminalPanel.java:382`
+   * = `if (EditorSettingsExternalizable.getInstance().isWheelFontChangeEnabled() && EditorUtil.isChangeFontSize(e))`
+   * （:383 新字号 = 当前 - wheelRotation、:384 界内才写、:387 `return` ⇒ 缩放时不再滚缓冲区）。
+   * 本仓唯一消费点：`src/components/TerminalPanel.vue:115` 的 `wheelFontZoomEnabled` →
+   * `src/terminalFontSize.ts:79` 的 `terminalWheelZoomApplies(event, wheelEnabled)`；
+   * 关着时那次滚动照常滚终端缓冲区（就是上游那个 && 的前半个条件）。设置行在
+   * 「编辑器 › 常规」（`src/components/SettingsDialog.vue` 的 `data-page="editor"` 那页）。
+   * 还有一把 `IS_WHEEL_FONTCHANGE_PERSISTENT`（同文件 `:125`，同样默认 false）管「缩放要不要写回设置」，
+   * 本仓的缩放是会话内临时的（`TerminalFontSizeProvider.kt:16-18` 的 "Sets temporary font size without
+   * changing the size in the settings"）⇒ **不落**那把。
+   */
+  wheelFontChangeEnabled: boolean;
+  /**
+   * 终端基准字号，整数 4..40（界 = `platform/editor-ui-ex/src/com/intellij/application/options/EditorFontsConstants.java:11-13`
+   * 的 `getMinEditorFontSize()` = `scale(4)` 与 `:15-17` 的 `getMaxEditorFontSize()` = `ide.editor.max.font.size` 默认 40；
+   * 与 `JBTerminalPanel.java:384` 用的是同一对边界）。
+   * 上游**没有**这一格的原样：那一档住在配色方案的 consoleFontSize 里
+   * （`platform/execution-impl/src/com/intellij/terminal/TerminalUiSettingsManager.kt:123-132` 的
+   * `detectFontSize()` / `resetFontSize()` 现算 ⇒ 临时缩放不写设置）。本仓没有可编辑配色方案 ⇒
+   * 落成一格显式设置，缺省 13 = 本仓内置 `TERMINAL_BASE_FONT_SIZE`（`src/terminalFontSize.ts:47`）。
+   * **这是本仓架构映射，不是上游那一格的原样。**
+   * 消费点 `src/components/TerminalPanel.vue:121` 的 `baseFontSize`（越界的值它也不采纳）。
+   */
+  terminalBaseFontSize: number
 }
