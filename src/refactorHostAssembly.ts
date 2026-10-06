@@ -3,6 +3,9 @@
 // 全部编排逻辑在这里（`tests/module-size.test.mjs` 对 App.vue 的行数上限是唯一权威）。
 //
 // 接线请求原文：`docs/wiring-requests-2026-10-06-bucket1b.md` A1/A2/A3/A4。
+// A5（安全删除的树侧入口）本轮补了对外的一格：`showSafeDelete()` —— 树那边算好账就能把同一份
+// 三选一对话框立起来，不必再走本文件的 `openSafeDelete()`（那条是重构菜单/Alt+Delete 的入口）。
+// 挂点交请求：`docs/wiring-requests-2026-10-06-refactor.md` R1（`src/treeActions.ts` + `src/App.vue`）。
 // 请求里写的依赖名有四个在 `src/App.vue` / `src/semanticActions.ts` 里**并不存在**，
 // 这里用的是实测到的真实出口（对照表见 `docs/batch-2026-10-06-wiring1.md`）：
 //   · `applyEditsToFiles`      → `createSemanticActions()` 的 `applyEditsToFiles`（同名，真的在，App.vue:992）
@@ -432,6 +435,19 @@ export function createRefactorHost(deps: RefactorHostDeps) {
 
   function closeSafeDelete() { safeDelete.value = null }
 
+  /**
+   * 把一份**别处算好的**用法账交给同一张三选一对话框 —— A5 的树侧入口（`src/treeActions.ts` 的
+   * `beginDelete`/`warnBeforeDelete`）用：那边只有「删哪个文件」，账由 `safeDeletePromptFromFiles()`
+   * （`src/safeDelete.ts:226`）算，弹框与删除都回流到本文件的这一份状态。
+   * 上游只有一张 `UnsafeUsagesDialog`：重构菜单的 SafeDelete（`LangActions.xml:388`）、树右键 Delete、
+   * `Delete` 键走的都是同一个动作 ⇒ 本仓两个删除入口也必须共用这一个对话框，不能各画一份。
+   * `target` 给「查看用法」那一条（`UnsafeUsagesDialog.java:95-105` 的 `ViewUsagesAction`）。
+   */
+  function showSafeDelete(prompt: SafeDeletePrompt, path: string,
+    target: { line: number; character: number } | null): void {
+    safeDelete.value = { prompt, path, target }
+  }
+
   return {
     changeSignature, openChangeSignature,
     /** 对话框的可见状态（App.vue 顶层解构出来，模板里才会自动拆 ref）。 */
@@ -443,6 +459,6 @@ export function createRefactorHost(deps: RefactorHostDeps) {
     openPushDown: () => openMemberMove('down'),
     openIntroduceParameterObject,
     closeChooser, applyChooser, setChooserField, toggleChooserRow, toggleChooserExtra, toggleChooserCheck,
-    safeDeleteState: safeDelete, openSafeDelete, safeDeleteChoose, closeSafeDelete,
+    safeDeleteState: safeDelete, openSafeDelete, safeDeleteChoose, closeSafeDelete, showSafeDelete,
   }
 }

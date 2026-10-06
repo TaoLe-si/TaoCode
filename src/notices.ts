@@ -63,12 +63,19 @@ export function noticeButtonText(count: number, label = NOTICES_LABEL): string {
   return count > 0 ? `${label} ${count}` : label
 }
 
-/** The tooltip spells out what the icon alone cannot: the count and whether errors are inside. */
+/**
+ * The tooltip of the status-bar notification widget —— 上游 `IdeNotificationArea.java:105-107` 只给两句，
+ * 按"有没有挂起的通知"分档，中文取值逐字抄本地化包（`localization-zh.jar` 的 `messages/UIBundle.properties`）：
+ *   · 有：`status.bar.notifications.widget.tooltip`（中文包 `:266` = `{0} {0, choice, 1\#通知|2\#通知}挂起`
+ *     ⇒ MessageFormat 跑出来是「N 通知挂起」；英文原值
+ *     `platform/platform-api/resources/messages/UIBundle.properties:189` = "{0} notification(s) pending"）；
+ *   · 没有：`status.bar.notifications.widget.no.notification.tooltip`（中文包 `:265` =「无新通知」，
+ *     英文 `:190` = "No new notifications"）。
+ * 本仓原来那句「通知中心：最近 N 条，其中含错误」是本仓自造的文案，上游 tooltip 里**没有**「错误」这一档：
+ * 严重度只决定图标上色（`App.vue` 的 `has-error` 类走 `noticeLevel`），不进提示文字。
+ */
 export function noticeTitle(entries: readonly NoticeEntry[]): string {
-  const level = noticeLevel(entries)
-  if (level === 'none') return '通知中心：暂无通知'
-  const suffix = level === 'error' ? '其中含错误' : '无错误'
-  return `通知中心：最近 ${entries.length} 条，${suffix}`
+  return entries.length ? `${entries.length} 通知挂起` : '无新通知'
 }
 
 /** The rows the popup shows (`noticeLog.slice(0, NOTICE_PREVIEW_LIMIT)`). */

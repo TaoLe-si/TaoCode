@@ -31,6 +31,8 @@
 // 与上游的差异（如实）：本仓的 push 事件（`bridge.ts` 的 `lsp.diagnostics`）不带版本号，
 // 所以没有上游 :78-88 的版本闸门；下一次推送到达前，调整是近似的。
 
+import { registerLspCache } from './lspPerFileCache.ts'
+
 /** 宿主文档偏移区间（上游 `com.intellij.openapi.util.TextRange` 的半开区间）。 */
 export interface TextRange { start: number; end: number }
 
@@ -167,6 +169,9 @@ export class HighlightingSnapshotCache<T> {
   constructor(options: { staleStamp?: number | string; quiescenceDelayMs?: number } = {}) {
     this.staleStamp = options.staleStamp ?? STALE_DOC_STAMP
     this.quiescenceMs = options.quiescenceDelayMs ?? LOW_PRIORITY_QUIESCENCE_MS
+    // 参与批量作废：语言服务重启或服务器发 `workspace/…/refresh` 时整族清掉
+    // （注册表与两个触发点见 `src/lspPerFileCache.ts`，分派见 `src/lspProgress.ts`）。
+    registerLspCache(this)
   }
 
   /** 上游 `quiescenceDelay`：首次拉取不走静默窗口。 */

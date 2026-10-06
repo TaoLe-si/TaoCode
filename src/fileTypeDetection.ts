@@ -33,12 +33,17 @@ export interface FileTypeGuess {
 }
 
 /**
- * 一条**可注册的内容探测器**（上游 `com.intellij.openapi.fileTypes.FileTypeDetector` 的等价物）。
+ * 一条**可注册的内容探测器**（上游 `FileTypeRegistry.FileTypeDetector` 的等价物）。
  *
- * 上游那个类在本仓判词里被点名，但**上游树里没有这个文件**（已核实，见报告）—— 能核实的
- * 最近物是 `FileTypeBean` 的 `hashBangs` 属性（`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeBean.java:144`）：
- * 上游把"按内容认类型"这件事做成了**声明式的属性**，不是一段硬编码的 if 链。本仓照这个形状做：
- * 一张有序的探测器表，先注册/先声明的先判（`order` 小的优先），first-match-wins。
+ * **订正（本轮亲开上游核实，原写「上游树里没有这个文件」是错的）**：那个 EP 是
+ * `platform/core-api/src/com/intellij/openapi/fileTypes/FileTypeRegistry.java:156` 的**嵌套接口**
+ * `FileTypeDetector`，`EP_NAME = "com.intellij.fileTypeDetector"` 在 `:157`；按文件名搜当然搜不到
+ * —— 它在门面文件里。判定签名是 `:168` 的
+ * `detect(VirtualFile, ByteSequence firstBytes, CharSequence firstCharsIfText)`（认不出回 null），
+ * 探测器自己声明需要多长的前缀：`:176-178` `getDesiredContentPrefixLength()` 默认 **1024**。
+ * 上游把这件事做成**声明式的扩展点**，不是一段硬编码的 if 链（另一条声明式入口是
+ * `FileTypeBean` 的 `hashBangs` 属性，`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeBean.java:144`）。
+ * 本仓照这个形状做：一张有序的探测器表，先注册/先声明的先判（`order` 小的优先），first-match-wins。
  * 内置探测器就是这张表的默认内容，所以这个"EP"是被真实消费的，不是空注册点。
  */
 export interface ContentDetector {
@@ -72,8 +77,10 @@ export function detectByShebang(firstLine: string): { type: string; language: st
 /**
  * 二进制判定 —— 探测**必须在它上面短路**（`lp/file-types` 判词里「二进制与编码判定」那一项）。
  *
- * 上游把这件事交给 `BinaryFileType.isBinary()`（`platform/ide-core/src/com/intellij/openapi/fileTypes/NativeFileType.java:48-51`
- * 与 `UserBinaryFileType.java:16-19` 都是恒 true 的那一档）；本仓已经有一份字节级判据
+ * 上游的位是 `FileType.isBinary()`（`platform/core-api/src/com/intellij/openapi/fileTypes/FileType.java:63`
+ * 那个抽象方法；**没有** `BinaryFileType` 这个类，已核实）恒真的那一族：
+ * `platform/ide-core/src/com/intellij/openapi/fileTypes/NativeFileType.java:48-51` 与
+ * `UserBinaryFileType.java:16-19`；本仓已经有一份字节级判据
  * （`src/vcsFileUtil.ts` 的 `looksBinary`，给补丁应用用的），这里直接复用，不另写一套。
  * 短路之后探测不再看内容：否则一个 PNG 开头撞上 `<?xml` 就会被认成 XML。
  */
@@ -174,9 +181,22 @@ export function overrideGuess(fileName: string): FileTypeGuess | null {
  * 传入的 `associations` 是设置页里的扩展名表（`{ java: 'java' }`），只覆盖语言，不给类型名。
  *
  * 覆盖排在最前是上游的顺序（`FileTypeManagerImpl.java:916-923`）；
- * 二进制**排在其余之前**：上游的 `BinaryFileType`/`NativeFileType`
- * （`platform/ide-core/src/com/intellij/openapi/fileTypes/NativeFileType.java:48-51`）
- * 是一等类型，按内容认类型的探测器没有理由在它上面跑 —— 也不该跑（PNG 开头撞上 `<?xml` 就认成 XML 了）。
+ * 二进制**排在其余之前**：上游把二进制文件当成一等类型
+ * （`platform/ide-core/src/com/intellij/openapi/fileTypes/NativeFileType.java:48-51` 与
+ * `UserBinaryFileType.java:16-19` 把 `FileType.java:63` 的 `isBinary()` 判成恒真；
+ * **上游没有 `BinaryFileType` 这个类**，已核实），按内容认类型的探测器没有理由在它上面跑
+ * —— 也不该跑（PNG 开头撞上 `<?xml` 就认成 XML 了）。
+ *
+ * **口径差异（本仓有意，判据 `tests/file-type-detection.test.mjs` 钉着，别当 bug 顺手改）**：
+ * 上游 `platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeManagerImpl.java:925-934`
+ * 只在**按名字没认出来**（`fileType == null`）或名字认出来的是
+ * `DetectedByContentFileType.INSTANCE` 那一档时，才去跑内容探测
+ * （`:931-933` 的 `detectionService.getOrDetectFromContent`）。所以严格照上游，
+ * `tool.txt`（`.txt` 命中 PlainText）即使首行是 `#!/usr/bin/env python3` 也**不该**改判成 Python。
+ * 本仓没有 PSI、没有 `DetectedByContentFileType` 这个标记类型，且「按内容认类型」这条能力
+ * 是判词点名要补的（`docs/inventory/verdict-platform_rest.md` 的 lp/file-types），
+ * 于是把它做成**高置信度特征可以覆盖扩展名**（低置信度不行，见下面的分支）。
+ * 要改回上游口径，得连着 `tests/file-type-detection.test.mjs` 那两条断言一起动 —— 那是主代理的决定。
  */
 export function detectFileType(fileName: string, content = '', associations: Record<string, string> = {}): FileTypeGuess {
   const override = overrideGuess(fileName)
@@ -189,8 +209,9 @@ export function detectFileType(fileName: string, content = '', associations: Rec
   const associatedType = associated?.type ?? associatedLanguage ?? ''
   // shebang 是最强特征（IDEA 也把它单列成一条探测）：`script` 无扩展名时全靠它。
   // 先查**注册表里登记的 hashbang 模式**（上游 `<fileType hashBangs="…">` 那一条，
-  // `FileTypeBean.java:138-144` + `FileTypeManagerImpl.java:644-647`，判定用
-  // `FileUtil.isHashBangLine`，探测器是 `HashBangFileTypeDetector.kt:14-16`）：
+  // `FileTypeBean.java:135-144` + `FileTypeManagerImpl.java:644-649`，判定用
+  // `FileUtil.isHashBangLine`（`platform/util/src/com/intellij/openapi/util/io/FileUtil.java:1300-1310`），
+  // 探测器是 `HashBangFileTypeDetector.kt:15-29`，它只要前 256 个字符（`:28`））：
   // 那是显式声明，比本仓那张内置解释器表（猜的）优先，所以用户在设置页给某个类型加一条
   // `HashBang patterns` 就当场改变判定。
   const head = content ? content.replace(/^\s+/, '') : ''
@@ -233,7 +254,7 @@ const EDITOR_FORCED_LANGUAGES = new Set(['java', 'cpp', 'typescript'])
  * 返回 `undefined` 表示「扩展名与关联都没说出个所以然」，编辑器按老路径自己认。
  *
  * **二进制先退出**：一个 `.java` 名下塞进 PNG 的情况极少，但 `.h` 名下的图片不少 ——
- * 上游给二进制文件开的是 `BinaryFileType`（`NativeFileType.java:48-51` 那一档），没有词法层，
+ * 上游给二进制文件的是 `isBinary()` 恒真那一档（`NativeFileType.java:48-51`），没有词法层，
  * 所以这里一律不接编辑器，让二进制查看器那条路（`file.readBinary`）接管。
  */
 export function resolveEditorLanguage(fileName: string, content: string, associations: Record<string, string> = {}): string | undefined {

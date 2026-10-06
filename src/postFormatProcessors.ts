@@ -16,7 +16,14 @@
 //      所以「哪些行是行注释」按**行首空白之后的第一个非空白字符是不是已知行注释前缀**来判。
 //      后果：块中间的 `/* */` 不算、字符串里的 `//` 也会算（后者与 `FormatterTagHandler` 那边
 //      「整行文本上匹配」的口径一致，见 `src/formatterTags.ts` 的模块注释第 2 条）。
-//   2. `canInsertSpaceInLineComment`（`:79-81`，语言级钩子）本仓没有，按**恒真**处理。
+//   2. `canInsertSpaceInLineComment` 本仓按**接口默认实现**判（`canInsertSpaceInLineComment()`，
+//      `platform/code-style-api/src/com/intellij/psi/codeStyle/LanguageCodeStyleProvider.java:77-81`：
+//      空白内容不加、首字符不是字母或数字也不加）。2026-10-06 实测全社区树**没有任何语言覆写它**
+//      （`grep -r canInsertSpaceInLineComment` 只有这一处 default 与那一处调用点），所以默认实现
+//      就是上游用户可见的行为本身 —— 原注释写的「本仓没有，按恒真处理」是**误判**（留痕见下），
+//      后果是 `// 已有空格` 会被补成两个空格、`//----` 分节线被拆行。
+//      覆写口（Go 的 `//go:generate` 这类编译指令）在语言插件里，本仓的档位表没有这一列，
+//      所以按默认实现走；要按语言豁免就得给设置面加字段（`docs/wiring-requests-2026-10-06-refactor.md` R4）。
 //   3. 行注释前缀表 `Commenter.lineCommentPrefixes`（`:59`）在语言插件里，本仓用一张固定的小表
 //      （`LINE_COMMENT_PREFIXES`），取值就是各语言 commenter 实际用到的 `//` / `#` / `--` / `;` / `%`。
 //
@@ -67,6 +74,21 @@ export function processLineCommentAddSpace(
   return { text: next, inserted: offsets.length }
 }
 
+/**
+ * `LanguageCodeStyleProvider.canInsertSpaceInLineComment`（`:77-81`）默认实现的等价物：
+ *   · 内容整段是空白 → 不加（`if (commentContents.isBlank()) return false`，`:78`）；
+ *   · 首字符不是字母或数字 → 不加（`:79`，`isLetterOrDigit(commentContents.charAt(0))`）；
+ *   · 其余才加（`:80`）。
+ * Java 那边是 `Character.isLetterOrDigit`（Unicode 字母 + 十进制数字），这里用 `\p{L}` 与 `\p{N}` ——
+ * 差别只在罗马数字/上标这两个小众数字类上，`//TODO`、`//中文`、`//1 号` 这类实际用例判得一致。
+ * 判据用例（本仓旧实现按「恒真」会做错的三件）：`// 已有空格` 不再补成两个空格、
+ * `//---- 分节线` 不动、`//   ` 只有空白不动。
+ */
+export function canInsertSpaceInLineComment(commentContents: string): boolean {
+  if (commentContents.trim() === '') return false
+  return /[\p{L}\p{N}]/u.test(commentContents.charAt(0))
+}
+
 /** `SingleLineCommentFinder.visitComment`（`:68-84`）收集 `commentOffsets` 的文本等价物。 */
 function lineCommentInsertOffsets(
   text: string,
@@ -83,8 +105,10 @@ function lineCommentInsertOffsets(
     const rest = text.slice(cursor, lineEnd)
     const prefix = prefixes.find(item => item && rest.startsWith(item))
     if (!prefix) continue
-    // `:74` 的 `takeUnless { commentText.length == it }`：空注释不加空格。
-    if (rest.length === prefix.length) continue
+    // `:71-75` 先挡掉空注释（`takeUnless { commentText.length == it }`），`:79-81` 再由
+    // `canInsertSpaceInLineComment` 决定「前缀后面那个位置」到底加不加空格 —— 两件事在同一个
+    // 函数里判，顺序与上游一致（先算 contents、再问钩子）。
+    if (!canInsertSpaceInLineComment(rest.slice(prefix.length))) continue
     const at = cursor + prefix.length
     // `:36` 的 `filter { rangeToReformat.contains(it) }`：只处理落在待重排区间内的位置。
     if (at >= range.start && at < range.end) offsets.push(at)

@@ -113,3 +113,104 @@ export function renameTerminal(state: TerminalTitleState, name: string, limit = 
   const trimmed = name.trim().slice(0, limit)
   return { ...state, userDefined: trimmed === '' ? undefined : trimmed }
 }
+
+// ---------------------------------------------------------------------------
+// 标签的**行模型**：新建会话的默认名（去重）与「按设置决定要不要用 shell 标题」那一档。
+//
+// 上游坐标（逐个文件开过）：
+//   · 新建会话时默认标题的来源 `platform/execution-impl/.../TerminalToolWindowManager.java:315-323`
+//     —— `state.getDefaultTitle() == null` 时才填，填的是
+//     `Objects.requireNonNullElse(terminalRunner.getDefaultTabTitle(), TerminalOptionsProvider.getInstance().getTabName())`
+//     （`:317-320`）再交给 `TerminalTitleUtils.createDefaultTabName`（`:321`），最后 `state.setDefaultTitle(uniqueName)`（`:322`）。
+//   · 默认名本尊 `plugins/terminal/src/org/jetbrains/plugins/terminal/TerminalOptionsProvider.kt:73` 的
+//     `myTabName = defaultTabName()`，`defaultTabName()` 在 `:325` = bundle 的
+//     `local.terminal.default.name`（`plugins/terminal/resources/messages/TerminalBundle.properties:96` = **`Local`**；
+//     远程那一档 `:97` = `Remote`）。**上游的标签基础名不是 "Terminal"。**
+//   · 去重 `plugins/terminal/src/org/jetbrains/plugins/terminal/util/TerminalTitleUtils.kt:61-88`
+//     —— existing = `toolWindow.contentManager.contentsRecursively` 每条 content 的 `displayName`（`:68-70`），
+//     生成走 `UniqueNameGenerator.generateUniqueName(defaultName, "", "", " (", ")", 条件)`（`:80-87`）。
+//   · 编号几何 `platform/util/src/com/intellij/util/text/UniqueNameGenerator.java:102-124`
+//     —— 先试原名（`:105-108`）；然后用 `Pattern.compile("(.+?)" + quote(" (") + "(\\d{1,9})")` 配 **`matches()`**
+//     整串匹配（`:111-117`）⇒ 结尾那个 `)` **不在模式里**，所以 `Local (2)` 自身不算「已编号的名字」，
+//     只有像 `Local (2` 这种缺右括号的才会被认出并把计数接到后面；起点是 2（`:99` 传 2，`:113`）。
+//     之后 `while(true)` 逐个试 `base + " (" + index + ")"`（`:118-123`）。
+//   · 设置感知 `TerminalTitleUtils.kt:37-39`（`buildSettingsAwareTitle` = `buildTitle(ignoreAppTitle = !shouldShowAppTitle(...))`）
+//     与 `:50-52`（`buildSettingsAwareFullTitle` = `buildFullTitle(...)`，同一个门）；
+//     `shouldShowAppTitle`（`:54-59`）= `showApplicationTitle && (mode == WHEN_COMMAND_RUNNING && isCommandRunning || mode == ALWAYS)`。
+//     两个设置项的默认值：`TerminalOptionsProvider.kt:68` = `showApplicationTitle: Boolean = true`、
+//     `:71` = `applicationTitleShowingMode = WHEN_COMMAND_RUNNING`；枚举两条在
+//     `plugins/terminal/src/org/jetbrains/plugins/terminal/settings/TerminalApplicationTitleShowingMode.kt:8-9`。
+//   · 重命名弹窗的**初值** `plugins/terminal/src/org/jetbrains/plugins/terminal/action/RenameTerminalSessionAction.kt:20-23`
+//     —— `getContentDisplayNameToEdit` 返回的是 `widget.terminalTitle.buildSettingsAwareFullTitle()`，
+//     **不是标签上那条截断过的文字**；提交走 `:25-29` 的 `change { userDefinedTitle = newContentName }`。
+//     弹窗文案 `TerminalBundle.properties:35` = `action.RenameSession.newSessionName.label` = "Session name:"，
+//     动作名 `:10` = "Rename Session"。
+//
+// 本仓落点：`src/components/TerminalPanel.vue` 新建窗格时用 `nextTerminalTabName` 取名、
+// 重命名输入框的初值用 `terminalRenameInitialValue`、标签文字与 tooltip 用下面那两条设置感知的包装。
+// 判据：tests/terminal-title.test.mjs。
+// ---------------------------------------------------------------------------
+
+/** `TerminalBundle.properties:96` 的 `local.terminal.default.name=Local`（本仓界面无中文包 ⇒ 英文原文直译）。 */
+export const TERMINAL_TAB_BASE_NAME = '本地'
+
+/** `TerminalOptionsProvider.kt:68` 的默认值。 */
+export const TERMINAL_SHOW_APP_TITLE_DEFAULT = true
+
+/** `TerminalOptionsProvider.kt:71` + `TerminalApplicationTitleShowingMode.kt:8-9` 的两档与默认值。 */
+export type TerminalAppTitleMode = 'whenCommandRunning' | 'always'
+
+export interface TerminalTitleSettings {
+  /** `TerminalOptionsProvider.showApplicationTitle`。 */
+  showApplicationTitle: boolean
+  /** `TerminalOptionsProvider.applicationTitleShowingMode`。 */
+  applicationTitleShowingMode: TerminalAppTitleMode
+}
+
+/** `TerminalTitleUtils.kt:54-59` 的 `shouldShowAppTitle`（逐条对照，四个分支都要各自成立）。 */
+export function shouldShowApplicationTitle(settings: TerminalTitleSettings, isCommandRunning: boolean): boolean {
+  if (!settings.showApplicationTitle) return false
+  if (settings.applicationTitleShowingMode === 'always') return true
+  return settings.applicationTitleShowingMode === 'whenCommandRunning' && isCommandRunning
+}
+
+/** `TerminalTitleUtils.kt:37-39`：标签上那条（截断过 shell 标题、带 tag），按设置决定是否采纳 shell 标题。 */
+export function buildSettingsAwareTitle(state: TerminalTitleState, settings: TerminalTitleSettings, isCommandRunning = false): string {
+  return buildTerminalTitle(state, { ignoreAppTitle: !shouldShowApplicationTitle(settings, isCommandRunning) })
+}
+
+/** `TerminalTitleUtils.kt:50-52`：tooltip 那条（不截断、不拼 tag），同一个门。 */
+export function buildSettingsAwareFullTitle(state: TerminalTitleState, settings: TerminalTitleSettings, isCommandRunning = false): string {
+  return buildTerminalFullTitle(state, { ignoreAppTitle: !shouldShowApplicationTitle(settings, isCommandRunning) })
+}
+
+/** `RenameTerminalSessionAction.kt:20-23`：重命名输入框里预填的就是这条全标题。 */
+export function terminalRenameInitialValue(state: TerminalTitleState, settings: TerminalTitleSettings, isCommandRunning = false): string {
+  return buildSettingsAwareFullTitle(state, settings, isCommandRunning)
+}
+
+/** `UniqueNameGenerator.java:111` 的那条正则：`beforeNumber` = `" ("`，`matches()` ⇒ 整串匹配（结尾的 `)` 匹配不上）。 */
+const NUMBERED_TAB_NAME = /^(.+?) \((\d{1,9})$/
+
+/**
+ * `TerminalTitleUtils.kt:61-88` + `UniqueNameGenerator.java:102-124`：
+ * 基础名没被占用就用基础名，否则从 **2** 起拼 `基础名 (n)`。
+ * 上游的 `prefix`/`suffix` 在 `createDefaultTabName` 里都是空串（`:81-82`），所以这里不拼。
+ */
+export function nextTerminalTabName(baseName: string = TERMINAL_TAB_BASE_NAME, existingNames: readonly string[] = []): string {
+  const taken = new Set(existingNames)
+  const defaultFullName = baseName.trim()
+  if (defaultFullName !== '' && !taken.has(defaultFullName)) return defaultFullName
+  let base = baseName
+  let index = 2
+  const numbered = NUMBERED_TAB_NAME.exec(base)
+  if (numbered) {
+    base = numbered[1]
+    index = Number(numbered[2]) + 1
+  }
+  for (;;) {
+    const candidate = `${base} (${index})`.trim()
+    if (!taken.has(candidate)) return candidate
+    index += 1
+  }
+}

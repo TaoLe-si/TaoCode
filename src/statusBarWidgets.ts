@@ -66,17 +66,19 @@ export function withWidgetEnabled(overrides: Readonly<Record<string, boolean>>, 
   return next
 }
 
-/** `isExplicitlyDisabled`（`:24`）——只认显式存下来的 `false`。 */
-export function explicitlyDisabled(overrides: Readonly<Record<string, boolean>>, id: string): boolean {
-  return overrides[id] === false
-}
-
 /** `isAllowedByInternalMode`（`StatusBarWidgetsManager.kt:243-245`）。本仓没有内部模式，一律放行非内部组件。 */
 function allowedByInternalMode(factory: StatusBarWidgetFactory): boolean {
   return factory.internal !== true
 }
 
-/** 工厂该不该建组件（`updateWidget` :98-100 的三道闸）。 */
+/**
+ * 工厂该不该建组件（`updateWidget` :98-100 的三道闸）。
+ * 上游还有一道"显式关掉就连实例都不建"的闸：`StatusBarWidgetsManager.kt:197` 在装配可用工厂列表时按
+ * `StatusBarWidgetSettings.isExplicitlyDisabled(id)`（`StatusBarWidgetSettings.kt:22`）先过滤一遍。
+ * 本仓这一条由下面的 `widgetEnabled`（存过的值优先，没存过按 `isEnabledByDefault`）承担 —— 同一个存档、
+ * 同一个判据，不再另开一个只认 `false` 的函数（原写在此处的 `explicitlyDisabled()` 零消费者，
+ * 2026-10-06 桶 status2 删除；判据 `tests/status-bar-widgets.test.mjs` 的三道闸用例覆盖同一条语义）。
+ */
 export function shouldCreateWidget(factory: StatusBarWidgetFactory, overrides: Readonly<Record<string, boolean>>): boolean {
   if (factory.configurable !== false && !widgetEnabled(overrides, factory)) return false
   if (factory.available === false) return false

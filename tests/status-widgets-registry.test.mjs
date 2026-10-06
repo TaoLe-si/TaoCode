@@ -8,7 +8,7 @@
 //     `src/statusBarLifecycle.ts` 的 `canEnableOn` 说的是同一件事（有打开的编辑器）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { findWidgetFactory, listWidgets, STATUS_WIDGETS, widgetChecked, widgetClickable, widgetToggleRows } from '../src/statusWidgets.ts'
+import { findWidgetFactory, listWidgets, showWidget, STATUS_WIDGETS, widgetChecked, widgetClickable, widgetOverrides, widgetToggleRows } from '../src/statusWidgets.ts'
 import { configurableFactories, shouldCreateWidget, widgetToggleEnabled } from '../src/statusBarWidgets.ts'
 import { canEnableOn } from '../src/statusBarLifecycle.ts'
 
@@ -25,9 +25,34 @@ test('注册表：id 唯一、按 id 反查、upstreamId 都在', () => {
 })
 
 test('反查就是上游 findWidgetFactory(:139)：id→工厂，未知 id 无答案', () => {
-  assert.equal(findWidgetFactory('position')?.displayName, '光标位置')
+  assert.equal(findWidgetFactory('position')?.displayName, '行:列号')
   assert.equal(findWidgetFactory('vfsRefresh')?.upstreamId, 'VfsRefresh')
   assert.equal(findWidgetFactory('memory')?.enabledByDefault, false, '默认关的组件也照样在注册表里')
+})
+
+test('勾选清单里那个名字是上游 getDisplayName() 的中文取值（不是本仓的说法）', () => {
+  // 每条都是 bundle 键 + 英文原值 + 中文包取值的三重证据；中文包 =
+  // `D:\IntelliJ IDEA 2026.2\plugins\localization-zh\lib\localization-zh.jar` 的 `messages/*.properties`。
+  // 2026-10-06 桶 statusbar 把五条本仓自造的说法订正成上游取值（原写「光标位置 / 列选择 / 只读 /
+  // 通知中心 / 内存」）。
+  const expected = [
+    // UIBundle.properties:183 "Line:Column Number"（中文包 :267），PositionPanelWidgetFactory.kt:15
+    ['position', '行:列号'],
+    // UIBundle.properties:186 "Editor Selection Mode"（中文包 :269），ColumnSelectionModeWidgetFactory.java:20
+    ['column', '编辑器选择模式'],
+    // UIBundle.properties:187 "Read-Only Attribute"（中文包 :268），ReadOnlyAttributeWidgetFactory.java:21
+    ['readonly', '只读特性'],
+    // UIBundle.properties:188 "Notifications"（中文包 :264），NotificationWidgetFactory.java:24
+    ['notices', '通知'],
+    // UIBundle.properties:194 "Memory Indicator"（中文包 :263），MemoryIndicatorWidgetFactory.java:18
+    ['memory', '内存指示器'],
+    // 这几条磁盘上本来就对，一起钉住，防止以后被"顺手改顺"：
+    ['lineSeparator', '行分隔符'], ['encoding', '文件编码'], ['vfsRefresh', '文件系统同步'],
+    ['powerSave', '省电模式'], ['indent', '缩进'], ['branch', 'Git 分支'], ['lspServices', '语言服务'],
+  ]
+  for (const [id, name] of expected) {
+    assert.equal(findWidgetFactory(id)?.displayName, name, `${id} 的显示名不是上游那句`)
+  }
 })
 
 test('可配置分档：configurable=false 的不进勾选清单', () => {
@@ -54,10 +79,10 @@ test('editor-based 的开启闸：有编辑器才可点，且与 canEnableOn 同
   assert.equal(canEnableOn({ windowId: 'w', editorId: 'e1', filePath: 'a.ts', editorShowing: false }), false, '编辑器不可见也不行')
 })
 
-test('「显示 <组件名>」那批只覆盖 EP 工厂（直接画进面板的四条不产生搜索命中）', () => {
+test('「显示 <组件名>」那批只覆盖 EP 工厂（直接画进面板的三条不产生搜索命中）', () => {
   const rows = widgetToggleRows(true)
   const ids = rows.map(row => row.id)
-  for (const direct of ['file', 'progress', 'bridge', 'problems']) {
+  for (const direct of ['file', 'progress', 'problems']) {
     assert.equal(findWidgetFactory(direct)?.factory, false, `${direct} 不是工厂`)
     assert.ok(!ids.includes(`statusBar.widget.${direct}`), `${direct} 不该有搜索命中`)
   }
@@ -73,4 +98,21 @@ test('「显示 <组件名>」那批只覆盖 EP 工厂（直接画进面板的�
   // 勾选态取持久化覆盖（这里只核默认回退：默认开的为 true）。
   assert.equal(widgetChecked('encoding'), true)
   assert.equal(widgetChecked('memory'), false, 'MemoryIndicatorWidgetFactory 默认关')
+})
+
+test('注册表里没有「勾了不生效」的条目：`bridge` 已删，存档里残留的键也不复活它', () => {
+  // 判据的由来（2026-10-06 桶 status2，先证明再删）：
+  //   · 本仓侧：`src/App.vue` 的状态栏模板只消费 16 个 id，其中**没有** `showWidget('bridge')`；
+  //   · 上游侧：`statusBarWidgetFactory` 的全部注册处（`platform/platform-impl/resources/intellij.platform.ide.impl.xml:1618-1644`
+  //     十五条 + `intellij.platform.ide.xml:98` 的扩展点声明本身）里没有"桥接状态"这个组件。
+  // ⇒ 它在勾选清单里 = 铁律 §3 禁的假控件，条目已从 `STATUS_WIDGETS` 删除。
+  assert.equal(findWidgetFactory('bridge'), undefined, 'bridge 不该再被注册表反查到')
+  assert.equal(STATUS_WIDGETS.some(widget => widget.id === 'bridge'), false, '注册表里不该有 bridge 这一行')
+  assert.equal(listWidgets().some(widget => widget.id === 'bridge'), false, '勾选清单里不该再列出 bridge')
+  assert.equal(showWidget('bridge'), false, '认不出的 id 不画，也不猜语义')
+  assert.equal(widgetToggleRows(true).some(row => row.id === 'statusBar.widget.bridge'), false,
+    '「显示 桥接状态」那条搜索命中也不能存在')
+  // 老存档里可能还留着用户当年勾出来的 `bridge` 覆盖键：`loadOverrides()` 认不出的键直接丢，
+  // 所以它不会残在内存状态里（同上游 `StatusBarWidgetSettings.loadState` 的处理）。
+  assert.equal(Object.hasOwn(widgetOverrides.value, 'bridge'), false, '已删组件的覆盖键必须被丢弃')
 })

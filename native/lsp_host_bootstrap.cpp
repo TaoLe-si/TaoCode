@@ -80,16 +80,27 @@ Host& Session::ensure(const std::string& language) {
                       {"cancellable", value.value("cancellable", false)}});
     });
 
-    // 服务器自己发的 `window/showMessage`（jdt.ls 用它报 Gradle 导入失败之类）：交给界面如实显示，
-    // 走的是同一条 progress 出口（前端按 `event` 分派）。
+    // 服务器**主动**发来的那几种消息都走这一条出口：`window/showMessage` 与 `window/logMessage`
+    // 是通知，`window/showMessageRequest` 与 `workspace/…/refresh` 是请求 —— 客户端已在参数里
+    // 补了 `method`（见 native/lsp.cpp 的 tag_server_message）。走的是同一条 progress 出口
+    // （前端按 `event` 分派、再按 `method` 分处置），上游对这四条的处置也各不相同：
+    // `LspServerNotificationsHandlerImpl.kt:341-368`（refresh）、`:377-383`（showMessageRequest）、
+    // `:385-390`（showMessage）、`:396-404`（logMessage 只进日志，Error/Warning 才弹）。
     host->set_server_message([this, language](Json params) {
         if (!on_progress_ || !params.is_object()) return;
         const auto text = string_at(params, "message");
-        if (text.empty()) return;
-        on_progress_({{"event", "lsp.message"},
-                      {"language", language},
-                      {"severity", params.contains("type") && params.at("type").is_number() ? params.at("type").get<int>() : 3},
-                      {"message", text}});
+        const auto method = string_at(params, "method");
+        // refresh 那一族没有消息正文（参数是 null 或省略），但事件必须转出去：前端要据此作废缓存。
+        if (text.empty() && method.empty()) return;
+        Json payload{{"event", "lsp.message"},
+                     {"language", language},
+                     {"severity", params.contains("type") && params.at("type").is_number() ? params.at("type").get<int>() : 3},
+                     {"message", text},
+                     {"method", method}};
+        // `window/showMessageRequest` 的按钮标题（协议的 `actions: MessageActionItem[]`）原样带上，
+        // 由前端决定怎么显示（上游是通知上的那一排按钮；本仓的按钮还没接线，见请求文档）。
+        if (params.contains("actions") && params.at("actions").is_array()) payload["actions"] = params.at("actions");
+        on_progress_(std::move(payload));
     });
 
     Host::Spec spec;

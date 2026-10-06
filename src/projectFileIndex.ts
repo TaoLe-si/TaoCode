@@ -109,9 +109,27 @@ export function sourceRootFromConvention(path: string): string | null {
   return longestPrefixRoot(normalized, ['src'])
 }
 
-/** `getSourceRootForFile` 的独立形态：有配置用配置，没有才按约定。 */
+/**
+ * 进程级「已配置源根」表（判词 `pm/file-index` 缺项 ② 的订正：「`getSourceRootForFile` 在渲染层
+ * 拿不到项目设置时退到目录约定，配置的源根只有 `ProjectStructurePane.vue` 手上有」）。
+ * 上游每次查询都从工程对象读根模型（`ModuleRootManager.getSourceRoots`），本仓的菜单组件拿不到
+ * `project.settings` —— 等价通道是这张表：写者 = `src/gradleHost.ts`（它手上就有
+ * `projectSettings.java.sourcePaths`），读者 = `sourceRootFor(path)` 不显式给配置根时。
+ * 表为空（设置还没到）才落到目录约定 `sourceRootFromConvention`。
+ */
+let configuredSourceRoots: readonly string[] = []
+
+export function setConfiguredSourceRoots(roots: readonly string[]): void {
+  configuredSourceRoots = [...new Set((roots ?? []).map(root => normalizeIndexPath(root)).filter(Boolean))]
+}
+
+export function getConfiguredSourceRoots(): readonly string[] { return configuredSourceRoots }
+
+/** `getSourceRootForFile` 的独立形态：显式配置 > 进程表 > 目录约定。 */
 export function sourceRootFor(path: string, configuredRoots: readonly string[] = []): string | null {
-  return longestPrefixRoot(path, configuredRoots) ?? sourceRootFromConvention(path)
+  return longestPrefixRoot(path, configuredRoots)
+    ?? longestPrefixRoot(path, configuredSourceRoots)
+    ?? sourceRootFromConvention(path)
 }
 
 /** 测试源根判定（`ProjectRootTestSourcesFilter`）：路径里有 `test`/`tests` 段且不是 `test-resources` 之外的资源根。 */

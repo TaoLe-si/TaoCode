@@ -46,6 +46,7 @@ const char* const sample_manifest = R"({
   "version": "1.2",
   "description": "带一个命令与一个模板",
   "category": "工具",
+  "vendor": "示例厂商",
   "contributes": {
     "commands": [{"id": "sample.hello", "title": "打招呼", "action": "app.about", "group": "示例"}],
     "templates": [{"key": "Logd", "body": "console.log($x$);", "description": "打印", "languages": ["typescript"]}]
@@ -113,6 +114,7 @@ int main() {
         check(plugin.version == "1.2", "version 没读出来");
         check(plugin.description == "带一个命令与一个模板", "description 没读出来");
         check(plugin.category == "工具", "category 没读出来");
+        check(plugin.vendor == "示例厂商", "vendor（上游清单的 <vendor> 元素）没读出来");
         check(plugin.enabled, "新装的插件默认是启用的");
         check(plugin.error.empty(), "清单合法时不该有 error");
         check(plugin.commands.size() == 1 && plugin.commands[0].id == "sample.hello", "命令没读出来");
@@ -259,6 +261,7 @@ int main() {
         const Json json = to_json(list(plugins_dir));
         check(json.at("plugins").size() == 1, "应当有一条");
         check(json.at("plugins").at(0).at("category").get<std::string>() == "工具", "category 没输出");
+        check(json.at("plugins").at(0).at("vendor").get<std::string>() == "示例厂商", "vendor 没输出（前端的 /vendor: 搜索吃它）");
         check(json.at("plugins").at(0).at("id").get<std::string>() == "sample-plugin", "id 没输出");
     });
 
@@ -281,6 +284,22 @@ int main() {
         check(plugin.commands.size() == 1, "命令里的空白不该让它被丢掉");
         check(plugin.commands[0].id == "hello" && plugin.commands[0].title == "打招呼" &&
               plugin.commands[0].action == "app.about", "命令字段也要剪空白");
+    });
+
+    run("厂商 vendor：去空白、没写与超长都是空串（前端的 /vendor: 与详情行都靠它）", [] {
+        const fs::path root = scratch("vendor");
+        const fs::path plugins_dir = root / "plugins";
+        write_file(plugins_dir / "with_vendor" / "plugin.json", R"({"name": "有厂商", "vendor": "  JetBrains s.r.o.  "})");
+        write_file(plugins_dir / "no_vendor" / "plugin.json", R"({"name": "没厂商"})");
+        // 与 name/category 同一口径：超过长度上限的值当作没写（`text_or`），不留一个截断的厂商名。
+        write_file(plugins_dir / "long_vendor" / "plugin.json",
+                   std::string("{\"name\": \"超长厂商\", \"vendor\": \"") + std::string(121, 'x') + "\"}");
+        const auto plugins = list(plugins_dir);
+        check(find_plugin(plugins, "with_vendor").vendor == "JetBrains s.r.o.", "vendor 的首尾空白要剪掉");
+        check(find_plugin(plugins, "no_vendor").vendor.empty(), "清单没写厂商时是空串（详情面板不渲染那一行）");
+        check(find_plugin(plugins, "long_vendor").vendor.empty(), "超过 120 字符的厂商与没写同义");
+        const Json json = to_json(plugins);
+        check(json.at("plugins").at(0).contains("vendor"), "vendor 要进 JSON（前端按它过滤 /vendor:）");
     });
 
     run("重复的命令 id 只留第一条（菜单行 id 不能重复）", [] {

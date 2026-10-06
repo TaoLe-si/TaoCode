@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
-import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitLogQuery, type GitCommitDetails, type GitCommitChanges } from './bridge.ts'
+import { isDesktop, request, type GitFullCommit, type GitFullLog, type GitLogQuery, type GitCommitDetails, type GitCommitChanges, type GitStatus, type GitTags } from './bridge.ts'
 
 export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?: () => GitLogQuery) {
   const commits = ref<GitFullCommit[]>([])
@@ -161,6 +161,7 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
     busy.value = true; error.value = ''
     try {
       await request('git.tag.create', { name, target: hash })
+      forgetRefCompletionCache()
       if (current()) { await load(); if (current()) await loadSelection() }
     } catch (caught) { if (current()) error.value = message(caught) }
     finally { if (current()) busy.value = false }
@@ -172,10 +173,40 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
     busy.value = true; error.value = ''
     try {
       await request('git.tag.delete', { name })
+      forgetRefCompletionCache()
       if (current()) { await load(); if (current()) await loadSelection() }
     } catch (caught) { if (current()) error.value = message(caught) }
     finally { if (current()) busy.value = false }
   }
+  // 「转到哈希/分支/标记」的**两批**候选来源。上游给弹层的是 `dataPack.getRefs()`
+  // （`GoToHashOrRefAction.java:44`），类型是 `VcsLogAggregatedStoredRefs`（`VcsLogDataPack.java:29`），
+  // 含义是"所有根上的**全部** stored refs"（`VcsLogAggregatedStoredRefs.kt:24`）—— 不是已加载那一页的引用；
+  // 两批的划分在 `VcsRefCompletionProvider.java:26-38`（`collectSync` = 分支，`collectAsync` = 非分支引用）。
+  // 本仓的对应物：分支 = `git.status` 的 `branches`（`native/main.cpp:1135` 那句 `taocode::git::branches`），
+  // 标签 = `git.tags`（`native/git.hpp:102`）。两条都是**取一次、缓存着**（同一仓库根的 refs 不会自己变），
+  // 换仓库根就作废（见下面 `watch(root)`），否则切项目还在补上一个项目的分支。
+  const branchNames = ref<string[]>([])
+  const tagNames = ref<string[]>([])
+  async function loadBranchNames(): Promise<string[]> {
+    if (!isDesktop || !root.value) return []
+    if (branchNames.value.length) return branchNames.value
+    const current = scope()
+    const data = await request<GitStatus>('git.status', {})
+    const names = data.branches ?? []
+    if (current() && root.value) branchNames.value = names
+    return names
+  }
+  async function loadTagNames(): Promise<string[]> {
+    if (!isDesktop || !root.value) return []
+    if (tagNames.value.length) return tagNames.value
+    const current = scope()
+    const data = await request<GitTags>('git.tags', {})
+    const names = data.tags ?? []
+    if (current() && root.value) tagNames.value = names
+    return names
+  }
+  /** 刚打了标签/删了标签/建了分支：这三处之后补全的那两份缓存就得重取（否则新标记补不出来）。 */
+  function forgetRefCompletionCache() { branchNames.value = []; tagNames.value = [] }
   watch(root, () => {
     generation++; logToken++; selectionToken++; navigationToken++
     back.value = []; forward.value = []
@@ -184,6 +215,7 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
     commits.value = []; selected.value = ''; query.value = restoredQuery(); error.value = ''
     details.value = null; changes.value = null; detailsError.value = ''; changesError.value = ''
     detailsLoading.value = false; changesLoading.value = false
+    branchNames.value = []; tagNames.value = []
     if (active.value) void load()
   }, { flush: 'sync' })
   // 打开日志窗口时先问一次存档（每个仓库根各存各的）。
@@ -192,5 +224,5 @@ export function useVcsLogData(root: Ref<string>, active: Ref<boolean>, restore?:
   onBeforeUnmount(() => { generation++; logToken++; selectionToken++; navigationToken++ })
   return { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
     canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick, loadSelection, scope,
-    resetTo, uncommit, createTagOn, deleteTag }
+    resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames }
 }

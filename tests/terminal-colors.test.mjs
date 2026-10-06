@@ -66,6 +66,33 @@ test('深浅两套表不同；坏颜色串退回内置默认；主题名解析�
   assert.equal(resolveTerminalThemeName(undefined), 'light', 'tokens.css 的 :root 是浅色面')
 })
 
+test('按色号覆盖（上游 JBTerminalSchemeColorPalette.kt:23-25 逐色号回方案取值）：只改被覆盖的那一号', () => {
+  const overridden = terminalPalette('dark', undefined, undefined, { 1: '#123456', 15: '#abcdef' })
+  assert.equal(overridden.attributes[1].foreground, '#123456')
+  assert.equal(overridden.attributes[15].foreground, '#abcdef')
+  assert.equal(overridden.attributes[0].foreground, ANSI_DARK_COLORS[0], '没给覆盖的色号仍是内置表')
+  assert.equal(colorByAnsiIndex(overridden, 1), '#123456', ' ANSI 1 号的使用方（面板/控制台）跟着走')
+  assert.equal(colorByAnsiIndex(overridden, 16), '#000000', '16 之后的立方色不吃这张表')
+  // 用户可见效果：xterm 主题那 16 个键里对应的 red / brightWhite 换成覆盖值，其余不动。
+  const theme = terminalXtermTheme(overridden)
+  assert.equal(theme.red, '#123456')
+  assert.equal(theme.brightWhite, '#abcdef')
+  assert.equal(theme.green, ANSI_DARK_COLORS[2])
+})
+
+test('覆盖表里的坏值/坏键一律丢弃（不许把 xterm 主题写坏）', () => {
+  const palette = terminalPalette('dark', undefined, undefined, { 1: 'red', 2: '', 3: '  ', 20: '#ffffff', 4: '#F0F0F0' })
+  assert.equal(palette.attributes[1].foreground, ANSI_DARK_COLORS[1], '非 # 记法不是颜色')
+  assert.equal(palette.attributes[2].foreground, ANSI_DARK_COLORS[2], '空串 = 不覆盖')
+  assert.equal(palette.attributes[20], undefined, '16 号以后不进这张表（属性里根本没有那个键）')
+  assert.equal(palette.attributes[4].foreground, '#F0F0F0', '合法值原样采用（只去掉首尾空白）')
+})
+
+test('不传覆盖表时与改造前逐字节一致（默认路径没有行为变化）', () => {
+  assert.deepEqual(terminalPalette('dark').attributes, terminalPalette('dark', undefined, undefined, {}).attributes)
+  assert.deepEqual(terminalPalette('light', '#111111', '#eeeeee').attributes, terminalPalette('light', '#111111', '#eeeeee', undefined).attributes)
+})
+
 test('消费链：TerminalPanel 新建终端带主题、换主题时应用到所有窗格', () => {
   const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
   assert.match(panel, /theme: terminalXtermTheme\(currentPalette\(\)\)/, '新建窗格要把调色板交给 xterm')

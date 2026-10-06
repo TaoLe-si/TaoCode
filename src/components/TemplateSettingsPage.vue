@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Braces, FileText, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { templatePattern, customPattern, templates as builtinLive, postfixTemplates as builtinPostfix, type CustomTemplate, type TemplateSettings } from '../templates'
+import { LIVE_TEMPLATE_MACROS, templateMacroOfExpression, unknownMacroCall } from '../templateMacros.ts'
 import { iconSize } from '../uiIcons'
 import FileTemplatesSettingsPage from './FileTemplatesSettingsPage.vue'
 
@@ -81,6 +82,37 @@ const validDraft = computed(() => !keyError.value && !descriptionError.value && 
 const slots = computed(() => [...draft.value.body.matchAll(VARIABLE)]
   .map(match => match[1] === 'END' ? '' : match[1] === 'EXPR' ? 'EXPR（后置模板表达式）' : match[1])
   .filter((name, index, list) => name && list.indexOf(name) === index))
+// 上游「Edit Template Variables」表的 **Expression / Default value** 两列
+// （`platform/lang-impl/src/com/intellij/codeInsight/template/impl/EditVariableDialog.java:80-85`，
+// 列名文案在 `CodeInsightBundle.properties:157-161`）。本仓把两列压进 `$NAME:那一段$` 里，
+// 所以这里按宏表把它们再拆回来：那一段是宏调用就报宏，否则报字面默认值。
+const slotRows = computed(() => {
+  const rows: { name: string; detail: string }[] = []
+  const seen = new Set<string>()
+  for (const match of draft.value.body.matchAll(VARIABLE)) {
+    const name = match[1]!
+    if (name === 'END' || seen.has(name)) continue
+    seen.add(name)
+    if (name === 'EXPR') { rows.push({ name, detail: '后置模板的接收者（固定文本，不可改）' }); continue }
+    const raw = match[2] ?? ''
+    // 整段就是宏名（零参宏，`MacroParser.java:74-76`）或 `宏名(实参)` 都走这一条。
+    const call = templateMacroOfExpression(raw)
+    rows.push({ name, detail: call ? call.presentableName : (raw || '（空）') })
+  }
+  return rows
+})
+// 看着像宏调用、宏表里却没这个名字：那一格不会求值，按字面文本插入（宏清单只渲染宏表里那 21 条，
+// 上游注册了但本仓接不上的 12 条不在这里出现 —— 规约 §3「没有消费链路的宏不渲染」）。
+const unknownMacro = computed(() => {
+  for (const match of draft.value.body.matchAll(VARIABLE)) {
+    const found = unknownMacroCall(match[2] ?? '')
+    if (found) return found
+  }
+  return ''
+})
+// 上游那份表达式下拉是**去重后按字符串排序**的（EditVariableDialog.java:104 的 `.sorted()`），同口径。
+const macros = [...LIVE_TEMPLATE_MACROS]
+  .sort((left, right) => (left.presentableName < right.presentableName ? -1 : left.presentableName > right.presentableName ? 1 : 0))
 // `$...$` runs that look like a slot but do not match the grammar above stay in the
 // expanded text as-is; they are listed so nobody wonders why nothing was replaced.
 const unresolved = computed(() => {
@@ -210,6 +242,21 @@ function toggleLanguage(language: string) {
       <p v-else-if="slots.length" class="lt-slots" role="status">插入后可用 Tab 依次跳转的槽位：{{ slots.join('、') }}。</p>
       <p v-else class="lt-slots" role="status">没有槽位：展开后会原样插入这段文本，光标停在末尾。</p>
       <p v-if="unresolved.length" class="lt-field-error" role="alert">这些写法不是槽位，展开时会原样输出：{{ unresolved.slice(0, 4).join(' 、 ') }}{{ unresolved.length > 4 ? ' …' : '' }}。正确写法是 $NAME$ 或 $NAME:默认值$；引擎没有转义机制，文本里真正需要的美元符号请改用描述性写法。</p>
+      <p v-if="unknownMacro" class="lt-field-error" role="alert">「{{ unknownMacro }}」不是已注册的模板宏：那一格会按字面文本插入，不会求值。</p>
+      <dl v-if="slotRows.length" class="lt-vars" aria-label="模板变量的取值">
+        <div v-for="row in slotRows" :key="row.name" class="lt-var-row">
+          <dt class="lt-var-name">{{ row.name }}</dt>
+          <dd class="lt-var-value">{{ row.detail }}</dd>
+        </div>
+      </dl>
+      <!-- 上游这一份清单在「Edit Template Variables」对话框的表达式下拉里：宏表全量 → 按上下文过滤 →
+           取 getPresentableName() → 去重排序（EditVariableDialog.java:103-111，
+           查表是 MacroFactory.getMacros()，MacroFactory.java:21-24）。
+           下拉文案就是上游 getPresentableName() 的原文（CodeInsightBundle.properties:178-185 与各宏构造器）。
+           上游注册了但本仓接不上的 12 条不渲染（见 src/templateMacros.ts 的 DEFERRED_TEMPLATE_MACROS）。 -->
+      <div class="lt-macros" role="group" aria-label="可用模板宏">
+        <code v-for="macro in macros" :key="macro.name" class="lt-macro">{{ macro.presentableName }}</code>
+      </div>
       <div class="lt-actions">
         <button type="submit" class="primary-button" :disabled="busy || !validDraft">{{ busy ? '保存中…' : '保存模板' }}</button>
         <button type="button" class="subtle-button" :disabled="busy" @click="cancel">取消</button>
@@ -240,6 +287,12 @@ function toggleLanguage(language: string) {
 .lt-builtin { cursor: default; }
 .lt-field-error { margin: 0; color: var(--error); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .lt-slots { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.lt-vars { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; }
+.lt-var-row { display: flex; align-items: baseline; gap: var(--space-2); }
+.lt-var-name { flex-shrink: 0; min-width: 88px; color: var(--accent); font: 11px var(--font-mono); }
+.lt-var-value { margin: 0; min-width: 0; color: var(--secondary); font-size: 11px; overflow-wrap: anywhere; }
+.lt-macros { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.lt-macro { padding: 0 var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); font: 10px var(--font-mono); }
 .lt-key { font: 12px var(--font-mono); color: var(--accent); }
 .lt-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .lt-detail { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 10px; }

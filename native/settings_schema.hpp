@@ -85,6 +85,19 @@ inline constexpr std::string_view EDITOR_SETTING_KEYS[] = {
     // textDocument/inlayHint，按它的 kind 分三档（1 = Type，2 = Parameter，其余归第三档）。
     // 键名与分组的唯一定义处是 src/inlayHints.ts 的 INLAY_HINT_SETTING_KEYS。
     "showTypeInlayHints", "showParameterInlayHints", "showOtherInlayHints",
+    // 保存时的两条 pass（IDEA Settings ▸ Editor ▸ General，控件在 EditorOptionsPanel.kt:147-157；
+    // 字段与默认值 EditorSettingsExternalizable.java:73-74,142，三档字面值 :216-218）。
+    // 消费方 src/editorSaveTransforms.ts 的 saveTrimOptionsFromSettings。
+    "stripTrailingSpaces", "ensureNewLineAtEof", "keepTrailingSpacesOnCaretLine",
+    // 回车与引号的三个开关（CodeInsightSettings.java:130/132/140，默认全 true）；与上面
+    // reformatOnPaste 同一个设置类。消费方 src/enterHandlers.ts 与 src/editorTyping.ts 的 smartQuotes。
+    "autoInsertPairQuote", "closeCommentOnEnter", "insertBraceOnEnter",
+    // Code Vision（CodeVisionSettings.kt 的 State：:36 isEnabled、:38-39 可见条数 5、
+    // :45/:50 两个「只装与出厂相反那一半」的集合）。组 id 只有两个，见 src/codeLensSettings.ts:48-50。
+    "codeVisionEnabled", "codeVisionDisabledGroups", "codeVisionEnabledGroups", "codeVisionVisibleEntries",
+    // 快速文档两档（EditorSettingsExternalizable.java:76 默认 true；DocumentationToolWindowManager.kt:55
+    // 的 `documentation.auto.update` 默认 true）。键名由 src/docHoverPolicy.ts 的 DOC_HOVER_SETTING_KEYS 定死。
+    "showQuickDocOnMouseHover", "autoUpdateDocumentation",
 };
 
 inline constexpr std::string_view GENERAL_SETTING_KEYS[] = {

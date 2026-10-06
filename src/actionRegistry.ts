@@ -20,7 +20,7 @@
 // 取，键位尾部用 `ACTIONS.run(id)` 分派，插件命令入口用 `ACTIONS.has(id)` 校验。
 //
 // 判据：`tests/action-registry.test.mjs`。
-import type { KeyBinding, KeyBindingState } from './keymapBindings.ts'
+import type { EditorActionBinding, KeyBinding, KeyBindingState } from './keymapBindings.ts'
 import { keymapKeys } from './keymapBindings.ts'
 import type { MenuRow } from './menus/types.ts'
 
@@ -147,6 +147,35 @@ export function registerKeymapActions(
       source: 'keymap',
       enabled: () => !binding.when || binding.when(state()),
       run: handler,
+    })
+  }
+}
+
+/**
+ * 编辑器一族动作的注册（`src/keymap.ts` 每次按键时调用，与 `registerKeymapActions` 同一条装配链）：
+ * 这一族**没有全局键位** —— 上游 `$default.xml` 里查不到它们的绑定（`EditorSortLines` 一族），
+ * 或者那把人是在编辑器自己的 CodeMirror keymap 里按到的（`EditorMatchBrace`），
+ * 所以它们不进 `KEY_BINDINGS`（进了就是一条永远按不到的绑定 + 一个空转的处理器），只进注册表。
+ * 注册之后 `ACTIONS.has('line.sort')` 才为真，插件命令（`src/pluginCommands.ts` 的 `hasAction`）、
+ * 命令补全（`src/lspCompletion.ts` 读 `ACTIONS.ids()`）与「查找操作」的注册表那一段才认得它们；
+ * 面板里不会多出第二行 —— `src/menuUi.ts:246` 的 actionList 按 id 去重、菜单行优先。
+ * 可用性 = 「当前有编辑器」，与菜单行的 `enabled: hasEditor`（`src/App.vue:1436`）同一份判据 ——
+ * 上游那一族动作的 `update()` 置灰口径（`EditorActionAction`）在本基准树里按文件名搜不到，
+ * **没当依据用**，见 `docs/batch-2026-10-06-keymap.md` §6。
+ */
+export function registerEditorActions(
+  actions: readonly EditorActionBinding[],
+  runCommand: (command: string) => void,
+  hasEditor: () => boolean,
+): void {
+  for (const action of actions) {
+    ACTIONS.register({
+      id: action.id,
+      title: action.label,
+      keywords: action.keywords,
+      source: 'keymap',
+      enabled: hasEditor,
+      run: () => runCommand(action.command),
     })
   }
 }

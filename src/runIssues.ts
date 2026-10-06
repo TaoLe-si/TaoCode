@@ -5,10 +5,15 @@
 //   · `parseRunIssue` 按项目根解析 `路径:行:列: 说明`（规则在 src/buildOutput.ts，`RunIssue` 也从那里来）；
 //   · `runLines` 再按 `Console` 设置折叠连续重复行（`foldConsoleLines` —— IDEA 的
 //     ConsoleConfigurable 两项：要折叠的行 / 例外）；
+//     折叠之前先过 **ANSI 解码**（`src/consoleAnsi.ts`）：上游的 Java 运行输出走
+//     `ColoredProcessHandler`（`java/execution/openapi/src/com/intellij/execution/configurations/JavaCommandLineStateUtil.java:17-21`），
+//     带色码的输出在控制台里是**有色的**，本仓宿主只回传原始字节，所以这里把转义序列剥成
+//     可见文本、把样式带在 `chunks` 上给面板上色（问题/链接识别一律用剥完的文本）。
 //   · `jumpToIssue` / `nextRunIssue` = 控制台侧的"跳到问题".
 // 它们共享同一份派生结果（`runLines`），所以合成一域；真正的运行控制在 src/runActions.ts。
 import { computed, watch } from 'vue'
 import { runState, type GeneralSettingsState } from './bridge.ts'
+import { createConsoleAnsiDecoder } from './consoleAnsi.ts'
 import { foldConsoleLines } from './consoleFold.ts'
 import { findRunHyperlinks, type RunHyperlink } from './runHyperlinks.ts'
 import { parseAnyIssue, type RunIssue } from './buildOutput.ts'
@@ -32,15 +37,23 @@ function parseRunIssue(text: string): RunIssue | null {
 // 每行同时收集**全部** `file:line` 链接（`findRunHyperlinks`，上游 MultipleFilesHyperlinkInfo
 // 的等价物）与首个可跳转问题（编译器诊断的 `file(line,col)` 形态仍由 parseAnyIssue 认）。
 const runLines = computed(() => foldConsoleLines(
-  runOutput.join('').split('\n').map(text => {
-    const links = findRunHyperlinks(text, workspace.value?.root ?? '')
-    const first: RunHyperlink | undefined = links[0]
-    return {
-      text,
-      issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null),
-      links,
-    }
-  }),
+  (() => {
+    // 一台状态机按行喂（上游 `AnsiEscapeDecoder` 的 per-stream emulator 同一件事：颜色跨行延续，
+    // 直到 `ESC[0m` 或流结束）。每次重算都新建一台 —— 与「从输出开头重放一遍」等价。
+    const ansi = createConsoleAnsiDecoder()
+    return runOutput.join('').split('\n').map(raw => {
+      const { text, chunks } = ansi.line(raw)
+      const links = findRunHyperlinks(text, workspace.value?.root ?? '')
+      const first: RunHyperlink | undefined = links[0]
+      return {
+        text,
+        issue: parseRunIssue(text) ?? (first ? { path: first.path, line: first.line, column: first.column } : null),
+        links,
+        // 没有任何样式的行**不带这个字段** ⇒ 面板渲染路径与本轮之前逐字相同（判据钉住）。
+        ...(chunks.length > 0 ? { chunks } : {}),
+      }
+    })
+  })(),
   generalSettings.value.foldConsoleLines,
   generalSettings.value.foldExceptions,
   2000))

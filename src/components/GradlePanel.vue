@@ -26,6 +26,15 @@ import {
   loadTasksActivation, saveTasksActivation, tasksActivationForLinkedBuilds,
   type TaskPhase, type TasksActivationMap,
 } from '../externalProjectModel.ts'
+// 任务执行设置的编辑面（上游 `ExternalSystemEditTaskDialog.java:25-64` + 字段面
+// `ExternalSystemTaskSettingsControl.java:66-103,145-155`）：任务节点右键「编辑任务…」写这张表，
+// `gradleHost.runTask` 读它折命令/VM 选项/env（存储与消费口径见 `src/externalTaskSettings.ts` 头注）。
+import {
+  loadTaskSettingsMap, parseEnvironmentLines, saveTaskSettingsMap, taskDialogDefaults, taskSettingsForBuild,
+  taskSettingsForLinkedBuilds, taskSettingsFromDialog, withTaskSettings,
+  type TaskSettingsMap,
+} from '../externalTaskSettings.ts'
+import { splitScriptParameters } from '../externalSystemTask.ts'
 // 节点动作矩阵（上游 `ExternalSystemNodeAction` 一族）与视图开关（`ExternalSystemViewGearAction`）：
 // 右键菜单/齿轮菜单的行由 `src/externalSystemActions.ts` 产出，勾选态读同一份激活表与视图开关。
 import {
@@ -106,10 +115,51 @@ function persistActivation(next: TasksActivationMap) {
 function onActivationAdd(directory: string, phase: TaskPhase, task: string) { persistActivation(addActivation(activationMap.value, directory, phase, task)) }
 function onActivationRemove(directory: string, phase: TaskPhase, task: string) { persistActivation(removeActivation(activationMap.value, directory, phase, task)) }
 function onActivationMove(directory: string, phase: TaskPhase, task: string, delta: number) { persistActivation(moveActivation(activationMap.value, directory, phase, task, delta)) }
-/** 任务节点 tooltip：有激活显示阶段串（`ExternalSystemTaskActivator.getDescription`），否则回退任务描述。 */
+/**
+ * 任务节点 tooltip（一个绑定产出两段，右键「编辑任务…」与激活表都从这里回声）。
+ * · 阶段串：有激活时按 `ExternalSystemTaskActivator.getDescription` 的口径追加（`activationTooltip`）。
+ * · 「（已编辑）」：`ExternalSystemEditTaskDialog` 存过非默认设置的任务要标出来（`taskEditedSuffix`）。
+ */
 function taskActivationTitle(task: GradleTaskNode, directory: string): string {
   const phases = activationTooltip(activationMap.value, directory, task.name)
-  return phases ? `${task.description}${task.description ? ' · ' : ''}激活：${phases}` : task.description
+  const base = phases ? `${task.description}${task.description ? ' · ' : ''}激活：${phases}` : task.description
+  return `${base}${taskEditedSuffix(directory, task.name)}`
+}
+// —— 任务执行设置（「编辑任务…」，上游 `ExternalSystemEditTaskDialog`；存储与执行消费见 `src/externalTaskSettings.ts`）——
+const taskSettingsMap = ref<TaskSettingsMap>({})
+const taskEditOpen = ref(false)
+const taskEditTarget = ref<{ directory: string; task: string } | null>(null)
+const taskEdit = ref({ tasksText: '', vmOptions: '', scriptParameters: '', envText: '' })
+watch(() => props.result.workspaceRoot, root => { taskSettingsMap.value = loadTaskSettingsMap(activationStore, root ?? '') }, { immediate: true })
+// 取消链接的 build 一并丢掉它存过的任务设置（与激活表 `tasksActivationForLinkedBuilds` 同一口径）。
+watch(() => props.linkedProjects, dirs => {
+  if (!dirs.length) return
+  const pruned = taskSettingsForLinkedBuilds(taskSettingsMap.value, dirs)
+  if (JSON.stringify(pruned) !== JSON.stringify(taskSettingsMap.value)) {
+    taskSettingsMap.value = pruned
+    saveTaskSettingsMap(activationStore, props.result.workspaceRoot ?? '', pruned)
+  }
+})
+const taskEditEnvInvalid = computed(() => parseEnvironmentLines(taskEdit.value.envText).invalid)
+// 任务文本按 `ParametersList.parse` 同口径切（上游 `apply` 在 `ExternalSystemTaskSettingsControl.java:146`、
+// 那次 `ParametersListUtil.parse` 在 `:149`）；
+// 写了字却一条任务都没解析出来（如只剩空引号）时「确定」不可用 —— 空任务列表跑不了任何东西。
+const taskEditTaskNames = computed(() => splitScriptParameters(taskEdit.value.tasksText))
+function openTaskEditor(directory: string, task: string) {
+  taskEditTarget.value = { directory, task }
+  taskEdit.value = taskDialogDefaults(taskSettingsForBuild(taskSettingsMap.value, directory, task), task)
+  taskEditOpen.value = true
+}
+function saveTaskEditor() {
+  const target = taskEditTarget.value
+  if (!target) return
+  const next = withTaskSettings(taskSettingsMap.value, target.directory, target.task, taskSettingsFromDialog(taskEdit.value))
+  taskSettingsMap.value = next
+  saveTaskSettingsMap(activationStore, props.result.workspaceRoot ?? '', next)
+  taskEditOpen.value = false
+}
+function taskEditedSuffix(directory: string, task: string): string {
+  return taskSettingsForBuild(taskSettingsMap.value, directory, task) ? '（已编辑）' : ''
 }
 watch(() => props.result.workspaceRoot, () => {
   selectedDirectory.value = props.linkedProjects[0] ?? ''
@@ -179,6 +229,8 @@ function menuAction(row: ExternalSystemActionRow) {
   }
   if (row.id === 'RunExternalSystemTaskAction' && target.task) emit('runTask', target.task, target.directory)
   if (row.id === 'AssignRunConfigurationShortcutAction' && target.task) emit('saveRunConfig', target.task, target.directory)
+  // 「编辑任务…」= 上游 `ExternalSystemBeforeRunTaskProvider.java:59-60` 开 `ExternalSystemEditTaskDialog` 的那一步。
+  if (row.id === 'EditExternalSystemTaskAction' && target.task) openTaskEditor(target.directory, target.task)
   if (row.id === 'OpenExternalConfigAction') emit('openConfig', target.directory)
   if (row.id === 'RefreshExternalProjectAction') emit('refreshProject', target.directory)
   if (row.id === 'RefreshAllExternalProjectsAction') emit('sync')
@@ -197,7 +249,7 @@ function gearAction(row: ExternalSystemActionRow) {
   if (row.id === 'ShowIgnoredAction') setShowIgnoredProjects(row.checked !== true)
 }
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { closeMenu(); query.value = '' }
+  if (event.key === 'Escape') { closeMenu(); query.value = ''; taskEditOpen.value = false }
 }
 const now = ref(Date.now())
 let ticker: ReturnType<typeof setInterval> | null = null
@@ -300,6 +352,26 @@ const analyzerModuleName = computed(() => (analyzerBuild.value?.directory || '�
     </div>
     <ExternalTasksActivationDialog v-if="activationOpen" :builds="activationNodes" :summary="activationSummary"
       @close="activationOpen = false" @add="onActivationAdd" @remove="onActivationRemove" @move="onActivationMove" />
+    <!-- 任务编辑对话框（上游 `ExternalSystemEditTaskDialog`：标题 properties:134 `Edit {0} Task`；
+         字段面 `ExternalSystemTaskSettingsControl.java:66-103` 的 项目/任务/VM 选项/参数/环境变量。
+         `passParentEnvs` 勾选不渲染：本仓通道只能「在继承来的环境之上叠」，画了就是假控件。 -->
+    <div v-if="taskEditOpen && taskEditTarget" class="modal-backdrop" @click.self="taskEditOpen = false">
+      <section class="task-editor" role="dialog" aria-modal="true" aria-label="编辑 Gradle 任务">
+        <h3>编辑 Gradle 任务</h3>
+        <label class="task-editor-field"><span>Gradle 项目：</span>
+          <input :value="`${result.workspaceRoot || ''}${taskEditTarget.directory ? `/${taskEditTarget.directory}` : ''}`" readonly aria-label="Gradle 项目" /></label>
+        <label class="task-editor-field"><span>任务：</span><input v-model="taskEdit.tasksText" aria-label="任务" /></label>
+        <label class="task-editor-field"><span>VM 选项：</span><input v-model="taskEdit.vmOptions" aria-label="VM 选项" /></label>
+        <label class="task-editor-field"><span>参数：</span><input v-model="taskEdit.scriptParameters" aria-label="参数" /></label>
+        <label class="task-editor-field"><span>环境变量：</span><textarea v-model="taskEdit.envText" rows="3" aria-label="环境变量" placeholder="每行一个 KEY=VALUE" /></label>
+        <p v-if="taskEditEnvInvalid.length" class="gradle-error">无效的环境变量行：{{ taskEditEnvInvalid.join('、') }}</p>
+        <p class="gradle-note">任务名与参数拼进命令行；VM 选项与环境变量在直接运行时走带环境的 Gradle 通道（输出在「同步输出」）。</p>
+        <div class="task-editor-actions">
+          <button class="subtle-button" @click="taskEditOpen = false">取消</button>
+          <button class="subtle-button" :disabled="taskEditTaskNames.length === 0 && taskEdit.tasksText.trim() !== ''" @click="saveTaskEditor">确定</button>
+        </div>
+      </section>
+    </div>
     <DependencyAnalyzerDialog v-if="analyzerOpen && analyzerBuild" :scopes="analyzerBuild.dependencies"
       :module-name="analyzerModuleName" :project-label="analyzerBuild.directory || '工作区根项目'" @close="analyzerOpen = false" />
   </div>
@@ -337,4 +409,11 @@ h4 { margin:2px 4px; font-size:11px; color:var(--bright); }
 .gradle-ignored { margin-left:auto; color:var(--muted); font-size:10px; }
 .gradle-settings-menu { right:0; top:100%; }
 .gradle-context { position:fixed; }
+.task-editor { display:flex; flex-direction:column; gap:var(--space-2); width:520px; max-width:100%; padding:var(--space-3); background:var(--elevated); border:1px solid var(--line-strong); border-radius:var(--radius-lg); box-shadow:var(--shadow-3); }
+.task-editor h3 { margin:0; font-size:13px; }
+.task-editor-field { display:flex; align-items:flex-start; gap:var(--space-2); font-size:12px; }
+.task-editor-field span { flex:0 0 96px; color:var(--muted); }
+.task-editor-field input, .task-editor-field textarea { flex:1; min-width:0; background:var(--editor); color:var(--text); border:1px solid var(--line); padding:4px; font:12px/1.5 var(--font-mono); }
+.task-editor-field input[readonly] { color:var(--muted); }
+.task-editor-actions { display:flex; justify-content:flex-end; gap:var(--space-1); }
 </style>

@@ -19,6 +19,7 @@
 // （`ToolWindowHeader.kt:119` 的 `DockToolWindowAction, ShowOptionsAction, HideAction`），
 // 不在齿轮组里，所以不进这份引用表。
 import type { MenuRow } from './types'
+import { canCloseContents } from '../toolWindowManager.ts'
 
 /**
  * 齿轮菜单要追加的引用（顺序即上游顺序）。
@@ -39,6 +40,15 @@ export interface ToolWindowGearEntry {
    */
   contentsScoped?: boolean
   /**
+   * 这一行要先问**注册表**：`ToolWindow.canCloseContents()` 答 false 的窗口，
+   * 上游这条动作根本不可见（`TabbedContentAction.java:87`/`:114` 的
+   * `setEnabledAndVisible(myManager.canCloseContents() && …)`、`ContentManagerImpl.java:473` 的
+   * `canCloseAllContents()` 第一句就是 `if (!canCloseContents()) return false`）。
+   * 与 `hideWhenDisabled` 不同：那一条问的是"此刻有没有两条以上可关的内容"，这一条问的是
+   * "**这个窗口的内容到底能不能关**"，是注册期就定的另一道闸。
+   */
+  requiresClosableContents?: boolean
+  /**
    * 这一行不在菜单索引里，由宿主按当前焦点提供（`SpeedSearch` 就是这种：上游也只把它加进齿轮组）。
    * 取不到就整行不出现 —— 与"引用一个不存在的动作"同样处理。
    */
@@ -56,7 +66,7 @@ export const TOOL_WINDOW_GEAR_SPEC: readonly ToolWindowGearEntry[] = [
   // `<reference>`（只登记引用、不加进菜单），所以本仓也不给它编一个菜单位置，行由宿主按
   // "当前焦点处有没有可搜的列表"提供（上游 `SpeedSearchAction.update`：`isVisible = 有 handler`，`:29-32`）。
   { action: 'window.speedSearch', fromHost: true },
-  { action: 'window.closeAllTabs', hideWhenDisabled: true, contentsScoped: true },
+  { action: 'window.closeAllTabs', hideWhenDisabled: true, contentsScoped: true, requiresClosableContents: true },
   { action: 'window.toggleContentUiType', contentsScoped: true },
   // `PinToolwindowTab`（`intellij.platform.ide.impl.actions.xml:455`）不在齿轮组里 —— 它在
   // `PlatformActions.xml:657` 的 ActiveToolwindowGroup 里。齿轮这边**不抄一份**：
@@ -69,17 +79,61 @@ export const TOOL_WINDOW_GEAR_SPEC: readonly ToolWindowGearEntry[] = [
   { action: 'window.removeStripeButton', fromHost: true },
 ]
 
+// --- 注册表那道闸（`ToolWindow.canCloseContents()`）的公共部分 ---------------------------------
+// 行表与组件用的是**同一条**判据，所以这里只留一份：`toolWindowGearRows()` 在**造行**时过它，
+// 齿轮组件在**渲染**时过它（调用方拿到的是宿主统一算好的行表，"当前挂在哪个窗口上"只有组件知道）。
+// 要拦哪些行从上面那张引用表**派生**，不再手抄一份 id 清单（两处登记迟早漂成两个答案）。
+export const GEAR_CLOSE_CONTENTS_ROWS: ReadonlySet<string> = new Set(
+  TOOL_WINDOW_GEAR_SPEC.filter(entry => entry.requiresClosableContents).map(entry => entry.action))
+
+// 只有注册表**答 false** 时才拦：`canCloseContents()` 是注册期就定的布尔
+// （`ToolWindowImpl.kt:647`，值来自 EP 的 `canCloseContents`，`ToolWindowSetInitializer.kt:369`）；
+// 答不出（`null`：底部那几格固定内容在本仓没有 `<toolWindow>` 注册记录）保持现状，
+// 没给 id 同样保持现状 —— 替窗口猜一个 false 会把既有能用的行关掉（假闸）。
+function blockedByRegistry(action: string, closable: boolean | null): boolean {
+  return closable === false && GEAR_CLOSE_CONTENTS_ROWS.has(action)
+}
+
+/**
+ * 组件侧那条闸：一张**已经算好**的齿轮行表，按「这个齿轮当前挂在哪个工具窗口上」再滤一次。
+ *
+ * 为什么落在组件而不是只落在行表里：上游那份齿轮组不是宿主统一算一份再发给两边的 ——
+ * `platform/platform-impl/src/com/intellij/toolWindow/InternalDecoratorImpl.kt:290`
+ * 给每个标题栏的是 `gearProducer = { toolWindow.createPopupGroup(true) }`，
+ * 也就是按**这个头部自己那一份 `ToolWindow`**（同文件 `ToolWindowHeader.kt:68` 的构造参数）现取的；
+ * 本仓的行表由 `src/menuUi.ts` 统一算、`ToolWindowHeader.vue` / `ToolWindowGear.vue` 只渲染，
+ * 所以"当前是哪个窗口"这一位要由**拿着 id 的那一层**补上（底部那一格的 id 在宿主，接线请求见
+ * `docs/wiring-requests-2026-10-06-tw3.md`）。
+ * 摘行的写法照上游：`TabbedContentAction.java:145-149` 是 `setEnabledAndVisible(...)`，
+ * 而它的第一道闸 `ContentManagerImpl.java:472-475` 就是 `canCloseContents()` ⇒ 不适用时**整行不见**，
+ * 不是留一行灰着的。
+ */
+export function gearRowsForWindow(rows: readonly MenuRow[], toolWindowId?: string | null): MenuRow[] {
+  const closable = toolWindowId ? canCloseContents(toolWindowId) : null
+  if (closable !== false) return [...rows]
+  return rows.filter(row => !blockedByRegistry(row.id, closable))
+}
+
 /**
  * 按引用取行；取不到的丢掉（该动作不存在就不该有一行假的）。
  * `contents` = 这个齿轮管的是**挂着内容的那个窗口**（底部 dock），默认 false = 侧栏窗口。
+ * `toolWindowId` = 这个齿轮当前挂在哪个工具窗口上（上游 `ToolWindowHeader.kt` 拿的就是自己那一份
+ * `ToolWindow`）；给了就按注册表那条 `canCloseContents` 再过一道 `requiresClosableContents` 的闸。
+ * **不给**（本仓现有调用方 `src/menuUi.ts:333` 还没传）= 这一位答不出，沿用既有行为，不替窗口猜一个值 ——
+ * 底部那几格固定内容在本仓没有 `<toolWindow>` 注册记录，同一档返回 null，理由见
+ * `src/toolWindowManager.ts` 的 `canCloseContents`。
  */
 export function toolWindowGearRows(find: (id: string) => MenuRow | undefined,
                                    spec: readonly ToolWindowGearEntry[] = TOOL_WINDOW_GEAR_SPEC,
                                    contents = false,
-                                   hostRows: Readonly<Record<string, MenuRow>> = {}): MenuRow[] {
+                                   hostRows: Readonly<Record<string, MenuRow>> = {},
+                                   toolWindowId?: string): MenuRow[] {
+  const closable = toolWindowId === undefined ? null : canCloseContents(toolWindowId)
   const rows: MenuRow[] = []
   for (const entry of spec) {
     if (entry.contentsScoped && !contents) continue
+    // 注册表说这个窗口的内容关不掉 ⇒ 这条整行不见（判据与 `gearRowsForWindow` 同一份）。
+    if (blockedByRegistry(entry.action, closable)) continue
     // 宿主行**只**从宿主拿：`SpeedSearch` 不在菜单索引里（上游也只把它加进齿轮组），
     // 回退去 find 会把它当成主菜单动作 —— 那样"取不到的引用"这条判据就形同虚设。
     const row = entry.fromHost ? hostRows[entry.action] : find(entry.action)

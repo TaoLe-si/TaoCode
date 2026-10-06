@@ -18,13 +18,23 @@
 // 与上游的两点差异，都是本仓形态决定的，不是省事：
 //   1. `id` 用本仓既有的短键（`position`/`lineSeparator`…）：它就是"我们的扩展 id"，持久化键不能中途
 //      改名（否则用户的显隐设置会静默丢失）。上游的 id 记在 `upstreamId` 里，供审计对照与门控核对。
-//   2. 有四个条目**不是**工厂：`file`/`progress`/`bridge`/`problems`。上游对应物是直接画进状态栏面板的
+//   2. 有三条条目**不是**工厂：`file`/`progress`/`problems`。上游对应物是直接画进状态栏面板的
 //      组件（`ToolWindowsWidget` 走 `IdeStatusBarImpl.kt:285-298` 的 leftPanel、`InfoAndProgressPanel`
 //      走 `:343` 的 centerPanel），**不经过工厂**。本仓把它们也列进勾选清单是既有行为（用户可隐藏），
 //      所以保留，但标成 `factory: false` —— 门控只对 `factory: true` 的条目核上游 id/默认值。
-//      ⚠️ 这四条里 `bridge` 目前**没有消费者**（状态栏模板里没有 `showWidget('bridge')`），
-//      勾掉它不改变任何东西 = 假控件；门禁 tests/statusbar-popup-motion-parity.test.mjs 把这条
-//      记成显式的 KNOWN_GAPS，新增死条目会当场红。
+//      原写「有四条：file/progress/bridge/problems」（桶 6b/statusbar）—— 实际 `bridge` 那条是
+//      **假控件**，本批已删，留痕如下：
+//      · 本仓侧：`src/App.vue` 的状态栏模板只消费 16 个 id（branch/column/encoding/file/indent/
+//        lineSeparator/lspServices/memory/notices/position/powerSave/problems/progress/readonly/
+//        smartMode/vfsRefresh），没有 `showWidget('bridge')` ⇒ 勾它不改变任何东西（违铁律 §3「不放假控件」）。
+//      · 上游侧：`statusBarWidgetFactory` 的全部注册处都没有"桥接状态"这个组件
+//        （`platform/platform-impl/resources/intellij.platform.ide.impl.xml:1618-1644` 十五条 id =
+//        VfsRefresh/Position/LineSeparator/Encoding/PowerSaveMode/InsertOverwrite/ReadOnlyAttribute/
+//        Notifications/FatalError/WriteThread/Memory/EditorAnimationCacheStatistics/SmartModeIndicator/
+//        IndexesAndVfsFlushIndicator/settingsEntryPointWidget；全仓 `--include=*.xml` 再搜 bridge 零命中）。
+//      同批清掉门禁 `tests/statusbar-popup-motion-parity.test.mjs` 的 KNOWN_GAPS 登记（否则那条
+//      "KNOWN_GAPS 不能过期"的反查会红）。用户存档里残留的 `bridge` 覆盖键由 `loadOverrides()`
+//      丢弃（认不出的键不猜语义，同上游 `loadState`）。
 import { ref } from 'vue'
 import {
   configurableFactories, migrateHiddenKeys, shouldCreateWidget, widgetEnabled, widgetToggleEnabled, withWidgetEnabled,
@@ -58,6 +68,33 @@ export interface StatusBarWidget extends StatusBarWidgetFactory {
  *   `LanguageServiceWidgetFactory.kt:12`（本仓的 `smartMode`）。
  * 其余（`PositionPanelWidgetFactory`/`MemoryIndicatorWidgetFactory`/`PowerSaveStatusWidgetFactory`/
  * `NotificationWidgetFactory`/git 的 `GitBranchWidget.Factory`）都是**直接实现**接口，没有这一层。
+ *
+ * `displayName` 一律取上游 `getDisplayName()` 那句 bundle 的**中文包取值**（本轮逐条解包核过，
+ * 中文包 = `D:\IntelliJ IDEA 2026.2\plugins\localization-zh\lib\localization-zh.jar` 里的
+ * `messages/*.properties`，英文原值 = `platform/platform-api/resources/messages/UIBundle.properties`）：
+ *   · `Position` `status.bar.position.widget.name` = 「行:列号」（英文 `:183` "Line:Column Number"，
+ *     `PositionPanelWidgetFactory.kt:15`）—— 本仓原写「光标位置」是自造说法，已订正；
+ *   · `InsertOverwrite` `status.bar.selection.mode.widget.name` = 「编辑器选择模式」（英文 `:186`，
+ *     `ColumnSelectionModeWidgetFactory.java:20`）—— 原写「列选择」；
+ *   · `ReadOnlyAttribute` `status.bar.read.only.widget.name` = 「只读特性」（英文 `:187`，
+ *     `ReadOnlyAttributeWidgetFactory.java:21`）—— 原写「只读」；
+ *   · `Notifications` `status.bar.notifications.widget.name` = 「通知」（英文 `:188`，
+ *     `NotificationWidgetFactory.java:24`）—— 原写「通知中心」；
+ *   · `Memory` `status.bar.memory.usage.widget.name` = 「内存指示器」（英文 `:194`，
+ *     `MemoryIndicatorWidgetFactory.java:18`）—— 原写「内存」。
+ * 已经在磁盘上就与上游一致的六条本轮复核过，不改：`LineSeparator`「行分隔符」（英文 `:184`）、
+ * `Encoding`「文件编码」（`:185`）、`VfsRefresh`「文件系统同步」（`:201`）、
+ * `PowerSaveMode`「省电模式」（`InspectionsBundle.properties:327` = "Power Save Mode"）、
+ * `CodeStyleStatusBarWidget`「缩进」（英文 `:193` "Indentation"）、git 的「Git 分支」
+ * （`plugins/git4idea/shared/resources/messages/GitBundle.properties:994`，`GitBranchWidget.kt:123`）、
+ * `LanguageServiceStatusBarWidget`「语言服务」（`LangBundle.properties`，`language.services.widget`）。
+ *
+ * ⚠ 上游 `NotificationWidgetFactory.isAvailable()`（`:13-15`）那句是
+ * `UISettings.hideToolStripes || UISettings.presentationMode` —— 正常档（工具窗口条可见）时那个
+ * **状态栏**通知组件根本不该建，通知住在工具窗口条上的通知区（`IdeNotificationArea`）。本仓没有
+ * 那条通知区：Event Log 面板是工具窗口的一个内容（`src/components/ToolWindowView.vue:191`），而气球/
+ * 弹层那一份用户可见面只有状态栏这条 chip（`App.vue` 的 `NoticeList`）。按上游那句判会让 chip 在默认
+ * 配置下消失 = 用户失去唯一的收通知入口，所以这里**登记差异、不照抄该闸**（`available` 保持缺省 true）。
  */
 export const STATUS_WIDGETS: StatusBarWidget[] = [
   // 上游已注册、本仓没有的 EP 工厂（逐条核过 `statusBarWidgetFactory` 扩展点下的全部注册处）。
@@ -78,28 +115,34 @@ export const STATUS_WIDGETS: StatusBarWidget[] = [
   //     `McpServerStatusBarWidget`、hg 的三个、vcs-impl 的 `IncomingChanges`）不在本仓范围。
   { id: 'file', displayName: '当前文件', factory: false },
   { id: 'progress', displayName: '后台任务', factory: false },
-  { id: 'bridge', displayName: '桥接状态', factory: false },
   { id: 'problems', displayName: '问题计数', factory: false },
   { id: 'branch', displayName: 'Git 分支', factory: true, upstreamId: 'git' },
-  { id: 'position', displayName: '光标位置', factory: true, upstreamId: 'Position' },
+  { id: 'position', displayName: '行:列号', factory: true, upstreamId: 'Position' },
   { id: 'lineSeparator', displayName: '行分隔符', factory: true, upstreamId: 'LineSeparator', editorBased: true },
   { id: 'encoding', displayName: '文件编码', factory: true, upstreamId: 'Encoding', editorBased: true },
-  { id: 'readonly', displayName: '只读', factory: true, upstreamId: 'ReadOnlyAttribute', editorBased: true },
-  { id: 'column', displayName: '列选择', factory: true, upstreamId: 'InsertOverwrite', editorBased: true },
+  { id: 'readonly', displayName: '只读特性', factory: true, upstreamId: 'ReadOnlyAttribute', editorBased: true },
+  { id: 'column', displayName: '编辑器选择模式', factory: true, upstreamId: 'InsertOverwrite', editorBased: true },
   { id: 'indent', displayName: '缩进', factory: true, upstreamId: 'CodeStyleStatusBarWidget', editorBased: true },
-  { id: 'notices', displayName: '通知中心', factory: true, upstreamId: 'Notifications' },
+  { id: 'notices', displayName: '通知', factory: true, upstreamId: 'Notifications' },
   // `VfsRefreshIndicatorWidgetFactory.java:53-59`：显示名取 `status.bar.vfs.refresh.widget.name`
   // （中文包 =「文件系统同步」）、`isEnabledByDefault() = false`（用户要去勾选清单里打开）、
   // 空闲时那个 JLabel 是**空图标**（`:100` `EmptyIcon.ICON_16`），只在同步期间换成 `AnimatedIcon.FS`
   // 转起来（`:109-119` 的 start/stop）。上游那整个类是 `@ApiStatus.Internal`（`:27`），组件还
   // `setEnabled(false)`（`:106`）—— 它本来就**不可点**，所以本仓落成一个只读的 span 而不是假按钮。
   { id: 'vfsRefresh', displayName: '文件系统同步', factory: true, upstreamId: 'VfsRefresh', enabledByDefault: false },
-  { id: 'memory', displayName: '内存', factory: true, upstreamId: 'Memory', enabledByDefault: false },
+  { id: 'memory', displayName: '内存指示器', factory: true, upstreamId: 'Memory', enabledByDefault: false },
   { id: 'powerSave', displayName: '省电模式', factory: true, upstreamId: 'PowerSaveMode', enabledByDefault: false },
   // 上游有两个"跟语言服务有关"的组件：`SmartModeIndicator`（默认关、`isInternal = true`，只在内部模式出现）
   // 与 `LanguageServiceStatusBarWidget`（editor-based，默认开）。本仓这条 chip 说的是"当前文件有没有活着的
   // 语言服务"（见 App.vue 的 `smartModeLabel`），是后者；按前者登记会让它默认消失。
   { id: 'smartMode', displayName: '语言服务状态', factory: true, upstreamId: 'LanguageServiceStatusBarWidget', editorBased: true },
+  // 桶 3b W3 落的那颗真 `lsWidget`：每台语言服务一条 + 分「正在当前文件/其他文件」两段 + 停止/重启动作
+  // （`platform/lang-impl/resources/intellij.platform.lang.impl.xml:1509-1511` 注册的
+  // `LanguageServiceWidgetFactory`，`getId()` = `LanguageServiceStatusBarWidget`，
+  // `getDisplayName()` = `LangBundle.properties:604` `language.services.widget` = 「语言服务」）。
+  // 注意：上面那条 `smartMode` 也登记着同一个 upstreamId（桶 6 当时的取舍，被
+  // `tests/status-bar-widgets.test.mjs:112,117` 钉住，本轮不放松）⇒ 两条的归因重叠已如实报给测试属主。
+  { id: 'lspServices', displayName: '语言服务', factory: true, upstreamId: 'LanguageServiceStatusBarWidget', editorBased: true },
 ]
 
 const BY_ID = new Map(STATUS_WIDGETS.map(widget => [widget.id, widget]))
@@ -201,7 +244,7 @@ export const SHOW_WIDGET_LABEL = '显示'
 
 export function widgetToggleRows(hasEditor: boolean): WidgetToggleRow[] {
   // 只覆盖 **EP 工厂**（`factory: true`）：上游 `StatusBarWidgetsOptionProvider` 遍历的是
-  // `manager.getWidgetFactories()`，而 `file`/`progress`/`bridge`/`problems` 那四条在本仓是
+  // `manager.getWidgetFactories()`，而 `file`/`progress`/`problems` 那三条在本仓是
   // "直接画进面板的组件"（上游 `ToolWindowsWidget` / `InfoAndProgressPanel` 那一类），
   // 根本没有工厂，也不会出现在那批搜索命中里。
   return configurableFactories(STATUS_WIDGETS.filter(widget => widget.factory)).map(widget => ({

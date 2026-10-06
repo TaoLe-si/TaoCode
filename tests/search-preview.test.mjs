@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   PREVIEW_CONTEXT_LINES, PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE,
-  previewHeader, previewLines, previewWindow,
+  previewHeader, previewLines, previewWindow, resultLineParts,
 } from '../src/searchPreview.ts'
 
 const read = rel => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
@@ -129,4 +129,22 @@ test('the preview pane is labelled and styled like the rest of the panel', () =>
   assert.match(panel, /\.fs-preview-line\.current \{ background: var\(--accent-soft\)/)
   // 矮停靠区里预览体不能只剩标题（真机截图看到过：列表吃掉整块，正文在折叠线以下）。
   assert.match(panel, /\.fs-preview \{[^}]*min-height: 96px/, '预览面板保底高度')
+})
+
+// —— 结果列表那一行的行内切分（同一族的第二段规则，从面板搬进来）——
+
+test('resultLineParts 按宿主报的 column/length 切行内命中，不在面板里重新匹配', () => {
+  assert.deepEqual(resultLineParts('get(user, name)', 5, 4),
+    [{ text: 'get(', hit: false }, { text: 'user', hit: true }, { text: ', name)', hit: false }])
+  assert.deepEqual(resultLineParts('abc', 1, 3), [{ text: 'abc', hit: true }], '整行命中时只有一段')
+  assert.deepEqual(resultLineParts('abc', 3, 5), [{ text: 'ab', hit: false }, { text: 'c', hit: true }], 'length 越界时夹到行尾')
+  assert.deepEqual(resultLineParts('abc', 0, 2), [{ text: 'ab', hit: true }, { text: 'c', hit: false }], 'column 缺省（0）按行首算')
+  assert.deepEqual(resultLineParts('', 1, 0), [{ text: '', hit: true }], '空行给一段空命中 —— 与搬出组件前那份逐字同形')
+})
+
+test('面板用这条规则渲染结果行（不是自己再实现一份切分）', () => {
+  const panel = read('src/components/SearchPanel.vue')
+  assert.match(panel, /import \{[^}]*resultLineParts as lineParts[^}]*\} from '\.\.\/searchPreview'/)
+  assert.match(panel, /in lineParts\(match\.preview, match\.column, match\.length\)/)
+  assert.doesNotMatch(panel, /function parts\(/, '切分已搬进 src/searchPreview.ts，面板不留第二份')
 })

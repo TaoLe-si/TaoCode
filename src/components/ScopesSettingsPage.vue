@@ -19,8 +19,12 @@
 //   * 模块只有隐式一个，名字取工作区目录名；Include/Exclude 生成的模式里带 `[模块名]`
 //     （`ProjectPatternProvider.createPackageSet` :82-121 用 `module.getName()`），
 //     因此重命名项目目录会让旧作用域失效 —— 与 IDEA 重命名模块同效。
-//   * 预定义作用域（Project Files / Problems / …）由 `CustomScopesProvider` 提供，本仓没有这些
-//     提供者，故列表里只有用户自定义的作用域；查询不到名字的 `$引用` 恒不匹配（源码同）。
+//   * 预定义作用域：**作用域列表**里仍然只有用户自定义的那些（上游那张表由 `ProjectScopeService`
+//     合成，`CustomScopesProvider` 的扩展点本仓没有 ⇒ 在列表里造一排只读条目就是假控件）。
+//     但**分析范围**的单选组不同：那里本可以出现标准档，所以本仓把可判定的三档
+//     （项目文件 / 项目生产文件 / 项目测试文件，`src/analysisScope.ts` 的 `STANDARD_ANALYSIS_SCOPES`）
+//     直接给进单选组 —— 判定来自 `src/packageDepsView.ts` 的路径分类，不靠项目设置里的那张表。
+//     查询不到名字的 `$引用` 恒不匹配（源码同）。
 import { computed, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, Copy, FileText, Folder, Plus, Save, Trash2,
@@ -32,8 +36,8 @@ import {
 import { moduleScopeModel, scopeFileSystem, type ScopeFileSystem } from '../moduleScopes'
 import { matchedJars } from '../externalLibraries'
 import {
-  analysisScope, analysisUiOptions, scopeSummary, setAnalysisScopeNamed, setAnalysisScopeNamedScopes,
-  setAnalysisUiOption,
+  analysisScope, analysisUiOptions, isStandardAnalysisScope, scopeSummary, setAnalysisScopeNamed,
+  setAnalysisScopeNamedScopes, setAnalysisUiOption, STANDARD_ANALYSIS_SCOPES,
 } from '../analysisScope'
 
 import { iconSize } from '../uiIcons'
@@ -371,8 +375,10 @@ const analysisChoice = computed<string>({
   set: name => { if (name !== CUSTOM_CHOICE) setAnalysisScopeNamed(name) },
 })
 
-/** 选中的作用域被改名/删掉 ⇒ 范围里一个文件都找不到（上游 `preselectButton` :128-146 找不到就退回默认档）。 */
+/** 选中的作用域被改名/删掉 ⇒ 范围里一个文件都找不到（上游 `preselectButton` :128-146 找不到就退回默认档）。
+ *  标准范围（`STANDARD_ANALYSIS_SCOPES`）不依赖项目设置里的那张表 ⇒ 永远"认得"，不该弹这句警告。 */
 const analysisChoiceKnown = computed(() => analysisScope.value.kind !== 'named'
+  || isStandardAnalysisScope(analysisScope.value.namedScope ?? '')
   || appliedScopes.value.some(entry => entry.name === (analysisScope.value.namedScope ?? '')))
 
 const analysisKind = computed(() => analysisScope.value.kind)
@@ -528,6 +534,15 @@ defineExpose({ dirty, getDraft })
         <label v-for="entry in appliedScopes" :key="`analysis-${entry.name}`" class="analysis-radio">
           <input v-model="analysisChoice" type="radio" name="analysis-scope" :value="entry.name" :disabled="!root" />
           <span>作用域“{{ entry.name }}”</span>
+        </label>
+        <!-- 标准范围三档（上游是代码级 GlobalSearchScope，不在项目设置那张表里）：
+             项目文件 = ProjectFilesScope.java:25-28（本仓工作区清单即内容根 ⇒ 恒真）
+             项目生产文件 = GlobalSearchScopesCore.java:152（isInSourceContent 且非测试）
+             项目测试文件 = GlobalSearchScopesCore.java:188（TestSourcesFilter.isTestSources）
+             id 与显示名的两向映射 = ScopeIdMapper.kt:24-26 / ScopeIdMapperImpl.kt:20-21。 -->
+        <label v-for="scope in STANDARD_ANALYSIS_SCOPES" :key="`analysis-standard-${scope.id}`" class="analysis-radio">
+          <input v-model="analysisChoice" type="radio" name="analysis-scope" :value="scope.id" :disabled="!root" />
+          <span>{{ scope.title }}</span>
         </label>
       </div>
       <p v-if="!appliedScopes.length" class="field-hint">还没有已应用的作用域：先添加并应用，才能把它选成分析范围。</p>

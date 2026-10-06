@@ -91,6 +91,22 @@ export function createHierarchyView(deps: HierarchyViewDeps) {
     if (!HIERARCHY_SCOPES.some(entry => entry.id === scope)) return
     hierScope.value = scope
   }
+  /**
+   * 下拉的选项（面板只要 `v-for="entry in hierScopeOptions"`，不必再去 import `hierarchyScopes`）。
+   * 顺序与呈现名 = `HierarchyBrowserBaseEx.java:235-243` 那张表，五档 id =
+   * `HierarchyBrowserScopes.java:8-12`（都收在 `src/hierarchyScopes.ts:44-50`）。
+   */
+  const hierScopeOptions = computed(() => HIERARCHY_SCOPES)
+  /**
+   * `<select @change>` 的那一层：DOM 事件给的是**字符串**，这里做白名单校验后再落到类型化的
+   * `pickHierarchyScope` —— 宿主模板里就不用在事件表达式上写 `as`（原请求 W-2 只能那么写）。
+   * 校验不过整档不动（与 `pickHierarchyScope`、`src/hierarchyScopes.ts:91-94` 同一条口径）。
+   */
+  function setHierarchyScope(value: string) {
+    const matched = HIERARCHY_SCOPES.find(entry => entry.id === value)
+    if (!matched) return
+    hierScope.value = matched.id
+  }
   function hierarchyKey(item: LspHierarchyItem) {
     return JSON.stringify([item.path, item.name, item.kind, item.line, item.character])
   }
@@ -233,8 +249,8 @@ export function createHierarchyView(deps: HierarchyViewDeps) {
   }
   return {
     hierKind, hierRoot, hierItems, hierOrigin, hierBusy, hierError, hierDirection, hierOptions, hierTitle, hierRows,
-    hierScope, hierScopeNotice, hierPinned, hierDirectionLabel,
+    hierScope, hierScopeNotice, hierScopeOptions, hierPinned, hierDirectionLabel,
     hierarchyKey, hierarchyNodes, hierarchyChildren, resetHierarchy, prepareHierarchy, loadHierarchy, toggleHierarchy, pickHierarchyDirection, callSiteTarget,
-    pickHierarchyScope, exportCurrentHierarchy, hierarchyClipboardPayload, hierarchyExportSummary, pinCurrentHierarchy, closePinnedHierarchyTab,
+    pickHierarchyScope, setHierarchyScope, exportCurrentHierarchy, hierarchyClipboardPayload, hierarchyExportSummary, pinCurrentHierarchy, closePinnedHierarchyTab,
   }
 }

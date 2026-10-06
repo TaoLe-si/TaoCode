@@ -159,7 +159,18 @@ void Session::request(const std::string& kind, const std::string& path, int line
                 if (!error.is_null()) { on_result(Json(nullptr), std::move(error)); return; }
                 if (!result.is_object() || !result.contains("contents") || result.at("contents").is_null())
                     on_result({{"available", false}}, Json(nullptr));
-                else on_result({{"available", true}, {"contents", hover_text(result.at("contents"))}}, Json(nullptr));
+                else {
+                    // `Hover.range` 原样透传（服务器没给就不带这一格）：上游也是把服务器给的区间
+                    // 交给宿主（`platform/lsp-impl/src/impl/LspRequestExecutor.kt:220`
+                    // `it.range = hover.range?.let { range -> lspDocument.toHostRange(range) }`），
+                    // 文档缓存再按这条区间命中（`HoverResultCache.kt:12`
+                    // `storedValue.textRange.contains(queriedOffset)`；服务器没给区间时上游退化成
+                    // 零长区间 `TextRangeAndMarkupContent.kt:16-19`，本仓前端同样退化）。
+                    // 前端消费点：`src/docHoverContent.ts` 的 `hoverRangeFromPayload`。
+                    auto reply = Json{{"available", true}, {"contents", hover_text(result.at("contents"))}};
+                    if (result.contains("range") && result.at("range").is_object()) reply["range"] = result.at("range");
+                    on_result(std::move(reply), Json(nullptr));
+                }
             });
     } else if (kind == "definition" || kind == "declaration") {
         if (dispatch_navigation(kind, uri, *host, position, on_result)) return;

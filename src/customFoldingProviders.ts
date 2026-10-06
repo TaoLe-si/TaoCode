@@ -14,7 +14,8 @@
 //     `isCustomRegionStart` / `isCustomRegionEnd` / `getPlaceholderText` / `getDescription` /
 //     `getStartString`+`getEndString`，本表逐字段对应。
 //   · 判定入口在上游是 `CustomFoldingBuilder.java:164-187`（`isCustomRegionStart/End(node)` 各问一次
-//     provider），provider 的挑选是 `:194-203`（按注册顺序问过去，取**第一个**认领的）。
+//     provider），provider 的挑选是 `:194-203`（循环**没有 break** ⇒ 取**最后一个**认领的，
+//     并缓存在 `myDefaultProvider` 字段里给整次构建复用；逐条对应见下面 `markersPair` 的注释）。
 //
 // 文案出处：中文取随 IDE 发货的语言包 `plugins/localization-zh/lib/localization-zh.jar` 的
 // `messages/LangBundle.properties:113-114`（`<editor-fold…> 注释` / `region…endregion 注释`），
@@ -120,16 +121,63 @@ export function markerKindOf(body: string | null): { provider: CustomFoldingProv
   return null
 }
 
+/** 一条 region 标记（开始或结束）连同认它的那个 provider —— 配对要比较 provider 身份。 */
+export type RegionMarker = { provider: CustomFoldingProviderInfo; kind: 'start' | 'end' }
+
+// 区域配对必须**同族**（两条 provider 各自的 `isCustomRegionStart`/`isCustomRegionEnd` 是一对，
+// 上游一次构建里 start/end 问的是**同一份** provider —— `CustomFoldingBuilder.java:194-203`
+// 把认下来的 provider 缓存在 `myDefaultProvider` 字段，`:79-92` 的入栈/出栈都走这一个 provider）。
+//
+// 留痕：原注释写的是「按注册顺序问过去，取**第一个**认领的」。实际 `:196-200` 那个循环**没有 break**，
+// 命中的是**最后一个**认领该文本的 provider，而且结果按 builder 实例缓存、对后续所有注释复用
+// （`myDefaultProvider != null` 就不再重问，直到下一次 `buildFoldRegions` 在 `:38` 清空）。
+// 这是上游的取巧写法：一个文件里混用两族标记时它只认其中一族。本仓逐行认 provider
+// （不复制那份缓存），但**保留可核实的那一条后果 —— 开始与结束标记不同族就不配对**：
+// `//<region>` 不该被 `//endregion` 关掉、`#region` 也不该被 `//</region>` 关掉，
+// 否则一次手误的混用会让整段代码从错的那一行折到底。
+/** 两条标记能否配成同一个区域（同族才算，异族的那条按「不是区域收尾」处理，与上游同果）。 */
+export function markersPair(start: RegionMarker, end: RegionMarker): boolean {
+  return start.kind === 'start' && end.kind === 'end' && start.provider === end.provider
+}
+
+// 栈里**最近的同族开始标记**（自顶向下找，找不到返回 -1）。
+// 上游一次构建只有一份 provider（`CustomFoldingBuilder.java:194-203` 的那份缓存），
+// 所以它的 `FoldingStack` 里天然只有同族开始标记，`:83-84` 的 `pop()` 就等于「最近的那个」；
+// 本仓逐行认 provider ⇒ 栈里可能混着两族，得按同族找。
+// 压在它上面的**异族**开始标记因此被丢弃 —— 那些是没闭合的标记，上游的规则是不产生区域
+// （`CustomFoldingBuilder.java:82-91` 只在配到结束标记时才 `descriptors.add`）。
+/** 自顶向下找与这条结束标记同族的开始标记，返回它在栈里的下标（没有则 -1）。 */
+export function matchingStartIndex(stack: readonly RegionMarker[], end: RegionMarker): number {
+  for (let index = stack.length - 1; index >= 0; --index) {
+    if (markersPair(stack[index]!, end)) return index
+  }
+  return -1
+}
+
 // 上游 `getPlaceholderText(elementText)`（`CustomFoldingBuilder.java:102-111` 转发的就是它）。
-// 取不到说明文字时返回 `...` —— 两个能核实的 provider 的空值分支都是这个字面量
-// （`VisualStudioCustomFoldingProvider.java:26`、`NetBeansCustomFoldingProvider.java:26`），
+// 两个 provider 的实现都是 `elementText.replaceFirst(正则, "$1").trim()`，空则 `...`
+// （`VisualStudioCustomFoldingProvider.java:23-27`、`NetBeansCustomFoldingProvider.java:24-27`），
 // `CustomFoldingBuilder.java:117-119` 那个单参数重载也直接返回 `...`。
-export function placeholderOf(body: string | null): string {
+//
+// **2026-10-06 本轮补的一条**：Java 的 `replaceFirst` 在**正则不匹配时原样返回入参**，
+// 所以「开始标记里根本没有那个捕获组」时占位文字是**整段元素文本**（trim 后），不是 `...`。
+// 能核实的只有 NetBeans 一支 —— 它的正则要 `desc="…"`（`:25`），写成
+// `<editor-fold>` / `<editor-fold defaultstate="collapsed">` 时上游折出来就是整条注释
+// （形如 `// <editor-fold defaultstate="collapsed">`）。原写法是「取不到就 `...`」，
+// 那是把「捕获为空」与「正则不匹配」两档合并了 ⇒ 现在分开：
+//   · 匹配且捕获为空 → `...`（两个 provider 的 `isEmpty()` 分支，`:26`）；
+//   · 正则不匹配 → 整段元素文本（没有它时退回正文），仍空才 `...`。
+// `elementText` 传的就是上游 `node.getText()` 在本仓的替身：**去掉行首缩进的整条注释行**
+// （含注释前缀），不是剥了前缀的正文 —— 前缀在上游那段文本里，折起来时它也在折线里。
+export function placeholderOf(body: string | null, elementText?: string): string {
   if (!body) return '...'
   const marker = markerKindOf(body)
   if (!marker || marker.kind !== 'start') return '...'
   const matched = marker.provider.placeholder.exec(body)
-  if (!matched) return '...'
+  if (!matched) {
+    const whole = (elementText ?? body).trim()
+    return whole || '...'
+  }
   // 尖括号形态的收尾 `>` 不算说明（`<region 构造>` → `构造`）。
   const tail = (marker.provider.blockCommentTail && body.startsWith('/*')
     ? matched[1]!.replace(marker.provider.blockCommentTail, '')

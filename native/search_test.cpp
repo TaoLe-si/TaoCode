@@ -207,6 +207,70 @@ int main() {
         check(result.at("matches").empty() && result.at("fileCount").get<int>() == 0, "no query -> no matches");
     });
 
+    // ── 替换模板的展开 = 上游 RegExReplacementBuilder（逐条 :87-247），不再是 std::format ──
+    // 这四条钉的是「IDEA 会展开、std::match_results::format 不展开」的那几档。
+    run("regex replace expands $0 as the whole match", [&] {
+        put(root / "re.txt", "foo1bar\n");
+        Options options; options.query = "foo(\\d)"; options.replacement = "[$0-$1]";
+        options.regex = true; options.include = {"re.txt"};
+        taocode::search::replace(root, options);
+        // 上游 `:164`（refNum 从首位数字起算）+ Java 的 group(0) = 整段命中；
+        // std::format 那侧 `$0` 不是替换标记，会被原样写进文件。
+        check(grab(root / "re.txt") == "[foo1-1]bar\n", "$0 must splice the whole match");
+        fs::remove(root / "re.txt", ec);
+    });
+
+    run("regex replace expands backslash escapes into real characters", [&] {
+        put(root / "re.txt", "x y\n");
+        Options options; options.query = "x"; options.replacement = "a\\nb\\tc\\x0041\\q";
+        options.regex = true; options.include = {"re.txt"};
+        taocode::search::replace(root, options);
+        // `:114-118`（\n \t）+ `:119-128`（\xNNNN，`\x0041` = 'A'）+ `:134`（认不出的转义
+        // **去掉反斜杠**：`\q` -> 'q'）。std::format 会把这四档全部原样留在文件里。
+        check(grab(root / "re.txt") == "a\nb\tcAq y\n", "\\n \\t \\x0041 \\q expanded like upstream");
+        fs::remove(root / "re.txt", ec);
+    });
+
+    run("regex replace parses \\x with Integer.parseInt semantics", [&] {
+        put(root / "re.txt", "x\n");
+        Options bad; bad.query = "x"; bad.replacement = "\\xZZ00"; bad.regex = true; bad.include = {"re.txt"};
+        taocode::search::replace(root, bad);
+        // `:121-126` 的 catch **不前进 cursor** ⇒ 那 4 位随后按普通字符走（JS 侧同一条判据）。
+        check(grab(root / "re.txt") == "ZZ00\n", "an unparseable \\x leaves the four characters as text");
+        fs::remove(root / "re.txt", ec);
+    });
+
+    run("regex replace applies the case-conversion regions", [&] {
+        put(root / "re.txt", "ab cd\n");
+        Options up; up.query = "([a-z]+)"; up.replacement = "\\U$1"; up.regex = true; up.include = {"re.txt"};
+        taocode::search::replace(root, up);
+        check(grab(root / "re.txt") == "AB CD\n", "\\U… 管到模板末尾（:189-192 的夹取）");
+        fs::remove(root / "re.txt", ec);
+        put(root / "lo.txt", "AB\n");
+        Options one; one.query = "([A-Z]+)"; one.replacement = "\\l$1"; one.regex = true; one.include = {"lo.txt"};
+        taocode::search::replace(root, one);
+        // `\l` 只转**下一个字符**（`:206-212`），区域长度是 1。
+        check(grab(root / "lo.txt") == "aB\n", "\\l folds only the first character");
+        fs::remove(root / "lo.txt", ec);
+    });
+
+    run("a malformed replacement template refuses before writing anything", [&] {
+        put(root / "bad.txt", "foo\n");
+        // 上游在「Replace All」按钮上跑 `RegExReplacementBuilder.validate`（FindPopupPanel.java:1548），
+        // 模板非法 ⇒ `Malformed replacement string`，**一个字都不写**。本仓在 walk 之前跑同一趟。
+        const std::vector<std::string> broken = {"$9", "$&", "${name}", "a\\", "$"};
+        for (const auto& tmpl : broken) {
+            Options options; options.query = "foo"; options.replacement = tmpl;
+            options.regex = true; options.include = {"bad.txt"};
+            bool refused = false;
+            try { taocode::search::replace(root, options); }
+            catch (const taocode::WorkspaceError& e) { refused = e.code == "INVALID_REQUEST"; }
+            check(refused, "template must be refused up front: " + tmpl);
+            check(grab(root / "bad.txt") == "foo\n", "a refused replace leaves the file untouched: " + tmpl);
+        }
+        fs::remove(root / "bad.txt", ec);
+    });
+
     // 作用域编辑器（IDEA FileTreeModelBuilder + ScopeEditorPanel 的「包含 N / 共 M」）用的清单：
     // 与大写扫描同一套目录排除策略，但不读内容、不做二进制判定，并且排序稳定。
     run("list_files returns the whole sorted project listing", [&] {

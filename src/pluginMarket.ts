@@ -6,8 +6,12 @@
 //  · `.../newui/PluginUiModel.kt:30-126`
 //     条目展示字段：pluginId、name、version、vendor、tags、downloads、rating、date、
 //     displayCategory、changeNotes、size。
-//  · `.../MarketplaceTabSearchSortByOptions.kt:10-17`
+//  · `.../MarketplaceTabSearchSortByOptions.kt:10-18`
 //     排序项与它们的 query 词：Update Date/DOWNLOADS/RATING/Name/Relevance。
+//  · `.../newui/SearchQueryParser.kt:24-124`（`Marketplace`）
+//     市场页搜索框的 `/vendor:` `/tag:` `/sortBy:` `/repository:` 与 `/suggested` `/internal`
+//     `/staffPicks` 三个布尔词 —— 解析在下面的 `parseMarketplaceQuery`，`/sortBy:` 的取值词
+//     同时是市场页排序动作写进搜索框的词面（`MarketplacePluginsTab.kt:287,298,309`）。
 //  · `.../marketplace/PluginChunkDataSource.kt`、`MarketplacePluginDownloadService.kt`
 //     下载/分块续传 —— 本仓不适用（见下）。
 //
@@ -22,6 +26,7 @@
 //
 // 这个模块只有纯函数 + 依赖注入的加载/安装流程（不 import bridge、不持状态），所以能单独测
 // （`tests/plugin-market.test.mjs`）；RPC 调用在 `src/components/PluginMarketPanel.vue` 里接。
+import { splitPluginQuery, vendorTextMatches } from './pluginGroups.ts'
 import type { PluginInfo } from './pluginGroups.ts'
 
 // ── 条目与清单 ────────────────────────────────────────────────────────────────
@@ -295,6 +300,14 @@ export interface MarketplaceQuery {
   category: string
   /** `all` = 全部；`outdated` 是 `/outdated`（有更新）；`downloaded` 是 `/downloaded`（已安装）。 */
   scope: 'all' | 'outdated' | 'downloaded'
+  /**
+   * `/vendor:` 的取值（`SearchQueryParser.kt:25` 的 `vendors`）。多个取值是**或**，
+   * 与关键字/类目是**与**；判定用 `vendorTextMatches`（本地仓库没有 `organization=` 服务端，
+   * `:108-113` 那条 URL 参数拼法在本仓落到客户端过滤）。
+   */
+  vendors?: readonly string[]
+  /** `/tag:` 的取值（`:26` 的 `tags`）；命中口径见 `marketplaceEntryTagMatches`。 */
+  tags?: readonly string[]
 }
 
 export const MARKETPLACE_SCOPE_LABELS: Record<MarketplaceQuery['scope'], string> = {
@@ -305,16 +318,34 @@ export const MARKETPLACE_SCOPE_LABELS: Record<MarketplaceQuery['scope'], string>
 
 /**
  * 关键词匹配（`MarketplaceRequests.searchPlugins` 的关键字口径）：名称 / id / 描述 / 厂商 / 类目 / 标签。
+ * `/vendor:`、`/tag:` 是叠加的收窄（与关系），各自内部取值是或关系。
  */
 export function matchesMarketplaceQuery(entry: MarketplacePlugin, query: MarketplaceQuery, installed: readonly PluginInfo[]): boolean {
   const status = marketplaceEntryStatus(entry, installed)
   if (query.scope === 'outdated' && status.state !== 'update') return false
   if (query.scope === 'downloaded' && status.state === 'available') return false
   if (query.category && marketplaceEntryCategory(entry) !== query.category) return false
+  // `/vendor:`：与已安装页同一条判定（`vendorTextMatches`，`MyPluginModel.kt:1348-1361`）。
+  // 上游市场页是把取值拼成 URL 参数 `organization=`（`SearchQueryParser.kt:108-113`）交给服务端，
+  // 本仓的仓库在本地工作区，所以这条过滤落在客户端，判定沿用已安装页那一处（不复制第二份规则）。
+  const vendors = query.vendors ?? []
+  if (vendors.length && !vendorTextMatches(entry.vendor, vendors)) return false
+  // `/tag:`：已安装页用 `ContainerUtil.intersects`（`InstalledPluginsTabSearchResultPanel.kt:100`）
+  // = 标签名**全等**求交集；市场页在上游把标签拼成 `tags=`（`SearchQueryParser.kt:101-106`）发给服务端，
+  // 服务端规则不在这棵参考树里 ⇒ 本仓沿用唯一能核实的全等口径（徽章点出来的也是原样拼词，见 `tagQueryWord`）。
+  const tags = query.tags ?? []
+  if (tags.length && !marketplaceEntryTagMatches(entry, tags)) return false
   if (!query.keyword) return true
   const needle = query.keyword.toLowerCase()
   return [entry.name, entry.id, entry.description, entry.vendor, entry.category, ...(entry.tags ?? [])]
     .some(value => (value ?? '').toLowerCase().includes(needle))
+}
+
+/** 条目的标签集合与查询标签是否有交集（标签名全等，两侧都去首尾空白）。 */
+export function marketplaceEntryTagMatches(entry: MarketplacePlugin, tags: readonly string[]): boolean {
+  const owned = (entry.tags ?? []).map(tag => tag.trim())
+  if (!owned.length) return false
+  return tags.some(needle => owned.includes(needle.trim()))
 }
 
 /** 排序（缺省相关度 = 清单顺序；`name` 用码元序，与已安装页同一比较口径）。 */
@@ -345,6 +376,151 @@ export function marketplaceCategories(entries: readonly MarketplacePlugin[]): st
     if (!categories.includes(category)) categories.push(category)
   }
   return categories
+}
+
+// ---- 市场页搜索框的 `/xxx` 语法（`newui/SearchQueryParser.kt:24-124` 的 `Marketplace`）----
+
+/**
+ * 市场页认得的**带取值**属性词（`newui/SearchWords.kt:9-12` 的子集，消费点是
+ * `SearchQueryParser.kt:77-84` 的 `handleAttribute`）。键是分词后的原样词 ——
+ * `splitQuery`（`:244-245`）把 `:` 留给前一个词，所以 `/sortBy:updated` 拆成 `/sortBy:` + `updated`。
+ * 上游拿词面做的是**逐字**比较，本仓与已安装页（`parseInstalledQuery`）同一口径按忽略大小写匹配：
+ * 只是多接受几种写法，不改变任何一条命中/取值规则。
+ */
+const MARKETPLACE_ATTRIBUTE_WORDS: Record<string, 'vendor' | 'tag' | 'sortBy' | 'repository'> = {
+  '/vendor:': 'vendor',
+  '/tag:': 'tag',
+  '/sortby:': 'sortBy',
+  '/repository:': 'repository',
+}
+
+/**
+ * 三个**布尔**词（`SearchWords.kt:13-15`）。上游不在 `handleAttribute` 里处理它们，
+ * 而是在市场页重写的 `addToSearchQuery`（`SearchQueryParser.kt:68-75`）里拦下 ——
+ * 所以它们既不进关键字串，也不会像 `/vendor:` 那样吃掉后一个词。
+ */
+const MARKETPLACE_BOOLEAN_WORDS: Record<string, 'suggested' | 'internal' | 'staffPicks'> = {
+  '/suggested': 'suggested',
+  '/internal': 'internal',
+  '/staffpicks': 'staffPicks',
+}
+
+/**
+ * `/sortBy:` 取值 → 排序项（`MarketplaceTabSearchSortByOptions.kt:10-14` 的 `query` 字段，
+ * 反查走 `getByQueryOrNull`，`:16-18`）。取值是**逐字**匹配的（上游 `it.query == query`），
+ * 所以 `/sortBy:Updated` 与上游一样落到 null。
+ */
+const SORT_BY_QUERY_VALUES: Record<string, MarketplaceSort> = {}
+for (const key of MARKETPLACE_SORTS) SORT_BY_QUERY_VALUES[MARKETPLACE_SORT_LABELS[key].query] = key
+
+/** 认识但本仓**没有数据源**的词，`deferred` 里给出的是这些词的中文说明。 */
+const MARKETPLACE_DEFERRED_LABELS: Record<'repository' | 'suggested' | 'internal' | 'staffPicks', string> = {
+  // 词面直译自上游文案（本地化包不在基准树里）：`IdeBundle.properties:1619` `Repository: {0}`、
+  // `:1605` `Suggested`、`:1601` `Internal plugins`、`:1618` `Staff Picks`。
+  repository: '仓库主机（/repository:）',
+  suggested: '推荐（/suggested）',
+  internal: '内部插件（/internal）',
+  staffPicks: '官方精选（/staffPicks）',
+}
+
+export interface MarketplaceSearch {
+  /** 拼回的关键字（`:12` 的 `searchQuery` + `:14-21` 的空格拼接）。 */
+  keyword: string
+  /** `/vendor:` 的取值（`:25`）。 */
+  vendors: string[]
+  /** `/tag:` 的取值（`:26`）。 */
+  tags: string[]
+  /** `/sortBy:` 命中的排序项；取值不认识时是 null（`:80` 的 `getByQueryOrNull`）。 */
+  sortBy: MarketplaceSort | null
+  /** `/repository:` 的取值（`:27`）：本仓只有一个本地仓库根，没有"多主机"这一层。 */
+  repositories: string[]
+  suggested: boolean
+  internal: boolean
+  staffPicks: boolean
+  /** 解析出来但没有数据源的词的说明（界面上如实说明，不参与过滤）。 */
+  deferred: string[]
+}
+
+/**
+ * 市场页查询解析 —— `SearchQueryParser.Marketplace` 的 `parse`（`:38-66`）逐条对齐：
+ *   · 空词表直接返回（`:42-44`）；
+ *   · **只有一个词**时它只能是关键字（`:45-48`，没有下一个词当取值）；
+ *   · 以 `:` 结尾的词吃下一个词当取值（`:53-56`）；**取值缺失**时把整条原样查询当关键字并停止
+ *     （`:57-60`，上游是 `addToSearchQuery(query)` + `return`；本仓与已安装页同样只保留整条原样文本，
+ *     不重复累加已收的关键字）；
+ *   · 其余词进关键字串，但三个布尔词在 `addToSearchQuery` 的重写里被拦下（`:68-75`）；
+ *   · 不认识的 `xxx:` 词照样吃掉取值、然后什么都不做（`:77-84` 的 when 没有 else 分支）。
+ */
+export function parseMarketplaceQuery(text: string): MarketplaceSearch {
+  const result: MarketplaceSearch = {
+    keyword: '', vendors: [], tags: [], sortBy: null, repositories: [],
+    suggested: false, internal: false, staffPicks: false, deferred: [],
+  }
+  const words = splitPluginQuery(text)
+  if (!words.length) return result
+  const keywords: string[] = []
+  const add = (value: string): void => {
+    const booleanWord = MARKETPLACE_BOOLEAN_WORDS[value.toLowerCase()]
+    if (booleanWord) result[booleanWord] = true
+    else keywords.push(value)
+  }
+  const handle = (name: string, value: string): void => {
+    switch (MARKETPLACE_ATTRIBUTE_WORDS[name.toLowerCase()]) {
+      case 'vendor':
+        if (!result.vendors.includes(value)) result.vendors.push(value)
+        break
+      case 'tag':
+        if (!result.tags.includes(value)) result.tags.push(value)
+        break
+      case 'repository':
+        if (!result.repositories.includes(value)) result.repositories.push(value)
+        break
+      case 'sortBy':
+        // 上游是赋值（`:80`）：后一次 `/sortBy:` 覆盖前一次，取值不认识就回到 null。
+        result.sortBy = SORT_BY_QUERY_VALUES[value] ?? null
+        break
+      default:
+        break
+    }
+  }
+  if (words.length === 1) {
+    add(words[0])
+  } else {
+    let index = 0
+    while (index < words.length) {
+      const name = words[index++]
+      if (name.endsWith(':')) {
+        if (index < words.length) handle(name, words[index++])
+        else {
+          keywords.length = 0
+          keywords.push(text)
+          break
+        }
+      } else add(name)
+    }
+  }
+  result.keyword = keywords.join(' ')
+  if (result.repositories.length) result.deferred.push(MARKETPLACE_DEFERRED_LABELS.repository)
+  if (result.staffPicks) result.deferred.push(MARKETPLACE_DEFERRED_LABELS.staffPicks)
+  if (result.suggested) result.deferred.push(MARKETPLACE_DEFERRED_LABELS.suggested)
+  if (result.internal) result.deferred.push(MARKETPLACE_DEFERRED_LABELS.internal)
+  return result
+}
+
+/**
+ * 标签徽章点出来的查询词 —— `SearchQueryParser.getTagQuery`（`:254-257`）：
+ * `/tag:` + 标签名，名字里有空格就用双引号包住（分词器把空格当分隔符，`:227-234` 才认引号）。
+ * 点击动作是**整框替换**（`newui/PluginsTab.kt:271` 的 `setTextIgnoreEvents(query)`），
+ * 上游的徽章监听器就挂在这个词上（`newui/PluginTagBadge.kt:29`）。
+ */
+export function tagQueryWord(tag: string): string {
+  return `/tag:${tag.includes(' ') ? `"${tag}"` : tag}`
+}
+
+/** 当前查询里生效的排序项（`/sortBy:` 优先于下拉框，与上游 `MarketplaceSortByAction.setState:748-755` 一致：
+ *  状态由解析结果决定，而不是由控件自己记着）。 */
+export function marketplaceEffectiveSort(sort: MarketplaceSort, search: MarketplaceSearch): MarketplaceSort {
+  return search.sortBy ?? sort
 }
 
 // ── 加载与安装（依赖注入：不 import bridge，测试传假实现）────────────────────

@@ -64,6 +64,9 @@ const workspaceWhen = (state: KeyBindingState) => state.workspace
 const editorWhen = (state: KeyBindingState) => state.editor
 const workspaceLspWhen = (state: KeyBindingState) => state.workspace && state.lsp
 const lspEditorWhen = (state: KeyBindingState) => state.editor && state.lsp
+// 转到测试 / 相关符号：菜单行的 `enabled` 是「有编辑器 + 有工程」（`src/menus/navigateMenu.ts:162`/`:169`），
+// 判据与那一行逐字对齐，不许两边各写一套。
+const workspaceEditorWhen = (state: KeyBindingState) => state.workspace && state.editor
 
 /**
  * 分派器尾部那一组的键位表（`src/keymap.ts` 从这张表读；数组顺序 = 分派优先级）。
@@ -106,6 +109,21 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     chord: { key: 'e', control: 'mod' }, when: workspaceWhen, upstream: '$default.xml:324-326 RecentFiles' },
   { id: 'navigate.gotoLine', label: '转到行…', display: 'Ctrl G', scope: 'editor',
     chord: { key: 'g', control: 'mod', forbid: ['shift'] }, when: editorWhen, upstream: '$default.xml:532-534 GotoLine' },
+  // 转到父方法 / 转到测试 / 相关符号（`GoToCodeGroup` 的三条，`LangActions.xml:194-196`）。
+  // 菜单行早已按上游文案与键位出现（`src/menus/navigateMenu.ts:153`/`:161`/`:168`），这一族补的是
+  // **分派面**：此前菜单写着加速键、全局分派表里却没有 ⇒ 「看着能按、按了没反应」。
+  // `forbid` 逐条给据：`control shift U` = EditorToggleCase（`:529-530`，另有 `:1122-1123` 的 Shelve）、
+  // `control alt T` = SurroundWith（`:915-916`）、`control HOME`/`shift HOME`/`control shift HOME`
+  // 各有其人（`:667-668`/`:892-893`/`:562-563`），`alt HOME` = ShowNavBar（`:14-15`，本仓在
+  // `src/keymap.ts` 的 if 链里已实现）—— 上游的键位是**精确匹配**，多一个修饰键就不该落到这一条。
+  { id: 'navigate.super', label: '转到父方法 / 父类或接口', display: 'Ctrl U', scope: 'editor',
+    chord: { key: 'u', control: 'mod', forbid: ['shift', 'alt'] }, when: lspEditorWhen, upstream: '$default.xml:251-253 GotoSuperMethod（文案 ActionsBundle.properties:698 Go to Super Method）' },
+  // 标题两档（`ActionsBundle.properties:701` `Go to Test` / `:702` `Go to Test Subject`）：表里钉上游的
+  // 主档，菜单那一行按当前文件是不是测试动态给（`src/menus/navigateMenu.ts:160`）。
+  { id: 'navigate.test', label: '转到测试', display: 'Ctrl Shift T', scope: 'editor',
+    chord: { key: 't', control: 'mod', shift: true, forbid: ['alt'] }, when: workspaceEditorWhen, upstream: '$default.xml:254-256 GotoTest（文案 ActionsBundle.properties:701 Go to Test）' },
+  { id: 'navigate.related', label: '相关符号…', display: 'Ctrl Alt Home', scope: 'editor',
+    chord: { key: 'Home', control: 'ctrl', alt: true, forbid: ['shift'] }, when: workspaceEditorWhen, upstream: '$default.xml:257-259 GotoRelated' },
   { id: 'refactor.changeSignature', label: '更改签名…', display: 'Ctrl F6', scope: 'editor',
     // 上游 `first-keystroke="control F6"`（`:470`）。`forbid` 两条都有据：
     // Ctrl+Shift+F6 = ChangeTypeSignature（`:472-474`）、Ctrl+Alt+F6 = SwitchCoverage（`:36-38`），
@@ -132,6 +150,87 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     chord: { key: 'c', control: 'ctrl', shift: true, alt: true }, when: editorWhen, upstream: '$default.xml:639-641 CopyReference' },
   { id: 'edit.copyPath', label: '复制路径', display: 'Ctrl Shift C', scope: 'editor',
     chord: { key: 'c', control: 'ctrl', shift: true, forbid: ['alt'] }, when: editorWhen, upstream: '$default.xml:454-456 CopyPaths' },
+]
+
+// ── 编辑器一族动作（有动作、**没有全局键位**）────────────────────────────────
+//
+// `KEY_BINDINGS` 只写「全局分派器 `src/keymap.ts` 尾部真的会去匹配的那些键位对」：`findKeyBinding`
+// 逐条比 `chord`，`tailActions` 又必须与那张表一一对应（判据 `tests/keymap-bindings.test.mjs`
+// 的「消费链：分派器从表读，动作映射与表一一对应」）。把没有全局键位的编辑器动作塞进那张表，
+// 就会得到一条永远按不到的绑定 + 一个空转的处理器 —— 即「假控件」。
+//
+// 所以这一族单独成表、只进**动作注册表**（`src/actionRegistry.ts` 的 `registerEditorActions`），
+// id 用**本仓的 id**（= 菜单行 id = `editingCommands` 的键名），上游的 `<action id>` 记在 `upstreamId`：
+// `menuUi.ts:246` 的 actionList 按 id 去重（菜单行优先），换成上游 id 反而会让「查找操作」出现双行。
+//
+// `key` 三态的判据在 `tests/keymap-bindings.test.mjs` 的「编辑器一族动作」那条：
+//   · `none` —— 上游 `$default.xml`（乃至 `keymaps/` 全部十张表）都没有这个动作的绑定 ⇒ **不许编加速键**
+//     （本仓铁律），菜单那一行的键位栏必须是空串；
+//   · `upstream` —— 上游有键位，本仓把它绑在编辑器的 CodeMirror keymap 里（`boundAt` 给文件:行号）；
+//   · `repo` —— 上游没有这个键位、这一把是本仓编辑器 keymap 自己给的 ⇒ `upstream` 必须写明
+//     「本仓绑定」与撞车的上游动作，不冒充上游（`KEY_BINDINGS` 里 `file.openPath`/`vcs.blame` 同口径）。
+export interface EditorActionChord {
+  /** 菜单与注册表的键位显示串（与 `src/menus/editMenu.ts` 那一行的第 3 个实参逐字相同）。 */
+  display: string
+  /** CodeMirror 的键位写法（`src/components/CodeEditor.vue` 的 keymap 里逐字找得到）。 */
+  cm: string
+  /** 这条键位真的绑在哪儿（`文件:行`）。 */
+  boundAt: string
+}
+
+export interface EditorActionBinding {
+  /** 本仓 id：菜单行 id = 注册表 id = 这一条的 id（三处同名才会被去重而不是出双行）。 */
+  id: string
+  /** 上游 `<action id="…">` 那一串（`ActionManager.getAction` 的键）。 */
+  upstreamId: string
+  /** 文案 = 上游 `Presentation.text` 的直译，与菜单行同一份（判据逐条比对）。 */
+  label: string
+  /** 「查找操作」的关键字别名（含上游 id，按上游 id 也搜得到）。 */
+  keywords: string
+  /** `src/editorCommands.ts` 的 `editingCommands` 键名（宿主 `runEditor(name)` 的参数）。 */
+  command: string
+  /** 键位来源（`none` = 上游无绑定且本仓也不许编）。`none` 之外还给出这把人能在哪儿按到。 */
+  key: { source: 'none'; upstream: string } | { source: 'upstream' | 'repo' } & EditorActionChord & { upstream: string }
+}
+
+/**
+ * 上游依据（逐条核过本地基准树，行号是 `<action id=…>` 的**注册处**；键位那一栏写的是
+ * 「`$default.xml` 查无此动作」的实测结论 —— 对整个 `platform/platform-resources/src/keymaps/`
+ * 目录 grep 过，不是只看一张表）：
+ *   · `EditorSortLines` / `EditorReverseLines` / `EditorUniqueLines` ——
+ *     `platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:262`/`:263`/`:264`；
+ *     文案 `platform/platform-resources-en/src/messages/ActionsBundle.properties:173`/`:174`/`:175`
+ *     （`Sort Lines` / `Reverse Lines` / `Delete Duplicate Lines`）；
+ *     `$default.xml` **无绑定**，全 keymaps 目录只有 `keymaps/Sublime Text.xml:105` 给
+ *     `EditorSortLines` 绑过 `control F9`（Mac 档 `Sublime Text (Mac OS X).xml:99` 是 `control F5`），
+ *     `EditorReverseLines`/`EditorUniqueLines` 任何键位表里都没有。
+ *   · `EditorCloneCaretAbove` / `EditorCloneCaretBelow` ——
+ *     同上 `:219`/`:218`；文案 `ActionsBundle.properties:121-122`/`:119-120`；
+ *     `$default.xml` **无绑定**（只有 `keymaps/Sublime Text.xml:280`/`:284` 给过 `control alt UP/DOWN`），
+ *     而 `$default.xml:879-881`/`:882-884` 把 `control alt shift UP`/`DOWN` 给了
+ *     `ResizeToolWindowUp`/`ResizeToolWindowDown` —— 本仓的全局分派表照的是上游那一条
+ *     （`src/keymap.ts` 的 `stretchToolWindow`），这一族的本仓编辑器键位与之撞车，
+ *     摘键请求见 `docs/wiring-requests-2026-10-06-keymap.md`（要动的是编辑器的 keymap 与菜单行，不属本 lane）。
+ *   · `EditorMatchBrace` —— `platform/lang-impl/resources/intellij.platform.lang.impl.actions.xml:23`；
+ *     文案 `ActionsBundle.properties:161`（`Move Caret to Matching Brace`）；
+ *     键位 `platform/platform-resources/src/keymaps/$default.xml:1146-1148` = `control shift M`。
+ */
+export const EDITOR_ACTIONS: readonly EditorActionBinding[] = [
+  { id: 'line.sort', upstreamId: 'EditorSortLines', label: '排序行', keywords: 'sort lines 排序行 排序 EditorSortLines',
+    command: 'line.sort', key: { source: 'none', upstream: '上游注册 intellij.platform.ide.impl.actions.xml:262、文案 ActionsBundle.properties:173；$default.xml 无绑定（全 keymaps 目录只有 Sublime Text.xml:105 绑过 control F9）⇒ 本仓不编键位' } },
+  { id: 'line.reverse', upstreamId: 'EditorReverseLines', label: '反串行', keywords: 'reverse lines 反串行 倒序 EditorReverseLines',
+    command: 'line.reverse', key: { source: 'none', upstream: '上游注册 intellij.platform.ide.impl.actions.xml:263、文案 ActionsBundle.properties:174；$default.xml 与其余 keymaps/*.xml 均无绑定 ⇒ 本仓不编键位' } },
+  { id: 'line.unique', upstreamId: 'EditorUniqueLines', label: '删除重复行', keywords: 'delete duplicate lines unique 删除重复行 去重 EditorUniqueLines',
+    command: 'line.unique', key: { source: 'none', upstream: '上游注册 intellij.platform.ide.impl.actions.xml:264、文案 ActionsBundle.properties:175；$default.xml 与其余 keymaps/*.xml 均无绑定 ⇒ 本仓不编键位' } },
+  { id: 'cursor.above', upstreamId: 'EditorCloneCaretAbove', label: '在上行添加光标', keywords: 'clone caret above 多光标 上行 EditorCloneCaretAbove',
+    command: 'cursor.above', key: { source: 'repo', display: 'Ctrl Alt Shift ↑', cm: 'Ctrl-Alt-Shift-Up', boundAt: 'src/components/CodeEditor.vue:865',
+      upstream: '本仓绑定：上游注册 intellij.platform.ide.impl.actions.xml:219、文案 ActionsBundle.properties:121-122，但 $default.xml 没有这个动作的键位（只有 Sublime Text.xml:280 给过 control alt UP）；同键 control alt shift UP 在上游是 ResizeToolWindowUp（$default.xml:879-881）⇒ 摘键请求已提' } },
+  { id: 'cursor.below', upstreamId: 'EditorCloneCaretBelow', label: '在下行添加光标', keywords: 'clone caret below 多光标 下行 EditorCloneCaretBelow',
+    command: 'cursor.below', key: { source: 'repo', display: 'Ctrl Alt Shift ↓', cm: 'Ctrl-Alt-Shift-Down', boundAt: 'src/components/CodeEditor.vue:866',
+      upstream: '本仓绑定：上游注册 intellij.platform.ide.impl.actions.xml:218、文案 ActionsBundle.properties:119-120，但 $default.xml 没有这个动作的键位（只有 Sublime Text.xml:284 给过 control alt DOWN）；同键 control alt shift DOWN 在上游是 ResizeToolWindowDown（$default.xml:882-884）⇒ 摘键请求已提' } },
+  { id: 'brace.match', upstreamId: 'EditorMatchBrace', label: '移动到配对的括号', keywords: 'match brace 配对括号 匹配括号 EditorMatchBrace',
+    command: 'brace.match', key: { source: 'upstream', display: 'Ctrl Shift M', cm: 'Ctrl-Shift-m', boundAt: 'src/components/CodeEditor.vue:846',
+      upstream: '$default.xml:1146-1148 EditorMatchBrace = control shift M；注册 intellij.platform.lang.impl.actions.xml:23；文案 ActionsBundle.properties:161' } },
 ]
 
 /** 键位显示串（菜单「快捷键」列查这里，不再手写第二份文案）。 */

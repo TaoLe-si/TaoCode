@@ -23,6 +23,7 @@
 // `toolLayouts` 把锚点全写成 left）—— 现在**只有本文件定义**，其余地方 import。
 import { Bell, Bookmark as BookmarkIcon, Boxes, Bug, Files, FolderTree, GitBranch, GitGraph, ListChecks, Search } from 'lucide-vue-next'
 import { mnemonicBindings, mnemonicOf } from './toolWindows.ts'
+import { beanToTask, type ToolWindowBean, type ToolWindowFactory, type RegisterToolWindowTask } from './toolWindowFactories.ts'
 
 /** IDEA 的 `ToolWindowAnchor`（TaoCode 只用 left/right/bottom；FLOATING 没有宿主）。 */
 export type ToolWindowAnchor = 'left' | 'right' | 'bottom'
@@ -42,7 +43,13 @@ export interface ToolWindowAvailability {
   gradleAvailable: boolean
 }
 
-export interface ToolWindowRegistration {
+/**
+ * 一条注册 = `ToolWindowEP` 的声明面（`ToolWindowBean`：id / anchor / icon / secondary /
+ * canCloseContents / doNotActivateOnStart）+ `ToolWindowFactory` 的行为面（本仓叫
+ * `available` / `applicable`，对应上游的 `shouldBeAvailable` `:54` 与 `isApplicableAsync` `:23-30`）。
+ * 两个上游类型住在 `src/toolWindowFactories.ts`，装配规则也在那里（`beanToTask`）。
+ */
+export interface ToolWindowRegistration extends ToolWindowBean {
   /** `<toolWindow id="…">` 的 id，也是锚点表/顺序表/助记符表与持久化键里的键。 */
   id: string
   /** 条纹标题（`RegisterToolWindowTask.stripeTitle`；也被状态栏弹层与菜单用作文案）。 */
@@ -58,6 +65,14 @@ export interface ToolWindowRegistration {
   numbered?: boolean
   /** 缺省 = 恒可用（上游没有 `shouldBeAvailable` 的那些窗口）。 */
   available?: (deps: ToolWindowAvailability) => boolean
+  /**
+   * `ToolWindowFactory.isApplicableAsync(project)`（`ToolWindowFactory.kt:23-30`，默认 true）：
+   * **不通过 = 这条压根不注册**（条纹上没有它、菜单里也没有它），
+   * 与上面 `available` 的"注册了但灰着"是两道不同的闸（上游 `ToolWindowSetInitializer.kt:350-355`）。
+   * 本仓目前没有任何窗口答 false，所以这一位只由 `toolWindowTask()` 消费；
+   * 把它写进类型是为了让第 1 件事与第 2 件事以后不再被合并回同一个谓词。
+   */
+  applicable?: (deps: ToolWindowAvailability) => boolean
 }
 
 /** 注册表。每条上方的注释就是这条记录的上游依据（`<toolWindow>` 注册的出处 / 可用性出处）。 */
@@ -78,18 +93,25 @@ export const TOOL_WINDOW_REGISTRY = [
   // IDEA 的 Version Control / Log 窗口（`defaultToolWindowlayoutProvider.kt:246` 配在 bottom）。
   // `ChangeViewToolWindowFactory.isAvailable`（`vcsToolWindowFactories.kt:60-63`）= `canBeAvailableInProject`；
   // 本仓的等价物 = 桌面端 + 打开了项目（浏览器预览没有 git 通道，没有项目就没有仓库可读）。
-  { id: 'vcslog', title: 'VCS 日志', icon: GitGraph, anchor: 'bottom', available: deps => deps.isDesktop && deps.hasWorkspace },
+  // `canCloseContents="true"`：`VcsExtensions.xml:193-194` 那条注册写了这个属性。本仓这一格目前只挂
+  // 一条日志内容，所以这一位在界面上还问不出来（见报告「做不到」那节）。
+  { id: 'vcslog', title: 'VCS 日志', icon: GitGraph, anchor: 'bottom', canCloseContents: true,
+    available: deps => deps.isDesktop && deps.hasWorkspace },
   // IDEA 的 Find 窗口（`:246` 同一条 V1 默认布局）。
   { id: 'search', title: '搜索', icon: Search, anchor: 'bottom' },
-  // `todo.xml` 的 `<toolWindow id="TODO" anchor="bottom" …>`。
-  { id: 'todo', title: '任务', icon: ListChecks, anchor: 'bottom' },
+  // `todo.xml` 的 `<toolWindow id="TODO" anchor="bottom" …>`（`:60-61`，那条注册写了 `canCloseContents="true"`）。
+  { id: 'todo', title: '任务', icon: ListChecks, anchor: 'bottom', canCloseContents: true },
   // 结构视图：内容来自语言服务（`StructureView`）。上游没有对应的 `shouldBeAvailable`（IDEA 的结构
   // 窗口恒可用、只显示空态），这条是**本仓的映射**：没有语言服务就没有结构可给 ⇒ 灰着。
   // 它排在 TODO 之后不是随手写的：`$default.xml` 里 `ActivateOutlineToolWindow` 是 **Alt+6**、
   // 书签是 Alt+7，枚举顺序（= 助记符顺序）必须与那套键位一致。
-  { id: 'outline', title: '结构', icon: FolderTree, anchor: 'left', available: deps => deps.lspReady },
-  // `bookmarks.xml` 的 `<toolWindow id="Bookmarks" anchor="left" …>`：本仓的书签是纯本地状态，恒可用。
-  { id: 'bookmarks', title: '书签', icon: BookmarkIcon, anchor: 'left' },
+  // `secondary="true"`：`intellij.platform.structureView.xml:55-56` 那条注册写的属性
+  // （上游 `beanToTask` 把它写成 `sideTool`，`DesktopLayout.kt:46` 再拿它当 `WindowInfo.isSplit` 的初值 ⇒
+  // 条纹按钮排在这一侧的**后半组**，`AbstractDroppableStripe.kt:59-61` 的 "side buttons in the end"）。
+  { id: 'outline', title: '结构', icon: FolderTree, anchor: 'left', secondary: true, available: deps => deps.lspReady },
+  // `bookmarks.xml` 的 `<toolWindow id="Bookmarks" anchor="left" secondary="true" …>`（`:47-48`）：
+  // 本仓的书签是纯本地状态，恒可用。
+  { id: 'bookmarks', title: '书签', icon: BookmarkIcon, anchor: 'left', secondary: true },
   // IDEA 的 Debug 窗口（`:248`）。本仓的调试器是 DAP 客户端，窗口恒在、内容空态。
   { id: 'debug', title: '调试', icon: Bug, anchor: 'bottom' },
   // `plugins/gradle/.../intellij.gradle.xml:228`：`<toolWindow id="Gradle" anchor="right" …>`。
@@ -97,9 +119,9 @@ export const TOOL_WINDOW_REGISTRY = [
   // —— 本仓的等价物是"这个项目是已链接的 Gradle 项目"。
   { id: 'gradle', title: 'Gradle', icon: Boxes, anchor: 'right', numbered: false,
     available: deps => deps.isDesktop && deps.hasWorkspace && deps.gradleAvailable },
-  // `intellij.platform.ide.impl.xml:1210`：`<toolWindow id="Notifications" anchor="right" secondary="true" …>`。
+  // `intellij.platform.ide.impl.xml:1210-1212`：`<toolWindow id="Notifications" anchor="right" secondary="true" …>`。
   // 没有 `ActivateNotificationsToolWindow` 动作 ⇒ 不占 Alt+数字。
-  { id: 'notifications', title: '通知', icon: Bell, anchor: 'right', numbered: false },
+  { id: 'notifications', title: '通知', icon: Bell, anchor: 'right', secondary: true, numbered: false },
 ] as const satisfies readonly ToolWindowRegistration[]
 
 export type ToolWindowId = (typeof TOOL_WINDOW_REGISTRY)[number]['id']
@@ -155,6 +177,59 @@ export const DEFAULT_TOOL_ORDER: Record<ToolWindowAnchor, ToolWindowId[]> = {
   left: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'left'),
   bottom: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'bottom'),
   right: toolWindowOrder.filter(id => DEFAULT_TOOL_ANCHORS[id] === 'right'),
+}
+
+/**
+ * EP 声明那三个布尔属性（`ToolWindowEP.java:78-82` 与 `:60-61`）在本仓的派生表。
+ * 上游的去处逐条写在 `src/toolWindowFactories.ts`：
+ *   · `secondary` → `RegisterToolWindowTaskData.sideTool`（`ToolWindowSetInitializer.kt:368`）
+ *     → `WindowInfo.isSplit` 的初值（`DesktopLayout.kt:46`）→ 条纹按钮排在这一侧后半组
+ *     （`AbstractDroppableStripe.kt:59-61`）；
+ *   · `canCloseContents` → `canCloseContent`（`:369`）→ `ToolWindow.canCloseContents()`
+ *     （`ToolWindowImpl.kt:647`）→ 关标签那一族的第一道闸（`ContentManagerImpl.java:139-141`、`:473`、
+ *     `ContentTabLabel.java:170`、`CloseActiveTabAction.java:25/46`、`TabbedContentAction.java:87/114`）；
+ *   · `doNotActivateOnStart` → `WindowInfo.isActiveOnStart`（`WindowInfoImpl.kt:165-170`）。
+ * 三条都**由注册表派生**，别处不再按 id 判第二遍（这条由 `tests/tool-window-factories.test.mjs` 钉住）。
+ */
+export const toolSecondary: Record<ToolWindowId, boolean> = derived(entry => entry.secondary === true)
+export const toolCanCloseContents: Record<ToolWindowId, boolean> = derived(entry => entry.canCloseContents === true)
+/** `doNotActivateOnStart` 取反（同一个判据住在 `canActivateOnStart`，`WindowInfoImpl.kt:169`）。 */
+export const toolActiveOnStart: Record<ToolWindowId, boolean> = derived(entry => entry.doNotActivateOnStart !== true)
+
+/**
+ * `ToolWindowManager.registerToolWindow(RegisterToolWindowTask)` 的**读的那一半**：
+ * 把注册表里那一条（EP 声明 + 工厂谓词）按上游 `ToolWindowSetInitializer.kt:344-376` 装配成一条注册任务。
+ * 返回 null = 这一条**不注册**（被档案压掉，或 `isApplicable` 答 false）。
+ * `suppressedIds` 是上游的 `suppressedToolWindowIds`（`:350`）—— 本仓由 `src/toolLayoutProfiles.ts` 的
+ * 档案覆盖表算（`hidden` = 上游 `register=false`），调用方传进来，本模块不读档案（避免注册表依赖持久层）。
+ */
+export function toolWindowTask(id: ToolWindowId, deps: ToolWindowAvailability, suppressedIds: readonly string[] = []): RegisterToolWindowTask | null {
+  const entry = BY_ID.get(id)
+  if (!entry) return null
+  const factory: ToolWindowFactory | undefined =
+    entry.available || entry.applicable
+      ? {
+          ...(entry.applicable ? { isApplicable: entry.applicable } : {}),
+          ...(entry.available ? { shouldBeAvailable: entry.available } : {}),
+        }
+      : undefined
+  // 上游 `:366`/`:367`：图标与锚点都可以由工厂覆盖。本仓的注册表里工厂不带这两维
+  // （每个视图的 `createToolWindowContent` 那一半还是模板链，见文件头），所以只是原值。
+  const task = beanToTask({ bean: entry, factory, deps, stripeTitle: entry.title, suppressedIds })
+  return task ? { ...task, icon: entry.icon } : null
+}
+
+/**
+ * `computeToolWindowBeans`（`ToolWindowSetInitializer.kt:379-409`）：一条项目状态过一遍注册表。
+ * 顺序保持注册表顺序（= 枚举顺序，见上面那张表头的注释），装配不排第二遍。
+ */
+export function toolWindowTasks(deps: ToolWindowAvailability, suppressedIds: readonly string[] = []): RegisterToolWindowTask[] {
+  const out: RegisterToolWindowTask[] = []
+  for (const id of toolWindowOrder) {
+    const task = toolWindowTask(id, deps, suppressedIds)
+    if (task) out.push(task)
+  }
+  return out
 }
 
 /**

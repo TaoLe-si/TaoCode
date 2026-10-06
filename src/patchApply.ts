@@ -10,14 +10,25 @@
 // `PlainSimplePatchApplier`（**逐块核对上下文行**，对不上就整块失败），新增/删除/移动由
 // `TriggerAdditionOrDeletion` / `formove/PatchApplier` 处理，二进制走 `ApplyBinaryFilePatch`。
 //
-// 本仓做的是**文本子集**（与 `src/patchExport.ts` 的导出侧成对）：
+// 本仓做的是**文本子集**（与导出侧成对：整仓补丁走 `src/patchExport.ts`，正文来自宿主的 `git diff`；
+// 前端自己生成 unified 文本走 `src/diffText.ts` 的 `generateUnifiedDiff`，那块头的两侧行数是按
+// 正文实际行数列的 —— 与这里「按声明行数收」是同一份账，判据 `tests/patch-hunk-counts.test.mjs`，
+// 含真 `git apply --check`）：
 //   · 认 `git diff` / `diff -u` 的 unified 格式：`diff --git`、`--- /dev/null`、`+++ b/x`、
 //     `rename from/to`、`new file mode`、`deleted file mode`、`@@ -a,b +c,d @@`、
 //     `\ No newline at end of file`、`Binary files ... differ`；
-//   · 应用时**逐块核对上下文**（`PlainSimplePatchApplier.checkContextLines` 的等价物），
-//     不猜、不做 fuzz（GNU patch 的 fuzz 属 `GenericPatchApplier`，本仓没做，如实记）；
+//   · **块内容按 `@@` 声明的两侧行数收**（`PatchReader.readNextHunkUnified`，
+//     `platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java:335-392`），
+//     所以 `git format-patch` 的邮件头、diffstat 与结尾的 `-- ` 签名都不会被吃进最后一个块；
+//   · 应用时**逐块核对上下文**（`PlainSimplePatchApplier.checkContextLines` 的等价物，
+//     `apply/PlainSimplePatchApplier.java:98`），不猜；核对不上再走**偏移搜索**
+//     （`src/patchFuzzy.ts` = `apply/GenericPatchApplier` 的位置那一半，`apply/GenericPatchApplier.java:74-86`）；
+//     原写「GNU patch 的 fuzz 属 GenericPatchApplier，本仓没做」—— 实际偏移搜索已做，
+//     没做的是**吃掉上下文行**那一档（`apply/GenericPatchApplier.java:209-223` 那段 fuzz 循环里
+//     `:212` 调的 `complementInsertAndDelete`，函数体在 `:312-320`；`trySolveSomehow` 在 `:363-393`，
+//     只有 `applySomehow` 那条路会用），它会改写匹配处的文本，本仓不引入；
 //   · 只写「计划」不碰 IO：`planPatchApplication` 吃「补丁 + 每个目标文件的当前内容（不存在 = null）」
-//     给出逐文件动作与最终内容，IO 由调用方（`src/components/SourceControl.vue`）走宿主通道执行。
+//     给出逐文件动作与最终内容，IO 由调用方（`src/patchApplyHost.ts` → `SourceControl.vue`）走宿主通道执行。
 //     这样整批补丁可以**先全部验证再落盘**（上游 `PathsVerifier` 的用意）。
 //   · 二进制补丁（`GIT binary patch` / base85）不解析：判 `skip` 并给出理由
 //     （上游 `ApplyBinaryFilePatch` + `lib/base85xjava/Base85x`，本仓没有这条解码链）。
@@ -92,6 +103,16 @@ function parseHunkHeader(line: string): { beforeStart: number; beforeCount: numb
 /**
  * 解析 unified diff（上游 `GitPatchParser` + `PatchReader` 的文本子集）。
  * 认不出的开头进 `problems`，但后面的文件照常解析。
+ *
+ * **块内容按 `@@` 声明的行数收**（上游 `PatchReader.readNextHunkUnified`，
+ * `platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java:335-392`）：
+ * `:357-362` 把 `-a,b +c,d` 里的 `linesBefore` / `linesAfter` 读出来（省略第二个数就是 1，
+ * 本仓 `parseHunkHeader` 同款），`:375` 用 `before < linesBefore || after < linesAfter` 决定
+ * 「这一行还必须是一块内容」（`parsePatchLine` 的 `expectMeaningfulLines`，`:407-432`），
+ * 凑满了就 `iterator.previous(); break`（`:376-379`）把当前行**退回去**按表头重新判。
+ * 这条规矩是本仓原来缺的：不认行数时，`git format-patch` 结尾那行 `-- ` 会被当成删除行
+ * 并进最后一个块（前缀 `-` ⇒ REMOVE，文本 ` `），于是整份补丁核对上下文失败；
+ * 反向地，删除行本身长得像文件头（`--- 旧内容`）时也不能让它抢走表头判定。
  */
 export function parseUnifiedPatch(text: string): ParsedPatch {
   const lines = stripBom(normalizeLineSeparators(text)).split('\n')
@@ -99,6 +120,9 @@ export function parseUnifiedPatch(text: string): ParsedPatch {
   const problems: string[] = []
   let current: PatchFilePatch | null = null
   let hunk: PatchHunk | null = null
+  /** 当前块已吃进的两侧行数（上游 `readNextHunkUnified` 的 `before` / `after`，`:366-368`）。 */
+  let hunkBefore = 0
+  let hunkAfter = 0
 
   const finishFile = () => {
     if (current && (current.hunks.length > 0 || current.binary || current.kind !== 'text' || current.oldPath !== null || current.newPath !== null)) {
@@ -106,6 +130,8 @@ export function parseUnifiedPatch(text: string): ParsedPatch {
     }
     current = null
     hunk = null
+    hunkBefore = 0
+    hunkAfter = 0
   }
   const ensure = (): PatchFilePatch => {
     if (!current) {
@@ -113,8 +139,36 @@ export function parseUnifiedPatch(text: string): ParsedPatch {
     }
     return current
   }
+  /** 收一行进块，并把它算进两侧的行数（上游 `:380-388` 的 `switch` + `hunk.addLine(lastLine)`）。 */
+  const pushLine = (type: PatchLineType, text2: string): void => {
+    hunk?.lines.push({ type, text: text2, noNewline: false })
+    if (type !== 'add') hunkBefore++
+    if (type !== 'remove') hunkAfter++
+  }
 
   for (const line of lines) {
+    if (hunk) {
+      // `\ No newline at end of file` 挂在**上一行**上（上游 `:371-373`，只认 lastLine != null）。
+      if (line.startsWith('\\')) {
+        const last = hunk.lines[hunk.lines.length - 1]
+        if (last) last.noNewline = true
+        continue
+      }
+      if (hunkBefore < hunk.beforeCount || hunkAfter < hunk.afterCount) {
+        const marker = line[0]
+        if (marker === ' ') { pushLine('context', line.slice(1)); continue }
+        if (marker === '+') { pushLine('add', line.slice(1)); continue }
+        if (marker === '-') { pushLine('remove', line.slice(1)); continue }
+        if (line === '') { pushLine('context', ''); continue }
+        // 行数没凑满却不是块内容：上游在这里让 `parsePatchLine` 返回 null 从而结束这一块，
+        // 本仓额外留一条诊断（`problems` 非致命，后面的文件照常）。
+        problems.push(`块内认不出的行：${line}`)
+        hunk = null
+      } else {
+        // 声明的行数已凑满 ⇒ 这一块到此为止，当前行退回按表头判（上游 `:376-379`）。
+        hunk = null
+      }
+    }
     if (line.startsWith('diff --git ')) {
       finishFile()
       const file = ensure()
@@ -152,22 +206,10 @@ export function parseUnifiedPatch(text: string): ParsedPatch {
       const header = parseHunkHeader(line)
       if (!header) { problems.push(`块头认不出：${line}`); hunk = null; continue }
       hunk = { ...header, lines: [] }
+      hunkBefore = 0
+      hunkAfter = 0
       ensure().hunks.push(hunk)
       continue
-    }
-    if (hunk) {
-      if (line.startsWith('\\')) {
-        const last = hunk.lines[hunk.lines.length - 1]
-        if (last) last.noNewline = true
-        continue
-      }
-      const marker = line[0]
-      const text = line.slice(1)
-      if (marker === ' ') hunk.lines.push({ type: 'context', text, noNewline: false })
-      else if (marker === '+') hunk.lines.push({ type: 'add', text, noNewline: false })
-      else if (marker === '-') hunk.lines.push({ type: 'remove', text, noNewline: false })
-      else if (line === '') hunk.lines.push({ type: 'context', text: '', noNewline: false })
-      else { problems.push(`块内认不出的行：${line}`); hunk = null }
     }
   }
   finishFile()
@@ -221,11 +263,23 @@ export function applyHunksToText(text: string, hunks: readonly PatchHunk[]): Hun
   }
   for (let i = cursor; i < source.length; i++) target.push(source[i] ?? '')
   let result = joinHunkLines(target)
-  // 原文没有结尾换行、补丁也没有显式声明时，保留「无结尾换行」的形态。
+  // 补丁声明「新文件的最后一行没有结尾换行」：那就是块里最后一行带 `\ No newline`
+  // （上游 `PatchHunk.isNoNewLineAtEnd`，`platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunk.java:65-70`
+  // —— 取的就是 `myLines` 最后一行的 `isSuppressNewLine()`）。落盘时按它决定补不补行尾
+  // （`platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/PlainSimplePatchApplier.java:74-79` 的 `isNoNewlinePatched`、
+  // `apply/GenericPatchApplier.java:1139-1145` 的 `withLineBreak`），
+  // 并且只在**这一块吃到文件末尾**时才生效（同处的 `containsLastLine`，`:1150-1152`）。
   const lastHunk = hunks[hunks.length - 1]
-  const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true
-  if (hadTrailingNewline && !suppress && !result.endsWith('\n')) result += '\n'
-  if (!hadTrailingNewline && suppress === false && result.endsWith('\n') && text !== '') result = result.slice(0, -1)
+  const touchesEnd = cursor >= (hadTrailingNewline ? source.length - 1 : source.length)
+  const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true && touchesEnd
+  if (suppress) {
+    if (result.endsWith('\n')) result = result.slice(0, -1)
+  } else if (hadTrailingNewline && !result.endsWith('\n')) {
+    result += '\n'
+  } else if (!hadTrailingNewline && result.endsWith('\n') && text !== '') {
+    // 原文没有结尾换行、补丁也没显式声明 ⇒ 保留「无结尾换行」的形态。
+    result = result.slice(0, -1)
+  }
   return { ok: true, text: result }
 }
 

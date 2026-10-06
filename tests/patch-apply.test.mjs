@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  andStatus, applyHunksToText, isAlreadyApplied, parseUnifiedPatch, planPatchApplication, verifyPatchPath,
+  andStatus, applyHunksFlexible, applyHunksToText, isAlreadyApplied, parseUnifiedPatch, planPatchApplication, verifyPatchPath,
 } from '../src/patchApply.ts'
 
 const PATCH = [
@@ -187,4 +187,111 @@ test('解析失败不吞：坏块头与认不出的行进 problems，好文件�
   const plan = planPatchApplication(patch, new Map([['x', 'ctx\n']]))
   assert.equal(plan.files[0].status, 'skip')
   assert.match(plan.files[0].reason, /没有块/)
+})
+
+// —— 块内容按 `@@` 声明的行数收（上游 PatchReader.readNextHunkUnified:335-392）——
+
+const NO_NEWLINE = '\\ No newline at end of file'
+
+test('git format-patch 的邮件头 + diffstat + `-- ` 签名都不进块，补丁能直接应用', () => {
+  const formatPatch = [
+    'From 1a2b3c Mon Sep 17 00:00:00 2001',
+    'From: Tao <tao@example.com>',
+    'Subject: [PATCH] 改一行',
+    '',
+    '正文里这行以减号开头：-not-a-diff',
+    '',
+    '---',
+    ' a.txt | 2 +-',
+    ' 1 file changed, 1 insertion(+), 1 deletion(-)',
+    '',
+    'diff --git a/a.txt b/a.txt',
+    'index 1234567..89abcde 100644',
+    '--- a/a.txt',
+    '+++ b/a.txt',
+    '@@ -1,3 +1,3 @@',
+    ' one',
+    '-two',
+    '+TWO',
+    ' three',
+    '-- ',
+    '2.40.0',
+  ].join('\n')
+  const patch = parseUnifiedPatch(formatPatch)
+  assert.deepEqual(patch.problems, [], '凑满行数的块就地结束，尾部的 `-- ` 与版本号不再被当成删除行')
+  assert.equal(patch.files.length, 1)
+  assert.deepEqual(patch.files[0].hunks[0].lines.map(line => [line.type, line.text]),
+    [['context', 'one'], ['remove', 'two'], ['add', 'TWO'], ['context', 'three']])
+  const plan = planPatchApplication(patch, new Map([['a.txt', 'one\ntwo\nthree\n']]))
+  assert.equal(plan.ok, true)
+  assert.deepEqual([plan.files[0].status, plan.files[0].content], ['success', 'one\nTWO\nthree\n'])
+})
+
+test('mailbox（多封提交串成一个文件）：每封的 `From ` 头不再污染上一块', () => {
+  const mailbox = [
+    'From 1a2b Mon Sep 17 00:00:00 2001', 'Subject: [PATCH 1/2] 第一封', '', '---',
+    'diff --git a/a.txt b/a.txt', '--- a/a.txt', '+++ b/a.txt', '@@ -1,1 +1,1 @@', '-one', '+ONE',
+    'From 3456 Mon Sep 17 00:00:00 2001', 'Subject: [PATCH 2/2] 第二封', '', '---',
+    'diff --git a/b.txt b/b.txt', '--- a/b.txt', '+++ b/b.txt', '@@ -2,1 +2,1 @@', '-two', '+TWO',
+  ].join('\n')
+  const patch = parseUnifiedPatch(mailbox)
+  assert.deepEqual(patch.problems, [])
+  assert.deepEqual(patch.files.map(file => file.newPath), ['a.txt', 'b.txt'])
+  const plan = planPatchApplication(patch, new Map([['a.txt', 'one\ntwo\nthree\n'], ['b.txt', 'one\ntwo\nthree\n']]))
+  assert.deepEqual([plan.ok, plan.status], [true, 'success'])
+  assert.deepEqual(plan.files.map(file => file.content), ['ONE\ntwo\nthree\n', 'one\nTWO\nthree\n'])
+})
+
+test('声明的行数没凑满时，块里的 `--- ` 行仍是删除行（不会被抢去当文件头）', () => {
+  const patch = parseUnifiedPatch([
+    'diff --git a/a b/a', '--- a/a', '+++ b/a', '@@ -1,2 +1,1 @@', '--- 旧的分隔线', '+新行',
+  ].join('\n'))
+  assert.equal(patch.files.length, 1)
+  assert.equal(patch.files[0].oldPath, 'a', '文件头只认凑满行数之前的那两条')
+  assert.deepEqual(patch.files[0].hunks[0].lines.map(line => [line.type, line.text]),
+    [['remove', '-- 旧的分隔线'], ['add', '新行']])
+})
+
+test('纯插入块（`-N,0`）只吃新增那一行，后面那行上下文归下一段', () => {
+  const patch = parseUnifiedPatch(['--- a/a', '+++ b/a', '@@ -1,0 +2,2 @@', '+new', ' ctx'].join('\n'))
+  assert.deepEqual(patch.files[0].hunks[0].lines.map(line => line.type), ['add', 'context'])
+  assert.deepEqual([patch.files[0].hunks[0].beforeCount, patch.files[0].hunks[0].afterCount], [0, 2])
+})
+
+test('块比声明的短：不发明内容，下一份文件照常解析，problems 记一句', () => {
+  const patch = parseUnifiedPatch([
+    'diff --git a/a b/a', '--- a/a', '+++ b/a', '@@ -1,3 +1,3 @@', ' one', '-two',
+    'diff --git a/z b/z', '--- a/z', '+++ b/z', '@@ -1,1 +1,1 @@', '-z', '+Z',
+  ].join('\n'))
+  assert.equal(patch.files.length, 2, '第二份文件没有被吞进第一块')
+  assert.deepEqual(patch.files[0].hunks[0].lines.map(line => line.type), ['context', 'remove'])
+  assert.equal(patch.problems.length, 1)
+  assert.match(patch.problems[0], /^块内认不出的行：diff --git a\/z b\/z$/)
+})
+
+test('`\ No newline at end of file` 挂在最后一行上，落盘时就不补结尾换行（上游 PatchHunk.java:65-70）', () => {
+  const hunks = parseUnifiedPatch(['--- a/a', '+++ b/a', '@@ -1,1 +1,1 @@', '-one', '+two', NO_NEWLINE].join('\n')).files[0].hunks
+  assert.deepEqual(hunks[0].lines.map(line => line.noNewline), [false, true], '标记挂的是它前面那一行')
+  assert.equal(applyHunksToText('one\n', hunks).text, 'two', '声明了没有结尾换行 ⇒ 结果不带 \\n')
+  assert.equal(applyHunksFlexible('one\n', hunks).text, 'two')
+  assert.equal(applyHunksToText('one', hunks).text, 'two')
+})
+
+test('补丁没写 `\ No newline` 时照原文的行尾形态（原有那条「行尾保留」规矩不动）', () => {
+  const hunks = parseUnifiedPatch(['--- a/a', '+++ b/a', '@@ -1,1 +1,1 @@', '-one', '+two'].join('\n')).files[0].hunks
+  assert.equal(applyHunksToText('one\n', hunks).text, 'two\n')
+  assert.equal(applyHunksToText('one', hunks).text, 'two')
+})
+
+test('块不在文件末尾时，`\ No newline` 不许吃掉文件结尾的换行（上游 containsLastLine 的护栏）', () => {
+  const hunks = parseUnifiedPatch(['--- a/a', '+++ b/a', '@@ -1,1 +1,1 @@', '-one', '+two', NO_NEWLINE].join('\n')).files[0].hunks
+  assert.equal(applyHunksToText('one\ntwo\nthree\n', hunks).text, 'two\ntwo\nthree\n')
+})
+
+test('偏移搜索那条路同样按 `\ No newline` 决定结尾换行（patchFuzzy 与 patchApply 一套规矩）', () => {
+  const hunks = parseUnifiedPatch(['--- a/a', '+++ b/a', '@@ -1,2 +1,2 @@', ' one', '-two', '+TWO', NO_NEWLINE].join('\n')).files[0].hunks
+  const result = applyHunksFlexible('zero\none\ntwo\n', hunks)
+  assert.equal(result.ok, true, JSON.stringify(result))
+  assert.equal(result.offsetHunks, 1, '块头说的位置对不上，靠偏移找到了')
+  assert.equal(result.text, 'zero\none\nTWO')
 })

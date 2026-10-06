@@ -4,7 +4,8 @@
 //   · `platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/QuickEvaluateHandler.java:17-31`
 //     —— 四个口：`isEnabled(project)` / `createValueHint(project, editor, point, type)` /
 //        `canShowHint(project)` / `getValueLookupDelay(project)`；
-//   · `.../XDebuggerTextPopup.java:62-66` —— 弹层尺寸常量（MAX/MIN 宽高 + 工具条余量）；
+//   · `platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/evaluate/quick/common/XDebuggerTextPopup.java:62-66`
+//     —— 弹层尺寸常量（MAX/MIN 宽高 + 工具条余量）；
 //     `:229` / `:233` —— 实际尺寸 = `max(工具条, 文本) + TOOLBAR_MARGIN` / 文本高 + 工具条高；
 //     `:292-306` —— 夹在「屏幕的一半」与「屏幕的 1/5（宽）/ 1/7（高）」之间；
 //     `:127-140` —— 同一次展示里**值文本相同就不重复渲染**（`preventDoubleExecution`）；
@@ -172,7 +173,12 @@ function dapSessionUsable(): boolean {
 //     —— 求值**失败**时：`MOUSE_OVER_HINT` 收起自己的提示、让位给普通信息提示（文档），
 //        只有点击类提示才把错误文本画出来（`:416-418`）。
 
-/** 上游 `ValueHintType`（`rpc/.../ValueHintType.kt:8-12`）里本仓悬停通道能区分出来的两档。 */
+/**
+ * 上游 `ValueHintType`
+ * （`platform/xdebugger-impl/rpc/src/com/intellij/xdebugger/impl/evaluate/quick/common/ValueHintType.kt:8-10`
+ * 的三档：`MOUSE_OVER_HINT` / `MOUSE_ALT_OVER_HINT` / `MOUSE_CLICK_HINT`）里，
+ * 本仓悬停通道能区分出来的两档。
+ */
 export type QuickEvaluateHintKind = 'hover' | 'altHover'
 
 /** `AbstractValueHint.java:460-469`：只有「无修饰」与「Alt」两种悬停会出提示。 */

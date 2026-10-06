@@ -110,10 +110,19 @@ export function applyHunksWithOffsetSearch(text: string, hunks: readonly PatchHu
   }
   for (let i = cursor; i < source.length; i++) target.push(source[i] ?? '')
   let result = target.join('\n')
+  // 结尾换行的规矩与 `patchApply.applyHunksToText` 完全一致：块里最后一行带 `\ No newline`
+  // 且这一块吃到文件末尾 ⇒ 结果不带结尾换行（上游 `PatchHunk.java:65-70` +
+  // `apply/PlainSimplePatchApplier.java:74-79` + `apply/GenericPatchApplier.java:1139-1145`）。
   const lastHunk = hunks[hunks.length - 1]
-  const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true
-  if (hadTrailingNewline && !suppress && !result.endsWith('\n')) result += '\n'
-  if (!hadTrailingNewline && suppress === false && result.endsWith('\n') && text !== '') result = result.slice(0, -1)
+  const touchesEnd = cursor >= (hadTrailingNewline ? source.length - 1 : source.length)
+  const suppress = lastHunk?.lines[lastHunk.lines.length - 1]?.noNewline === true && touchesEnd
+  if (suppress) {
+    if (result.endsWith('\n')) result = result.slice(0, -1)
+  } else if (hadTrailingNewline && !result.endsWith('\n')) {
+    result += '\n'
+  } else if (!hadTrailingNewline && result.endsWith('\n') && text !== '') {
+    result = result.slice(0, -1)
+  }
   return { ok: true, text: result, offsetHunks }
 }
 

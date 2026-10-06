@@ -8,11 +8,15 @@ import { LOG_GRAPH_OPTIONS_DESCRIPTION, LOG_GRAPH_OPTIONS_TITLE, logGraphOptions
 import type { GitLogSort } from '../bridge'
 
 const props = defineProps<LogGraphOptionState>()
-const emit = defineEmits<{ pickSort: [sort: GitLogSort]; toggleFirstParent: []; toggleNoMerges: [] }>()
-const rows = computed(() => logGraphOptionsModel(props, {
+const emit = defineEmits<{ pickSort: [sort: GitLogSort]; toggleFirstParent: []; toggleNoMerges: []; setCollapsed: [value: boolean] }>()
+const rows = computed(() => logGraphOptionsModel({
+  sort: props.sort, firstParent: props.firstParent, noMerges: props.noMerges,
+  collapsed: props.collapsed, canCollapse: props.canCollapse,
+}, {
   setSort: sort => emit('pickSort', sort),
   setFirstParent: () => emit('toggleFirstParent'),
   setNoMerges: () => emit('toggleNoMerges'),
+  setCollapsed: value => emit('setCollapsed', value),
 }))
 </script>
 
@@ -25,6 +29,10 @@ const rows = computed(() => logGraphOptionsModel(props, {
     <form class="popup" @submit.prevent>
       <template v-for="row in rows" :key="row.id">
         <span v-if="row.separator" class="group-title" role="presentation">{{ row.title }}</span>
+        <button v-else-if="row.command" type="button" class="menu-button row" role="menuitem"
+          :disabled="row.disabled" :aria-disabled="row.disabled" :title="row.description" @click="row.run?.()">
+          <span class="menu-item-icon" /><span>{{ row.title }}</span>
+        </button>
         <button v-else type="button" class="menu-button row" :role="row.kind === 'checkbox' ? 'menuitemcheckbox' : 'menuitemradio'"
           :aria-checked="!!row.on" :title="row.description" @click="row.run?.()">
           <span class="menu-item-icon"><Check v-if="row.on" :size="iconSize.menu" /></span><span>{{ row.title }}</span>

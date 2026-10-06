@@ -68,7 +68,7 @@
    - 按文件名：`find -iname "*LinkBuilder*"` → 0 命中；`platform/platform-impl/src/com/intellij/codeInsight/documentation/builders/` 这个目录**在本 checkout 里不存在**（`ls` 直接失败），也没有任何 `*documentation*builders*` 目录。
    - 按符号引用：`grep -rln "LinkBuilder"` → 0 命中。
    - 按语义（"文档正文里的行内 `<a>` 是谁生成的"）→ 等价物是 `platform/markdown-utils/src/com/intellij/markdown/utils/doc/impl/XssSafeLinks.kt:17-27`（包路径 `com.intellij.markdown.utils.doc.impl`，`DocFlavourDescriptor.kt` 用的就是它；它包装 `org.intellij.markdown.html.LinkGeneratingProvider.renderLink`，正是"行内链接生成"那一层）。
-   - `DocFragment` / `Documentation_as_html`：按文件名只命中 javadoc PSI 那几个（`java/java-psi-api/src/com/intellij/javadoc/PsiDocFragmentName.java` 等）与 `JavaDocFragmentAnchorCache.kt`，不是文档 HTML 的那条链。
+   - `DocFragment` / `Documentation_as_html`：按文件名只命中 javadoc PSI 那几个（`java/java-psi-api/src/com/intellij/psi/javadoc/PsiDocFragmentName.java` 等，18 行、第 2 行 `package com.intellij.psi.javadoc;`；**citefix 订正**：原写 `java/java-psi-api/src/com/intellij/javadoc/PsiDocFragmentName.java`，参考树里没有该路径，少了一层 `psi/`）与 `JavaDocFragmentAnchorCache.kt`，不是文档 HTML 的那条链。
    ⇒ 内联结构的依据改用 `DocumentationMarkup.java:24`、`DocMarkdownToHtmlConverter.kt:66-70`、`LspDocumentationData.kt:94-102` 三处实坐标。
 2. **锚点链接（`#foo`）点了不动**：上游是 `LinkGeneratingProvider(baseURI, resolveAnchors)`（`XssSafeLinks.kt:20`）在整页 HTML 里滚动到锚；本仓弹层渲染的是一段**数据流**、没有可滚的 DOM id ⇒ `src/components/QuickDocPopup.vue:120-125` 对 `anchor` 明确不动作（注释已写明）。要做得整页 HTML 化，属"内联文档渲染/工具窗"那一族，见上。
 3. **`KeepTabAction` / `DocRenderer` 一族**：见判词表最后两行的具体卡点。

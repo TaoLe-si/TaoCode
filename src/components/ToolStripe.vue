@@ -19,6 +19,9 @@ import { computed, onUnmounted, ref } from 'vue'
 import { Check, MoreHorizontal } from 'lucide-vue-next'
 import { startStripeResize, stripeRailWidth, stripeWidthLimits, type StripeSide } from '../stripeResize'
 import type { ToolWindowId } from '../toolWindowMeta'
+import { windowInfo } from '../toolWindowManager.ts'
+import { STRIPE_SEPARATOR_HEIGHT_PX, STRIPE_SEPARATOR_LINE_THICKNESS_PX, STRIPE_SEPARATOR_LINE_WIDTH_PX,
+         stripeSeparatorIndex } from '../toolStripeSplit.ts'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
@@ -78,6 +81,22 @@ const railWidth = computed(() => stripeRailWidth(props.width))
 const limits = computed(() => stripeWidthLimits(props.compact))
 const railStyle = computed(() => (props.width > 0 ? { width: `${props.width}px`, minWidth: `${props.width}px` } : undefined))
 const moreVisible = computed(() => props.moreOnThisSide && props.moreIds.length > 0)
+/**
+ * 后半组（side tool）那条分隔件画在**第几个按钮之前**（`AbstractDroppableStripe.kt:592-597`，
+ * 插在第一个 `isSplit` 的按钮前面；`:602-609` 那条"整条都是后半组就不画"在
+ * `stripeSeparatorIndex` 里）。
+ * `isSplit` 读门面那一份聚合对象：布局存过就用存过的，没存过回到注册表的 EP `secondary`
+ * （`DesktopLayout.kt:46` 的 `info.isSplit = task.sideTool`）。
+ */
+const splitOfId = (id: ToolWindowId) => windowInfo(id)?.isSplit === true
+const separatorAt = computed(() => stripeSeparatorIndex(props.ids, splitOfId))
+// 尺寸与颜色逐条照 `StripeButtonSeparator.kt:22-37`：盒子 32×11（本仓轨道只有 31px 宽，
+// 所以横向取满轨道、线仍然居中画那 24×1），颜色 `ToolWindow.Stripe.separatorColor`（`:36`）
+// 在本仓的等价令牌是 `--line`（侧条边框用的就是它，见 `.activity-bar` 那条）。
+const separatorBox = { height: `${STRIPE_SEPARATOR_HEIGHT_PX}px`, width: '100%', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', flexShrink: '0' }
+const separatorLine = { width: `${STRIPE_SEPARATOR_LINE_WIDTH_PX}px`, height: `${STRIPE_SEPARATOR_LINE_THICKNESS_PX}px`,
+                        background: 'var(--line)' }
 // `tool.window.new.stripe.more.title` / `more.button.accessible.name`（UIBundle，中文包 = 更多工具窗口 / 更多）
 const moreTitle = '更多工具窗口'
 const moreLabel = '更多'
@@ -165,7 +184,9 @@ onUnmounted(() => {
   >
     <!-- 按钮列表单独一层：轨道自己不能再滚（分隔线要整条贴着轨道内沿），溢出交给这一层。 -->
     <div class="stripe-list">
-      <template v-for="id in ids" :key="id">
+      <template v-for="(id, index) in ids" :key="id">
+        <!-- 后半组的分隔件（`StripeButtonSeparator`）：画在第一个 side tool 之前。 -->
+        <span v-if="separatorAt === index" class="stripe-split-separator" :style="separatorBox" aria-hidden="true"><span :style="separatorLine" /></span>
         <span v-if="isDropBefore(side, id)" class="stripe-drop-marker" aria-hidden="true" />
         <button
           class="activity-button" :class="{ active: isActive(id), dragging: dragging === id }" draggable="true"

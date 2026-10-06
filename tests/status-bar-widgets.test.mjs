@@ -81,7 +81,7 @@ test('旧存档（隐藏键数组）能迁移成 id→覆盖 映射，坏输入�
   }
 })
 
-test('装配：App.vue 的勾选清单走注册表，且工具栏/状态栏那四条不是工厂', () => {
+test('装配：App.vue 的勾选清单走注册表，且工具栏/状态栏那三条不是工厂', () => {
   const app = read('src/App.vue')
   assert.match(app, /v-for="widget in listWidgets\(\)"/, '勾选清单没走注册表')
   assert.match(app, /:aria-checked="widgetChecked\(widget\.id\)"/, '勾选态没走注册表')
@@ -91,15 +91,19 @@ test('装配：App.vue 的勾选清单走注册表，且工具栏/状态栏那�
   assert.match(app, /import \{ listWidgets, showAllWidgets, showWidget, toggleWidget, widgetChecked, widgetClickable \} from '\.\/statusWidgets'/,
     'App.vue 没从注册表取这六个 API')
   const registry = read('src/statusWidgets.ts')
-  // 上游不经过工厂的四个直接画进面板的组件，本仓保留在清单里但标 factory: false。
-  for (const id of ['file', 'progress', 'bridge', 'problems']) {
+  // 上游不经过工厂的三个直接画进面板的组件，本仓保留在清单里但标 factory: false。
+  // （原写四条、含 `bridge` —— 那条是「模板不消费」的假控件，2026-10-06 桶 status2 已删，
+  //   判定过程见 `src/statusWidgets.ts` 表头与 `tests/statusbar-popup-motion-parity.test.mjs` 的 KNOWN_GAPS 注释。）
+  for (const id of ['file', 'progress', 'problems']) {
     assert.match(registry, new RegExp(`\\{ id: '${id}', displayName: '[^']+', factory: false \\}`),
       `${id} 应登记为"不是工厂"（上游它直接画进状态栏面板）`)
   }
   // 每个真工厂都要写出上游 id，否则审计对照与门控无从核对。
   const lines = registry.split('\n').filter(line => /^\s*\{ id: '.+', .*factory: true/.test(line))
-  // 第九十八批加了 `VfsRefresh`（上游 `VfsRefreshIndicatorWidgetFactory`）⇒ 11 → 12。
-  assert.equal(lines.length, 12, `真工厂应有 12 条，实为 ${lines.length}`)
+  // 第九十八批加了 `VfsRefresh`（上游 `VfsRefreshIndicatorWidgetFactory`）⇒ 11 → 12；
+  // 本批加 `LanguageServiceStatusBarWidget`（`intellij.platform.lang.impl.xml:1509`、
+  // `LanguageServiceWidgetFactory.kt:10`，文案 `LangBundle.properties:604`）⇒ 12 → 13。
+  assert.equal(lines.length, 13, `真工厂应有 13 条，实为 ${lines.length}`)
   for (const line of lines) assert.match(line, /upstreamId: '[^']+'/, `缺 upstreamId：${line.trim()}`)
 })
 

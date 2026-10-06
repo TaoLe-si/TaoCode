@@ -1,6 +1,7 @@
 // 设置模式层：键表、校验、未知键剪枝、默认值 —— 对应 IDEA 各 Configurable 的
 // 校验与默认值（SettingsSchema）。从 projects.cpp 拆出（桃 2026-09-26：模块化）。
 #include "settings_schema.hpp"
+#include "settings_editor_keys.hpp"
 #include "folding_state_schema.hpp"
 #include "fsops.hpp"
 #include "trusted_paths.hpp"
@@ -32,25 +33,8 @@ constexpr std::size_t max_scopes = 64;
 
 namespace taocode {
 
-namespace {
-// TaoCode 能高亮/索引的语言集合，与 templates.ts / fileAssociations 用的是同一份。
-constexpr std::string_view editor_languages[]{"java", "cpp", "typescript", "other"};
-}  // namespace
-
-// 「语言 id -> 布尔」表：只存被显式配置过的语言，没进表=默认（源码 mapLanguageBreadcrumbs
-// 的语义，EditorSettingsExternalizable.java:146-152 + isBreadcrumbsShownFor :459-466）。
-void validate_language_flags(const Json& value, const char* name) {
-    if (!value.is_object()) fail("INVALID_SETTINGS", std::string(name) + " must be an object of language flags.");
-    if (value.size() > 32) fail("INVALID_SETTINGS", std::string(name) + " 的条目过多。");
-    for (auto it = value.begin(); it != value.end(); ++it) {
-        const auto id = it.key();
-        if (std::find(std::begin(editor_languages), std::end(editor_languages), std::string_view(id)) == std::end(editor_languages))
-            fail("INVALID_SETTINGS", std::string(name) + " 里有未知语言：" + id);
-        if (!it.value().is_boolean())
-            fail("INVALID_SETTINGS", std::string(name) + " 的值必须是布尔值。");
-    }
-}
-
+// `validate_language_flags` / `editor_languages` / 新增键的校验分支都在 settings_editor_keys.hpp
+// （本文件贴着 native 的 1100 行机检上限，新增 10 把键压不下 —— 拆头文件，不抬上限）。
 void validate_editor_patch(const Json& patch) {
     // useTabCharacter / showWhitespaces / formatOnSave were added to the editor
     // defaults; a validator that does not know them makes the settings dialog fail
@@ -144,6 +128,8 @@ void validate_editor_patch(const Json& patch) {
             // 与 general 档的同名键同一套界（:182）：1..100 行。
             if (!value.is_number_integer() || value.get<int>() < 1 || value.get<int>() > 100)
                 fail("INVALID_SETTINGS", "diffContextLines must be an integer between 1 and 100.");
+        } else if (validate_editor_added_key(it.key(), value)) {
+            // 本批新增的**非布尔**键在 settings_editor_keys.hpp 里校验；走到这里就是已经判过。
         } else if (!value.is_boolean()) {
             fail("INVALID_SETTINGS", "Editor flags must be JSON booleans.");
         }
@@ -416,7 +402,21 @@ Json editor_defaults_impl() {
             // EditorSettingsExternalizable.java:93-94 `SHOW_STICKY_LINES = true` / `STICKY_LINES_LIMIT = 5`。
             {"showStickyLines", true}, {"stickyLinesLimit", 5},
             // diff.base 的 settings.context.lines（DiffSettingsConfigurable.kt:30-58），默认与 git 一致。
-            {"diffContextLines", 3}};
+            {"diffContextLines", 3},
+            // 保存时的两条 pass（IDEA Settings ▸ Editor ▸ General，控件 EditorOptionsPanel.kt:147-157）。
+            // 上游默认逐条：STRIP=Changed（EditorSettingsExternalizable.java:73，三档字面值 :216-218）、
+            // IS_ENSURE_NEWLINE_AT_EOF=false（:74）、KEEP_TRAILING_SPACE_ON_CARET_LINE=true（:142）。
+            // 消费方 src/editorSaveTransforms.ts。**不落** REMOVE_TRAILING_BLANK_LINES（:75，没有执行体）。
+            {"stripTrailingSpaces", "Changed"}, {"ensureNewLineAtEof", false}, {"keepTrailingSpacesOnCaretLine", true},
+            // 回车与引号的三个开关（CodeInsightSettings.java:140/:132/:130，默认全 true），
+            // 设置行在编辑器 › 智能键（EditorSmartKeysConfigurable.kt:49-51/:69-72/:74-76）。
+            {"autoInsertPairQuote", true}, {"closeCommentOnEnter", true}, {"insertBraceOnEnter", true},
+            // Code Vision（CodeVisionSettings.kt 的 State：:36 isEnabled=true、:45/:50 两个"只装与
+            // 出厂相反那一半"的集合（出厂都空）、:38-39 每行可见条数 5）。组 id 见 src/codeLensSettings.ts:48-50。
+            {"codeVisionEnabled", true}, {"codeVisionDisabledGroups", Json::array()},
+            {"codeVisionEnabledGroups", Json::array()}, {"codeVisionVisibleEntries", 5},
+            // 快速文档两档，上游默认都是开（:76 与 DocumentationToolWindowManager.kt:55）。
+            {"showQuickDocOnMouseHover", true}, {"autoUpdateDocumentation", true}};
 }
 
 // DefaultTodoDefaultPatternProvider.getDefaultPatterns 只发 todo/fixme 两条（已核对源码），

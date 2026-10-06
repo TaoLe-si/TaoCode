@@ -180,6 +180,20 @@ std::vector<std::pair<std::string, std::string>> read_archive(const std::filesys
     for (std::size_t at = 0; at + 4 <= data.size();) {
         const auto signature = load32(data, at);
         if (signature == 0x04034b50u) {
+            // 本地文件头里先问三件「能不能读」的事，再动数据。原来的实现只看签名与大小，
+            // 于是 deflate（method 8，几乎所有外部工具打的包）会**原样吐出压缩字节**：
+            // 调用方拿到的是乱码，报出来的错是「设置不是合法的 JSON」，把真原因盖掉了。
+            // ZIP 的字段口径见 zipstore.hpp 的注释与 APPNOTE 的 local header 表：
+            // 通用位标志在偏移 6、压缩方法在偏移 8、压缩后大小在偏移 18。
+            const auto flag = load16(data, at + 6);
+            const auto method = load16(data, at + 8);
+            if (method != 0)
+                throw std::runtime_error("条目用了压缩方法 " + std::to_string(method) +
+                                         "，本仓的 zip 读取只支持 store（方法 0）");
+            // bit 0 = 加密；bit 3 = 大小写在条目尾部的 data descriptor 里，本地头里的两个
+            // 大小字段是 0 ⇒ 无法定位下一条目的起点，只能明确拒掉（不是"读出来是空的"）。
+            if ((flag & 0x0001u) != 0) throw std::runtime_error("条目是加密的，读不了");
+            if ((flag & 0x0008u) != 0) throw std::runtime_error("条目把大小写在数据之后（流式打包），读不了");
             const auto size = load32(data, at + 18);
             const auto name_size = load16(data, at + 26);
             const auto extra_size = load16(data, at + 28);

@@ -26,6 +26,10 @@
 //     `…description=Paste from recent clipboards`（`plugins/terminal/resources/messages/TerminalBundle.properties:22-23`）。
 //   · 右键菜单组 `plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:225-230`
 //     —— `Terminal.OutputContextMenu` = CopyBlock / CopySelectedText / Paste / PasteFromHistory。
+//   · 鼠标两条 `platform/execution-impl/src/com/intellij/terminal/JBTerminalSystemSettingsProviderBase.java`
+//     —— `:302-304` 的 `pasteOnMiddleMouseClick()` 无条件 `return true`（中键粘剪贴板），
+//     `:297-299` 的 `copyOnSelect()` = `SystemInfo.isLinux`（只有 Linux 选中即复制）。
+//     这两条是 settings provider 的**覆写值**、不是设置页旋钮，所以本仓当固定行为接，不新增设置键。
 //
 // 本仓落点：`src/components/TerminalPanel.vue` 的窗格右键菜单 + `attachCustomKeyEventHandler`
 // 拦上游那四组键；候选清单来自 `src/clipboard.ts` 的 `readClipboardHistory()`
@@ -171,6 +175,29 @@ export function terminalClipboardKeyFor(event: TerminalKeyLike): 'copy' | 'paste
  */
 export function terminalHistoryEntries(entries: readonly TerminalHistoryEntry[], limit = 8): TerminalHistoryEntry[] {
   return entries.filter(entry => entry.purged !== true && entry.text !== '').slice(0, Math.max(0, limit))
+}
+
+/**
+ * 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304` 的 `pasteOnMiddleMouseClick()`）：
+ * 上游这个覆写**没有条件**，直接 `return true` —— 三平台上都成立，所以它不是设置项而是固定行为。
+ * 本仓面板把它做成中键按下即粘系统剪贴板（并在捕获阶段拦掉事件，避免 xterm 自己再粘一次变成双份）。
+ */
+export function terminalPasteOnMiddleClick(): boolean {
+  return true
+}
+
+/** 鼠标事件是不是中键（DOM 的 `MouseEvent.button` 里中键固定是 1）。 */
+export function terminalIsMiddleButton(event: { button?: number }): boolean {
+  return event.button === 1
+}
+
+/**
+ * 选中即复制（同文件 `:297-299` 的 `copyOnSelect()`）：上游写的是 `return SystemInfo.isLinux`
+ * —— **只有 Linux** 选中就进剪贴板（X 的 PRIMARY 选择那条惯例），Windows 与 macOS 都不做。
+ * 所以这里收一个明确的 linux 旗标，不猜平台。
+ */
+export function terminalCopyOnSelect(linux: boolean): boolean {
+  return linux
 }
 
 /**

@@ -8,7 +8,8 @@ import { classifyLegend, legendGroups, legendText } from '../commitLegend'
 import { AMEND_TOOLTIP, AMEND_CHECKBOX_TEXT, COMMIT_MESSAGE_PLACEHOLDER, MESSAGE_HISTORY_TEXT, MESSAGE_HISTORY_DESCRIPTION,
   EXPAND_ALL_TEXT, COLLAPSE_ALL_TEXT } from '../commitPanelStrings'
 import { amendMessagePlan, restoreBeforeAmendMessage } from '../amendMessage'
-import { RERUN_CHECKS_TOOLTIP, NOT_AVAILABLE_DURING_INDEXING, failuresRowText, saveDuringCommitQuestion } from '../commitChecks'
+import { RERUN_CHECKS_TOOLTIP, NOT_AVAILABLE_DURING_INDEXING, failuresRowText, saveDuringCommitQuestion,
+  commitRequestParams } from '../commitChecks'
 import { changesMenuRows, isConflictedStatus, type ChangesMenuTarget } from '../changesMenuActions'
 import { scanTodoHits } from '../todoScan'
 import { copyPatchToClipboard, createPatchFile } from '../patchExport'
@@ -69,6 +70,22 @@ const props = defineProps<{
   savePath?: (path: string) => Promise<unknown>
   /** 激活某个工具窗口（宿主的 `showView`）：失败通知里「显示详细信息」那条动作用。 */
   showToolWindow?: (id: string) => void
+  /**
+   * 「提交文件…」的范围（`CommonCheckinFilesAction.kt:26-78` → `CheckinActionUtil.kt:100-160`）：
+   * 给了就只提交这些路径（`git commit --only -- <paths>`）。**默认不给 = 逐字沿用整份暂存区**。
+   * 宿主那条通道还没接线之前它恒为空（请求体里连 `paths` 这个键都不出现），界面上也就不渲染
+   * 「提交文件…」那一行 —— 不放假控件。
+   * 接线请求：`docs/wiring-requests-2026-10-06-vcs2.md` W1（原写 `wiring-requests-2026-10-06-vcs.md`——
+   * 上一路 vcs 代理被切断时那份文档没落盘，本批补上并把宿主四段（main.cpp / App.vue / ToolWindowView.vue /
+   * toolViewContext.ts）的可照抄替换写全）。
+   */
+  commitPaths?: readonly string[]
+  /**
+   * 编辑器内容的**修订计数**（上游 `DocumentListener.documentChanged`，
+   * `NonModalCommitWorkflowHandler.kt:216-225`）：每次键入/保存都要变，上一次检查结果随之作废。
+   * 本仓现在只有 `dirtyPaths`（非响应式的"未保存清单"快照）⇒ 只覆盖第一次编辑。见 W2。
+   */
+  editorEpoch?: number
 }>()
 const status = ref<GitStatus>({ available: true, changes: [] })
 const loading = ref(false)
@@ -300,7 +317,11 @@ const runCommit = (push: boolean) => {
   const text = message.value.trim()
   // `changesCommitted = changes - failedToCommitChanges` (ShowNotificationCommitResultHandler.kt:42-43):
   // the count is taken from what was included in this commit, before the tree reloads.
-  const stagedPaths = staged.value.map(change => change.path)
+  // 「提交文件…」时"这次包含的那些变更" = 被选中的路径（`CheckinActionUtil.kt:100-160` 的
+  // `getIncludedChanges()`），没有范围时才是暂存区那一份。
+  const stagedPaths = props.commitPaths?.length
+    ? [...props.commitPaths]
+    : staged.value.map(change => change.path)
   let committed = false
   void act(async () => {
     // 这一轮检查（上游 `doExecuteSession` 把它包在 `runWithProgress(isOnlyRunCommitChecks = false)` 里）：
@@ -312,12 +333,14 @@ const runCommit = (push: boolean) => {
     if (!report.ok) { applyChecksReport(report, true); return }
     commitCheckError.value = ''
     await confirmSaveDuringCommit(stagedPaths)
-    await request('git.commit', {
+    await request('git.commit', commitRequestParams({
       message: text, amend: amend.value, signoff: signoff.value,
       // An override only rides this commit; native refuses it without an e-mail
       // (git commit --author needs "Name <email>").
       author: authorOverride.value?.name ?? '', authorEmail: authorOverride.value?.email ?? '',
-    })
+      // 「提交文件…」的范围（宿主没给 = 不带这个键，请求体与历史逐字一致）。
+      paths: props.commitPaths,
+    }))
     committed = true
     // 提交成功 ⇒ 上游 `CheckinProjectPanel` 的收尾会把信息存进 MRU（VcsConfiguration:169-177）。
     recentMessages.value = saveRecentMessage(recentMessages.value, text)
@@ -438,6 +461,9 @@ const {
 } = createCommitChecks({
   props, emit, act, commit, staged, changes, message, amend, checkTodoBeforeCommit, todoCheckBusy, todoHits,
   messageProblems, signoff, postponeSlowChecks, dirtyPaths,
+  // 宿主的修订计数（W2 接线请求）：宿主没传这个 prop 时**不填** ⇒ 指纹维持本批之前的形状，
+  // 传了以后每一次键入都会把上一轮检查结果作废（上游 documentChanged，:216-225）。
+  ...(props.editorEpoch === undefined ? {} : { editorEpoch: () => props.editorEpoch ?? 0 }),
 })
 
 // IDEA's commit message history: session MRU first (newest first), git log subjects as fallback;

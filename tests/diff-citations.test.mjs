@@ -60,6 +60,10 @@ export const ANCHORS = [
   { cite: 'VcsActions.xml:110-111', path: 'platform/vcs-impl/resources/META-INF/VcsActions.xml', from: 110, to: 111, must: /ChangesView\.ApplyPatch[\s\S]*ChangesView\.ApplyPatchFromClipboard/, why: '应用补丁两条动作的注册处' },
   { cite: 'ApplyPatchAction.java:29', path: 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/ApplyPatchAction.java', from: 29, to: 29, must: /class ApplyPatchAction/, why: '是 .java 不是 .kt（本域订正之一）' },
   { cite: 'GitMergeUtil.java:63-67', path: 'plugins/git4idea/backend/src/merge/GitMergeUtil.java', from: 63, to: 67, must: /./, why: '合并自动接受的判定链' },
+  // 统一（unified）档那一族（本轮 `src/diffUnified.ts` 的承重坐标）：
+  { cite: 'UnifiedFragmentBuilder.kt:80-92', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFragmentBuilder.kt', from: 80, to: 92, must: /appendText\(Side\.LEFT[\s\S]*appendText\(Side\.RIGHT/, why: '一个改动块在统一文档里**先出删除行、再出新增行**的次序（diff-unified 第一条断言的依据）' },
+  { cite: 'UnifiedFoldingModel.java:36', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFoldingModel.java', from: 36, to: 36, must: /settings\.range == -1/, why: '上下文范围 = 禁用时统一视图同样整份不建折叠（与并排视图同一档）' },
+  { cite: 'LineNumberConvertor.java:121-123', path: 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/LineNumberConvertor.java', from: 121, to: 123, must: /myFragments\.put\(masterStart, new Data\(masterLength, slaveStart, slaveLength\)\)/, why: '统一行号 ↔ 两侧行号的映射表本体（本仓换算不到落 null 的那一侧由此而来）' },
 ]
 
 /** 本域出现过的裸文件名 → 参考树里的唯一路径（`find -name` 逐条解析过；两份同名的已选生产那一份）。 */
@@ -89,9 +93,20 @@ export const BARE_NAMES = {
   'TextDiffViewerUtil.java': TOOLS + 'base/TextDiffViewerUtil.java',
   'TwosideTextDiffProviderBase.java': TOOLS + 'text/TwosideTextDiffProviderBase.java',
   'MergeThreesideViewer.java': 'platform/diff-impl/src/com/intellij/diff/merge/MergeThreesideViewer.java',
+  // 统一（unified）档一族（`tools/fragmented/`，`src/diffUnified.ts` 与 `tests/diff-unified.test.mjs` 引）：
+  // 参考树里各只有一个同名文件（`find -name` 逐条核过，没有第二份）。
+  'UnifiedFragmentBuilder.kt': 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFragmentBuilder.kt',
+  'UnifiedFoldingModel.java': 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedFoldingModel.java',
+  'LineNumberConvertor.java': 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/LineNumberConvertor.java',
+  'UnifiedDiffChange.java': 'platform/diff-impl/src/com/intellij/diff/tools/fragmented/UnifiedDiffChange.java',
   'CompareFilesAction.java': 'platform/diff-impl/src/com/intellij/diff/actions/CompareFilesAction.java',
   'DiffUserDataKeys.java': 'platform/diff-api/src/com/intellij/diff/util/DiffUserDataKeys.java',
   'GenericPatchApplier.java': 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/GenericPatchApplier.java',
+  'PlainSimplePatchApplier.java': 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/apply/PlainSimplePatchApplier.java',
+  'PatchReader.java': 'platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java',
+  // 同名文件在 `platform/vcs-api/vcs-api-core/…/patch/` 与 `platform/vcs-impl/…/patch/` 两个模块里各有一份的
+  // 情况已逐条 find -name 核过：PatchHunk.java 只有 vcs-api-core 那一份（`find -name PatchHunk.java` 唯一命中）。
+  'PatchHunk.java': 'platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunk.java',
   'ApplyPatchAction.java': 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/ApplyPatchAction.java',
   'ApplyPatchFromClipboardAction.java': 'platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/ApplyPatchFromClipboardAction.java',
   'GitMergeUtil.java': 'plugins/git4idea/backend/src/merge/GitMergeUtil.java',

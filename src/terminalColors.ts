@@ -73,6 +73,13 @@ function pickColor(value: string | undefined, fallback: string): string {
 
 export type TerminalThemeName = 'light' | 'dark'
 
+/**
+ * ANSI 16 色的按色号覆盖表（键 0–15 ⇒ `#RGB`/`#RRGGBB`/`#RRGGBBAA`）。
+ * 用 `Record<number, …>` 而不是 16 个字面量键：设置页存的是一串「色号 → 颜色」的条目，
+ * 取值一律经 `overrides?.[index]`（缺键 = 不覆盖），坏键/坏值由 `pickColor` 丢掉。
+ */
+export type TerminalAnsiOverrides = Readonly<Record<number, string>>
+
 /** `document.documentElement.dataset.theme` 的取值解析：缺省是浅色（tokens.css `:root` 就是浅色面）。 */
 export function resolveTerminalThemeName(value: string | undefined | null): TerminalThemeName {
   return value === 'dark' ? 'dark' : 'light'
@@ -81,13 +88,28 @@ export function resolveTerminalThemeName(value: string | undefined | null): Term
 /**
  * 当前主题的调色板。`foreground`/`background` 传当前配色方案（`--text`/`--editor`）；
  * 空串或坏值退回两套内置默认（上游 `colorsScheme.defaultForeground/defaultBackground` 那一档）。
+ *
+ * `overrides` = **按 ANSI 色号**（0–15）的用户自定义前景，对应上游
+ * `JBTerminalSchemeColorPalette.kt:23-25` 的 `getAttributesByColorIndex(index)`：
+ * 上游每取一个色号都回配色方案要 `ColoredOutputTypeRegistryImpl.getAnsiColorKey(index)`
+ * （`platform/execution-impl/src/com/intellij/terminal/JBTerminalSchemeColorPalette.kt:24`），
+ * 于是「用户改了 ANSI 3 号」终端里那一个颜色跟着变。本仓没有可编辑的 `EditorColorsScheme`，
+ * 等价物就是这张按色号覆盖的表（值同 `pickColor` 校验，坏值丢弃 ⇒ 留内置那两套表的对应项）。
+ * 16 之后的色号（256 色立方与灰阶）由 `colorByAnsiIndex` 现算，上游也不让它们进方案，故此处不接受覆盖。
  */
-export function terminalPalette(theme: TerminalThemeName, foreground?: string, background?: string): TerminalColorPalette {
+export function terminalPalette(
+  theme: TerminalThemeName,
+  foreground?: string,
+  background?: string,
+  overrides?: TerminalAnsiOverrides,
+): TerminalColorPalette {
   const fallbackForeground = theme === 'dark' ? '#d4d4d4' : '#1f1f1f'
   const fallbackBackground = theme === 'dark' ? '#1e1e1e' : '#ffffff'
   const colors = theme === 'dark' ? ANSI_DARK_COLORS : ANSI_LIGHT_COLORS
   const attributes: Record<number, TerminalTextAttributes> = {}
-  colors.forEach((color, index) => { attributes[index] = { foreground: color } })
+  colors.forEach((color, index) => {
+    attributes[index] = { foreground: pickColor(overrides?.[index], color) }
+  })
   return {
     defaultForeground: pickColor(foreground, fallbackForeground),
     defaultBackground: pickColor(background, fallbackBackground),

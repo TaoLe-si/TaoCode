@@ -57,6 +57,7 @@ int main() {
         std::mutex mutex;
         std::condition_variable ready;
         bool initialized = false, init_failed = false, got_diagnostics = false, got_hover = false, got_progress = false;
+        bool got_server_messages = false;
         Json diagnostics, hover_result;
         std::vector<Json> progress;
 
@@ -73,11 +74,13 @@ int main() {
             got_progress = progress.size() >= 3;
             ready.notify_all();
         });
-        // `window/showMessage` 与进度同一条出口（宿主按 `event` 分派），所以这里只挑它那几条。
+        // 服务器主动发的消息（`window/showMessage` 与 `window/logMessage` 共用这一条出口，
+        // 客户端在参数里带 `method` 分开，见 native/lsp.cpp 的通知分支）。
         std::vector<Json> messages;
         host.set_server_message([&](Json params) {
             std::lock_guard lock(mutex);
             messages.push_back(std::move(params));
+            got_server_messages = messages.size() >= 2;
             ready.notify_all();
         });
 
@@ -129,11 +132,22 @@ int main() {
         check(wait_for(got_hover), "hover response never arrived");
         check(hover_result.at("contents").at("value") == "hover from fake", "hover content round-tripped");
 
+        // 两条都得等到（不是在断言里赌调度）：fake server 在 didOpen 之后按 showMessage、logMessage、
+        // publishDiagnostics 的顺序写帧，读线程逐帧派发，所以这里等到 2 条才算数。
+        check(wait_for(got_server_messages), "服务器主动发的 showMessage 与 logMessage 都要转出来");
         {
             std::lock_guard lock(mutex);
-            check(messages.size() == 1 && messages[0].at("message") == "fake import failure",
+            // 这条断言的**精确条数**从 1 变成 2：改动前 fake server 只发 showMessage，现在也发
+            // window/logMessage（真机上 jdt.ls 的话绝大多数在这一条里，以前被整条丢掉）。
+            // 两条各自钉死，不是放宽 —— 上游对它们的处置不同（`LspServerNotificationsHandlerImpl.kt:385-390`
+            // 与 `:396-404`），分不开就等于界面上要么少一半话、要么把日志当通知弹。
+            check(messages.size() == 2, "showMessage 与 logMessage 都要转出来，一条不多一条不少");
+            check(messages[0].at("message") == "fake import failure" && messages[0].at("method") == "window/showMessage",
                   "工程级的 window/showMessage 要原样转出来（不然'外部类解析不了'在界面上无声无息）");
             check(messages[0].at("type") == 2, "severity 原样带上");
+            check(messages[1].at("message") == "fake log line" && messages[1].at("method") == "window/logMessage"
+                      && messages[1].at("type") == 4,
+                  "window/logMessage 得带得清是 logMessage：它只进语言服务日志，不弹通知");
         }
 
         host.stop();

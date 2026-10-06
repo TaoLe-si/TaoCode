@@ -154,3 +154,38 @@ test('全局栈只留最近 10 组（registry.properties:20）', () => {
   }
   assert.equal(processor.size().undo, GLOBAL_UNDO_LIMIT)
 })
+
+// `$Undo` / `$Redo` 那一菜单行的形状（`PlatformActions.xml:446-448` +
+// `platform/platform-impl/src/com/intellij/openapi/command/impl/Undo.java:40-43`）。
+// 这一行要等的是一处宿主改动（`src/menus/editMenu.ts` 不在本 lane，见
+// docs/wiring-requests 的 W2'），所以判据先把行模型钉住：文字来自命令栈、
+// 可用性跟着栈顶走、run 之后一定回调（撤完要刷树，见 pvFileUndoProvider.ts 的函数头）。
+test('commandMenuRows：文字/可用性/run 都走命令栈，撤完回调拿到那次结果', async () => {
+  const { commandMenuRows } = await import('../src/pvFileUndoProvider.ts')
+  const processor = getCommandProcessor(scratchRoot())
+  const settled = []
+  const [undoRow, redoRow] = commandMenuRows(processor, () => [], result => settled.push(result))
+  assert.equal(undoRow.id, '$Undo')
+  assert.equal(redoRow.id, '$Redo')
+  assert.equal(undoRow.keys, 'Ctrl+Z')
+  assert.equal(redoRow.keys, 'Ctrl+Shift+Z')
+  assert.equal(undoRow.enabled(), false, '空栈不能画成可点')
+  assert.equal(undoRow.title(), '撤消最后操作', '空名回落 action.undo.description.empty')
+  let removed = 0
+  processor.record({
+    name: '删除 a.txt', groupId: 'del', global: true,
+    steps: [{ paths: ['a.txt'], undo: () => { removed += 1 }, redo: () => {}, stillMatches: () => true }],
+  })
+  assert.equal(undoRow.enabled(), true)
+  // 命令名进菜单文本（`Undo.java:40-43` 的 `undo.command` + `ActionsBundle.properties:427`
+  // `_Undo {0}`）。拼接用的模板是本仓既有的那份 `撤消{0}`（`UNDO_TEXTS.undoTemplate`，
+  // 英文原文里 {0} 前有一个空格，中文这一档**无法核实**——zh 语言包不在本地基准树里），
+  // 所以这里钉的是「带不带命令名」，不是空格。
+  assert.equal(undoRow.title(), '撤消删除 a.txt', '菜单文字带命令名（Undo.java:40-43 的 undo.command）')
+  await undoRow.run()
+  assert.equal(removed, 1, 'run 真的发了一次撤销')
+  assert.equal(settled.length, 1, '撤完回调必定被叫到（宿主拿它刷树）')
+  assert.equal(settled[0].ok, true)
+  assert.equal(redoRow.enabled(), true)
+  assert.equal(redoRow.title(), '重做删除 a.txt')
+})

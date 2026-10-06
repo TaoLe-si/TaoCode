@@ -6,9 +6,9 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { request } from './bridge.ts'
 import { errorMessage } from './errors.ts'
-import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks.ts'
+import { bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, bookmarkSelectionDescription, nextLineBookmarkInFile, normalizeMnemonic, nextBookmark as nextInList, placeBookmark, reconcileBookmarks, orderedBookmarks, removeBookmark, sortGroupBookmarks, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from './bookmarks.ts'
 import { DEFAULT_BOOKMARKS_VIEW, type BookmarksViewSettings } from './bookmarksView.ts'
-import { addBookmarkToNamedList, configureBookmarkLists, runWithChosenList, syncBookmarkLists } from './bookmarkListActions.ts'
+import { addBookmarkToNamedList, bookmarkInFirstNamedList, configureBookmarkLists, removeBookmarkFromNamedList, runWithChosenList, setNamedListBookmarkDescription, syncBookmarkLists } from './bookmarkListActions.ts'
 import { type Bookmark, type ProjectSettings, type Workspace } from './bridge.ts'
 
 export interface BookmarkActionsDeps {
@@ -141,9 +141,10 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     if (!tab) return
     // 放书签时把那一行原文一起记下（上游的 `myBeforeChangeData` 记的是同一个东西，只是记在变更前）。
     // 选中了一段非空白文字时，那段的文本成为这条书签的**自定义描述**
-    // （`ToggleBookmarkAction.addSingleBookmark:88-93`：`selectedText` 非空白 → `group.setDescription`）。
-    const selected = deps.selection?.(tab.path)
-    placeAt(tab.path, tab.line, mnemonic, deps.editorContent?.(tab.path), selected && selected.trim() ? selected : undefined)
+    // （`ToggleBookmarkAction.addSingleBookmark:78-81`：`selectedText` 非空白才 `group.setDescription`，
+    // 规则本体在 `src/bookmarks.ts` 的 `bookmarkSelectionDescription`，与文件书签那一支共用同一条）。
+    const description = bookmarkSelectionDescription(deps.selection?.(tab.path))
+    placeAt(tab.path, tab.line, mnemonic, deps.editorContent?.(tab.path), description)
   }
   function openMnemonicPrompt() {
     const tab = active.value
@@ -204,8 +205,19 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
    * （`GutterLineBookmarkRenderer.getMiddleButtonClickAction:50`）与右键菜单里的「编辑描述」，
    * 弹一个预填当前描述的输入框（`Messages.showInputDialog`，标题/提示取中文包）。
    */
-  const descriptionPrompt = ref<{ path: string; line?: number; current: string } | null>(null)
+  const descriptionPrompt = ref<{ path: string; line?: number; current: string; list?: string } | null>(null)
   function editBookmarkAt(path: string, line?: number) {
+    // 上游取的是"第一个持有它的列表"那一份描述（`EditBookmarkAction.kt:27` 的
+    // `manager.getGroups(bookmark).firstOrNull()`），描述本身**按列表各存一份**
+    // （`BookmarksManagerImpl.kt:598-609` 把 description 记在 `InGroupInfo` 上）。
+    // 本仓的书签表 = 默认列表那一份，命名列表里可能另有同一处的拷贝：先看命名列表，
+    // 再退回默认列表 —— 这样"某条书签只存在于命名列表里"时「编辑描述」不再是点了没反应。
+    const holder: Bookmark = { path, line }
+    const inNamed = bookmarkInFirstNamedList(holder)
+    if (inNamed !== undefined) {
+      descriptionPrompt.value = { path, line, current: bookmarkDescription(inNamed.entry) ?? '', list: inNamed.name }
+      return
+    }
     const entry = bookmarks.value.find(item => item.path === path && item.line === line)
     if (entry === undefined) return
     descriptionPrompt.value = { path, line, current: bookmarkDescription(entry) ?? '' }
@@ -228,6 +240,11 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     const at = descriptionPrompt.value
     descriptionPrompt.value = null
     if (!at) return
+    // 「它所在的那张列表」优先（上游 `EditBookmarkAction.kt:36` 的 `group.setDescription` 只写那个 group）。
+    if (at.list !== undefined) {
+      setNamedListBookmarkDescription(at.list, { path: at.path, line: at.line }, value)
+      return
+    }
     const trimmed = value.trim()
     bookmarks.value = bookmarks.value.map(entry =>
       entry.path === at.path && entry.line === at.line
@@ -241,12 +258,16 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     else void revealLocation({ path: entry.path, line: entry.line - 1 })
   }
   /**
-   * 文件书签的开关（右键项目树/编辑器标签那一下）。上游 `BookmarksManagerImpl.createBookmark(file)`
-   * 从 `VirtualFile` 建一条没有行号的书签，`toggle(bookmark, DEFAULT)` 就是加/删。
+   * 文件书签的开关：项目树右键与**编辑器标签右键**（`EDITOR_TAB_POPUP`）那一下。
+   * 上游 `actions/extensions.kt:57-61` —— 这两处上下文里拿到的都是"文件"，于是
+   * `manager.createBookmark(file)` 建一条没有行号的 `FileBookmark`；`ToggleBookmarkAction.addSingleBookmark:72-82`
+   * 接着做两件事：`manager.toggle(bookmark, type)`（已有就整条删、没有就加）＋
+   * **该编辑器里的非空白选区**成为这条书签的自定义描述（`CommonDataKeys.EDITOR` 的 `selectedText`）。
+   * 选区取的是**被右键那一个标签**的编辑器（宿主给的 `selection(path)`，与上游"取不到 editor 就没有描述"同形）。
    */
   function bookmarkFile(path: string) {
     const existing = bookmarks.value.find(entry => entry.path === path && entry.line === undefined)
-    bookmarks.value = toggleFileBookmark(bookmarks.value, path)
+    bookmarks.value = toggleFileBookmark(bookmarks.value, path, deps.selection?.(path))
     deps.notify(existing !== undefined ? `已取消书签 ${path}` : `书签 ${path}`)
     persistBookmarks()
   }
@@ -296,6 +317,21 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     goTo(target)
   }
   /**
+   * 编辑器内的「下一个 / 上一个行书签」（上游 `GotoNextBookmarkInEditor` / `GotoPreviousBookmarkInEditor`，
+   * `platform/bookmarks/resources/intellij.platform.bookmarks.xml:74-79`；
+   * 名字里的 "Line" 与"默认没有键位"见 `src/bookmarks.ts` 的 `nextLineBookmarkInFile`）。
+   * 与上面那条项目级循环的差别：**只在这个文件里走，走到头不回绕**，
+   * 所以上游在这种情况下直接把动作置灰（`NextBookmarkInEditor.kt:22` 的 `isEnabledForCaret`）；
+   * 本仓的菜单项没有逐条 enabled 通道，就说一句"没有更…"。
+   */
+  function cycleBookmarkInEditor(reverse: boolean) {
+    const tab = active.value
+    if (!tab) return
+    const target = nextLineBookmarkInFile(bookmarks.value, tab.path, tab.line, reverse)
+    if (!target) { deps.notify(reverse ? `这个文件里 ${tab.line} 行之前没有行书签。` : `这个文件里 ${tab.line} 行之后没有行书签。`, true); return }
+    goTo(target)
+  }
+  /**
    * 「按类型和名称对书签进行排序」（上游 `SortGroupBookmarksAction` + `Group.sortLater`
    * `BookmarksManagerImpl.kt:649-659`）：把**某一个分组内**的书签按提供者权重 + 位置重排，
    * 顺序**写回存档**（上游 `groupBookmarks` 是持久的，不是渲染期的临时排序）。
@@ -310,7 +346,17 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     bookmarks.value = bookmarks.value.map(entry => (entry.path === path ? sorted[next++]! : entry))
     persistBookmarks()
   }
+  /**
+   * 移除一条书签（面板的 X 与行右键「移除书签」）。
+   * 上游删的是**这一行所在的那张列表**里的记录（`ui/tree/BookmarkListProvider.kt:54-57`
+   * 的 `node.value?.let { node.bookmarkGroup?.remove(it) }`；`BookmarksManagerImpl.kt:230-238`
+   * 的 `remove(bookmark)` 也只处理"只有一个列表持有"那一种）。
+   * 本仓的事件只带书签不带列表名 ⇒ 按面板段序（命名列表在前、默认列表最后）删**第一个持有它的列表**：
+   * 命名列表里有就先删命名列表，否则删默认列表（原行为）。
+   * 以前这里只动默认列表那张平铺表，"只存在于命名列表里"的书签点了 X 毫无反应。
+   */
   function dropBookmark(entry: Bookmark) {
+    if (removeBookmarkFromNamedList(entry)) return
     bookmarks.value = removeBookmark(bookmarks.value, entry)
     persistBookmarks()
   }
@@ -326,6 +372,6 @@ export function createBookmarkActions(deps: BookmarkActionsDeps) {
     gutterBookmarks, toggleBookmarkAt, descriptionPrompt, editBookmarkAt, saveBookmarkDescription,
     // 下面三个是宿主别处也要用的（项目设置装配、助记符数字表、书签的持久化包装）。
     useProjectSettings, digits, bookmarkSave,
-    jumpMnemonic, cycleBookmark, dropBookmark, mnemonicOwner, persistBookmarks, sortGroup,
+    jumpMnemonic, cycleBookmark, cycleBookmarkInEditor, dropBookmark, mnemonicOwner, persistBookmarks, sortGroup,
   }
 }

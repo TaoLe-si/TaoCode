@@ -17,7 +17,11 @@ const model = (template, extra = {}) => {
   const replacement = ref(extra.replacement ?? '')
   const caseSensitive = ref(extra.caseSensitive ?? true)
   const definitions = ref(extra.definitions ?? [])
-  return createStructuralSearchModel({ enabled, template: query, replacement, caseSensitive, definitions })
+  // 面板那两个「与结构化并排」的档也走同一条装配（默认关，与既有断言的口径一致）：
+  // `wholeWord` 是既有的第二参数通道，`regexMode` = 上游 `FindModel.isRegularExpressions()`。
+  const wholeWord = ref(extra.wholeWord ?? false)
+  const regexMode = ref(extra.regexMode ?? false)
+  return createStructuralSearchModel({ enabled, template: query, replacement, caseSensitive, wholeWord, definitions, regexMode })
 }
 
 test('模式关着时模型一个字都不改（既有搜索/替换通道不受接线影响）', () => {
@@ -73,7 +77,7 @@ test('匹配范围（整模板档的 within）真的在筛宿主返回的候选�
   ]
   const kept = m.refine(rows)
   assert.deepEqual(kept.map(row => row.line), [1])
-  assert.match(m.note.value, /1 处不满足修饰符\/匹配范围，已剔除/)
+  assert.match(m.note.value, /1 处不满足修饰符\/匹配范围\/列表整段，已剔除/)
   assert.match(m.note.value, /1 处本仓复核不上/)
   m.scope.value = null
   // 撤掉匹配范围后本层不再复核：第 3 行那种"宿主本来就不该报"的候选由宿主负责，这里不替它判定。
@@ -111,4 +115,41 @@ test('valuesOf 给的是这一次命中里每个变量匹配到的文本（Match
   assert.equal(m.valuesOf('没有加号'), null)
   const off = model('$x$ + $y$', { enabled: false })
   assert.equal(off.valuesOf('a + b'), null)
+})
+
+// —— 按下替换时的那道门（上游 `FindPopupPanel.getValidationInfo` 的 `:1520` 那一整块，
+//    校验点 `:1547-1552`；文案 `FindBundle.properties:96`）——
+
+test('替换串畸形只在「正则档」挡：非正则档里 $3 是字面文本（FindPopupPanel.java:1520）', () => {
+  const bad = model('(\w+)@(\w+)', { enabled: false, regexMode: true, replacement: '[$3]' })
+  assert.match(bad.replaceGuard.value, /No group 3/, '两个组的模式里写 $3 ⇒ 上游 :58-59 那句 No group 3')
+  assert.match(bad.replaceGuard.value, /^替换字符串格式非法：/, '与宿主 validate_replacement 同一句前缀')
+  // 同一句话在非正则档**不挡**：上游那块校验整条挂在 isRegularExpressions() 里，
+  // 普通查找的替换串由 `FindManagerBase.getStringToReplace:288-291` 原样使用（不展开 $n）。
+  assert.equal(model('(\w+)@(\w+)', { enabled: false, replacement: '[$3]' }).replaceGuard.value, '')
+  // 组数够用的写法放行（`$0` 是整段命中，恒可用）。
+  assert.equal(model('(\w+)@(\w+)', { enabled: false, regexMode: true, replacement: '[$0-$2]' }).replaceGuard.value, '')
+})
+
+test('替换框为空时门是开的（上游 :1533 的 isReplaceState()，空替换是"删掉命中"不是模板）', () => {
+  assert.equal(model('(\w+)', { enabled: false, regexMode: true, replacement: '' }).replaceGuard.value, '')
+})
+
+test('结构化模式下门看的是编译产物与折好的替换串（那条通道本身就是 regex:true 发出去的）', () => {
+  const ok = model('log($x$)', { replacement: '$x$!' })
+  assert.ok(ok.compiled.value, '模板编得动，才有下面这句"放行"可言')
+  assert.equal(ok.replaceGuard.value, '')
+  // 替换串里落单的字面 `$9`：模板编译按未知变量原样留着，但它发给宿主就越界了（1 个组）。
+  assert.match(model('log($x$)', { replacement: '$9' }).replaceGuard.value, /No group 9/)
+  // 模板编不动时**不**冒替换串的错：那条路径上拒绝的是 `error`（模板本身），
+  // 不是替换字段 —— 两条错误同时出现会把用户引到错的那一半。
+  const broken = model('$x${3,1}', { replacement: '$9' })
+  assert.match(broken.error.value, /大于上界/)
+  assert.equal(broken.replaceGuard.value, '')
+})
+
+test('query 自己编不出来时不拿"组数 0"去误判替换串（那是搜索阶段宿主报的错）', () => {
+  // 上游同一档：`Pattern.compile` 抛 ⇒ `find.invalid.regular.expression.error`，根本走不到替换校验
+  // （`FindPopupPanel.java:1523-1532`）。
+  assert.equal(model('((\w+', { enabled: false, regexMode: true, replacement: '$1' }).replaceGuard.value, '')
 })

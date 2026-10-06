@@ -88,12 +88,16 @@ test('四档计数自洽，且与表尾那句一致', () => {
   const count = letter => rows.filter(row => row.verdict === letter).length
   // 2026-10-04 两轮改判后：`CollapseExpandDocCommentsHandler` 与 `CodeFoldingPass`/`FoldingUpdate`
   // 三条 `[~]` → `[x]`，四档从 1/39/0/29 变成 3/37/0/29（表尾那句同步改过）。
-  assert.equal(count('[x]'), 3)
-  assert.equal(count('[~]'), 37)
+  // 2026-10-06 第三轮（fold3 lane）：选区作用域（`BaseFoldingHandler`/`CollapseAllRegionsAction`/
+  // `ExpandAllRegionsAction`）、`ApplyDefaultStateMode` 三档（`UpdateFoldRegionsOperation`）、
+  // 按偏移查询的公开面（`CodeFoldingManager`/`CodeFoldingManagerImpl`）、逐条轻签名替身
+  // （`DocumentFoldingInfo`）共 7 条 `[~]` → `[x]`，四档从 3/37/0/29 变成 10/30/0/29。
+  assert.equal(count('[x]'), 10)
+  assert.equal(count('[~]'), 30)
   assert.equal(count('[ ]'), 0)
   assert.equal(count('[-]'), 29)
   assert.equal(count('[x]') + count('[~]') + count('[ ]') + count('[-]'), 69)
-  assert.match(verdict, /四档合计\*\*：`\[x\]` 3 \+ `\[~\]` 37 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
+  assert.match(verdict, /四档合计\*\*：`\[x\]` 10 \+ `\[~\]` 30 \+ `\[ \]` 0 \+ `\[-\]` 29 = 69/,
     '表尾的和数要与逐条表一致')
 })
 

@@ -45,7 +45,15 @@ export interface SurroundResult {
   text: string
 }
 
-/** 选区吸附到整行：起在首行第一个非空白字符，止在末行行尾（`:153-188` 的文本等价）。 */
+/**
+ * 选区吸附到整行：起在首行第一个非空白字符，止在末行行尾（`:153-188` 的文本等价）。
+ * 「选区里没有任何实际元素」这一档由 `end <= snappedFrom` 那一条挡住：`body.trimStart()` 把跨行的
+ * 空白（含换行）一路剥到底，整段都是空白时 `snappedFrom` 正好落到 `end` ⇒ 返回 null。
+ * 上游同一条规矩在 `:56-61`：首尾的 `PsiWhiteSpace` 各挪一个兄弟，挪完首尾是同一个空白 token
+ * 就直接返回空数组 —— 一处空白选区不该在文件里插下两条孤零零的标记。
+ * （本轮先加过一条「吸附完整段都是空白」的显式判据，实测**不可达**、被前一条完全覆盖 ⇒ 已删；
+ * 判据留在 `tests/folding-custom-region-surround.test.mjs` 盯着这条路径。）
+ */
 function snapToLines(text: string, from: number, to: number): { from: number; to: number } | null {
   if (to <= from) return null                                // `:51` 空选区不给包围
   const lineStart = text.lastIndexOf('\n', Math.max(0, from - 1)) + 1
@@ -54,7 +62,7 @@ function snapToLines(text: string, from: number, to: number): { from: number; to
   const body = text.slice(lineStart, end)
   const shift = body.length - body.trimStart().length
   const snappedFrom = lineStart + shift
-  if (end <= snappedFrom) return null
+  if (end <= snappedFrom) return null                        // 整段都是空白 ⇒ 没有可包围的元素（`:56-61`）
   return { from: snappedFrom, to: end }
 }
 

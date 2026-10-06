@@ -103,15 +103,44 @@ function asUnchanged(row: DiffRow): DiffRow {
 export function computeLCS(a: string[], b: string[]): { from: number; to: number }[] {
   return alignLines(a, b)
 }
+/**
+ * 文本形式的 unified diff（一次到底：两侧**每一行**都进正文，所以只有 `@@` 一个块头）。
+ *
+ * 块头的四个数照上游算法：
+ *   · 写法 `UnifiedDiffWriter.writeHunkStart`（`platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/UnifiedDiffWriter.java:220-225`）
+ *     —— `@@ -起始,行数 +起始,行数 @@`，行数 = 块尾下标 - 块头下标（两侧各算一次，即 `PatchHunk.getEndLineBefore() - getStartLineBefore()`）；
+ *   · 数法 `PatchHunkUtil.getRange`（`platform/vcs-api/vcs-api-core/src/com/intellij/openapi/diff/impl/patch/PatchHunkUtil.kt:10-30`）
+ *     —— 从**真正写进这个块的行**逐行累加：REMOVE 只加 before 侧、ADD 只加 after 侧、CONTEXT 两侧都加。
+ * 于是「声明的行数」永远等于「实际收得到的行数」，这才是 `git apply` 认的那份账
+ * （读侧按声明行数收块见 `src/patchApply.ts` 的 `parseUnifiedPatch`，上游
+ * `PatchReader.readNextHunkUnified`，`platform/vcs-impl/src/com/intellij/openapi/diff/impl/patch/PatchReader.java:335-392`，
+ * 收满就 `iterator.previous(); break` 把当前行退回去按表头重判，`:375-379`）。
+ *
+ * 原来这里写死 `@@ -1 +1 @@`：省略第二个数就是 1（上游 `PatchReader.java:359` 的
+ * `linesBeforeText == null ? 1`、本仓 `parseHunkHeader` 同款），也就是向读侧声明「这块只有 1 行」，
+ * 而正文是整个文件 ⇒ 声明与实际不符：`git apply` 报 `corrupt patch at line N`，
+ * 本仓的解析器也会在收满 1 行之后把剩下的正文行当成表头重新判（跨块残留）。
+ *
+ * 某一侧行数为 0（纯增 / 纯删）时，那一侧的起始号按 git 惯例退成 0 基的「插在哪一行之后」，
+ * 与本仓 `native/history_diff.cpp:116-121` 的 `render_hunks` 同一口径（那里的 `@@` 头也是从实际行累加出来的）。
+ */
 export function generateUnifiedDiff(a: string[], b: string[]): string {
   const lcs = computeLCS(a, b)
-  const lines: string[] = ['--- 当前文件', '+++ 剪贴板', '@@ -1 +1 @@']
+  const body: string[] = []
   let ci = 0, ki = 0, li = 0
   while (ci < a.length || ki < b.length) {
-    if (li < lcs.length && ci < lcs[li].from) { lines.push(`-${a[ci]}`); ci++ }
-    else if (li < lcs.length && ki < lcs[li].to) { lines.push(`+${b[ki]}`); ki++ }
-    else if (li < lcs.length) { lines.push(` ${a[ci]}`); ci++; ki++; li++ }
-    else { if (ci < a.length) lines.push(`-${a[ci]}`); if (ki < b.length) lines.push(`+${b[ki]}`); ci++; ki++ }
+    if (li < lcs.length && ci < lcs[li].from) { body.push(`-${a[ci]}`); ci++ }
+    else if (li < lcs.length && ki < lcs[li].to) { body.push(`+${b[ki]}`); ki++ }
+    else if (li < lcs.length) { body.push(` ${a[ci]}`); ci++; ki++; li++ }
+    else { if (ci < a.length) body.push(`-${a[ci]}`); if (ki < b.length) body.push(`+${b[ki]}`); ci++; ki++ }
   }
-  return lines.join('\n')
+  // 声明的行数由正文实际吐出的那些行累加（`PatchHunkUtil.kt:14-27` 的那个 switch）。
+  let beforeCount = 0
+  let afterCount = 0
+  for (const line of body) {
+    if (line[0] !== '+') beforeCount++
+    if (line[0] !== '-') afterCount++
+  }
+  const header = `@@ -${beforeCount === 0 ? 0 : 1},${beforeCount} +${afterCount === 0 ? 0 : 1},${afterCount} @@`
+  return ['--- 当前文件', '+++ 剪贴板', header, ...body].join('\n')
 }

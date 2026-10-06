@@ -21,6 +21,15 @@ import {
 import { gradleSyncTasks, ignoredExternalProjects } from './externalSystemViewOptions.ts'
 import { loadTasksActivation, tasksForPhase } from './externalProjectModel.ts'
 import { generateExternalSystemTaskName } from './externalSystemTask.ts'
+// 任务执行设置的编辑面与存储（上游 `ExternalSystemEditTaskDialog`，见 `src/externalTaskSettings.ts` 头注）：
+// 面板的「编辑任务…」写这张表，`runTask`/`saveTaskAsRunConfig` 读它折命令与环境变量。
+import {
+  composeTaskRunCommand, loadTaskSettingsMap, taskNeedsEnvironment, taskRunEnvironment,
+  taskSettingsForBuild, type TaskExecutionSettings,
+} from './externalTaskSettings.ts'
+// 「已配置源根」的进程表写者（判词 pm/file-index 缺项 ②）：渲染层拿不到 project.settings，
+// 这里把 `java.sourcePaths` 灌进 `projectFileIndex` 的表，标签右键「来自源根的路径」就按配置走。
+import { setConfiguredSourceRoots } from './projectFileIndex.ts'
 // 重名去重的候选序（上游 `service/project/nameGenerator/` 四个类，见那边的文件头）：
 // 本仓没有 Module 对象图，所以这条链落在**用户可见的标识**上 —— 控制台标签与运行配置名。
 import { chooseModuleName, moduleNameCandidates, moduleNamePathParts } from './externalSystemNameGenerator.ts'
@@ -32,7 +41,8 @@ import { backgroundTaskQueue } from './backgroundTasks.ts'
 // 链接/解除经 `ExternalSystemUnlinkedProjectAware` 登记表暴露（本仓没有插件 EP 宿主，
 // 登记项由这里直接构造）。
 import {
-  createExternalSystemProjectTracker, createUnlinkedProjectRegistry, normalizeProjectPath, projectIdOf,
+  createAutoReloadWindow, createExternalSystemProjectTracker, createUnlinkedProjectRegistry,
+  normalizeProjectPath, projectIdOf,
   type AutoImportModificationType, type ExternalRefreshStatus,
 } from './externalSystemAutoImport.ts'
 // 「自动链接未链接工程」的项目级开关（上游 `ExternalSystemUnlinkedProjectSettings.isEnabledAutoLink`，
@@ -59,14 +69,15 @@ export interface GradleHostDeps {
   isOpenInEditor: (path: string) => boolean
   openSettings: (section: 'build.tools' | 'reference.settingsdialog.project.gradle') => unknown
   openFile: (path: string) => unknown
-  addRunConfiguration: (name: string, command: string) => unknown
+  addRunConfiguration: (name: string, command: string, env?: string[]) => unknown
   notifyProgress: NotifyProgress
   saveGradleSettings: (patch: BuildToolsGradleSettings) => Promise<unknown>
 }
 
-/** 同步任务串的**默认值**（实际值见 `src/gradleTaskActivations.ts` 的 `gradleSyncTasks()`：面板的
- *  「显示继承任务」开关决定末尾是 `--all` 还是不带）。 */
-export const GRADLE_SYNC_TASKS = 'projects tasks --all'
+// 同步任务串没有常量默认值：每次现算 `gradleSyncTasks()`（`src/externalSystemViewOptions.ts`，
+// 面板的「显示继承任务」开关决定末尾是 `--all` 还是不带；判据 `tests/external-system-actions.test.mjs:64-65`）。
+// roots2 留痕：这里原有一个 `export const GRADLE_SYNC_TASKS = 'projects tasks --all'`，全仓零消费方
+// （src/tests/docs 都只命中它自己那一行），注释还指向不存在的 `src/gradleTaskActivations.ts` ⇒ 按死代码删除。
 export interface GradleViewContext {
   gradleDetection: GradleDetection | null
   gradleDetectionError: string
@@ -113,12 +124,17 @@ export function gradleViewContext(
   }
 }
 
-type JobKind = 'sync' | 'dependencies'
-interface Job { directory: string; root: string; epoch: number; kind: JobKind; done: () => void; cancelled?: boolean }
+type JobKind = 'sync' | 'dependencies' | 'task'
+interface Job { directory: string; root: string; epoch: number; kind: JobKind; done: () => void; cancelled?: boolean;
+  /** kind='task' 用：命令串与要叠的环境变量（任务编辑对话框写下的 VM 选项/env 只有这条通道带得动）。 */
+  commandOverride?: string; environment?: string[] }
 interface ActiveJob { job: Job; command: string; startedAt: number; cancelled: boolean; discard: boolean; accepted: boolean }
 
 export function createGradleHost(deps: GradleHostDeps) {
   const buildTools = computed<BuildToolsSettings>(() => deps.projectSettings.value.buildTools ?? DEFAULT_BUILD_TOOLS)
+  // 配置源根进进程表（上游查询现场读根模型；本仓的等价时机是设置到手的那一刻）。
+  watch(() => deps.projectSettings.value.java?.sourcePaths ?? [], roots => { setConfiguredSourceRoots(roots) },
+    { immediate: true, flush: 'sync' })
   const linkedProjects = computed(() => [...new Set(buildTools.value.gradle.linkedProjects ?? [])])
   const projectDirectory = computed(() => linkedProjects.value[0] ?? '')
   const available = computed(() => linkedProjects.value.length > 0)
@@ -266,6 +282,19 @@ export function createGradleHost(deps: GradleHostDeps) {
   const autoImportTracker = createExternalSystemProjectTracker({
     autoReloadType: () => buildTools.value.autoReloadType,
   })
+  /**
+   * 自动重载的合并窗（上游 `AutoImportProjectTracker.kt:89-96,157-170,549-551`：改动先攒 300ms 跨度，
+   * 延迟重载 3s 折算成 2700ms 才跑；`scheduleProjectRefresh` :137-142 的显式刷新不吃这个延迟，
+   * `PriorityEatUpdate` 还让它把待着的延迟重载吃掉）。本仓：延迟走 `createAutoReloadWindow`，
+   * 显式路径（同步按钮 / 通知的「同步更改」）直接 `sync()` 并在 `sync()` 里 `eatPending`。
+   */
+  const autoReloadWindow = createAutoReloadWindow(keys => { for (const key of keys) void sync(key) })
+  /** 某个 build 某个任务被「编辑任务…」存过的执行设置（`ExternalSystemTasksTree.java:183-190` 的复用口径）。 */
+  function taskSettingsFor(directory: string, task: string): TaskExecutionSettings | null {
+    const root = deps.workspace.value?.root ?? ''
+    if (!root || typeof localStorage === 'undefined') return null
+    return taskSettingsForBuild(loadTaskSettingsMap(localStorage, root), directory, task)
+  }
   /** 未链接工程登记表（`autolink` 族）：本仓只有 Gradle 一个登记项，由域内直接构造。 */
   const unlinkedProjects = createUnlinkedProjectRegistry()
   unlinkedProjects.register({
@@ -293,7 +322,12 @@ export function createGradleHost(deps: GradleHostDeps) {
           const detection = modelFor(directory)?.detection
           return [...(detection?.buildFiles ?? []), ...(detection?.settingsFiles ?? [])].map(path => externalProjectPathOf(fromDirectory(directory, path)))
         },
-        reloadProject: () => { void sync(directory) },
+        reloadProject: context => {
+          // 显式刷新 = 直接排同步（上游 `scheduleProjectRefresh` 不等延迟，`AutoImportProjectTracker.kt:137-142`）；
+          // 自动重载 = 进合并窗（`:157-170`，同窗内的多次改动并成一次）。
+          if (context.isExplicitReload) { void sync(directory); return }
+          autoReloadWindow.schedule(directory)
+        },
       })
       autoImportTracker.activate(id)
     }
@@ -407,8 +441,9 @@ export function createGradleHost(deps: GradleHostDeps) {
     const beforeSync = job.kind === 'sync' ? activationTasks(job.root, job.directory, 'beforeSync') : []
     const task = job.kind === 'sync'
       ? [...beforeSync, gradleSyncTasks()].join(' ')
-      : GRADLE_DEPENDENCIES_TASK
-    const command = gradleCommand(info, buildTools.value.gradle, task)
+      : job.kind === 'dependencies' ? GRADLE_DEPENDENCIES_TASK : ''
+    // 「编辑任务…」存下过 VM 选项/env 的那次执行自带命令串与环境变量（别种类型现场拼）。
+    const command = job.kind === 'task' ? job.commandOverride ?? '' : gradleCommand(info, buildTools.value.gradle, task)
     const owner: ActiveJob = { job, command, startedAt: 0, cancelled: false, discard: false, accepted: false }
     active = owner
     // 重载生命周期（上游 `ExternalSystemProjectListener.onProjectReloadStart/Finish`）：
@@ -417,7 +452,14 @@ export function createGradleHost(deps: GradleHostDeps) {
     const trackedId = projectIdOf(GRADLE_SYSTEM.id, externalProjectPathOf(job.directory))
     let reloadOutcome: ExternalRefreshStatus = 'CANCEL'
     if (job.kind === 'sync') autoImportTracker.beginReload(trackedId)
-    const env = gradleEnvironment(buildTools.value.gradle, deps.projectSettings.value.java?.jdkHome ?? '')
+    // 非重载的长执行（依赖加载 / 带 env 的任务运行）进**操作计数**（`ExternalSystemAutoImportAwareListener`
+    // 的用场，`AutoImportProjectTracker.kt:267-275` 的 isOperationInProgress 门）：
+    // 期间设置文件改动只攒脏不决策，operationCompleted 时按当时的档位补齐（`externalSystemAutoImport.ts` 的 pending 账）。
+    const longOperation = job.kind !== 'sync'
+    if (longOperation) autoImportTracker.operationStarted()
+    const env = job.kind === 'task'
+      ? job.environment ?? []
+      : gradleEnvironment(buildTools.value.gradle, deps.projectSettings.value.java?.jdkHome ?? '')
     let finished = false
     let complete!: () => void
     const exit = new Promise<void>(resolve => { complete = resolve })
@@ -443,7 +485,11 @@ export function createGradleHost(deps: GradleHostDeps) {
       const error = owner.cancelled || gradleSync.cancelled ? '已取消。'
         : gradleFailure(output) || (gradleSync.exit === 0 ? '' : `Gradle 退出码 ${gradleSync.exit}`)
       reloadOutcome = owner.cancelled || gradleSync.cancelled ? 'CANCEL' : error ? 'FAILURE' : 'SUCCESS'
-      if (job.kind === 'dependencies') {
+      if (job.kind === 'task') {
+        // 任务执行不改工程模型：输出走同一条 gradle.* 事件流，只把结论写进消息与进度。
+        model.message = error ? `任务运行失败：${error}` : '任务运行完成。'
+        message.value = `${job.directory || '根项目'} · ${model.message}`
+      } else if (job.kind === 'dependencies') {
         model.dependencies = error ? [] : parseGradleDependencies(output)
         model.dependenciesLoaded = !error
         model.message = error || `已加载依赖：${model.dependencies.length} 个配置。`
@@ -456,9 +502,11 @@ export function createGradleHost(deps: GradleHostDeps) {
         model.dependenciesLoaded = false
         model.message = error || `已同步：${model.result.projects.length} 个项目、${model.result.tasks.length} 个任务。`
       }
-      // 导入完成 → 登记外部系统工程模型（失败导入保留上次成功的结构与时间戳）。
-      registerExternalProject(job.directory, gradleSync.at, error, model)
-      message.value = `${job.directory || '根项目'} · ${model.message}`
+      // 导入完成 → 登记外部系统工程模型（失败导入保留上次成功的结构与时间戳）。任务执行不登记（模型没变）。
+      if (job.kind !== 'task') {
+        registerExternalProject(job.directory, gradleSync.at, error, model)
+        message.value = `${job.directory || '根项目'} · ${model.message}`
+      }
       // 同步后激活的任务（上游 `Phase.AFTER_SYNC`）：同步**成功**后依次跑；失败/取消不跑
       // （与上游只在导入成功后才触发同步后任务一致）。走与手工任务同一条 run 控制台通道。
       if (job.kind === 'sync' && !error && !owner.cancelled && !gradleSync.cancelled) {
@@ -469,8 +517,9 @@ export function createGradleHost(deps: GradleHostDeps) {
           }))
         }
       }
-      if (error && !owner.cancelled && !gradleSync.cancelled) notifyFailure(job.directory, job.kind === 'sync' ? 'Gradle 同步' : '依赖加载', error)
-      deps.notifyProgress(gradleFinishedNoticeOf(error, Math.max(0, Math.round((gradleSync.at - owner.startedAt) / 1000)), job.kind === 'dependencies' ? '依赖加载' : undefined))
+      if (error && !owner.cancelled && !gradleSync.cancelled) notifyFailure(job.directory, job.kind === 'sync' ? 'Gradle 同步' : job.kind === 'dependencies' ? '依赖加载' : '任务运行', error)
+      deps.notifyProgress(gradleFinishedNoticeOf(error, Math.max(0, Math.round((gradleSync.at - owner.startedAt) / 1000)),
+        job.kind === 'dependencies' ? '依赖加载' : job.kind === 'task' ? '任务运行' : undefined))
     } catch (error) {
       reloadOutcome = 'FAILURE'
       if (current(job.root, job.epoch) && modelFor(job.directory) === model) {
@@ -480,6 +529,7 @@ export function createGradleHost(deps: GradleHostDeps) {
         deps.notify(model.message, true)
       }
     } finally {
+      if (longOperation) autoImportTracker.operationCompleted()
       if (job.kind === 'sync') autoImportTracker.finishReload(trackedId, reloadOutcome)
       stop()
       if (active === owner) active = null
@@ -527,6 +577,9 @@ export function createGradleHost(deps: GradleHostDeps) {
     // 重载已排上 ⇒ 撤下待同步通知（`AutoImportProjectTracker.kt:224-228` 的 notificationExpire 分支）。
     // `.id`：通知表按系统 id 字符串记账（`autoImportNotifications.ts`），`GRADLE_SYSTEM` 是模型身份对象。
     autoImport.expire(GRADLE_SYSTEM.id)
+    // 显式刷新把合并窗里待着的延迟重载吃掉（上游 `PriorityEatUpdate` 的 priority 0 语义，
+    // `AutoImportProjectTracker.kt:137-142,171-196`）：这次真的会跑，不用再排一次。
+    autoReloadWindow.eatPending(directory)
     await enqueue('sync', directory)
   }
   async function refreshProject(directory = projectDirectory.value): Promise<void> { await sync(directory) }
@@ -592,11 +645,35 @@ export function createGradleHost(deps: GradleHostDeps) {
   }
   async function runTask(task: string, directory = projectDirectory.value): Promise<void> {
     const command = await taskCommand(task, directory)
-    if (command) deps.runInConsole(command, taskRunName(task, directory))
+    if (!command) return
+    // 「编辑任务…」存过的设置参与执行（上游 `ExternalSystemTasksTree.java:183-190`：同一工程上一次
+    // 任务执行的 vmOptions/scriptParameters 会被带到下一次；入口对话框 = `ExternalSystemEditTaskDialog`）。
+    const settings = taskSettingsFor(directory, task)
+    const composed = composeTaskRunCommand(command, settings, task)
+    if (taskNeedsEnvironment(settings)) {
+      // VM 选项/env 只有原生 Gradle 通道带得动（`native/gradle.cpp` 的 env 叠在继承来的环境之上；
+      // 运行控制台那条通道只有一条命令字符串）。走它 = 上游把外部系统任务折进专用输出通道的形态。
+      const env = taskRunEnvironment(settings!, gradleEnvironment(buildTools.value.gradle, deps.projectSettings.value.java?.jdkHome ?? ''))
+      const root = deps.workspace.value?.root
+      if (!root) return
+      queue.push({ directory, root, epoch, kind: 'task', commandOverride: composed, environment: env, done: () => {} })
+      busy.value = true
+      void pump()
+      return
+    }
+    deps.runInConsole(composed, taskRunName(task, directory))
   }
   async function saveTaskAsRunConfig(task: string, directory = projectDirectory.value): Promise<void> {
     const command = await taskCommand(task, directory)
-    if (command) deps.addRunConfiguration(taskRunName(task, directory), command)
+    const settings = taskSettingsFor(directory, task)
+    // 运行配置的形状：{name, command} + 可选 env 数组（`src/runConfigurationSchema.ts:22` 的键白名单里
+    // 早有 `env`，`src/runActions.ts:96` 的 `if (config.env?.length) params.env = config.env` 已经把它
+    // 交给 `native/run_host.cpp:207` 的 `step.environment`）。任务名与脚本参数折进命令，VM 选项/env
+    // 折进第三参 —— 上游那份是随运行配置持久化整个 bean（`ExternalSystemBeforeRunTask.java:38-45`
+    // 把 tasks/externalProjectPath/vmOptions/scriptParameters 都写进 XML），不是只在「直接运行」时生效。
+    // 收下方回调的 `src/App.vue:1817` 目前只声明两个参数，第三参会被丢掉 ⇒ 已提接线请求 R1。
+    if (command) deps.addRunConfiguration(taskRunName(task, directory), composeTaskRunCommand(command, settings, task),
+      settings && taskNeedsEnvironment(settings) ? taskRunEnvironment(settings, []) : undefined)
   }
 
   async function cancel(): Promise<void> {
@@ -687,7 +764,17 @@ export function createGradleHost(deps: GradleHostDeps) {
     // autoReloadDecision 同口径）判——SELECTIVE 的「VCS 更新」那一条在这里接上。
     if (afterVcsUpdate && shouldAutoReload(type, { afterVcsUpdate })) reload = true
     if (reload) {
-      await sync()
+      // 自动重载不在这里立刻跑：逐文件的改动已经由 tracker 经 `reloadProject` 钩子排进合并窗
+      // （上游 `scheduleDelayedProjectReload`，`AutoImportProjectTracker.kt:157-170`）；
+      // VCS 批量更新这条没有逐文件事件，在这里按「脚本属于哪个链接目录」补排同一个窗。
+      if (afterVcsUpdate) {
+        if (scripts.length) {
+          for (const directory of linkedProjects.value)
+            if (scripts.some(script => directory === '' || script.startsWith(`${directory}/`))) autoReloadWindow.schedule(directory)
+        } else {
+          for (const directory of linkedProjects.value) autoReloadWindow.schedule(directory)
+        }
+      }
       return true
     }
     // 自动重载被禁用（NONE，或 SELECTIVE 下只有 IDE 内改动）时上游**不是静默跳过**：
@@ -716,6 +803,8 @@ export function createGradleHost(deps: GradleHostDeps) {
     ++externalVersion.value
     // 待同步通知同样随项目走（上游通知挂在 project 的 notificationAware 上）。
     autoImport.reset()
+    // 合并窗是**工程级**的：换根时上一根的待重载连同时钟一起作废（不能让旧窗打到新工程上）。
+    autoReloadWindow.dispose()
     // CRC 表同理：换工程后上一张表不再可信，清掉（下次用到时按新根从 localStorage 读回）。
     resetSettingsCrc()
     // 跨会话的工程数据也按根分键：换根要重新 load 一次（`restoreFromCache` 里按根缓存加载状态）。

@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { addToListItem, createList, defaultListOf, deleteList, freeListName, listForBookmark, listNameError, listsFromLegacy, renameList, setDefaultList, toggleDefaultList } from '../src/bookmarkLists.ts'
+import { addToListItem, createList, defaultListOf, deleteList, firstListHolding, freeListName, listForBookmark, listHolds, listsHolding, listNameError, listsFromLegacy, panelSections, removeFromFirstHolder, renameList, setDescriptionInList, setDefaultList, toggleDefaultList } from '../src/bookmarkLists.ts'
 
 const list = (name, isDefault = false, bookmarks = []) => ({ name, isDefault, bookmarks })
 
@@ -107,4 +107,53 @@ test('编辑器标签页与项目视图菜单都有文件书签那三条，且"�
     '行书签不该出现这个入口（上游 update 直接 return false）')
   assert.match(runtime, /runWithChosenList\(name => addBookmarkToNamedList\(name, entry\)\)/,
     '加进另一张列表要复用挑列表的捷径')
+})
+
+// 「移除书签」与「编辑描述」都要落在**这一行所在的那张列表**里：
+//   · 树上删的是被点那一段的列表（`ui/tree/BookmarkListProvider.kt:54-57`
+//     的 `node.value?.let { node.bookmarkGroup?.remove(it) }`；`Group.remove(bookmark)` =
+//     `BookmarksManagerImpl.kt:636` 的 `removeFromGroup(this, bookmark)`）；
+//   · 描述也**按列表各存一份**（`BookmarksManagerImpl.kt:598-609` 把 description 记在 `InGroupInfo`，
+//     `setDescription:586-594` 只写那一份），入口 `actions/EditBookmarkAction.kt:27` 取
+//     `manager.getGroups(bookmark).firstOrNull()`（`getGroups` 的口径 = `BookmarksManagerImpl.kt:146-148`）。
+// 本仓原先这两处只动默认列表那张平铺表 ⇒ "只存在于命名列表里"的书签点 X / 改描述**毫无反应**。
+test('按列表身份删/改：第一张持有它的列表优先，都不持有时交回默认列表', () => {
+  const line = { path: 'a.cpp', line: 3 }
+  const file = { path: 'b.cpp' }
+  const lists = [list('待办', false, [line]), list('笔记', false, [{ ...file, description: '旧' }])]
+  assert.equal(listHolds(lists[0], line), true)
+  assert.equal(listHolds(lists[1], line), false)
+  assert.deepEqual(listsHolding(lists, file).map(entry => entry.name), ['笔记'])
+  assert.equal(firstListHolding(lists, file).name, '笔记')
+  assert.equal(firstListHolding(lists, { path: '没有.cpp', line: 1 }), undefined)
+
+  const removed = removeFromFirstHolder(lists, line)
+  assert.equal(removed.removed, true)
+  assert.deepEqual(removed.lists[0].bookmarks, [], '从「待办」里删掉')
+  assert.equal(removed.lists[1], lists[1], '别的那张列表一个字不动')
+  const nothing = removeFromFirstHolder(removed.lists, { path: 'a.cpp', line: 3 })
+  assert.equal(nothing.removed, false, '没有列表持有 ⇒ 交给默认列表处理（不是静默失败）')
+
+  const edited = setDescriptionInList(lists, lists[1], file, '新描述')
+  assert.equal(edited[1].bookmarks[0].description, '新描述')
+  assert.equal(lists[1].bookmarks[0].description, '旧', '纯函数：不改调用方那份数组')
+  const cleared = setDescriptionInList(edited, edited[1], file, '   ')
+  assert.equal('description' in cleared[1].bookmarks[0], false, '空白 = 清掉自定义描述（回到行原文那一支）')
+})
+
+// 「只有一个默认列表」是上游的硬约束（`Group.isDefault` 的 setter 顺手清掉旧默认，
+// `BookmarksManagerImpl.kt:529-534`），而本仓的默认列表**恒等于**历史字段 `bookmarks` 那一份。
+// 存档里允许一张命名列表自带 `isDefault: true`（`tests/bookmark-settings.test.mjs` 就钉着这条），
+// 渲染成两段「默认」就与那条约束冲突 —— 宿主的另一处取数（`src/toolViewContext.ts`）早就是筛掉的。
+test('面板的段：命名列表在前、默认列表最后，且只有一段带「默认」标记', () => {
+  const named = [list('待办', false, [{ path: 'a.cpp', line: 1 }]), list('越权的默认', true, [{ path: 'b.cpp' }])]
+  const sections = panelSections(named, [{ path: 'c.cpp', line: 9 }], 'ui-parity-proj')
+  assert.deepEqual(sections.map(section => [section.name, section.isDefault]),
+    [['待办', false], ['越权的默认', false], ['ui-parity-proj', true]],
+    '命名列表里那个 isDefault 不参与渲染：默认列表只有历史字段那一份')
+  assert.equal(sections.filter(section => section.isDefault).length, 1, '两段「默认」= 与上游的单一默认冲突')
+  assert.deepEqual(sections[2].entries, [{ path: 'c.cpp', line: 9 }], '默认列表段用的就是传进来的那份')
+  assert.deepEqual(panelSections([], [], 'proj').map(section => section.name), ['proj'], '没有命名列表时仍有一段')
+  const shape = panelSections(named, [], 'proj')
+  assert.deepEqual(Object.keys(shape[0]).sort(), ['entries', 'isDefault', 'name'], '面板的 PanelList 形状')
 })

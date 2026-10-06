@@ -2,16 +2,35 @@
 //
 // 上游这一族的注册表与次序：`platform/lang-impl/resources/intellij.platform.lang.impl.xml`
 //   `:1159` `EnterInStringLiteralHandler` → `:1160` `EnterInLineCommentHandler` →
-//   `:1161-1162` `EnterInBlockCommentHandler`（`id="blockComment"`，带 `order="last"` ⇒ 它在 EP 表里
-//     实际排到最后问）→ `:1163-1164` `EnterAfterUnmatchedBraceHandler` →
+//   `:1161-1162` `EnterInBlockCommentHandler`（`id="blockComment"`，带 `order="last"`）、
+//   `:1163-1164` `EnterAfterUnmatchedBraceHandler` →
 //   `:1165-1166` `EnterBetweenBracesFinalHandler`（bean id 就叫 `EnterBetweenBracesHandler`）→
-//   `:1171` `EnterAfterJavadocTagHandler`。EP 声明在 `:399`；「逐个问、第一个接管的算」就是这张表的
-//   列出顺序（`platform/lang-impl/src/com/intellij/codeInsight/editorActions/EnterHandler.java:136-137`
+//   `:1167-1170` 它自带的 `InjectedIndentPostProcessor`（也 `order="last"`）→
+//   `:1171` `EnterAfterJavadocTagHandler`。EP 声明在 `:399`。「逐个问、第一个接管的算」问的是这张表
+//   **排完序之后**的顺序（`platform/lang-impl/src/com/intellij/codeInsight/editorActions/EnterHandler.java:136-137`
 //   的 preprocessEnter 循环；订正 2026-10-06：旧注释抄的是 `:181`，那一处是 postProcessEnter 的循环），
-//   返回值的处置（`Result.DefaultForceIndent` / `DefaultSkipIndent`）在 `EnterHandler.java:145-151`。
-//   **本仓把注释那两条排在字面量之前**：上游靠 token 类型区分「引号在注释里」和「引号在字面量里」，
-//   本仓只有词法扫描，`// 说 "abc` 这种行注释里的引号会被字面量那条误切成 `" + "`，所以先问注释
-//   （架构不等价 ⇒ 按本仓架构还原用户可见行为；次序差异留痕在这里，不在代码里偷偷改）。
+//   返回值的处置在 `EnterHandler.java:142-153`（不是 `Continue` 的每一档都 break）。
+//   `order="last"` 把块注释那条推到表尾 ⇒ 本仓能还原的那几条的**有效次序**是：
+//   ① 字符串字面量 → ② 行注释 → ③ 未配对的左花括号 → ④ 块注释。
+//   订正（2026-10-06 复核这四条的次序时逐行对的）：这里原先写「本仓把注释那两条排在字面量之前，
+//   否则 `// 说 "abc` 里的引号会被字面量那条误切」—— 那是拿**问法次序**当**词法**用。上游区分这两件事
+//   靠 token 类型，不是靠次序：`enter/EnterInStringLiteralHandler.java:39-42` 先问
+//   `isInStringLiteral`、`:116-125` 读的是 `offset-1` 那个 token 的类型（注释 token 直接 false），
+//   `enter/EnterInLineCommentHandler.java:97` 要求光标前那个 token 是**行注释**类型。
+//   本批按上面的有效次序问，并把「这个引号在注释里 / 这个 `//` 在字符串里」交给 `lexUntil` 那份
+//   逐字符词法回答 —— 两边都按上游的判据问 ⇒ `String s = "http://x"` 里的那个 `//` 不再被当成注释
+//   （改动前本仓会把它当注释续行，这是用户能看见的错）。次序与词法都由 `tests/editor-enter-handlers.test.mjs`
+//   钉住（那条次序断言原地改写，理由与上游行号写在那条测试的注释里）。
+//
+// 三条开关（上游 `platform/analysis-impl/src/com/intellij/codeInsight/CodeInsightSettings.java` 的字段，
+// 默认值都是 true）：`:130` `INSERT_BRACE_ON_ENTER` 把关 `enter/EnterAfterUnmatchedBraceHandler.java:84-86`
+// （关掉 ⇒ `getMaxRBraceCount` 返回 0 ⇒ 这一条整条不接管）；`:132` `CLOSE_COMMENT_ON_ENTER` 把关
+// `enter/EnterInBlockCommentHandler.java:62`（关掉 ⇒ 没闭合的块注释不再补闭尾；`* ` 续行那一支不受它管）；
+// `:140` `AUTOINSERT_PAIR_QUOTE` 把关引号那一族（消费方在 `src/editorTyping.ts`，不在这里）。
+// **订正**：`src/editorEnterBlockComment.ts` 与本文件之前的注释都写「本仓 `EditorSettings` 里没有这一条对应项」——
+// 实际是**有键**（`src/settingsModel.ts:427-431`，默认值 `:223`）**有界面**（`src/components/EditorEnterKeysFields.vue:29-33`）
+// **没有消费方**，也就是派单第 3 节禁的假控件。本批把消费链路写在模块侧（`EnterOptions`，不传时按上游默认值 true 走 ⇒
+// 现有行为一格不变），宿主把 `props.settings` 递进来的那一行在保留文件里 ⇒ `docs/wiring-requests-2026-10-06-editorinput.md` R1。
 //
 // 每条的上游坐标（2026-10-06 逐行核对；此前这份头注释里 `:38-46`/`:64-75`/`:68-82` 那几处行号
 // 是上一任手抄的，与上游对不上的已就地订正，订正依据都写在下面的行号里）：
@@ -42,6 +61,19 @@
 //     `java/java-frontback-impl/src/com/intellij/codeInsight/editorActions/JavaQuoteHandler.java:83-86`），
 //     `:73-74` 光标停在插进来的第二个引号之后；`:75-77` 是 `BINARY_OPERATION_SIGN_ON_NEXT_LINE`
 //     的另一档（连接符挪到下一行、caretAdvance 变 3）—— 本仓没有那张 code-style 表，按默认档做。
+//     `:39-42` + `:109-125`：**整条只在「这门语言注册了 `JavaLikeQuoteHandler`」时才问**
+//     （`platform/lang-impl/src/com/intellij/codeInsight/editorActions/JavaLikeQuoteHandler.java:15-17`
+//     的 `canBeConcatenated` 读 `getConcatenatableStringTokenTypes()`，Java 那份是
+//     `JavaQuoteHandler.java:32` 的 `TokenSet.create(JavaTokenType.STRING_LITERAL)` —— **文本块不在里面**
+//     ⇒ Java 的三引号文本块里回车不切分）。引号 handler 的注册表不止 Java 一家
+//     （`intellij.java.frontback.impl.xml:74`、`plugins/kotlin/base/code-insight/minimal/resource/intellij.kotlin.base.codeInsight.minimal.xml:89`、
+//     `plugins/markdown/core/resources/META-INF/plugin.xml:220`、纯文本那条在 `intellij.platform.lang.impl.xml:1020`），
+//     但**上面那道 `instanceof JavaLikeQuoteHandler` 的门槛只放过 Java**：全树里实现 `JavaLikeQuoteHandler` 的
+//     就 `JavaQuoteHandler.java:31` 一个（`CustomFileTypeQuoteHandler.java:18` 与 `KotlinQuoteHandler.kt:10`
+//     都只实现 `QuoteHandler`）⇒ 纯文本 / Kotlin / Markdown 里回车都不切字符串。本仓按这张表收紧
+//     （id 从 `src/editorMatchBrace.ts` 的 `editorLanguageId` facet 拿，它的挂载点已经写在
+//     `docs/wiring-requests-2026-10-06-bucket5b.md`）；facet 没挂时**保持既有档位**，
+//     免得本批把 Java 的切分顺手改没。文本块那一档不用 facet：`lexUntil` 认三引号的形状。
 //
 // 判不了的场合一律返回 null，让 CodeMirror 自己的 `insertNewlineAndIndent` 接手（= 上游的 `Result.Default`）。
 // 它已经承担了「在一对花括号之间回车时多插一个换行」那一条（`insertNewlineAndIndent` → `isBetweenBrackets`，
@@ -58,13 +90,31 @@ import type { Command, EditorView } from '@codemirror/view'
 // 块注释里回车（`EnterInBlockCommentHandler`）：词法与那一族判定都在
 // `src/editorEnterBlockComment.ts`（本模块拆出来的下半截，行数上限的缘故）。
 import { blockLexiconFor, enterInBlockComment, type BlockCommentLexicon } from './editorEnterBlockComment.ts'
+// 「这门语言的字符串字面量能不能用回车切开」= 上游那张按语言注册的引号表里有没有连接符
+// （门槛是 `EnterInStringLiteralHandler.java:39-42/109-114` 的 `instanceof JavaLikeQuoteHandler`，
+// 表在 `src/editorTyping.ts`，同一个来源只留一张）。
+import { stringConcatFor } from './editorTyping.ts'
+// 「按什么次序问、谁接管了算哪一档」这张表与那个循环本身（`EnterHandler.java:136-153` 的等价物）。
+import {
+  ENTER_HANDLER_ORDER, enterInsertsNewline, preprocessEnter, type EnterBranch, type EnterHit,
+} from './enterHandlerOrder.ts'
 
 /** 这门语言的注释词法（上游 `Commenter.getLineCommentPrefix` 的一半，由调用方给）。 */
 export interface EnterLanguage {
   /** 行注释前缀，如 `//`。没有行注释的语言留空。 */
   line?: string
-  /** 块注释那一半（`getBlockCommentPrefix/Suffix`、文档注释 `/**`、续行 `*`）：见 lexicon 的注释。 */
+  /** 块注释那一半（getBlockCommentPrefix/Suffix、文档前缀、续行星号）：见 lexicon 的注释。 */
   block?: BlockCommentLexicon
+  // 上游 CodeInsightSettings.java:132 的 CLOSE_COMMENT_ON_ENTER（默认 true，本仓
+  // settingsModel.ts:429 的 closeCommentOnEnter）；undefined 按上游默认走。
+  blockCloseOnEnter?: boolean
+  // 上游 CodeInsightSettings.java:130 的 INSERT_BRACE_ON_ENTER（默认 true，本仓
+  // settingsModel.ts:431 的 insertBraceOnEnter）；把关 enterAfterUnmatchedBrace 那一条。
+  insertBraceOnEnter?: boolean
+  // 字符串字面量的连接符：`+` = Java（JavaQuoteHandler.java:83-86）；
+  // null = 这门语言在上游没有 JavaLikeQuoteHandler ⇒ 整条不接管；
+  // undefined = 宿主没给语言 id ⇒ 按改动前的档位走（连接符 `+`）。
+  stringConcat?: string | null
 }
 
 const SPACES = ' \t'
@@ -74,12 +124,21 @@ const SPACES = ' \t'
  * 翻成回车家族要的词法。行前缀直接搬，块前缀走 `blockLexiconFor`（上游那一族的四件套
  * `JavaCommenter.java:27-28`（`/*` 开）、`:32-33`（闭）、`:62-63`（文档前缀）、`:67-68`（续行 `*`）
  * 由它按同一对应关系给；块前缀不是 `/*` 的语言只给 block，续行那一支自己退出）。
+ * 第二个实参是编辑器当前的语言 id（宿主那边 `smartQuotes(() => props.language)` 已经在传同一个值，
+ * 这里只是把同一条通道接进回车家族）：给了才做「按语言决定能不能切字符串字面量」这一步。
  *
  * 这个函数住在模块里而不是写在 `CodeEditor.vue` 里：`CodeEditor.vue` 的登记上限是 1147 行
  * （`tests/module-size.test.mjs` 钉着，只许拆、不许升），装配规则放宿主就是往一个到顶的文件里再塞逻辑。
  */
-export function smartEnterLanguageFor(style?: { line?: string; block?: [string, string] } | null): EnterLanguage {
-  return { line: style?.line, block: blockLexiconFor(style ?? undefined) }
+export function smartEnterLanguageFor(
+  style?: { line?: string; block?: [string, string] } | null, language?: string,
+): EnterLanguage {
+  return {
+    line: style?.line,
+    block: blockLexiconFor(style ?? undefined),
+    // 没给语言 id ⇒ `undefined`：字面量那一条按改动前的档位走（不因为本批把 Java 的切分顺手改没）。
+    stringConcat: language === undefined ? undefined : stringConcatFor(language),
+  }
 }
 
 function shiftForward(text: string, from: number, chars: string): number {
@@ -94,16 +153,133 @@ function shiftBackward(text: string, from: number, chars: string): number {
   return at
 }
 
+// 词法状态码（`LineLex.kinds` 的取值）。上游这一族问的都是 token 类型
+// （`enter/EnterInStringLiteralHandler.java:116-125` 读 `offset-1` 那个 token、
+// `enter/EnterInLineCommentHandler.java:97` 要行注释类型、`enter/EnterInBlockCommentHandler.java:103-120`
+// 要块注释区间），本仓没有高亮迭代器 ⇒ 自己逐字符扫。
+// 0 代码 / 1 字符串 / 2 行注释 / 3 块注释 / 4 三引号文本块（Java 的 `JavaQuoteHandler.java:32` 把
+// TEXT_BLOCK 排除在「能连的字符串」之外，所以它是单独一档）。
+export const LEX_CODE = 0
+export const LEX_STRING = 1
+export const LEX_LINE_COMMENT = 2
+export const LEX_BLOCK_COMMENT = 3
+export const LEX_TEXT_BLOCK = 4
+
+/** 一行里每个字符的词法状态（行内下标）。 */
+export interface LineLex {
+  // 长度 = 行宽 + 1；多出来的那一格是「光标落在行尾」的哨兵，恒为 LEX_CODE。
+  kinds: number[]
+  // 该字符所在 token 的行内起始下标；代码位置为 -1。
+  starts: number[]
+}
+
+/**
+ * 从 `text` 的**开头**把状态推到 `upto`（不含），但只把 `[base, upto)` 那一段记进结果数组。
+ * 状态必须从头推：块注释与三引号文本块都能跨行（`enter/EnterInBlockCommentHandler.java:103-120` 也是
+ * 拿整个注释 token 的区间在判）。记账只记本行那一段 ⇒ 数组是一行的长度，不是全文的长度。
+ */
+export function lexUntil(text: string, upto: number, language: EnterLanguage, base = 0): LineLex {
+  const length = Math.max(0, Math.min(upto, text.length) - base)
+  const kinds: number[] = new Array(length + 1).fill(LEX_CODE)
+  const starts: number[] = new Array(length + 1).fill(-1)
+  const linePrefix = language.line
+  const open = language.block?.block?.[0]
+  const close = language.block?.block?.[1]
+  let kind = LEX_CODE
+  let quote = ''
+  let tokenStart = 0
+  let escaping = false
+  // 分隔符（`//`、`/*`、三引号、块注释闭尾）还剩几个字符要按当前 token 记账；`exiting` = 这段分隔符
+  // 数完了就回到代码（闭尾是 true，开头部是 false）。
+  let pending = 0
+  let exiting = false
+  const put = (index: number, code: number) => {
+    const at = index - base
+    if (at < 0 || at > length) return
+    kinds[at] = code
+    if (code !== LEX_CODE && starts[at] < 0) starts[at] = Math.max(0, tokenStart - base)
+  }
+  for (let i = 0; i < upto && i < text.length; ++i) {
+    const char = text[i]!
+    if (pending > 0) {
+      put(i, kind)
+      if (--pending === 0 && exiting) { kind = LEX_CODE; exiting = false }
+      continue
+    }
+    switch (kind) {
+      case LEX_LINE_COMMENT:
+        put(i, LEX_LINE_COMMENT)
+        if (char === '\n') kind = LEX_CODE
+        continue
+      case LEX_BLOCK_COMMENT:
+        put(i, LEX_BLOCK_COMMENT)
+        if (close && text.startsWith(close, i)) {
+          pending = close.length - 1; exiting = true
+          if (pending === 0) { kind = LEX_CODE; exiting = false }
+        }
+        continue
+      case LEX_TEXT_BLOCK:
+        put(i, LEX_TEXT_BLOCK)
+        if (escaping) { escaping = false; continue }
+        if (char === '\\') { escaping = true; continue }
+        // 收尾的三个引号：上游 TEXT_BLOCK 不在 `JavaQuoteHandler.java:32` 那张「能连的字符串」表里，
+        // 所以这一段整体算一个 token、不当字面量切。
+        if (char === '"' && text[i + 1] === '"' && text[i + 2] === '"') {
+          pending = 2; exiting = true
+          if (pending === 0) { kind = LEX_CODE; exiting = false }
+        }
+        continue
+      case LEX_STRING:
+        put(i, LEX_STRING)
+        if (escaping) { escaping = false; continue }
+        if (char === '\\') { escaping = true; continue }
+        if (char === quote) kind = LEX_CODE
+        continue
+      default:
+        break
+    }
+    // 代码位置：先认注释前缀（上游 `Commenter` 的两个 getter），再认三引号，最后认单字符引号。
+    if (linePrefix && linePrefix.length > 0 && text.startsWith(linePrefix, i)) {
+      kind = LEX_LINE_COMMENT; tokenStart = i; pending = linePrefix.length - 1; exiting = false
+      put(i, LEX_LINE_COMMENT); continue
+    }
+    if (open && open.length > 0 && text.startsWith(open, i)) {
+      kind = LEX_BLOCK_COMMENT; tokenStart = i; pending = open.length - 1; exiting = false
+      put(i, LEX_BLOCK_COMMENT); continue
+    }
+    if (char === '"' && text[i + 1] === '"' && text[i + 2] === '"') {
+      kind = LEX_TEXT_BLOCK; tokenStart = i; pending = 2; exiting = false
+      put(i, LEX_TEXT_BLOCK); continue
+    }
+    if (char === '"' || char === '\'' || char === '`') {
+      kind = LEX_STRING; quote = char; tokenStart = i; put(i, LEX_STRING); continue
+    }
+    put(i, LEX_CODE)
+  }
+  return { kinds, starts }
+}
+
 /**
  * 在行注释中间回车（`EnterInLineCommentHandler` 的文本子集）。
  * 返回**先**落地的编辑与之后光标要前进的字符数；不适用返回 null。
+ * `lex` 缺省时按本行自己扫一遍（跨行的块注释状态就不知道了）—— 命令里传的是全文推出来的那份。
  */
 export function enterInLineComment(
-  lineText: string, caret: number, language: EnterLanguage,
+  lineText: string, caret: number, language: EnterLanguage, lex?: LineLex,
 ): { edits: ChangeSpec[]; caretAdvance: number } | null {
   const prefix = language.line
   if (!prefix) return null
-  const start = lineText.indexOf(prefix)
+  const states = lex ?? lexUntil(lineText, lineText.length, language)
+  // 前缀得是**一个行注释 token 的开头**：上游 `:97` 要的是「光标前那个 token 是行注释类型」，
+  // `String s = "http://x"` 里的那两个字符属于字符串 token ⇒ 不算注释（改动前本仓把它当注释续行），
+  // 而注释正文里再出现 `//` 也只是同一个 token（`:56-62` 那一支找的是**下一个**前缀，见下面的 textStart）。
+  let start = -1
+  for (let i = 0; i + prefix.length <= lineText.length; ++i) {
+    if (states.kinds[i] !== LEX_LINE_COMMENT || states.starts[i] !== i) continue
+    if (!lineText.startsWith(prefix, i)) continue
+    start = i
+    break
+  }
   // `getLineCommentStart` 的两个门槛（`:103-106`）：前缀要在光标之前；offset 至少为 1。
   if (caret < 1 || start < 0 || start + prefix.length > caret) return null
   // `:45-46`：光标后跳空格；落到底（也就是行尾）就交回默认回车。
@@ -199,27 +375,135 @@ export function enterAfterUnmatchedBrace(
 }
 
 /**
- * 在双引号字符串里回车：插 `" + "`，让原来那个收尾引号变成下一段的开引号
- * （`EnterInStringLiteralHandler.splitString`，`:68-82`）。不适用返回 null。
+ * 在双引号字符串里回车：插「开引号 + 空格 + 连接符 + 空格 + 开引号」，让原来那个收尾引号变成下一段的
+ * 开引号（`EnterInStringLiteralHandler.splitString`，`:61-81`）。不适用返回 null。
+ *
+ * 「这个引号到底在不在字面量里」由 `lex` 回答（上游用 token 类型：`:116-125` 读 `offset-1` 那个 token，
+ * 注释里的引号、三引号文本块里的光标都不算 —— `JavaQuoteHandler.java:32` 的
+ * `myConcatenableStrings` 只有 `STRING_LITERAL`）。改动前这一条是拿 `indexOf('"')` 猜的，
+ * 所以两个已知的错判都在本批修掉：`// 说 "abc`（注释里的引号）与 `foo("a", "b|")`（第二个字面量看不见）。
  */
-export function enterInStringLiteral(lineText: string, caret: number): { at: number; insert: string } | null {
-  const quote = lineText.indexOf('"')
+export function enterInStringLiteral(
+  lineText: string, caret: number, language: EnterLanguage = {}, lex?: LineLex,
+): { at: number; insert: string } | null {
+  // 整条先过上游那道 `instanceof JavaLikeQuoteHandler` 的门槛（`:39-42`）：宿主给了语言 id、
+  // 而那张引号表里没有这门语言的连接符 ⇒ 返回 null（`null` 与 `undefined` 的区别见 EnterLanguage 的注释）。
+  if (language.stringConcat === null) return null
+  const states = lex ?? lexUntil(lineText, lineText.length, language)
+  // 行尾那一格是哨兵 ⇒ 光标在行尾就是「不在任何 token 里」。
+  if (states.kinds[caret] !== LEX_STRING) return null
+  const open = states.starts[caret]
   // `:46`：光标得在开引号**之后**（`psiAtOffset.getTextOffset() < caretOffset`）。
-  if (quote < 0 || caret <= quote + 1) return null
+  if (open < 0 || lineText[open] !== '"' || caret <= open + 1) return null
+  // 光标落在转义序列里（`:69` 的 skipStringLiteralEscapes 把切点推到 token 末尾）时不做：词法层没有
+  // token 边界，按经验猜一个转义长度就是瞎编，如实交回默认回车。
   let escaped = false
-  for (let i = quote + 1; i < caret; ++i) {
-    if (lineText[i] === '"') return null
+  for (let i = open + 1; i < caret; ++i) {
     if (lineText[i] === '\\' && !escaped) escaped = true
     else escaped = false
   }
-  // 光标落在转义序列里（`skipStringLiteralEscapes` 会推到 token 末尾）时不做：词法层没有
-  // token 边界，按经验猜一个转义长度就是瞎编，如实交回默认回车。
   if (escaped) return null
-  return { at: caret, insert: '" + "' }
+  // Java 的连接符是 `+`（`java/java-frontback-impl/src/com/intellij/codeInsight/editorActions/JavaQuoteHandler.java:83-86`）。
+  const concat = language.stringConcat ?? '+'
+  return { at: caret, insert: `" ${concat} "` }
+}
+
+/** 一条分支被问到时能看到的上下文（都已经在命令里算好，分支自己不再碰 view）。 */
+interface EnterContext {
+  readonly lineText: string
+  /** 光标在**行内**的偏移。 */
+  readonly caret: number
+  /** 全文文本。 */
+  readonly docText: string
+  /** 光标的文档偏移（分支里的绝对坐标都从它换算）。 */
+  readonly head: number
+  /** 光标所在行的行首偏移。 */
+  readonly lineFrom: number
+  readonly lexicon: EnterLanguage
+  readonly lex: LineLex
 }
 
 /**
- * 回车：按上游那张注册表逐条问（次序差异与理由见文件头），本仓一条都不接管时交回
+ * 本仓实现了的那几条分支，按 `src/enterHandlerOrder.ts` 里的 `id` 索引（键 = 表里的 `id`，
+ * 少一条 = 上游会问、本仓按 `Result.Continue` 处理）。返回 null 就是不接。
+ */
+const ENTER_IMPLS: Readonly<Record<string, (ctx: EnterContext) => EnterBranch | null>> = {
+  // ① 字符串字面量（`EnterInStringLiteralHandler`，注册表 `xml:1159`）。
+  EnterInStringLiteralHandler: ctx => {
+    const inString = enterInStringLiteral(ctx.lineText, ctx.caret, ctx.lexicon, ctx.lex)
+    if (!inString) return null
+    // `:72` 先落 `" + "`，`:73` 再把切点推到 `" +` 之后（`insertedFragment.length()` = 3，
+    // 也就是插入串里收尾那个引号**之前**）—— 换行必须在那里切，否则开引号被留在上一行、
+    // 上一行的字面量没闭合。`:74` 的 `caretAdvance = 1` 让光标停在补出来的第二个引号之后。
+    // `:81` 的 Result.DefaultForceIndent 就是「插换行并缩进」。
+    const splitAt = ctx.lineFrom + inString.at + inString.insert.length - 2
+    return {
+      edits: [{ from: ctx.lineFrom + inString.at, insert: inString.insert }],
+      breakAt: splitAt, caretAdvance: 1, userEvent: 'input.type',
+    }
+  },
+  // ② 行注释（`EnterInLineCommentHandler`，`xml:1160`）。
+  EnterInLineCommentHandler: ctx => {
+    const inComment = enterInLineComment(ctx.lineText, ctx.caret, ctx.lexicon, ctx.lex)
+    if (!inComment) return null
+    // `:82` 先把前缀落在光标处，`:88` 再走「默认回车 + 强制缩进」：回车把前缀推到下一行，
+    // `:85-87` 的 caretAdvance 让光标停在补出来的前缀之后。少了这一步就等于只复制注释文本、不换行。
+    return { edits: inComment.edits, caretAdvance: inComment.caretAdvance, userEvent: 'input' }
+  },
+  // ③ 未配对的左花括号（`EnterAfterUnmatchedBraceHandler`，`xml:1163-1164`）。
+  //    上游这条由 `INSERT_BRACE_ON_ENTER` 把关（`CodeInsightSettings.java:130`，开关本体问在
+  //    `enter/EnterAfterUnmatchedBraceHandler.java:84-86`，返回 0 时 `:50-51` 短路 ⇒ 整条不接管）。
+  afterUnmatchedBrace: ctx => {
+    if (!(ctx.lexicon.insertBraceOnEnter ?? true)) return null
+    const afterBrace = enterAfterUnmatchedBrace(ctx.docText, ctx.head, /^\s*/.exec(ctx.lineText)![0])
+    if (!afterBrace) return null
+    // 闭合括号落在光标所在行之后（`:173` 插的是 `"\n" + braces`）。
+    return { edits: [{ from: afterBrace.at, insert: `\n${afterBrace.text}` }], userEvent: 'input.type' }
+  },
+  // ④ 块注释（`EnterInBlockCommentHandler`，判定在 `src/editorEnterBlockComment.ts`；
+  //    注册表 `xml:1161-1162` 带 `order="last"` ⇒ 上游把它排在整张表的最后问）。
+  //    只在语言给了块注释词法时才问；补闭尾那一条由 `CLOSE_COMMENT_ON_ENTER`
+  //    （`CodeInsightSettings.java:132`，开关问在 `enter/EnterInBlockCommentHandler.java:62`）把关；
+  //    `* ` 续行那一支不受它管。两档各自的上游返回值由载荷带出来（`:67` 是 Default、`:98` 是 DefaultForceIndent）。
+  blockComment: ctx => {
+    const block = ctx.lexicon.block
+    if (!block) return null
+    const inBlock = enterInBlockComment(ctx.docText, ctx.head, block, ctx.lexicon.blockCloseOnEnter ?? true)
+    if (!inBlock) return null
+    return {
+      edits: inBlock.edits, caretAdvance: inBlock.caretAdvance, userEvent: 'input',
+      result: inBlock.forceIndent ? 'defaultForceIndent' : 'default',
+    }
+  },
+}
+
+/**
+ * 把命中那一支落地：先落编辑（= 上游 delegate 在 `preprocessEnter` 里自己动的那些文档改动），
+ * 再按那一档决定要不要插换行（`EnterHandler.java:142-153` 里只有 `Stop` 是「什么都不再做」，
+ * 其余非 `Continue` 档都会继续跑原 handler = 本仓的 `insertNewlineAndIndent`），
+ * 最后按 `caretAdvance` 挪光标（`EnterHandler.java:168` 那一档）。
+ * `Default` 与 `DefaultForceIndent` 在本仓**同一个结果**：上游的差别只在 `SMART_INDENT_ON_ENTER`
+ * 关掉时才看得出来（`EnterHandler.java:163-174`），而本仓 `EditorSettings` 没有那条键
+ * （依据与行号见 `src/enterHandlerOrder.ts` 模块头）⇒ 按上游默认档（true）走。
+ */
+export function applyEnterHit(view: EditorView, hit: EnterHit): boolean {
+  const { branch, result } = hit
+  const changes = [...branch.edits]
+  if (changes.length > 0) {
+    view.dispatch(branch.breakAt === undefined
+      ? { changes, userEvent: branch.userEvent ?? 'input' }
+      : { changes, selection: { anchor: branch.breakAt }, userEvent: branch.userEvent ?? 'input' })
+  }
+  if (!enterInsertsNewline(result)) return true
+  const indented = insertNewlineAndIndent(view)
+  const advance = branch.caretAdvance ?? 0
+  if (advance > 0) view.dispatch({ selection: { anchor: view.state.selection.main.head + advance } })
+  return advance > 0 || indented
+}
+
+/**
+ * 回车：按 `src/enterHandlerOrder.ts` 那张表**排完序之后的次序**逐个问（表为什么长那样、
+ * `order="last"` 把哪条推到了后面，见本文件头），本仓一条都不接管时返回 false，交回
  * CodeMirror 的 `insertNewlineAndIndent`（= 上游的 `Result.Default`）。
  * 有选区或多个光标时不做主判断（那几条上游处理器都是按单个光标写的）。
  */
@@ -231,60 +515,16 @@ export function smartEnterCommand(language: () => EnterLanguage): Command {
     if (state.selection.ranges.length > 1 || !selection.empty) return false
     const doc = state.doc
     const line = doc.lineAt(selection.head)
-    const caret = selection.head - line.from
-    const lineText = line.text
     const lexicon = language()
-    // ① 行注释（`EnterInLineCommentHandler`）。
-    const inComment = enterInLineComment(lineText, caret, lexicon)
-    if (inComment) {
-      // `:82` 先把前缀落在光标处，`:88` 再走「默认回车 + 强制缩进」：回车把前缀推到下一行，
-      // `:85-87` 的 caretAdvance 让光标停在补出来的前缀之后。少了这一步就等于只复制注释文本、不换行。
-      view.dispatch({ changes: inComment.edits, userEvent: 'input' })
-      insertNewlineAndIndent(view)
-      if (inComment.caretAdvance > 0) {
-        view.dispatch({ selection: { anchor: view.state.selection.main.head + inComment.caretAdvance } })
-      }
-      return true
+    const docText = doc.toString()
+    // 词法状态从全文开头推（块注释与三引号文本块都能跨行），数组只覆盖光标所在那一行。
+    const lex = lexUntil(docText, line.to, lexicon, line.from)
+    const ctx: EnterContext = {
+      lineText: line.text, caret: selection.head - line.from, docText, head: selection.head,
+      lineFrom: line.from, lexicon, lex,
     }
-    // ② 块注释（`EnterInBlockCommentHandler`，判定在 `src/editorEnterBlockComment.ts`）。
-    //    只在语言给了块注释词法时才问；上游那两条 `Result.Default*` 在这里都是「补完就普通回车」。
-    const block = lexicon.block
-    if (block) {
-      const inBlock = enterInBlockComment(doc.toString(), selection.head, block)
-      if (inBlock) {
-        view.dispatch({ changes: inBlock.edits, userEvent: 'input' })
-        insertNewlineAndIndent(view)
-        if (inBlock.caretAdvance > 0) {
-          view.dispatch({ selection: { anchor: view.state.selection.main.head + inBlock.caretAdvance } })
-        }
-        return true
-      }
-    }
-    // ③ 字符串字面量（`EnterInStringLiteralHandler`）。
-    const inString = enterInStringLiteral(lineText, caret)
-    if (inString) {
-      // `:72` 先落 `" + "`，`:73` 再把切点推到 `" +` 之后（`insertedFragment.length()` = 3，
-      // 也就是插入串里收尾那个引号**之前**）—— 换行必须在那里切，否则开引号被留在上一行、
-      // 上一行的字面量没闭合。`:74` 的 `caretAdvance = 1` 让光标停在补出来的第二个引号之后。
-      // `:81` 的 Result.DefaultForceIndent 就是 `insertNewlineAndIndent`。
-      const splitAt = inString.at + inString.insert.length - 2
-      view.dispatch({
-        changes: { from: line.from + inString.at, insert: inString.insert },
-        selection: { anchor: line.from + splitAt },
-        userEvent: 'input.type',
-      })
-      insertNewlineAndIndent(view)
-      view.dispatch({ selection: { anchor: view.state.selection.main.head + 1 } })
-      return true
-    }
-    // ④ 未配对的左花括号（`EnterAfterUnmatchedBraceHandler`）。
-    const afterBrace = enterAfterUnmatchedBrace(state.doc.toString(), selection.head, /^\s*/.exec(lineText)![0])
-    if (afterBrace) {
-      // 闭合括号落在光标所在行之后（`:173` 插的是 `"\n" + braces`）。
-      const at = afterBrace.at
-      view.dispatch({ changes: { from: at, insert: `\n${afterBrace.text}` }, userEvent: 'input.type' })
-      return insertNewlineAndIndent(view)
-    }
-    return false
+    // 循环体与 break 语义 = `EnterHandler.java:136-153`（表驱动的等价物，见那模块的注释）。
+    const hit = preprocessEnter(ENTER_HANDLER_ORDER, step => ENTER_IMPLS[step.id]?.(ctx) ?? null)
+    return hit ? applyEnterHit(view, hit) : false
   }
 }

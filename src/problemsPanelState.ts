@@ -5,11 +5,15 @@
 //
 // 本仓的等价物：落 `localStorage`，面板挂载时读回。逐字段对照：
 //   · `hideBySeverity`     → `hiddenSeverities`（被藏起来的严重度，勾选 = 显示）
+//   · `sortFoldersFirst`   → 同名（默认 **true**，`:29`；比较器第一个参数，
+//     `ProblemsViewPanel.java:523-529` 把三个开关一起递进去）
 //   · `sortBySeverity`     → 同名（默认 `true`，`:30`）
 //   · `sortByName`         → 同名（默认 `false`，`:31`）
 //   · `groupByToolId`      → `grouping`（上游是一个开关，本仓与另几档统一成下拉）：
 //     选中 `'inspection'` 就是上游那个开关的等价物（键 = 检查项身份，见 src/inspectionIdentity.ts），
-//     `'source'`/`'code'` 是本仓把同一份身份拆成两列后各给的一档。
+//     `'source'`/`'code'` 是本仓把同一份身份拆成两列后各给的一档，
+//     `'severity'` 承接的是 Inspect Code Results 那个同名开关
+//     （`AnalysisUIOptions.java:37,70-93`，本仓的档清单与上游坐标见 `src/problemsView.ts` 的头注）。
 //   · `collapsedGroups`    → **本仓多出来的**：上游的展开态是 `JTree` 的运行时对象
 //     （`ProblemsViewPanel.java:212` `new Tree(new AsyncTreeModel(...))`）没有落进 `ProblemsViewState`，
 //     本仓的树要能跨会话记住谁折着，就得给它一个可序列化的家。
@@ -23,6 +27,8 @@ import { PROBLEM_GROUPINGS, PROBLEM_SEVERITIES, type ProblemGrouping, hiddenSeve
 export interface ProblemsPanelState {
   /** 被隐藏的严重度（空 = 全显示）。上游 `hideBySeverity` 的形状。 */
   hiddenSeverities: number[]
+  /** 上游 `ProblemsViewState.kt:29`（默认 **true**）：同层的目录组排在本层文件组之前。 */
+  sortFoldersFirst: boolean
   sortBySeverity: boolean
   sortByName: boolean
   grouping: ProblemGrouping
@@ -32,7 +38,8 @@ export interface ProblemsPanelState {
 }
 
 export const DEFAULT_PROBLEMS_PANEL_STATE: ProblemsPanelState = {
-  hiddenSeverities: [], sortBySeverity: true, sortByName: false, grouping: 'none', query: '', collapsedGroups: [],
+  hiddenSeverities: [], sortFoldersFirst: true, sortBySeverity: true, sortByName: false,
+  grouping: 'none', query: '', collapsedGroups: [],
 }
 
 const STORAGE_KEY = 'taocode.problemsPanel'
@@ -64,6 +71,7 @@ export function parseProblemsPanelState(value: unknown): ProblemsPanelState {
     : parseHiddenSeverities(raw.hiddenSeverities)
   return {
     hiddenSeverities,
+    sortFoldersFirst: typeof raw.sortFoldersFirst === 'boolean' ? raw.sortFoldersFirst : defaults.sortFoldersFirst,
     sortBySeverity: typeof raw.sortBySeverity === 'boolean' ? raw.sortBySeverity : defaults.sortBySeverity,
     sortByName: typeof raw.sortByName === 'boolean' ? raw.sortByName : defaults.sortByName,
     grouping: GROUPINGS.includes(raw.grouping as ProblemGrouping) ? raw.grouping as ProblemGrouping : defaults.grouping,

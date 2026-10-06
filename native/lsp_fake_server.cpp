@@ -136,6 +136,11 @@ int main(int argc, char** argv) {
                     // "Gradle 导入失败"那类问题，客户端必须转出去而不是丢掉。
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "window/showMessage"},
                                      {"params", {{"type", 2}, {"message", "fake import failure"}}}});
+                    // 服务器自己的一行日志（`window/logMessage`，type=4 日志级）：上游把它写进
+                    // 「语言服务」输出而不是弹通知（`LspServerNotificationsHandlerImpl.kt:396-404`），
+                    // 所以两条都得出得去、并且分得开（`method` 由客户端补上）。
+                    write_frame(Json{{"jsonrpc", "2.0"}, {"method", "window/logMessage"},
+                                     {"params", {{"type", 4}, {"message", "fake log line"}}}});
                     write_frame(Json{{"jsonrpc", "2.0"}, {"method", "textDocument/publishDiagnostics"}, {"params",
                         {{"uri", opened_uri}, {"diagnostics", Json::array({
                             {{"range", {{"start", {{"line", 0}, {"character", 0}}}, {"end", {{"line", 0}, {"character", 5}}}}},

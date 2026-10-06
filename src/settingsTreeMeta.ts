@@ -7,7 +7,7 @@
 // 这样"这一页对应源码哪一条注册"在代码里就是答案；早期批次用过的键（appearance / editor.general /
 // structure / commit …）保持不变，以免打断跳转目标与测试。
 import {
-  AlignLeft, Braces, Bug, Cog, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Keyboard,
+  AlignLeft, Braces, Bug, Cog, Eye, FileType, Filter, FoldVertical, GitBranch, GitCommitIcon, Hammer, History, Keyboard,
   Layers, ListChecks, Palette, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Type, Volume2,
 } from 'lucide-vue-next'
 
@@ -47,6 +47,8 @@ export type PageKey = 'preferences.lookFeel' | 'editor' | 'editor.preferences.ap
   | 'editor.breadcrumbs' | 'editor.stickyLines' | 'Console' | 'Errors'
   // InlaySettingsConfigurable（intellij.platform.lang.impl.xml:935-941 `parentId="editor" id="inlay.hints"`）。
   | 'inlay.hints'
+  // Code Vision 页（上游把这一组挂在 Inlay Hints 页里，本仓单列一页；键名是本仓的）。
+  | 'code.vision'
   | 'preferences.toDoOptions' | 'preferences.fileTypes' | 'preferences.externalTools'
   | 'diff.base' | 'build.tools' | 'vcs.log' | 'debugger'
   // Keymap 顶层页（`intellij.platform.ide.impl.xml:951` 的 `id="preferences.keymap"`）——
@@ -119,6 +121,11 @@ export const SETTINGS_NODES: SettingsNode[] = [
   // parentId="editor"（intellij.platform.lang.impl.xml:935-941，`id="inlay.hints" groupWeight="1"`）：
   // LSP inlayHint 按 kind 分的三档（类型 / 参数名 / 其它）。
   { key: 'inlay.hints', label: '内联提示', icon: Type, parent: 'editor', keywords: '内联 提示 参数名 类型 推断 inlay hints parameter type' },
+  // Code Vision：上游页名与总闸文案在 `CodeVisionBundle.properties:2-3`（"Code Vision" / "Enable Code Vision"），
+  // 分组名 `settings.hints.new.group.code.vision`（`ApplicationBundle.properties:725-726`）—— 上游把它当
+  // Inlay Hints 页里的一个**分组**，本仓设置树按页组织 ⇒ 单列一页。键名 `code.vision` 是**本仓起的**
+  // （上游那个 configurable 的注册行不在本地树里，不编一个假的 id）。
+  { key: 'code.vision', label: 'Code Vision', icon: Eye, parent: 'editor', keywords: 'code vision 行上方 提示 嵌入 引用数 问题计数 lens codeLens 可见条数' },
   // preferences.toDoOptions groupId="editor"（platform/todo/resources/intellij.platform.todo.xml:49）
   { key: 'preferences.toDoOptions', label: 'TODO', icon: ListChecks, parent: 'group:editor', keywords: 'TODO 模式 标记 待办 fixme pattern marker' },
 
@@ -177,7 +184,7 @@ export const PAGE_KEYS: PageKey[] = ['preferences.lookFeel', 'editor', 'editor.p
   'preferences.sourceCode.indents', 'tools.actionsOnSave', 'editing.templates', 'commit', 'preferences.general', 'project.scopes',
   'reference.settings.ide.settings.file-colors',
   'trusted.hosts',
-  'ide.audiocues', 'inlay.hints',
+  'ide.audiocues', 'inlay.hints', 'code.vision',
   'editor.breadcrumbs', 'editor.stickyLines', 'Console', 'Errors', 'preferences.toDoOptions', 'preferences.fileTypes',
   'preferences.externalTools', 'diff.base', 'build.tools', 'vcs.log', 'reference.settingsdialog.project.gradle',
   'preferences.keymap']

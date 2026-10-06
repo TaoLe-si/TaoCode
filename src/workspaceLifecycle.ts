@@ -19,7 +19,8 @@ import { JAVA_SDK_TYPE, SdkTable, createSdk } from './rootsSdkTable.ts'
 import { errorMessage } from './errors.ts'
 import { normalizeSettingsShape } from './settingsInspector.ts'
 import type { Tab } from './editorTab'
-import { isProjectTrusted, mergeTrustEntries, needsTrustPrompt, rememberTrust, trustBlockReason,
+import { isProjectTrusted, mergeTrustEntries, needsTrustPrompt, rememberSessionTrust, rememberTrust,
+         sessionTrustEntries, trustBlockReason,
          type TrustChoice, type TrustedPathEntry } from './trustedProjects.ts'
 import { EnvironmentKeyRegistry, createHeadlessEnvironmentService } from './environmentKeys.ts'
 import { checkRequiredEnvironmentKeysActivity, registerStartupActivity, resetStartupProgress,
@@ -85,12 +86,19 @@ export function createWorkspaceLifecycle(deps: WorkspaceLifecycleDeps) {
           projectError, projectForm, projectMode, projectBusy, cancelling, openFile } = deps
 // 受信任项目（IDEA `TrustedProjects` + `TrustedPaths`，落点见 src/trustedProjects.ts）：
 // 打开陌生目录先问一次「信任 / 安全模式 / 取消」；勾了「以后不再询问」才写进应用级设置，
-// 没勾的答案只活在本次会话（`sessionTrust`，关了应用就忘）。判定与门控文案都是纯函数。
+// 没勾的答案只活在本次会话（关了应用就忘）。判定与门控文案都是纯函数。
+//
+// 会话级那一档**只有一份**，就是 `src/trustedProjects.ts` 里的 `sessionTrustedLocations`
+// （宿主原先自留一个 `sessionTrust` ref，与模块那份是两处：对话框答「这次信任」在设置页看不见，
+// 设置页改会话项也不影响执行侧门禁）。上游本来就只有一份 per 存储：确认框与设置页都走
+// `TrustedPaths.getInstance()`（`platform/platform-impl/src/com/intellij/ide/impl/TrustedPaths.kt:25-28`），
+// 设置页那张表是**两个存储并起来**的（`platform/platform-impl/src/com/intellij/ide/impl/TrustedHostsConfigurable.kt:66-71`）、
+// 应用时按差集各回各家（同文件 `:80-89`）⇒ 本仓读写同一份模块级数组，行为与那两行等价。
 const trustPrompt = ref<{ root: string; name: string } | null>(null)
 let trustResolver: ((choice: TrustChoice, remember: boolean) => void) | null = null
-const sessionTrust = ref<TrustedPathEntry[]>([])
+/** 门禁吃的清单 = 持久那一份 + 会话那一份（会话那份的真源在 `trustedProjects`）。 */
 function trustEntries(): TrustedPathEntry[] {
-  return mergeTrustEntries(generalSettings.value?.trustedPaths, sessionTrust.value)
+  return mergeTrustEntries(generalSettings.value?.trustedPaths, sessionTrustEntries())
 }
 /** 执行入口问一句：`null` = 放行；字符串 = 拦住并用它提示（喂给 src/runActions.ts 的 `trustBlock`）。 */
 function projectTrustBlock(action: string): string | null {
@@ -125,7 +133,7 @@ async function confirmTrust(result: Workspace): Promise<boolean> {
   trustResolver = null
   if (choice === 'cancel') return false
   if (remember) await saveTrustedPaths(rememberTrust(entries, root, choice === 'trust'))
-  else sessionTrust.value = rememberTrust(sessionTrust.value, root, choice === 'trust')
+  else rememberSessionTrust(root, choice === 'trust')
   if (choice === 'distrust')
     notify(`已用安全模式打开 ${result.name || root}：构建、运行、调试与终端已禁用。`, true)
   return true

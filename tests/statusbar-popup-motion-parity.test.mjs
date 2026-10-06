@@ -3,8 +3,9 @@
 // 这一组只钉**可数的事实**，判据全部指向上游源码行（platform/platform-impl/.../status/ 与
 // platform/external-system-impl/.../ExternalSystemTaskProgressIndicatorUpdater.kt），不碰像素：
 //
-//   1. 注册表里没有「勾了不生效」的死条目（铁律：状态栏 widget 必须真消费）。`bridge` 是已知的
-//      那一处，登记在 KNOWN_GAPS 里；新增死条目会当场红，而不是等用户点出空按钮。
+//   1. 注册表里没有「勾了不生效」的死条目（铁律：状态栏 widget 必须真消费）。KNOWN_GAPS 现为空 =
+//      本域没有已知的死条目（`bridge` 那一条 2026-10-06 桶 status2 已从注册表删除，判定见
+//      `src/statusWidgets.ts` 表头）；新增死条目会当场红，而不是等用户点出空按钮。
 //   2. 不可点的组件确实不可点：`VfsRefreshIndicatorWidgetFactory` 的组件是 `setEnabled(false)`
 //      的 JLabel（`:106`），所以本仓落成只读 span；反过来，可点的条目都带真动作。
 //   3. 主题水纹（`startViewTransition` + clip-path 揭示）认**两道**降级闸：系统
@@ -29,13 +30,14 @@ const lineOf = (file, needle) => read(file).split('\n').find(line => line.includ
 
 /**
  * 状态栏模板里**没有** `showWidget(...)` 的条目。每一项都要写清为什么。
- * 空数组 = 全仓没有死条目；新增死控件时把这个数组撑大 = 门禁放行，必须先补上理由。
+ * 空数组 = 全仓没有死控件；新增死控件时把这个数组撑大 = 门禁放行，必须先补上理由。
+ *
+ * 2026-10-06 桶 status2：这里原本钉着一处 `bridge`（勾选清单里有、模板不消费 = 假控件）。
+ * 判定过程与两处同批改法记在 `src/statusWidgets.ts` 的表头（本仓侧：`App.vue` 消费的 16 个 id 不含它；
+ * 上游侧：`statusBarWidgetFactory` 的全部注册处都没有"桥接状态"）⇒ 条目已从注册表删除，
+ * 这一份登记随之清空。**断言体一字未动**：`:40-49` 那条既不许新增死条目，也不许留过期的 gap。
  */
-const KNOWN_GAPS = new Map([
-  ['bridge', '勾选清单里有这一条，但状态栏模板从来没有 `showWidget(\'bridge\')` —— 点了不改变任何东西。'
-    + '上游也没有对应物（`ToolWindowsWidget` / `InfoAndProgressPanel` 之外没有"桥接状态"这个组件），'
-    + '本仓要真接上它得先有一个能读的状态；在那之前它是本域唯一一处假控件。'],
-])
+const KNOWN_GAPS = new Map()
 
 test('注册表里没有新的死条目：每个 id 都被状态栏模板真正消费', () => {
   const template = read('src/App.vue')

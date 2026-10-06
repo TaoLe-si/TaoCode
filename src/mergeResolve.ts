@@ -27,6 +27,14 @@
 // 本仓按**行**判（比较的粒度就是本仓的输入粒度）。行级比词级**更保守**：词级能自动合掉的
 // "同一行里两处不同的词改动"，行级会当成真冲突留给用户 —— 少自动合，不会合错。
 //
+// 粒度塌成一层还带出一条必须照抄的上游结构：外层问类型时传「能不能自己合掉」的探路
+// （`MergeRangeUtil.getLineMergeType` 的第 4 个参数 `canResolveLineConflict`，`util/MergeRangeUtil.kt:104`），
+// 而**解决器内部**判类型时上游走 `getWordMergeType`，它的探路参数写死 `{ false }`
+// （`util/MergeRangeUtil.kt:158-168`，`comparison/MergeResolveUtil.kt:152-154` 的 `getConflictType` 用的就是它）。
+// 上游两层（行→词）天然收敛；本仓两层是同一个算法，都带探路就会对同样的输入无限自问，
+// 真冲突文件点「解决简单的冲突」直接 `RangeError: Maximum call stack size exceeded`
+// —— 所以解决器内部一律用 `NO_CONFLICT_PROBE`，判据见 `tests/merge-resolve.test.mjs`。
+//
 // 本模块零依赖（不 import bridge），能被 `node --test` 直接加载。
 
 import { comparisonKey, type ComparisonPolicy } from './diffComparison.ts'
@@ -275,18 +283,34 @@ export function buildMergeRanges(left: readonly string[], base: readonly string[
   return builder.finish(left.length, base.length, right.length)
 }
 
-/** `MergeRangeUtil.getLineMergeType`（`util/MergeRangeUtil.kt:92-107`）。 */
+/**
+ * 上游 `getWordMergeType` 的第 4 个参数就是写死的 `{ false }`
+ * （`platform/util/diff/src/com/intellij/diff/util/MergeRangeUtil.kt:158-168`，探路那一项在 `:168`）。
+ * 解决器自己判类型时用它 —— 只许「外层问内层」一次，不许内层再问内层。
+ */
+const NO_CONFLICT_PROBE = (): boolean => false
+
+/**
+ * `MergeRangeUtil.getLineMergeType`（`util/MergeRangeUtil.kt:92-107`）。
+ *
+ * `conflictProbe` 是上游的第 4 个参数（`MergeRangeUtil.kt:104` 的 `canResolveLineConflict`）：
+ * 真冲突时去问文本解决器「这一段能不能合掉」。默认带探路（模型层问法），
+ * 解决器内部必须传 `NO_CONFLICT_PROBE` —— 本仓的行级/内层是**同一个算法**（上游外层行、内层词，
+ * 见文件头那条口径差），两边都带探路会 `mergeLineType → tryResolveConflict → mergeLineType(同样输入)`
+ * 无限自递归（真冲突文件点「解决简单的冲突」直接 `RangeError: Maximum call stack size exceeded`）。
+ */
 export function mergeLineType(
   range: MergeRange,
   left: readonly string[], base: readonly string[], right: readonly string[],
   policy: ComparisonPolicy = 'default',
+  conflictProbe: () => boolean = () => tryResolveConflict(sliceOf(left, range.left), sliceOf(base, range.base), sliceOf(right, range.right), policy) !== null,
 ): MergeConflictType {
   const lines = { left, base, right }
   return mergeType(
     side => range[side][0] === range[side][1],
     (a, b) => sameRange(lines[a], range[a], lines[b], range[b], policy),
     (a, b) => sameRange(lines[a], range[a], lines[b], range[b], 'default'),
-    () => tryResolveConflict(sliceOf(left, range.left), sliceOf(base, range.base), sliceOf(right, range.right), policy) !== null,
+    conflictProbe,
   )
 }
 
@@ -321,7 +345,7 @@ export function tryResolveConflict(left: readonly string[], base: readonly strin
   for (const change of changes) {
     appendBase(nextRange(change.left[0], change.base[0], change.right[0]))
     const conflictRange = nextRange(change.left[1], change.base[1], change.right[1])
-    const type = mergeLineType(conflictRange, left, base, right, policy)
+    const type = mergeLineType(conflictRange, left, base, right, policy, NO_CONFLICT_PROBE)
     if (type.type === 'conflict') return null
     append(conflictRange, type.leftChange ? 'left' : 'right')
   }
@@ -333,7 +357,7 @@ export function tryResolveConflict(left: readonly string[], base: readonly strin
     if (isEmptyRange(range)) return
     const unchanged = sameRange(base, range.base, left, range.left, 'default') && sameRange(base, range.base, right, range.right, 'default')
     if (unchanged) { append(range, 'base'); return }
-    const type = mergeLineType(range, left, base, right, 'default')
+    const type = mergeLineType(range, left, base, right, 'default', NO_CONFLICT_PROBE)
     if (type.leftChange) append(range, 'left')
     else if (type.rightChange) append(range, 'right')
     else append(range, 'base')

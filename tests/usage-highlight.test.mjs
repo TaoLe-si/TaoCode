@@ -7,12 +7,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { EditorState } from '@codemirror/state'
 import {
-  commentRanges, highlightTargetAt, identifierAt, isHighlightableWord, usageRanges,
+  commentRanges, highlightTargetAt, highlightUsagesStatusText, identifierAt, isHighlightableWord, usageRanges,
 } from '../src/usageHighlight.ts'
 import {
   backgroundResultIsFresh, countByKind, highlightUsagesCommand, setUsageHighlight,
   usageHighlightExtension, usageHighlightField, usagesAt,
+  reportUsageHighlightStatus, USAGE_HIGHLIGHT_SHORTCUT_TEXT,
 } from '../src/usageHighlightExtension.ts'
+import { IDLE_TEXT, resetStatusText, statusText } from '../src/statusBarText.ts'
 
 test('identifierAt：光标在词内、词首、词尾都能取到；空白与标点上取不到', () => {
   const text = 'foo bar_baz $x'
@@ -118,6 +120,39 @@ test('读/写分桶计数（UsageRanges.kt 的四个集合，供状态栏/提示
   assert.equal(counts.read, 1)
   assert.equal(counts.writeDeclaration, 1)
   assert.equal(counts.write, 0)
+})
+
+// 状态栏提示（`HighlightUsagesHandler.setStatusText`，:393-409 的三档 → `:408` 的 setInfo）。
+// 通道是 `src/statusBarText.ts`（本仓的 `StatusBar.Info`），所以这三条不需要宿主行就是真用户可见的。
+test('状态栏三档：n 条用法 / 0 条用法 / 清除高亮时收掉自己说的话', () => {
+  resetStatusText()
+  const found = highlightUsagesStatusText(3, 'total', USAGE_HIGHLIGHT_SHORTCUT_TEXT)
+  assert.equal(found, '3 usages of total found (press Ctrl+Shift+F7 again to remove the highlighting, Escape to remove all highlighting)')
+  assert.equal(highlightUsagesStatusText(1, 'total', USAGE_HIGHLIGHT_SHORTCUT_TEXT).startsWith('1 usage of total found '), true, '一条要用单数')
+  assert.equal(highlightUsagesStatusText(0, 'total', USAGE_HIGHLIGHT_SHORTCUT_TEXT), 'No usages of total found')
+  reportUsageHighlightStatus(3, 'total')
+  assert.equal(statusText.value, found)
+  // 清除那一档（:395-397 的 message = ""）：说话人还是自己，所以空文字被接受、退回兜底。
+  reportUsageHighlightStatus(0, 'total', true)
+  assert.equal(statusText.value, IDLE_TEXT)
+})
+
+test('命令层：高亮/清除都会把话说到状态栏（上游 :189 的 refCount + myClearHighlights）', () => {
+  resetStatusText()
+  const first = run(highlightUsagesCommand, 'total = total + 1\n', 0, 0, DEFAULTS)
+  assert.equal(first.ran, true)
+  assert.equal(statusText.value, '2 usages of total found (press Ctrl+Shift+F7 again to remove the highlighting, Escape to remove all highlighting)')
+  let state = first.state
+  const view = { get state() { return state }, dispatch: (...specs) => { state = state.update(...specs).state } }
+  assert.equal(highlightUsagesCommand(view), true, '再执行一次 = 清除')
+  assert.equal(statusText.value, IDLE_TEXT, '清除那一档把状态栏文字一起收掉')
+})
+
+test('命令层：光标处没有元素时既不写状态栏也不吞键（上游没有 target 就不进 setStatusText）', () => {
+  resetStatusText()
+  const out = run(highlightUsagesCommand, '  \n', 1, 1, DEFAULTS)
+  assert.equal(out.ran, false)
+  assert.equal(statusText.value, IDLE_TEXT, '没有元素这一档不该往状态栏说话')
 })
 
 test('接线：扩展自己绑 Ctrl+Shift+F7（$default.xml 的 HighlightUsagesInFile），菜单行展示同一个键', () => {

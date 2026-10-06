@@ -11,13 +11,29 @@
 //      对应"顺带把块内的那一份也画上"；
 //   ④ 注册进编辑器：CodeEditor.vue 贴着机检上限，扩展只能从它**已经调用**的入口挂进去，
 //      所以 `src/editorSearchExtension.ts` 把本扩展与查找高亮层一并返回（同属光标驱动的
-//      高亮层，见那边的说明）。
+//      高亮层，见那边的说明）；
+//   ⑤ 高亮开/关时的**状态栏提示**（`HighlightUsagesHandler.setStatusText`，:393-409 的三档，
+//      最后一行 `getStatusBar(project).setInfo(message)`）—— 通道是 `src/statusBarText.ts`，
+//      文字规则在 `src/usageHighlight.ts` 的 `highlightUsagesStatusText`。
+//
+// 两条**故意没有接线**的东西（写了就得有人解释，免得下批又当"缺项"重做）：
+//   · `highlightUsagesInCodeBlockCommand`：上游 `CodeBlockSupportHandler` 的 `getCodeBlockRange`
+//     服务的是结构标记高亮（`IdentifierHighlightingComputer.kt:152`）、缩进参考线
+//     （`IndentGuideCalculator.java:93`）、`MatchBraceAction.java:60` 与智能选区
+//     （`CodeBlockUtil.java:110/:178`）—— **没有**一条"只在当前代码块内高亮用法"的用户动作，
+//     注册它等于造一条 IDEA 没有的菜单行（规矩：不放假控件）。块范围规则本身留在
+//     `src/usageHighlight.ts` 的 `codeBlockRange`，谁要接结构标记就接它。
+//   · `src/usageHighlight.ts` 的 `CHOOSE_ALL_ENTRY`：上游 `ChooseOneOrAllRunnable.run()`（:38-40）
+//     在**只有一个元素**时直接选中、不进弹层；本仓的目标恒是光标处那一个标识符，弹层永远不会出现，
+//     所以这一档只有规则、没有消费点（多条候选要 PSI 的 `PsiElement` 列表才有）。
 import { StateEffect, StateField, type EditorState, type Extension, type Range } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, keymap, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { commentStyleFromState } from './commentToggle.ts'
+// 状态栏中段文字通道（IDEA 的 `StatusBar.Info.set`），高亮用法的三档提示就走它。
+import { setStatusText } from './statusBarText.ts'
 import {
-  classifyUsage, codeBlockRange, commentRanges, highlightTargetAt, isHighlightableWord, stringRanges, usageKinds,
-  type TypedUsageOccurrence, type UsageKind,
+  classifyUsage, codeBlockRange, commentRanges, highlightTargetAt, highlightUsagesStatusText, isHighlightableWord,
+  stringRanges, usageKinds, type TypedUsageOccurrence, type UsageKind,
 } from './usageHighlight.ts'
 
 export interface UsageHighlight {
@@ -180,33 +196,59 @@ export function usageBackgroundRecompute(): Extension {
 // ---------------------------------------------------------------- 命令与键位
 
 /**
- * 高亮光标处的用法；已有高亮时（无论在不在同一个词上）先清除 —— 与上游动作的
- * 开关语义一致，按键不悬空。没有可高亮的元素时返回 false（菜单据此提示）。
+ * 上游 `HighlightUsagesHandler.getShortcutText()`（:415-423）读的是
+ * `ACTION_HIGHLIGHT_USAGES_IN_FILE` 的第一条快捷键（没绑就回 `<no key assigned>`）。
+ * 本仓的键位表是保留文件（`src/keymapBindings.ts` 归主代理），这里给的是与下面
+ * `Ctrl-Shift-F7` 那条绑定同一个动作的呈现文本。
  */
-export const highlightUsagesCommand: Command = view => {
-  if (view.state.field(usageHighlightField, false)) {
-    view.dispatch({ effects: setUsageHighlight.of(null) })
-    return true
-  }
-  const range = view.state.selection.main
-  const highlight = usagesAt(view.state, range.from, range.to)
-  if (!highlight) return false
-  view.dispatch({ effects: setUsageHighlight.of(highlight) })
-  return true
+export const USAGE_HIGHLIGHT_SHORTCUT_TEXT = 'Ctrl+Shift+F7'
+
+/** 状态栏的说话人（`StatusBar.Info.set(text, project, requestor)` 的第三参，`HighlightUsagesHandler.java:408`）。 */
+export const USAGE_HIGHLIGHT_REQUESTOR = 'highlightUsages'
+
+/**
+ * `HighlightUsagesHandler.setStatusText`（:393-409）的三档，一次调用落完：
+ *   · 清除高亮 → 空文字（`:395-397` 的 `message = ""`，通道只允许当前说话人擦自己）；
+ *   · 找到 n 条 → 「n 处用法…」（`:398-402`，带快捷键提示）；
+ *   · 一条都没有 → 「没有找到用法」（`:403-407`）。
+ * 三档最后都写状态栏（`:408`）。文字本身在 `src/usageHighlight.ts`（`CodeInsightBundle.properties:64-67` 的直译）。
+ */
+export function reportUsageHighlightStatus(count: number, elementName: string | null, clearing = false): void {
+  setStatusText(clearing ? '' : highlightUsagesStatusText(count, elementName, USAGE_HIGHLIGHT_SHORTCUT_TEXT), USAGE_HIGHLIGHT_REQUESTOR)
 }
 
-/** 块内版：只看光标所在最内层花括号块（`CodeBlockSupportHandler` 那一族）。 */
-export const highlightUsagesInCodeBlockCommand: Command = view => {
-  if (view.state.field(usageHighlightField, false)) {
+/**
+ * 两条命令共用的那一半（上游 `HighlightUsagesHandler.java:189` 把 `refCount` 与
+ * `myClearHighlights` 一起交给 `setStatusText`，所以"关掉"与"0 条"都要说话）。
+ * 返回 false = 光标处根本没有可高亮的元素（不吞键，菜单据此提示）。
+ */
+function toggleUsageHighlight(view: EditorView, codeBlockOnly: boolean): boolean {
+  const current = view.state.field(usageHighlightField, false)
+  if (current) {
     view.dispatch({ effects: setUsageHighlight.of(null) })
+    reportUsageHighlightStatus(0, current.word, true)
     return true
   }
   const range = view.state.selection.main
-  const highlight = usagesAt(view.state, range.from, range.to, true)
-  if (!highlight) return false
-  view.dispatch({ effects: setUsageHighlight.of(highlight) })
-  return true
+  const target = highlightTargetAt(view.state.doc.toString(), range.from, range.to)
+  if (!target || !isHighlightableWord(target.word)) return false
+  const highlight = usagesOf(view.state, range.from, range.to, codeBlockOnly)
+  if (highlight) view.dispatch({ effects: setUsageHighlight.of(highlight) })
+  reportUsageHighlightStatus(highlight?.occurrences.length ?? 0, target.word)
+  return Boolean(highlight)
 }
+
+/**
+ * 高亮光标处的用法；已有高亮时（无论在不在同一个词上）先清除 —— 与上游动作的
+ * 开关语义一致，按键不悬空。光标处没有元素时返回 false（菜单据此提示）。
+ */
+export const highlightUsagesCommand: Command = view => toggleUsageHighlight(view, false)
+
+/**
+ * 块内版：只看光标所在最内层花括号块（规则在 `src/usageHighlight.ts` 的 `codeBlockRange`）。
+ * **没有注册进菜单/键位**：上游没有这条用户动作，理由见文件头。
+ */
+export const highlightUsagesInCodeBlockCommand: Command = view => toggleUsageHighlight(view, true)
 
 /** Esc 收起（`EscapeHandler` 清临时高亮的等价物）：没有高亮时返回 false，把键让给别人。 */
 const clearOnEscape: Command = view => {

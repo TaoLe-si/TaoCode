@@ -109,12 +109,12 @@ export const TRUST_REMEMBER_LABEL = '以后不再询问'
 //       `external.link.confirmation.trust.label` = "Trust Project and Open"（`:3153`）、
 //       `CommonBundle.getCancelButtonText()` = "Cancel"；默认按钮是 **Open**（`:79`），
 //       但**焦点**落在「信任项目并打开」（`:80`）；
-//   · 答 Open → 开，但**不**写信任清单（`:82`）；答 Trust Project and Open →
-//     `setProjectTrusted(true)` 然后开（`:83`）；其它（含 Esc/关窗）→ 不开（`:84`）。
+//   · 答 Open → 开，但**不**写信任清单（`:83`）；答 Trust Project and Open →
+//     `setProjectTrusted(true)` 然后开（`:84`）；其它（含 Esc/关窗）→ 不开（`:85`）。
 // 标题 `external.link.confirmation.title` = "Open Link"（`:3149`），
 // 正文 `external.link.confirmation.message.0`（`:3151`）把 URL 放在最后一行。
 //
-// 上游另有一条**文件级**的那一支（`confirmOpeningUntrustedFile` `:89-108`，按钮
+// 上游另有一条**文件级**的那一支（`confirmOpeningUntrustedFile` `:88-108`，按钮
 // `external.link.confirmation.trust.file.label` = "Trust File and Open" `:3154`）：
 // 本仓的信任存储只有项目/目录级（`generalSettings.trustedPaths`），没有单文件那一档
 // （`native/trusted_paths.cpp` 的三道硬边界也全是按目录判的），所以这里只落项目级，
@@ -144,8 +144,8 @@ export function externalLinkPrompt(
 
 /**
  * 答完之后要做的事：开不开、信任清单要不要改。
- * `trust` 走 `rememberTrust`（与启动时那个确认框同一份存储，`:83` 的 `setProjectTrusted`）；
- * `open` 什么都不写（`:82`）；`cancel` 不开也不写（`:84`）。
+ * `trust` 走 `rememberTrust`（与启动时那个确认框同一份存储，`:84` 的 `setProjectTrusted`）；
+ * `open` 什么都不写（`:83`）；`cancel` 不开也不写（`:85`）。
  */
 export function externalLinkOutcome(
   choice: ExternalLinkChoice, root: string | undefined | null, entries: readonly TrustedPathEntry[] | undefined,
@@ -155,9 +155,45 @@ export function externalLinkOutcome(
   return { open: choice !== 'cancel', entries: current }
 }
 
-// —— 确认框里的「始终信任来自此来源的项目」（上游 `TrustedProjectStartupDialog` 的 trust-all 勾选）——
+/**
+ * 上游 `browse()` 的那一条完整出口（`BrowserLauncherAppless.kt:88-112`：先 `signUrl`/trim（`:96`）、
+ * 再 `canBrowse`（`:99`）、过了才真的开）—— 本仓把它做成**一个函数**，因为本仓的 URL 出口有四处
+ * （`src/App.vue` 的两条、`src/components/TerminalPanel.vue`、`src/quickDocHost.ts`），
+ * 每一处各自判一次就会各漏一次；上游只有一个 `browse()`，判定就长在它里面。
+ *
+ * `ask` 由宿主给（组件是 `TrustedProjectDialog.vue` 的 `mode='link'` 那一档），
+ * `save` 由宿主给（`settings.general.update` 那条通路）。**已信任就不问**（`:69-71`）。
+ */
+export async function browseWithTrustCheck(url: string, deps: {
+  /** 当前项目根（没开项目 = null ⇒ 上游 `canBrowse` 的 `project == null` 那一档：直接放行，`:60-62`）。 */
+  root: () => string | undefined | null
+  /** 现在这份信任清单（持久 + 会话）。 */
+  entries: () => readonly TrustedPathEntry[]
+  /** 弹那三颗按钮，拿回答。 */
+  ask: (prompt: { message: string; labels: typeof EXTERNAL_LINK_LABELS; focused: ExternalLinkChoice; url: string }) => Promise<ExternalLinkChoice>
+  /** 清单变了就写回（答「信任项目并打开」那一路才会走到，`:84`）。 */
+  save: (entries: TrustedPathEntry[]) => unknown
+  /** 真的开（宿主的 `shell.openUrl` 或指定浏览器那条通道）。 */
+  open: (url: string) => unknown
+}): Promise<'opened' | 'canceled'> {
+  const trimmed = url.trim()
+  const root = deps.root()
+  if (!root) { await deps.open(trimmed); return 'opened' }
+  const entries = deps.entries()
+  const prompt = externalLinkPrompt(trimmed, root, entries)
+  if (!prompt) { await deps.open(trimmed); return 'opened' }
+  const choice = await deps.ask({ ...prompt, url: trimmed })
+  const outcome = externalLinkOutcome(choice, root, entries)
+  if (!outcome.open) return 'canceled'
+  // 只有答「信任项目并打开」才动清单（`:84` 那一路才有 setProjectTrusted）；答 Open 不写（`:83`）。
+  if (choice === 'trust') await deps.save(outcome.entries)
+  await deps.open(trimmed)
+  return 'opened'
+}
+
+// —— 确认框里的「始终信任来自此来源的项目」（上游 `TrustedProjectsStartupDialog` 的 trust-all 勾选）——
 //
-// 上游 `TrustedProjectsDialog.kt:64-71`：
+// 上游 `platform/platform-impl/src/com/intellij/ide/trustedProjects/TrustedProjectsDialog.kt:64-71`：
 //   if (openChoice == TRUST_AND_OPEN) {
 //     TrustedProjects.setProjectTrusted(locatedProject, true)
 //     if (projectRoot.parent != null && dialog.isTrustAll) {
@@ -169,12 +205,33 @@ export function externalLinkOutcome(
 // `TrustedHostsConfigurable.getMergedTrustedPaths()`（`:66-71`）读的是同一份。本仓只有一个
 // 应用级清单 `generalSettings.trustedPaths`，两张表合一，所以下面直接把父目录写进同一份清单。
 //
-// **本仓不渲染这个勾选**（不假控件）：勾选后的落库点是 `App.vue` 的 `resolveTrustPrompt`
-// （`App.vue:2653` 挂的 `@resolve`），而 `src/App.vue` 本批只读（余量 57 行）。规则先落地，
-// 接线请求见本批报告。
+// 勾选框本身在 `impl/TrustedProjectsStartupDialog.kt:86-92`：`projectPath.parent` 存在且
+// `isProjectLocationOfferedForTrust` 通过才画；落库那一行在宿主 `resolveTrustPrompt`
+// （`src/App.vue:2622` 挂的 `@resolve`），`src/App.vue` 本桶只读 ⇒ 组件已按可用性渲染
+// （`canTrustAll` prop，默认不传 = 整格不画），宿主那一步登记在
+// `docs/wiring-requests-2026-10-06-welcome2.md` W3。
 
-/** 勾选框文案（上游是 `IdeBundle` 的一条 message，键名见 `TrustedProjectStartupDialog` 资源包）。 */
-export const TRUST_ALL_LABEL = '始终信任来自此来源的项目'
+/**
+ * 勾选框文案 —— 上游 `IdeBundle.properties:2949` 的
+ * `untrusted.project.warning.trust.location.checkbox=<html>Trust all projects in <b>''{0}''</b> folder`，
+ * `{0}` 是**父目录的文件夹名**（`impl/TrustedProjectsStartupDialog.kt:86-92` 传入，
+ * 超长先过 `StringUtil.shortenTextWithEllipsis(name, 40, 0, true)`，`StringUtil.java:2822-2831`：
+ * 超 40 字符时留前 39 + 省略号、后缀长度 0）。本地化包不在基准树里 ⇒ 英文原文直译，注释留出处。
+ * 原写「始终信任来自此来源的项目」（14c 桶转述的上游**概念**而非原文），2026-10-06 按实测文案订正。
+ */
+export const TRUST_ALL_LABEL = '信任「{0}」文件夹里的所有项目'
+
+/** `shortenTextWithEllipsis(name, maxLength, 0, true)`：超长时前 maxLength-1 个字符 + 一个省略号。 */
+export function shortenFolderName(name: string, maxLength = 40): string {
+  return name.length > maxLength ? `${name.slice(0, maxLength - 1)}…` : name
+}
+
+/** 勾选框那一句的成品：父目录的文件夹名（截断到 40）填进模板；没有父目录时给省略号（那种情况整格本就不画）。 */
+export function trustAllLabel(projectRoot: string): string {
+  const parent = trustedLocationParent(projectRoot)
+  const folder = parent ? parent.split('/').filter(Boolean).pop() ?? parent : ''
+  return TRUST_ALL_LABEL.replace('{0}', folder ? shortenFolderName(folder) : '…')
+}
 
 /** 项目的**父目录**（`projectRoot.parent`）；盘符根与相对路径没有父目录，给 null。 */
 export function trustedLocationParent(projectRoot: string): string | null {
@@ -268,12 +325,18 @@ export function needsTrustPrompt(root: string | undefined | null, entries: reado
 
 /**
  * 设置页那一张清单其实是**两个存储**并起来看的（上游
- * `platform/platform-impl/src/com/intellij/ide/impl/TrustedHostsConfigurable.kt:61-69`：
+ * `platform/platform-impl/src/com/intellij/ide/impl/TrustedHostsConfigurable.kt:66-71`
+ * （函数本体；同文件 `platform/platform-impl/src/com/intellij/ide/impl/TrustedHostsConfigurable.kt:61-69`
+ * 的那段注释原文就是 "One list over both trust stores"）：
  * 「用户手管的 `TrustedPathsSettings`」+「在确认框里当场答应过的 `TrustedPaths`」，
  * 顺序就是**先设置里的、后对话框里的那一份**）。
  * 本仓第一档落 `generalSettings.trustedPaths`（落盘），第二档是**会话级**的这份模块内数组
  * （不落盘，与上游 `TrustedPaths` 的「应用级但由确认框写」同源；上游那份是持久存储，
- * 本仓的会话答案上游也是「没勾不再询问就只活这一次」，见 `src/workspaceLifecycle.ts` 的 `sessionTrust`）。
+ * 本仓的会话答案没勾「以后不再询问」就只活这一次）。
+ * 2026-10-06 起这一份是会话级的**唯一真源**：宿主原先自留一份
+ * `ref<TrustedPathEntry[]>`（两份互不可见 ⇒ 对话框答的在设置页看不见、设置页改的不管门禁），
+ * 现在打开流程与设置页读写的是这里的 `rememberSessionTrust` / `sessionTrustEntries`
+ * （上游两侧用的也是同一个单例：`impl/TrustedPaths.kt:25-28` 的 `getInstance()`）。
  */
 export type TrustedLocationSource = 'settings' | 'explicit'
 
@@ -284,7 +347,11 @@ export function sessionTrustEntries(): TrustedPathEntry[] {
   return sessionTrustedLocations.map(entry => ({ ...entry }))
 }
 
-/** 记一条会话级信任（`TrustedPaths` 那一档；不落盘）。空路径不记。 */
+/**
+ * 记一条会话级信任（`TrustedPaths` 那一档；不落盘）。空路径不记。
+ * 覆盖口径与持久清单那条 `rememberTrust` 一致（同一路径就地更新、别的条目不动），
+ * 所以「原先写宿主那一份」的那串写入序列搬到这一份上得到同一张表。
+ */
 export function rememberSessionTrust(path: string, trusted: boolean): void {
   const normalized = normalizeTrustedPath(path)
   if (!normalized) return

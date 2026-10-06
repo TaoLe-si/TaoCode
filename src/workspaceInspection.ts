@@ -14,6 +14,7 @@ import { backgroundTaskManager } from './progressTasks.ts'
 import { analysisScope, filterByAnalysisScope, scopeSummary } from './analysisScope.ts'
 // 显式 `.ts` 后缀：Node 直跑 .ts 时不做扩展名推断（`tests/workspace-diagnostics.test.mjs` 直接 import 这里）。
 import {
+  DiagnosticSourceCaches,
   describeWorkspaceDiagnostics,
   planWorkspaceReports,
   previousResultIdsFrom,
@@ -33,7 +34,23 @@ export interface WorkspaceInspectionDeps {
   diagnostics: Map<string, LspDiagnostic[]>
   /** path → resultId，跨次调用保留，供下一轮省掉没变文件的重算。 */
   resultIds: Map<string, string>
+  /**
+   * 诊断的两份按特性缓存（push / pull，上游 `LspHighlightingCacheRegistry.kt:26-27`）。
+   * 缺省 = 本模块自持的那一份（跨次调用保留，`Unchanged` 与 push 覆盖后要重并都靠它）；
+   * 测试用例各传各的以免互相串状态。
+   */
+  sources?: DiagnosticSourceCaches
 }
+
+/**
+ * 本模块自持的那两份缓存（每个会话一份，等价上游"每个 LSP client 一份 registry"，
+ * `LspHighlightingCacheRegistry.kt:23` 的构造位置就是 `LspClientImpl.kt:106`）。
+ * **不需要**额外的重置口：构造时它自登记进 `src/lspPerFileCache.ts` 的那张注册表，
+ * 于是上游 `LspClientImpl.kt:398` 那一次 `highlightingCacheRegistry.clearCache()` 在本仓的两个生产触发点
+ * 都会连它一起清掉 —— 语言服务重启（`src/lsSessionHost.ts` 的 `resetLspSession()`）与
+ * 服务器自己要求重取（`src/lspProgress.ts` 里 `route === 'refresh'` → `clearAllLspCaches()`）。
+ */
+const sharedDiagnosticSources = new DiagnosticSourceCaches()
 
 export interface WorkspaceInspectionOutcome {
   ok: boolean
@@ -66,11 +83,33 @@ export async function runWorkspaceInspection(deps: WorkspaceInspectionDeps): Pro
       return { ok: false, message: '语言服务没有返回整工程诊断。', scanned: 0, found: 0, skipped: 0, profile }
     }
     const plan = planWorkspaceReports(result.items)
+    const sources = deps.sources ?? sharedDiagnosticSources
     // 分析范围（问题面板工具栏选的那份）：范围外的报告不写进诊断表 —— 与 IDEA 只在范围内
     // 找问题同义；resultId 仍然全部记下（下一轮这些文件可以回 unchanged，省掉重算）。
     const scoped = filterByAnalysisScope(plan.writes, write => write.path)
+    const scopedUnchanged = filterByAnalysisScope(
+      (result.items ?? []).filter(report => report.kind === 'unchanged'), report => report.path)
     backgroundTaskManager.update(WORKSPACE_INSPECTION_TASK_ID, { detail: `合并 ${scoped.kept.length + plan.unchanged} 个文件` })
-    for (const write of scoped.kept) deps.diagnostics.set(write.path, write.diagnostics)
+    // 写共享槽的是 **push 那一份 + pull 那一份**（上游 `getDiagnosticsAndQuickFixes` 的合并口径），
+    // 不是 pull 报告本身 —— 直接 set 会把编辑器里服务端推来的波浪线整份换掉。
+    for (const write of scoped.kept) {
+      const merged = sources.applyPullReport(write.path, deps.diagnostics.get(write.path), write.diagnostics)
+      deps.diagnostics.set(write.path, merged)
+    }
+    // `unchanged` 的文件：内容沿用，但中间 push 可能已经把这个文件的槽整体换掉过，
+    // 所以按记着的那份 pull 结果再并一次（不重算请求）。
+    for (const report of scopedUnchanged.kept) {
+      const merged = sources.remergePull(report.path, deps.diagnostics.get(report.path))
+      if (merged !== null) deps.diagnostics.set(report.path, merged)
+    }
+    // 上一轮拉过、这一轮报告里**完全没有**的文件：pull 那一份作废，只剩 push 的那一份
+    // （与下面 resultId 表整体替换同一口径）。从没拉过的文件 `dropPull` 给 null，不去动它。
+    const mentioned = new Set((result.items ?? []).map(report => report.path))
+    for (const path of sources.pulledPaths()) {
+      if (mentioned.has(path)) continue
+      const pushed = sources.dropPull(path, deps.diagnostics.get(path))
+      if (pushed !== null) deps.diagnostics.set(path, pushed)
+    }
     // resultId 表整体替换：上一轮报过、这一轮没出现的文件不该继续带着旧 id，
     // 否则下一轮会把一个服务器已经忘掉的 id 发回去。
     deps.resultIds.clear()

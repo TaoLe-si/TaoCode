@@ -174,7 +174,7 @@ test('登记过的内容收起来了也答得出 getToolWindow；reset 后回到
 
 test('生产方确实存在：stripes 装载项目布局时登记 / 换项目时清登记', () => {
   const stripes = readFileSync(new URL('../src/toolWindowStripes.ts', import.meta.url), 'utf8')
-  assert.ok(stripes.includes("import { installToolWindowManager, registerToolWindowId, resetRegisteredToolWindowIds } from './toolWindowManager.ts'"),
+  assert.ok(stripes.includes("import { installToolWindowManager, registerToolWindowId, resetRegisteredToolWindowIds, toolWindowSplitDefault } from './toolWindowManager.ts'"),
     "门面注册表没有生产方（或值 import 漏了 .ts 扩展名 ⇒ Node ESM 下整个模块加载失败）")
   assert.match(stripes, /extraContentIds\.add\(id\); registerToolWindowId\(id\)/,
     '布局里读到的"不在出厂锚点表"的内容没登记进门面')
@@ -197,4 +197,54 @@ test('宿主给了焦点判据就用它：窗口开着而光标在编辑器里 �
   assert.equal(toolWindowManager().isEditorComponentActive(), false,
     '近似档：有窗口可见 ⇒ 答"编辑器不 active"')
   installToolWindowManager(null)
+})
+
+// ── lastActiveToolWindowId（`ToolWindowManager.kt:132`）──────────────────────────
+// 上游：`ToolWindowManagerImpl.kt:746-747` 读 `getLastActiveToolWindows().firstOrNull()?.id`，
+// 那一条是「持久栈顶往下第一个 `isAvailable`」（`:749-753`）。隐藏不从持久栈里删
+// （`setHiddenState` 走 `activeStack.remove(entry, false)`，`:712-718`），只有注销窗口才真删（`:1217`）。
+// 栈本体住在宿主（唯一的 push 点是 `recordActiveToolWindow`），门面只**读**它：
+// 宿主没接这一位时答 null，不自己记第二份账（原判词 §6-1 拦的就是两处真相）。
+test('lastActiveToolWindowId：栈顶往下第一个还可用的是答案，全不可用与空栈都答 null', () => {
+  installToolWindowManager(fixture({ activationStack: () => ['files', 'gradle'] }))
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), 'gradle', '栈顶（最后入栈的那个）')
+
+  installToolWindowManager(fixture({ activationStack: () => ['gradle', 'project', 'files'] }))
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), 'files',
+               'project 在夹具里是 disabled ⇒ 跳过它继续往下找（:749-753 的那条 filter）')
+
+  installToolWindowManager(fixture({ activationStack: () => ['project'] }))
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), null, '栈里一个可用的都没有 = 动作该灰着')
+
+  installToolWindowManager(fixture({ activationStack: () => [] }))
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), null, '空栈不猜')
+
+  installToolWindowManager(fixture())
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), null,
+               '宿主还没把常驻栈接进来 ⇒ 答 null（门面不自己记账，两份真相是禁的）')
+  installToolWindowManager(null)
+})
+
+test('激活栈与可见集是两条不同的查询（activeToolWindowId 只看此刻开着的）', () => {
+  installToolWindowManager(fixture({ activationStack: () => ['files', 'gradle'] }))
+  const manager = toolWindowManager()
+  assert.equal(manager.activeToolWindowId(), 'gradle', '可见集的最后一条')
+  assert.equal(manager.lastActiveToolWindowId(), 'gradle', '栈顶（最后入栈的那个 = 数组末位）')
+  installToolWindowManager(fixture({ activationStack: () => ['files', 'gradle'], visibleIds: () => ['files'] }))
+  assert.equal(toolWindowManager().activeToolWindowId(), 'files')
+  assert.equal(toolWindowManager().lastActiveToolWindowId(), 'gradle',
+               'gradle 被收掉了但还留在持久栈里（F12 正是把它重新亮出来）')
+  installToolWindowManager(null)
+})
+
+test('门面的 activationStack 有生产方：stripes 把宿主的 activeStack 依赖转发进来', () => {
+  const stripes = readFileSync(new URL('../src/toolWindowStripes.ts', import.meta.url), 'utf8')
+  assert.match(stripes, /activeStack\?: \{ readonly value: readonly string\[\] \}/,
+              '依赖表里没有这一位 = 门面永远答 null')
+  assert.match(stripes, /activationStack: deps\.activeStack \? \(\) => deps\.activeStack\?\.value \?\? \[\] : undefined/,
+              '装了状态却没转发这一位（宿主给就转、不给就不给）')
+  // 复用 `src/activeToolWindow.ts` 那条纯函数，不再写第二份遍历。
+  const manager = readFileSync(new URL('../src/toolWindowManager.ts', import.meta.url), 'utf8')
+  assert.match(manager, /import \{ lastActiveId \} from '\.\/activeToolWindow\.ts'/)
+  assert.match(manager, /lastActiveId\(stack, id => !\(source \? source\.toolDisabled\(id\) : true\)\)/)
 })

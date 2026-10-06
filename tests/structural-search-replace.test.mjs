@@ -8,7 +8,13 @@
 //   · 空文本不插（=删除）`…/plugin/replace/impl/Replacer.java:70-76`；
 //   · 不改文档的预览 `…/plugin/replace/impl/Replacer.java:78-92` 的 `testReplace`；
 //   · 三个替换开关 `…/plugin/replace/ReplaceOptions.java:27-29`（getter `:72`/`:80`/`:92`）；
-//   · 命中计数文案 `platform/structuralsearch/resources/messages/SSRBundle.properties:48`。
+//   · 命中计数文案 `platform/structuralsearch/resources/messages/SSRBundle.properties:48`；
+//   · 整份文件那一侧的三步骨架：`Replacer.java:125-131`（`CollectingMatchResultSink` 收**全部**命中，
+//     逐条建 `ReplacementInfo`）、`ReplacementBuilder.java:132-163`（`process` 逐处展开，参数位按
+//     `getStartIndex` **逆序**插，`:140-141`）、`Replacer.java:180-211`（`doReplaceAll` 逐处写回，
+//     `:219-221` 写回前查元素还有效吗）；
+//   · 命中不重叠/不嵌套 `…/impl/matcher/handlers/TopLevelMatchingHandler.java:22-34`
+//     （匹配成功且没开递归档 ⇒ 不往子节点里钻）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { compileStructuralPattern, compileStructuralReplacement } from '../src/structuralSearch.ts'
@@ -16,7 +22,7 @@ import {
   UNAVAILABLE_REPLACE_OPTIONS, buildReplacementTemplate, checkDefinitions, compileStructuralReplacementWithDefinitions,
   defineReplacementVariable,
   definitionMap, danglingDefinitions, expandStructuralReplacement, previewMany, previewStructuralReplacement,
-  replacementSummary, unknownReplacementNames, validateReplacement,
+  applyStructuralReplacements, replacementSummary, structuralReplacementPlan, unknownReplacementNames, validateReplacement,
 } from '../src/structuralSearchReplace.ts'
 
 test('定义表的 `""` 哨兵与上游同名规则：写两个引号就是空串', () => {
@@ -133,4 +139,82 @@ test('三个替换开关登记为"没有落点"，不画成可点的控件', () 
   for (const item of UNAVAILABLE_REPLACE_OPTIONS) assert.ok(item.reason.length > 20, item.name)
   // 理由里点名了上游的字段（`ReplaceOptions.java:27-29`），核对得上才不算空话。
   assert.match(UNAVAILABLE_REPLACE_OPTIONS.map(item => item.reason).join('|'), /ReplaceOptions\.java:28/)
+})
+
+// ── 桶 9 派单点名的 matcher 纯函数半区：模板解析 → 匹配 → 替换文本生成 ──────────
+// 上游那三步：`Replacer.java:125-131`（收全部命中，逐条建 ReplacementInfo）→
+// `ReplacementBuilder.java:132-163`（逐处展开，参数位逆序插 `:140-141`）→
+// `Replacer.java:180-211`（逐处写回）。命中不重叠：`TopLevelMatchingHandler.java:22-34`。
+const eqPattern = compileStructuralPattern('$x$ == null')
+const eqLine = 'a == null && b == null'
+
+test('整份文件一次替换：拿全部命中、按文档顺序、互不重叠（Replacer.java:125-131）', () => {
+  const plan = structuralReplacementPlan(eqPattern, eqLine, '$x$ != null')
+  assert.deepEqual(plan.edits.map(edit => [edit.from, edit.to, edit.text]),
+    [[0, 9, 'a != null'], [13, 22, 'b != null']], '一处命中一条 ReplacementInfo')
+  assert.deepEqual(plan.edits.map(edit => edit.values.x), ['a', 'b'], '逐处的捕获值跟着这一处走')
+  assert.equal(applyStructuralReplacements(eqLine, plan.edits), 'a != null && b != null')
+  for (let i = 1; i < plan.edits.length; ++i) {
+    assert.ok(plan.edits[i - 1].to <= plan.edits[i].from, '编辑互不重叠（上游由 PSI 节点整块吃掉保证）')
+  }
+})
+
+test('逆序写回：给出的顺序不影响结果（ReplacementBuilder.java:140-141）', () => {
+  // 用"越换越短"的替换串：`== null` 整个吃掉。正序写回会让第二处的下标落在**已经被改过**的文本上
+  // （上游 `Replacer.java:185-207` 是正序，但它每写一处都重解析 PSI，本仓没有这一条 ⇒ 只能逆序）。
+  const plan = structuralReplacementPlan(eqPattern, eqLine, '$x$')
+  assert.deepEqual(plan.edits.map(edit => [edit.from, edit.to, edit.text]), [[0, 9, 'a'], [13, 22, 'b']])
+  assert.equal(applyStructuralReplacements(eqLine, plan.edits), 'a && b')
+  assert.equal(applyStructuralReplacements(eqLine, [...plan.edits].reverse()),
+    applyStructuralReplacements(eqLine, plan.edits), '先算下标再一次性写 ⇒ 前面的编辑不许挪动后面的位置')
+  assert.notEqual(applyStructuralReplacements(eqLine, plan.edits), eqLine, '判据不能是"改了等于没改"')
+})
+
+test('前后一样的与复核判掉的都不写回，但要分开计数', () => {
+  // 定义把变量写回原文 ⇒ 不产生编辑（面板那句"N 处替换前后一样"的口径）。
+  const noop = structuralReplacementPlan(eqPattern, eqLine, '$x$ == null')
+  assert.deepEqual(noop.edits, [])
+  assert.equal(noop.unchanged, 2)
+  // accept = 复核（`verdictForHit` 那一层）：判掉的计入 skipped，不写回。
+  const half = structuralReplacementPlan(eqPattern, eqLine, '$x$ != null', new Map(), '',
+    spans => spans.whole.start !== 13)
+  assert.deepEqual(half.edits.map(edit => edit.from), [0])
+  assert.equal(half.skipped, 1)
+  assert.equal(half.unchanged, 0)
+})
+
+test('替换成空 = 删掉这一段（Replacer.java:70-76 的空文本不插）', () => {
+  const plan = structuralReplacementPlan(eqPattern, 'if (a == null) {}', '')
+  assert.deepEqual(plan.edits.map(edit => [edit.from, edit.to, edit.text]), [[4, 13, '']])
+  assert.equal(applyStructuralReplacements('if (a == null) {}', plan.edits), 'if () {}')
+})
+
+test('一行两处：预览按列号取"这一处"，与 verdictForHit 的起点同一档', () => {
+  // 复核那一步早就按列号取命中（`src/structuralSearchModifiers.ts:416-417` + `:426`），
+  // 预览原先固定从 0 起 ⇒ 第二条结果行的预览显示的是第一条的前后文本。
+  const first = previewStructuralReplacement(eqPattern, eqLine, '$x$ != null', new Map(), '', 0)
+  const second = previewStructuralReplacement(eqPattern, eqLine, '$x$ != null', new Map(), '', 13)
+  assert.equal(first.before, 'a == null')
+  assert.equal(second.before, 'b == null', '第二条结果行预览的是压在 column 13 上的那一处')
+  assert.equal(second.values.x, 'b')
+  // 取不到正好压在列号上的命中时退回行内第一处（老调用方传 0 / 传任意列都不至于变成"算不出"）。
+  assert.equal(previewStructuralReplacement(eqPattern, eqLine, '$x$ != null', new Map(), '', 7).before, 'a == null')
+  // previewMany 把行上的列号一路传下去。
+  const many = previewMany(eqPattern, [
+    { path: 'a.ts', line: 1, column: 0, text: eqLine },
+    { path: 'a.ts', line: 1, column: 13, text: eqLine },
+  ], '$x$ != null')
+  assert.deepEqual([...many.previews.values()].map(preview => preview.before), ['a == null', 'b == null'])
+  assert.equal(many.unverifiable, 0)
+  assert.equal(many.unchanged, 0)
+})
+
+test('零宽命中不死循环、不重叠（本仓给 `{0,}` 那类模板加的保险）', () => {
+  // 上游一次匹配吃掉一个完整 PSI 节点，不存在"零个字符"的命中；本仓的正则能编出可空捕获组
+  // （`$x$*`），推进规则必须自己挡住，否则一次搜索就挂死在这里。
+  const pattern = compileStructuralPattern('$x$*')
+  const plan = structuralReplacementPlan(pattern, 'zz', 'E')
+  assert.deepEqual(plan.edits.map(edit => [edit.from, edit.to]), [[0, 2], [2, 2]])
+  assert.equal(applyStructuralReplacements('zz', plan.edits), 'EE')
+  assert.equal(plan.edits.length, 'zz'.length + 1 - 1, '每处至多推进一格 ⇒ 处数不会超过字符数')
 })

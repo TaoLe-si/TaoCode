@@ -18,8 +18,15 @@
 // 删除入口那一步检查（删前提示「还有 N 处引用」）仍接在 `src/treeActions.ts` 的
 // `beginDelete` → `warnBeforeDelete`；本模块是给**对话框**准备的纯模型。
 // 纯逻辑（位置去重、文件计数、选项、文案）都在这里，组件侧只负责调用，可单测。
+//
+// 2026-10-06（桶 1 / A5）：加 `safeDeletePromptFromFiles()` —— 树侧与重构侧的删除入口只要给
+// 「名字 + 语言服务的引用 + 文件文本」就能拿到同一份对话框模型，注释/字符串那半本账不会再被
+// 漏掉（`style` 在模块里按路径补齐）。树侧那一行改写在 `src/treeActions.ts`（桶 14 名下、本片只读），
+// 以**接线请求**交出：`docs/wiring-requests-2026-10-06-format.md` W1。
+// 重构菜单/Alt+Delete 那一侧（`src/refactorHostAssembly.ts`）已在上一轮接好（同一份模型）。
 import type { LspLocation } from './bridge'
-import { groupNonCodeUsages, type NonCodeReport } from './nonCodeUsages.ts'
+import { commentStyleFor } from './commentToggle.ts'
+import { groupNonCodeUsages, nonCodeReport, type NonCodeReport } from './nonCodeUsages.ts'
 
 /** LSP `textDocument/references` 结果里本仓用得上的部分（与 bridge 的 `LspLocation` 同形）。 */
 export interface SafeDeleteReport {
@@ -180,4 +187,53 @@ export function safeDeletePrompt(
       : `「查看用法」会把这些结果放进引用窗口。删除「${name}」本身不做任何改动。`,
     blocked: details.length > 0,
   }
+}
+
+/* ── 一次调用的组装：文件文本 → 完整对话框模型（A5 的模块侧）─────────────────── */
+
+/** 参与「注释与字符串里的用法」扫描的一份文件文本。 */
+export interface SafeDeleteFileText { path: string; text: string }
+
+/**
+ * 被删符号在本仓文本扫描里用的那个词：取路径最后一段并去掉扩展名
+ * （`Widget.java` → `Widget`；没有点、或以点开头的名字（`.editorconfig`）就整体当词）。
+ * 上游对位的是 `ElementDescriptionUtil.getElementDescription(element,
+ * NonCodeSearchDescriptionLocation.STRINGS_AND_COMMENTS)`（`SafeDeleteProcessor.java:457-459`），
+ * 拿到的就是那个声明的名字 —— 本仓删除入口的对象是文件，故词 = 文件名主干（与 `refactorHostAssembly`
+ * 那份 `fileStem` 同一条口径，收在这里就不再要调用方各写一遍）。
+ */
+export function safeDeleteSearchWord(name: string): string {
+  const base = (name.split('/').pop() ?? name).trim()
+  const stem = base.replace(/\.[^.]+$/, '')
+  return stem || base
+}
+
+/**
+ * 从「文件文本」直接组装删除前的对话框模型 —— `safeDeletePrompt()` 的调用面，
+ * 把两件容易写错的事收在模块里：
+ *   1. **注释标记必须按路径给**：`nonCodeReport()` 认的是 `FileText{path,text,style}`，
+ *      `style` 缺省为 null 时只扫字符串 ⇒ 注释那一半**静默漏报**。这里统一用
+ *      `commentStyleFor(undefined, path)`（扩展名档）补齐，调用方只给 `{path,text}`。
+ *   2. **两个搜索开关得真的管住扫描**：上游 `SafeDeleteProcessor.addNonCodeUsages`
+ *      （`:447-464`；本仓旧注释写的 `:449-464` 是签名头两行往前挪了一位，实际方法从 `:447` 起）
+ *      里 `searchInCommentsAndStrings` 为假就**根本不扫**
+ *      （`:457-460` 那个 `if`），`searchNonJava` 为假就不走 `addTextOccurrences`（`:461-463`）。
+ *      本仓 `searchInComments` 为假 ⇒ `nonCode = null`（对话框里那一栏空着，与上游"没勾就是空列表"同效）；
+ *      `searchTextOccurrences` 在本仓没有对应的宿主通道（见 `docs/wiring-requests-2026-10-06-bucket1b.md`
+ *      「不做」第 1 条），缺省关，且**不影响**注释/字符串那一半的扫描。
+ * 是否弹三选一由调用方按返回值的 `blocked` 决定（`blocked` 为假时上游也是直接删）。
+ */
+export function safeDeletePromptFromFiles(
+  name: string,
+  refs: readonly LspLocation[],
+  files: readonly SafeDeleteFileText[],
+  options: SafeDeleteOptions = defaultSafeDeleteOptions(),
+): SafeDeletePrompt {
+  const word = safeDeleteSearchWord(name)
+  const nonCode = options.searchInComments
+    ? nonCodeReport(files.filter(file => file.text !== '').map(file => ({
+        path: file.path, text: file.text, style: commentStyleFor(undefined, file.path),
+      })), word)
+    : null
+  return safeDeletePrompt(name, refs, nonCode, options)
 }

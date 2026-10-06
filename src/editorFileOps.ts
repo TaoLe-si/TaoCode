@@ -16,6 +16,8 @@ import { copyToClipboard } from './clipboard.ts'
 import { createHoverCache } from './hoverDocumentation.ts'
 import { createQuickDocHost } from './quickDocHost.ts'
 import { errorMessage } from './errors.ts'
+import { makeEditorConfigReader } from './codeStyleSettings.ts'
+import { applySaveTextTransforms, offsetInText, saveTrimOptionsFor } from './editorSaveTransforms.ts'
 import type { EditorHandle, Tab } from './editorTab'
 
 export interface EditorFileOpsDeps {
@@ -222,11 +224,48 @@ function applyEncodingChoice() {
   encodingPrompt.value = null
   notify(`已切换为 ${encodingLabels[choice.encoding]}${choice.bom ? '（带 BOM）' : ''}，保存时按该编码写入 ${tab.path}`)
 }
+// ---------------------------------------------------------------- 保存前的两条纯文本 pass
+//
+// IDEA 在 `beforeDocumentSaving` 里、**Actions on Save 之后**跑这一段
+// （`FileDocumentManagerImpl.java:1214-1245` 的 multiCast 顺序：消息总线 → Actions on Save →
+// `TrailingSpacesStripper`），执行体逐条在 `src/editorSaveTransforms.ts`。这里只做三件事：
+// 凑齐 `.editorconfig` 的 reader（`file.read`）、把光标的行列换算成正文偏移、把标签页的只读档
+// 交给上游那四道门。**没有落盘的键时全部落到上游默认档**（清「改动过的行」的行尾空白、
+// 不补末行换行），所以这一条链路现在就是真的在执行，不是等键。
+async function transformOnSave(tab: Tab, content: string) {
+  const { options, enforcedRemoval } = await saveTrimOptionsFor({
+    path: tab.path,
+    root: workspaceRoot?.() ?? undefined,
+    // 落盘的两条 pass 读的是设置那三格（IDEA `EditorSettingsExternalizable.java:73/74/142`，
+    // 默认 `Changed` / false / true）；旧存档缺键时 `editor_defaults_impl()` 已经按同一套默认补齐，
+    // 所以这里不需要再造一层回落。
+    settings: {
+      stripTrailingSpaces: editorSettings.value.stripTrailingSpaces,
+      ensureNewLineAtEof: editorSettings.value.ensureNewLineAtEof,
+      keepTrailingSpacesOnCaretLine: editorSettings.value.keepTrailingSpacesOnCaretLine,
+    },
+    read: isDesktop ? makeEditorConfigReader(path => request<DocumentData>('file.read', { path })) : undefined,
+  })
+  const cursor = editorFor(tab.path)?.getCursor()
+  return applySaveTextTransforms({
+    path: tab.path,
+    text: content,
+    savedText: tab.content,
+    options,
+    enforcedRemoval,
+    caretOffsets: cursor ? [offsetInText(content, cursor.line, cursor.ch)] : undefined,
+    // 上游 getOptions 的门（`TrailingSpacesStripper.java:295-322`）在本仓的对应物。
+    writable: !tab.readOnly,
+    backedByFile: isDesktop,
+  })
+}
   return {
     conflictPrompt, conflictDiff, showConflictDiff, resolveConflictReload, resolveConflictKeep,
     quickDoc, showQuickDoc, closeQuickDoc, copyReference, showFileProperties,
     convertIndents, convertLineSeparators, encodingPrompt, encodingSelect, openEncoding,
     reloadWithEncoding, applyEncodingChoice,
+    // 保存前 pass（`App.vue` 的 `save()` 在 `runActionsOnSave` 之后调，整段可照抄：接线请求里给）。
+    transformOnSave,
     // 快速文档弹层的新出口（前进/后退、外部文档动作、内部链接、图片解析）。
     // 转发宿主而不是让 App.vue 直接建宿主，是为了 `showQuickDoc` 仍只有一处装配。
     quickDocGoBackward: quickDocHost.goBackward,

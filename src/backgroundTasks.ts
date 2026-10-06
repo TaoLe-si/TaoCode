@@ -21,6 +21,12 @@
 // 理由与上游依据写在 progressSuspender.ts 的模块头）。任务在耗时点 `await indicator.awaitResumed()`
 // 就是上游 `checkCanceled()` 里那句 `myLock.wait()` 的等价物 —— 单线程 JS 不能真的阻塞，
 // 改成"这一拍不往下走"。
+//
+// 协作式的**另一半在任务体里**：只有走到 `awaitResumed()` / `checkCanceled()` 的任务才会真的让路。
+// 目前唯一的入队消费者（`src/gradleHost.ts:203` 的「同步 Gradle 项目更改」）只用了 `onCancel`
+// —— 那条同步是宿主子进程，中途没有可让路的节拍 ⇒ 挂起对它的实际效果是"不再开新任务"。
+// `queueRow` 那句措辞按这个口径写（原写「正在跑的那条停在检查点上」= 把没做的事说成做了，本批订正），
+// 给 gradleHost 的接线请求见 `docs/wiring-requests-2026-10-06-status2.md`。
 import { computed, ref, shallowRef } from 'vue'
 import { createProgressSuspender, ProgressSuspenderTracker, type ProgressSuspender } from './progressSuspender.ts'
 
@@ -121,8 +127,17 @@ class Indicator implements ProgressIndicatorModel {
     if (!this.suspender) return Promise.resolve()
     const pending = this.suspender.waitWhileSuspended()
     if (!this.suspender.isSuspended() || this.suspender.inNonSuspendableSection()) return pending
-    // 挂起中：把 resolve 排进等待队列，`resume()` / `cancel()` 时统一放行。
-    return new Promise<void>(resolve => { this.waiters.push(resolve) })
+    // 挂起中。**两条**路都得放行，少一条任务体就永远卡在这个检查点上：
+    //   · 恢复：`waitWhileSuspended()` 那条 Promise 落地（上游 `freezeIfNeeded` 里 `myLock.wait()`
+    //     被 `resumeProcess()` 叫醒的那一下，`ProgressSuspender.java:139-152`）；
+    //   · 取消：`cancel()` 先 `suspender.resume()`（上游给指示器装的 `cancelled()` 监听，`:55-61`）
+    //     再排空 `waiters`。
+    // 原写这里只把 resolve 登记进 `waiters`、不接 `pending` ⇒ 省电模式关掉后任务并不往下走
+    // （本轮实测出来的，判据 `tests/progress-queue-suspend.test.mjs`）。
+    return new Promise<void>(resolve => {
+      this.waiters.push(resolve)
+      pending.then(() => this.resumeWaiters())
+    })
   }
   runNonSuspendable(body: () => void): void {
     if (!this.suspender) { body(); return }
@@ -150,8 +165,6 @@ export function createBackgroundTaskQueue() {
   const runningFraction = ref<number | null>(null)
   const runningCancellable = ref(false)
   const queuedCount = ref(0)
-  /** 正在跑的那条此刻挂起时显示的原因；没挂起就是空串（面板据此加不加那一行字）。 */
-  const runningSuspendedText = ref('')
   /**
    * 「取消已经按下、任务体还没走到下一个 `checkCanceled()`」的那条任务的标题（空串 = 没有）。
    * 协作式取消的两个时刻要分开画：点下去是一件事，任务真的收尾是另一件事
@@ -162,8 +175,13 @@ export function createBackgroundTaskQueue() {
   const cancellingTitle = computed(() => cancellingEntry.value?.indicator.title ?? '')
   const queue: QueueEntry[] = []
   const suspenders = new ProgressSuspenderTracker()
-  /** 队列级别的挂起请求（省电模式那类"外部要求让路"）：正在跑的与接下来要跑的都算。 */
-  let queueSuspendReason: string | null = null
+  /**
+   * 队列级别的挂起请求（省电模式那类"外部要求让路"）：正在跑的与接下来要跑的都算。
+   * 必须是 **ref**：`queueRow` 是 computed，挂起状态是它唯一的判据之一，用普通变量的话
+   * "只是挂起/恢复"这一拍没有响应式依赖变化 ⇒ 那一行不会出现在面板里（本轮实测出来的，
+   * 判据 `tests/progress-queue-suspend.test.mjs`）。
+   */
+  const queueSuspendReason = ref<string | null>(null)
   let current: QueueEntry | null = null
   let pumping = false
   let taskSeq = 0
@@ -175,17 +193,19 @@ export function createBackgroundTaskQueue() {
     runningDetail.value = current?.indicator.text ?? ''
     runningFraction.value = current?.indicator.fraction ?? null
     runningCancellable.value = Boolean(current?.indicator.cancellable && !current.indicator.cancelled)
-    // 上游那份是 `TaskManager.pauseTask(task, suspender.suspendedText, Source.USER)`
-    // （`TaskInfoEntityCollector.kt:164-168`）—— 暂停状态带着那句原因显示出来。
-    const live = current ? suspenders.getSuspender(current.indicator.taskId) : null
-    runningSuspendedText.value = live && live.isSuspended() ? live.text() : ''
+    // 挂起原因**不在这里另开一个出口**：上游那句是 `TaskManager.pauseTask(task, suspender.suspendedText,
+    // Source.USER)`（`TaskInfoEntityCollector.kt:174`，恢复的对称面 `resumeTask` 在 `:177`；上一批写的
+    // `:164-168` 是那段函数的起始行，本轮重开该文件逐行数过）—— 暂停状态跟着那一行显示，
+    // 本仓的那一行就是下面的 `queueRow`（面板读它）。原写在这里的 `runningSuspendedText`
+    // （`:154` 声明、`:181` 写、`:246` 导出）全仓零消费者 = 铁律 §5 禁的"只过自己测试的死出口"，
+    // 2026-10-06 桶 status2 删除（判据：`tests/progress-queue-suspend.test.mjs`）。
   }
 
   /** 把队列级的挂起请求落到那条正在跑的任务上。 */
   const applySuspend = (indicator: Indicator) => {
     const suspender = suspenders.getSuspender(indicator.taskId)
     if (!suspender) return
-    if (queueSuspendReason !== null) suspender.suspend(queueSuspendReason)
+    if (queueSuspendReason.value !== null) suspender.suspend(queueSuspendReason.value)
     else suspender.resume()
   }
 
@@ -195,7 +215,7 @@ export function createBackgroundTaskQueue() {
     try {
       while (queue.length) {
         // 队列被挂起时**不开新任务**（上游：省电模式禁后台任务；这里是"让路"而不是"取消"）。
-        while (queueSuspendReason !== null) await new Promise<void>(resolve => { resumeQueueWaiters.push(resolve) })
+        while (queueSuspendReason.value !== null) await new Promise<void>(resolve => { resumeQueueWaiters.push(resolve) })
         // 挂起期间 `clear()` 可能把这一条已经摘走了（`clear()` 里 `queue.splice` + `resolve`），
         // 醒来时必须重新看一眼队列，不能拿着 `shift()` 的 undefined 往下走。
         if (!queue.length) break
@@ -208,8 +228,12 @@ export function createBackgroundTaskQueue() {
         const taskId = `${entry.indicator.title}#${++taskSeq}`
         entry.indicator.taskId = taskId
         const suspender = suspenders.track(createProgressSuspender(
-          // 上游那句 `suspendText` 是"这条任务可以被挂起，原因写在这里"（`TaskSuspension.kt:24-28`）；
-          // 没有具体 reason 时用它兜底，面板拼成「已挂起：<这句>」。
+          // 上游那句 `suspendText` 是"这条任务可以被挂起，原因写在这里"（`TaskSuspension.kt:24-25`）；
+          // 它是构造给挂起器的那句**兜底**文案（上游优先级在 `ProgressSuspender.java:106-110`：临时 reason 优先）。
+          // 原写「没有具体 reason 时用它兜底，面板拼成「已挂起：<这句>」」= 把没发生的事说成发生过了：
+          // 队列这一路 `applySuspend` 只在 reason 非 null 时才往下传（本文件 :208），所以这句兜底
+          // **当前显示不到**（面板读的是 `queueRow` 里的 `queueSuspendReason.value`，:364-367）。
+          // 2026-10-06 桶 status2defect 核对后按实情订正；要真接上兜底口径的线见交付报告 §7。
           taskId, '等待前台操作',
           { get running() { return current === entry && !entry.indicator.cancelled } },
         ))
@@ -243,15 +267,16 @@ export function createBackgroundTaskQueue() {
   const resumeQueueWaiters: Array<() => void> = []
 
   return {
-    runningTitle, runningDetail, runningFraction, runningCancellable, queuedCount, runningSuspendedText,
-    /** 正在跑的那条的挂起器（面板/判据用；上游 `getSuspender`）。 */
-    currentSuspender: () => (current ? suspenders.getSuspender(current.indicator.taskId) : null),
+    runningTitle, runningDetail, runningFraction, runningCancellable, queuedCount,
+    // 原写在这里还有一条 `currentSuspender()`（对应上游 `ProgressSuspenderTracker.getSuspender`），
+    // 全仓零消费者 ⇒ 与 `runningSuspendedText` 同批删除（挂起状态由 `queueRow` 那一行显示，
+    // 队列内部用 `suspenders.getSuspender` 与 `Indicator.suspender` 两条私有通道，不需要对外再开一个）。
     /**
-     * 队列级挂起：`reason` 给字符串就是"让路"（正在跑的停在检查点上、还没轮到的不开），
+     * 队列级挂起：`reason` 给字符串就是"让路"（正在跑的在它走到下一个检查点时让路、还没轮到的不开），
      * 给 null 就是恢复。**不是取消** —— 任务的进度、百分比、`onCancel` 都不动。
      */
     setSuspended(reason: string | null): void {
-      queueSuspendReason = reason
+      queueSuspendReason.value = reason
       if (current) applySuspend(current.indicator)
       if (reason === null) {
         for (const entry of queue) if (entry.indicator.suspender) entry.indicator.suspender.resume()
@@ -261,7 +286,7 @@ export function createBackgroundTaskQueue() {
       }
       sync()
     },
-    isSuspended: () => queueSuspendReason !== null,
+    isSuspended: () => queueSuspendReason.value !== null,
     /** `BackgroundTaskQueue.run(...)`：入队并等它跑完（被取消也算"结束"）。 */
     run(task: BackgroundQueueTask): Promise<void> {
       return new Promise<void>(resolve => {
@@ -336,10 +361,10 @@ export function createBackgroundTaskQueue() {
       // 挂起时这一行是**必要**的：省电模式让后台任务让路（上游那句正文「代码洞察和后台任务已禁用。」，
       // `power.save.mode.on.notification.content`），但正在跑的那条由各功能自己画（Gradle 行、
       // 检查行…），它们不知道队列被挂起了。所以挂起状态由队列自己补一行，而不是塞进别人的行。
-      if (queueSuspendReason !== null && (queuedCount.value > 0 || current !== null)) {
+      if (queueSuspendReason.value !== null && (queuedCount.value > 0 || current !== null)) {
         return {
           title: '后台任务队列',
-          detail: `已挂起：${queueSuspendReason}${queuedCount.value > 0 ? `（还有 ${queuedCount.value} 个排队中）` : '（正在跑的那条停在检查点上）'}`,
+          detail: `已挂起：${queueSuspendReason.value}${queuedCount.value > 0 ? `（还有 ${queuedCount.value} 个排队中）` : '（正在跑的那条会在下一个检查点让路）'}`,
           percent: null as number | null,
         }
       }

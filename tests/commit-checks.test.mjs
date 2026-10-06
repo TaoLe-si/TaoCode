@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RUNNING_CHECKS_TEXT, RERUN_CHECKS_TOOLTIP, CHECKS_FAILED_UNKNOWN, COMMIT_ACTION_TEXT,
-  TODO_ITEMS_FOUND, REVIEW_TODO_ACTION,
+  TODO_ITEMS_FOUND, REVIEW_TODO_ACTION, MAX_COMMIT_PATHS, MAX_COMMIT_PATH_LENGTH, commitRequestParams,
   checksFailedTitle, commitAnywayLabel, commitCheckReport, failuresRowText, failureTexts, saveDuringCommitQuestion } from '../src/commitChecks.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -163,4 +163,144 @@ test('面板的通知真的接得到宿主（此前 @notify 没绑 ⇒ 通知被
   assert.match(notices, /function notifyFromPanel\(message: string, error = false, displayId\?: string, detail\?: string\[\], actions\?: NoticeAction\[\]\)/,
     'notifyFromPanel 收面板那五个参数')
   assert.match(notices, /notify\(message, error, undefined, detail, displayId, actions\)/, '按 notify 的形参顺序转过去')
+})
+
+// ── R1「提交文件…」：请求形状 + native 落点（桶 13 遗留的那一半）──────────────────
+// 上游 `CommonCheckinFilesAction.kt:26-78` → `CheckinActionUtil.kt:100-160` 的 `pathsToCommit`：
+// 只有被选中的那些变更进这次提交。本仓的落点是 `git commit --only -- <paths>`。
+// 三条口径都有人踩过坑，所以逐条钉住：空 = 不发这个键、去重保序、上限与 native 同数。
+
+const commitBase = { message: '做点事', amend: false, signoff: false, author: '', authorEmail: '' }
+
+test('「提交文件…」为空时请求体逐字不变（宿主通道没接之前不多发一个键）', () => {
+  assert.deepEqual(commitRequestParams(commitBase), commitBase)
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: [] }), commitBase, 'paths: [] 与不给完全一样')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: [' ', ''] }), commitBase, '空白项不算一次选择')
+  assert.equal('paths' in commitRequestParams({ ...commitBase, paths: [] }), false,
+    '空集合时连这个键都不出现（带上也只会被旧宿主忽略 ⇒ 宁可不发）')
+})
+
+test('被选路径：去空白、并重复、保顺序（pathsToCommit 的集合语义）', () => {
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['b.ts', 'a.ts', 'b.ts'] }).paths, ['b.ts', 'a.ts'],
+    '重复项并掉，但**不重排** —— 上游按选中顺序交给 workflowHandler')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: [' a.ts ', 'a.ts'] }).paths, ['a.ts'],
+    '去空白后相同的并成一条')
+})
+
+test('所选文件的上限与 native 那一半是同一个数（两边都得拒，且口径一致）', () => {
+  assert.equal(MAX_COMMIT_PATHS, 500)
+  const many = Array.from({ length: MAX_COMMIT_PATHS + 1 }, (_unused, index) => `f${index}.ts`)
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: many }), /500/, '超上限在这里就拒掉')
+  const exact = Array.from({ length: MAX_COMMIT_PATHS }, (_unused, index) => `f${index}.ts`)
+  assert.equal(commitRequestParams({ ...commitBase, paths: exact }).paths.length, MAX_COMMIT_PATHS,
+    '正好到上限的要发出去（上限是"一次最多"，不是"少于"）')
+  // native 侧同一档：`paths.size() > 500` ⇒ INVALID_REQUEST，不是让 git 撞死。
+  const native = read('native/git.cpp')
+  assert.match(native, /if \(paths\.size\(\) > 500\) throw WorkspaceError\("INVALID_REQUEST", "一次最多提交 500 个所选文件。"\);/)
+  assert.equal(MAX_COMMIT_PATHS, 500, '前端常量与 native 的字面量必须同一个数')
+})
+
+test('落点：--only 只提交被选的那些路径，index 里其它暂存项不动', () => {
+  const native = read('native/git.cpp')
+  assert.match(native, /const bool scoped = !paths\.empty\(\);/, '非空才是"子集提交"')
+  assert.match(native, /if \(scoped\) arguments\.push_back\(L"--only"\);/, '--only 只在有子集时加（整份暂存区那一档逐字沿用旧命令行）')
+  assert.match(native, /if \(scoped\) \{ arguments\.push_back\(L"--"\); arguments\.insert\(arguments\.end\(\), specs\.begin\(\), specs\.end\(\)\); \}/,
+    'pathspec 放在 `--` 之后：用户给的路径永远不会被 git 当选项读')
+  // 未跟踪的被选项：git 不认陌生 pathspec ⇒ 先只对这些路径 add（不碰其它暂存项）。
+  assert.match(native, /if \(scoped\) \{\s*std::vector<std::wstring> add\{L"add", L"--"\};/, '先 add 被选的那些，且 add 也带 `--`')
+  // 每个路径过 checked_path（与 file_history 同一道闸），非法路径在交给 git 之前就被挡下。
+  assert.match(native, /for \(const auto& path : paths\) specs\.push_back\(checked_path\(path\)\);/)
+  assert.match(read('native/git.hpp'), /const std::vector<std::string>& paths = std::vector<std::string>\(\)\);/,
+    '头里的 paths 是**带默认值**的尾参：既有六参调用点一个字都不用改')
+})
+
+test('面板只用一条通道发提交：整份暂存区与被选子集都走 commitRequestParams', () => {
+  const panel = read('src/components/SourceControl.vue')
+  assert.equal((panel.match(/request\('git\.commit'/g) ?? []).length, 1, 'git.commit 在面板里只有一个调用点')
+  assert.match(panel, /await request\('git\.commit', commitRequestParams\(\{/, '请求体由 commitRequestParams 一处生成')
+  assert.match(panel, /paths: props\.commitPaths,/, '被选子集来自宿主的可选 prop')
+  assert.match(panel, /commitPaths\?: readonly string\[\]/, '可选：宿主没接这一档时界面上没有对应的假控件')
+  assert.doesNotMatch(panel, /<button[^>]*>\s*[^<]*提交文件/, '没有把「提交文件…」做成点了没反应的按钮')
+})
+
+// ── R1 补完（commit2）：非法 / 被忽略 / 未跟踪的被选项，与 amend、noisy 档共处 ──────
+// 四条口径的上游出处写在 src/commitChecks.ts 的注释里（本文件只写落点）：
+//   · 单条路径的合法性 = native 那道闸（`native/git.cpp:259-265` 的 `checked_path()`）先在前端跑一遍；
+//   · 目录与其子项同时选中**不并掉**：`DescindingFilesFilter.java:36-39` 先问 `allowsNestedRoots`，
+//     而 `GitVcs.java:260-263` 对 git 答 true；
+//   · 被忽略（noisy）的被选项 ⇒ 拒绝：`CommonCheckinFilesAction.kt:74-78` 的 `isActionEnabled`
+//     要 `status != FileStatus.IGNORED`；
+//   · 未跟踪的被选项 ⇒ 明确纳入：`CheckinActionUtil.kt:104-105` + 同文件 `:159-167`
+//     把 `selectedUnversioned` 并进"这次包含的变更"。
+
+const rowOf = (path, extra = {}) => ({ path, untracked: false, ...extra })
+
+test('非法的被选项在交给宿主之前就拒掉：- 前缀 / .. / 换行 / 超长（与 native 同一道闸）', () => {
+  assert.equal(MAX_COMMIT_PATH_LENGTH, 512, '长度上限与 native 的字面量必须同一个数')
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['-rf.txt'] }), /不合法/,
+    '以 - 开头的路径会被 git 当选项读 ⇒ 前端先挡')
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['../outside.txt'] }), /不合法/,
+    '含 .. 的路径出了仓库根')
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['a.ts\nb.ts'] }), /不合法/, '含换行的不是一个路径')
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['x'.repeat(513) + '.ts'] }), /过长/,
+    '超长的单独一种原因')
+  // 哪一条坏的要写在消息里（拒绝要说清楚拒了谁）。
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['ok.ts', '../bad.ts'] }), /\.\.\/bad\.ts/,
+    '消息里点出那条非法的')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['src/a.ts', 'README.md'] }).paths, ['src/a.ts', 'README.md'],
+    '合法的一条都不掉')
+  // native 那一半同一道闸（逐条对照的锚点，别改这道闸的条件而不动前端）。
+  const gate = read('native/git.cpp')
+  assert.match(gate, /if \(path\.empty\(\) \|\| path\.size\(\) > 512 \|\| path\.front\(\) == '-' \|\|\n/)
+  assert.match(gate, /path\.find\("\.\."\)/, '含 .. 的那一条（native 写成字面量 ".."）')
+  assert.match(gate, /throw WorkspaceError\("INVALID_REQUEST", "文件路径不合法。"\);/, '同一道闸、同一个错误码')
+  assert.match(gate, /for \(const auto& path : paths\) specs\.push_back\(checked_path\(path\)\);/,
+    '被选的每一条路径都过这道闸')
+})
+
+test('被忽略（noisy）的被选项：明确拒绝；宿主没给变更列表时不误拒（形状与本批之前逐字一致）', () => {
+  const rows = [rowOf('a.ts'), rowOf('build/x.js', { ignored: true })]
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['build/x.js'], changes: rows }), /被忽略/,
+    '「显示忽略的文件」开着时列出来的那些不能因为一次多选就进提交')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['a.ts'], changes: rows }).paths, ['a.ts'],
+    '正常变更照发')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['build/x.js'] }).paths, ['build/x.js'],
+    '没给 changes（宿主通道未接）⇒ 不做这一档判断，宁可不拒也不误拒')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: [], changes: rows }), commitBase,
+    '给了变更列表也不改变「空 = 全量」这一条：连 paths 键都不出现')
+})
+
+test('未跟踪的被选项：明确纳入而不是拒绝（上游 selectedUnversioned 进 included）', () => {
+  const rows = [rowOf('new.ts', { untracked: true }), rowOf('m.ts')]
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['new.ts'], changes: rows }).paths, ['new.ts'],
+    '未跟踪 = 新文件，是这次提交的一部分')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['m.ts', 'new.ts'], changes: rows }).paths, ['m.ts', 'new.ts'],
+    '混着选也按选中顺序原样发（native 先对这批 add，再 --only 提交）')
+  // native 那一半：先只对被选路径 add（带 --），未跟踪的才进得了 pathspec。
+  assert.match(read('native/git.cpp'), /const bool scoped = !paths\.empty\(\);/)
+})
+
+test('选中目录与它的子项一起给 ⇒ 两条都留（git 允许嵌套根，上游不折叠后代）', () => {
+  const rows = [rowOf('src/a.ts'), rowOf('src/deep/b.ts')]
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['src', 'src/a.ts'], changes: rows }).paths,
+    ['src', 'src/a.ts'], '不把 src/a.ts 并进 src —— 上游对 git 一个都不并（allowsNestedRoots = true）')
+  assert.deepEqual(commitRequestParams({ ...commitBase, paths: ['src'], changes: rows }).paths, ['src'],
+    '目录本身对得上它下面的变更行，不算"没有可提交的变更"')
+  assert.throws(() => commitRequestParams({ ...commitBase, paths: ['ghost.ts'], changes: rows }), /没有可提交的变更/,
+    '对不上任何变更 = 上游那条 status == NOT_CHANGED，这个动作压根不启用')
+  assert.equal('paths' in commitRequestParams({ ...commitBase, paths: ['src'] }), true,
+    '没给 changes 时目录也照样发（git 的 pathspec 认目录）')
+})
+
+test('paths 与既有字段共处：amend / signoff / author 那五个老键一个字没变', () => {
+  const full = { message: '做点事', amend: true, signoff: true, author: 'Tao', authorEmail: 't@example.com' }
+  assert.deepEqual(commitRequestParams({ ...full, paths: ['a.ts', 'b.ts'] }),
+    { ...full, paths: ['a.ts', 'b.ts'] }, '多出来的只有 paths 这一个键')
+  assert.deepEqual(commitRequestParams({ ...full, paths: [] }), full,
+    '空选择 + amend ⇒ 逐字沿用旧请求体（修正提交走整份暂存区）')
+  assert.deepEqual(commitRequestParams({ ...full }), full, '连这个键都不给时形状不变')
+  // native 那一半：--amend 与 --only 是两条独立开关，同时给就同时进命令行。
+  assert.match(read('native/git.cpp'),
+    /if \(amend\) arguments\.push_back\(L"--amend"\);\n    if \(scoped\) arguments\.push_back\(L"--only"\);/,
+    'amend 与子集提交互不遮挡')
 })

@@ -37,9 +37,14 @@ export type ToolWindowLayoutApplyMode = 'seedOnly' | 'forceOnce'
  *   · `showStripeButton` —— 上游同名字段（`RemoveStripeButtonAction` 把它置 false，本仓的"从侧栏移除"）；
  *   · `contentUiType` —— 内容条是标签还是下拉（`src/toolWindowContentUi.ts`）；
  *   · `visible` —— 每窗口可见性 + 打开项目时恢复（`ToolWindowSetInitializer` 那一半）；
- *   · `type` / `autoHide` —— 视图模式的两个自由度（2026-10-06 第八桶：`src/toolWindowViewMode.ts`）。
- * 没兑现的：`weight`/`sideWeight`/`isSplit`
- * （本仓的"每个窗口各自尺寸"是另一条路：`panelResize.ts` 的 `rememberSizeForEachToolWindow`）。
+ *   · `type` / `autoHide` —— 视图模式的两个自由度（2026-10-06 第八桶：`src/toolWindowViewMode.ts`）；
+ *   · `split` —— `WindowInfoImpl.isSplit`（`:91-92`，XML 属性名 `side_tool`，默认 false）：这一位是
+ *     「条纹上的**后半组**（side tool）」，初值来自 EP 的 `secondary`（`DesktopLayout.kt:46`），
+ *     用户把按钮拖过分隔线时由 `setSideToolAndAnchor`（`AbstractDroppableStripe.kt:255`）改写。
+ *     读写法在 `src/toolWindowStripes.ts` 的 `isSplitOf`/`setSideTool`。
+ * 没兑现的：`weight`/`sideWeight`
+ * （本仓的"每个窗口各自尺寸"是另一条路：`panelResize.ts` 的 `rememberSizeForEachToolWindow`，
+ * 存的也是像素而不是权重 —— 判词 §B-5 那条差异）。
  */
 export interface WindowInfo {
   anchor?: ToolWindowAnchor
@@ -61,6 +66,13 @@ export interface WindowInfo {
   type?: ToolWindowType
   /** `WindowInfoImpl.isAutoHide`（`:46-47`，默认 false，XML 属性名 `auto_hide`）。 */
   autoHide?: boolean
+  /**
+   * `WindowInfoImpl.isSplit`（`:91-92`，默认 false，XML 属性名 `side_tool`）：条纹上的后半组。
+   * 本仓的属性名沿用字段名 `split`（我们的存档是自己的 JSON，不是 `<window_info>`）。
+   * **只有显式写过才是"用户拖过"**：没写 = 这一位由注册表的 EP `secondary` 定初值
+   * （`DesktopLayout.kt:46` 的 `info.isSplit = task.sideTool`）。
+   */
+  split?: boolean
   /**
    * `WindowInfoImpl.floatingBounds`（`:49-53`）：「浮动」那一档下窗口的矩形。
    * 上游那条 `skipNullWhenLoading` 的谓词把"全 0 矩形"也当成没存过（`:53`），

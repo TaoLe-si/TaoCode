@@ -30,6 +30,29 @@ export const EVENT_LOG_DO_NOT_ASK_LABEL = '不再显示'
 
 export type EventLogSectionId = 'suggestions' | 'timeline'
 
+/**
+ * 面板的占位文字（上游 `Container.emptyText` 的两行，`NotificationsPanel.kt:264-268` 的
+ * `setEmptyState()` 用两个 `appendLine` 装上，`:145` 在建面板时就装好了）：
+ *   · `notifications.toolwindow.empty.text.first.line` —— 英文原值 "Suggestions, events,"
+ *     （`platform/platform-api/resources/messages/IdeBundle.properties:3109`），
+ *     中文包取值「建议、事件，」（`localization-zh.jar!messages/IdeBundle.properties:1725`）；
+ *   · `notifications.toolwindow.empty.text.second.line` —— 英文 "and errors will appear here"
+ *     （`IdeBundle.properties:3110`），中文包「以及错误将出现在这里」（同 jar `:1726`）。
+ * 原写在这里的两句「没有通知。」/「没有匹配的通知。」是本仓自造的上游没有的中文（违 §3 文案条），
+ * 本批按上游这两句订正；"搜不到"那件事另有当场报警（搜索框变红，`:461`，见 `searchHasNoMatch`）。
+ */
+export const EVENT_LOG_EMPTY_LINES: readonly [string, string] = ['建议、事件，', '以及错误将出现在这里']
+
+/**
+ * 占位文字此刻该不该显示 —— 上游那两道是成对的：`startSearch()` 里 `clearEmptyState()`
+ * （`NotificationsPanel.kt:437`）、`cancelSearch()` 里 `setEmptyState()`（`:472`）。
+ * ⇒ **搜索进行中不给占位**（零命中的反馈是搜索框那条红底，不是再来一句话），
+ *   且只有整份日志真的为空时才显示。
+ */
+export function showsNoticeEmptyText(entries: readonly unknown[], query: string): boolean {
+  return entries.length === 0 && query.trim() === ''
+}
+
 /** 一条通知在 Event Log 里的宿主数据（在 `NoticeEntry` 之上补两个上游字段）。 */
 export interface EventLogEntry extends NoticeEntry {
   /**

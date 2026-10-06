@@ -298,14 +298,22 @@ export interface ChooserShortcut {
 }
 
 /**
- * 最近文件行（上游 `RecentFileManager` 那一族，`FileChooserDialog` 左侧第一组）。
+ * 最近位置行（`FileChooserDialog` 左侧第一组）。
  *
- * 上游的最近列表是**全局**的、按最近打开排序、去重；本仓的等价数据源是
- * `src/recentFilesModel.ts` 的 `RecentFilesMutableState`（桶内已落），调用方把清单给进来。
- * 这里只做对话框那一侧的加工：**目录优先**（选目录时目录排前面，上游 LIST 视图同口径）、
- * 去重、按 `limit` 截断。
+ * 上游这一份列表是**选择器自己记的**，不是编辑器的最近文件：
+ *   · 记录点 `platform/platform-impl/src/com/intellij/openapi/fileChooser/ex/FileChooserDialogImpl.java:186-191`
+ *     （`storeSelection` → `FileChooserUtil.updateRecentPaths(...)`，每次选中都记）；
+ *   · 规则 `impl/FileChooserUtil.java:89-108`（新的一条排在最前 + `distinct()` + `limit(30)`），
+ *     键与上限 `:33-34`（`file.chooser.recent.files` / `RECENT_FILES_LIMIT = 30`）；
+ *   · 读盘 `:74-82`（没记过 = 空表，不是缺省值）；用在哪：路径下拉 `:258`
+ *     （`myPath = new ComboBox<>(getApplicableRecentPaths()...)`，存储键见 `:309-315`）。
+ * 本仓的第二档（宿主可以喂编辑器历史进来）是**本仓的适配**，上游没有；因此这里只做
+ * 归一、去重、截断，不宣称照抄上游的两套控件。
+ * ⚠️ **订正（2026-10-06 复核）**：这里原先写着「上游的最近列表是 `RecentFileManager` 那一族」
+ * 与「目录优先（上游 LIST 视图同口径）」—— 前者与选择器无关（`RecentFileManager` 是编辑器
+ * 最近文件），后者代码里根本没有、上游也没有对应实现，两条都已删除。
  */
-export function recentShortcuts(paths: readonly string[], limit = 10): ChooserShortcut[] {
+export function recentShortcuts(paths: readonly string[], limit = CHOOSER_RECENT_LIMIT): ChooserShortcut[] {
   const seen = new Set<string>()
   const out: ChooserShortcut[] = []
   for (const raw of paths) {
@@ -319,15 +327,84 @@ export function recentShortcuts(paths: readonly string[], limit = 10): ChooserSh
 }
 
 /**
- * 收藏位置行（上游 `FavoritesList`，`FileChooserDialog` 左侧第二组）。
- * 上游收藏的是**根**（一个 project root / 外部目录），所以只接受目录；
- * 传进来的文件路径会被丢掉 —— 如实说明而不是悄悄画成一行。
+ * 收藏位置行（左侧第二组）。
+ * ⚠️ **订正（2026-10-06 复核）**：这里原先写着「上游 `FavoritesList`，`FileChooserDialog` 左侧第二组」——
+ * 基准树里**没有 `FavoritesList` 这个类**（`find -name "FavoritesList*"` 空），收藏视图在
+ * `platform/favoritesTreeView/src/com/intellij/ide/favoritesTreeView/FavoritesManager.java`，
+ * 且 `platform/platform-impl/src/com/intellij/openapi/fileChooser/**` 全包搜 `favorite` **零命中**
+ * ⇒ 上游的文件选择器没有「收藏」这一栏，本仓也没有它的数据源。
+ * 留着这一组只为「宿主真给了目录就画」：`FileChooserDialog.vue` 的 `v-if="shortcuts.favorites.length"`
+ * 在没有数据时整组不渲染，因此不构成假控件；判词与后续处理见 `docs/batch-2026-10-06-welcome.md`。
+ * 代码本身做的事：归一 + 丢空 + 一律标成目录（调用方传文件路径时本仓没有 stat 通道，分不出来）。
  */
 export function favoriteShortcuts(roots: readonly string[]): ChooserShortcut[] {
   return roots
     .map(normalize)
     .filter(Boolean)
     .map(path => ({ label: fileNameOf(path) || path, path, kind: 'directory' as const }))
+}
+
+/** 上游 `FileChooserUtil.java:33-34`：`file.chooser.recent.files` 那张表的上限。 */
+export const CHOOSER_RECENT_LIMIT = 30
+
+/**
+ * 记一条「这次选中的路径」（上游 `FileChooserUtil.updateRecentPaths` `:104-107` 的三步）：
+ * 新的排最前、按**归一后的路径**去重（大小写不敏感，同 `recentShortcuts` 的口径）、超过上限丢尾巴。
+ */
+export function pushRecentPath(paths: readonly string[], path: string): string[] {
+  const normalized = normalize(path)
+  if (!normalized) return [...paths]
+  const key = normalized.toLowerCase()
+  return [normalized, ...paths
+    .map(entry => normalize(entry))
+    .filter(entry => entry && entry.toLowerCase() !== key)]
+    .slice(0, CHOOSER_RECENT_LIMIT)
+}
+
+/**
+ * 两档合并（选择器自己记的排在前面，宿主另外给的排在后面），同一份去重与上限口径。
+ * 上游只有一档（选择器自己记的），这一条是本仓为「宿主已经有编辑器历史」做的适配。
+ */
+export function mergeRecentPaths(own: readonly string[], seeded: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const entry of [...own, ...seeded]) {
+    const normalized = normalize(entry)
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(normalized)
+    if (out.length >= CHOOSER_RECENT_LIMIT) break
+  }
+  return out
+}
+
+/**
+ * 快捷条一行的落点。上游点「最近/路径下拉里的一条」时不是把它当目录打开，
+ * 而是**在树里选中它**（`ex/FileChooserDialogImpl.java:178-183` 的 `restoreSelection` →
+ * `selectInTree(new VirtualFile[]{file}, ...)`；同一处 `:639` 也是这一条）。
+ * 所以：目录 = 进那一层；文件 = 进它的父目录、把祖先链展开、并选中那一行 ——
+ * 绝不把文件路径当目录去 `workspace.list`（列不出来，本仓也不编目录内容）。
+ */
+export interface ShortcutNavigation {
+  /** 要切到的当前目录（`''` = 工作区根）。 */
+  path: string
+  /** 要在树里选中的那一行；目录型快捷条没有这一项。 */
+  select: string | null
+  /** 需要展开的祖先目录链（从工作区根往下，含 `path` 自身）。 */
+  expand: string[]
+}
+
+export function shortcutNavigation(shortcut: ChooserShortcut): ShortcutNavigation {
+  const path = normalize(shortcut.path)
+  const asFile = shortcut.kind === 'file'
+  const at = path.lastIndexOf('/')
+  const parent = at < 0 ? '' : path.slice(0, at)
+  const shown = asFile ? parent : path
+  const chain: string[] = []
+  if (shown) for (const part of shown.split('/')) chain.push(chain.length ? `${chain[chain.length - 1]}/${part}` : part)
+  return { path: shown, select: asFile ? path : null, expand: chain }
 }
 
 // ── 树形浏览（`FileTreeModel` 的懒加载孩子 + 就地展开）─────────────────────────────

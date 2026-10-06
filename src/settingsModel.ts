@@ -220,7 +220,7 @@ export const defaultGeneralSettings: GeneralSettingsState = {
   // 受信任清单默认空 = 陌生目录第一次打开都要问（上游 `TrustedPaths.State` 默认空 map）。
   trustedPaths: [],
 }
-export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showMembersInNavigationBar: true, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 5, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true, lineNumeration: 'absolute', showTypeInlayHints: true, showParameterInlayHints: true, showOtherInlayHints: true }
+export const defaultEditorSettings: EditorSettings = { collapseImports: true, collapseCustomRegions: false, fontSize: 14, tabSize: 4, wordWrap: false, lineNumbers: true, showIndentGuides: true, bracketMatching: true, tabLimit: 30, tabsInOneRow: true, hideTabsIfNeeded: true, sortBookmarks: false, useTabCharacter: false, showWhitespaces: false, formatOnSave: false, uiZoomPercent: 100, compactMode: false, fullPathsInWindowHeader: false, showTreeIndentGuides: false, compactTreeIndents: false, smoothScrolling: true, showIconsInMenus: true, rememberSizeForEachToolWindow: false, showToolWindowNames: false, showToolWindowBars: true, leftSideBySide: false, wideScreenSupport: false, rightSideBySide: false, showToolWindowNumbers: false, keepPopupsForToggles: false, dndWithPressedAltOnly: false, powerSaveMode: false, useContrastScrollbars: false, colorBlindness: 'none', uiFontFamily: '', uiFontSize: 13, backgroundImagePath: '', backgroundImageOpacity: 100, backgroundImageFill: 'scale', backgroundImageKeepRatio: true, presentationMode: false, presentationModeFontSize: 24, mainMenuDisplayMode: 'hamburger', differentiateProjects: false, expandNodesWithSingleClick: false, maximizeEditorOnTabDoubleClick: true, pinnedTabsInSeparateRow: false, showBreadcrumbs: true, showStatusBar: true, rightMargin: true, breadcrumbsPlacement: 'bottom', breadcrumbsLanguages: {}, showMembersInNavigationBar: true, showDiagnostics: true, showErrorStripe: true, reformatOnPaste: 'indentEachLine', bidiTextDirection: 'contentBased', showGutterIcons: true , showStickyLines: true, stickyLinesLimit: 5, diffContextLines: 3, fileColorsEnabled: true, fileColorsForTabs: true, fileColorsForProjectView: true, lineNumeration: 'absolute', showTypeInlayHints: true, showParameterInlayHints: true, showOtherInlayHints: true, stripTrailingSpaces: 'Changed', ensureNewLineAtEof: false, keepTrailingSpacesOnCaretLine: true, autoInsertPairQuote: true, closeCommentOnEnter: true, insertBraceOnEnter: true, codeVisionEnabled: true, codeVisionDisabledGroups: [], codeVisionEnabledGroups: [], codeVisionVisibleEntries: 5, showQuickDocOnMouseHover: true, autoUpdateDocumentation: true }
 export const defaultProjectSettings: ProjectSettings = {
   excludedDirs: ['.git', 'node_modules', 'build', 'dist'],
   runConfigs: [],
@@ -396,5 +396,70 @@ export interface EditorSettings { collapseImports: boolean; collapseCustomRegion
    * `src/editorInlayHints.ts` 的 `createInlayHints`（按 `shouldShowInlayHint` 过滤）。
    * 默认全开（上游 `InlayHintsSettings.hintsEnabled` 出厂为真，见 `InlayProviderSettingsModel.isEnabled`）。
    */
-  showTypeInlayHints: boolean; showParameterInlayHints: boolean; showOtherInlayHints: boolean
+  showTypeInlayHints: boolean; showParameterInlayHints: boolean; showOtherInlayHints: boolean;
+  // ---------------------------------------------------------------- 保存时的两条 pass（IDEA Settings ▸ Editor ▸ General）
+  // 控件在 EditorOptionsPanel.kt（`platform/lang-impl/src/com/intellij/application/options/editor/EditorOptionsPanel.kt`）：
+  //   `cdStripTrailingSpacesEnabled` :156-157（文案键 `combobox.strip.trailing.spaces.on.save`）、
+  //   `cdEnsureBlankLineBeforeCheckBox` :147-149（`editor.options.line.feed`）、
+  //   `cdKeepTrailingSpacesOnCaretLine` :153-155（`editor.settings.keep.trailing.spaces.on.caret.line`）。
+  // 字段与默认值在 `platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java`：
+  //   :73 `STRIP_TRAILING_SPACES = STRIP_TRAILING_SPACES_CHANGED`、:74 `IS_ENSURE_NEWLINE_AT_EOF = false`、
+  //   :142 `KEEP_TRAILING_SPACE_ON_CARET_LINE = true`；三档字面值 :216-218（`None` / `Changed` / `Whole`）。
+  // 执行体：`src/editorSaveTransforms.ts` 的 `saveTrimOptionsFromSettings`（读这三条）+ `applySaveTextTransforms`。
+  /** `EditorSettingsExternalizable.java:73` + `:216-218`：默认 `Changed` = 只清本次改动过的行。 */
+  stripTrailingSpaces: 'None' | 'Changed' | 'Whole';
+  /** `EditorSettingsExternalizable.java:74`（`IS_ENSURE_NEWLINE_AT_EOF`，默认 **false**）。 */
+  ensureNewLineAtEof: boolean;
+  /** `EditorSettingsExternalizable.java:142`（`KEEP_TRAILING_SPACE_ON_CARET_LINE`，默认 **true**）。 */
+  keepTrailingSpacesOnCaretLine: boolean;
+  // 注：**不落** `REMOVE_TRAILING_BLANK_LINES`（同文件 :75，默认 false）—— 本仓的执行体还没有那一条，
+  // 落了就是一格没有消费链路的假控件（接线请求 docs/wiring-requests-2026-10-06-saveops.md ② 同此判断）。
+  // ---------------------------------------------------------------- 回车与引号的三个开关（IDEA CodeInsightSettings）
+  // 同一个设置类（`platform/analysis-impl/src/com/intellij/codeInsight/CodeInsightSettings.java`）里
+  // `reformatOnPaste` 已经在上面那一段落了，这三条与它同族：
+  //   :140 `AUTOINSERT_PAIR_QUOTE = true`（引号成对插入；`QuoteHandler.java:10-20` 的类注释就写明了
+  //        这个开关，执行体 `src/editorTyping.ts:120` 的 `smartQuotes`，挂载点 `src/components/CodeEditor.vue:968`）；
+  //   :132 `CLOSE_COMMENT_ON_ENTER = true`（块注释没闭合时回车补闭尾，执行体
+  //        `src/editorEnterBlockComment.ts:176-178` 的第 4 个参数，现按默认 true 走）；
+  //   :130 `INSERT_BRACE_ON_ENTER = true`（回车补未配对的收尾大括号，执行体
+  //        `src/enterHandlers.ts:180` 的 `enterAfterUnmatchedBrace`，调用点 `:281`）。
+  /** `CodeInsightSettings.java:140`：键入引号时自动补上收尾的那一个。 */
+  autoInsertPairQuote: boolean;
+  /** `CodeInsightSettings.java:132`：块注释未闭合时回车补上收尾的那个标记（`editorEnterBlockComment` 的第 4 个参数）。 */
+  closeCommentOnEnter: boolean;
+  /** `CodeInsightSettings.java:130`：回车补未配对的大括号收尾。 */
+  insertBraceOnEnter: boolean;
+  // ---------------------------------------------------------------- Code Vision（IDEA Settings ▸ Editor ▸ Code Vision）
+  // 上游 `platform/lang-api/src/com/intellij/codeInsight/codeVision/settings/CodeVisionSettings.kt` 的 `State`：
+  //   :36 `isEnabled = true`（总闸 `codeVisionEnabled`，:55-60）、
+  //   :38-39 `visibleMetricsAboveDeclarationCount / visibleMetricsNextToDeclarationCount = 5`（每行可见条数）、
+  //   :45 `disabledCodeVisionProviderIds`、:50 `enabledCodeVisionProviderIds` —— **两个集合都只装"与出厂相反"的那一半**。
+  // 设置页文案：`platform/lang-impl/resources/messages/CodeVisionBundle.properties:2`（页名 `Code Vision`）、
+  //   `:3`（`Enable Code Vision`）、`:5`（`Visible metrics {0}:`）；分组名 `settings.hints.new.group.code.vision`
+  //   见 `platform/ide-core/resources/messages/ApplicationBundle.properties:725-726`。
+  // 本仓的 provider 只有两组（`src/codeLensSettings.ts:48-50`）：`LspCodeVisionProvider` 与 `problems`；
+  // 运行时真值表在 `src/codeLensSettings.ts` 的 `codeVisionSettings`，进出口是
+  // `restoreCodeVisionSettings(patch)`（:171）与 `codeVisionSettingsPatch()`（:179），设置页在
+  // `src/components/CodeVisionSettingsPage.vue` 把两侧接起来。
+  /** `CodeVisionSettings.kt:36/55-60`：Code Vision 总闸，默认开。 */
+  codeVisionEnabled: boolean;
+  /** `CodeVisionSettings.kt:45`：被关掉的那一组 provider（组 id 数组，出厂为空）。 */
+  codeVisionDisabledGroups: string[];
+  /** `CodeVisionSettings.kt:50`：被单独打开的那一组（出厂关着的 provider 才进这里；本仓两组出厂都开 ⇒ 默认为空）。 */
+  codeVisionEnabledGroups: string[];
+  /** `CodeVisionSettings.kt:38-39`：一个锚点行最多画几条（出厂 5，与 `src/codeLens.ts:127` 同一个数）。 */
+  codeVisionVisibleEntries: number;
+  // ---------------------------------------------------------------- 快速文档的两档（IDEA「在鼠标移动时显示」/「选区更改时自动刷新文档」）
+  // 键名与默认档由 `src/docHoverPolicy.ts:47/54-57` 的 `DOC_HOVER_SETTING_KEYS` 定死（登记请求
+  // `docs/wiring-requests-2026-10-06-bucket3a.md` 的 R4），本批逐字取用，不另起名字。
+  // 上游：`platform/ide-core-impl/src/com/intellij/openapi/editor/ex/EditorSettingsExternalizable.java:76`
+  // （`SHOW_QUICK_DOC_ON_MOUSE_OVER_ELEMENT = true`；设置行是同目录 `EditorOptionsPanel.kt:150-152` 的
+  // `cdShowQuickDocOnMouseMove`）与 `platform/lang-impl/src/com/intellij/lang/documentation/ide/impl/DocumentationToolWindowManager.kt:55`
+  // （注册表属性 `documentation.auto.update`，默认 true）。
+  // 运行时真值与执行体在 `src/docHoverPolicy.ts`（`docHoverPolicy` 被 `src/quickDocHost.ts:327` 与
+  // `src/docHoverContent.ts:24` 读），进出口是 `docHoverPolicyFromSettings()` / `docHoverPolicyPatch()`。
+  /** `EditorSettingsExternalizable.java:76`，默认 **true**：鼠标停在符号上就弹文档。 */
+  showQuickDocOnMouseHover: boolean;
+  /** 注册表属性 `documentation.auto.update`（`DocumentationToolWindowManager.kt:55`），默认 **true**。 */
+  autoUpdateDocumentation: boolean
 }

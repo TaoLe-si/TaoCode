@@ -14,7 +14,7 @@ import { exceptionBreakModeLabel, exceptionHeadline, exceptionValueExpression, f
 import { applyExceptionFilters, exceptionBreakpointGroup, parseExceptionFilters, sendExceptionBreakpoints, toggleExceptionBreakpoint } from '../exceptionBreakpoints'
 import { iconSize } from '../uiIcons'
 import { completionSuggestions, completionTypeLabel, type DapCompletionItem } from '../debugCompletions'
-import { applyLoadedSourceSnapshot, applyModuleSnapshot, capabilityReason } from '../debugSources'
+import { applyLoadedSourceSnapshot, applyModuleSnapshot, capabilityReason } from '../debugSources'; import { breakpointUpdater } from '../dbgBreakpointUpdate'
 import { DEFAULT_DEBUG_DATA_VIEW, collectReferenceRows, collectVarRows, visibleFrames, type DebugDataViewOptions, type VarRow } from '../debugDataView'
 import { copyToClipboard } from '../clipboard'
 import { debugCopyNote, debugCopyText, type DebugCopyRow, type DebugCopyMode } from '../debugValueCopy'
@@ -207,7 +207,7 @@ async function attach() {
 }
 async function step(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut') {
   error.value = ''; busy.value = true
-  try { await dapStep(action); if (action !== 'pause') await refreshStack() }
+  try { await breakpointUpdater.flush(); await dapStep(action); if (action !== 'pause') await refreshStack() }
   catch (caught) { error.value = message(caught) }
   finally { busy.value = false }
 }
@@ -245,7 +245,7 @@ const canStepBack = computed(() => dapCapability('supportsStepBack'))
 async function reverse(kind: 'back' | 'continue') {
   if (busy.value) return
   busy.value = true; error.value = ''
-  try { await (kind === 'back' ? dapStepBack() : dapReverseContinue()); await refreshStack() }
+  try { await breakpointUpdater.flush(); await (kind === 'back' ? dapStepBack() : dapReverseContinue()); await refreshStack() }
   catch (caught) { error.value = message(caught) } finally { busy.value = false }
 }
 // IDEA 的「重新运行」（Run 工具窗口的 Ctrl+F5 / Debug 面板）：适配器声明了 supportsRestartRequest
@@ -255,7 +255,7 @@ async function restart() {
   busy.value = true
   error.value = ''
   try {
-    await dapRestart({ noDebug: false })
+    await breakpointUpdater.flush(); await dapRestart({ noDebug: false })
     await refreshStack()
   } catch (caught) {
     const code = caught instanceof BridgeError ? caught.code : ''

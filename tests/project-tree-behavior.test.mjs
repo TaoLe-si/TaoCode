@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { sortProjectEntries, compareProjectFileNames } from '../src/projectTreeSort.ts'
+import { visibleSyntheticNodes } from '../src/projectViewBehavior.ts'
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
 const entry = (name, kind = 'file') => ({ name, path: name, kind })
@@ -33,4 +34,24 @@ test('default project toolbar replaces bulk expansion and has no environment bad
   assert.match(source, /@keydown.f5.prevent="ctx.onRefreshTree\(\)"/)
   // Removing title actions must not remove the underlying bulk operation.
   assert.match(read('../src/toolViewContext.ts'), /onExpandAll:.*expandAll\(/)
+})
+
+// 「显示临时文件和控制台」（`ProjectView.ShowScratchesAndConsoles`，
+// `platform/projectView/shared/resources/intellij.platform.projectView.xml:81-84`）：
+// 这一格只管合成根里 scratches 那一条。上游三条依据写在 `src/projectViewBehavior.ts` 的模块头
+// （默认开 `ViewSettings.java:54-56`、生效点 `ScratchTreeStructureProvider.java:199`、
+// 外部库那条不受它影响 `ProjectViewPane.java:143-145`）。
+test('合成根的显示档：缺设置=显示，关掉只去掉 scratches 那一条', () => {
+  const libraries = { path: '\u0000libraries', icon: 'libraries', label: '外部库' }
+  const scratches = { path: '\u0000scratches', icon: 'scratches', label: '临时文件与控制台' }
+  const nodes = [libraries, scratches]
+  assert.deepEqual(visibleSyntheticNodes(nodes, undefined), nodes, '设置缺键 = 上游默认档（显示）')
+  assert.deepEqual(visibleSyntheticNodes(nodes, true), nodes)
+  assert.deepEqual(visibleSyntheticNodes(nodes, false), [libraries], '库那一条不受这一格影响')
+  assert.deepEqual(visibleSyntheticNodes([scratches], false), [], '只有一条 scratches 时关掉就整组不出现')
+  assert.deepEqual(visibleSyntheticNodes([], false), [])
+  const input = [scratches]
+  const out = visibleSyntheticNodes(input, false)
+  assert.notEqual(out, input, '不改写宿主传进来的那一份数组')
+  assert.equal(input.length, 1)
 })

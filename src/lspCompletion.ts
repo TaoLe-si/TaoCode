@@ -181,11 +181,12 @@ export function createLspCompletion(deps: CompletionDeps) {
   }
   return async (context: CompletionContext): Promise<CompletionResult | null> => {
     const path = deps.path()
-    // 「现在开着哪些编辑器」这张表在本仓的**生产者**：每个编辑器实例被补全查询经过时登记
-    // 自己的路径 + 实时正文的取法。这是上游 `HippieWordCompletionHandler.java:271-277` 那句
-    // `FileEditorManager.getAllEditors()` 在本仓能找到的唯一装配点（`CodeEditor.vue` 是保留文件）。
-    // 句柄失效（组件卸载后 `deps.view()` 回 undefined）时正文是空串，由
-    // `completionOpenEditors.ts` 当下一次查询经过时清掉。
+    // 「现在开着哪些编辑器」这张表的**兜底生产者**：补全查询经过哪个编辑器实例，就登记
+    // 它的路径 + 实时正文的取法。真口径的生产者是宿主（接线请求 W2 已落地：`src/App.vue:134,183,187,201`
+    // 在挂载/关标签/换工程三处维护同一张表），这一份留着是为了纯规则用例与宿主挂载之前的窗口期；
+    // 同一个 path 再登记只是覆盖取文本的方法，不改变表的顺序。
+    // 句柄失效（组件卸载后 `deps.view()` 回 undefined）时正文是空串 ⇒ `completionOpenEditors.ts`
+    // 的 `otherOpenEditorTexts` 那一次跳过它、但**不**把它从表里摘掉（上游只读 `getAllEditors()`）。
     if (path) registerOpenEditor(path, () => deps.view()?.state.sliceDoc() ?? '')
     if (!deps.enabled()) return null
     const doc = context.state.doc

@@ -8,6 +8,10 @@ import * as model from '../src/externalSystemModel.ts'
 import * as viewOptions from '../src/externalSystemViewOptions.ts'
 import * as activationModel from '../src/externalProjectModel.ts'
 import * as externalSystemTask from '../src/externalSystemTask.ts'
+// 任务编辑设置（`src/externalTaskSettings.ts`）：gradleHost 的 runTask 读它折命令/env，宿主测试喂真实模块。
+import * as externalTaskSettings from '../src/externalTaskSettings.ts'
+// 配置源根的进程表（`src/projectFileIndex.ts`）：gradleHost 是它的写者，宿主测试喂真实模块。
+import * as projectFileIndex from '../src/projectFileIndex.ts'
 import * as autoImportNotifications from '../src/autoImportNotifications.ts'
 import * as backgroundTasks from '../src/backgroundTasks.ts'
 // 自动导入 API 层（esa/autoimport）：gradleHost 的改动经 tracker 决策，宿主测试要喂真实模块。
@@ -65,6 +69,8 @@ function host({ dirs = ['a', 'b'], failSave = false, deferredList = false } = {}
     if (name === './externalSystemViewOptions.ts') return viewOptions
     if (name === './externalProjectModel.ts') return activationModel
     if (name === './externalSystemTask.ts') return externalSystemTask
+    if (name === './externalTaskSettings.ts') return externalTaskSettings
+    if (name === './projectFileIndex.ts') return projectFileIndex
     if (name === './autoImportNotifications.ts') return autoImportNotifications
     if (name === './backgroundTasks.ts') return backgroundTasks
     if (name === './externalSystemAutoImport.ts') return autoImportApi
@@ -214,5 +220,103 @@ test('通知的「同步更改」走后台队列，入队后真的同步且队�
   h.finish(); await tick()
   assert.equal(backgroundTasks.backgroundTaskQueue.queuedCount.value, 0)
   assert.equal(backgroundTasks.backgroundTaskQueue.isEmpty(), true)
+  h.stop()
+})
+
+// ── 「编辑任务…」存过的设置参与执行（上游 `ExternalSystemEditTaskDialog` + `ExternalSystemTasksTree.java:183-190`）──
+function installTaskStore() {
+  const data = new Map()
+  globalThis.localStorage = {
+    getItem: key => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, value) },
+    removeItem: key => { data.delete(key) },
+  }
+  return () => { delete globalThis.localStorage }
+}
+
+test('存过的脚本参数/额外任务折进「运行」的控制台命令；没存过时命令一字不改', async () => {
+  const restore = installTaskStore()
+  try {
+    externalTaskSettings.saveTaskSettingsMap(globalThis.localStorage, 'D:/workspace',
+      externalTaskSettings.withTaskSettings({}, 'b', ':app:build',
+        { taskNames: ['clean', ':app:build'], vmOptions: '', scriptParameters: '--info', env: {} }))
+    const h = host(); await tick(); h.finish(); await tick(); h.finish(); await tick()
+    await h.api.runTask(':app:build', 'b')
+    assert.ok(h.calls.some(([m, command]) => m === 'console'
+      && /"b\/gradlew\.bat" --console=plain -p "b" :app:build/.test(command)
+      && command.endsWith('clean --info')), `控制台命令应带上存过的任务与参数：${JSON.stringify(h.calls)}`)
+    h.stop()
+  } finally { restore() }
+  // 对照组：没装存储（没存过）→ 命令一字不改（既有断言的口径）。
+  const plain = host({ dirs: ['b'] }); await tick(); await plain.finish(); await tick()
+  await plain.api.runTask(':app:build', 'b')
+  assert.ok(plain.calls.some(([m, command]) => m === 'console' && command === '"b/gradlew.bat" --console=plain -p "b" :app:build'))
+  plain.stop()
+})
+
+test('VM 选项/env 的任务执行走带环境的原生通道（env 数组里能看到 GRADLE_OPTS）', async () => {
+  const restore = installTaskStore()
+  try {
+    externalTaskSettings.saveTaskSettingsMap(globalThis.localStorage, 'D:/workspace',
+      externalTaskSettings.withTaskSettings({}, 'a', 'build',
+        { taskNames: ['build'], vmOptions: '-Xmx2g', scriptParameters: '', env: { TOKEN: 'secret' } }))
+    const h = host({ dirs: ['a', 'b'] }); await tick(); h.finish(); await tick(); h.finish(); await tick()
+    const before = h.calls.filter(([m]) => m === 'gradle.sync').length
+    await h.api.runTask('build', 'a')
+    await tick()
+    const run = h.calls.filter(([m]) => m === 'gradle.sync').at(-1)
+    assert.equal(h.calls.filter(([m]) => m === 'gradle.sync').length, before + 1, '原生通道起了这一次任务执行')
+    assert.match(run[1].command, /-p "a" build/)
+    assert.ok(run[1].env.includes('GRADLE_OPTS=-Xmx2g'), `env 要带 VM 选项：${JSON.stringify(run[1].env)}`)
+    assert.ok(run[1].env.includes('TOKEN=secret'), 'env 要带用户的环境变量')
+    assert.equal(h.calls.some(([m]) => m === 'console'), false, '带 env 的执行不走只有命令字符串的控制台通道')
+    h.finish('BUILD SUCCESSFUL'); await tick()
+    assert.match(h.api.projects.value[0].message, /任务运行完成/)
+    h.stop()
+  } finally { restore() }
+})
+
+// 「保存为运行配置」也带得上 env（接线请求 R1 的模块侧）：上游那份是整 bean 随配置持久
+// （`ExternalSystemBeforeRunTask.java:38-45` 把 tasks/externalProjectPath/vmOptions/scriptParameters
+// 全写进运行配置 XML），不是只在「直接运行」那一刻生效。
+test('存过的 VM 选项/env 随「创建运行配置」交出（第三参 KEY=VALUE 数组；没存过时不给 env）', async () => {
+  const restore = installTaskStore()
+  try {
+    externalTaskSettings.saveTaskSettingsMap(globalThis.localStorage, 'D:/workspace',
+      externalTaskSettings.withTaskSettings({}, 'b', ':app:build',
+        { taskNames: [':app:build'], vmOptions: '-Xmx2g', scriptParameters: '--info', env: { TOKEN: 'secret' } }))
+    const h = host(); await tick(); h.finish(); await tick(); h.finish(); await tick()
+    await h.api.saveTaskAsRunConfig(':app:build', 'b')
+    const config = h.calls.find(([m]) => m === 'config')
+    assert.ok(config, `应有一次「创建运行配置」：${JSON.stringify(h.calls)}`)
+    assert.match(config[2], /-p "b" :app:build --info$/, '脚本参数照旧折进命令')
+    assert.deepEqual(config[3], ['GRADLE_OPTS=-Xmx2g', 'TOKEN=secret'],
+      'VM 选项折 GRADLE_OPTS、用户 env 跟在后（与直接运行那条同一口径）')
+    assert.equal(config[3].some(entry => /^JAVA_HOME=/.test(entry)), false,
+      '不把自己解析出的 Gradle JVM 冻进配置（上游只持久 vmOptions/env）')
+    h.stop()
+  } finally { restore() }
+  // 对照组：没存过设置 ⇒ 第三参不给（运行配置形状不变）。
+  const plain = host({ dirs: ['b'] }); await tick(); await plain.finish(); await tick()
+  await plain.api.saveTaskAsRunConfig(':app:build', 'b')
+  const call = plain.calls.find(([m]) => m === 'config')
+  assert.equal(call[3], undefined, '没编辑过就不凭空塞 env')
+  assert.equal(call[2], '"b/gradlew.bat" --console=plain -p "b" :app:build')
+  plain.stop()
+})
+
+// 自动重载的合并窗（上游 `AutoImportProjectTracker.kt:157-170`：延迟重载不当场跑；显式刷新 :137-142 不等）。
+test('ALL 档外部改动进合并窗：不当场起同步，2.7s 的窗到点后一次跑完', async () => {
+  const h = host({ dirs: ['a'] }); await tick(); h.finish(); await tick()
+  // isOpenInEditor false + 非 VCS ⇒ EXTERNAL；ALL 档的自动重载走合并窗（有效延迟 2700ms）。
+  const synced = h.calls.filter(([m]) => m === 'gradle.sync').length
+  const reloaded = await h.api.onBuildFilesChanged(['a/build.gradle'])
+  assert.equal(reloaded, true, '决策是重载（只是排进了窗）')
+  assert.equal(h.calls.filter(([m]) => m === 'gradle.sync').length, synced, '当场不起新的同步（合并窗代跑）')
+  assert.equal(h.notices.length, 0, 'ALL 档不挂通知')
+  await new Promise(resolve => { setTimeout(resolve, 2850) })
+  assert.equal(h.calls.filter(([m]) => m === 'gradle.sync').length, synced + 1, '窗到点后真的排了同步')
+  h.finish(); await tick()
+  assert.equal(h.api.reloading.value, false)
   h.stop()
 })

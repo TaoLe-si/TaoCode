@@ -3,7 +3,14 @@ import { computed, ref, watch } from 'vue'
 import type { GitCommitChanges, GitCommitChange } from '../bridge'
 import { changeTree } from '../vcsLogChanges'
 import VcsLogChangeTree from './VcsLogChangeTree.vue'
-const props = defineProps<{ changes: GitCommitChanges | null; selected: boolean; loading?: boolean; error?: string }>()
+const props = defineProps<{ changes: GitCommitChanges | null; selected: boolean; loading?: boolean; error?: string;
+  /**
+   * `Vcs.Log.ShowChangesFromParents`（`MainVcsLogUiProperties.java:20`，缺省关 `VcsLogApplicationSettings.kt:116-117`）。
+   * 文案 `action.Vcs.Log.ShowChangesFromParents.description` = 分别显示对每个合并提交所做的更改，
+   * 消费点在 `VcsLogAsyncChangesTreeModel.kt:244`（`showChangesFromParents && !changesToParents.isEmpty()`）：
+   * 关 = 只看**第一个父提交**那一侧的变更，开 = 每个父提交各一份（本仓用那一条「比较父提交」下拉）。
+   */
+  fromParents?: boolean }>()
 const emit = defineEmits<{ select: [change: GitCommitChange | null] }>()
 const selectedPath = ref('')
 const comparisonIndex = ref(0)
@@ -13,7 +20,9 @@ function select(path: string) {
   emit('select', files.value.find(file => file.path === path) ?? null)
 }
 watch(() => props.changes?.revision, () => { comparisonIndex.value = 0 })
-const comparison = computed(() => props.changes?.comparisons[comparisonIndex.value])
+// 关档时把除第一个父以外的比较**藏起来**（不是禁掉下拉），与上游"只显示相对第一个父的变更"一致。
+const comparisons = computed(() => (props.changes?.comparisons ?? []).slice(0, props.fromParents ? undefined : 1))
+const comparison = computed(() => comparisons.value[Math.min(comparisonIndex.value, comparisons.value.length - 1)])
 const files = computed(() => comparison.value?.files ?? [])
 const tree = computed(() => changeTree(files.value.map(file => ({ path: file.path, status: file.status,
   previousPath: file.beforePath && file.beforePath !== file.afterPath ? file.beforePath : undefined }))))
@@ -21,8 +30,8 @@ const tree = computed(() => changeTree(files.value.map(file => ({ path: file.pat
 <template>
   <section class="changes" aria-label="提交变更文件">
     <div class="heading">变更<span v-if="changes !== null">{{ files.length }} 个文件</span></div>
-    <label v-if="changes && changes.comparisons.length > 1" class="comparison">比较父提交
-      <select v-model="comparisonIndex" aria-label="比较父提交"><option v-for="(item, index) in changes.comparisons" :key="item.parent" :value="index">{{ item.parent.slice(0, 8) }}</option></select>
+    <label v-if="changes && comparisons.length > 1" class="comparison">比较父提交
+      <select v-model="comparisonIndex" aria-label="比较父提交"><option v-for="(item, index) in comparisons" :key="item.parent" :value="index">{{ item.parent.slice(0, 8) }}</option></select>
     </label>
     <p v-if="!selected">选择提交以查看变更。</p>
     <p v-else-if="loading">正在加载变更…</p>

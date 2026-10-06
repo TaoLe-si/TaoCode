@@ -72,6 +72,23 @@ export function symbolLineContains(symbol: LspDocumentSymbol, line: number): boo
   return symbol.startLine <= line && symbol.endLine >= line
 }
 
+/**
+ * 编辑器那一侧的列 → 符号区间的 LSP 列。
+ *
+ * 两套口径（都在本仓实测）：
+ *   · 编辑器给的列是 **1 基** —— `src/components/CodeEditor.vue:1022`
+ *     `emit('cursor', line.number, pos - line.from + 1)`；
+ *   · 符号的 `startChar`/`endChar` 是 **0 基** —— `native/lsp_support.cpp:174-175` 的
+ *     `collect_symbols` 把 LSP `documentSymbol` 的 `character` 原样透传（LSP 位置一律 0 基，
+ *     本仓的跳转口径也是 0 基：`src/components/CodeEditor.vue:815` 的 `applyReveal`
+ *     用的就是 `target.line + 1`）。
+ * 宿主还没给列时按 0 处理（= 行首），与 `caretSymbolInTree` 的默认入参同一档：
+ * 上游 `scrollToSelectedElement` 的选中只看行包住光标，列只是「同一行里更具体」的加分项。
+ */
+export function caretCharacterInSymbolBasis(character: number | undefined): number {
+  return Math.max(0, (character ?? 1) - 1)
+}
+
 export interface CaretSymbolMatch {
   /** 最深一层包住光标的符号键（= 该选中的那一行）。 */
   key: string

@@ -48,6 +48,14 @@ export interface PluginInfo {
   id: string; name: string; version: string; description: string; path: string
   /** `plugin.json` 的 `category`（IDEA 的 `displayCategory`）；缺省归入 "Other Tools"。 */
   category?: string
+  /**
+   * 插件厂商 —— 上游清单 `<vendor>` 元素（`platform/pluginSystem/parser/impl/src/com/intellij/platform/pluginSystem/parser/impl/PluginXmlConst.kt:36`
+   * 的 `VENDOR_ELEM = "vendor"`，读取面 `platform/core-impl/src/com/intellij/ide/plugins/IdeaPluginDescriptorImpl.kt:224` 的
+   * `getVendor()`），界面模型 `newui/PluginUiModel.kt:52` 的 `val vendor: String?`。
+   * 上游允许没有（`IdeBundle.properties:455` 给的是 `(not specified)`），所以这里也是可选：
+   * 缺省不渲染那一行，`/vendor:` 也匹配不上它（`newui/MyPluginModel.kt:1348-1352`：厂商为空直接 false）。
+   */
+  vendor?: string
   enabled: boolean; error?: string; commands: PluginCommand[]; templates: PluginTemplate[]
   /** 插件声明的文件类型（`native/plugins.cpp` 的 `read_file_types` 解析）。 */
   fileTypes?: PluginFileType[]
@@ -188,6 +196,71 @@ export function pluginCanToggle(plugin: PluginInfo): boolean {
 
 export function pluginEnabledCount(plugins: readonly PluginInfo[]): number {
   return plugins.filter(pluginIsEnabled).length
+}
+
+// ---- 卸载前的「谁还依赖它」（UninstallAction 的那一段确认文案） ---------------------
+
+/**
+ * 依赖 `id` 的插件闭包 —— 上游 `newui/DefaultUiPluginManagerController.kt:1452-1479` 的 `getDependents`：
+ *  1. 候选者跳过自己（`:1463`）、跳过**停用着的**候选者（`!descriptor.isEnabled()` → `:1464` continue）、
+ *     跳过 essential / hidden（同两行；本仓没有"IDE 自带不可卸载的那一层"，见交付报告 §6）；
+ *  2. 对每个候选者顺着它自己的**必需**依赖逐级下探（`PluginManagerCore.processAllNonOptionalDependencies`，
+ *     `:1469`），探到 `id` 就收下（`:1470-1472` 的 TERMINATE）。
+ * 探路**不看中间节点的启用状态**（上游只对候选者自己看 `isEnabled()`），
+ * 所以「A 依赖着停用的 B、B 依赖 root」里的 A 仍算依赖者 —— 卸载 root 后 A 与 B 一起加载不了。
+ * 本仓的 `requiredBy` 只有一层（`native/plugins.cpp` 的 `list()` 只算直接反向引用），故闭包在前端算。
+ * 结果按名称排序（与 `PluginsGroup.sortByName` 同一口径）。
+ */
+export function pluginsDependingOn(id: string, plugins: readonly PluginInfo[]): PluginInfo[] {
+  const byId = new Map(plugins.map(plugin => [plugin.id, plugin]))
+  const reaches = (candidateId: string): boolean => {
+    const seen = new Set<string>([candidateId])
+    const queue: string[] = [candidateId]
+    while (queue.length) {
+      const current = queue.shift() as string
+      for (const dependency of byId.get(current)?.depends ?? []) {
+        if (dependency === id) return true
+        if (!seen.has(dependency)) {
+          seen.add(dependency)
+          queue.push(dependency)
+        }
+      }
+    }
+    return false
+  }
+  return sortPluginsByName(plugins.filter(plugin => plugin.id !== id && plugin.enabled && reaches(plugin.id)))
+}
+
+export interface PluginUninstallPrompt {
+  /** `IdeBundle.properties:459` 的 `title.plugin.uninstall`（"Uninstall Plugin?"）。 */
+  title: string
+  /** 正文：没有依赖者时是 `:457` 的 `prompt.uninstall.plugin`，有依赖者时是 `:2359` 的依赖者清单。 */
+  message: string
+  /** 会被牵连的插件（上游把名字逐个列进正文：`UninstallAction.kt:142-146`）。 */
+  dependents: PluginInfo[]
+}
+
+/**
+ * 卸载确认文案 —— 上游 `newui/UninstallAction.kt:91-103` 分两条路：
+ * 没有依赖者走 `getUninstallAllMessage`（`:127-135`，`prompt.uninstall.plugin`），
+ * 有依赖者走 `getUninstallDependentsMessage`（`:137-155`，`dialog.message.following.plugin.depend.on`）。
+ * 中文是本仓按英文原文直译（本地化包不在基准树里）：
+ *   `IdeBundle.properties:457` "Are you sure you want to uninstall the plugin ''{0}''{1, choice, 0#|1# update}?"
+ *   `IdeBundle.properties:2359` "Following {0,choice,1#plugin|2#plugins} {0,choice,1#depends|2#depend} on {1}:<br>{2}<br>Continue to remove {1}?"
+ * 英文的单复数（`{0,choice,1#plugin|2#plugins}`）在中文里没有对应形态，因此合并成一种说法。
+ */
+export function pluginUninstallPrompt(plugin: PluginInfo, plugins: readonly PluginInfo[]): PluginUninstallPrompt {
+  const name = plugin.name || plugin.id
+  const dependents = pluginsDependingOn(plugin.id, plugins)
+  if (!dependents.length) {
+    return { title: '卸载插件？', message: `确定要卸载插件「${name}」吗？`, dependents }
+  }
+  const listed = dependents.map(item => `  ${item.name || item.id}`).join('\n')
+  return {
+    title: '卸载插件？',
+    message: `以下 ${dependents.length} 个插件依赖「${name}」：\n${listed}\n确定要移除「${name}」吗？`,
+    dependents,
+  }
 }
 
 // ---- 排序（PluginsGroup.kt:146-155 + InstalledPluginsTab.kt:264-290, 710-712） ----
@@ -405,6 +478,21 @@ const OPTION_ALIASES: Record<string, InstalledSearchOption> = {
   '/outdated': 'needUpdate',
 }
 
+/**
+ * 需要**跟一个取值**的属性词 —— `newui/SearchWords.kt:8-16` 的枚举（值就是搜索框里打的词）：
+ * `VENDOR("/vendor:")` `:9`、`TAG("/tag:")` `:10`、`PLUGIN_UPDATE_SOURCE("/updatesFrom:")` `:16`。
+ * 解析口径照 `newui/SearchQueryParser.kt:156-167`：词表里下一个词是它的取值；
+ * **取值缺失**时上游把整条查询当关键字并停止解析（`:164` `addToSearchQuery(query)` + `break`）。
+ */
+const VALUE_ATTRIBUTE_WORDS: Record<string, 'vendor' | 'tag' | 'updateSource'> = {
+  '/vendor:': 'vendor',
+  '/tag:': 'tag',
+  '/updatesfrom:': 'updateSource',
+}
+
+/** `SearchQueryParser.kt:128-130` 的三个集合里本仓**没有数据源**的两个（标签与更新源来自远端清单）。 */
+export const UNSUPPORTED_ATTRIBUTE_WORDS = ['标签（/tag:）', '更新源（/updatesFrom:）'] as const
+
 export interface InstalledQuery {
   /** 非 `/` 开头的词，按空格拼回（`:14-21` 的 `searchQuery`）。 */
   keyword: string
@@ -414,6 +502,16 @@ export interface InstalledQuery {
   attributes: boolean
   /** `/xxx` 里本仓还不支持的（如 `/bundled`）：解析出来但不参与过滤，用于如实提示。 */
   unsupported: InstalledSearchOption[]
+  /**
+   * `/vendor:` 的取值集合（`SearchQueryParser.kt:128` 的 `vendors` / `:202-204` 的收集）。
+   * 多个取值之间是**或**关系 —— `MyPluginModel.kt:1354-1358` 是"命中其中任意一个就留下"。
+   */
+  vendors: string[]
+  /**
+   * 解析出来但本仓**没有数据源**的取值属性（`/tag:`、`/updatesFrom:`，`:129-130`）。
+   * 与 `unsupported` 同一处置：吃掉取值词、不参与过滤、界面上如实说明。
+   */
+  deferred: string[]
 }
 
 /**
@@ -455,12 +553,30 @@ export function parseInstalledQuery(text: string): InstalledQuery {
   const keywords: string[] = []
   const options: SupportedSearchOption[] = []
   const unsupported: InstalledSearchOption[] = []
-  for (const word of words) {
+  const vendors: string[] = []
+  const deferred: string[] = []
+  let index = 0
+  while (index < words.length) {
+    const word = words[index++]
     if (!word.startsWith('/')) {
       keywords.push(word)
       continue
     }
-    const option = OPTION_ALIASES[word.toLowerCase()]
+    const lowered = word.toLowerCase()
+    const attribute = VALUE_ATTRIBUTE_WORDS[lowered]
+    if (attribute) {
+      // `SearchQueryParser.kt:156-167`：取值缺失（`/vendor:` 后面没有词了）时，上游把**整条查询**
+      // 当关键字并停止解析；取值存在时把它从词表里吃掉（`handleAttribute(name, words[index++])`）。
+      if (index >= words.length) return { keyword: text, options, attributes: options.length > 0 || unsupported.length > 0, unsupported, vendors, deferred }
+      const value = words[index++]
+      if (attribute === 'vendor') {
+        if (!vendors.includes(value)) vendors.push(value)
+      } else if (!deferred.includes(attribute)) {
+        deferred.push(attribute)
+      }
+      continue
+    }
+    const option = OPTION_ALIASES[lowered]
     if (!option) continue
     if ((SUPPORTED_SEARCH_OPTIONS as readonly string[]).includes(option)) {
       const supported = option as SupportedSearchOption
@@ -469,7 +585,16 @@ export function parseInstalledQuery(text: string): InstalledQuery {
       unsupported.push(option)
     }
   }
-  return { keyword: keywords.join(' '), options, attributes: options.length > 0 || unsupported.length > 0, unsupported }
+  return {
+    keyword: keywords.join(' '),
+    options,
+    // `SearchQueryParser.kt:177` 的 `attributes` **只数布尔属性**（vendors / tags 不算），
+    // 所以 `/vendor:xxx` 单用不会把界面推进"属性筛选"分支。
+    attributes: options.length > 0 || unsupported.length > 0,
+    unsupported,
+    vendors,
+    deferred,
+  }
 }
 
 /**
@@ -490,12 +615,79 @@ export function installedQueryOptions(text: string): Set<SupportedSearchOption> 
 }
 
 /**
+ * 厂商文本匹配 —— `newui/MyPluginModel.kt:1348-1361` 的 `isVendor`：
+ * 先把插件的厂商去空白，**空厂商直接不匹配**（`:1350-1352`）；命中条件是「忽略大小写相等」
+ * **或**「插件厂商按忽略大小写包含查询词」（`:1355`）；多个查询词之间是**或**（`:1354` 的循环，
+ * 命中任意一个就返回真）。消费点在已安装页：`InstalledPluginsTabSearchResultPanel.kt:87-94`。
+ * 抽成「一段厂商文本」的形态，是因为市场页的条目（`src/pluginMarket.ts` 的 `MarketplacePlugin`）
+ * 带的也是同一段文本，上游那边把 `/vendor:` 发给仓库服务端（`SearchQueryParser.kt:108-113` 的
+ * `organization=`），本仓的仓库在本地，两侧共用这一条判定，不各写一份。
+ */
+export function vendorTextMatches(vendor: string | undefined, needles: readonly string[]): boolean {
+  const text = (vendor ?? '').trim()
+  if (!text) return false
+  const haystack = text.toLowerCase()
+  return needles.some(needle => {
+    const target = needle.toLowerCase()
+    return haystack === target || haystack.includes(target)
+  })
+}
+
+export function pluginVendorMatches(plugin: PluginInfo, vendors: readonly string[]): boolean {
+  return vendorTextMatches(plugin.vendor, vendors)
+}
+
+/**
+ * 厂商点出来的查询词 —— 上游详情面板的厂商链接（`newui/PluginDetailsPageComponent.kt:1336`）：
+ * `SearchWords.VENDOR.value + (organization 含空格时用双引号包住)`。
+ * 必须按这条规则拼：分词器（`splitQuery`，`SearchQueryParser.kt:244`）把 `:` 和空格都当分隔符，
+ * 不带引号的 "JetBrains s.r.o." 会被拆成取值 `JetBrains` + 关键字 `s.r.o.`。
+ * 点击后的动作是**整框替换**（`newui/PluginsTab.kt:271` 的 `searchTextField.setTextIgnoreEvents(query)`），
+ * 不是往后面追加。
+ */
+export function vendorQueryWord(vendor: string): string {
+  return `/vendor:${vendor.includes(' ') ? `"${vendor}"` : vendor}`
+}
+
+/**
+ * 上游 `InstalledPluginsTabSearchResultPanel.kt:56-63` 的 8 个属性词：查询里出现任何一个，
+ * 空态就**不**给「在市场里搜索」这条链接（那已经是筛选而不是找不到了）。
+ * 上游用的是原始字符串的 `contains`（区分大小写、不看词界），这里保持同一口径。
+ */
+const INSTALLED_ATTRIBUTE_WORDS = [
+  '/downloaded',
+  '/userInstalled',
+  '/outdated',
+  '/enabled',
+  '/disabled',
+  '/invalid',
+  '/bundled',
+  '/updatedBundled',
+]
+
+/**
+ * 「什么都没搜到」时要不要在空态里挂出市场入口 —— 上游 `setupEmptyText`
+ * （`InstalledPluginsTabSearchResultPanel.kt:53-70`）：空态正文是 `plugins.configurable.nothing.found`
+ * （`IdeBundle.properties:1621` "Nothing found."），只要查询里没有属性词就在后面追加一条
+ * 次级链接 `plugins.configurable.search.in.marketplace`（`IdeBundle.properties:1620`
+ * "Search in Marketplace"），点击把**整个查询原样**交给市场页（`:68` 的 `accept(query)`）。
+ * 中文是按英文原文直译（本地化包不在基准树里）。
+ */
+export function offersMarketplaceSearch(text: string): boolean {
+  if (!text.trim()) return false
+  return !INSTALLED_ATTRIBUTE_WORDS.some(word => text.includes(word))
+}
+
+/**
  * 一个插件是否命中查询 —— 属性是**与**关系；关键字匹配名称 / id / 描述。
  * `updateIds`：市场页从本地仓库算出的「有更新」插件 id（`marketplaceUpdates()` 的输出）。
  * 传了就参与 `/outdated` 过滤；没传 = 还没读仓库，此时 `/outdated` 匹配不到任何插件
  * （不是"没有更新"，是"还不知道"—— 界面上的计数同样是 0，读仓库后立刻有值）。
  */
 export function matchesInstalledQuery(plugin: PluginInfo, query: InstalledQuery, updateIds?: readonly string[]): boolean {
+  // 厂商过滤在布尔属性之前（上游 `InstalledPluginsTabSearchResultPanel.kt:87` 也是先过滤 vendors，
+  // 布尔属性在 `:117-155` 才跑）；两者是叠加关系，先后不影响结果。
+  if (query.vendors.length && !pluginVendorMatches(plugin, query.vendors)) return false
   if (query.options.includes('enabled') && !pluginIsEnabled(plugin)) return false
   // `/invalid`：清单读不出来，或必需依赖不满足 —— 两种都进不了加载（IDEA 同上）。
   if (query.options.includes('invalid') && !plugin.error && !pluginIsBroken(plugin)) return false

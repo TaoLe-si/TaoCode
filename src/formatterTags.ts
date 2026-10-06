@@ -19,9 +19,13 @@
 //      `@formatter:off` 同样生效。这是上游行为，本仓保持同一口径。
 //
 // 本仓的消费链路：`src/semanticActions.ts` 的 `runFormatting`（Ctrl+Alt+L / 保存时格式化 / 选区格式化
-// 都走它）。语言服务的格式化结果（LSP TextEdit）里**落在禁用区间内的一条整个丢掉**——上游对禁用区间
-// 就是"不重排"，本仓按"宁可少改、不改禁用段"的保守侧落地（跨启用/禁用边界的编辑整条放弃，不会把
-// 用户手写的对齐冲掉）。
+// 都走它）。两条口径，别混：
+//   · **请求侧切分**（`enabledFormatRanges`，本文件末尾）：选区跨 `@formatter:off` 边界时把区间
+//     切成仍可格式化的子区间，**每段各发一次** `rangeFormatting` —— 上游对禁用段是「从区间里挖掉、
+//     其余照排」（`CodeFormatterFacade.java:232-235` + `InitialInfoBuilder.java:334`），不是整个选区不排。
+//   · **响应侧兜底**（`filterFormatEdits`）：语言服务不认识这些标记，越界给出的编辑里
+//     没被某个启用子区间整条包住的**整条丢掉**（宁可少改，绝不把用户手写的对齐冲掉）。
+//     切分之后这条基本只剩兜底作用：子区间之间不相交，服务器守区间时给不出跨界编辑。
 
 export type FormatterTag = 'on' | 'off' | 'none'
 
@@ -142,4 +146,102 @@ export function filterFormatEdits<T extends LineColumnEdit>(text: string, edits:
     const end = Math.max(start, offsetAt(text, edit.endLine, edit.endChar))
     return covered({ start, end })
   })
+}
+
+/* ── 请求侧的区间切分（csi/formatter ③：切分而不是放弃跨界的那条编辑）────────────── */
+
+/** LSP 的区间形状（与 `bridge.ts:162` 的 `LspRange` 同形；本模块不 import bridge，保持纯函数）。 */
+export interface FormatPoint { line: number; character: number }
+export interface FormatRange { start: FormatPoint; end: FormatPoint }
+
+/**
+ * 文本偏移 → LSP 的（行, 字符），`offsetAt` 的反向换算。
+ * 行 0 基；只按 `\n` 分行（`\r\n` 里的 `\r` 归前一行的内容）—— 与 `offsetAt` 同一个口径，
+ * 两者互逆：`offsetAt(text, ...lineColumnAt(text, offset)) === clamp(offset)`。
+ */
+export function lineColumnAt(text: string, offset: number): FormatPoint {
+  const clamped = Math.max(0, Math.min(text.length, offset))
+  let line = 0
+  let lineStart = 0
+  for (let index = 0; index < clamped; ++index) {
+    if (text[index] !== '\n') continue
+    line += 1
+    lineStart = index + 1
+  }
+  return { line, character: clamped - lineStart }
+}
+
+/**
+ * 把「要格式化的区间」按 `@formatter:off` 切成**仍可格式化**的子区间（位置升序）。
+ *
+ * 上游依据（本仓旧注释引错了地方，留痕订正）：切分不在 `AdjustFormatRangesState.java`
+ * —— 那个类走的是 `Block`/`ExtraRangesProvider` 的 PSI 块模型
+ * （`platform/code-style-impl/src/com/intellij/formatting/AdjustFormatRangesState.java:36-60`）。
+ * 真正让禁用段不参与重排的是这两处：
+ *   · `CodeFormatterFacade.setDisabledRanges`（`platform/code-style-impl/src/com/intellij/psi/impl/source/codeStyle/CodeFormatterFacade.java:232-235`）
+ *     —— 拿 `FormatterTagHandler.getEnabledRanges(file.getNode(), file.getTextRange())`，
+ *     用 `TextRangeUtil.excludeRanges` 把「整文件减去启用段」记成禁用区间（`:109`、`:197` 各调一次）；
+ *   · `InitialInfoBuilder.isInDisabledRange`（`platform/code-style-impl/src/com/intellij/formatting/InitialInfoBuilder.java:334`）
+ *     —— 命中禁用段的空白**跳过处理**，区间里其余部分照常重排。
+ * 净效果：跨 `@formatter:off` 边界的选区，**能排的那半照样排**，不是整条编辑一起丢。
+ *
+ * 本仓没有本地格式化模型，重排由语言服务做 ⇒ 同一件事只能在**请求侧**做：把区间切开、
+ * 每段各发一次 `textDocument/rangeFormatting`（`src/semanticActions.ts` 的 `requestFormatting`）。
+ * 三条边界口径：
+ *   · 文件里没有标记 → 原样返回 `[range]`（调用方走单次请求那条旧路径，零额外往返）；
+ *   · 整段都在禁用区里 → 返回 `[]`（一条请求都不发）；
+ *   · 子区间的端点落在标记**所在行的行首**（沿用 `enabledRanges` 的 `EnabledRangesCollector` 口径，
+ *     `FormatterTagHandler.java:70-84`），不会把 `// @formatter:off` 那一行排进去。
+ */
+export function enabledFormatRanges(text: string, range: FormatRange, options: FormatterTagOptions = {}): FormatRange[] {
+  if (!hasFormatterTags(text, options)) return [range]
+  const start = offsetAt(text, range.start.line, range.start.character)
+  const end = Math.max(start, offsetAt(text, range.end.line, range.end.character))
+  return enabledRanges(text, { start, end }, options)
+    .map(part => ({ start: lineColumnAt(text, part.start), end: lineColumnAt(text, part.end) }))
+}
+
+/** 一条格式化编辑（`bridge.ts:132` 的 `LspTextEdit` 用得上的那部分）。 */
+export interface FormatEdit extends LineColumnEdit { text: string }
+
+/** 两条编辑是否真的重叠（端部相接不算 —— LSP 允许 `[a,b)` `[b,c)` 这种相邻编辑）。 */
+function editsOverlap(a: FormatEdit, b: FormatEdit): boolean {
+  const aBeforeB = a.endLine < b.startLine || (a.endLine === b.startLine && a.endChar <= b.startChar)
+  const bBeforeA = b.endLine < a.startLine || (b.endLine === a.startLine && b.endChar <= a.startChar)
+  return !aBeforeB && !bBeforeA
+}
+
+/**
+ * 把多段 `rangeFormatting` 的响应并成一份（`enabledFormatRanges` 切出几段就有几份）。
+ *   · 文件次序 = 首次出现的次序，段内编辑按段的位置升序 append ⇒ 合起来就是偏移升序；
+ *   · **完全相同**的编辑只留一条（相邻两段各报同一条时，套第二遍就是把同一段文本再写一次）；
+ *   · 跨段**重叠**的编辑丢掉后到的那条并计入 `dropped`（子区间本不相交，真出现就是服务器越界；
+ *     `applyTextEdits` 是倒序套用，重叠会写坏文本 ⇒ 宁可少排一段）。
+ */
+export function mergeFormatParts<Edit extends FormatEdit>(
+  parts: readonly { available: boolean; edits?: readonly { path: string; textEdits: readonly Edit[] }[] }[],
+): { available: boolean; edits: { path: string; textEdits: Edit[] }[]; dropped: number } {
+  const byPath = new Map<string, Edit[]>()
+  const keys = new Map<string, Set<string>>()
+  let available = false
+  let dropped = 0
+  for (const part of parts) {
+    if (part.available) available = true
+    for (const file of part.edits ?? []) {
+      const kept = byPath.get(file.path) ?? []
+      const seen = keys.get(file.path) ?? new Set<string>()
+      for (const edit of file.textEdits ?? []) {
+        const key = `${edit.startLine}:${edit.startChar}:${edit.endLine}:${edit.endChar}\u0000${edit.text}`
+        if (seen.has(key)) { ++dropped; continue }
+        if (kept.some(item => editsOverlap(item, edit))) { ++dropped; continue }
+        seen.add(key)
+        kept.push(edit)
+      }
+      byPath.set(file.path, kept)
+      keys.set(file.path, seen)
+    }
+  }
+  const edits = [...byPath].filter(([, textEdits]) => textEdits.length)
+    .map(([path, textEdits]) => ({ path, textEdits }))
+  return { available, edits, dropped }
 }

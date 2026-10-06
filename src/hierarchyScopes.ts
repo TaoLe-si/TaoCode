@@ -4,7 +4,9 @@
 //   · 五档范围名的常量表：`platform/lang-impl/src/com/intellij/ide/hierarchy/HierarchyBrowserScopes.java:8-12`
 //     —— `SCOPE_PROJECT="Production"` / `SCOPE_ALL="All"` / `SCOPE_CLASS="This Class"` /
 //     `SCOPE_MODULE="This Module"` / `SCOPE_TEST="Test"`；
-//     `HierarchyBrowserBaseEx.java:109-113` 原样转名，`:235-243` 给每档的**呈现名**
+//     `HierarchyBrowserBaseEx.java:109-113` 原样转名，`:237-241` 给每档的**呈现名**
+//     （那一份是 `getPresentableNameMap()`，只管按钮上的当前档名；**下拉里的先后**是
+//     `getValidScopes()`，`:770-776`，见下面 `HIERARCHY_SCOPES` 的头注）
 //     （Production/Tests/All 走 scope 对象的 `getPresentableName()`，
 //     「本类」「本模块」走 `platform/lang-api/resources/messages/LangBundle.properties:348`/`:349`
 //     = "This Class" / "This Module"；「全部」= `platform/analysis-api/resources/messages/AnalysisBundle.properties:206`
@@ -40,16 +42,38 @@ import { isTestPath } from './navGotoTest.ts'
 /** 五档范围（键 = 上游常量值，别翻成中文键：判据与请求都按上游字符串对齐）。 */
 export type HierarchyScopeId = 'Production' | 'All' | 'This Class' | 'This Module' | 'Test'
 
-/** 范围下拉的顺序与呈现名（顺序照 `HierarchyBrowserBaseEx.java:235-243` 那张表的书写序）。 */
+/**
+ * 范围下拉的**顺序与呈现名**。
+ *
+ * 留痕（原写 X、实际 Y）：这一份原先照 `HierarchyBrowserBaseEx.java:235-243` 排，
+ * 那个位置其实是 `getPresentableNameMap()` —— 它往 `HashMap` 里 put，**Map 的装入序根本不是
+ * 下拉的顺序**（`:235-241`），下拉真正画的是 `getValidScopes()` 那一份
+ * （`platform/lang-impl/src/com/intellij/ide/hierarchy/HierarchyBrowserBaseEx.java:770-776`
+ * 建列表、`:811-813` 一条一条 `group.add(new MenuAction(namedScope))`）。本批按后者改：
+ *   1. Production —— `:772` `ProjectProductionScope.INSTANCE`，呈现名 =
+ *      `platform/analysis-api/src/com/intellij/psi/search/scope/ProjectProductionScope.java:36`
+ *      → `AnalysisBundle.properties:127` `predefined.scope.production.name=Production`；
+ *   2. Tests —— `:773` `TestsScope.INSTANCE`，呈现名 = `TestsScope.java:22` 的
+ *      `AnalysisBundle.properties:205` `tests.scope.name=Tests`（**注意**：常量是 `"Test"`，
+ *      屏上写的是 `"Tests"`，`HierarchyBrowserScopes.java:12` 与 `AnalysisBundle.properties:205`
+ *      两处不是一个字符串）；
+ *   3. All —— `:774` `CustomScopesProviderEx.getAllScope()`，呈现名 = `AnalysisBundle.properties:206`
+ *      `all.scope.name=All`；
+ *   4. This Class —— `:775`，呈现名 = `LangBundle.properties:348` `this.class.scope.name=This Class`；
+ *   5. This Module —— `:776`，呈现名 = `LangBundle.properties:349` `this.module.scope.name=This Module`。
+ * 其后才是命名作用域（`:778-782`）与 `ConfigureScopesAction`（`:815`）—— 本仓没有命名作用域宿主，
+ * 那两条不给（宁缺毋假），逐条登记在 `docs/source-todo.md`。
+ * id 用的仍是 `HierarchyBrowserScopes.java:8-12` 那五个常量原值（下拉项的 `getScopeId()`）。
+ */
 export const HIERARCHY_SCOPES: readonly { id: HierarchyScopeId; label: string }[] = [
-  { id: 'All', label: '全部' },
   { id: 'Production', label: '生产代码' },
   { id: 'Test', label: '测试' },
+  { id: 'All', label: '全部' },
   { id: 'This Class', label: '本类' },
   { id: 'This Module', label: '本模块' },
 ]
 
-/** 默认档（见文件头对上游初始 scope 的核对）。 */
+/** 默认档：上游 `HierarchyBrowserBaseEx.java:165` —— `state.SCOPE == null ? SCOPE_ALL : state.SCOPE`。 */
 export const DEFAULT_HIERARCHY_SCOPE: HierarchyScopeId = 'All'
 
 /** 节点的最小形状（`src/bridge.ts` 的 `LspHierarchyItem` 子集）。 */
@@ -87,11 +111,39 @@ export function nodeInScope(node: HierarchyScopedNode, scope: HierarchyScopeId, 
   }
 }
 
+/** 这一档认不认（未知档 = 命名作用域，本仓没有宿主）。 */
+export function isKnownHierarchyScope(scope: string): scope is HierarchyScopeId {
+  return HIERARCHY_SCOPES.some(entry => entry.id === scope)
+}
+
+/** 认不出来的档位一律退回默认档（与 `HierarchyBrowserBaseEx.java:165` 那句 `state.SCOPE == null` 的兜底同一形状）。 */
+export function resolveHierarchyScope(scope: string): HierarchyScopeId {
+  return isKnownHierarchyScope(scope) ? scope : DEFAULT_HIERARCHY_SCOPE
+}
+
+/**
+ * **范围求值的纯函数**（W-2 要的宿主契约：`scopeFilterFor(scope, item)`）。
+ * 求值全在这里，宿主（`src/App.vue` 的那个下拉）只负责"选了哪一档"和"把这一档交回来"，
+ * 不在模板里写任何判断：
+ *   · `scope` 是下拉的**当前值**（字符串，认不出来就按默认档走，不清空列表）；
+ *   · `item` 是一个层级节点（只需要 `path`，即 `src/bridge.ts:168` 的 `LspHierarchyItem` 子集）；
+ *   · `base` 是这次层级的**根**（`This Class` / `This Module` 要按它来收窄；
+ *     上游那两档同样要 base —— `HierarchyTreeStructure.java:161-169` 里的 `baseClass`）。
+ * 返回的是**判断谓词**而不是过滤好的数组：面板画一棵树时要逐节点问，
+ * 而 `filterNodesByScope` 是同一份求值在"一批"上的样子。
+ */
+export function scopeFilterFor(
+  scope: string,
+  base: HierarchyScopedNode | null,
+): (item: HierarchyScopedNode) => boolean {
+  const effective = resolveHierarchyScope(scope)
+  return item => nodeInScope(item, effective, base)
+}
+
 /** 一批节点的范围过滤（保持原序；范围非法就退回默认档而不是清空列表）。 */
 export function filterNodesByScope<T extends HierarchyScopedNode>(nodes: readonly T[], scope: HierarchyScopeId, base: HierarchyScopedNode | null): T[] {
-  const known = HIERARCHY_SCOPES.some(entry => entry.id === scope)
-  const effective: HierarchyScopeId = known ? scope : DEFAULT_HIERARCHY_SCOPE
-  return nodes.filter(node => nodeInScope(node, effective, base))
+  const filter = scopeFilterFor(scope, base)
+  return nodes.filter(filter)
 }
 
 /** 一级目录（判据与面板提示用）。 */
@@ -101,6 +153,8 @@ export function moduleDirectoryOf(path: string): string {
 
 /** 范围切换后的计数提示（面板标题尾巴；不参与判定）。 */
 export function scopeNotice(scope: HierarchyScopeId, kept: number, total: number): string {
-  const label = HIERARCHY_SCOPES.find(entry => entry.id === scope)?.label ?? HIERARCHY_SCOPES[0]!.label
+  // 认不出来的档位按**默认档**的呈现名报（与 `resolveHierarchyScope`/`filterNodesByScope` 同一条兜底；
+  // 原来取的是 `HIERARCHY_SCOPES[0]`，那是下拉的第一项而不是默认档，两件事不该混在一个位置上）。
+  const label = HIERARCHY_SCOPES.find(entry => entry.id === resolveHierarchyScope(scope))?.label ?? ''
   return `${label}：${kept} / ${total}`
 }

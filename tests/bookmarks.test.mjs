@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, isFileBookmark, nextBookmark, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from '../src/bookmarks.ts'
+import { BOOKMARK_MNEMONICS, BOOKMARK_TEXT_LIMIT, BOOKMARK_TYPE_ORDER, bookmarkAnchor, bookmarkDescription, bookmarkGutterTooltip, bookmarkOwner, bookmarkSelectionDescription, isFileBookmark, nextBookmark, nextLineBookmarkInFile, normalizeMnemonic, placeBookmark, reconcileBookmarks, removeBookmark, sortedBookmarks, toggleFileBookmark, withoutMnemonic } from '../src/bookmarks.ts'
+
+const read = relative => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', relative), 'utf8')
 
 test('F11 adds a bookmark on the line and clears it again', () => {
   const once = placeBookmark([], 'src/a.cpp', 12)
@@ -212,4 +217,141 @@ test('装订线的悬停文本按上游拼：书签 + 助记键 + 描述 + 键�
   assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3, text: 'int x;', description: '选中的那段', mnemonic: '9' }),
                '书签 9: 选中的那段 (Ctrl+Shift+9 以切换，Ctrl+9 以跳转到)', '自定义描述优先于行原文')
   assert.equal(bookmarkGutterTooltip({ path: 'a.cpp', line: 3 }), '书签', '没有原文/描述/助记键时只有"书签"')
+})
+
+// ---------------------------------------------------------------- EDITOR_TAB_POPUP（编辑器标签右键那一支）
+// 上游 `platform/bookmarks/src/com/intellij/ide/bookmark/actions/extensions.kt:57-61`：
+// 标签右键与项目树右键都拿不到行号 ⇒ `manager.createBookmark(file)` 建**文件书签**；
+// `ToggleBookmarkAction.addSingleBookmark:72-82` = `manager.toggle(bookmark, type)` ＋
+// `:78-81` 的「该编辑器有非空白选区 ⇒ 那段文本成为自定义描述」。
+// 菜单标题 = `ToggleBookmarkAction.update:54-58`（右键上下文里 `bookmark.add.action.text` /
+// `bookmark.delete.action.text`，中文包 `BookmarkBundle.properties:8/10` = 添加书签 / 删除书签）。
+
+test('选区 → 描述的规则照上游：空白与没有选区都不设，设的是原文（不 trim）', () => {
+  assert.equal(bookmarkSelectionDescription(undefined), undefined, '取不到 editor ⇒ 没有 selectedText')
+  assert.equal(bookmarkSelectionDescription(null), undefined)
+  assert.equal(bookmarkSelectionDescription(''), undefined)
+  assert.equal(bookmarkSelectionDescription('   \n '), undefined, 'isNullOrBlank 的那一支')
+  assert.equal(bookmarkSelectionDescription('  void run()  '), '  void run()  ',
+    '存的是选区原文：上游 `setDescription(bookmark, selectedText)` 不 trim（trim 只在算默认描述时做）')
+})
+
+test('标签右键的三段行为：新增带描述、再点整条删掉、与同文件行书签互不干扰', () => {
+  const added = toggleFileBookmark([], 'src/a.cpp', '  int x;  ')
+  assert.deepEqual(added, [{ path: 'src/a.cpp', description: '  int x;  ' }], '文件书签**不写 line 键**（BookmarkManager.writeExternal:335-337）')
+  assert.equal(bookmarkDescription(added[0]), '  int x;  ', '描述就是那段原文')
+  // 空白选区 ⇒ 形状回到"只有 path"（与旧存档同形，不多一个空 description 键）。
+  assert.deepEqual(toggleFileBookmark([], 'src/a.cpp', '   '), [{ path: 'src/a.cpp' }])
+  assert.deepEqual(toggleFileBookmark([], 'src/a.cpp', undefined), [{ path: 'src/a.cpp' }])
+  // 再点一次 = 取消（上游 toggle → remove），描述不复活、同文件的行书签不动。
+  const both = placeBookmark(added, 'src/a.cpp', 3, undefined, 'int y;')
+  assert.deepEqual(both.map(entry => entry.line), [undefined, 3], '两种书签并存')
+  assert.deepEqual(toggleFileBookmark(both, 'src/a.cpp', '别的').map(entry => entry.line), [3])
+  assert.deepEqual(toggleFileBookmark(both, 'src/a.cpp').map(entry => entry.line), [3],
+    '取消那一下与选区无关（上游 toggle 命中已有书签就直接 remove）')
+})
+
+test('标签菜单标题随状态（添加书签 / 删除书签），且挂点真的消费了模型', () => {
+  const actions = read('src/bookmarkActions.ts')
+  // 模型侧：文件书签的开关要拿**被右键那个标签**的选区（宿主 `selection(path)`），
+  // 行书签那一支走同一个纯函数 ⇒ 两条分支的"空白不设"是同一份规则。
+  assert.match(actions, /toggleFileBookmark\(bookmarks\.value, path, deps\.selection\?\.\(path\)\)/,
+    'EDITOR_TAB_POPUP 的选区必须进描述')
+  assert.match(actions, /bookmarkSelectionDescription\(deps\.selection\?\.\(tab\.path\)\)/, 'F11 那一支共用同一条规则')
+  assert.match(actions, /'删除书签' : '添加书签'/, '标题两态（BookmarkBundle 中文包 :8/:10）')
+  // 挂点：编辑器标签右键菜单（`src/components/TabContextMenu.vue`，桶 8 名下）确实调了这两个口 ——
+  // 没有这一行，模型就是零消费方的死代码。
+  const tabMenu = read('src/components/TabContextMenu.vue')
+  assert.match(tabMenu, /ctx\.bookmarkFile\(/, '标签右键必须挂上 ToggleBookmark 的等价物')
+  assert.match(tabMenu, /ctx\.fileBookmarkLabel\(/, '标题由模型给（不在组件里另写一份文案）')
+})
+
+// 项目级「下一个 / 上一个书签」= 上游 `GotoNextBookmark` / `GotoPreviousBookmark`。
+// 名字里就写着 Line（`platform/platform-resources-en/src/messages/ActionsBundle.properties:1333-1334`
+// = "Next Line Bookmark" / "Previous Line Bookmark"），实现那张表是
+// `platform/bookmarks/src/com/intellij/ide/bookmark/actions/NextBookmarkService.kt:47` 的
+// `bookmarks.filterIsInstance<LineBookmark>()` ⇒ **文件书签不进这个循环**。
+test('项目级循环只走行书签：文件书签不参与（NextBookmarkService.kt:47）', () => {
+  const file = { path: 'src/a.cpp' }
+  const lines = [{ path: 'src/a.cpp', line: 8 }, { path: 'src/b.cpp', line: 2 }]
+  assert.deepEqual(nextBookmark([file, ...lines], 'src/a.cpp', 1, false), lines[0], '第一条还是行书签')
+  assert.deepEqual(nextBookmark(lines, 'src/a.cpp', 8, false), lines[1], '行书签之间照旧')
+  assert.deepEqual(nextBookmark([file, ...lines], 'src/b.cpp', 2, false), lines[0],
+    '走到头回绕到的也是行书签，不是那条文件书签')
+  assert.deepEqual(nextBookmark([file, ...lines], 'src/a.cpp', 1, true), lines[1], '反向同理')
+  assert.equal(nextBookmark([file], 'src/a.cpp', 1, false), undefined, '只有文件书签 ⇒ 这条动作跳不动（上游据此置灰）')
+})
+
+// 编辑器内的「下一个 / 上一个行书签」= `GotoNextBookmarkInEditor` / `GotoPreviousBookmarkInEditor`
+// （`platform/bookmarks/resources/intellij.platform.bookmarks.xml:74-79`；
+// 本体 `actions/NextBookmarkInEditor.kt:32-59`）。三条与项目级不同之处全部照搬：
+// 只看当前文件（`:36`）、严格大于/小于光标行（`:39-52`）、**默认不回绕**
+// （`:53-56` 那段在 `BookmarkOccurrence.cyclic` 里，而它默认 false —— `BookmarkOccurrence.kt:57-58`）。
+test('编辑器内循环：同文件、跨不过去、光标那一行不算、默认不回绕', () => {
+  const own = [{ path: 'src/a.cpp', line: 4 }, { path: 'src/a.cpp', line: 9 }, { path: 'src/b.cpp', line: 1 }]
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 1, false), own[0], '1 行之后第一条是 4')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 4, false), own[1], '4 行之后是 9')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 9, false), undefined, '到头了不回绕（cyclic 默认 false）')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 9, true), own[0], '反向：降序后第一条 <9 的是 4')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 4, true), undefined, '4 之前没有别的行书签')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 1, true), undefined, '最前面再往前也没有')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 9, false, true), own[0], '开着 cyclic 才回绕')
+  assert.deepEqual(nextLineBookmarkInFile(own, 'src/a.cpp', 4, true, true), own[1], '反向回绕取降序后的第一条 = 9')
+  // 绕回来正好是光标那一行时不动（`NextBookmarkInEditor.kt:55` 的 `bookmark.line != line`）。
+  const single = [{ path: 'src/a.cpp', line: 7 }]
+  assert.deepEqual(nextLineBookmarkInFile(single, 'src/a.cpp', 7, false, true), undefined, '只有书签那一行 ⇒ 不算下一个')
+  assert.deepEqual(nextLineBookmarkInFile(single, 'src/a.cpp', 8, true, true), single[0], '8 之前那条(7)不是光标行 ⇒ 照回')
+  assert.deepEqual(nextLineBookmarkInFile(single, 'src/a.cpp', 7, true, true), undefined, '反向同理：绕回自己那行不算')
+  assert.deepEqual(nextLineBookmarkInFile([{ path: 'other.cpp', line: 2 }], 'src/a.cpp', 1, false), undefined, '别的文件不算')
+  assert.deepEqual(nextLineBookmarkInFile([{ path: 'src/a.cpp' }], 'src/a.cpp', 1, false), undefined, '文件书签不算（只收 LineBookmark）')
+})
+
+// 缺锚的书签不能被"空行"骗回来：上游那份比的是删除前**实读**的行文本
+// （`platform/bookmarks/src/com/intellij/ide/bookmarks/BookmarkManager.java` 的
+// `beforeDocumentChange:439-443` 记 `BookmarkInfo(bookmark, line, doc.getText(...))`，
+// `moveToDeleted:530-538` 存进 `myDeletedDocumentBookmarks`，`:506` 才 `bookmarkedText.equals(lineContent)`）。
+// 本仓的历史状态可能根本没有 `text`，补一个空串就等于给任意空行发通行证。
+test('缺锚的书签越界后不会因为某个空行被假放回；有锚的照旧放回', () => {
+  const noAnchor = { path: 'x.java', line: 4 }
+  const first = reconcileBookmarks([noAnchor], 'x.java', 'a\nb\nc')
+  assert.deepEqual(first.list, [], '第 4 行没了 ⇒ 删掉')
+  assert.equal(first.dropped[0].text, undefined, '丢掉表里也**不**给它编一个空串锚')
+  const back = reconcileBookmarks(first.list, 'x.java', 'a\nb\nc\n\n', first.dropped)
+  assert.deepEqual(back.list, [], '新内容第 4 行是空行：空串 == 空行那种"放回"是假放回')
+  assert.equal(back.dropped.length, 1, '它仍留在丢掉的那张表里（上游也不静默丢数据）')
+  // 对照组：有锚的那条照旧放回（这条判据保证不是把整条放回逻辑写死了）。
+  const anchored = placeBookmark([], 'x.java', 4, undefined, 'd')
+  const gone = reconcileBookmarks(anchored, 'x.java', 'a\nb\nc')
+  const revived = reconcileBookmarks(gone.list, 'x.java', 'a\nb\nc\nd', gone.dropped)
+  assert.deepEqual(revived.list.map(entry => entry.line), [4], '原文回到同一行号就放回去（:506）')
+  assert.deepEqual(revived.dropped, [])
+})
+
+// 两份助记键顺序是**两件事**：菜单里 36 行「转到书签 {0}」照
+// `platform/bookmarks/resources/intellij.platform.bookmarks.xml:82-117`（GotoBookmark0 在前），
+// 而凡"遍历所有类型"的地方照枚举序 `platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:19-31`
+// （DIGIT_1…DIGIT_9、DIGIT_0、LETTER_A…LETTER_Z）—— 选择器网格与「转到助记符…」都用后者。
+test('菜单序（0 先）与枚举序（1 先、0 在数字末）不是一份数组', () => {
+  assert.deepEqual(BOOKMARK_MNEMONICS.slice(0, 11), [...'0123456789', 'A'])
+  assert.deepEqual(BOOKMARK_TYPE_ORDER.slice(0, 11), [...'1234567890', 'A'])
+  assert.equal(BOOKMARK_TYPE_ORDER.length, 36)
+  assert.equal(BOOKMARK_TYPE_ORDER.includes('0'), true, 'DEFAULT（无键）不进这张表')
+  assert.deepEqual([...BOOKMARK_TYPE_ORDER].sort(), [...BOOKMARK_MNEMONICS].sort(), '只是顺序不同，成员一致')
+})
+
+// 上面那两条"按列表删/改"要真的在运行时的链上（不是只过纯函数测试的死模型）：
+// 面板的 X 与行右键 → `ctx.onBookmarkRemove` → `dropBookmark`；「编辑描述」→ `requestBookmarkEdit`
+// → `editBookmarkAt` → 保存 → `saveBookmarkDescription`。这三条边一条断掉，模型就退回"点了没反应"。
+test('删/改描述的运行时链路确实接了命名列表那一份', () => {
+  const actions = read('src/bookmarkActions.ts')
+  assert.match(actions, /function dropBookmark\(entry: Bookmark\) \{[\s\S]{0,160}?if \(removeBookmarkFromNamedList\(entry\)\) return/,
+    '移除要先看哪张命名列表持有它')
+  assert.match(actions, /bookmarkInFirstNamedList\(holder\)/, '「编辑描述」的取数走"第一张持有它的列表"')
+  assert.match(actions, /setNamedListBookmarkDescription\(at\.list, \{ path: at\.path, line: at\.line \}, value\)/,
+    '保存要落回同一张列表（上游 setDescription 只写那一个 group）')
+  assert.match(actions, /import \{[^}]*removeBookmarkFromNamedList[^}]*\} from '\.\/bookmarkListActions\.ts'/, '值 import 带 .ts 扩展名')
+  const view = read('src/toolViewContext.ts')
+  assert.match(view, /onBookmarkRemove: entry => dropBookmark/, '面板的移除事件确实进 dropBookmark')
+  assert.match(view, /onBookmarkEdit: \(entry: \{ path: string; line\?: number \}\) => requestBookmarkEdit\(entry\.path, entry\.line\)/,
+    '面板的编辑事件确实进 requestBookmarkEdit')
 })

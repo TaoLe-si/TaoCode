@@ -225,9 +225,14 @@ export interface BreakpointGroupNode {
   enabledCount: number
 }
 
+/** 组里当前的成员 ref（`breakpointGroupNodes` 与「整组搬迁」共用这一份口径）。 */
+export function groupMembers(refs: readonly string[], name: string): string[] {
+  return refs.filter(ref => groupNameOf(ref) === name)
+}
+
 export function breakpointGroupNodes(refs: readonly string[]): BreakpointGroupNode[] {
   return groupNames(refs).map(name => {
-    const members = refs.filter(ref => groupNameOf(ref) === name)
+    const members = groupMembers(refs, name)
     const enabledCount = members.filter(isBreakpointEnabled).length
     return {
       name,
@@ -237,6 +242,34 @@ export function breakpointGroupNodes(refs: readonly string[]): BreakpointGroupNo
       enabledCount,
     }
   })
+}
+
+/**
+ * 组节点的「移至组」——上游 `MoveToGroupAction.actionPerformed`（`BreakpointsDialog.java:542-557`）
+ * 循环的是 `myTreeController.getSelectedBreakpoints(true)`，而 `traverse = true` 那一支
+ * （`BreakpointItemsTreeController.java:187-194`）对选中节点做**先深遍历子树**
+ * ⇒ 选中一个组节点再点「移至组」= 组里每条断点一起 `setGroup`，逐条那份不动。
+ * `to = null`（`<无组>`）同样是整组一起移（上游子菜单第一项就是 `MoveToGroupAction(null)`，
+ * `BreakpointsDialog.java:324`（**留痕**：这里原写 `:332`，逐行数过参考树后 `:332` 是那条 stream 的
+ * `.sorted()`，`res.add(new MoveToGroupAction(null))` 在 `:324`），
+ * 文案 `XDebuggerBundle.properties:230 no.group=<No Group>`）。
+ *
+ * **上游没有「组的改名」与「删除组」**：组不是实体，只是断点上的一个字符串
+ * （`platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroup.java:10-42`
+ * 只有 `getName`/`compareTo`/`expandedByDefault`/`getIcon`，`XBreakpointCustomGroup.java:16-38` 多一个
+ * `isDefault`；组名清单永远是从断点上 distinct+sorted 取的，`BreakpointsDialog.java:326-335`），
+ * 所以「改名/删除」在上游就等于「整组搬到另一个名字」⇒ 本仓不另造假控件。
+ * 目标名与源名相同 ⇒ 一条都不动（返回空数组，调用方据此不落盘、不重发）。
+ */
+export function moveGroupContents(refs: readonly string[], from: string, to: string | null): string[] {
+  const group = typeof to === 'string' ? to.trim() : ''
+  if (group === from) return []
+  return assignBreakpointsToGroup(groupMembers(refs, from), group || null)
+}
+
+/** 「移至组」子菜单里的目标清单（上游 `:336-343`：distinct + sorted，中间插一条分隔线再给「新建…」）。 */
+export function groupMoveTargets(refs: readonly string[], exclude: string): string[] {
+  return groupNames(refs).filter(name => name !== exclude)
 }
 
 /** 受影响的 ref 落在哪几个文件（DAP `setBreakpoints` 是**按文件**整份发的）。 */

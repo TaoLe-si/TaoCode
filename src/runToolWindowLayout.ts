@@ -174,10 +174,17 @@ export const RUNNER_VIEW_ACTIONS_NOT_PORTED = [
       + '登记在 `platform/lang-api/resources/intellij.platform.lang.actions.xml:3`。'
       + '它做的事（`AbstractFocusOnAction.java:20-26` 与 `:33-36`）是在**多视图布局**里给某个 Content 打一个'
       + '「启动时聚焦」的标记：`getRunnerLayoutUi().getOptions().setToFocus(content, STARTUP)`，'
-      + '而且 `content.length == 1` 时整条不显示。本仓的 Run 工具窗口是**一条扁平实例标签**'
+      + '而且 `content.length == 1` 才显示（上游 `:21` 原文 `visible = content.length == 1`；'
+      + '这一格原先把方向写反了，2026-10-06 已订正，见 `docs/batch-2026-10-06-exec2.md` §1）。'
+      + '本仓的 Run 工具窗口是**一条扁平实例标签**'
       + '（`src/components/RunConsole.vue`，见本文件头部），没有 `RunnerLayoutUi` 也没有可切换的视图格，'
       + '「启动时聚焦哪一个布局」没有对象可标 —— 与 `Runner.RestoreLayout` 同一条架构性卡点，'
-      + '`RunnerLayoutSettings`/`CustomContentLayoutSettings` 那个布局设置页也一并落不了地。',
+      + '`RunnerLayoutSettings`/`CustomContentLayoutSettings` 那个布局设置页也一并落不了地。'
+      + '（`RunnerContentUi.java:1813-1833/1858-1866` 那份「UI 首次显示时聚焦被标的 Content」在'
+      + '`RunnerLayout.java:292-296` 的 `focusOnCondition` 是空 map ⇒ 上游默认也没人夺焦。）'
+      + '用户可见的那半件「启动运行实例时把面板打开 / 把焦点移进去」不依赖布局格，'
+      + '它在上游是运行配置的两个开关（`ExecutionManagerImpl.kt:290-293` → `RunContentManagerImpl.kt:439-458`），'
+      + '本仓由 `src/runStartupFocus.ts` 承接判定、`src/runActions.ts` 的 `startRun` 消费。',
   },
 ] as const
 

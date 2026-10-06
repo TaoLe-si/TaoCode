@@ -32,11 +32,11 @@ import { iconSize } from '../uiIcons'
 import { dapBreakpoints } from '../bridge'
 import {
   assignBreakpointsToGroup, breakpointGroupNodes, breakpointGroupState, groupBreakpointsByFile,
-  groupNameOf, isBreakpointEnabled, loadGroupState, pathsOf, saveGroupState, setBreakpointsEnabled, setDefaultBreakpointGroup,
+  groupNameOf, groupMoveTargets, isBreakpointEnabled, loadGroupState, moveGroupContents, pathsOf, saveGroupState, setBreakpointsEnabled, setDefaultBreakpointGroup,
   type BreakpointGroupNode,
 } from '../breakpointGroups'
 // 断点的唯一下发口（属性并入 + 勾选位过滤 + 同文件合并 + 册子维护），见 `src/dbgBreakpointUpdate.ts` 文件头。
-import { breakpointFileSend, breakpointUpdater, type BreakpointPoint } from '../dbgBreakpointUpdate'
+import { breakpointUpdater, type BreakpointPoint } from '../dbgBreakpointUpdate'
 import { exceptionBreakpointGroup, toggleExceptionBreakpoint } from '../exceptionBreakpoints'
 import { NOTHING_TO_SHOW, detailPaneState, elidePath, type DetailItem } from '../popupDetail'
 
@@ -55,6 +55,9 @@ const emit = defineEmits<{ (event: 'close'): void; (event: 'open', item: DetailI
 const NO_GROUP = '\u0000none'
 const NEW_GROUP = '\u0000new'
 
+// 组节点那一格的占位项：上游组节点的右键里第一项就是「移至组」子菜单本体
+// （`XDebuggerBundle.properties:226 move.to.group=Move to Group`），它不是动作，只是入口的名字。
+const MOVE_GROUP = '\u0000move'
 const selectedId = ref<string | null>(props.items[0]?.id ?? null)
 // 上游 `DetailController` 用 `FontMetrics.stringWidth` 量宽；本仓用等宽字体的近似值 ——
 // 只影响"省到第几段"，不影响算法本身（`elidePath` 把量宽作为参数收，就是为了这一层解耦）。
@@ -70,8 +73,12 @@ const storage = typeof localStorage === 'undefined' ? null : localStorage
 loadGroupState(storage, props.root ?? '')
 const sendError = ref('')
 const itemById = computed(() => new Map(props.items.map(item => [item.id, item])))
-const groupNodes = computed<BreakpointGroupNode[]>(() => breakpointGroupNodes(props.items.map(item => item.id)))
+/** 列表里全部断点的 ref（组节点、逐条「所在组」、整组「移至组」读的都是这一份）。 */
+const allRefs = computed(() => props.items.map(item => item.id))
+const groupNodes = computed<BreakpointGroupNode[]>(() => breakpointGroupNodes(allRefs.value))
 const groupOptions = computed(() => groupNodes.value.map(node => node.name))
+/** 整组搬迁的目标清单 = 上游那份 distinct+sorted 的组名**去掉它自己**（搬到同名 = 上游的白跑一趟）。 */
+const groupMoveTargetsOf = (name: string) => groupMoveTargets(allRefs.value, name)
 /** 未分组的行断点按文件成组（已进组的断点由它的组节点画，这里不重复画）。 */
 const ungroupedGroups = computed(() => fileGroups.value
   .map(group => ({ ...group, items: group.items.filter(item => !groupNameOf(item.id)) }))
@@ -108,6 +115,7 @@ const isDefaultGroup = (name: string) => name === breakpointGroupState.defaultGr
 // 而 native 记的正是「上一次收到的那份」（`native/dap.hpp:185`）⇒ 在对话框里取消勾选一次，
 // 重启会话后这些断点就退回成裸行断点。改走 `breakpointUpdater` 后：属性并入、勾选位扣掉、
 // 册子按全量记、同一文件的多次改动合并成一轮（`FrontendXLineBreakpointVisualizationManager.kt:296-304`）。
+// 属性/依赖/静音那份状态由断点区登记给下发口（`provideBreakpointSendRules`）⇒ 这里只说「这个文件现在有哪些断点」。
 async function resend(refs: readonly string[]) {
   if (!refs.length) return
   sendError.value = ''
@@ -115,7 +123,8 @@ async function resend(refs: readonly string[]) {
     const points: readonly BreakpointPoint[] = dapBreakpoints.get(path) ?? []
     // 空文件不产生请求（断点已经在移除时发过空数组了）。
     if (!points.length) return Promise.resolve(null)
-    return breakpointUpdater.queue(breakpointFileSend(path, points, {}))
+    // 勾选/取消勾选 = 上游点名「不能等 300ms」的那一档（同文件 `:290-294` 的 `updateBreakpointNow`）。
+    return breakpointUpdater.queueFile(path, points, { now: true })
   }))
   const failed = rounds.map(round => round?.error).filter(Boolean)
   if (failed.length) sendError.value = failed[0] ?? ''
@@ -137,6 +146,18 @@ function moveToGroup(ref: string, value: string) {
     assignBreakpointsToGroup([ref], name)
   } else assignBreakpointsToGroup([ref], value === NO_GROUP ? null : value)
   saveGroupState(storage, props.root ?? '')
+}
+/** 组节点上的「移至组」= 整组搬迁：上游 `MoveToGroupAction` 循环的是
+ *  `getSelectedBreakpoints(true)`，而 `traverse = true` 那一支会对选中节点**先深遍历子树**
+ *  （`BreakpointItemsTreeController.java:187-194`）⇒ 选中组节点改组 = 组里每条断点一起 `setGroup`，
+ *  逐条那一格不动。子菜单第一项 `<无组>`（`BreakpointsDialog.java:332`）与「新建…」(`:338`) 对组同样成立。
+ *  上游**没有**「组的改名/删除」两个动作（组只是断点上的字符串 ⇒ 见 src/breakpointGroups.ts 的 `moveGroupContents`），
+ *  所以这里也只有搬迁，不另造假控件。 */
+function moveWholeGroup(node: BreakpointGroupNode, value: string) {
+  if (value === MOVE_GROUP) return
+  const target = value === NEW_GROUP ? window.prompt('新建组名称', '')?.trim() ?? '' : value === NO_GROUP ? '' : value
+  const moved = moveGroupContents(allRefs.value, node.name, target || null)
+  if (moved.length) saveGroupState(storage, props.root ?? '')
 }
 function setDefaultGroup(name: string) {
   setDefaultBreakpointGroup(isDefaultGroup(name) ? null : name)
@@ -184,6 +205,14 @@ function open() { if (selected.value) emit('open', selected.value) }
                 <span class="breakpoints-group-count">{{ row.node.enabledCount }}/{{ row.node.refs.length }}</span>
                 <!-- 上游 SetAsDefaultGroupAction：默认组只影响**新**断点，不搬动已有的（BreakpointsDialog.java:561-576）。 -->
                 <button class="chip-x" :title="isDefaultGroup(row.node.name) ? '取消设置为默认' : '设为默认组'" :aria-label="isDefaultGroup(row.node.name) ? '取消设置为默认组' : '设为默认组'" @click="setDefaultGroup(row.node.name)">默认</button>
+                <!-- 整组「移至组」（上游组节点右键里的同一个子菜单，差别只在它遍历的是整个子树）：
+                     顺序照上游 —— `<无组>` 在最前（`:332`），然后现有组名（distinct+sorted，`:336-341`），最后「新建…」（`:338`）。 -->
+                <select class="breakpoints-group-select" :value="MOVE_GROUP" :aria-label="`把组 ${row.node.name} 整体移至`" @change="moveWholeGroup(row.node, ($event.target as HTMLSelectElement).value)">
+                  <option :value="MOVE_GROUP">移至组…</option>
+                  <option :value="NO_GROUP">&lt;无组&gt;</option>
+                  <option v-for="name in groupMoveTargetsOf(row.node.name)" :key="name" :value="name">{{ name }}</option>
+                  <option :value="NEW_GROUP">新建…</option>
+                </select>
               </div>
             </li>
             <li v-else-if="row.kind === 'file'" class="breakpoints-group" :class="{ indented: row.inGroup }">

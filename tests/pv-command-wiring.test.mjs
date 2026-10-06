@@ -29,6 +29,11 @@ test('项目视图上 Ctrl+Z / Ctrl+Shift+Z 接的是命令栈，不是编辑器
   assert.match(tree, /if \(event\.key === 'Z' && event\.ctrlKey && !event\.altKey && !event\.metaKey\) \{/)
   assert.match(tree, /undoRedoFileOperation\(event\.shiftKey \? 'redo' : 'undo'\)/)
   assert.ok(!/document\.execCommand/.test(tree), '不用已废弃的 execCommand 兜壳')
+  // 撤成功之后树要重看一遍磁盘：上游撤完 copy/move/delete 会发 VFS 事件，窗格按
+  // `ProjectViewUpdateCause.kt:49-52`（VFS_CREATE / VFS_COPY / VFS_MOVE / VFS_DELETE）重建那一支。
+  // 本仓没有事件总线 ⇒ `model.refresh()`（清目录缓存重取）是同一件事的等价物；
+  // 少了这一步，撤销掉一次粘贴后行会留在屏幕上，要点 F5 才消失。
+  assert.match(tree, /else if \(result\.ok\) void model\.refresh\(\)/)
 })
 
 test('撤销/重做的文案与上限来自上游坐标，不许写死在组件里', () => {

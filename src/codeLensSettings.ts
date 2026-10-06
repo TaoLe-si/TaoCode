@@ -32,6 +32,14 @@
 //      所以这里的真值是**会话内**的一份 reactive 表，并留出 `restoreCodeVisionSettings()` 这个入口，
 //      接线请求落地时把磁盘那一份灌进来就行（见 `docs/wiring-requests-2026-10-06-bucket3.md` 的 S1）。
 //      这不是假控件：勾了立刻生效、生效的是**渲染通道本身**（`codeLensExtension.ts` 过滤条目）。
+//      订正留痕（2026-10-06 K-4，`docs/wiring-requests-2026-10-06-setkeys.md:73-105`）：**盘上那一侧已经就位** ——
+//      四把键在 `src/settingsModel.ts:445-451`、出厂值与界在 `native/settings_schema.cpp:414-417` 与
+//      `native/settings_editor_keys.hpp:56-62`（1..10 = 上游 `CodeVisionGlobalSettingsProvider.kt:43` 的
+//      `spinner(1..10, 1)`）；渲染侧的四把键也都在读了（总闸/组闸 `codeLensExtension.ts` 的 `visible`，
+//      每锚点条数 `codeVisionVisibleEntryLimit()`）。**只剩两个调用方**：启动读回
+//      （`src/workspaceLifecycle.ts:147` 之后）与设置页 `syncRuntime()`
+//      （`src/components/CodeVisionSettingsPage.vue:61-64`），都在别人名下 ⇒ 见
+//      `docs/wiring-requests-2026-10-06-lensgate.md` 的 L-1/L-2/L-3。
 //   2. 上游还有第三项「Lens Settings…」跳到设置页（`CodeVisionContextPopup.kt:24` 的
 //      `CodeVisionHost.settingsLensProviderId`）。本仓没有 Code Vision 设置页（要新建页面 ＋
 //      `src/settingsTreeMeta.ts` 的树节点，都是保留文件）⇒ **这一项不渲染**，
@@ -60,7 +68,10 @@ export const CODE_VISION_POPUP_MAX_ROWS = 15
 /** 出厂可见条数（`CodeVisionSettings.kt:38-39` 的两个 5）。 */
 export const CODE_VISION_VISIBLE_COUNT = CODE_LENS_VISIBLE_MAX
 
-/** 上游那份 `State`（`CodeVisionSettings.kt:35-53`）在本仓要的四项。 */
+// 上游那份 `State`（`CodeVisionSettings.kt:35-53`）在本仓要的四项。
+// 第四项 `visibleEntries` 对应 `:38-39` 的那两个 5（本仓的条目一律画在**上方**，
+// 上游那两档 `visibleMetricsAboveDeclarationCount` / `visibleMetricsNextToDeclarationCount`
+// 在本仓只剩一档，与设置页 `spinner(1..10, 1)`（`CodeVisionGlobalSettingsProvider.kt:43`）同一格）。
 export interface CodeVisionSettingsState {
   /** `codeVisionEnabled`（`CodeVisionSettings.kt:55-60`）：总闸。 */
   enabled: boolean
@@ -68,12 +79,15 @@ export interface CodeVisionSettingsState {
   disabledGroups: Record<string, boolean>
   /** `enabledCodeVisionProviderIds`（`:50`）：出厂关着、被用户单独打开的。 */
   enabledGroups: Record<string, boolean>
+  /** 同一个锚点最多画几条（`:38-39` 出厂 5）；读法见 `codeVisionVisibleEntryLimit()`。 */
+  visibleEntries: number
 }
 
 export const codeVisionSettings = reactive<CodeVisionSettingsState>({
   enabled: true,
   disabledGroups: {},
   enabledGroups: {},
+  visibleEntries: CODE_VISION_VISIBLE_COUNT,
 })
 
 /**
@@ -123,6 +137,29 @@ export function shouldShowCodeVisionEntry(
   return isCodeVisionGloballyEnabled(settings) && isCodeVisionGroupEnabled(groupId, settings)
 }
 
+// 第二层：同一个锚点最多画几条 —— 上游这一档不是常量，是**读设置的**。链路三步，逐条可查：
+//   ① 出厂值 `CodeVisionSettings.kt:38` `var visibleMetricsAboveDeclarationCount: Int = 5`；
+//   ② 取用 `CodeVisionSettings.kt:140-147` 的 `getAnchorLimit(position)`（Top 档读上面那个字段），
+//      经 `CodeVisionHost.kt:287-288` 的
+//      `viewService.setPerAnchorLimits(... associateWith { (lifeSettingModel.getAnchorLimit(it) ?: defaultVisibleLenses) })`
+//      灌进 `ProjectCodeVisionModelImpl.kt:30` 的 `maxVisibleLensCount`；
+//   ③ 生效 `CodeVisionListData.kt:45-57` 的 `updateVisible()`：`val count = projectModel.maxVisibleLensCount[anchor]`
+//      → `val visibleCount = minOf(count, anchoredLens.size)` → `anchoredLens.subList(0, visibleCount)`。
+//      ⇒ 截断规则 = **保留前缀、不改顺序**，超出的既不画也没有「更多…」（`editor.codeVision.more.inlay`
+//      缺省 false，`CodeVisionListData.kt:60`；registry 缺省值见 `src/codeLens.ts:124-125` 的注）。
+// 本仓的截断动作在 `src/codeLens.ts:165` 的 `items.slice(0, cap)`（同一形状：前缀、不改序），
+// 这里只负责把设置表里那一个数**解析**出来，所以是个不碰 DOM、不碰 CodeMirror 的纯判定。
+// 兜底口径（本仓的守卫，上游没有这一层：State 是直读的）：非正整数 ⇒ 回出厂 5。
+// 取 5 的理由与 `src/codeLens.ts:150`（`groupAnchoredLenses` 的既有守卫，
+// `tests/code-lens-grouping.test.mjs:52-59` 钉着）逐字相同，形状也与 ② 那句 `?: defaultVisibleLenses`
+// （`CodeVisionHost.kt:85` 的 `const val defaultVisibleLenses: Int = 5`）一致。
+// 界面上那一格的 1..10 是**输入约束**（`CodeVisionGlobalSettingsProvider.kt:43` 的 `spinner(1..10, 1)`），
+// 不在读侧再夹一次：上游读侧（`getAnchorLimit`）也没夹，本仓也不发明这条。
+export function codeVisionVisibleEntryLimit(settings: CodeVisionSettingsState = codeVisionSettings): number {
+  return Number.isInteger(settings.visibleEntries) && settings.visibleEntries > 0
+    ? settings.visibleEntries : CODE_VISION_VISIBLE_COUNT
+}
+
 /** 右键菜单的那几条（`CodeVisionContextPopup.kt:22-23`：先"隐藏这一组"、再"全部隐藏"）。 */
 export interface CodeVisionContextAction {
   id: string
@@ -167,19 +204,26 @@ export function handleCodeVisionExtraAction(
   return false
 }
 
-/** 把一份磁盘上的设置灌回运行时真值（接线请求 S1 落地时由宿主编排调用）。 */
-export function restoreCodeVisionSettings(patch: { codeVisionEnabled?: boolean; disabledGroups?: readonly string[]; enabledGroups?: readonly string[] } | null | undefined): void {
+/** 把一份磁盘上的设置灌回运行时真值（接线请求 S1 落地时由宿主编排调用）。
+ *  `codeVisionVisibleEntries`（每锚点条数上限）走的是同一条入口：坏值（非整数、0、负数）一律不写，
+ *  表里留出厂 5 —— 与 `codeVisionVisibleEntryLimit()` 的兜底同一口径，旧存档缺这一键时也走这里。 */
+export function restoreCodeVisionSettings(patch: {
+  codeVisionEnabled?: boolean; disabledGroups?: readonly string[]; enabledGroups?: readonly string[]; codeVisionVisibleEntries?: number
+} | null | undefined): void {
   if (!patch) return
   if (typeof patch.codeVisionEnabled === 'boolean') codeVisionSettings.enabled = patch.codeVisionEnabled
   for (const id of patch.disabledGroups ?? []) codeVisionSettings.disabledGroups[id] = true
   for (const id of patch.enabledGroups ?? []) codeVisionSettings.enabledGroups[id] = true
+  const entries = patch.codeVisionVisibleEntries
+  if (entries !== undefined && Number.isInteger(entries) && entries > 0) codeVisionSettings.visibleEntries = entries
 }
 
 /** 导出当前这份表（宿主持久化用；与 `restoreCodeVisionSettings` 成对）。 */
-export function codeVisionSettingsPatch(): { codeVisionEnabled: boolean; disabledGroups: string[]; enabledGroups: string[] } {
+export function codeVisionSettingsPatch(): { codeVisionEnabled: boolean; disabledGroups: string[]; enabledGroups: string[]; codeVisionVisibleEntries: number } {
   return {
     codeVisionEnabled: codeVisionSettings.enabled,
     disabledGroups: Object.keys(codeVisionSettings.disabledGroups).filter(id => codeVisionSettings.disabledGroups[id]),
     enabledGroups: Object.keys(codeVisionSettings.enabledGroups).filter(id => codeVisionSettings.enabledGroups[id]),
+    codeVisionVisibleEntries: codeVisionSettings.visibleEntries,
   }
 }

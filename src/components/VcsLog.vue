@@ -14,9 +14,9 @@ import VcsLogFilters from './VcsLogFilters.vue'
 import VcsLogGoToRef from './VcsLogGoToRef.vue'
 import { hiddenColumns, toggleColumn, type LogColumn } from '../vcsLogColumns'
 import { isEmptyLogQuery, logFilterStorageKey, parseLogQuery, serializeLogQuery } from '../vcsLogFilterStore'
-import { LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
+import { LOG_PRESENTATION_DEFAULTS, LOG_VIEW_OPTIONS_TITLE, logPresentationModel } from '../vcsLogPresentation'
 import { LOG_NO_MATCHING_COMMITS, LOG_RESET_FILTERS, logCommitMenu, logRefMenu, type LogMenuRow } from '../vcsLogMenu'
-import { logDate } from '../vcsLogGraph'
+import { canCollapseLinearBranches, logDate } from '../vcsLogGraph'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{ root: string; active: boolean; showTagNames?: boolean; showRootNames?: boolean }>()
@@ -24,7 +24,7 @@ const props = defineProps<{ root: string; active: boolean; showTagNames?: boolea
 const emit = defineEmits<{ setTagNames: [value: boolean] }>()
 const { commits, selected, query, loading, loaded, hasMore, error, details, changes, detailsLoading, changesLoading,
   canBack, canForward, travel, select, detailsError, changesError, busy, navigating, selectedCommit, load, applyQuery, navigate, cherryPick,
-  resetTo, uncommit, createTagOn, deleteTag, scope } =
+  resetTo, uncommit, createTagOn, deleteTag, loadBranchNames, loadTagNames, scope } =
   useVcsLogData(toRef(props, 'root'), toRef(props, 'active'), () => {
     try { return parseLogQuery(localStorage.getItem(logFilterStorageKey(props.root))) } catch { return {} }
   })
@@ -105,12 +105,44 @@ function toggleLogColumn(column: LogColumn) {
   hidden.value = toggleColumn(hidden.value, column)
   try { localStorage.setItem(columnsKey.value, JSON.stringify(hidden.value)) } catch { /* Session-only. */ }
 }
+// 「视图选项」里那几条勾选项的**本仓存档**（与列显隐同一族键，按仓库根各存各的）。
+// 上游这些值在 `VcsLogApplicationSettings` 的 OptionTag 上（`COMPACT_REFERENCES_VIEW` /
+// `LABELS_LEFT_ALIGNED` / `SHOW_CHANGES_FROM_PARENTS` / `DIFF_PREVIEW_VERTICAL_SPLIT`，
+// `VcsLogApplicationSettings.kt:106-122`），缺省值抄 `LOG_PRESENTATION_DEFAULTS`；
+// 旧存档缺键 = 用缺省，**不按字段数量判损坏**（这一族本来就是可缺的视图偏好）。
+const viewPrefs = ref<{ compactReferences: boolean; showLongEdges: boolean; alignLabels: boolean;
+  diffPreviewAtBottom: boolean; showChangesFromParents: boolean }>({ ...LOG_PRESENTATION_DEFAULTS })
+function viewPrefKey(id: string) { return `taocode.vcs.log.${encodeURIComponent(props.root)}.${id}` }
+function readViewPref(id: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(viewPrefKey(id))
+    return raw === null ? fallback : raw === 'true'
+  } catch { return fallback }
+}
+const viewPrefKeys = ['compactReferences', 'showLongEdges', 'alignLabels', 'diffPreviewAtBottom', 'showChangesFromParents'] as const
+// 「收起线性分支」（`Vcs.Log.CollapseAll` / `Vcs.Log.ExpandAll`）：只影响已加载这一页的可见行。
+const collapsed = ref(false)
+const canCollapse = computed(() => canCollapseLinearBranches(commits.value))
+watch(() => props.root, () => {
+  for (const id of viewPrefKeys) viewPrefs.value[id] = readViewPref(id, LOG_PRESENTATION_DEFAULTS[id])
+  // 折叠是**视图态**（上游记在图上、不进 UI 属性）⇒ 换仓库根就回到展开态。
+  collapsed.value = false
+}, { immediate: true })
+function setViewPref(id: typeof viewPrefKeys[number], value: boolean) {
+  viewPrefs.value = { ...viewPrefs.value, [id]: value }
+  try { localStorage.setItem(viewPrefKey(id), String(value)) } catch { /* Session-only. */ }
+}
 // 日志窗口自己的齿轮（上游 `Vcs.Log.PresentationSettings`，日志工具条右角）：模型在
 // src/vcsLogPresentation.ts，只给真能接住的行（不做的四条在 docs/source-todo.md §11）。
 const gearOpen = ref(false)
 const presentationRows = computed(() => logPresentationModel(
-  { showTagNames: props.showTagNames !== false, hidden: hidden.value },
-  { setShowTagNames: value => emit('setTagNames', value), toggleColumn: toggleLogColumn }))
+  { showTagNames: props.showTagNames !== false, hidden: hidden.value, ...viewPrefs.value },
+  { setShowTagNames: value => emit('setTagNames', value), toggleColumn: toggleLogColumn,
+    setCompactReferences: value => setViewPref('compactReferences', value),
+    setShowLongEdges: value => setViewPref('showLongEdges', value),
+    setAlignLabels: value => setViewPref('alignLabels', value),
+    setDiffPreviewAtBottom: value => setViewPref('diffPreviewAtBottom', value),
+    setShowChangesFromParents: value => setViewPref('showChangesFromParents', value) }))
 function pickPresentation(row: { run?: () => void }) { row.run?.() }
 watch([() => props.root, selected, changes], () => { previewChange.value = null }, { flush: 'sync' })
 const table = ref<InstanceType<typeof VcsLogTable>>()
@@ -159,12 +191,12 @@ async function jump(hash: string) {
 <template>
   <div ref="panel" class="vcslog-panel">
     <!-- MainFrame: table+toolbar left; changes above details right; initial ratios 0.7. -->
-    <VcsLogSplitter vertical :storage-key="`${layoutKey}.diff.splitter.proportion`" :second-visible="!!previewChange">
+    <VcsLogSplitter :vertical="viewPrefs.diffPreviewAtBottom" :storage-key="`${layoutKey}.diff.splitter.proportion`" :second-visible="!!previewChange">
       <template #first>
     <VcsLogSplitter :key="root" :storage-key="`${layoutKey}.changes.splitter.proportion`">
       <template #first>
         <div class="vcslog-toolbar" role="toolbar" aria-label="日志过滤与显示">
-          <VcsLogFilters :query="query" @apply="applyLogFilter" />
+          <VcsLogFilters :query="query" :collapsed="collapsed" :can-collapse="canCollapse" @apply="applyLogFilter" @set-collapsed="collapsed = $event" />
           <button class="icon-button" title="后退" aria-label="日志导航后退" :disabled="!canBack" @click="history('back')"><ArrowLeft :size="iconSize.control" /></button>
           <button class="icon-button" title="前进" aria-label="日志导航前进" :disabled="!canForward" @click="history('forward')"><ArrowRight :size="iconSize.control" /></button>
           <span class="count" :title="`已加载 ${commits.length} 条提交`">{{ commits.length }}{{ hasMore ? '+' : '' }}</span>
@@ -187,12 +219,14 @@ async function jump(hash: string) {
           </details>
           <!-- `Vcs.Log.GoToRef`（`intellij.platform.vcs.log.impl.xml:290`，挂在
                `Vcs.Log.Toolbar.RightCorner` 里、排在「视图选项」之后）。 -->
-          <VcsLogGoToRef :commits="commits" :navigating="navigating" @go-to="jump" />
+          <VcsLogGoToRef :commits="commits" :navigating="navigating" :load-branches="loadBranchNames" :load-tags="loadTagNames" @go-to="jump" />
         </div>
         <p v-if="!isDesktop" class="note">浏览器预览没有 VCS 日志，请在桌面端使用。</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p v-if="navigating" class="note" role="status">正在定位提交…</p>
-        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden" @select="select" @copy="copyHash" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
+        <VcsLogTable ref="table" :loading="loading" :commits="commits" :selected="selected" :root="root" :show-tag-names="showTagNames" :show-root-names="showRootNames" :hidden="hidden"
+          :compact-references="viewPrefs.compactReferences" :align-labels="viewPrefs.alignLabels" :show-long-edges="viewPrefs.showLongEdges" :collapsed="collapsed"
+          @select="select" @copy="copyHash" @more="more" @menu="openMenu" @ref-menu="openRefMenu">
           <div v-if="loading" class="empty" role="status">加载中…</div>
           <!-- `vcs.log.no.commits.matching.status` + `vcs.log.reset.filters.status.action`
                （`VcsLogBundle.properties:151-152`）：有过滤却一条都没命中时给一个真的重置入口，
@@ -207,7 +241,7 @@ async function jump(hash: string) {
       </template>
       <template #second>
         <VcsLogSplitter vertical :storage-key="`${layoutKey}.details.splitter.proportion`" :second-visible="showDetails">
-          <template #first><VcsLogChanges :changes="changes" :selected="!!selectedCommit" :loading="changesLoading" :error="changesError" @select="previewChange = $event" /></template>
+          <template #first><VcsLogChanges :changes="changes" :selected="!!selectedCommit" :loading="changesLoading" :error="changesError" :from-parents="viewPrefs.showChangesFromParents" @select="previewChange = $event" /></template>
           <template #second><VcsLogDetails :commit="selectedCommit" :details="details" :busy="busy" :loading="detailsLoading" :error="detailsError" @copy="copyHash" @cherry-pick="cherryPick" @navigate="jump" /></template>
         </VcsLogSplitter>
       </template>

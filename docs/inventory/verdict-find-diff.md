@@ -70,6 +70,7 @@
 ### A7. 第一百一十七批清扫的账（`[x]` 12 → 31 的来路）
 
 `§G` 那 630 行现在是**清扫后**的状态：455 条 `[ ]` 已归零，去向是 `[~]` 284、`[-]` 161、`[x]` 10；另有 9 条 `[~]` 升判 `[x]`（保留大小写、差异导航一族、`SmartTextDiffProvider` 的两步比对、`ComparisonPolicy` 三档、`TrimUtil` 两半、词级/字符级两条链、`ChunkOptimizer` 两档、`FindInProjectRecents`），最后 2026-10-04 又改判 `FindInPathAction`（入口 `src/menus/editMenu.ts:96` + 最近搜索 `src/findInProjectRecents.ts`，预填点 `src/components/SearchPanel.vue:601-602`）与 `CombinedDiffSearch`（`src/diffSearch.ts` + `src/components/DiffView.vue:171`、`:230-247`，判据 `tests/diff-search.test.mjs`）—— 四档因此是 `[x] 31 / [~] 352 / [ ] 0 / [-] 247`。
+2026-10-06（fold3 lane）再改判 `ApplyNonConflictsAction` 一条：「自动接受全部不冲突改动」整条链已落 —— 算在 `src/mergeResolve.ts:408`（`resolveConflictsInText(content, onlyNonConflicts = true)`，文件头 `:404-406` 写明只合 `type !== 'conflict'` 的那些）、文案 `src/mergeResolve.ts:450`、可用性谓词 `src/changesMenuActions.ts:67`、执行 `src/mergeResolveHost.ts:43` → `src/components/SourceControl.vue:227`，判据 `tests/merge-resolve.test.mjs`；上游 `platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt:31`（`hasNonConflictedChanges(side)` 决定可用性）与 `:35`（`applyNonConflictedChanges(side)`）逐行打开核过 ⇒ `[~]` → `[x]`，四档变成 **`[x] 32 / [~] 351 / [ ] 0 / [-] 247`**（残余差异「上游逐侧、本仓整文件一档」写在 §G 该行里，三栏窗口本身仍记在 `MergeThreesideViewer` 那一族）。
 
 这份账**不是手抄回来的**：逐类判决的产物是 `build/b7rows.json`（`build/b7-sweep/sweep.mjs` 生成时逐条 `existsSync` 验过本仓落点、逐条在上游文件里钉过 marker 行），落盘走 `build/b7-sweep/restore-rows.mjs`（默认 `--check` 打印、`--write` 才写；它只换「判决 + 理由」两格，行序与类集一个字不动，页脚那句合计由实际行数重算）。2026-10-05 有人按快照把判词文件重写回清扫前的 455 条 `[ ]`，所以这一批的修复动作就是把它按产物恢复。
 
@@ -300,7 +301,7 @@ UnselectPreviousOccurrence = Alt+Shift+J。菜单侧 `FindMenuGroup`（`Platform
 5. **算术**：四档计数与页脚那句合计一致，且 `[x] + [~] + [ ] + [-] = 630`。
 6. **口径不漂移**：`src/diffAlign.ts` 头注释里那批上游 `file:line`（`Diff.kt` / `MyersLCS.kt` / `Enumerator.kt` / `DiffConfig.kt` / `TextDiffSettingsHolder.kt` / `IgnorePolicy.java` / `TrimUtil.kt`）必须仍在文件里 —— 免得上游行号改了而本仓注释不跟。
 7. **差异表不空**：§E 至少 5 条，且第 1 条必须提到 Patience。
-8. **计数冻结**：四档必须是 `[x] 31 / [~] 352 / [ ] 0 / [-] 247` —— 改判是一次**动作**（留下 §A7 那种来路 + 同步改这组数与页脚），不是漂移。
+8. **计数冻结**：四档必须是 `[x] 32 / [~] 351 / [ ] 0 / [-] 247` —— 改判是一次**动作**（留下 §A7 那种来路 + 同步改这组数与页脚），不是漂移。
 9. **`[-]` 不许空口**：每条 `[-]` 的理由里必须反引号包着一个上游 `文件.扩展名:行号`。
 
 ## G. 逐条总表
@@ -504,7 +505,7 @@ UnselectPreviousOccurrence = Alt+Shift+J。菜单侧 `FindMenuGroup`（`Platform
 | `DiffLangSpecificProvider` | `platform/diff-impl/src/com/intellij/diff/lang/DiffLangSpecificProvider.kt` | `[-]` | 上游是按语言的忽略范围；它要语言侧（Language/PsiElement）给出可忽略区间（注释/import），本仓是纯文本逐行比较，没有语言词法层。依据：`platform/diff-impl/src/com/intellij/diff/lang/DiffLangSpecificProvider.kt:9` 的 `import com.intellij.openapi.extensions.ExtensionPointName`。 |
 | `DiffLanguage` | `platform/diff-impl/src/com/intellij/diff/lang/DiffLanguage.kt` | `[-]` | 上游是按语言的忽略范围；它要语言侧（Language/PsiElement）给出可忽略区间（注释/import），本仓是纯文本逐行比较，没有语言词法层。依据：`platform/diff-impl/src/com/intellij/diff/lang/DiffLanguage.kt:7` 的 `import com.intellij.lang.Language`。 |
 | `LangDiffIgnoredRangeProvider` | `platform/diff-impl/src/com/intellij/diff/lang/LangDiffIgnoredRangeProvider.java` | `[-]` | 上游是按语言的忽略范围；它要语言侧（Language/PsiElement）给出可忽略区间（注释/import），本仓是纯文本逐行比较，没有语言词法层。依据：`platform/diff-impl/src/com/intellij/diff/lang/LangDiffIgnoredRangeProvider.java:5` 的 `import com.intellij.lang.Language;`。 |
-| `ApplyNonConflictsAction` | `platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt` | `[~]` | 上游是三方合并与冲突解决（MergeRequestProcessor 一族）；本仓有对应物（`src/mergeConflicts.ts:52`，mergeConflicts.ts 的冲突标记模型 + editorMergeHost.ts 的接受/导航 + MergeBar.vue），缺「自动接受全部不冲突改动」（逐条接受已落，见 `src/mergeConflicts.ts` 的 acceptSide）。 |
+| `ApplyNonConflictsAction` | `platform/diff-impl/src/com/intellij/diff/merge/ApplyNonConflictsAction.kt` | `[x]` | 用户可见那条动作**已落**（2026-10-06 改判，原写「缺『自动接受全部不冲突改动』」）：上游 `:12-36` 的 `update` 拿 `viewer.model.hasNonConflictedChanges(side)`（`:31`）决定可用性、`actionPerformed` 调 `viewer.applyNonConflictedChanges(side)`（`:35`）；本仓同一条链是 `src/mergeResolve.ts:408` 的 `resolveConflictsInText(content, onlyNonConflicts = true)`（文件头 `:404-406` 写明「只合 `type !== 'conflict'` 的」= 一侧没动、另一侧改了那批）+ 文案 `src/mergeResolve.ts:450` + 可用性谓词 `src/changesMenuActions.ts:67` + 执行 `src/mergeResolveHost.ts:43` → `src/components/SourceControl.vue:227`，判据 `tests/merge-resolve.test.mjs`；逐条接受那一半仍在 `src/mergeConflicts.ts` 的 acceptSide。**残余差异（如实记）**：上游粒度是**逐侧**（`:18` 的三档 id `Diff.ApplyNonConflicts.Left` / 中间档 / `.Right`），本仓是**整文件**一档 —— 没有三栏合并窗口，也就没有「在哪一侧按这个按钮」；三栏窗口本身记在 `MergeThreesideViewer` 那一族。 |
 | `BinaryMergeTool` | `platform/diff-impl/src/com/intellij/diff/merge/BinaryMergeTool.java` | `[~]` | 上游是三方合并与冲突解决（MergeRequestProcessor 一族）；本仓有对应物（`src/mergeConflicts.ts:52`，mergeConflicts.ts 的冲突标记模型 + editorMergeHost.ts 的接受/导航 + MergeBar.vue），缺三份内容（base/yours/theirs）的 merge changes 模型、逐片段接受与 ApplyNonConflicts；本仓的输入是文件里的冲突标记。 |
 | `ChangeReferenceProcessor` | `platform/diff-impl/src/com/intellij/diff/merge/ChangeReferenceProcessor.kt` | `[~]` | 上游是三方合并与冲突解决（MergeRequestProcessor 一族）；本仓有对应物（`src/mergeConflicts.ts:52`，mergeConflicts.ts 的冲突标记模型 + editorMergeHost.ts 的接受/导航 + MergeBar.vue），缺三份内容（base/yours/theirs）的 merge changes 模型、逐片段接受与 ApplyNonConflicts；本仓的输入是文件里的冲突标记。 |
 | `ErrorMergeTool` | `platform/diff-impl/src/com/intellij/diff/merge/ErrorMergeTool.java` | `[~]` | 上游是三方合并与冲突解决（MergeRequestProcessor 一族）；本仓有对应物（`src/mergeConflicts.ts:52`，mergeConflicts.ts 的冲突标记模型 + editorMergeHost.ts 的接受/导航 + MergeBar.vue），缺三份内容（base/yours/theirs）的 merge changes 模型、逐片段接受与 ApplyNonConflicts；本仓的输入是文件里的冲突标记。 |
@@ -938,4 +939,4 @@ UnselectPreviousOccurrence = Alt+Shift+J。菜单侧 `FindMenuGroup`（`Platform
 | `DiffVcsDataKeys` | `platform/vcs-impl/src/com/intellij/diff/DiffVcsDataKeys.kt` | `[-]` | 上游是VCS 侧的 diff 数据（块/数据键/补丁标注）；它是 ActionSystem 的 DataKey 常量表，本仓没有数据键机制。依据：`platform/vcs-impl/src/com/intellij/diff/DiffVcsDataKeys.kt:10` 的 `object DiffVcsDataKeys {`。 |
 | `PatchBaseAnnotationInfo` | `platform/vcs-impl/src/com/intellij/diff/PatchBaseAnnotationInfo.kt` | `[~]` | 上游是 VCS 侧的 diff 数据（块/数据键/补丁标注）；本仓有对应物（`src/diffFold.ts:55`，diffFold.ts 的未更改上下文块 + editorBlameAnnotations.ts 的逐行标注），缺上游 Block 对象（围绕改动取上下文）与补丁基准标注；本仓上下文由折叠窗口表达。 |
 
-合计 630 类：`[x]` 31、`[~]` 352、`[ ]` 0、`[-]` 247。
+合计 630 类：`[x]` 32、`[~]` 351、`[ ]` 0、`[-]` 247。

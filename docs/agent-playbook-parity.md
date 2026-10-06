@@ -8,9 +8,13 @@
 
 上一轮用 32 个子代理并发推进，**中途被中断**。当前树：
 
-- **842 处改动**（261 已修改 + 581 未跟踪新增），约 **150 个新文件**已经落地
-- **58 个类型错误 / 19 个文件**（快照在 `docs/tsc-error-snapshot-2026-10-05.md`，每个文件已唯一归桶）
+- **842 处改动**（261 已修改 + 581 未跟踪新增）——**这是 2026-10-05 17:30 的快照，早已过期**：
+  那一轮之后代码被整批提交过。**实时数以 `git status --porcelain | wc -l` 为准**，别抄这一行。
+- **58 个类型错误 / 19 个文件**（同样是那一轮的值；`docs/tsc-error-snapshot-2026-10-05.md` 自己已把它改成
+  「**58 → 5**」。取当前值用 `npx vue-tsc -b --force`）
 - 一批新模块**只有模型与测试、零生产消费方**（接线被中断）
+- 同一版还写着「约 **150 个新文件**已经落地」——**这个数字口径不明**（未跟踪？含 `build*/`、`dist/` 产物？），
+  2026-10-06 复核**无法核实**，已不当当现状用；要判"新模块有没有接上"看下面第 2 段的 grep 判据。
 
 ### 你的三段工作，顺序不能换
 
@@ -30,10 +34,13 @@
 
 ### 保留文件（**只有桶 8 能改，其余七桶一律只读**）
 
-`src/App.vue`（2702 行 / 上限 2737）、`src/components/CodeEditor.vue`（1127 行）、
+`src/App.vue`、`src/components/CodeEditor.vue`（**两者的行数都按分钟级漂移，本文件不再写死**：
+`wc -l src/App.vue src/components/CodeEditor.vue` 自数；上限 2737 由 `tests/module-size.test.mjs` 判，
+「还剩几行余量」= 上限减去实测行数，别抄任何文档里的余量数）、
 `src/style.css`、`src/tokens.css`、`src/uiIcons.ts`、`src/settingsModel.ts`、`src/settingsTreeMeta.ts`
 
-**为什么**：`App.vue` 只剩 35 行余量，`CodeEditor.vue` 是全仓争用最凶的文件。八个 agent 同时改必冲突。
+**为什么**：`App.vue` 的余量长期是个位数到几十位数（2026-10-05 写「只剩 35 行」，2026-10-06 实测是 2735 行 / 余 2 行，
+随后又被提交轮改动），`CodeEditor.vue` 是全仓争用最凶的文件。八个 agent 同时改必冲突。
 所以这批的规矩是：**逻辑一律写进你自己的新文件，组件里只做接线**。
 你确实需要上面某个保留文件接线时 —— **不要自己改**，在报告里写一行：
 
@@ -76,18 +83,15 @@ constructor(storage: Foo) { this.storage = storage }
 node .tools/find-param-props.mjs
 ```
 
-**2026-10-05 17:50 全仓现状 —— 7 处待清**（各桶属主见括号）：
+**2026-10-06 复核：已清零。** 本节原先那张「7 处待清」的文件:行表（`src/autoTest.ts` /
+`src/completionUi.ts` / `src/editorGutterIcons.ts` / `src/editorInlineValues.ts` /
+`src/editorWhitespace.ts` / `src/libraryModel.ts` 七个坐标）**整段作废并删除**，因为：
+`node .tools/find-param-props.mjs` 现在输出「**共 0 处参数属性**」，逐个重开那七行 ——
+其中四行如今是**解释这条禁令的注释**（「不能写参数属性」），两行是普通调用（`onMenu(...)` / `builder.add(...)`），
+最后一行本来就是显式字段的正确写法。**留着那张表 = 让下一位去「修」7 个不存在的问题**，
+这正是 §1.5 说的那类假待办。
 
-| 文件:行 | 属主桶 |
-|---|---|
-| `src/autoTest.ts:87` | 桶6 |
-| `src/completionUi.ts:206` | 桶2 |
-| `src/editorGutterIcons.ts:99` | 桶1 |
-| `src/editorInlineValues.ts:18` | 桶2 |
-| `src/editorWhitespace.ts:10` / `:44` | 桶1 |
-| `src/libraryModel.ts:145` | 桶7 |
-
-**不在你桶里的不用管，但如果你写的模块被 `import` 到上面任何一个，就顺手一起清掉。**
+**自查只认工具的当前输出，不要抄任何文档里的行号。**
 `src/breakpointLocations.ts:60-62` 有这条约束的说明注释，是正确写法的样板。
 
 ### ⚠️ 另一条：`.mjs` 测试文件必须是**纯 JavaScript**
@@ -132,17 +136,38 @@ assert.ok(x satisfies number)                 // ❌ 同上
 3. **禁止图像/截图比对**。SVG 一律读源码文本。禁止「IDEA 一般是…」这类经验值。
 4. 安装目录 `D:\IntelliJ IDEA 2026.2` **只能读 `lib/` 里的上游资源文本**（theme json / Scheme xml），
    **不许用它反推像素**。中文文案包可从 `plugins/localization-zh/lib/localization-zh.jar` 解出来读**字符串**。
-5. 上游树**缺文件/缺模块**是常态（例：`OpenProjectAction` / `EditRecentProjectsAction` /
-   `ResetLayoutAction` / `UISettings.java` 在本 checkout 里按文件名都搜不到 —— 只有 `ReopenProjectAction` 的子串命中）。
-   遇到缺的就**先自己搜一遍确认**，再如实写「无法核实」，**不要用经验值补**。
-   ⚠️ **「按文件名搜不到」不等于「功能不存在」** —— 提交前后重写、模块搬迁都会让文件名变。
-   **必须按包路径 / 语义 / XML 里的 `id` 三条路各搜一遍再下结论。**
+5. 上游树**缺文件/缺模块**是常态，但**「按文件名搜不到」从来不是「功能不存在」的证据**。
+   ⚠️ 本条第一版拿 `OpenProjectAction` / `ResetLayoutAction` / `UISettings.java` 当「搜不到 ⇒ 无法核实」的例证，
+   **那是三个假例证**（只有 `EditRecentProjectsAction` 站得住）。2026-10-06 逐个重开上游树后按实测改写如下，
+   **下面每一条坐标都能指到，一个都不许当「无法核实」的依据** —— 它们的用途是打假：
+
+   - **真缺的**：`EditRecentProjectsAction` —— 文件名搜不到、`--include=*.xml` 全树也搜不到这个 `id`，
+     三条路走完才算数。
+   - **「重置布局」在树里**（旧例证是 `ResetLayoutAction`，那个文件名确实没有，功能却全在）：
+     `platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:444`
+     = `<action id="RestoreFactoryDefaultLayout" class="com.intellij.ide.actions.RestoreFactoryDefaultLayoutAction"/>`，
+     类体 `platform/platform-impl/src/com/intellij/ide/actions/RestoreFactoryDefaultLayoutAction.kt:13`，
+     挂在 `platform/platform-impl/resources/idea/PlatformActions.xml:641` 的 `LayoutsGroup`，
+     文案 `platform/platform-resources-en/src/messages/ActionsBundle.properties:1085`
+     （本仓 `docs/ui-parity-checklist.md` 布局那一节**早已引过**这条文案行）。
+   - **「打开工程」在树里**（旧例证 `OpenProjectAction` 根本没有这个类）：
+     `idea/customization/min/resources/intellij.platform.customization.min.xml:53`
+     = `<action id="WelcomeScreen.OpenProject" class="com.intellij.ide.actions.OpenFileAction$OnWelcomeScreen">`
+     —— 实现是 `OpenFileAction` 的**内嵌类**，所以按 `OpenProjectAction` 这个文件名永远搜不到。
+   - **`UISettings` 在树里**，只是已经 Kotlin 化：`platform/editor-ui-api/src/com/intellij/ide/ui/UISettings.kt`（914 行；
+     同目录还有 `UISettingsState.kt` / `UISettingsUtils.kt` / `UISettingsListener.java`）。
+
+   遇到疑似缺的**先按包路径 / 语义 / XML 里的 `id` 三条路各搜一遍**，三条全空再如实写「无法核实」，
+   **不要用经验值补**，并且要把「搜过哪三条路」写进判词里。
+   ⚠️ **提交前后重写、模块搬迁、Java→Kotlin 迁移都会让文件名变**（上面三个假例证各占一种）。
 6. ❌ **不要照抄任何「某目录不存在」的说法，包括本文件里的。**
    这条曾经写着「`platform/keymaps` 整个目录不存在」，被两轮独立验收证伪：它**存在**于
    `platform/platform-resources/src/keymaps/`（**10 个文件**，`$default.xml` **1308 行**、含 `Mac OS X.xml` /
    `Emacs.xml` 等），另有 `platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`
    （**27 个文件**：`KeymapPanel.java` 1138 行 / `KeyboardShortcutPanel.java` / `KeymapSchemeManager.java` …）
-   与 `plugins/keymaps/`（**10 个插件目录 / 26 个 scheme XML**）。
+   与 `plugins/keymaps/`（**10 个插件目录 / 16 个 scheme XML**）。
+   ⚠️ 这里原本写「26 个 scheme XML」，那是**全部 XML 的条数**（26 = 16 份键位表 + 10 份 `META-INF/plugin.xml`）；
+   复算：`find plugins/keymaps -type f -name "*.xml" -not -path "*META-INF*" | wc -l` = 16。
    那条假规则已经**实际生产了假的「无法核实」判词**（`ui-parity-checklist.md:3125`/`:3420`、
    `handoff-2026-10-05-parity-batch.md:140`），而那些坐标本来就能引。
 
@@ -178,7 +203,9 @@ assert.ok(x satisfies number)                 // ❌ 同上
 
 ## 4. 共享工作区纪律（这条最容易出事）
 
-工作区有 **700+ 处未提交改动**，所有 agent 共用同一棵树。
+工作区**始终**有大量未提交改动（2026-10-05 那一版写「700+ 处」，2026-10-06 复核时上一轮已被整批提交、
+`git status --porcelain` 只剩个位数 —— **这个数会随提交轮整块跳动，别把它当现状**；
+实时数用 `git status --porcelain | wc -l`），所有 agent 共用同一棵树。
 
 1. **绝对禁止** `git checkout --` / `git reset` / `git stash` / `git clean` / 任何丢弃工作区的命令。
    上一轮已经因此**丢过 630 行测试**，事故记录在 `docs/handoff-2026-09-28-ui-parity.md` §4.2。
@@ -268,6 +295,10 @@ assert.ok(x satisfies number)                 // ❌ 同上
 
 - 不要改 `tests/module-size.test.mjs` 的**上限数字**（除非你就是靠拆分把它下调的）。
 - 不要提交 git（父代理统一处理）。
-- 不要动 `docs/inventory/verdict-*.md` 的**生成物内容**——那是 `scripts/verdict_table.py` 生成的。
-  要改判词，去改 `scripts/verdict_table.py` 里的 `FAMILIES` / `PLATFORM_FAMILIES` 表，然后重新生成。
+- 不要动 `docs/inventory/verdict-*.md` 的**生成物内容**——**只有 5 个域是生成物**：
+  `execution` / `xdebugger` / `projectviews` / `daemon` / `platform_rest`（`tests/verdict-generated.test.mjs` 的 `DOMAINS` 就这 5 个，
+  文件头也自己写着「由 `python scripts/verdict_table.py …` 生成，不要手改」）。
+  **B 系列（`verdict-actions` / `verdict-editor` / `verdict-find-diff` / `verdict-vcs` / …）是手写的**，
+  它们的门禁是 `tests/b*-verdict.test.mjs`，改判词直接改文档、改完跑那扇门。
+  生成域的判词要改，去改 `scripts/verdict_table.py` 里的 `FAMILIES` / `PLATFORM_FAMILIES` 表，然后重新生成。
 - 不要碰别的 agent 名下的文件。

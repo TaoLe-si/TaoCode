@@ -1,6 +1,11 @@
 // IDEA-style live templates: a keyword (`sout`) or a `receiver.postfix` (`list.for`)
 // that expands into a snippet with editable slots. Deliberately free of CodeMirror so
 // the expansion rules are testable on their own (tests/templates.test.mjs).
+//
+// 槽位默认值那一段里**以已注册宏名开头**的写法是宏调用，求值在 src/templateMacros.ts
+// （上游 `com.intellij.codeInsight.template.Macro` 那一族；判据、参数与回退口径都在那边）。
+// 本模块只做「哪一段是宏」的取数，不重复实现宏。
+import { resolveTemplateSlotValues, type TemplateMacroContext, type TemplateSlotDefinition } from './templateMacros.ts'
 
 export type Language = 'java' | 'cpp' | 'typescript' | 'other'
 
@@ -139,25 +144,39 @@ function indentOf(line: string) {
   return /^ */.exec(line)![0]
 }
 
-// Re-indent continuation lines and replace `$NAME$` / `$NAME:default$` / `$END$`.
-export function render(body: string, indent: string, vars: Record<string, string>) {
+// 槽位词法（本仓的既有契约，`$NAME$` / `$NAME:默认值$` / `$END$` / `$EXPR$`）。
+// 宏只活在「默认值那一段」里，识别与求值都在 src/templateMacros.ts。
+const pattern = /\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$]*))?\$/g
+
+// Re-indent continuation lines and replace `$NAME$` / `$NAME:默认值$` / `$END$`.
+// `context` 只给宏用（文件路径与时间源）；不传也照常展开，文件类宏那时取不到路径就是空串。
+export function render(body: string, indent: string, vars: Record<string, string>, context: TemplateMacroContext = { path: '' }) {
   const shifted = body.split('\n').map((part, index) => {
     if (index === 0) return part
     return part.length ? indent + part : part
   }).join('\n')
   const stops: Stop[] = []
+  const matches = [...shifted.matchAll(pattern)]
+  // 上游的取值顺序在这里保持：`vars`（预定义变量表）先命中就不算宏
+  // （`TemplateStateBase.java:79-84`），剩下的槽位才交给宏表做定形迭代。
+  const slots: TemplateSlotDefinition[] = []
+  for (const match of matches) {
+    const name = match[1]!
+    if (name === 'END' || Object.prototype.hasOwnProperty.call(vars, name)) continue
+    slots.push({ name, rawDefault: match[2] ?? '' })
+  }
+  const values = resolveTemplateSlotValues(slots, vars, context)
   let text = ''
   let end = -1
-  const pattern = /\$(END|EXPR|[A-Za-z_][A-Za-z0-9_]*)(?::([^$]*))?\$/g
   let cursor = 0
-  for (const match of shifted.matchAll(pattern)) {
+  for (const match of matches) {
     text += shifted.slice(cursor, match.index)
     cursor = (match.index ?? 0) + match[0].length
     const name = match[1]!
     if (name === 'END') { end = text.length; continue }
     const known = Object.prototype.hasOwnProperty.call(vars, name)
     if (known) { text += vars[name]; continue }
-    const value = match[2] ?? ''
+    const value = Object.prototype.hasOwnProperty.call(values, name) ? values[name]! : (match[2] ?? '')
     stops.push({ start: text.length, end: text.length + value.length })
     text += value
   }
@@ -208,12 +227,13 @@ export function expand(
   const prefix = line.slice(0, caret)
   const indent = indentOf(line)
   const usable = effectiveTemplates(path, settings, plugins)
+  const macroContext: TemplateMacroContext = { path }
   const trigger = postfixAt(prefix)
   // Nothing to expand until the user has typed the key after the dot.
   if (trigger?.key) {
     const found = usable.find(entry => entry.template.postfix && entry.template.key === trigger.key)
     if (found) {
-      const result = render(found.template.body, indent, { EXPR: trigger.receiver })
+      const result = render(found.template.body, indent, { EXPR: trigger.receiver }, macroContext)
       return { start: caret - trigger.length, end: caret, ...result }
     }
   }
@@ -221,7 +241,7 @@ export function expand(
   if (!word) return null
   const found = usable.find(entry => !entry.template.postfix && entry.template.key === word[1])
   if (!found) return null
-  const result = render(found.template.body, indent, {})
+  const result = render(found.template.body, indent, {}, macroContext)
   return { start: caret - word[1]!.length, end: caret, ...result }
 }
 

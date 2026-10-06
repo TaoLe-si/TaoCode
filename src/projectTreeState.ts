@@ -10,8 +10,12 @@ export const DEFAULT_PROJECT_TREE_SETTINGS: Readonly<ProjectTreeSortSettings> = 
   autoscrollToSource: false, autoscrollFromSource: false, openInPreviewTab: false,
   // IDEA `ProjectView.CompactDirectories` 默认关（`NodeOptions.java:41-43`）。
   compactDirectories: false,
+  // IDEA `ProjectView.ShowScratchesAndConsoles` 默认**开**（`ViewSettings.java:54-56`、
+  // `ProjectViewSharedSettings.kt:28`）⇒ 缺键的旧存档仍然显示那条合成根。
+  showScratchesAndConsoles: true,
 })
-const BOOLEAN_KEYS = ['foldersAlwaysOnTop', 'autoscrollToSource', 'autoscrollFromSource', 'openInPreviewTab', 'compactDirectories'] as const
+const BOOLEAN_KEYS = ['foldersAlwaysOnTop', 'autoscrollToSource', 'autoscrollFromSource', 'openInPreviewTab',
+  'compactDirectories', 'showScratchesAndConsoles'] as const
 const hosts = new Map<string, ReturnType<typeof createHost>>()
 const prefix = 'taocode.projectView.v1:'
 /** 排序设置对象 → 宿主（`projectTreeHostFor` 用的那张反查表）。 */
@@ -43,6 +47,48 @@ export interface ProjectTreeHost {
   update: (patch: Partial<ProjectTreeSortSettings>) => void
   updateNesting: (patch: { enabled?: boolean; rules?: readonly NestingRule[] }) => void
 }
+/**
+ * 落盘形态按上游那张表整形（本轮 ptree3 核出来的形状差）：
+ *   · 上游一条 `NestingRule` = **一对**父子后缀，`equals`/`hashCode` 比的也是这一对
+ *     （`ProjectViewFileNestingService.java:110-159`，`equals` 在 `:149-153`）⇒ 同一对出现两次
+ *     只算一条（`FileNestingBuilder.java:49` 收进的是 `OrderedSet`）；
+ *   · 存储那张表是 `SortedList<>(Comparator.comparing(o -> o.getParentFileSuffix()))`
+ *     （`ProjectViewFileNestingService.java:102-103`）⇒ **父后缀升序**；
+ *     同一父内部的子次序按对话框那把 `parent + " " + child` 的比较器
+ *     （`FileNestingInProjectViewDialog.java:45-46`，本仓同一个次序在 `src/projectTreeNestingDialog.ts`）。
+ *   · 空后缀与父子相等的对不收（`FileNestingBuilder.java:58-59` 与对话框的 `doValidate`，
+ *     后者在 `src/projectTreeNestingDialog.ts` 里已经守着）。
+ * 注意这里**不做**传递规则展开：上游补规则发生在应用时（`FileNestingBuilder.getNestingRules()`），
+ * 存的那份仍是用户写的基础表。
+ */
+function normalizeNestingRules(rules: readonly NestingRule[]): NestingRule[] {
+  const pairs: Array<{ parent: string; child: string }> = []
+  const seen = new Set<string>()
+  for (const rule of rules) {
+    if (!rule || !rule.parent) continue
+    for (const child of rule.children ?? []) {
+      if (!child || child === rule.parent) continue
+      const key = `${rule.parent}\u0000${child}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      pairs.push({ parent: rule.parent, child })
+    }
+  }
+  pairs.sort((a, b) => {
+    if (a.parent !== b.parent) return a.parent < b.parent ? -1 : 1
+    const left = `${a.parent} ${a.child}`
+    const right = `${b.parent} ${b.child}`
+    return left < right ? -1 : left > right ? 1 : 0
+  })
+  const grouped = new Map<string, string[]>()
+  for (const { parent, child } of pairs) {
+    const list = grouped.get(parent)
+    if (list) list.push(child)
+    else grouped.set(parent, [child])
+  }
+  return [...grouped.entries()].map(([parent, children]) => ({ parent, children }))
+}
+
 /** 存档里的规则行要真的是 `{parent, children}` 才收下，坏行当没写（不判损坏）。 */
 function readNestingRules(raw: unknown): readonly NestingRule[] {
   if (!Array.isArray(raw)) return DEFAULT_NESTING_RULES
@@ -55,7 +101,7 @@ function readNestingRules(raw: unknown): readonly NestingRule[] {
     if (!list.length) continue
     rules.push({ parent, children: list })
   }
-  return rules
+  return normalizeNestingRules(rules)
 }
 function createHost(root: string): ProjectTreeHost {
   const state = reactive<ProjectTreeSortSettings>({ ...DEFAULT_PROJECT_TREE_SETTINGS })
@@ -97,7 +143,7 @@ function createHost(root: string): ProjectTreeHost {
    */
   function updateNesting(patch: { enabled?: boolean; rules?: readonly NestingRule[] }) {
     if (typeof patch.enabled === 'boolean') nesting.enabled = patch.enabled
-    if (patch.rules) nesting.rules = patch.rules.map(rule => ({ parent: rule.parent, children: [...rule.children] }))
+    if (patch.rules) nesting.rules = normalizeNestingRules(patch.rules)
     save()
   }
   const host = { state: settingsView, nesting: nestingView, status: statusView, update, updateNesting }

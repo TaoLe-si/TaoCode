@@ -38,7 +38,12 @@ std::size_t write_archive(const std::filesystem::path& target, const std::vector
 /** 同上，但条目内容来自内存（导出设置用）。 */
 std::size_t write_archive(const std::filesystem::path& target, const std::vector<MemoryEntry>& entries);
 
-/** 读回 zip 里的全部条目（name → 原始字节）。用于测试与校验。 */
+/**
+ * 读回 zip 里的全部条目（name → 原始字节）。用于测试与校验，也是「导入设置归档」的读取口。
+ * 只支持 **store（方法 0）**：条目不是 store、或加了密、或把大小写在数据之后（流式打包）时
+ * **抛错说清是哪一种**，绝不把压缩字节当内容吐出去 —— 否则调用方（settings_transfer）报出来的
+ * 是「设置不是合法的 JSON」，把真原因盖掉。本仓的 writer 只写 store，所以自己的包永远读得出。
+ */
 std::vector<std::pair<std::string, std::string>> read_archive(const std::filesystem::path& archive);
 
 /** CRC-32（IEEE 802.3，ZIP 用的那个多项式）。单独暴露出来便于单测。 */

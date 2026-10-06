@@ -55,6 +55,7 @@ import {
   type LspWidgetItem,
   type LspWidgetFacts,
 } from './lsFeaturesWidget.ts'
+import { clearAllLspCaches } from './lspPerFileCache.ts'
 
 /** 一条 `lsp.open` / `lsp.request status` 回包（宿主形状，见 `src/bridge.ts` 的 `LspOpenResult`）。 */
 export type LspSessionReply = unknown
@@ -151,9 +152,15 @@ export function lspStateForFile(path: string): LspServerState | undefined {
 /**
  * 停机/重启那一轮之后把表清干净（上游 `LspClientManagerImpl` 换一批客户端对象）。
  * 不清的话 `canTransitionLspState` 的终态闸会拒掉新会话的第一份状态（`lsSessionState.ts:208`）。
+ *
+ * 顺手把 LSP 缓存整批作废：上游每一台客户端**自带一份**缓存注册表
+ * （`LspClientImpl.kt:106`），换客户端 = 旧缓存跟着对象一起没了；本仓的缓存在前端活得更久，
+ * 所以这里显式做一次 `clearAllLspCaches()`（`src/lspPerFileCache.ts` 的注册表），
+ * 否则「服务器卡死→重启」之后结构视图/语义高亮还会端着旧进程给的结果不放。
  */
 export function resetLspSession(language?: string): void {
   advanceLspStartRequestStamp()
+  clearAllLspCaches()
   if (language) { delete lspSessionStates[language]; statusByLanguage.delete(language); return }
   for (const key of Object.keys(lspSessionStates)) delete lspSessionStates[key]
   statusByLanguage.clear()

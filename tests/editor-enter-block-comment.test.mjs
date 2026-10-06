@@ -111,17 +111,28 @@ test('没有块注释词法的语言（py 只有 #）一律返回 null', () => {
 })
 
 // ── 接线：enterHandlers 的命令必须真的问这一条，CodeEditor.vue 必须把块注释词法喂进来 ──────
-test('smartEnterCommand 接上了块注释那一步（顺序：行注释 → 块注释 → 字面量 → 未配对右括号）', () => {
+test('smartEnterCommand 接上了块注释那一步（有效次序：字面量 → 行注释 → 左花括号 → 块注释）', () => {
   const source = readFileSync(join(root, 'src/enterHandlers.ts'), 'utf8')
   assert.match(source, /from '\.\/editorEnterBlockComment\.ts'/, '没接上块注释模块')
-  assert.match(source, /enterInBlockComment\(doc\.toString\(\), selection\.head, block\)/, '命令里没有真的问块注释')
-  const command = source.slice(source.indexOf('export function smartEnterCommand'))
-  const lineStep = command.indexOf('enterInLineComment(lineText')
-  const blockStep = command.indexOf('enterInBlockComment(doc')
-  const stringStep = command.indexOf('enterInStringLiteral(lineText')
-  const braceStep = command.indexOf('enterAfterUnmatchedBrace(')
-  assert.ok(lineStep < blockStep && blockStep < stringStep && stringStep < braceStep,
-    '四条的先后次序变了：注释两条要排在字面量之前（见文件头的理由）')
+  // 订正（2026-10-06）：这一条原本钉的是「行注释 → 块注释 → 字面量 → 未配对右括号」，那是上一任为了
+  // 绕开「行注释里的引号被字面量那条误切」而调的次序 —— 拿问法次序顶了词法的班。上游那张表
+  // （`platform/lang-impl/resources/intellij.platform.lang.impl.xml`）排完序的有效次序是
+  // `:1159` 字面量 → `:1160` 行注释 → `:1163-1164` 左花括号 → `:1161-1162` 块注释（`order="last"`），
+  // 循环在 `EnterHandler.java:136-153`；区分那两件事靠的是 token 类型
+  // （`enter/EnterInStringLiteralHandler.java:116-125`、`enter/EnterInLineCommentHandler.java:97`）。
+  // 本批补了 `lexUntil` 那份词法 ⇒ 次序断言照上游改写，四条问法一条没少（下面逐条核）。
+  // 订正（2026-10-06 · edact3）：次序改成表驱动之后这四条问法从 `smartEnterCommand` 的 if 链搬进了
+  // `ENTER_IMPLS`（表在 src/enterHandlerOrder.ts），坐标也从 `docText/selection.head/lexicon` 改成
+  // `ctx.docText/ctx.head/ctx.lexicon` ⇒ 下面两条锚点跟着搬，**断言强度不变**：
+  // 「开关真的传进了 enterInBlockComment」与「四条问法一条没少、次序照上游」都还是逐字钉的。
+  assert.match(source, /enterInBlockComment\(ctx\.docText, ctx\.head, block, ctx\.lexicon\.blockCloseOnEnter \?\? true\)/,
+    '命令里没有真的问块注释，或没把 CLOSE_COMMENT_ON_ENTER（CodeInsightSettings.java:132）传进去')
+  const impls = source.slice(source.indexOf('const ENTER_IMPLS'), source.indexOf('export function applyEnterHit'))
+  const order = ['enterInStringLiteral(ctx.lineText', 'enterInLineComment(ctx.lineText',
+    'enterAfterUnmatchedBrace(ctx.docText', 'enterInBlockComment(ctx.docText'].map(step => impls.indexOf(step))
+  assert.deepEqual(order.map(at => at >= 0), [true, true, true, true], '四条问法少了一条')
+  assert.deepEqual([...order].sort((a, b) => a - b), order,
+    '次序要等于上游排完序之后的有效次序（块注释那条 order="last" ⇒ 排最后）')
 })
 
 test('Enter 键确实绑在回车家族上（上游 EditorEnter，$default.xml:800-801）', () => {
@@ -137,6 +148,11 @@ test('Enter 键确实绑在回车家族上（上游 EditorEnter，$default.xml:8
     'smartEnter 的语言工厂没走 smartEnterLanguageFor ⇒ 块注释那一半（第②步）在真实编辑器里问不到')
   const handlers = readFileSync(join(root, 'src/enterHandlers.ts'), 'utf8')
   assert.match(handlers, /export function smartEnterLanguageFor/, '装配出口被搬走了')
-  assert.match(handlers, /return \{ line: style\?\.line, block: blockLexiconFor\(style \?\? undefined\) \}/,
+  // 订正（2026-10-06）：出口原来是一行 `return { line, block }`，现在多带回连接符那一格
+  // （`EnterLanguage.stringConcat`，上游 `EnterInStringLiteralHandler.java:39-42` 的门槛），
+  // 形状从单行变成多行 ⇒ 断言只核「块注释那一半有没有被翻成 lexicon」这条实质，不核整行字面。
+  assert.match(handlers, /block: blockLexiconFor\(style \?\? undefined\)/,
     '出口没把块注释四件套翻成 lexicon')
+  assert.match(handlers, /stringConcat: language === undefined \? undefined : stringConcatFor\(language\)/,
+    '出口没把「这门语言能不能切字符串字面量」装配进来')
 })

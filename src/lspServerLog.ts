@@ -16,8 +16,12 @@
 // 前端也就无从记录）、按客户端的日志文件（`LanguageServiceLogger` 往 log 目录写文件）。
 import { ref } from 'vue'
 
-/** 日志行的来源类别（对应上游几处写入点：服务器通知、进度、会话生命周期、服务端编辑）。 */
-export type LspLogKind = 'message' | 'progress' | 'session' | 'edit'
+/** 日志行的来源类别（对应上游几处写入点：服务器通知、进度、会话生命周期、服务端编辑、
+ * 服务器要求重取（`workspace/…/refresh`，上游同样只写日志不弹通知：
+ * `LspServerNotificationsHandlerImpl.kt:341-368`））。
+ * `dropped` = 前端没有登记这条方法的处理器（`src/lspServerMessages.ts` 的注册表拦下来的那些）：
+ * 「声明了 capability 却没处理器」这一类缺陷在本仓唯一可观察的痕迹就是它，不记就等于无声丢弃。 */
+export type LspLogKind = 'message' | 'progress' | 'session' | 'edit' | 'refresh' | 'dropped'
 
 /** 严重级与 LSP `MessageType` 同口径：1 错误 / 2 警告 / 3 信息 / 4 日志。 */
 export type LspLogLevel = 1 | 2 | 3 | 4
@@ -105,10 +109,14 @@ export function appendLspLog(entry: Omit<LspLogEntry, 'at'> & { at?: number }): 
   lspLogEntries.value = appendLspLogEntry(lspLogEntries.value, { ...entry, at: entry.at ?? Date.now() })
 }
 
+/** LSP `MessageType` → 本日志的级别；认不出的值按信息（3）记，不凭空升级为错误。 */
+export function lspLogLevelOf(severity: number): LspLogLevel {
+  return severity === 1 || severity === 2 ? severity : severity === 4 ? 4 : 3
+}
+
 /** 服务器自己发的消息（`window/showMessage`，bridge 整形成 `{language, severity, message}` 后进表）。 */
 export function logLspServerMessage(message: { language: string; severity: number; message: string }): void {
-  const severity = message.severity === 1 || message.severity === 2 ? message.severity : message.severity === 4 ? 4 : 3
-  appendLspLog({ language: message.language, kind: 'message', level: severity, text: message.message })
+  appendLspLog({ language: message.language, kind: 'message', level: lspLogLevelOf(message.severity), text: message.message })
 }
 
 /** 进度三态（begin/report/end）与会话停止 —— 只记**状态变化**，report 不逐拍刷屏。 */

@@ -3,8 +3,12 @@
 // （使用点 `platform/lang-impl/src/com/intellij/codeInsight/completion/actions/HippieWordCompletionHandler.java:271-278`：
 // 循环词补全第一轮在当前文档里走完，就换到**别的已打开文本编辑器**里接着找词；
 // `:274` 那条 `anotherEditor != editor` 就是"排除自己"的判据 —— 上游按编辑器对象身份排除，
-// 本仓按"正文与当前文档相同"排除**第一条**命中的（编辑器扩展里拿不到 `props.path`，
-// 那张表在 `App.vue` 的 `editorRefs`/`groups` 上 —— 见 `docs/wiring-requests-2026-10-06-bucket2c.md` 的 W2）。
+// 本仓按"正文与当前文档相同"排除**第一条**命中的（编辑器扩展里拿不到自己的路径）。
+//
+// 2026-10-06 订正（留痕）：本文件原写着「生产者只能挂在补全查询上、宿主登记待接 = 接线请求 W2」，
+// **实际 W2 已经落地**：`src/App.vue:134` 引入这三个导出、`:183` 在编辑器挂载时 `registerOpenEditor`、
+// `:187` 关标签时 `unregisterOpenEditor`、`:201`（`closeAllPanes`）换工程/关全部时 `clearOpenEditors`。
+// `src/lspCompletion.ts` 里那份登记保留，作为宿主之外的兜底（同一张表、按 path 覆盖，不会重复）。
 //
 // 上游 `getAllEditors()` 的顺序是工具窗口里内容编辑器的顺序；本仓用 Map 的**插入顺序**
 // （= tab 打开顺序），与上游 `LspOpenedFilesService` 那张 `LinkedHashMap` 同一口径
@@ -44,18 +48,24 @@ export function openEditorPaths(): string[] {
 
 /**
  * 「除我以外的打开文档」：`selfText` 是当前编辑器正文，第一条与它相同的条目被当成"自己"跳过。
- * 正文取不到（编辑器已卸载、句柄失效）或抛错的条目**当场清掉** —— 上游那条循环里非 `TextEditor`
- * 的编辑器（`instanceof TextEditor textEditor`，`:272`）本来就不参与，本仓的生产者
- * （`src/lspCompletion.ts` 每次补全查询登记自己）也没有关标签的时机，所以死句柄在**被看见的那一次**
- * 就摘掉，不让它一直占着已卸载的组件作用域。空正文（空文件 / 已卸载）同样不入表。
+ * 上游那条循环只**读** `getAllEditors()`（`HippieWordCompletionHandler.java:271-278`），
+ * 不会把任何一个编辑器从这张表里摘掉 —— 摘掉只有关标签那一条路（`unregisterOpenEditor`，
+ * 宿主在 `src/App.vue:187` 调）。所以本函数遇到**正文取不到 / 抛错 / 空正文**的条目时
+ * **跳过但保留登记**：
+ *   · 空正文可能就是空文件（上游照样把它算作"打开的编辑器"，只是贡献不出词）；
+ *   · 宿主只在编辑器挂载那一刻登记一次（`src/App.vue:183`），此刻 CodeMirror 的 view
+ *     可能还没建好 ⇒ 正文暂时是空串。当场摘掉 = 这个标签**永远**离开这张表
+ *     （补全查询只替**当前**标签兜底重新登记），跨文档那一档就少一个候选来源。
+ * 2026-10-06 订正（留痕）：这里原先是"当场清掉"，理由是"生产者只有补全查询、没有关标签的时机" ——
+ * 那个前提随着宿主登记（接线请求 W2）落地已经不成立，判据 `tests/completion-open-editors.test.mjs`。
  */
 export function otherOpenEditorTexts(selfText: string): HippieDocument[] {
   const documents: HippieDocument[] = []
   let skippedSelf = false
   for (const [path, read] of openEditors) {
     let text = ''
-    try { text = read() } catch { openEditors.delete(path); continue }
-    if (!text) { openEditors.delete(path); continue }
+    try { text = read() } catch { continue }
+    if (!text) continue
     if (!skippedSelf && text === selfText) { skippedSelf = true; continue }
     documents.push({ path, text })
   }

@@ -3,15 +3,27 @@
 // never disagree about what a change looks like. Data comes from the parent: the rows
 // are already aligned natively, and `unified` is the same diff in patch form.
 //
+// `unified`（补丁文本）的**真消费者**是工具带上的「作为补丁复制到剪贴板」（见下面的 `copyPatch`）
+// 与「没有差异行只剩补丁文本」时的那块 `pre`。上游这一档就挂在差异查看器里：
+// `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/actions/diff/DiffViewerCreatePatchActionProvider.java:55-59`
+// （`$Clipboard` 那一支）→ `CreatePatchFromChangesAction.java:182-200`（`createIntoClipboard`，不弹对话框）
+// → `PatchWriter.java:104-111`（`CopyPasteManager.setContents(new StringSelection(补丁全文))`）。
+// 上游那里还有一条与本仓「不放假控件」同源的规矩：`DiffViewerCreatePatchActionProvider.java:71-76`
+// 的 `update()` 用的是 `setEnabledAndVisible(isEnabled)` —— 拿不到补丁文本时那一项**根本不出现**。
+//
 // 两个档位（上游 `TextDiffSettingsHolder.PlaceSettings` 的 `IGNORE_POLICY` + `HIGHLIGHT_POLICY`）：
 //   · 只有父级给了 `leftText`/`rightText`（原始两段文本）时才渲染选择器 —— 那种情况下本组件
 //     自己用 `buildDiffRows` 重算，档位才有真实消费者。native 对齐好的差异（Git 变更视图、
 //     本地历史）拿不到原始文本，选择器**不渲染**（不放假控件）。
 //   · 默认值取上游默认：`IgnorePolicy.DEFAULT`（＝「无」，尾随空格算不同）+ `HighlightPolicy.BY_WORD`。
 import { computed, nextTick, ref, watch } from 'vue'
-import { CaseSensitive, ChevronDown, ChevronRight, ChevronUp, Regex, Search, TextSelect, WholeWord, X } from 'lucide-vue-next'
+import { CaseSensitive, ChevronDown, ChevronRight, ChevronUp, Copy, Regex, Search, TextSelect, WholeWord, X } from 'lucide-vue-next'
 import type { DiffRow } from '../bridge'
 import { iconSize } from '../uiIcons'
+import { copyToClipboard } from '../clipboard'
+// 补丁导出的那条线与文案都在 `src/patchExport.ts`（上游同一个动作 id `ChangesView.CreatePatchToClipboard`）：
+// 这里只取它的**文案常量**，不调它那两个走宿主的函数 —— 差异视图手里的补丁文本已经在 `props.unified` 里。
+import { PATCH_TO_CLIPBOARD_TEXT } from '../patchExport'
 import { buildDiffRows } from '../diffText'
 import { COMPARISON_POLICY_GROUP, COMPARISON_POLICY_LABELS, DEFAULT_COMPARISON_POLICY, type ComparisonPolicy } from '../diffComparison'
 import { DEFAULT_HIGHLIGHT_POLICY, type HighlightPolicy } from '../diffWords'
@@ -19,6 +31,10 @@ import {
   COLLAPSE_UNCHANGED_TEXT, CONTEXT_RANGE_DISABLED, CONTEXT_RANGE_LABELS, CONTEXT_RANGE_MODES, DEFAULT_CONTEXT_RANGE,
   FOLD_GROUP_LABEL, allFoldKeys, diffFolds, foldCanStepDeep, foldKey, foldLabel, foldRows,
 } from '../diffFold'
+import {
+  buildUnifiedRows, foldUnifiedRows, unifiedBlockStart, unifiedFoldCanStepDeep,
+  unifiedFolds, unifiedSign, type UnifiedRow,
+} from '../diffUnified'
 import { canGoNext, canGoPrev, changeBlocks, goNext, goPrev } from '../diffNavigation'
 import { buildSearchRegex, findStatusText } from '../editorSearch'
 import {
@@ -97,7 +113,7 @@ const allCollapsed = computed(() => {
   const keys = allFoldKeys(effectiveRows.value, contextRange.value)
   return keys.length > 0 && keys.every(key => collapsed.value.has(key) && !(foldLevels.value.get(key) ?? 0))
 })
-function toggleAll() {
+function toggleAllSides() {
   foldLevels.value = new Map()
   collapsed.value = allCollapsed.value ? new Set() : new Set(allFoldKeys(effectiveRows.value, contextRange.value))
 }
@@ -126,6 +142,52 @@ watch(contextRange, () => { foldLevels.value = new Map(); collapsed.value = new 
 // 差异换了（新文件 / 换了档位重算）就把折叠状态清掉：行的下标不再指同一批行。
 watch(effectiveRows, () => { foldLevels.value = new Map(); collapsed.value = new Set() })
 
+// 统一（unified）档的行表与它的块级折叠（上游 `tools/fragmented/` 那一族，见 `src/diffUnified.ts` 文件头）。
+// 折叠状态**两侧分开存**：并排视图的段落起点与统一视图的段落起点不是同一套坐标，
+// 共用一个集合会把另一侧的段落收起（上游那里也是两个不同的 FoldingModel 实例）。
+const unifiedRows = computed(() => buildUnifiedRows(effectiveRows.value))
+const collapsedUnified = ref<Set<number>>(new Set())
+const foldLevelsUnified = ref<Map<number, number>>(new Map())
+const unifiedItems = computed(() => foldUnifiedRows(unifiedRows.value, contextRange.value, collapsedUnified.value, foldLevelsUnified.value))
+/** 统一视图里当前这一处折叠的层数与是否到底（与并排视图同一套语义）。 */
+const allCollapsedUnified = computed(() => {
+  const folds = unifiedFolds(unifiedRows.value, contextRange.value)
+  return folds.length > 0 && folds.every(fold => collapsedUnified.value.has(fold.runStart) && !(foldLevelsUnified.value.get(fold.runStart) ?? 0))
+})
+function toggleAllUnified() {
+  foldLevelsUnified.value = new Map()
+  collapsedUnified.value = allCollapsedUnified.value ? new Set() : new Set(unifiedFolds(unifiedRows.value, contextRange.value).map(fold => fold.runStart))
+}
+function toggleFoldUnified(key: number) {
+  const next = new Set(collapsedUnified.value)
+  if (!next.has(key)) { next.add(key); collapsedUnified.value = next; return }
+  const level = foldLevelsUnified.value.get(key) ?? 0
+  if (unifiedFoldCanStepDeep(key, contextRange.value, unifiedRows.value, level)) {
+    const levels = new Map(foldLevelsUnified.value)
+    levels.set(key, level + 1)
+    foldLevelsUnified.value = levels
+    return
+  }
+  next.delete(key)
+  collapsedUnified.value = next
+  const levels = new Map(foldLevelsUnified.value)
+  levels.delete(key)
+  foldLevelsUnified.value = levels
+}
+/** 统一视图折叠行的行号 = 该段第一条被藏起来的行的**左侧**行号（新增行没有左侧号，落到右侧）。 */
+function hiddenUnifiedLine(fold: { hiddenFrom: number }): number | '' {
+  const row = unifiedRows.value[fold.hiddenFrom]
+  if (!row) return ''
+  return row.leftNo ?? row.rightNo ?? ''
+}
+watch(contextRange, () => { foldLevelsUnified.value = new Map(); collapsedUnified.value = new Set() })
+watch(unifiedRows, () => { foldLevelsUnified.value = new Map(); collapsedUnified.value = new Set() })
+/** 工具带那个开关按当前档位走（并排 ↔ 统一）；「折叠全部」的选中态也按当前档位判。 */
+const allCollapsedNow = computed(() => mode.value === 'unified' ? allCollapsedUnified.value : allCollapsed.value)
+function toggleAll() {
+  if (mode.value === 'unified') toggleAllUnified(); else toggleAllSides()
+}
+
 // 差异导航（上游 `PrevNextDifferenceIterableBase.java:46-96` 的 canGoNext / canGoPrev，纯逻辑在
 // `src/diffNavigation.ts`）。锚点 = 上一次跳到的差异行，-1 = 还没起步；上游语义是**不走回头路**，
 // 所以按钮在两端是禁用的（不是回绕）。
@@ -145,12 +207,28 @@ const rowEls = new WeakMap<DiffRow, HTMLElement>()
 function setRowEl(row: DiffRow, el: unknown) {
   if (el instanceof HTMLElement) rowEls.set(row, el)
 }
+// 统一档同一条规矩，只是键在统一行对象上（`blocks` 的序号与 `unifiedRows` 的 `block` 一一对应：
+// 两边都是「相邻非 equal 行合成一块」，顺序也一致 —— 上游那里是同一个 `UnifiedDiffChange` 列表）。
+const unifiedEls = new WeakMap<UnifiedRow, HTMLElement>()
+function setUnifiedEl(row: UnifiedRow, el: unknown) {
+  if (el instanceof HTMLElement) unifiedEls.set(row, el)
+}
+/** 当前差异块在统一档里的高亮判据（整块 = 删行 + 增行，与上游 `getDeletedRange` + `getInsertedRange` 同一段）。 */
+function unifiedActive(row: UnifiedRow): boolean {
+  return row.block !== -1 && row.block === activeBlock.value
+}
 function goToChange(forward: boolean) {
   const list = blocks.value
   const block = forward ? goNext(list, changeAnchor.value) : goPrev(list, changeAnchor.value)
   if (!block) return
   changeAnchor.value = block.start
   activeBlock.value = list.indexOf(block)
+  if (mode.value === 'unified') {
+    const at = unifiedBlockStart(unifiedRows.value, activeBlock.value)
+    const row = at >= 0 ? unifiedRows.value[at] : undefined
+    if (row) void nextTick(() => unifiedEls.get(row)?.scrollIntoView({ block: 'center' }))
+    return
+  }
   void nextTick(() => rowEls.get(effectiveRows.value[block.start])?.scrollIntoView({ block: 'center' }))
 }
 watch(effectiveRows, () => { changeAnchor.value = -1; activeBlock.value = -1 })
@@ -169,6 +247,22 @@ function pieces(cell: DiffRow['left'], side: 'left' | 'right', rowIndex: number,
     })
   }
   return highlightPieces(cell.text, wordMarks, hits)
+}
+
+/**
+ * 统一档一行的分片：词级标记就是这一行自带的 `marks`（删除行取并排视图的 `leftMarks`、
+ * 新增行取 `rightMarks`，见 `src/diffUnified.ts`）；查找命中按并排视图的「行 + 侧」换算过来 ——
+ * 统一文档里一个并排改动行可能拆成删/增两行，各吃各的那一侧命中。
+ */
+function unifiedPieces(row: UnifiedRow) {
+  const side = row.kind === 'insert' ? 'right' : row.kind === 'delete' ? 'left' : null
+  const hits: { from: number; to: number; current: boolean }[] = []
+  if (side && searchOpen.value && searchQuery.value) {
+    searchMatches.value.forEach((match, index) => {
+      if (match.row === row.source && match.side === side) hits.push({ from: match.from, to: match.to, current: index === searchIndex.value })
+    })
+  }
+  return highlightPieces(row.text, row.marks, hits)
 }
 
 // ── 差异视图内的查找（见 src/diffSearch.ts 文件头与 §上游出处）───────────────────────────
@@ -233,6 +327,37 @@ watch(searchQuery, () => { searchIndex.value = -1 })
 watch(searchOptions, () => { searchIndex.value = -1 }, { deep: true })
 watch(effectiveRows, () => { searchIndex.value = -1 })
 function onEscape() { if (searchOpen.value) closeSearch() }
+
+// ── 补丁文本（`props.unified`）的消费者：「作为补丁复制到剪贴板」────────────────────────
+// 上游这一档就挂在差异查看器上：`ChangesView.CreatePatchToClipboard`
+// （`platform/vcs-impl/resources/META-INF/VcsActions.xml:213-214`，class 是
+// `CreatePatchFromChangesAction$Clipboard`），差异查看器里的那一支是
+// `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/actions/diff/DiffViewerCreatePatchActionProvider.java:55-59`
+// （`$Clipboard`；`isActive` 只认差异查看器里的请求，`:67-69`）。
+// 走的路径不弹对话框：`CreatePatchFromChangesAction.java:182-200` 的 `createIntoClipboard`
+// → `CreatePatchCommitExecutor.java:343-355` 的 `writePatchToClipboard`
+// → `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/PatchWriter.java:104-111`
+// 的 `CopyPasteManager.setContents(new StringSelection(补丁全文))` —— 复制的就是那份 unified 文本本身。
+// 本仓的对应出口是 `src/clipboard.ts` 的 `copyToClipboard`（系统剪贴板 + 剪贴板环，同一个中央入口）。
+// 按钮文案直接用 `src/patchExport.ts:21` 的 `PATCH_TO_CLIPBOARD_TEXT`
+// （= `action.ChangesView.CreatePatchToClipboard.text`，`ActionsBundle.properties:1583`），
+// 与变更视图右键那两条同源，不在这里另抄一份中文。
+/** 成功那一句（上游 `VcsBundle.properties:447` `patch.copied.to.clipboard`；本地树没有中文包 ⇒ 按英文原文直译）。 */
+const PATCH_COPIED_TEXT = '补丁已复制到剪贴板。'
+/** 补丁文本 = 父级给的那一份（前端侧由 `src/diffText.ts` 的 `generateUnifiedDiff` 生成，宿主侧是 `git diff`）；纯空白视作没有。 */
+const patchText = computed(() => (props.unified.trim() ? props.unified : ''))
+/** 上游 `DiffViewerCreatePatchActionProvider.java:71-76` 用的是 `setEnabledAndVisible` —— 没有补丁文本时那颗按钮**不出现**。 */
+const canCopyPatch = computed(() => patchText.value !== '')
+const patchCopied = ref(false)
+async function copyPatch() {
+  const text = patchText.value
+  // 空补丁不动剪贴板（与 `src/patchExport.ts` 的 `copyPatchToClipboard` 同口径）。
+  if (!text) return
+  await copyToClipboard(text)
+  patchCopied.value = true
+}
+// 换了差异（另一个文件 / 另一份冲突预览）就把那句提示撤掉，否则它说的是上一份补丁。
+watch(() => props.unified, () => { patchCopied.value = false })
 </script>
 
 <template>
@@ -287,6 +412,12 @@ function onEscape() { if (searchOpen.value) closeSearch() }
         <button :class="{ selected: mode === 'sides' }" @click="mode = 'sides'">并排</button>
         <button :class="{ selected: mode === 'unified' }" @click="mode = 'unified'">统一</button>
       </div>
+      <!-- 「作为补丁复制到剪贴板」（上游 `ChangesView.CreatePatchToClipboard` 在差异查看器里的那一支
+           `DiffViewerCreatePatchActionProvider$Clipboard`）：`props.unified` 那份补丁文本的出口。
+           没有补丁文本就不出现（上游 `:71-76` 的 `setEnabledAndVisible`）。 -->
+      <button v-if="canCopyPatch" class="find-icon-button" type="button" :title="PATCH_TO_CLIPBOARD_TEXT"
+              :aria-label="PATCH_TO_CLIPBOARD_TEXT" @click="copyPatch"><Copy :size="iconSize.control" /></button>
+      <span v-if="patchCopied" class="diff-copy-state" role="status">{{ PATCH_COPIED_TEXT }}</span>
       <!-- 折叠未更改的片段（上游 `TextDiffViewerUtil.ToggleExpandByDefaultAction`）：上下文范围 = 禁用时
            整个控件不出现（`TextDiffViewerUtil.java:455`）。 -->
       <div v-if="foldsEnabled" class="diff-folds" role="group" :aria-label="FOLD_GROUP_LABEL">
@@ -296,8 +427,8 @@ function onEscape() { if (searchOpen.value) closeSearch() }
             <option v-for="value in CONTEXT_RANGE_MODES" :key="value" :value="value">{{ CONTEXT_RANGE_LABELS[value] ?? value }}</option>
           </select>
         </label>
-        <button class="diff-fold-toggle" :class="{ selected: allCollapsed }" :title="COLLAPSE_UNCHANGED_TEXT" @click="toggleAll">
-          <ChevronRight v-if="allCollapsed" :size="iconSize.control" />
+        <button class="diff-fold-toggle" type="button" :class="{ selected: allCollapsedNow }" :title="COLLAPSE_UNCHANGED_TEXT" @click="toggleAll">
+          <ChevronRight v-if="allCollapsedNow" :size="iconSize.control" />
           <ChevronDown v-else :size="iconSize.control" />
           <span>{{ COLLAPSE_UNCHANGED_TEXT }}</span>
         </button>
@@ -322,8 +453,27 @@ function onEscape() { if (searchOpen.value) closeSearch() }
         </div>
       </template>
     </div>
-    <!-- Both the unified patch and the "nothing to show" fallback need pre-formatted
-         text: a <p> would collapse the patch's newlines and indentation. -->
+    <!-- 统一（unified）档：一列到底的行表 + 与并排档同一套**块级**折叠（上游 `tools/fragmented` 那一族，
+         规则见 `src/diffUnified.ts` 文件头）。左号 = 原文件行、右号 = 新文件行；
+         删除行没有右号、新增行没有左号（上游 `LineNumberConvertor.convert` 换算不到返回 -1，这里留空）。 -->
+    <div v-else-if="effectiveRows.length" class="diff-unified">
+      <template v-for="(item, index) in unifiedItems" :key="index">
+        <button v-if="item.kind === 'fold'" class="diff-fold-row diff-unified-fold" type="button"
+                :title="foldTitle(item)" :aria-label="foldTitle(item)" @click="toggleFoldUnified(foldKey(item.fold))">
+          <span class="diff-no">{{ hiddenUnifiedLine(item.fold) }}</span>
+          <span class="diff-no" />
+          <span class="diff-fold-label diff-unified-label">{{ foldLabel(item.hidden) }}</span>
+        </button>
+        <div v-else class="diff-unified-line" :class="[`unified-${item.row.kind}`, { 'diff-active': unifiedActive(item.row) }]" :ref="el => setUnifiedEl(item.row, el)">
+          <span class="diff-no">{{ item.row.leftNo ?? '' }}</span>
+          <span class="diff-no">{{ item.row.rightNo ?? '' }}</span>
+          <span class="diff-unified-sign">{{ unifiedSign(item.row.kind) }}</span>
+          <span class="diff-cell"><span v-for="(piece, i) in unifiedPieces(item.row)" :key="i" :class="{ 'diff-word-del': piece.word && item.row.kind !== 'insert', 'diff-word-add': piece.word && item.row.kind === 'insert', 'diff-find-hit': piece.search, 'diff-find-current': piece.current }">{{ piece.text }}</span></span>
+        </div>
+      </template>
+    </div>
+    <!-- 只剩补丁文本的场合（rows 为空）与「无差异」兜底仍走 pre：
+         a <p> would collapse the patch's newlines and indentation. -->
     <pre v-else class="diff-body">{{ unified || '（无差异）' }}</pre>
   </div>
 </template>
@@ -348,6 +498,10 @@ function onEscape() { if (searchOpen.value) closeSearch() }
 .diff-folds { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .diff-nav { display: inline-flex; align-items: center; gap: var(--space-1); }
 .diff-nav button:disabled { opacity: .4; cursor: default; }
+/* 复制补丁的那句结果提示（上游是 `VcsNotifier.notifySuccess(patch.copied.to.clipboard)`，
+   `platform/vcs-impl/src/com/intellij/openapi/vcs/changes/patch/CreatePatchCommitExecutor.java:353-354`；
+   差异视图没有通知通道，就在工具带上说一句）。 */
+.diff-copy-state { color: var(--success); font: 11px var(--font-ui); white-space: nowrap; }
 /* 差异视图内的查找行（与查找栏同高同一档控件）。 */
 .diff-search { display: inline-flex; align-items: center; gap: var(--space-1); }
 .diff-search-input { width: 120px; height: var(--ctrl-height-sm); padding: 0 var(--space-2); color: var(--text); background: var(--editor); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); font: 11px var(--font-ui); }
@@ -366,4 +520,16 @@ function onEscape() { if (searchOpen.value) closeSearch() }
 .diff-fold-row:hover { background: var(--hover); color: var(--bright); }
 .diff-fold-row .diff-no, .diff-fold-row .diff-cell { background: var(--panel); border-bottom: 1px dashed var(--line-strong); }
 .diff-fold-label { grid-column: 2 / 4; min-width: 0; padding: 0 var(--space-2); border-bottom: 1px dashed var(--line-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 统一（unified）档：一列到底 —— 左侧行号 / 右侧行号 / `+`·`-` 符号列 / 正文。
+   上游那里是一个真编辑器（`UnifiedDiffViewer`），行号由两个 `LineNumberConvertor` 换算；
+   本仓由并排行表机械换算（`src/diffUnified.ts`），换算不到那一侧就留空行号。 */
+.diff-unified { flex: 1; min-height: 0; overflow: auto; font: 12px/1.7 var(--font-mono); }
+.diff-unified-line { display: grid; grid-template-columns: 46px 46px 16px minmax(0, 1fr); align-items: start; }
+.diff-unified-sign { padding: 0 var(--space-1); color: var(--muted); text-align: center; user-select: none; }
+.diff-unified-line.unified-delete > .diff-cell { background: var(--error-bg); }
+.diff-unified-line.unified-insert > .diff-cell { background: var(--success-bg); }
+.diff-unified-line.diff-active > .diff-cell { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* 统一档的折叠行沿用并排档那一条标记，只把栅格换成四列、标签跨过符号列与正文列。 */
+.diff-unified-fold { grid-template-columns: 46px 46px 16px minmax(0, 1fr); }
+.diff-unified-fold .diff-unified-label { grid-column: 3 / 5; }
 </style>

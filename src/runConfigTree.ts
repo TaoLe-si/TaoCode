@@ -10,15 +10,21 @@
 // 抽成纯函数的原因：树的分组规则（类型 → 文件夹 → 配置）、唯一名、文件夹名校验都是可测逻辑，
 // 组件只负责渲染与交互。
 import { stableRunConfig, type RuntimeRunConfig as RunConfig } from './runTargets.ts'
-import { normalizeRunConfigurations } from './runConfigurationSchema.ts'
+import { normalizeRunConfigurations, RUN_CONFIG_TYPE_IDS } from './runConfigurationSchema.ts'
 
-/** IDEA 的 ConfigurationType 在 TaoCode 的三个对应物（标签沿用面板里的中文名）。 */
-export const RUN_CONFIG_TYPES: Array<{ id: NonNullable<RunConfig['type']>; label: string }> = [
-  { id: 'shell', label: 'Shell 命令' },
-  { id: 'application', label: '应用程序' },
-  { id: 'debug', label: '调试' },
-  { id: 'compound', label: '复合配置' },
-]
+/** IDEA 的 ConfigurationType 在 TaoCode 的对应物（标签沿用面板里的中文名）。
+ *  id 清单只有一份（`runConfigurationSchema.ts` 的 `RUN_CONFIG_TYPE_IDS`），这里只给中文名；
+ *  `Record<NonNullable<RunConfig['type']>, string>` 是**穷尽**的 ⇒ 联合里加类型就必须在这里补标签，
+ *  否则编译不过（与 `RUN_CONFIG_EDITORS` 同一约束）。 */
+const RUN_CONFIG_TYPE_LABELS: Record<NonNullable<RunConfig['type']>, string> = {
+  shell: 'Shell 命令',
+  application: '应用程序',
+  debug: '调试',
+  compound: '复合配置',
+}
+
+export const RUN_CONFIG_TYPES: Array<{ id: NonNullable<RunConfig['type']>; label: string }> =
+  RUN_CONFIG_TYPE_IDS.map(id => ({ id, label: RUN_CONFIG_TYPE_LABELS[id] }))
 
 /** 参数字段必须可逆（IDEA ParametersListUtil.join/parse），不能用空格 split 破坏 classpath。
  * TaoCode 运行在 Windows：这里与 run_host 的 CRT 双引号/反斜杠规则对应，不执行 shell 展开。

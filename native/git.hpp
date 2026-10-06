@@ -52,9 +52,17 @@ void unstage(const std::filesystem::path& repo, const std::string& path);
 // `author_name`/`author_email` override the commit author for this commit only
 // (git commit --author=…), which is IDEA's CommitAuthorComponent editor; both empty
 // means "use the repository configuration".
+// `paths` is IDEA's "Commit File…" subset (`CommonCheckinFilesAction.kt:26-78` →
+// `CheckinActionUtil.kt:100-160`, `pathsToCommit`): non-empty means ONLY these paths go
+// into this commit. It lands on `git commit --only -- <paths>`, so the index entries of
+// the other files stay staged and untouched. Untracked selections are `git add`ed first
+// (git refuses a `--only` pathspec for a file it does not know, while the upstream
+// subset does include untracked changes). Empty = the whole-index commit, i.e. the exact
+// command line this file produced before the parameter existed.
 void commit(const std::filesystem::path& repo, const std::string& message, bool amend = false,
             bool signoff = false, const std::string& author_name = std::string(),
-            const std::string& author_email = std::string());
+            const std::string& author_email = std::string(),
+            const std::vector<std::string>& paths = std::vector<std::string>());
 // The repository's configured author, read from `git config --get user.name` /
 // `user.email`. Shapes {name, email}; either may be empty when unset.
 Json user(const std::filesystem::path& repo);

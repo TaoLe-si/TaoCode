@@ -243,6 +243,57 @@ int main() {
         check(written[1].at("id") == "server-string-id" && written[1].at("error").at("code") == -32601, "unknown method preserves the id type and gets MethodNotFound");
     });
 
+    run("服务器主动的四条各有处置：logMessage 转出去、showMessageRequest 与 refresh 答对回包", [&] {
+        // 上游逐条（platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt）：
+        //   · `:396-404` logMessage —— 写进语言服务日志（只有 Error/Warning 另弹通知），
+        //     与 `:385-390` 的 showMessage 是**两种处置**，所以转出去时必须分得清是哪一条；
+        //   · `:377-383` showMessageRequest —— 返回 MessageActionItem 或 null（用户没点）；
+        //   · `:341-368` 五条 `workspace/…refresh`（含只答 null 的 inlineValue）—— 返回类型是 void。
+        // 本仓没有的那一层（`workspace/documentContent/refresh` 的动态文档内容，`:369-375`）
+        // 照旧回 MethodNotFound：不为做不到的事回一个"支持"。
+        Harness h;
+        std::vector<Json> messages;
+        h.client.on_server_message([&](Json params) { messages.push_back(std::move(params)); });
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"method", "window/logMessage"},
+                          {"params", {{"type", 4}, {"message", "indexing 12 of 30"}}}});
+        check(messages.size() == 1, "logMessage 不再被丢弃，要交给服务器消息这条出口");
+        check(messages[0].at("message") == "indexing 12 of 30" && messages[0].at("type") == 4,
+              "参数原样带出来");
+        check(messages[0].at("method") == "window/logMessage", "必须带得清这是 logMessage 而不是 showMessage");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"method", "window/showMessage"},
+                          {"params", {{"type", 2}, {"message", "import failed"}}}});
+        check(messages.size() == 2 && messages[1].at("method") == "window/showMessage",
+              "showMessage 也带 method，前端按同一张表分派");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 91}, {"method", "window/showMessageRequest"},
+                          {"params", {{"type", 2}, {"message", "import this folder?"},
+                                      {"actions", Json::array({{{"title", "Import"}}, {{"title", "Cancel"}}})}}}});
+        check(messages.size() == 3 && messages[2].at("actions").size() == 2 &&
+                  messages[2].at("actions")[0].at("title") == "Import",
+              "选项标题要原样上来（上游把它们显示成通知上的按钮，也写进日志）");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 92}, {"method", "workspace/semanticTokens/refresh"}});
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", "refresh-string-id"}, {"method", "workspace/diagnostic/refresh"}});
+        auto written = h.drain();
+        check(written.size() == 3, "两条 refresh 与一条 showMessageRequest 各有一份回包");
+        for (const auto& response : written) {
+            check(response.contains("result") && response.at("result").is_null() && !response.contains("error"),
+                  "这三条协议的返回类型都是 void / 可以返回 null：答 null，不能再回 MethodNotFound");
+        }
+        check(written[2].at("id") == "refresh-string-id", "字符串 id 也要按原类型回");
+        check(messages.size() == 5, "两条 refresh 也转出去了（前端据此作废 LSP 缓存）");
+        check(messages[3].at("method") == "workspace/semanticTokens/refresh" &&
+                  messages[4].at("method") == "workspace/diagnostic/refresh",
+              "refresh 带的是自己那条方法名，前端才分得清是哪一族过期了");
+
+        h.client.receive({{"jsonrpc", "2.0"}, {"id", 93}, {"method", "workspace/documentContent/refresh"}});
+        const auto unknown = h.drain();
+        check(unknown.size() == 1 && unknown[0].at("error").at("code") == -32601,
+              "本仓没有动态文档内容那一层 ⇒ 照旧如实回 MethodNotFound");
+    });
+
     run("workspace/configuration answers nested sections and live updates", [&] {
         Harness h;
         h.client.set_configuration({{"java", {{"project", {{"sourcePaths", Json::array({"src"})}}}}}});

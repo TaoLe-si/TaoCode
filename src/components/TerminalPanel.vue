@@ -2,10 +2,11 @@
 // 终端面板：ConPTY 窗格 + 标签 + 工具条 + 窗格右键菜单。
 //
 // 2026-10-06（桶 10b）把原先零消费方的四个纯模块接成真实链路，用户可见的那一面是：
-//   · `src/terminalTitle.ts` —— 标签文字 = `buildTerminalTitle`（重命名 > shell 标题 > 「终端 N」> Unnamed），
-//     tooltip = `buildTerminalFullTitle`（不截断、不拼 tag）；shell 的 OSC 0/2 由 xterm 的
-//     `onTitleChange` 上报，就是上游的 `TerminalApplicationTitleListener`
-//     （`platform/execution-impl/src/com/intellij/terminal/TerminalTitle.kt:125-137`）。
+//   · `src/terminalTitle.ts` —— 标签文字 = `buildSettingsAwareTitle`（重命名 > shell 标题 > 「本地」> Unnamed），
+//     tooltip = `buildSettingsAwareFullTitle`（不截断、不拼 tag）；采纳哪条由上游那两格设置决定
+//     （`TerminalTitleUtils.kt:37-59`）；shell 的 OSC 0/2 由 xterm 的 `onTitleChange` 上报，就是上游的
+//     `TerminalApplicationTitleListener`（`platform/execution-impl/src/com/intellij/terminal/TerminalTitle.kt:125-137`）；
+//     新建会话的默认名走 `nextTerminalTabName` 那条去重的行模型（`TerminalTitleUtils.kt:61-88`）。
 //   · `src/terminalClipboard.ts` —— 窗格右键菜单 `Terminal.OutputContextMenu`
 //     （`plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:225-230`）的复制/粘贴/从历史粘贴，
 //     以及 `attachCustomKeyEventHandler` 上那四组键（Ctrl+C/Ctrl+Insert 复制、Ctrl+V/Shift+Insert 粘贴）；
@@ -14,22 +15,29 @@
 //     且不再滚缓冲区）与工具条的放大/缩小/复位；缩放是会话内临时的，不写设置。
 //   · `src/terminalSplits.ts` —— 右侧/下侧分屏、取消分屏、窗格间跳转，窗格数不再有本仓自己加的上限
 //     （`TerminalToolWindowManager.java:431-434` 的 `canSplit` 只问动作可用性）。
+// 2026-10-06 第二轮（同一桶，接 `ex/terminal` 剩下的可见项）：
+//   · `src/terminalHyperlinks.ts` —— 行内 URL 与 OSC 8 超链接（上游 `JBTerminalWidget.java:87-90` 装的
+//     `JediTermHyperlinkFilterAdapter` + `Osc8UrlHyperlinkFilter`，判定规则在 `UrlFilter.java:44-150`
+//     与 `URLUtil.java:50-62`）。Ctrl/⌘+单击交给宿主的 `shell.openUrl`；只有面板真能做事的命中才画成链接。
+//   · `src/terminalClipboard.ts` 的两条鼠标行为 —— 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304`）
+//     与「Linux 上选中即复制」（同文件 `:297-299`，上游就只给 Linux）。
 // 布局：窗格按 `terminalGridSize()` 排成 CSS 网格（上游是 splitter 树，架构不等价 ⇒ 取同一件可见的事）。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Columns2, Pencil, Plus, RotateCcw, RotateCw, Rows2, Search, Shrink, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Columns2, Pencil, Plus, RotateCcw, RotateCw, Rows2, Search, Shrink, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { BridgeError, isDesktop, subscribeTerm, subscribeTermExit, term } from '../bridge'
+import { BridgeError, isDesktop, request, subscribeTerm, subscribeTermExit, term } from '../bridge'
 import { iconSize } from '../uiIcons'
 import { copyToClipboard, readClipboardHistory, readClipboardText } from '../clipboard'
 import { resolveTerminalThemeName, terminalPalette, terminalXtermTheme } from '../terminalColors'
-import { createTerminalActions, terminalAction, terminalActionTitle, type TerminalActionContext, type TerminalActionId } from '../terminalActions'
+import { createTerminalActions, terminalAction, terminalActionKeyFor, terminalActionTitle, type TerminalActionContext, type TerminalActionId } from '../terminalActions'
 import { canTerminalSplit, nextTerminalPaneCell, paneIndexAfterSplit, terminalGridSize, type TerminalPaneCell, type TerminalSplitOrientation } from '../terminalSplits'
 import { changeTerminalFontSize, FONT_SIZE_STEP_DOWN, FONT_SIZE_STEP_UP, resetTerminalFontSize, TERMINAL_BASE_FONT_SIZE, terminalFontSizeForWheel, terminalFontSizeTitle, terminalWheelZoomApplies } from '../terminalFontSize'
-import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalHistoryEntries, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
-import { buildTerminalFullTitle, buildTerminalTitle, renameTerminal, setApplicationTitle, titleChanged, type TerminalTitleState } from '../terminalTitle'
+import { terminalClipboardActions, terminalClipboardKeyFor, terminalCopyOnCtrlC, terminalCopyOnSelect, terminalHistoryEntries, terminalIsMiddleButton, terminalPasteOnMiddleClick, type TerminalClipboardContext, type TerminalHistoryEntry } from '../terminalClipboard'
+import { terminalHyperlinkRanges, terminalLinkActivatable, terminalLinkTarget, terminalLinkTooltip, terminalOsc8Target } from '../terminalHyperlinks'
+import { buildSettingsAwareFullTitle, buildSettingsAwareTitle, nextTerminalTabName, renameTerminal, setApplicationTitle, TERMINAL_SHOW_APP_TITLE_DEFAULT, TERMINAL_TAB_BASE_NAME, terminalRenameInitialValue, titleChanged, type TerminalTitleSettings, type TerminalTitleState } from '../terminalTitle'
 import AnchoredMenu from './AnchoredMenu.vue'
 
 const props = defineProps<{ active: boolean; cwd?: string; confirmClose?: (label: string) => Promise<boolean> }>()
@@ -81,6 +89,13 @@ const splitCounts = new Map<number, { rights: number; downs: number }>()
 const WHEEL_FONT_ZOOM_ENABLED = true
 
 /**
+ * 上游 `SystemInfo.isLinux` 的本仓等价判断（`JBTerminalSystemSettingsProviderBase.java:297-299` 的
+ * `copyOnSelect()` 认的就是这一个平台）。判平台沿用仓库既有写法（`src/presentationAssistant.ts:67-71`：
+ * `navigator.platform` + `userAgent` 一起看，Node 下没有 navigator ⇒ 按非 Linux）。
+ */
+const ON_LINUX = typeof navigator !== 'undefined' && /linux/i.test(`${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`)
+
+/**
  * 工具栏每个按钮的启用/可见都问这张表，不再各写一遍 `:disabled` 表达式
  * （上游 `TerminalBaseContextAction.update` 的 `setEnabledAndVisible(terminal != null)`，
  * `TerminalActionUtil.createTerminalAction` 的登记规则）。
@@ -97,6 +112,9 @@ function actionContext(): TerminalActionContext {
     searchHasText: searchText.value.trim().length > 0,
     paneCount: panes.value.length,
     exited: Boolean(current?.exited),
+    // 标签在整排里的位置（`getIndexOfContent` / `contentCount`，MoveTerminalToolwindowTabLeftRightAction.kt:28-32）。
+    tabIndex: current ? panes.value.indexOf(current) : -1,
+    tabCount: panes.value.length,
     hasSelection: hasSelection.value,
     historyCount: historyEntries.value.length,
     fontSize: current?.fontSize ?? TERMINAL_BASE_FONT_SIZE,
@@ -110,13 +128,27 @@ const shownAs = (id: TerminalActionId) => Boolean(action(id)?.visible)
 const why = (id: TerminalActionId, fallback: string) => terminalActionTitle(action(id), fallback)
 let observer: ResizeObserver | undefined
 let themeObserver: MutationObserver | undefined
-let counter = 0
 let groups = 0
 let disposed = false
 
-// 标签可见文字/tooltip 都走 `src/terminalTitle.ts`（重命名压过 shell 标题，shell 标题压过默认标题）。
-const paneLabel = (pane: Pane) => buildTerminalTitle(pane.title)
-const paneTooltip = (pane: Pane) => buildTerminalFullTitle(pane.title)
+// 标签可见文字/tooltip 都走 `src/terminalTitle.ts`（重命名压过 shell 标题，shell 标题压过默认标题），
+// 采纳不采纳 shell 标题由 `TerminalTitleUtils.kt:54-59` 那扇门决定（下面 TITLE_SETTINGS）。
+const paneLabel = (pane: Pane) => buildSettingsAwareTitle(pane.title, TITLE_SETTINGS, isCommandRunning(pane))
+const paneTooltip = (pane: Pane) => buildSettingsAwareFullTitle(pane.title, TITLE_SETTINGS, isCommandRunning(pane))
+/**
+ * `TerminalTitle.isCommandRunning` 这一档上游来自 OSC 133（shell 集成上报「命令在跑」），
+ * 本仓宿主是裸 ConPTY：`native/terminal.hpp:56-60` 只有 write/resize/kill/running/ids，
+ * 没有任何命令边界的信号 ⇒ 这里如实回答「不知道」，把「进程还活着」当成信号用是编造。
+ * 缺的那一路写进 docs/wiring-requests-2026-10-06-term3.md（N1）。
+ */
+function isCommandRunning(_pane: Pane): boolean { return false }
+/**
+ * 上游的两档设置在 `TerminalOptionsProvider.kt:68`（showApplicationTitle=true）与 `:71`
+ * （applicationTitleShowingMode=WHEN_COMMAND_RUNNING）。默认档要看上面那个信号，而信号在本仓宿主里
+ * 不存在 ⇒ 按默认档会把 shell 标题这条链路整体藏掉。这里取上游的另一档
+ * `TerminalApplicationTitleShowingMode.kt:9` 的 ALWAYS，让既有链路照常可见，并把设置项写成接线请求（R1）。
+ */
+const TITLE_SETTINGS: TerminalTitleSettings = { showApplicationTitle: TERMINAL_SHOW_APP_TITLE_DEFAULT, applicationTitleShowingMode: 'always' }
 const paneCell = (pane: Pane): TerminalPaneCell => ({ id: pane.id, origin: pane.group })
 const groupPanes = (pane: Pane) => panes.value.filter(other => other.group === pane.group)
 function countsOf(group: number) { return splitCounts.get(group) ?? { rights: 0, downs: 0 } }
@@ -184,8 +216,10 @@ async function spawn(group?: number, cwdOverride?: string): Promise<Pane | null>
   try {
     id = (await term.create(80, 24, requested)).id
     if (disposed) { await term.kill(id); return null }
-    counter = Math.max(counter, id)
-    pane = attachPane(id, `终端 ${++counter}`, group)
+    // 新建会话的标签名 = 上游那条去重的行模型（TerminalTitleUtils.kt:61-88 + UniqueNameGenerator.java:102-124）：
+    // 基础名取设置里的 tabName（上游默认 `Local`，TerminalBundle.properties:96 ⇒ 直译「本地」），
+    // 已被占用就从 2 起拼「本地 (2)」。原先这里写的是自造的「终端 N」流水号。
+    pane = attachPane(id, nextTerminalTabName(TERMINAL_TAB_BASE_NAME, panes.value.map(paneLabel)), group)
     return pane
   } catch (error) {
     if (pane) { pane.off(); pane.offExit(); pane.view.remove(); pane.instance.dispose(); panes.value = panes.value.filter(other => other !== pane) }
@@ -315,6 +349,70 @@ async function pasteHistoryEntry(entry: TerminalHistoryEntry) {
   pane.instance.paste(entry.text)
   closeMenu()
 }
+/**
+ * 中键粘贴（`JBTerminalSystemSettingsProviderBase.java:302-304`：上游这条**无条件** return true）。
+ * 在捕获阶段把事件吃掉 —— 否则 xterm 自己那条中键粘贴会再补一次，用户看到的是双份内容。
+ */
+function onMiddleClick(pane: Pane, event: MouseEvent) {
+  if (!terminalIsMiddleButton(event) || !terminalPasteOnMiddleClick()) return
+  if (pane.exited) return
+  event.preventDefault()
+  event.stopPropagation()
+  void pasteFromClipboard()
+}
+/**
+ * 终端链接的落点动作：交给宿主的系统默认处理器（上游 `OpenUrlHyperlinkInfo.java:69-72` 的
+ * `navigate` = `BrowserLauncher.browse(url, ...)`；本仓那一端是 `shell.openUrl`）。
+ * 「逐个浏览器打开」与「复制链接」那两条右键菜单项**没搬**，理由写在 `src/terminalHyperlinks.ts` 文件头第 2 条。
+ */
+async function openTerminalUrl(url: string) {
+  if (!isDesktop) { note.value = '浏览器预览不能调用系统默认程序打开链接。'; return }
+  try { await request('shell.openUrl', { url }) }
+  catch (error) { note.value = error instanceof BridgeError ? `${error.code}: ${error.message}` : `打不开 ${url}。` }
+}
+/**
+ * 一行里的 URL 命中 → xterm 的 link provider（上游 `JBTerminalWidget.java:87-90` 装 hyperlink 过滤器那一对）。
+ * 只有面板真能做事的那些命中才画成链接（`terminalLinkActivatable`），点不动的链接不如不画。
+ */
+function attachLinkProvider(instance: Terminal) {
+  instance.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const row = instance.buffer.active.getLine(bufferLineNumber - 1)
+      if (!row) { callback(undefined); return }
+      const text = row.translateToString(true)
+      const links = terminalHyperlinkRanges(text).flatMap(range => {
+        const target = terminalLinkTarget(range.text)
+        const verdict = terminalLinkActivatable(target, isDesktop)
+        if (!verdict.ok || target.kind !== 'browser') return []
+        return [{
+          range: { start: { x: range.start + 1, y: bufferLineNumber }, end: { x: range.end, y: bufferLineNumber } },
+          text: range.text,
+          decorations: { pointerCursor: true, underline: true },
+          activate: () => { void openTerminalUrl(target.url) },
+          hover: () => { if (instance.element) instance.element.title = terminalLinkTooltip(target, true) },
+          leave: () => { if (instance.element) instance.element.title = '' },
+        }]
+      })
+      callback(links.length ? links : undefined)
+    },
+  })
+}
+/**
+ * OSC 8（终端程序自己写的 `\x1b]8;;URI` 链接）：上游也要再过一遍 `UrlFilter`
+ * （`Osc8UrlHyperlinkFilter.kt:10-17`），本仓同样只放行它算出来的 `browser` 目标。
+ * xterm 没装 handler 时会用浏览器的 `confirm` + `window.open`（typings 的 `linkHandler` 注释自己写了这条默认），
+ * 桌面宿主里那是错的路，所以这里**总是**装自己的。
+ */
+function osc8LinkHandler() {
+  return {
+    allowNonHttpProtocols: true,
+    activate: (_event: MouseEvent, uri: string) => {
+      const target = terminalOsc8Target(uri)
+      if (!terminalLinkActivatable(target, isDesktop).ok || target.kind !== 'browser') return
+      void openTerminalUrl(target.url)
+    },
+  }
+}
 async function refreshHistory() {
   try { historyEntries.value = terminalHistoryEntries(await readClipboardHistory()) }
   catch { historyEntries.value = [] }
@@ -340,6 +438,22 @@ function gotoPane(forward: boolean) {
   const next = nextTerminalPaneCell(groupPanes(current), current, forward)
   if (next) select(next)
   void closeMenu()
+}
+/**
+ * 标签左右移动（`Terminal.MoveToolWindowTabLeft`/`Right`，plugin.xml:125-126）。
+ * 上游那一步 `MoveTerminalToolwindowTabLeftRightAction.kt:34-46` 是把**邻位**那条 content 摘下来
+ * 再插到本条的位置（`removeContent(other, false, false, false)` + `addContent(other, ind)`），
+ * 净效果就是本条与邻位互换 ⇒ 本仓同样只在数组里交换这两个窗格，其它窗格的相对次序不动。
+ */
+function moveTab(pane: Pane, forward: boolean) {
+  const index = panes.value.indexOf(pane)
+  const other = forward ? index + 1 : index - 1
+  if (index < 0 || other < 0 || other >= panes.value.length) return
+  const next = [...panes.value]
+  next[index] = next[other]
+  next[other] = pane
+  panes.value = next
+  layout()
 }
 /** Terminal.SelectAll（`plugin.xml:137-141` 的 `setSelection(0, textLength)` 等价物）。 */
 function selectAll() {
@@ -376,9 +490,26 @@ function closeMenu() { menuOpen.value = false }
 
 /** attachPane 里挂 xterm 的四个回调：选区、shell 标题（OSC 0/2）、按键、滚轮。 */
 function attachHandlers(pane: Pane, instance: Terminal) {
-  instance.onSelectionChange(() => { if (selected.value === pane) hasSelection.value = instance.hasSelection() })
+  instance.onSelectionChange(() => {
+    if (selected.value === pane) hasSelection.value = instance.hasSelection()
+    // 选中即复制（`JBTerminalSystemSettingsProviderBase.java:297-299` 的 `copyOnSelect()` = `SystemInfo.isLinux`）：
+    // 上游只在 Linux 做，Windows/macOS 不做 —— 这里照同一个门，不把「选中就进剪贴板」当成通用行为。
+    if (ON_LINUX && terminalCopyOnSelect(true) && instance.hasSelection()) void copyToClipboard(instance.getSelection())
+  })
   instance.onTitleChange(raw => setPaneTitle(pane, setApplicationTitle(pane.title, raw)))
   instance.attachCustomKeyEventHandler(event => {
+    // 终端自己的两条快捷键：Ctrl+F 开查找（Terminal.Find ← Find = control F，$default.xml:565-566）、
+    // Ctrl+Shift+T 新建标签（Terminal.NewTab，intellij.terminal.frontend.xml:242-243）。
+    // 这里只吃掉面板真能做的这两条，其它键照常交给 shell（包括无选区的 Ctrl+C，见 terminalClipboard.ts）。
+    const actionKey = terminalActionKeyFor(event)
+    if (actionKey === 'search') {
+      if (event.type === 'keydown') toggleSearch()
+      return false
+    }
+    if (actionKey === 'newTab') {
+      if (event.type === 'keydown') void spawn()
+      return false
+    }
     const intent = terminalClipboardKeyFor(event)
     if (intent === null) return true
     if (intent === 'copy') {
@@ -392,6 +523,8 @@ function attachHandlers(pane: Pane, instance: Terminal) {
     return false
   })
   pane.view.addEventListener('wheel', (event) => onWheel(pane, event as WheelEvent), { passive: false })
+  // 中键粘贴要抢在 xterm 自己之前（第三个参数 true = 捕获阶段），否则一次点击会粘两遍。
+  pane.view.addEventListener('mousedown', (event) => onMiddleClick(pane, event as MouseEvent), true)
 }
 
 function attachPane(id: number, defaultTitle: string, group?: number): Pane {
@@ -399,12 +532,14 @@ function attachPane(id: number, defaultTitle: string, group?: number): Pane {
   view.className = 'terminal-view'
   view.hidden = true
   stage.value!.appendChild(view)
-  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: TERMINAL_BASE_FONT_SIZE, scrollback: 5000, theme: terminalXtermTheme(currentPalette()) })
+  const instance = new Terminal({ cursorBlink: true, fontFamily: "'Cascadia Code', Consolas, monospace", fontSize: TERMINAL_BASE_FONT_SIZE, scrollback: 5000, theme: terminalXtermTheme(currentPalette()), linkHandler: osc8LinkHandler() })
   const fit = new FitAddon()
   const search = new SearchAddon()
   instance.loadAddon(fit)
   instance.loadAddon(search)
   instance.open(view)
+  // 行内 URL 的链接判定（上游 `JBTerminalWidget.java:87-90` 装的两层 hyperlink 过滤器里的普通链接那层）。
+  attachLinkProvider(instance)
   const created: Pane = {
     id, title: { defaultTitle }, view, instance, fit, search,
     off: () => undefined, offExit: () => undefined, group: group ?? ++groups, exited: false, exitCode: null,
@@ -433,8 +568,8 @@ function attachPane(id: number, defaultTitle: string, group?: number): Pane {
 function adopt(id: number, label?: string) {
   if (!isDesktop || !stage.value) return
   if (panes.value.some(pane => pane.id === id)) { select(panes.value.find(pane => pane.id === id)!); return }
-  counter = Math.max(counter, id)
-  attachPane(id, label?.trim() || `终端 ${id}`)
+  // 宿主已经起好的会话（调试器的 runInTerminal）没有标题时，同样走上游那条去重的默认名。
+  attachPane(id, label?.trim() || nextTerminalTabName(TERMINAL_TAB_BASE_NAME, panes.value.map(paneLabel)))
   emit('focusTerminal')
 }
 defineExpose({ openIn, adopt })
@@ -494,7 +629,10 @@ async function reapExited() {
 
 function beginRename(pane: Pane) {
   renaming.value = pane
-  renameText.value = paneLabel(pane)
+  // 输入框预填的是**设置感知的全标题**（`RenameTerminalSessionAction.kt:20-23` 的
+  // `getContentDisplayNameToEdit` = `buildSettingsAwareFullTitle()`），不是标签上那条截断过的文字；
+  // 提交写回的仍是 `userDefinedTitle`（同文件 `:25-29`）。
+  renameText.value = terminalRenameInitialValue(pane.title, TITLE_SETTINGS, isCommandRunning(pane))
   void nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
 }
 function commitRename() {
@@ -559,6 +697,9 @@ onBeforeUnmount(() => {
       </div>
       <input v-if="renaming" ref="renameInput" v-model="renameText" class="terminal-rename" aria-label="终端名称" maxlength="40" @keydown.enter.prevent="commitRename" @keydown.esc.stop.prevent="renaming = null" @blur="commitRename" />
       <button v-if="shownAs('terminal.rename')" class="icon-button" :title="why('terminal.rename', '重命名当前终端')" :aria-label="why('terminal.rename', '重命名当前终端')" :disabled="!can('terminal.rename')" @click="selected && beginRename(selected)"><Pencil :size="iconSize.menu" /></button>
+      <!-- Terminal.MoveToolWindowTabLeft / Right（plugin.xml:125-126）：挪的是当前选中的那一条标签。 -->
+      <button v-if="shownAs('terminal.tab.left')" class="icon-button" :title="why('terminal.tab.left', '向左移动标签')" :aria-label="why('terminal.tab.left', '向左移动标签')" :disabled="!can('terminal.tab.left')" @click="selected && moveTab(selected, false)"><ArrowLeft :size="iconSize.menu" /></button>
+      <button v-if="shownAs('terminal.tab.right')" class="icon-button" :title="why('terminal.tab.right', '向右移动标签')" :aria-label="why('terminal.tab.right', '向右移动标签')" :disabled="!can('terminal.tab.right')" @click="selected && moveTab(selected, true)"><ArrowRight :size="iconSize.menu" /></button>
       <button v-if="shownAs('terminal.search')" class="icon-button" :class="{ active: searchOpen }" :title="why('terminal.search', '在终端中查找')" :aria-label="why('terminal.search', '在终端中查找')" :disabled="!can('terminal.search')" @click="toggleSearch"><Search :size="iconSize.control" /></button>
       <span v-if="shownAs('terminal.font.reset')" class="terminal-font" :title="terminalFontSizeTitle(fontSizeShown, TERMINAL_BASE_FONT_SIZE)">{{ fontSizeShown }}px</span>
       <button v-if="shownAs('terminal.font.decrease')" class="icon-button" :title="why('terminal.font.decrease', '缩小终端字号')" :aria-label="why('terminal.font.decrease', '缩小终端字号')" :disabled="!can('terminal.font.decrease')" @click="stepFontSize('terminal.font.decrease')"><ZoomOut :size="iconSize.control" /></button>

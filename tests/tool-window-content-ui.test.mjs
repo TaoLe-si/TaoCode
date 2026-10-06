@@ -78,8 +78,21 @@ test('the content UI toggle is wired to a real combo rendering and is remembered
   // `rows` 退回它上游的位置 —— 一张「可见行的原索引」表，由 `props.options` 投影出来。
   assert.match(combo, /v-for="\(option, index\) in options"/, 'combo 画的那一排不是内容列表')
   assert.match(combo, /v-show="rows\.includes\(index\)"/, '速度搜索没把没命中的行收起（上游是过滤视图，不是换数据源）')
-  assert.match(combo, /const rows = computed\(\(\) => \{[\s\S]{0,240}props\.options\.forEach[\s\S]{0,160}speedSearchMatches\(query, option\.label\)/,
-    'rows 不是 options 的投影（过滤串为空时必须是全量）')
+  // 2026-10-06（桶 8 注册/门面这一批）：过滤那一步搬进了 `src/popupSteps.ts` 的 `listStepRows`
+  // （桶 7b 的接线请求 A1：那份行模型此前**零生产消费方**，而这一层列表的上游对象就是
+  // `SelectContentStep` —— `platform/platform-impl/src/com/intellij/openapi/wm/impl/content/SelectContentStep.kt:17`
+  // 给这一层开了速度搜索，`ToolWindowContentUi.java:862-875` 把**全量 contents** 交给这一步）。
+  // 判据**没有放松**，只是改指真源：数据源仍是全量 `props.options`（`step.values()`），
+  // `rows` 仍是「可见行的原索引」投影（`idOf` 给的就是原索引），而匹配规则只剩 `popupSteps` 里那一份。
+  assert.match(combo, /values: \(\) => props\.options/, 'combo 的数据源不是全量 contents')
+  assert.match(combo, /const stepRows = computed\(\(\) => listStepRows\(step, \{ query: filter\.value, idOf \}\)\)/,
+    'rows 不是这一步的行模型投影（过滤串为空时必须是全量）')
+  assert.match(combo, /const rows = computed\(\(\) => stepRows\.value\.flatMap\(row => row\.kind === 'item' \? \[Number\(row\.id\)\] : \[\]\)\)/,
+    '可见行表不再是原索引投影')
+  assert.ok(!combo.includes('speedSearchMatches'), 'combo 里又写了第二份速度搜索匹配（规则只准住在 popupSteps）')
+  assert.match(readFileSync(new URL('../src/popupSteps.ts', import.meta.url), 'utf8'),
+    /export function shouldBeShowing[\s\S]{0,400}speedSearchMatches\(query, text\)/,
+    'popupSteps 里那条过滤规则不在了（上面那句"只住一处"就落空了）')
   assert.ok(combo.includes('contentCountLabel'), 'the combo does not use the tabs/views naming')
   // 形态改成**每个内容一份**、跟着项目布局走（上游 `WindowInfo.contentUiType`）：见第四十二批 §AT。
   const stripes = readFileSync(new URL('../src/toolWindowStripes.ts', import.meta.url), 'utf8')

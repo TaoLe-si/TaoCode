@@ -170,8 +170,12 @@ export interface BlockCommentEnterResult {
  * 上游每一处 `Result.Continue` 在这里都是 null —— 交回默认回车。
  *
  * `closeOnEnter` = 上游 `CodeInsightSettings.CLOSE_COMMENT_ON_ENTER`（默认 true，
- * `CodeInsightSettings.java:132`）。本仓 `EditorSettings` 里没有这一条对应项 ⇒ 先按上游默认值走，
- * 设置项写在接线请求里。
+ * `CodeInsightSettings.java:132`；开关问在 `EnterInBlockCommentHandler.java:62`，`* ` 续行那一支不受它管）。
+ * **订正（2026-10-06 复核）**：这里原先写「本仓 `EditorSettings` 里没有这一条对应项」—— 实际是**有键**
+ * （`src/settingsModel.ts:429`，默认 true）**有界面**（`src/components/EditorEnterKeysFields.vue:33`）
+ * **没有消费方**。缺的那一半现在接上了：`src/enterHandlers.ts` 把 `EnterLanguage.blockCloseOnEnter ?? true`
+ * 传进这个实参；宿主递 `props.settings.closeCommentOnEnter` 的那一行在保留文件里
+ * ⇒ `docs/wiring-requests-2026-10-06-editorinput.md` R1。不传时按上游默认 true 走，行为一格不变。
  */
 export function enterInBlockComment(
   text: string, caret: number, lexicon: BlockCommentLexicon, closeOnEnter = true,

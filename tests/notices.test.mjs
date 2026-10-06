@@ -27,10 +27,19 @@ test('the level is the highest severity in the list', () => {
   assert.equal(noticeLevel([entry(2, true), entry(1)]), 'error')
 })
 
-test('the tooltip spells out the count and whether errors are inside', () => {
-  assert.equal(noticeTitle([]), '通知中心：暂无通知')
-  assert.equal(noticeTitle([entry(1)]), '通知中心：最近 1 条，无错误')
-  assert.equal(noticeTitle([entry(1), entry(2, true)]), '通知中心：最近 2 条，其中含错误')
+test('the tooltip is upstream\'s two strings and nothing else', () => {
+  // 上游 `IdeNotificationArea.java:105-107`：提示只有「挂起条数」与「无新通知」两档，
+  // 中文包 `localization-zh.jar!messages/UIBundle.properties:265-266`
+  // （`status.bar.notifications.widget.no.notification.tooltip=无新通知`、
+  //  `status.bar.notifications.widget.tooltip={0} {0, choice, 1\#通知|2\#通知}挂起`）。
+  // 本仓旧断言钉的是自造文案「通知中心：最近 N 条，其中含错误」（2026-10-06 桶 statusbar 订正：
+  // 上游 tooltip 里没有「错误」这一档，严重度只用于图标上色 ⇒ `noticeLevel`）。
+  assert.equal(noticeTitle([]), '无新通知')
+  assert.equal(noticeTitle([entry(1)]), '1 通知挂起')
+  assert.equal(noticeTitle([entry(1), entry(2)]), '2 通知挂起')
+  // 含错误的那一条不改变提示文字 —— 分档只走 `noticeLevel`（App.vue 的 has-error 类）。
+  assert.equal(noticeTitle([entry(1), entry(2, true)]), '2 通知挂起')
+  assert.equal(noticeLevel([entry(1), entry(2, true)]), 'error', '严重度仍然算得出来，只是不进提示')
 })
 
 test('the popup previews the newest entries and stops at the limit', () => {

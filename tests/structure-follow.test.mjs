@@ -106,3 +106,12 @@ test('面板真的把两个跟随开关和可见性排序接上了（不是死�
   assert.match(panel, /scrollRowIntoView\(match\.key\)/, '跟随时要把那一行滚进视野')
   assert.match(panel, /@dblclick="selectRow\(entry, true\)"/, '关掉跟随时双击仍跳源码')
 })
+
+// 14b 的接线请求 W1（\u300c跟随编辑器光标\u300d那一半的入参）已经落地：窗格把光标位置喂给了面板。
+test('跟随光标的挂点真的在：窗格传 :source，面板没有它就不画那一格', () => {
+  const view = readFileSync('src/components/ToolWindowView.vue', 'utf8')
+  assert.match(view, /<OutlinePanel[^>]*:source="ctx\.todoSource"/, '面板拿到的是活动文件的光标（与 TodoPanel 同一份）')
+  const panel = readFileSync('src/components/OutlinePanel.vue', 'utf8')
+  assert.match(panel, /v-if="source"/, '没有光标数据时整格不渲染（不画点了没反应的开关）')
+  assert.match(panel, /props\.source\.line - 1/, '编辑器口径（1 基）换成符号区间口径（0 基）')
+})

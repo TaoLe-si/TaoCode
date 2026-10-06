@@ -30,6 +30,9 @@ import { junitQuickFixActions } from './junitQuickFix.ts'
 // （规则与清单在 src/intentionSettings.ts）。
 import { isIntentionEnabled } from './intentionSettings.ts'
 import { filterFormatEdits } from './formatterTags.ts'
+// 同一个模块的第二条 import：上面那条的形态被 `tests/formatter-tags.test.mjs:91` 逐字钉住
+// （`import { filterFormatEdits } from './formatterTags.ts'`），并进去就会红 —— 门禁不动，这里多写一行。
+import { enabledFormatRanges, mergeFormatParts } from './formatterTags.ts'
 import { mergeFormattingResult } from './formattingMerge.ts'
 // 格式化准入（`ExcludedFileFormattingRestriction`/`UntrustedFileFormattingServiceSuppressor`）与
 // 进度行（`FormattingProgressTask`）：规则在 src/formattingRestriction.ts，任务表在 src/progressTasks.ts。
@@ -194,25 +197,33 @@ async function runFormatting(path: string, range?: LspRange) {
   // 之前这条路径**不传**这两个字段，宿主按 4/空格兜底（`native/lsp_support.cpp:363-365`），
   // 于是用户改的缩进宽度在「重排代码」上完全不起作用。
   const indent = await formattingIndentOptions(path, Boolean(range), before ?? '')
+  // csi/formatter ③（本轮补）：选区跨 `@formatter:off` 边界时，上游是把禁用段**从要重排的区间里挖掉**、
+  // 其余照常重排（`CodeFormatterFacade.java:232-235` 记禁用区间 + `InitialInfoBuilder.java:334` 跳过段内空白），
+  // 而不是「跨界那条编辑一起放弃」。本仓重排在语言服务那边，所以切分落在**请求侧**：
+  // 区间按 `enabledFormatRanges` 切成仍可格式化的子区间，每段各发一次 `rangeFormatting`
+  // （规则、边界与上游坐标见 src/formatterTags.ts 末尾那一节）。拿不到缓冲文本（非编辑器入口）
+  // 或文件里没有标记时不额外切段，仍是原来那一次请求。
+  const subRanges: LspRange[] = range && before !== undefined ? enabledFormatRanges(before, range) : []
+  if (range && before !== undefined && !subRanges.length) {
+    // 整段都落在禁用区里 ⇒ 一条请求都不发（上游同样什么都不会改），提示沿用套完编辑后那句的同一口径。
+    notify('格式化标记（@formatter:off）已禁用这些区域，未做改动。')
+    return
+  }
   // 进度行（上游 `FormattingProgressTask`）：格式化是异步长请求，状态栏的后台任务列表可见。
   backgroundTaskManager.begin(FORMAT_FORMATTING_TASK_ID, '正在格式化', { detail: path })
   try {
-    const result = await request<LspFormatResult>('lsp.request', {
-      kind: range ? 'rangeFormatting' : 'formatting', path, line: 0, character: 0,
-      tabSize: indent.indentSize, insertSpaces: !indent.useTabCharacter,
-      ...(range ? { range } : {}),
-    })
+    const result = await requestFormatting(path, range, subRanges, indent)
     if (!result.available || !result.edits?.length) { notify(range ? '所选内容无需格式化，或语言服务不支持选区格式化。' : '无需格式化，或语言服务不支持格式化。'); return }
     let touched = 0
-    let suppressed = 0
+    let suppressed = result.dropped   // 切段合并时服务器越界给出的重叠/重复编辑（`mergeFormatParts` 拦下的）
     let conflicted = 0
     let postProcessed = 0
     for (const file of result.edits) {
       const open = findTab(file.path)
       if (!open) continue  // formatting only makes sense on an open buffer
       const base = editorFor(file.path)?.text() ?? open.content
-      // 格式化标记（`// @formatter:off` … `// @formatter:on`）：上游 `FormatterTagHandler`
-      // 对禁用区间不重排，这里把落在禁用区间的语言服务编辑整条丢掉（规则与边界见 src/formatterTags.ts）。
+      // 格式化标记（`// @formatter:off` … `// @formatter:on`）：请求已经按启用子区间切过段（上），
+      // 这里再兜一道 —— 服务器不守区间时给出的跨界/落段编辑整条丢掉（规则与边界见 src/formatterTags.ts）。
       const edits = filterFormatEdits(base, file.textEdits)
       suppressed += file.textEdits.length - edits.length
       // 请求时刻的快照（`file.path === path` 才存在）。快照与当前缓冲一致时这就是原来的
@@ -245,6 +256,45 @@ async function runFormatting(path: string, range?: LspRange) {
     else notify(touched ? `已格式化当前缓冲（未保存），检查后按 Ctrl+S 保存。${postProcessed ? '（已按设置补齐行注释后的空格）' : ''}` : '格式已是最新。')
   } catch (error) { notify(errorMessage(error), true) }
   finally { backgroundTaskManager.end(FORMAT_FORMATTING_TASK_ID) }
+}
+
+/**
+ * 一份格式化响应里本文件用得上的部分：`bridge` 的 `LspFormatResult` 加上「切段合并时丢掉了几条」。
+ */
+type FormatResponse = LspFormatResult & { dropped: number }
+
+/**
+ * 子区间的条数上限。切段是为了让「禁用段之外照样重排」，但每段都是一次语言服务往返，
+ * 标记密集的长选区（例如一份到处是 `@formatter:off` 的生成文件）不能把一次格式化变成几十次请求。
+ * 超过这个数就退回**一次请求覆盖整个选区** + 响应侧 `filterFormatEdits` 兜底（= 本轮之前的行为）。
+ */
+const MAX_FORMAT_SUBRANGES = 8
+
+/**
+ * 发格式化请求（`runFormatting` 的请求侧，两种形态）：
+ *   · 整缓冲重排 → 一次 `textDocument/formatting`；
+ *   · 选区重排 → 区间先按 `@formatter:off` 切成仍可格式化的子区间（`enabledFormatRanges`）：
+ *     一段（含「文件里没标记」那种原样返回）就只请求那一段，多段就**每段各发一次**
+ *     `textDocument/rangeFormatting` 再把响应并起来（`mergeFormatParts`）。
+ * 上游的对位做法：`CodeFormatterFacade.java:232-235` 把禁用段记进 `FormatTextRanges`，
+ * `InitialInfoBuilder.java:334` 对段内空白跳过处理 ⇒ 禁用段之外的部分照常重排。
+ */
+async function requestFormatting(path: string, range: LspRange | undefined, subRanges: readonly LspRange[],
+  indent: { indentSize: number; useTabCharacter: boolean }): Promise<FormatResponse> {
+  const send = (part?: LspRange) => request<LspFormatResult>('lsp.request', {
+    kind: part ? 'rangeFormatting' : 'formatting', path, line: 0, character: 0,
+    tabSize: indent.indentSize, insertSpaces: !indent.useTabCharacter,
+    ...(part ? { range: part } : {}),
+  })
+  if (!range) return { ...(await send()), dropped: 0 }
+  if (subRanges.length === 1) return { ...(await send(subRanges[0]!)), dropped: 0 }
+  if (subRanges.length > 1 && subRanges.length <= MAX_FORMAT_SUBRANGES) {
+    const parts: LspFormatResult[] = []
+    for (const sub of subRanges) parts.push(await send(sub))
+    return mergeFormatParts(parts)
+  }
+  // 没切出可排的子区间（调用方已提前返回）或段数超上限：一次请求覆盖整个选区，跨界编辑交给 filterFormatEdits。
+  return { ...(await send(range)), dropped: 0 }
 }
 
 /**

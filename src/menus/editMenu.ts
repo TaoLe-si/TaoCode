@@ -118,6 +118,21 @@ export interface EditMenuContext {
     // `platform/platform-resources-en/src/messages/ActionsBundle.properties:1946`）。
     // `$default.xml` 里没有它的键位 ⇒ 只给菜单行，不编快捷键。
     ctx.editable('paragraph.fill', '填充段落', '', 'fill paragraph 填充段落 折行'),
+    // 排序行 / 反串行（上游 `EditorSortLines`/`EditorReverseLines`，`PlatformActions.xml:495-496`
+    // 就在 `FillParagraph`(:494) 之后；`EditorTranspose`(:497) 本仓没有 ⇒ 不渲染假行）。
+    // 文案是 `platform/platform-resources-en/src/messages/ActionsBundle.properties:173-174`
+    // （`Sort Lines` / `Reverse Lines`）的直译：本地参考树里没有随 IDE 发货的中文包
+    // （`plugins/localization-zh` 不在 community 源里），所以不引用中文行号、也不假称取自中文包。
+    // 键位留空：`$default.xml` 里查不到这三条的绑定（全树只有 `keymaps/Sublime Text.xml:105` 给
+    // `EditorSortLines` 绑过键），等 `$default.xml` 那一族真的进了本仓键位表再填。
+    ctx.editable('line.sort', '排序行', '', 'sort lines 排序行 排序'),
+    ctx.editable('line.reverse', '反串行', '', 'reverse lines 反串行 倒序'),
+    // 删除重复行（上游 `EditorUniqueLines`，`ActionsBundle.properties:175` = `Delete Duplicate Lines`）。
+    // **本仓菜单落点与上游不同**：上游只把它挂在编辑器动作组（`PlatformActions.xml:240`），
+    // EditMenu 里没有这一行，用户在 IDEA 里靠 Find Action（Ctrl+Shift+A）够到它 ——
+    // 而本仓的动作注册表 `src/actionRegistry.ts` 是保留文件（接线见 docs/wiring-requests-2026-10-06-caretops.md），
+    // 不给菜单行的话这条命令就没有任何消费点 ⇒ 先按 EditSmartGroup 的尾巴给一行，差异如实记。
+    ctx.editable('line.unique', '删除重复行', '', 'delete duplicate lines unique 删除重复行 去重'),
     // 代码块首尾移动（上游 `EditorCodeBlockStart`/`End` 与 ±`WithSelection`，
     // 键位 `$default.xml:569-571`/`:315-317`/`:318-320`/`:824-826`；
     // 文案 `messages/ActionsBundle.properties:568-571`（zh 包），英文原文

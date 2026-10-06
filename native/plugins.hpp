@@ -55,6 +55,13 @@ struct Plugin {
     // IDEA 的 `IdeaPluginDescriptor.getDisplayCategory()`：分组用（`InstalledPluginsTab` 按它
     // 分桶，缺省归入 "Other Tools"）。空串表示没写，分组由前端兜底。
     std::string category;
+    // 插件厂商 —— 上游清单的 `<vendor>` 元素（`PluginXmlConst.kt:36` `VENDOR_ELEM = "vendor"`，
+    // 解析落在 `XmlReader.kt:203-207`；读取面 `IdeaPluginDescriptorImpl.kt:224` `getVendor()`）。
+    // 展示与搜索都吃它：`PluginUiModel.kt:52` `val vendor: String?`、
+    // 已安装页的 `/vendor:` 属性（`SearchWords.kt:9` + `InstalledPluginsTabSearchResultPanel.kt:87-94`）。
+    // 空串 = 清单没写（上游同样允许 null，界面上显示 `(not specified)`，
+    // `IdeBundle.properties:455` `plugin.status.not.specified`）。
+    std::string vendor;
     std::string path;      // absolute directory
     bool enabled = true;
     std::string error;     // set when the manifest could not be read/validated

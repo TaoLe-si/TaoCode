@@ -12,7 +12,7 @@
 // 预览里不写盘、不请求；接线的 `semanticActions` 只需在应用前把 edits 过一遍这个模型。
 
 import type { LspFileEdits, LspTextEdit } from './bridge'
-import { buildUsageTree } from './usageViewGrouping.ts'
+import { buildUsageTree, type UsageTreeNode } from './usageViewGrouping.ts'
 
 /** 预览里的一处改动（`fromLine`/`toLine` 是 0 基行区间，`newText` 是替换文本的前几行）。 */
 export interface PreviewHunk {
@@ -202,7 +202,7 @@ export function refactorPreviewTree(
     const index = (positions.get(path) ?? []).findIndex(point => point.line === line && point.character === character)
     return index < 0 ? undefined : flat.files.find(file => file.path === path)?.hunks[index]
   }
-  const decorate = (node: ReturnType<typeof buildUsageTree>): RefactorPreviewNode => {
+  const decorate = (node: UsageTreeNode<'directory' | 'file'>): RefactorPreviewNode => {
     const decorated: RefactorPreviewNode = {
       kind: node.kind, name: node.name, path: node.path, count: node.count,
       children: node.children.map(decorate), rows: [],

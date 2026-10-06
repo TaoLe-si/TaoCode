@@ -106,3 +106,78 @@ export function addToListItem(lists: readonly BookmarkList[], target: BookmarkLi
 export function listsFromLegacy(bookmarks: readonly Bookmark[], projectName: string): BookmarkList[] {
   return [{ name: projectName, isDefault: true, bookmarks: [...bookmarks] }]
 }
+
+// ── "这一条书签属于哪张列表"：面板那一行的移除/编辑描述要找的目标 ──────────────
+// 上游的口径（本轮逐条读过）：
+//   · `getGroups(bookmark)` = `allGroups.filter(info.groups::contains)`
+//     （`BookmarksManagerImpl.kt:146-148`）—— 顺序就是**列表登记的顺序**；
+//   · 树上的「移除」删的是**被点那一段所在列表**里的那一条
+//     （`ui/tree/BookmarkListProvider.kt:54-57` 的 `node.value?.let { node.bookmarkGroup?.remove(it) }`；
+//     `Group.remove(bookmark)` = `removeFromGroup(this, bookmark)`，`BookmarksManagerImpl.kt:636`）；
+//   · `BookmarksManagerImpl.remove(bookmark)`（`:230-238`）只处理"恰好一张列表持有"那一种，
+//     多张持有时是上游自己留着的一句 `//TODO:choose`（什么都不做）；
+//   · 「编辑描述」写的也是**一张列表**：`EditBookmarkAction.kt:27` 取 `getGroups(bookmark).firstOrNull()`，
+//     `:36` 调 `group.setDescription`；描述记在 `InGroupInfo` 上
+//     （`BookmarksManagerImpl.kt:598-609` 的 `group.add(bookmark, type, description)`、
+//     `setDescription:586-594`）—— 同一处书签在不同列表里**可以有不同的描述**。
+
+/** 这张列表里有没有这条书签（同一份对象，或路径 + 行号一致）。 */
+export function listHolds(list: BookmarkList, entry: Bookmark): boolean {
+  return list.bookmarks.some(item => item === entry || (item.path === entry.path && item.line === entry.line))
+}
+
+/** 持有这条书签的列表，按传入顺序（上游 `getGroups(bookmark)` 的那个顺序）。 */
+export function listsHolding(lists: readonly BookmarkList[], entry: Bookmark): BookmarkList[] {
+  return lists.filter(list => listHolds(list, entry))
+}
+
+/** 第一张持有它的列表（上游 `getGroups(bookmark).firstOrNull()`，`EditBookmarkAction.kt:27`）。 */
+export const firstListHolding = (lists: readonly BookmarkList[], entry: Bookmark): BookmarkList | undefined =>
+  listsHolding(lists, entry)[0]
+
+/** 从第一张持有它的列表里摘掉（没有列表持有 ⇒ 原样返回，调用方知道这次没落到列表上）。 */
+export function removeFromFirstHolder(lists: readonly BookmarkList[], entry: Bookmark): { lists: BookmarkList[]; removed: boolean } {
+  const holder = firstListHolding(lists, entry)
+  if (holder === undefined) return { lists: [...lists], removed: false }
+  return {
+    lists: lists.map(list => list === holder
+      ? { ...list, bookmarks: list.bookmarks.filter(item => !(item === entry || (item.path === entry.path && item.line === entry.line))) }
+      : list),
+    removed: true,
+  }
+}
+
+/**
+ * 改掉某张列表里那条书签的**描述**（上游 `setDescription` 只写被选中那一段的那份）。
+ * 空串 = 清掉自定义描述，回到"用行原文"（`bookmarkDescription` 的另一支）。
+ */
+export function setDescriptionInList(lists: readonly BookmarkList[], target: BookmarkList, entry: Bookmark, description: string): BookmarkList[] {
+  const trimmed = description.trim()
+  return lists.map(list => list !== target ? list : {
+    ...list,
+    bookmarks: list.bookmarks.map(item => {
+      if (!(item.path === entry.path && item.line === entry.line)) return item
+      const next = { ...item }
+      if (trimmed) next.description = description
+      else delete next.description
+      return next
+    }),
+  })
+}
+
+/** 面板的一段：段头名字 + 默认标记 + 这一段的书签（`BookmarksPanel.vue` 的 `PanelList` 形状）。 */
+export interface BookmarkPanelSection { name: string; isDefault: boolean; entries: Bookmark[] }
+
+/**
+ * 面板的段：命名列表在前、**默认列表（历史字段那份）最后**，且整棵树只允许一段带「默认」标记
+ * （`Group.isDefault` 的 setter 会顺手清掉旧默认，`BookmarksManagerImpl.kt:529-534`），
+ * 而本仓"新书签进的那张默认列表"恒等于历史字段 `bookmarks`（`listsFromLegacy` 那条迁移规则）。
+ * 所以存档里那张自带 `isDefault: true` 的命名列表在这里**照普通命名列表渲染**（标记摘掉、条目留着）：
+ * 段还是要出现的，否则用户会看到"列表里的书签凭空少一张"。
+ */
+export function panelSections(lists: readonly BookmarkList[], defaultEntries: readonly Bookmark[], projectName: string): BookmarkPanelSection[] {
+  return [
+    ...lists.map(list => ({ name: list.name, isDefault: false, entries: list.bookmarks })),
+    { name: projectName, isDefault: true, entries: [...defaultEntries] },
+  ]
+}

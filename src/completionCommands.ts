@@ -8,8 +8,10 @@
 //     （先按后缀逐级回退，再往回扫最多 30 个字母/数字/空格，最后是「行首只有空白」那条路）。
 //   · `CommandCompletionProvider.kt:701-742` `findCommandCompletionType`：三种形态 ——
 //     `PartialSuffix`（`foo.re`）、`FullSuffix`（`foo..`，再有一个点就返回 null）、`FullLine`（行首）。
-//   · `CommandCompletionProvider.kt:237`：命令名用 `CamelHumpMatcher(prefix, false, true)`
-//     过滤（大小写不敏感 + 驼峰）。
+//   · `CommandCompletionProvider.kt:237,252`：命令名过滤用 `CamelHumpMatcher(prefix, false, true)`
+//     （第 2 个参数是 `caseSensitive=false`、第 3 个是 `typoTolerant=true`，`CamelHumpMatcher.java:40-46`），
+//     放行进表的判据是 `:252` 的 `baseMatcher.prefixMatches(element)`，它走 `prefixMatches(name)`
+//     = `myMatcher.matches(name)`（`platform/analysis-impl/src/com/intellij/codeInsight/completion/impl/CamelHumpMatcher.java:80-87`）。
 //   · `CommandCompletionProvider.kt:311-313,317,319-326`：动作类的 `presentableName` 去掉 `...`、
 //     去掉 `_`；尾文本是 ` (additionalInfo)`；名字超过 50 个字符截断加 `…`。
 //   · `commands/AbstractActionCompletionCommand.kt:224-229,234-241`：
@@ -31,7 +33,8 @@
 // 另一处不做：上游弹层里的 **Commands 分组标题**（`getGroupDisplayName`）在本仓的自绘弹层里
 // 没有分组行的位置（`src/completionUi.ts` 是平铺列表），常量在下面但不渲染。
 
-import { camelHumpMatch, localSortKey } from './completionSort.ts'
+import { camelHumpMatcher } from './completionCamelHump.ts'
+import { localSortKey } from './completionSort.ts'
 import type { ContributorItem, LocalCompletionContributor } from './completionContributors.ts'
 
 /** `CommandCompletionSuffixProvider.kt:23`：`suffix()` 默认是 `.`。 */
@@ -172,19 +175,31 @@ export function commandLabel(title: string): string {
 
 /**
  * 列出这个位置可用的命令条目（上游 `CommandCompletionProvider.kt:237-259` 的过滤 + `createLookupElements`）。
- * 过滤用 `CamelHumpMatcher(prefix, false, true)` 的等价物 —— 本仓的 `camelHumpMatch` 本来就是
- * 大小写不敏感的（它把输入前缀小写化），所以 `ren` 命中 `Rename`、`rn` 也命中 `Rename`。
+ * 命令名过滤按上游那一把匹配器同档实现：`CamelHumpMatcher(prefix, false, true)`
+ * （`caseSensitive=false` ⇒ `createMatcher` 不套大小写档，取 `MinusculeMatcher` 默认的忽略大小写，
+ * `CamelHumpMatcher.java:130-147`）+ 留在表里的判据 `prefixMatches`（`:80-87`）
+ * ⇒ 本仓就是 `camelHumpMatcher(pattern, { caseSensitiveMode: 'ignore-case' }).matches(label)`。
+ * 于是 `cs` 命中 `Change Signature`、`sw` 命中 `Surround With`（两个词首那一档，旧实现只吃连续前缀所以打不到）；
+ * `rn` / `rne` 这种「在一个词里跳过一个字母」的形状**仍不命中** —— 上游放行它靠的是第三个参数
+ * `typoTolerant=true`（`TypoTolerantMatcher`），那一档本仓没移植（见下面两处差异与判据
+ * `tests/completion-commands.test.mjs`）。
+ * ⚠ 留痕：2026-10-06 上一轮在这里写「该用的是 `isStartMatch(label)`」—— **实际不是**：
+ * `isStartMatch` 在上游是「命中段是否贴着串首」的另一档查询（`CamelHumpMatcher.java:53-77`），
+ * 命令过滤那行用的是 `prefixMatches`（`CommandCompletionProvider.kt:252`）⇒ 本轮按 `matches` 落。
+ * ⚠ 两处做不到的差异（不是本轮引入）：上游第三参数 `typoTolerant=true` 的键盘布局纠错没被
+ * `src/completionCamelHump.ts:39-41` 移植（「打错一个键也能命中」那一档不做）；
+ * `prefixMatches:80-84` 的「名字以 `_` 开头且大小写档为 FIRST_LETTER 时按首字母大小写否决」依赖
+ * `CodeInsightSettings.COMPLETION_CASE_SENSITIVE` 的全局档，本仓没有那条设置 ⇒ 不模拟。
  */
 export function collectCommands(
   invocation: CommandInvocation,
   source: CommandActionSource,
   priorities: Readonly<Record<string, number>> = {},
 ): CommandItem[] {
-  // 没有前缀时不过滤（上游 `baseMatcher.prefixMatches` 对空前缀全过，`CommandCompletionProvider.kt:252`）。
-  const matches = invocation.pattern
-    ? (label: string) => label.toLowerCase().startsWith(invocation.pattern.toLowerCase())
-      || camelHumpMatch(label, invocation.pattern)
-    : () => true
+  // 没有前缀时不过滤（上游 `baseMatcher.prefixMatches` 对空前缀全过，`CommandCompletionProvider.kt:252`；
+  // 本仓匹配器同一档：`completionCamelHump.ts:569` 的空前缀直接放行）。
+  const matcher = invocation.pattern ? camelHumpMatcher(invocation.pattern, { caseSensitiveMode: 'ignore-case' }) : null
+  const matches = (label: string) => matcher === null || matcher.matches(label)
   const items: CommandItem[] = []
   for (const id of source.ids()) {
     if (!source.isAvailable(id)) continue

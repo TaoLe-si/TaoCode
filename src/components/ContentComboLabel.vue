@@ -20,7 +20,13 @@ import { Check, ChevronDown, FileCode2, ListTree, Play, SquareTerminal, Triangle
 import { toolIcons } from '../toolWindowMeta.ts'
 import { contentCountLabel, type ToolWindowContentUiType } from '../toolWindowContentUi.ts'
 import { usePopupLayer } from '../popupStack.ts'
-import { speedSearchMatches, speedSearchStepForKey, stepVisibleIndex } from '../speedSearch.ts'
+import { speedSearchStepForKey, stepVisibleIndex } from '../speedSearch.ts'
+// 这一层列表的上游对象就是 `SelectContentStep`（`ToolWindowContentUi.java:862-875` 把它交给
+// `createListPopup`），而 `ListPopupStep`/`ListPopupModel` 那一份行模型住在 `src/popupSteps.ts`：
+// 过滤口径（`shouldBeShowing`，`:108-114`）、行的可选性与"按下去关不关弹层"
+// （`isClosableOnExecute`，`ListPopupStep.java:38`）、初始选中项（`initialRowIndex` ←
+// `ListPopupStep.java:75` 的 `getDefaultOptionIndex`）都从那一处取，这里不再写第二份匹配规则。
+import { initialRowIndex, listStepRows, type ListPopupStepLike } from '../popupSteps.ts'
 import { iconSize } from '../uiIcons'
 import SpeedSearchBar from './SpeedSearchBar.vue'
 
@@ -50,19 +56,26 @@ const open = ref(false)
 // 搜索框在这一层是**常驻**的（不像树/书签那样能收 —— 见 `tests/popup-layer-wiring.test.mjs:152` 那条门禁），
 // 所以 `speedSearchKeyAction` 的 'accept'（收起搜索框那一支，`SpeedSearchBase.java:964-975`）在这里没有对象可收。
 const filter = ref('')
+/** 这一层的 `ListPopupStep`：一行一条 content，速度搜索开着（`SelectContentStep.kt:17`），
+ *  没有子步骤（`ListPopupStep.java:38` ⇒ 按下就关），默认选中项是当前那条
+ *  （`ToolWindowContentUi.java:865-867` 的 `setDefaultOptionIndex(selectedIndex)`）。 */
+const step: ListPopupStepLike<ContentComboOption> = {
+  values: () => props.options,
+  text: option => option.label,
+  defaultOptionIndex: () => selectedIndex.value,
+}
+/** 行 id 用的是**原索引**（`ListPopupModel.java:44-48` 那张「过滤位 → 原位」映射的另一半）：
+ *  高亮跟着原索引走，过滤串变化时才不会跳行。 */
+const idOf = (_option: ContentComboOption, index: number): string => String(index)
+/** 过滤后的**行模型**（`listStepRows` 里那条过滤就是 `shouldBeShowing`，与 `SpeedSearch.shouldBeShowing`
+ *  同源，本组件不再自己写第二份匹配）。 */
+const stepRows = computed(() => listStepRows(step, { query: filter.value, idOf }))
 /** 过滤后**可见**的那些行的「原索引」。上游 `ListPopupModel` 同时留着原表与过滤表
  *  （`:44-48` `getOriginalIndex(filteredIndex)`、`:143-150` `refilter()`、`:152-154` `isVisible(value)`）：
  *  没命中的行不是被从数据里删掉，而是**不可见** ⇒ 列表仍然逐条列 `contents` 的每一条
- *  （`ToolWindowContentUi.java:863` 把 `contentManager.getContents()` 全量交给这一步），
- *  命中的那条规则与 `SpeedSearch.shouldBeShowing`（`SpeedSearch.java:53-56`）同源，不另起一套匹配。 */
-const rows = computed(() => {
-  const query = filter.value.trim()
-  const visible: number[] = []
-  props.options.forEach((option, index) => {
-    if (!query || speedSearchMatches(query, option.label)) visible.push(index)
-  })
-  return visible
-})
+ *  （`ToolWindowContentUi.java:863` 把 `contentManager.getContents()` 全量交给这一步）。
+ *  `idOf` 给的就是原索引，所以这一位只是把行模型换回数字，不重算命中。 */
+const rows = computed(() => stepRows.value.flatMap(row => row.kind === 'item' ? [Number(row.id)] : []))
 const menu = ref<HTMLElement | null>(null)
 //   · **Esc 两段式**（`SpeedSearch.java:77-81` 在前、`AbstractPopup.java:3003-3010` 在后）：
 //     压着过滤串时第一次 Esc 只清空过滤串、列表不关；第二次才收掉这一层。这两步都吃掉按键
@@ -91,7 +104,13 @@ function toggle() {
   // 所以过滤串不带过来；高亮从当前项开始，焦点交给过滤串的输入框
   //（与 `src/components/ToolWindowGear.vue:47` 同一个手法）。
   filter.value = ''
-  active.value = selectedIndex.value
+  // 高亮的初始位置交给 `initialRowIndex`（`popupSteps.ts:162-170`）：它读的就是
+  // `ListPopupStep.getDefaultOptionIndex()`（`:75`），越界或落在不可选的行的位置时退回第一条可选行 ——
+  // 本仓这一步没有不可选项，所以两种写法同值，但规则只留那一处。
+  const fresh = listStepRows(step, { idOf })
+  const at = initialRowIndex(step, fresh)
+  const row = at >= 0 ? fresh[at] : undefined
+  active.value = row && row.kind === 'item' ? Number(row.id) : 0
   void nextTick(() => menu.value?.querySelector('input')?.focus())
 }
 function pick(id: string) { open.value = false; emit('pick', id) }
@@ -125,9 +144,11 @@ function onKeydown(event: KeyboardEvent) {
     return
   }
   // 一条都没命中时 Enter 不选任何东西（`ListPopupImpl.java:505`：压着过滤串且模型为空 ⇒ return false）。
+  // 「按下到底关不关弹层」用的是行模型上那一位（`listStepRows` 按 `ListPopupStep.java:38` 的
+  // `isClosableOnExecute` 算的 `closesOnExecute`）：有子步骤的行只换内容。这一步没有子步骤，所以恒关。
   if (event.key === 'Enter') {
-    const option = rows.value.includes(active.value) ? props.options[active.value] : undefined
-    if (option) { event.preventDefault(); pick(option.id) }
+    const row = stepRows.value.find(item => item.kind === 'item' && Number(item.id) === active.value)
+    if (row && row.kind === 'item' && row.closesOnExecute) { event.preventDefault(); pick(row.value.id) }
   }
 }
 </script>

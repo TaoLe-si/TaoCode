@@ -18,16 +18,17 @@
 //     `NetBeansCustomFoldingProvider.java:24-27`（`desc="…"` 的值，空则 `...`）。
 //
 // 与本仓既有折叠的关系：标记识别与注释前缀剥离复用 `src/editorFolding.ts` 的
-// `regionMarker` / `regionMarkerBody`（同一条 lane，两处不会认得不一样），折叠区间本身由
-// `localRegionFolds` 提供；本模块只补「把区域列出来 / 按位置导航」这一面，不碰折叠状态。
+// `regionMarkerBody`（= `src/customFoldingProviders.ts` 的 `commentMarkerBody`）与那张 provider 表，
+// 与 `localRegionFolds` 同一条 lane、同一套配对规则（含**同族才算收尾**），两处不会认得不一样；
+// 折叠区间本身由 `localRegionFolds` 提供；本模块只补「把区域列出来 / 按位置导航」这一面，不碰折叠状态。
 //
 // **无法核实**：`<region>` 那一族（`//<region>` / `//<region 说明>`）的 provider 不在社区树里
 // —— `intellij.platform.lang.impl.xml:1466-1467` 只注册了 NetBeans 与 VisualStudio 两条，
 // 全树也搜不到 `<region` 字面量（按包路径 / 语义 / XML 三条路都走过）。所以它的
 // `getPlaceholderText` 规则无法核实，这里按两个能核实的 provider 共用的那条最窄规则处理：
 // 取标记之后的说明文字，取不到就 `...`（与 `regionMarker` 对同一形态的识别保持一致）。
-import { regionMarker, regionMarkerBody } from './editorFolding.ts'
-import { placeholderOf } from './customFoldingProviders.ts'
+import { regionMarkerBody } from './editorFolding.ts'
+import { markerKindOf, matchingStartIndex, placeholderOf, type RegionMarker } from './customFoldingProviders.ts'
 
 export interface CustomRegion {
   /** 开始标记所在行（0 基，与 `localRegionFolds` 同一坐标系）。 */
@@ -54,11 +55,13 @@ export interface CustomRegion {
 }
 
 // 一行 region 开始标记的占位文本 = 上游 `CustomFoldingBuilder.java:102-111` 转发的
-// `CustomFoldingProvider.getPlaceholderText(elementText)`。规则（含两个 provider 各自的正则与
-// `...` 空值分支）在 `src/customFoldingProviders.ts` 那张表里，这里只是转发一层，
-// 免得标记识别（`regionMarker`）与占位文字两处对同一行认得不一样。
+// `CustomFoldingProvider.getPlaceholderText(elementText)`。规则（含三个 provider 各自的正则、
+// 「正则不匹配 ⇒ 原样返回那段元素文本」与 `...` 空值分支）在 `src/customFoldingProviders.ts`
+// 那张表里，这里只是转发一层，免得标记识别与占位文字两处对同一行认得不一样。
+// 第二个实参是上游的 `elementText` 替身：**去掉行首缩进的整行**（含注释前缀）——
+// `regionMarkerBody` 剥过前缀的正文只够判形状，取不到说明时上游回吐的是整段注释。
 export function regionLabel(line: string): string {
-  return placeholderOf(regionMarkerBody(line))
+  return placeholderOf(regionMarkerBody(line), line.trim())
 }
 
 /**
@@ -80,20 +83,29 @@ export function regionEntries(text: string): CustomRegion[] {
     at += lines[index]!.length + (text.startsWith('\r\n', at) ? 2 : 1)
   }
   const endOf = (line: number): number => lineStart[line]! + lines[line]!.length
-  const stack: CustomRegion[] = []
+  const stack: (CustomRegion & { marker: RegionMarker })[] = []
   const out: CustomRegion[] = []
   for (let line = 0; line < lines.length; ++line) {
-    const kind = regionMarker(lines[line]!)
-    if (kind === 'start') {
+    const body = regionMarkerBody(lines[line]!)
+    const marker = markerKindOf(body)
+    if (!marker) continue
+    if (marker.kind === 'start') {
       stack.push({
         startLine: line, endLine: line,
         from: lineStart[line]!, to: endOf(line), rangeEnd: endOf(line),
-        label: regionLabel(lines[line]!),
+        // 上游 `getPlaceholderText(elementText)` 拿的是**整段注释 token**（含前缀），
+        // 所以这里把「去掉行首缩进的整行」一起传进去 —— 正则取不到说明时它原样返回那段文本。
+        label: placeholderOf(body, lines[line]!.trim()),
         depth: 0,
+        marker,
       })
-    } else if (kind === 'end' && stack.length) {
-      const start = stack.pop()!
-      out.push({ ...start, endLine: line, rangeEnd: endOf(line) })
+    } else {
+      // 配对要**同族**（`//<region>` 不该被 `//endregion` 关掉），与 `localRegionFolds` 同一条规则；
+      // 压在它上面的异族开始标记没配到收尾 ⇒ 不产生区域。
+      const at = matchingStartIndex(stack.map(entry => entry.marker), marker)
+      if (at < 0) continue
+      const start = stack.splice(at)[0]!
+      out.push({ startLine: start.startLine, endLine: line, from: start.from, to: start.to, rangeEnd: endOf(line), label: start.label, depth: 0 })
     }
   }
   out.sort((a, b) => a.from - b.from)

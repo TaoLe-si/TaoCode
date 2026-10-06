@@ -303,8 +303,54 @@ int main() {
         check(rejected, "a plain commit still needs a message");
     });
 
-    run("git.user reads the repository author and can be overridden for one commit", [&] {
-        const auto configured = taocode::git::user(root);
+    // 「提交文件…」（R1 的那半条通道）：只把选中的那些路径带进这次提交。
+    // 上游 = CommonCheckinFilesAction.kt:26-78 → CheckinActionUtil.kt:100-160（pathsToCommit
+    // → getIncludedChanges → workflowHandler.setCommitState(...)），本仓落到
+    // `git commit --only -- <paths>`（native/git.cpp 的 commit(..., paths)）。
+    run("commit with a path subset commits only the selected files", [&] {
+        put(root / "scope-a.txt", "a one\n");
+        put(root / "scope-b.txt", "b one\n");
+        taocode::git::stage(root, "scope-a.txt");
+        taocode::git::stage(root, "scope-b.txt");
+        put(root / "scope-a.txt", "a two\n");  // 被选项再改一次：--only 取工作区那一份
+        taocode::git::commit(root, "scoped: only a", false, false, "", "", {"scope-a.txt"});
+        const auto after = taocode::git::status(root);
+        const auto* b = [&] { for (const auto& c : after) if (c.path == "scope-b.txt") return &c; return static_cast<const Change*>(nullptr); }();
+        check(b != nullptr && b->staged, "另一个已暂存的文件不跟着走，仍留在暂存区");
+        const auto* a = [&] { for (const auto& c : after) if (c.path == "scope-a.txt") return &c; return static_cast<const Change*>(nullptr); }();
+        check(a == nullptr, "被选中的那个文件整个从变更列表里消失");
+        const auto touched = taocode::git::log(root, "scope-a.txt", 5).at("commits");
+        check(!touched.empty() && touched[0].at("subject").get<std::string>() == "scoped: only a",
+              "那次提交的内容就是被选项的工作区版本");
+        // 未跟踪的被选项：git 不认陌生 pathspec（实测 error: pathspec '…' did not match any
+        // file(s) known to git），而上游那一支把 untracked 也当新文件纳入 ⇒ 先 add 再 --only。
+        put(root / "scope-c.txt", "brand new\n");
+        taocode::git::commit(root, "scoped: new file", false, false, "", "", {"scope-c.txt"});
+        const auto added = taocode::git::log(root, "scope-c.txt", 5).at("commits");
+        check(added.size() == 1 && added[0].at("subject").get<std::string>() == "scoped: new file",
+              "未跟踪的被选项也能提交进去");
+        // pathspec 走的是用户给的路径，非法的必须在交给 git 之前被挡住（与 file_history 同一个 checked_path）。
+        bool escaped = false;
+        try { taocode::git::commit(root, "escapes", false, false, "", "", {"../outside.txt"}); }
+        catch (const taocode::WorkspaceError& error) { escaped = error.code == "INVALID_REQUEST"; }
+        check(escaped, "路径不能越出仓库");
+        bool injected = false;
+        try { taocode::git::commit(root, "option", false, false, "", "", {"--help"}); }
+        catch (const taocode::WorkspaceError& error) { injected = error.code == "INVALID_REQUEST"; }
+        check(injected, "路径永远不会被读成命令行选项");
+        // 收尾：把留在暂存区的那一份提交掉，后面的用例需要一个干净的 index。
+        taocode::git::commit(root, "scoped: the rest");
+        // 失败信息带上"还剩哪几个文件、porcelain 的 XY 是什么"：这一档 check 的是**整个**工作区，
+        // 前面那几条只按名字看 scope-a / scope-b，所以别处留下的脏文件也只能在这里才看得见。
+        const auto rest = taocode::git::status(root);
+        std::string left;
+        for (const auto& change : rest)
+            left += " " + change.path + "(X" + change.index_status + "Y" + change.work_status +
+                    (change.untracked ? " untracked" : "") + (change.staged ? " staged" : "") + ")";
+        check(rest.empty(), "工作区重新干净，还剩:" + left);
+    });
+
+    run("git.user reads the repository author and can be overridden for one commit", [&] {        const auto configured = taocode::git::user(root);
         check(configured.at("name").get<std::string>() == "Test", "user.name comes from the repository config");
         check(configured.at("email").get<std::string>() == "test@example.com", "user.email comes from the repository config");
 

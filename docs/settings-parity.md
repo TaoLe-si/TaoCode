@@ -6,7 +6,9 @@
 
 > IDEA 侧证据：`platform/**/resources/*.xml` 里 `<applicationConfigurable>` / `<projectConfigurable>` 的 `id`。
 
-> IDEA 平台注册：**52** 个；TaoCode 设置节点：**12** 个。
+> IDEA 平台注册：**52** 个；TaoCode 设置节点：本轮实测 **40** 行 `  { key:`、**39** 个不同 key
+> （复算 `grep -c '^  { key:' src/settingsTreeMeta.ts`）。⚠️ 这一行 2026-09-27 写的是「**12** 个」，
+> 那是**当时**的节点数、不是口径变了 —— 后续批次一路加到 40，抄这一行的人请重跑上面那条命令。
 
 ---
 
@@ -15,7 +17,7 @@
 那一轮清单里有 **39** 项标着 `[ ]`。本批把它们**逐条查过**，发现它们其实是三种东西，
 混在一起才显得"缺口巨大"：**真的没做**、**早就做了但清单漏登**、**依赖 IDEA 专有后端**。
 本批新做 2 项、补登 9 项、剩下 28 项逐条写明"不做"或"未动"的理由（清单现在的状态分布：
-`[x]` 15 / `[~]` 8 / `[ ]` 28，共 52）。
+`[x]` 16 / `[~]` 8 / `[ ]` 28，共 52）。
 
 | 分类 | 数量 | 项 |
 |---|---:|---|
@@ -66,7 +68,7 @@
 
 | 13 | `editing.templates` | `LiveTemplatesConfigurable` | `[x]` **已实现（2026-10-05 补登记）**：注册证据 `intellij.platform.lang.impl.xml:1000-1002`（`groupId="editor" groupWeight="130" id="editing.templates"`）→ 节点 `editing.templates`（`src/settingsTreeMeta.ts:107`，`parent: 'group:editor'`）+ 面板 `SettingsDialog.vue:964` + 页面 `src/components/TemplateSettingsPage.vue`（内置模板覆盖 + 自定义模板的增删改）。项目级设置 `ProjectSettings.templates`（native `validate_template_settings`）→ 消费点 `CodeEditor.vue:504` 的 `expandTemplateAt`（打字时展开）与 `:552` 的 `templateCandidates`（模板选择器） |
 
-| 14 | `editor.breadcrumbs` | `BreadcrumbsConfigurable`（`platform/platform-impl/src/com/intellij/xml/breadcrumbs/BreadcrumbsConfigurable.java:24`，UI 在 `BreadcrumbsConfigurableUI.kt:44-70`） | `[x]` **三项全实现**（本批校正）：① 显示开关 `showBreadcrumbs`（`EditorSettingsExternalizable.isBreadcrumbsShown:439-453`）；② 位置 `breadcrumbsPlacement: 'top'\|'bottom'`（`isBreadcrumbsAbove:420-430`，**只有上/下**，默认**下方** —— `OptionSet:91-92` `SHOW_BREADCRUMBS_ABOVE=false`；旧版把「不显示」编进这个键的第三态已按源码拆开，旧文件由 `bridge.ts` 的 `normalizeEditorSettings` 迁移）；③ 按语言开关 `breadcrumbsLanguages: {语言: 布尔}`（`mapLanguageBreadcrumbs:146-152` **只存显式配置过的语言**，未进表=显示，`isBreadcrumbsShownFor:459-466`），native 用 `validate_language_flags` 校验键必须是已知语言 id；消费点是编辑器上下两条面包屑的 `breadcrumbsOn(path)`。设置页按源码排布：总开关 → 位置单选（随总开关禁用）→ 每语言复选。**仍缺**：页底「配置面包屑颜色」链接指向颜色方案页（`ColorAndFontOptions.selectOrEditColor(context,"Breadcrumbs//Current",GeneralColorsPage)`），本仓没有色板/颜色方案页，登记在 `class-parity-todo.md`，不渲染假链接 |
+| 14 | `editor.breadcrumbs` | `BreadcrumbsConfigurable`（`platform/platform-impl/src/com/intellij/xml/breadcrumbs/BreadcrumbsConfigurable.java:21-28` —— 21 = `final class BreadcrumbsConfigurable extends CompositeConfigurable<…> implements SearchableConfigurable`，26-28 = `getId()` 返回 `"editor.breadcrumbs"`；**2026-10-06 引用门复核**：原写 `:24` 已漂到空行上（区间读到空），改指当前真行号），UI 在 `BreadcrumbsConfigurableUI.kt:44-70`） | `[x]` **三项全实现**（本批校正）：① 显示开关 `showBreadcrumbs`（`EditorSettingsExternalizable.isBreadcrumbsShown:439-453`）；② 位置 `breadcrumbsPlacement: 'top'\|'bottom'`（`isBreadcrumbsAbove:420-430`，**只有上/下**，默认**下方** —— `OptionSet:91-92` `SHOW_BREADCRUMBS_ABOVE=false`；旧版把「不显示」编进这个键的第三态已按源码拆开，旧文件由 `bridge.ts` 的 `normalizeEditorSettings` 迁移）；③ 按语言开关 `breadcrumbsLanguages: {语言: 布尔}`（`mapLanguageBreadcrumbs:146-152` **只存显式配置过的语言**，未进表=显示，`isBreadcrumbsShownFor:459-466`），native 用 `validate_language_flags` 校验键必须是已知语言 id；消费点是编辑器上下两条面包屑的 `breadcrumbsOn(path)`。设置页按源码排布：总开关 → 位置单选（随总开关禁用）→ 每语言复选。**仍缺**：页底「配置面包屑颜色」链接指向颜色方案页（`ColorAndFontOptions.selectOrEditColor(context,"Breadcrumbs//Current",GeneralColorsPage)`），本仓没有色板/颜色方案页，登记在 `class-parity-todo.md`，不渲染假链接 |
 
 | 15 | `editor.preferences.import` | `AutoImportOptionsConfigurable` | `[ ]` **本批未动**：上游按 import 种类分档（`AutoImportOptionsConfigurable` + `AutoImportOptions` 的 importOnPaste/importOnType 等）。本仓对应的 `src/autoImportNotifications.ts` 还没有可持久化开关，先开页就是没有出口的勾选框 |
 
@@ -122,7 +124,7 @@
 
 | 41 | `preferences.updates` | `UpdateSettingsConfigurable` | `[ ]` **判定不做**：更新设置背后是 `ExternalUpdateManager`（IDE 版本检查 + 插件更新通道 + 重启安装）。本仓没有这条通道，开一页「自动检查更新」勾了也没有任何请求可发 |
 
-| 42 | `project.propDebugger` | `DebuggerConfigurableProvider`（`intellij.platform.debugger.impl.ui.xml:75` `id="project.propDebugger"`；另有一条 `groupId="build"` 的 `XDebuggerSettingsConfigurable`） | `[x]` **已实现（2026-10-05 补登记）**：节点 `debugger`（`src/settingsTreeMeta.ts`，`parent: 'group:build'`，label「调试器」）+ 页面 `src/components/DebuggerSettingsPage.vue`，七格全部有真实消费点：`XDebuggerDataViewSettings`（隐藏 null / 按名排序 / 行内值 / 库帧 → `src/debugDataView.ts`、`src/debugInlineValues.ts`）与 `XDebuggerGeneralSettings`（移断点确认 / 停在断点取消静音 / 求值对话框形态 → `src/debugBreakpointMute.ts`、`src/components/DebugEvaluateDialog.vue`）。键在 native `GENERAL_SETTING_KEYS` + 默认值 + `validate_general_patch` 三处齐（判据 `tests/debug-settings-keys.test.mjs`、`tests/debug-data-view.test.mjs`） |
+| 42 | `project.propDebugger` | `DebuggerConfigurableProvider`（`intellij.platform.debugger.impl.ui.xml:75` `id="project.propDebugger"`；另有一条 `groupId="build"` 的 `XDebuggerSettingsConfigurable`） | `[x]` **已实现（2026-10-05 补登记）**：节点 `debugger`（`src/settingsTreeMeta.ts`，`parent: 'group:build'`，label「调试器」）+ 页面 `src/components/DebuggerSettingsPage.vue`，七格全部有真实消费点：`XDebuggerDataViewSettings`（隐藏 null / 按名排序 / 行内值 / 库帧 → `src/debugDataView.ts`、`src/debugInlineValues.ts`）与 `XDebuggerGeneralSettings`（移断点确认 / 停在断点取消静音 / 求值对话框形态 → `src/debugBreakpointExtras.ts`（**订正 2026-10-06**：旧写的 `src/debugBreakpointMute.ts` 这个文件根本不存在 —— 行为在 `:62` 的 `shouldAutoUnmute`，注释直接写着「上游 `XDebuggerGeneralSettings.isUnmuteOnStop` 的唯一消费点」；另见 `src/debugDataView.ts:38` 的 `unmuteOnStop` 字段）、`src/components/DebugEvaluateDialog.vue`）。键在 native `GENERAL_SETTING_KEYS` + 默认值 + `validate_general_patch` 三处齐（判据 `tests/debug-settings-keys.test.mjs`、`tests/debug-data-view.test.mjs`） |
 
 | 43 | `project.propVCSSupport.Mappings` | `VcsManagerConfigurableProvider`（`VcsExtensions.xml:172-176`，`groupId="root" groupWeight="45"`） | `[~]` **本体是顶层节点但没有目录映射（2026-10-05 补登记）**：节点 `project.propVCSSupport.Mappings`（`src/settingsTreeMeta.ts`，`parent: null`，`expandOnly`）下挂两个真页 —— 「提交」与「VCS 日志」（后者消费点 `VcsLog.vue` 的 `visibleRefs()`，见 §52）。**仍缺**：上游这一页的本体是**目录映射**表（`VcsManagerConfigurable` 的 root/submodule 映射），本仓的子模块与 worktree 由 git 自己管，没有这一层可映射，所以节点只做展开 |
 

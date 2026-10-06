@@ -9,7 +9,7 @@
 // `src/commitChecksResult.ts` 的状态机（上游 `RecentCommitChecks`，`NonModalCommitWorkflowHandler.kt:229-249、
 // 337-342、533-557`），并把 reset 的判据换成上游那一条（变更集/文档真的变了，不是只数条数）。
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
-import { commitBlockMessage, commitBlockReason } from './commitCheck.ts'
+import { commitBlockMessage, commitBlockReason, commitIncludedCount } from './commitCheck.ts'
 import { COMMIT_ACTION_TEXT, CHECKS_STEP_TODO, PROGRESS_PRESENTATION_DELAY_MS, RUNNING_CHECKS_TEXT, SHOW_DETAILS_TEXT,
   REVIEW_TODO_ACTION, CHECKS_CANCEL_TEXT, checksFailedTitle, checksProgressShown, commitActionText, commitAndPushText,
   checksProgress as checksProgressOf, checksProgressPopup, indexingWarningVisible, commitCheckReport, failureTexts,
@@ -17,7 +17,7 @@ import { COMMIT_ACTION_TEXT, CHECKS_STEP_TODO, PROGRESS_PRESENTATION_DELAY_MS, R
 import {
   checksResultAfter, resetCommitChecks, willSkipCommitChecks, willSkipEarlyCommitChecks,
   willSkipModificationCommitChecks, willSkipPostCommitChecks, commitChecksFingerprint, commitChecksShouldReset,
-  type CommitChecksFileRow, type RecentCommitChecks,
+  type CommitChecksFileRow, type DocumentRevision, type RecentCommitChecks,
 } from './commitChecksResult.ts'
 import { postCommitCheckFailures, runsChecksAfterCommit, runsChecksBeforeCommit } from './commitOptions.ts'
 import { setStatusText } from './statusBarText.ts'
@@ -57,11 +57,32 @@ export interface CommitChecksDeps {
   postponeSlowChecks: Ref<boolean>
   /** 宿主答"哪些还没保存"的那条通道（上游 `SaveCommittingDocumentsVetoer`）。 */
   dirtyPaths: () => string[]
+  /**
+   * 编辑器内容的修订计数（上游 `DocumentListener.documentChanged`，`NonModalCommitWorkflowHandler.kt:216-225`）：
+   * 宿主接上线后每次键入/保存都要变；没接时不给（指纹保持本批之前的形状）。见 W2 接线请求。
+   */
+  editorEpoch?: () => number
+  /**
+   * **每篇文档各自的修订号**（上游 `Document.getModificationStamp()`，`Document.java:184-192`；
+   * 提交检查由 `documentChanged` 作废那一条的直接等价物，`NonModalCommitWorkflowHandler.kt:215-226`）。
+   * 上面那个全局计数会把"别的文档动了一下"也算成这次变更集变了，而 `dirtyPaths` 那份快照只覆盖
+   * 第一次编辑 ⇒ 这一档才是"同一篇改两次也作废"的那一口。没给（宿主还没接）= 空数组 = 本批之前的形状。
+   * 接线请求：`docs/wiring-requests-2026-10-06-commit2.md` C2。
+   */
+  documentRevisions?: () => readonly DocumentRevision[]
+  /**
+   * 「提交文件…」的范围（R1）：给了就按**这次包含的变更**判"有没有内容"，
+   * 上游那条 `isCommitEmpty()` 问的就是这个集合（`AbstractCommitWorkflowHandler.kt:82`：
+   * included changes **和** included unversioned 都空才算空；范围由 `CheckinActionUtil.kt:135-136`
+   * 的 `setCommitState(...)` 定）。没给 = 整份暂存区，判据与本批之前逐字一致。
+   */
+  commitScope?: () => readonly string[]
 }
 
 export function createCommitChecks(deps: CommitChecksDeps) {
   const { props, emit, act, commit, staged, changes, message, amend, checkTodoBeforeCommit, todoCheckBusy, todoHits,
-          messageProblems, signoff, postponeSlowChecks, dirtyPaths } = deps
+          messageProblems, signoff, postponeSlowChecks, dirtyPaths, editorEpoch, documentRevisions,
+          commitScope } = deps
   // IDEA's commit check (NonModalCommitWorkflowHandler.checkCommit, :177-184) records which
   // precondition is missing and CommitProgressPanel.buildErrorText() (:321-328) prints that
   // reason right above the commit actions. The Commit button itself only needs a VCS and no
@@ -93,6 +114,8 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   const commitAndPushLabel = computed(() => commitAndPushText({ amend: amend.value, skipChecks: checksSkipped.value }))
   const commitBlockReasonNow = computed(() => commitBlockReason({
     hasStagedChanges: staged.value.length > 0,
+    // 部分提交时"有没有内容"看这次包含的那一批（含未跟踪的新文件），不是整份暂存区。
+    includedCount: commitScope ? commitIncludedCount(changes.value, commitScope()) : null,
     hasMessage: message.value.trim().length > 0,
     amend: amend.value,
   }))
@@ -104,7 +127,11 @@ export function createCommitChecks(deps: CommitChecksDeps) {
   // `resetCommitChecksResult()`（`:246-249`）的触发条件在 `:200-226`：VFS 或文档变了、而且变的文件
   // 是"会影响检查结果"的那些（`:191-199`：在 VCS 下、在内容里、状态不是 IGNORED）。本仓的等价信号 =
   // 变更集指纹（`commitChecksFingerprint`）—— 已经 UNKNOWN 就早退（`:202`/`:218`）。
-  watch(() => commitChecksFingerprint(changes.value, dirtyPaths()), () => {
+  // 第二个参数是**未保存清单**（`:216-225` 的 documentChanged 在本仓的代理，只覆盖第一次编辑）；
+  // 第三个参数是宿主的修订计数，接上线后每一次键入都会让这一轮结果作废；
+  // 第四个参数是**按文档的修订号**（`Document.java:184-192`）：同一篇第二次编辑也变，别的文档变了不算。
+  watch(() => commitChecksFingerprint(changes.value, dirtyPaths(), editorEpoch ? editorEpoch() : null,
+                                      documentRevisions ? documentRevisions() : []), () => {
     commitCheckError.value = ''
     if (commitChecksShouldReset(checksResult.value)) checksResult.value = resetCommitChecks()
   })

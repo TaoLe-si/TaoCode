@@ -193,10 +193,16 @@ function focusHeader() {
         <span class="menu-item-icon"><PanelBottom :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">移动到底部</span>
       </button>
       <!-- 工具窗口自己的那一组（上游 GearActionGroup :857-891）：行、标题、快捷键与可用性都取自主菜单
-           动作索引；渲染器与底部 dock 的齿轮共用同一个 ToolWindowGearRows，两处不再各抄一份。 -->
+           动作索引；渲染器与底部 dock 的齿轮共用同一个 ToolWindowGearRows，两处不再各抄一份。
+           `:tool-window-id="id"` 是上游那一份"按窗口问"的对应物 —— 标题栏的齿轮组本来就是
+           按这个头部自己的那个 `ToolWindow` 现取的（`InternalDecoratorImpl.kt:290` 的
+           `gearProducer = { toolWindow.createPopupGroup(true) }`），所以注册表那道
+           `canCloseContents()` 在这里问的就是**本窗口**（`ToolWindowImpl.kt:647`）。
+           段落可见性仍按整张行表判：本窗口这一侧的行表里那些与内容相关的行本来就不出现
+           （`contentsScoped` 那一位，侧栏没有可关的内容），摘行只会少不会多，不会有空分隔线。 -->
       <template v-if="extraRows.length">
         <div class="menu-rule" role="separator" />
-        <ToolWindowGearRows :rows="extraRows" @pick="pickExtra" />
+        <ToolWindowGearRows :tool-window-id="id" :rows="extraRows" @pick="pickExtra" />
       </template>
     </div>
     </Teleport>

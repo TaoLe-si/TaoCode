@@ -16,21 +16,29 @@
 // 同一个修法（判据 `tests/popup-layer-wiring.test.mjs`）。栈上的裁决是
 // `StackingPopupDispatcherImpl.java:116-164`（自顶向下：落点在某层内就停），
 // Esc 走 `:181-193` + `SpeedSearch.java:77-81` 的两段式。
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { MoreVertical } from 'lucide-vue-next'
 import ToolWindowGearRows from './ToolWindowGearRows.vue'
 import type { MenuRow } from '../menus/types'
+import { gearRowsForWindow } from '../menus/toolWindowGear.ts'
 import { usePopupLayer } from '../popupStack.ts'
 import { iconSize } from '../uiIcons'
 
-const props = defineProps<{ rows: MenuRow[]; label?: string }>()
+// `toolWindowId` = 这个齿轮当前挂在哪个工具窗口上（底部那一格 = 选中的那条 content 的 id，
+// 上游按的是窗口自己那份 `canCloseContents()`，`ToolWindowImpl.kt:647`）。
+// 不给 = 答不出 ⇒ 行表原样（`ContentManagerImpl.java:472-475` 答不出的那一档不替窗口猜值）。
+const props = defineProps<{ rows: MenuRow[]; label?: string; toolWindowId?: string }>()
 const emit = defineEmits<{ pick: [row: MenuRow] }>()
 const open = ref(false)
 const at = ref({ left: 0, bottom: 0 })
+// 按钮画不画要按**过了注册表那道闸之后**的行数判：只看 `props.rows` 的话，
+// 「唯一那一行被窗口身份摘掉」时会留下一个点开是空的齿轮（上游那条是 `setEnabledAndVisible`，
+// 整行不见 ⇒ 没有行就没有那个位置）。
+const shownRows = computed(() => gearRowsForWindow(props.rows, props.toolWindowId))
 
 function toggle(event: MouseEvent) {
   if (open.value) { open.value = false; return }
-  if (!props.rows.length) return
+  if (!shownRows.value.length) return
   const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
   // 贴着按钮往上长（`top: 100%` 那一套是给侧栏往下长用的；底部 dock 往下没空间）。
   at.value = { left: Math.max(8, box.right - 0), bottom: window.innerHeight - box.top + 6 }
@@ -49,14 +57,14 @@ function pick(row: MenuRow) {
 </script>
 
 <template>
-  <span v-if="rows.length" class="tool-gear">
+  <span v-if="shownRows.length" class="tool-gear">
     <button type="button" class="icon-button" :aria-expanded="open" :aria-label="label ?? '工具窗口选项'"
             :title="label ?? '工具窗口选项'" @click.stop="toggle($event)"><MoreVertical :size="iconSize.control" /></button>
   </span>
   <Teleport v-if="open" to="body">
     <div ref="menu" class="tool-menu tool-gear-menu" role="menu" :aria-label="label ?? '工具窗口选项'"
          :style="{ left: `${at.left}px`, bottom: `${at.bottom}px` }" @contextmenu.prevent>
-      <ToolWindowGearRows :rows="rows" @pick="pick" />
+      <ToolWindowGearRows :tool-window-id="props.toolWindowId" :rows="shownRows" @pick="pick" />
     </div>
   </Teleport>
 </template>

@@ -88,8 +88,11 @@ test('接线：齿轮行由 menuUi 解析、标题栏只负责渲染与回抛', 
   assert.match(ui, /gearHostRows\?: \(\) => Record<string, MenuRow>/, '两条宿主行（速度搜索 / 从侧栏移除）走同一个入口')
   const header = read('src/components/ToolWindowHeader.vue')
   assert.match(header, /extraRows\.length/, '没有可用引用时整段（含分隔线）都不该出现')
-  assert.match(header, /<ToolWindowGearRows :rows="extraRows" @pick="pickExtra" \/>/,
-    '行列表要交给共用的渲染器（底部 dock 的齿轮用的是同一个）')
+  // 原写 `:rows="extraRows" @pick="pickExtra"`（没有窗口身份那一位）；W-TW2-3 的组件侧给渲染器
+  // 加了 `:tool-window-id="id"` —— 上游那份齿轮组本来就是按**这个头部自己的 `ToolWindow`** 现取的
+  // （`InternalDecoratorImpl.kt:290`），断言仍是逐字整段匹配，严格度没降。
+  assert.match(header, /<ToolWindowGearRows :tool-window-id="id" :rows="extraRows" @pick="pickExtra" \/>/,
+    '行列表要交给共用的渲染器（底部 dock 的齿轮用的是同一个），并且把本窗口的身份一起递下去')
   assert.match(header, /emit\('pickExtra', row\)[\s\S]{0,80}focusHeader\(\)/,
     '点完要把焦点还给标题栏，不然键盘焦点掉在已关闭的浮层上')
   const shared = read('src/components/ToolWindowGearRows.vue')
@@ -101,8 +104,8 @@ test('接线：齿轮行由 menuUi 解析、标题栏只负责渲染与回抛', 
   assert.match(app, /@pick-extra="pickEditorPopup\(\$event\); toolMenu = null"/,
     '齿轮项的执行必须复用 runAction 那条链（可用性提示 + 宏记录都在那里），并关掉菜单')
   // 底部 dock 的标题条以前没有齿轮：内容动作只能从主菜单进，而同样的动作侧栏一点就开。
-  assert.match(app, /<ToolWindowGear :rows="bottomGearRows" label="输出窗口选项" @pick="pickEditorPopup\(\$event\)" \/>/,
-    '底部 dock 的标题条要有同一个齿轮，并且走同一条执行链')
+  assert.match(app, /<ToolWindowGear :tool-window-id="bottomTab" :rows="bottomGearRows" label="输出窗口选项" @pick="pickEditorPopup\(\$event\)" \/>/,
+    '底部 dock 的标题条要有同一个齿轮，走同一条执行链，并把「当前选中哪一格」交给它（齿轮行的关闭组按窗口身份滤，见 tool-window-gear-identity）')
   assert.match(read('src/menuUi.ts'), /bottomGearRows = computed\(\(\) => toolWindowGearLayout\(findMenuRow, undefined, true, bottomGearHostRows\(\)\)\)/,
     '底部那一份要显式声明"这是挂着内容的窗口"，并把宿主行（用法视图的「视图选项」组）一起算进来')
   assert.match(read('src/components/ToolWindowGear.vue'), /Teleport v-if="open" to="body"/,

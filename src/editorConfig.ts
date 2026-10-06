@@ -26,7 +26,9 @@
 //     这里照抄成 `EditorConfigParseError` + 调用方 break；**坏文件的上层不会被继续往上找**。
 //
 // 消费链路：`src/codeStyleSettings.ts` 解析每份文件的生效缩进选项 → `src/semanticActions.ts` 的
-// `runFormatting` 把它当 LSP `FormattingOptions` 发出去（对齐上游 `LspFormattingService.kt:119-125`）。
+// `runFormatting` 把它当 LSP `FormattingOptions` 发出去（对齐上游 `LspFormattingService.kt:119-125`）；
+// `src/editorSaveTransforms.ts` 消费 `trim_trailing_whitespace` / `insert_final_newline`
+// 两个键（上游 `EditorConfigTrailingSpacesOptionsProvider.kt:13-45`，保存前跑一次纯文本 pass）。
 
 /** 配置文件名（上游 `Utils.EDITOR_CONFIG_FILE_NAME`，`Utils.kt:45`）。 */
 export const EDITOR_CONFIG_FILE_NAME = '.editorconfig'
@@ -326,11 +328,24 @@ function toPositiveInt(value: string): number | null {
   return parsed > 0 ? parsed : null
 }
 
-/** 这些键本仓**没有**落点（`basic.json` 里在册，但 LSP 兑现不了 / 宿主没有通道）。报告里如实登记。 */
+/** 这些键本仓**没有**落点（`basic.json` 里在册，但 LSP 兑现不了 / 宿主没有通道）。报告里如实登记。
+ *
+ * `trim_trailing_whitespace` 与 `insert_final_newline` **已经不在这一列**：2026-10-06 起
+ * 由 `src/editorSaveTransforms.ts` 的 `editorConfigSaveOverrides` 真实消费（保存前的纯文本 pass），
+ * 判据在 `docs/batch-2026-10-06-saveops.md`。
+ */
 export const EDITOR_CONFIG_KEYS_WITHOUT_CONSUMER = [
   'end_of_line',           // basic.json:59-83 —— 行尾在 pf/vfs 域（src/editorFileOps.ts），不在格式化请求里
   'charset',               // basic.json:85-123 —— 编码在 pf/vfs 域（src/sessionEncodings.ts）
   'max_line_length',       // basic.json:160-174 —— 硬换行需要本地格式化模型，本仓不建
-  'trim_trailing_whitespace',  // basic.json:125-147 —— 需要在格式化后跑一遍纯文本 pass（本批未做）
-  'insert_final_newline',  // basic.json:148-158 —— 同上
 ] as const
+
+/**
+ * 路径是不是**这一份 `.editorconfig` 本身**（`Utils.isEditorConfigName` / `isEditorConfigFile`，
+ * `plugins/editorconfig/backend/src/Utils.kt:243-247`：文件名大小写不敏感）。
+ * 上游用它挡掉「配置文件对自己生效」—— 保存 pass 与缩进解析都读这一份。
+ */
+export function isEditorConfigPath(path: string): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
+  return name.toLowerCase() === EDITOR_CONFIG_FILE_NAME
+}

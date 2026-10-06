@@ -1,14 +1,18 @@
 // 插件声明的**文件类型**（上游 `com.intellij.fileType` 扩展点 = `FileTypeBean` 那一条）在本仓的装载链。
 //
 // 上游形状（`platform/platform-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeBean.java`）：
-//   · 一个 `<fileType>` 标签有两种用法（`:26-43` 的类注释）：带 `implementationClass` = **声明一个新类型**，
-//     只给 `name` + 关联属性 = **给别的插件已经声明的类型补关联**（`:36-41`，被引用的类型必须已由别的标签注册，
-//     标签顺序无所谓）；
-//   · 关联属性四个，都是**分号分隔**且只按**文件名**匹配（`:94-96`：`extensions` / `fileNames` /
-//     `patterns` / `fileNamesCaseInsensitive`，`patterns` 不能含 `/`）；`hashBangs`（`:138-144`）是唯一
-//     看内容的那一个，只在按内容探测时才用；
-//   · `name` 全 IDE 唯一，**两个类型重名是错误**（`:49-54`，装载时报 `PluginException`）；
-//   · 声明方插件跟着走（`PluginAware`，`:57`）：冲突审批比厂商（`ConflictingFileTypeMappingTracker.java:107-114`），
+//   · 一个 `<fileType>` 标签有两种用法（`:26-43` 的类注释）：带 `implementationClass` = **声明一个新类型**
+//     （`:29-30`），只给 `name` + 关联属性、省掉 `implementationClass` = **给别的插件已经声明的类型补关联**
+//     （`:36-41`，被引用的类型必须已由别的标签注册，标签顺序无所谓）—— 这两档的口径**不能混**：
+//     前者才有类实现，后者只是往已有类型上挂匹配器；
+//   · 关联属性四个，都是**分号分隔**：`extensions`（`:101`）/ `fileNames`（`:108`）/
+//     `patterns`（`:116`，「模式按文件名匹配、不能含 `/`」写在 `:114`）/
+//     `fileNamesCaseInsensitive`（`:123`）；「只按**文件名**匹配」是 `:46-48` 那句；
+//     `hashBangs`（`:144`）是唯一看内容的那一条，且**排在最后**：`FileTypeBean.java:140-143`
+//     明确写它「在所有按名字的关联与所有 `FileTypeDetector` 都失败之后」才用；
+//   · `name` 全 IDE 唯一，**两个类型重名是错误**（`:51-54`，装载时报 `PluginException`），
+//     而 `name` 本身是 `@RequiredElement`（`:93`）；
+//   · 声明方插件跟着走（`PluginAware`，`:59`）：冲突审批比厂商（`ConflictingFileTypeMappingTracker.java:107-114`），
 //     覆盖列表拼「来自插件 X」的提示（`OverrideFileTypeAction.java:64-72`）。
 //
 // 本仓的等价物：插件清单 `plugin.json` 的 `contributes.fileTypes`（`native/plugins.cpp` 的
@@ -107,7 +111,8 @@ export function applyPluginFileTypes(plugins: readonly PluginFileTypeSource[]): 
       }
       const holder = claimedNames.get(typeName)
       if (holder && holder !== plugin.id) {
-        // 上游：两个 `<fileType>` 用同一个 name 是错误（`FileTypeBean.java:49-54` 的类注释），
+        // 上游：两个 `<fileType>` 用同一个 name 是错误（`FileTypeBean.java:52-53`；同一句 javadoc 的
+        // `:49-51` 说的正是装载时报 `PluginException`），
         // 后到的那条装载失败。本仓同样只让第一条生效，并把这条列出来。
         report.rejected.push({
           typeName,
@@ -150,7 +155,8 @@ export function applyPluginFileTypes(plugins: readonly PluginFileTypeSource[]): 
     }
     const matchers = parsed.descriptor.matchers ?? []
     const conflict = fileTypeManager.registerBean(bean, {
-      // 声明方插件名进 `vendor`：上游 `PluginAware` 带的就是这个（`FileTypeBean.java:57`），
+      // 声明方插件名进 `vendor`：上游 `PluginAware` 带的就是这个（`FileTypeBean.java:59`
+      // 的 `implements PluginAware`，取用口在 `:156-164`），
       // 冲突审批比厂商（`ConflictingFileTypeMappingTracker.java:107-108`）与覆盖列表的
       // 「来自插件 X」提示（`OverrideFileTypeAction.java:64-72`）都读它。
       bundled: false,

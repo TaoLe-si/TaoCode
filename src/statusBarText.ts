@@ -95,13 +95,15 @@ export function statusBarDisplay(input: StatusTextInput): { text: string; manage
 }
 
 // ——— 状态（上游的 currentRequestor / myDirty / myTimeText 三个字段）———
+// `myTimeText` 在本仓不落模块状态：时间后缀已经在 `statusBarDisplay` 里拼进 `display.text`，
+// 原来那个模块级 `timeText` 只服务一条没有消费者的读口（`statusTextTimeSuffix()`，
+// 2026-10-06 桶 status2 删除），留着就是一份没人读的第二个真相。
 
 let currentRequestor: string | null = null
 let pendingText = ''
 let notice: StatusNotice | null = null
 let dirty = true
 let managed = false
-let timeText: string | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 
 /** 状态栏中间那段文字（模板绑定它）。 */
@@ -126,7 +128,6 @@ function render(now: number) {
   const display = statusBarDisplay({ text: pendingText, notice, now, dirty })
   statusText.value = display.text || IDLE_TEXT
   managed = display.managed
-  timeText = display.timeText
   if (managed) { dirty = false; startTimer() } else stopTimer()
 }
 
@@ -164,12 +165,6 @@ export const BUSY_TEXT = '正在处理…'
 export function statusLabel(working: boolean): string {
   return statusText.value !== IDLE_TEXT ? statusText.value : working ? BUSY_TEXT : IDLE_TEXT
 }
-
-/** 当前是否由通知托管（判据用）。 */
-export function statusTextManaged(): boolean { return managed }
-
-/** 时间后缀（上游 `myTimeText`）；仅托管时有值。 */
-export function statusTextTimeSuffix(): string | null { return timeText }
 
 /** 测试用：把状态清回初始态。 */
 export function resetStatusText(now = Date.now()): void {

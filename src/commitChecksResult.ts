@@ -79,6 +79,18 @@ export interface CommitChecksFileRow {
 }
 
 /**
+ * 一篇文档的**修订号**（上游 `Document.getModificationStamp()`，
+ * `platform/core-api/src/com/intellij/openapi/editor/Document.java:184-192`）：
+ * 内容每变一次就换一个号（`DocumentImpl.java:171` + `DocumentModStamp.java:6-12`），
+ * 与文件时间无关、也不要求是"递增 1"。宿主（CodeMirror / 标签页）给的号只用满足
+ * "同一篇改一次就换一个、没改就不动"这一条。
+ */
+export interface DocumentRevision {
+  path: string
+  revision: number
+}
+
+/**
  * 变更集的指纹：`areFilesAffectsCommitChecksResult`（`:191-199`）在本仓的等价物。
  *
  * 上游看的是"这个文件在 VCS 下、在内容里、状态不是 IGNORED"；本仓拿到的就是 git 的变更列表
@@ -89,13 +101,56 @@ export interface CommitChecksFileRow {
  * `unsaved` = 编辑器里还没保存的路径（宿主的 `dirtyPaths`）：上游的第二个 listener 是
  * `DocumentListener.documentChanged`（`:216-225`），本仓的面板收不到逐次键入，只能拿"未保存清单"当代理
  * —— 第一次编辑会进清单（⇒ reset），同一文件之后继续编辑清单不再变（⇒ 这一条只覆盖一半，报告里已登记）。
+ *
+ * `editorEpoch` = 那条通道补齐后的**文档修订计数**（上游 `documentChanged` 的直接等价物：内容每变一次就
+ * 进一个新值）。给了就把每一次键入都算进指纹；不给（`null`）时指纹的形状与本批之前**逐字一致**，
+ * 免得宿主还没接线时行为先变了。
+ * 接线请求：`docs/wiring-requests-2026-10-06-vcs2.md` W2（原写 `docs/wiring-requests-2026-10-06-vcs.md`——
+ * 上一路 vcs 代理被切断时那份请求文档没落盘，本批改指 vcs2 并在里面补齐了宿主四段的可照抄代码）。
+ *
+ * `revisions` = **按文档分别记的修订号**（R2 这一批补的那一档，上游的真身）：
+ *   · 上游 `Document` 自己就是一个 `ModificationTracker`，"内容每变一次戳就换一次"
+ *     （`platform/core-api/src/com/intellij/openapi/editor/Document.java:25`、取值口 `:184-192`
+ *     `getModificationStamp()` —— 注释写明"value changed by any modification of the content of the
+ *     file… not related to the file modification time"）；每次文本变更都领一个新号
+ *     （`platform/core-impl/src/com/intellij/openapi/editor/impl/DocumentImpl.java:171` 传
+ *     `DocumentModStamp.next()`，该类注释 `platform/core-impl/src/com/intellij/openapi/editor/impl/DocumentModStamp.java:6-12`：
+ *     "creating fresh document modification stamps during document text changes"）；
+ *   · 提交检查那两侧的作废就是由这个"内容又变了"驱动的
+ *     （`platform/vcs-impl/src/com/intellij/vcs/commit/NonModalCommitWorkflowHandler.kt:215-226`
+ *     的 `addDocumentListener` / `documentChanged`，先过 `areFilesAffectsCommitChecksResult`
+ *     `:191-200` 那道筛：在 VCS 下、在内容里、状态不是 IGNORED）；
+ *   · 缓存键用这个号的写法在上游也有现成先例：拿一次 `document.getModificationStamp()`，
+ *     号一变就让那份结果过期（`java/execution/impl/src/com/intellij/execution/filters/ExceptionLineParserImpl.java:318-320`）。
+ *
+ * **留痕（原写 X、实际 Y）**：派单给的候选坐标 `platform/analysis-impl/src/com/intellij/codeInspection/ex/impl/…`
+ * 在参考树里**没有这一层目录**（真目录是 `platform/analysis-impl/src/com/intellij/codeInspection/ex/`，
+ * 里面 `grep modificationStamp` 零命中）；提交检查那一支（`CommitChecks.kt` /
+ * `NonModalCommitWorkflowHandler.kt`）也**不直接读** `getModificationStamp` —— 它是事件式的
+ * （每次 `documentChanged` 触发一次 reset）。本仓收不到逐次键入事件，只拿得到"每篇文档现在第几号"，
+ * 所以按上游那个号的语义做：**每篇文档一个修订号**，号变 ⇒ 指纹变（号不变 = 没编辑 ⇒ 指纹不变）。
+ * 上一版只有一个全局计数（`editorEpoch`）：它既会把"别的文档动了一下"也算成这次变更集变了
+ * （上游不会：`:222` 先问的是**这篇文件**影不影响检查结果），也在宿主没接时整档缺席 ⇒ 同一篇文档
+ * 第二次编辑清单不变、指纹不变、上一次的 PASSED 永远不作废。`revisions` 就是补这一口。
+ *
+ * 只认"会影响检查结果"的那些路径（`:191-200` 的等价筛 = 非 ignored 的变更行，选中目录算它下面的行）；
+ * 对不上号的路径**不进**指纹。空数组（宿主没接）时指纹与本批之前逐字一致。
  */
-export function commitChecksFingerprint(rows: readonly CommitChecksFileRow[], unsaved: readonly string[] = []): string {
-  const changed = rows
-    .filter(row => !row.ignored)
+export function commitChecksFingerprint(rows: readonly CommitChecksFileRow[], unsaved: readonly string[] = [],
+                                         editorEpoch: number | null = null,
+                                         revisions: readonly DocumentRevision[] = []): string {
+  const kept = rows.filter(row => !row.ignored)
+  const changed = kept
     .map(row => `${row.staged ? '+' : '-'}${row.path}:${row.indexStatus}${row.workStatus}${row.untracked ? '?' : ''}`)
     .sort()
-  return `${changed.join('|')}#${[...unsaved].sort().join('|')}`
+  const revision = editorEpoch === null ? '' : `@${editorEpoch}`
+  // 修订段：按路径排序（顺序不算变化），只收"变更列表里有这一篇（或它属于被选目录）"的那些。
+  const affecting = revisions
+    .filter(item => kept.some(row => row.path === item.path || row.path.startsWith(`${item.path}/`)))
+    .map(item => `${item.path}@${item.revision}`)
+    .sort()
+  const docs = affecting.length ? `#${affecting.join('|')}` : ''
+  return `${changed.join('|')}#${[...unsaved].sort().join('|')}${revision}${docs}`
 }
 
 /**

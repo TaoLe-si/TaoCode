@@ -8,8 +8,10 @@ import VcsLogTextFilterSettings from './VcsLogTextFilterSettings.vue'
 import VcsLogGraphOptions from './VcsLogGraphOptions.vue'
 import { graphOptionsQuery, graphOptionsState } from '../vcsLogGraphOptions'
 import { textFilterSettingsQuery, textFilterSettingsState } from '../vcsLogTextFilterSettings'
-const props = defineProps<{ query: GitLogQuery }>()
-const emit = defineEmits<{ apply: [query: GitLogQuery] }>()
+// `collapsed` / `canCollapse` 是**视图态**（上游的折叠记在图上、不进 UI 属性，也不进过滤条件），
+// 所以它不在 `query` 里，由日志面板传进来、再往回报。
+const props = defineProps<{ query: GitLogQuery; collapsed?: boolean; canCollapse?: boolean }>()
+const emit = defineEmits<{ apply: [query: GitLogQuery]; setCollapsed: [value: boolean] }>()
 const draft = reactive({ text: '', refs: '', author: '', since: '', until: '', path: '' })
 watch(() => props.query, q => Object.assign(draft, { text: q.text ?? '', refs: (q.refs ?? []).join('\n'), author: q.author ?? '', since: q.since ?? '', until: q.until ?? '', path: q.path ?? '' }), { immediate: true })
 const controls = [{ key: 'refs', label: '分支' }, { key: 'author', label: '用户' }, { key: 'date', label: '日期' }, { key: 'path', label: '路径' }] as const
@@ -72,7 +74,7 @@ function apply(key: Filter, event?: Event, clear = false) {
       <div class="actions"><button type="button" @click="apply(control.key, $event, true)">清除</button><button type="submit">应用</button></div>
     </form>
   </details>
-  <VcsLogGraphOptions v-bind="graphState" @pick-sort="setSort" @toggle-first-parent="setFirstParent(!graphState.firstParent)" @toggle-no-merges="setNoMerges(!graphState.noMerges)" />
+  <VcsLogGraphOptions v-bind="graphState" :collapsed="collapsed" :can-collapse="canCollapse" @pick-sort="setSort" @toggle-first-parent="setFirstParent(!graphState.firstParent)" @toggle-no-merges="setNoMerges(!graphState.noMerges)" @set-collapsed="emit('setCollapsed', $event)" />
 </template>
 <style scoped>
 .text-filter { display: flex; align-items: center; flex: 1; min-width: 50px; gap: 4px; color: var(--muted); }

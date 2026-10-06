@@ -11,7 +11,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  TERMINAL_DEFAULT_TITLE, TERMINAL_TITLE_MAX_LENGTH, buildTerminalFullTitle, buildTerminalTitle,
+  buildSettingsAwareFullTitle, buildSettingsAwareTitle, nextTerminalTabName, shouldShowApplicationTitle,
+  TERMINAL_DEFAULT_TITLE, TERMINAL_TAB_BASE_NAME, TERMINAL_TITLE_MAX_LENGTH, terminalRenameInitialValue,
+  buildTerminalFullTitle, buildTerminalTitle,
   renameTerminal, setApplicationTitle, shortenApplicationTitle, titleChanged, trimMiddle,
 } from '../src/terminalTitle.ts'
 
@@ -75,8 +77,68 @@ test('消费链：TerminalPanel 的标签文字/tooltip/重命名/OSC 标题都�
   const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
   assert.match(panel, /instance\.onTitleChange\(raw => setPaneTitle\(pane, setApplicationTitle\(pane\.title, raw\)\)\)/,
     'xterm 的 onTitleChange 就是上游的 TerminalApplicationTitleListener')
-  assert.match(panel, /buildTerminalTitle\(pane\.title\)/, '标签文字取 buildTerminalTitle')
-  assert.match(panel, /buildTerminalFullTitle\(pane\.title\)/, 'tooltip 取 buildTerminalFullTitle')
+  assert.match(panel, /buildSettingsAwareTitle\(pane\.title, TITLE_SETTINGS, isCommandRunning\(pane\)\)/, '标签文字取设置感知的标题')
+  assert.match(panel, /buildSettingsAwareFullTitle\(pane\.title, TITLE_SETTINGS, isCommandRunning\(pane\)\)/, 'tooltip 取设置感知的全标题')
   assert.match(panel, /setPaneTitle\(pane, renameTerminal\(pane\.title, renameText\.value\)\)/, '重命名写 userDefinedTitle')
   assert.match(panel, /if \(!titleChanged\(pane\.title, next\)\) return/, '内容没变不重绘')
+  // 新建会话的默认名与重命名初值也挂在面板上（不是只有模块自己过测试）。
+  assert.match(panel, /attachPane\(id, nextTerminalTabName\(TERMINAL_TAB_BASE_NAME, panes\.value\.map\(paneLabel\)\), group\)/,
+    '新建标签的名走那条去重的行模型')
+  assert.match(panel, /renameText\.value = terminalRenameInitialValue\(pane\.title, TITLE_SETTINGS, isCommandRunning\(pane\)\)/,
+    '重命名输入框预填全标题（RenameTerminalSessionAction.kt:20-23）')
+})
+
+// 标签行模型（新建会话的去重默认名）与「按设置采纳 shell 标题」那一档。
+// 上游依据：`plugins/terminal/src/org/jetbrains/plugins/terminal/util/TerminalTitleUtils.kt:37-59`（门）、
+// `:61-88`（去重）＋ `platform/util/src/com/intellij/util/text/UniqueNameGenerator.java:102-124`（编号几何）、
+// `plugins/terminal/src/org/jetbrains/plugins/terminal/TerminalOptionsProvider.kt:68/71/325`（三个默认值）、
+// `plugins/terminal/resources/messages/TerminalBundle.properties:96`（`local.terminal.default.name=Local`）、
+// `RenameTerminalSessionAction.kt:20-23`（弹窗初值 = buildSettingsAwareFullTitle）。
+
+test('新建会话的默认标签名：基础名没被占用就用它，占用后从 2 起编号（UniqueNameGenerator.java:105-123）', () => {
+  assert.equal(nextTerminalTabName('本地', []), '本地', '先试原名')
+  assert.equal(nextTerminalTabName('本地', ['本地']), '本地 (2)', '起点是 2（:99 把 startingNumber 传成 2）')
+  assert.equal(nextTerminalTabName('本地', ['本地', '本地 (2)']), '本地 (3)', '逐个试到没人用为止')
+  assert.equal(nextTerminalTabName('本地', ['本地 (2)']), '本地', '只占了 (2) 时基础名仍然可用')
+  // 上游的正则是 `(.+?) \((\d{1,9})` 配 matches() ⇒ 结尾的 `)` 不在模式里：
+  // 「本地 (2)」整体匹配不上，只有缺右括号的「本地 (2」才会把计数接下去。这条 quirk 照搬，不"修好"它。
+  assert.equal(nextTerminalTabName('本地 (2)', ['本地 (2)']), '本地 (2) (2)')
+  assert.equal(nextTerminalTabName('本地 (2', ['本地 (2']), '本地 (3)', '缺右括号时才认成已编号')
+  assert.equal(nextTerminalTabName(TERMINAL_TAB_BASE_NAME, []), TERMINAL_TAB_BASE_NAME)
+})
+
+test('shouldShowApplicationTitle 的四档组合（TerminalTitleUtils.kt:54-59）', () => {
+  const always = { showApplicationTitle: true, applicationTitleShowingMode: 'always' }
+  const whenRunning = { showApplicationTitle: true, applicationTitleShowingMode: 'whenCommandRunning' }
+  const off = { showApplicationTitle: false, applicationTitleShowingMode: 'always' }
+  assert.equal(shouldShowApplicationTitle(always, false), true, 'ALWAYS 不看信号')
+  assert.equal(shouldShowApplicationTitle(whenRunning, true), true)
+  assert.equal(shouldShowApplicationTitle(whenRunning, false), false, '默认档 + 命令没在跑 ⇒ 不采纳 shell 标题')
+  assert.equal(shouldShowApplicationTitle(off, true), false, '总闸关掉时两档都不给')
+})
+
+test('设置感知的标题：门关掉就不采纳 shell 标题，其余优先级不变', () => {
+  const state = { application: 'vim ~/notes', defaultTitle: '本地', tag: 'beta' }
+  const off = { showApplicationTitle: false, applicationTitleShowingMode: 'always' }
+  assert.equal(buildSettingsAwareTitle(state, off), '本地 (beta)', '不采纳 shell 标题 ⇒ 落回默认标题，tag 照样拼')
+  assert.equal(buildSettingsAwareTitle(state, { showApplicationTitle: true, applicationTitleShowingMode: 'always' }), 'vim ~/notes (beta)')
+  // 重命名永远压过一切（TerminalTitle.kt:78-86）。
+  assert.equal(buildSettingsAwareTitle({ ...state, userDefined: '发布用' }, off), '发布用 (beta)')
+  // 全标题不截断、不拼 tag（:93-98），门是同一扇。
+  const long = { application: 'a'.repeat(40), defaultTitle: '本地' }
+  assert.equal(buildSettingsAwareTitle(long, { showApplicationTitle: true, applicationTitleShowingMode: 'always' }).length, 30,
+    '标签这条按 trimMiddle 截到 30')
+  assert.equal(buildSettingsAwareFullTitle(long, { showApplicationTitle: true, applicationTitleShowingMode: 'always' }), long.application,
+    'tooltip 这条不截断')
+})
+
+test('重命名弹窗的初值是**全标题**，不是标签上那条截断过的文字（RenameTerminalSessionAction.kt:20-23）', () => {
+  const long = { application: `${'前'.repeat(20)}${'后'.repeat(20)}`, defaultTitle: '本地' }
+  const settings = { showApplicationTitle: true, applicationTitleShowingMode: 'always' }
+  const initial = terminalRenameInitialValue(long, settings)
+  assert.equal(initial, long.application, '预填的是 buildSettingsAwareFullTitle（未截断）')
+  assert.notEqual(initial, buildTerminalTitle(long), '绝不是标签那条')
+  assert.equal(terminalRenameInitialValue({ defaultTitle: '本地' }, settings), '本地')
+  // 门关掉时预填的也是「不采纳 shell 标题」那一条全标题。
+  assert.equal(terminalRenameInitialValue(long, { showApplicationTitle: false, applicationTitleShowingMode: 'always' }), '本地')
 })

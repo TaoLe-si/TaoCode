@@ -17,6 +17,17 @@
 //
 // 本模块只做"事件 → 任务表"这一段（纯函数 + 一个 reactive 表）；聚合与取消归 progressPanel。
 import { reactive } from 'vue'
+import { expireLspMessageRequestsOnStop, handleLspServerMessageEvent } from './lspServerMessages.ts'
+
+// 服务器**主动**发来的那几条消息/请求（showMessage、logMessage、showMessageRequest、
+// 五条 workspace/…/refresh）的处置不在本模块：注册表、丢弃计数与回选都在
+// `src/lspServerMessages.ts`（一个文件一件事：这里只管 `$/progress` 的后台任务表）。
+// 下面这几个名字继续从本模块转出，`src/bridge.ts`、`src/progressNotices.ts`
+// 与既有判据的 import 都不必改。
+export {
+  LSP_REFRESH_METHODS, lspActionTitles, lspMessageRouteOf, lspServerMessages,
+  type LspMessageRoute, type LspServerMessage,
+} from './lspServerMessages.ts'
 
 export type LspProgressKind = 'begin' | 'report' | 'end'
 
@@ -111,39 +122,34 @@ export function applyLspProgressEvent(
   if (event.percent >= 0) current.percent = event.percent
 }
 
-/** `bridge.ts` 递过来的那条宿主消息（三种 `lsp.progress*` 事件共用的字段袋）。 */
+/** `bridge.ts` 递过来的那条宿主消息（`lsp.progress*` 与 `lsp.message` 共用的字段袋）。 */
 export interface LspProgressEventData {
   event?: string; language?: unknown; token?: unknown; kind?: unknown
   title?: unknown; message?: unknown; percentage?: unknown; cancellable?: unknown
   /** `lsp.message` 用：LSP `MessageType`（1 错误 / 2 警告 / 3 信息 / 4 日志）。 */
   severity?: unknown
+  /** `lsp.message` 用：这条原来是 LSP 的哪一个方法（宿主在参数里带的，见 native/lsp_host_bootstrap.cpp）。 */
+  method?: unknown
+  /** `window/showMessageRequest` 用：服务器给的那一排选项（`MessageActionItem[]`）。 */
+  actions?: unknown
+  /** `window/showMessageRequest` 用：这条请求的 JSON-RPC id；本批宿主还没带出来（见请求文档 R2）。 */
+  id?: unknown
 }
 
 /**
- * 一条 `lsp.progress` / `lsp.progressReset` 事件进状态表。`false` = 这条不属于本通道
+ * 一条 `lsp.progress` / `lsp.progressReset` / `lsp.message` 事件进状态表。`false` = 这条不属于本通道
  * （调用方继续往下的分支）—— 与 `handleGradleEvent` 同一个约定，桥接层因此只留一行转发。
+ * 服务器**主动**说话那几条（`lsp.message`）整条交出去：分级、注册表、丢弃计数、showMessageRequest
+ * 的回选都在 `src/lspServerMessages.ts`，本模块不再自己认方法名。
  */
-/** 服务器自己发的整条消息（`window/showMessage`，整形见 native/lsp_host_bootstrap.cpp）。 */
-export interface LspServerMessage { language: string; severity: number; message: string }
-/** 待显示的消息队列（`progressNotices.ts` 的 watcher 读走；`notify` 在通知层，不在这儿）。 */
-export const lspServerMessages: LspServerMessage[] = []
-
 export function handleLspProgressEvent(event: string | undefined, data: LspProgressEventData): boolean {
-  // 服务器自己说的话（jdt.ls 用它报 Gradle 导入失败之类）：界面上必须看得见 —— 以前这条被丢掉，
-  // 表现就是"外部的类解析不了、又不知道为什么"。
-  if (event === 'lsp.message') {
-    const text = typeof data.message === 'string' ? data.message : ''
-    if (!text) return true
-    lspServerMessages.push({
-      language: typeof data.language === 'string' ? data.language : '',
-      severity: typeof data.severity === 'number' ? data.severity : 3,
-      message: text,
-    })
-    return true
-  }
+  if (event === 'lsp.message') return handleLspServerMessageEvent(data)
   if (event === 'lsp.progressReset') {
     // 服务器停了就再不会有 `end`：整条语言收掉，并交给消息窗口一句实话（不是"已完成"）。
     lspProgressInterrupted.push(...takeLspProgressForLanguage(lspProgressTasks, typeof data.language === 'string' ? data.language : ''))
+    // 它还没答完的问句（`window/showMessageRequest`）同一拍按 null 收掉 —— 上游是同一个理由：
+    // 客户端没法再替一个已经不存在的服务器留着这个 future（`LspServerNotificationsHandlerImpl.kt:378`）。
+    expireLspMessageRequestsOnStop(typeof data.language === 'string' ? data.language : '')
     return true
   }
   if (event !== 'lsp.progress') return false

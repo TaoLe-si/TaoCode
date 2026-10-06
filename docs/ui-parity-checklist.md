@@ -5,12 +5,12 @@
 | 区域 | IDEA 类 |
 |---|---|
 | 主窗口顶部工具栏 | `platform/platform-impl/src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbar.kt` |
-| 主菜单 | `platform/platform-impl/src/com/intellij/openapi/wm/impl/IdeMenuBar.kt` |
-| 右侧工具窗口条 | `platform/platform-impl/src/com/intellij/openapi/wm/impl/Stripe.java` / `StripeButton.java` |
+| 主菜单 | `platform/platform-impl/src/com/intellij/platform/ide/menu/IdeJMenuBar.kt`、`IdeMenuBarHelper.kt`（旧写法 `openapi/wm/impl/IdeMenuBar.kt` 全树没有这个文件） |
+| 右侧工具窗口条 | `platform/platform-impl/src/com/intellij/toolWindow/Stripe.java`、`StripeButton.kt`（旧写法把它们放在 `openapi/wm/impl/` 下并写成 `StripeButton.java`，两处都不对；New UI 的条纹按钮是 `platform/platform-impl/src/com/intellij/openapi/wm/impl/SquareStripeButton.kt`） |
 | 提交工具窗口 | `platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitPanel.kt`、`CommitActionsPanel.kt` |
 | 状态栏 | `platform/platform-impl/src/com/intellij/openapi/wm/impl/status/IdeStatusBarImpl.kt`、`PositionPanel.kt`、`EncodingPanel.java`、`LineSeparatorPanel.java`、`ReadOnlyAttributeWidgetFactory.java` |
-| 设置对话框 | `platform/platform-impl/src/com/intellij/openapi/options/newEditor/SettingsEditor.kt`、`ConfigurablesListPanel.kt`、`SettingsFilter.kt` |
-| 欢迎页 | `WelcomeScreenVerticalToolbar.kt`、`ProjectsTabFactory.kt`、`RecentProjectPanel.java` |
+| 设置对话框 | `platform/platform-impl/src/com/intellij/openapi/options/newEditor/SettingsEditor.java`（Java 类，不是 `.kt`；`platform/ide-core/src/com/intellij/openapi/options/SettingsEditor.java` 是那个 189 行的接口）、`ConfigurablesListPanel.kt`、`SettingsFilter.kt`（后两个与 `SettingsEditor.java` 同目录） |
+| 欢迎页 | `platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/WelcomeScreenVerticalToolbar.kt`、`ProjectsTabFactory.kt`、`RecentProjectPanel.java` |
 
 状态标记：**已实现** / **部分实现** / **仅占位** / **缺失**；✅ = 本轮修复完成并验证。
 
@@ -1034,7 +1034,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
 **判定不做（附理由）**：`TW.MoveToGroup`（`PlatformActions.xml:679`，`ToolWindowMoveAction.java`）—— 组内 8 项里 New UI 先砍掉 `TopLeft`/`TopRight`（`isAllowed` `:247-254`，无顶部条）；剩下 6 项中 `LeftBottom` / `BottomRight` / `RightBottom` 是**分屏位**（`isSplit()` `:89-91`，需要每个工具窗口自己的 `splitMode`，TaoCode 只有全局的左右并列设置，没有 per-window split），`BottomLeft` 指向底边停靠（TaoCode 的 `setToolAnchor(id, 'bottom')` 没有渲染路径，见 `docs/source-todo.md` §3 的旧结论）。真正可落地的只有 `LeftTop` / `RightTop` 两项，而它们与工具窗口头部 ⋮ 菜单里已有的「移动到左侧/右侧」（含同一个 `isApplied` 置灰规则，`ToolWindowMoveAction.java:106-108`）完全重合 —— 再往 Window 菜单里放两行是同一动作的第二张脸，**不做**。
 `TW.ViewModeGroup`（`:678`，`ToolWindowViewModeAction.java:33-37, 56-84`）—— `DockPinned` 就是现状；`Float` / `Window` 需要独立 OS 窗口（TaoCode 没有）；`Undock`（SLIDING）需要滑出式浮层；`DockUnpinned`（autoHide）需要"失焦即收、点条纹即展"的机制，而 TaoCode 的可见性标志是用户手动且粘性的，做出来只是名字对不上的开关，**不做**。
 `ShowContent`（`:680`，`ShowContentAction.java:48-54`）—— 动作体是 `ToolWindowContentUi.toggleContentPopup`（`:862-875`）+ `ContentLayout.showContentPopup`，是 New UI 内容布局自己的弹层机制（还带"当前内容是 TabbedContent 时 50ms 后自动确认"的细节）；TaoCode 的内容条既不会隐藏也不共用这套布局，复刻出来是标签条的第二张脸，**不做**。
-`MoveToolWindowTabToEditorAction`（`impl.actions.xml:449-451`，`<add-to-group group-id="ToolWindowTabContextMenu"/>`）—— 本源码树里**没有**该类文件，只有 XML 注册，**不做**。
+`MoveToolWindowTabToEditorAction`（`impl.actions.xml:449-451`，`<add-to-group group-id="ToolWindowTabContextMenu"/>`）—— **更正（2026-10-06 重开上游树）**：旧句「本源码树里**没有**该类文件，只有 XML 注册」是假的，类就在 `platform/platform-impl/src/com/intellij/openapi/wm/impl/tabInEditor/ToolWindowEditorTabActions.kt:16`（`internal class MoveToolWindowTabToEditorAction : DumbAwareAction()`，与同族动作共用一个文件，所以按类名 `find` 永远搜不到文件名 —— §1.5 那条假例证的本仓副本）。**这一格「不做」的证据基础因此已失效，档位与结论由本域属主按类体重判，本节只订正事实。**
 
 | 项 | 结果 |
 |---|---|
@@ -1066,7 +1066,8 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   `TargetPresentationMainRenderer.kt:30-44` / `TargetPresentationRenderer.kt:70-83`、
   过滤名 = `presentableText + " " + containerName`（`targetPopup.kt:62-81`）。
   本仓：`src/chooseTarget.ts`（行模型/速度搜索过滤/上下移动，纯函数 + 8 条单测）、
-  `src/components/ChooseTargetPopup.vue`（标题 + 图标 + 名字 + 灰的 `(in 文件)` + 右列 `行:列`；
+  `src/components/TargetChooserPopup.vue`（**订正 2026-10-06**：旧写的 `ChooseTargetPopup.vue` 已在「选择实现 / 选择类型」弹层重构时删除，现役组件叫这个名字；
+  标题 + 图标 + 名字 + 灰的 `(in 文件)` + 右列 `行:列`；
   ↑↓/Enter/Esc 两段式/打字即过滤）、`CodeEditor.vue` 的 `revealDefinition` 分成两条分支。
   native 侧本来就把**全部**位置交出来了（`native/lsp_navigation.cpp`），此前是前端只取 `locations[0]`。
   **② 更正上一批的「分组」**：`src/completionGroup.ts` 与其单测已删 —— 它编码的是"组间画分隔行"，
@@ -1120,7 +1121,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   **本批踩的坑（规矩记在下面「探针注意」那一段）**：探针用的 `TaoCode.lsp.json` 写进了 `build/`
   （用户正在用的 exe 目录），用户在自己的窗口里看到假服务器画的 inlay hint / hover（"代码被分割、提示是错的"）。
   探针配置必须跟着探针走、用完立刻删；另外**同一时刻只能跑一个 TaoCode 实例**
-  （WebView2 用户数据目录是 `%LOCALAPPDATA%\TaoCode`，`native/main.cpp:1845`；第二个进程起不来），
+  （WebView2 用户数据目录是 `%LOCALAPPDATA%\TaoCode`，`native/main.cpp:1688` 的 `CreateCoreWebView2EnvironmentWithOptions`；第二个进程起不来），
   所以探针必然顶掉用户那一个 —— 跑完要立刻把干净的那份重新拉起来。
 
 - [x] **已补（第七十九批）** 一轮四件（用户要求"一轮做完"）：书签、Search Everywhere、快速定义、真机取证，
@@ -1540,7 +1541,7 @@ Shift+F12 键位、`nameDialog` 两个新 mode 与 `applyNameDialog` 分支、�
   指到了假服务器并留着 exe 继续跑，用户在自己的窗口里看到假服务器画的 inlay hint / hover —— 读起来就是
   "代码被分割、提示是错的"。规矩：探针配置只跟探针副本一起存在、用完立刻删；`build/` 里的那份必须保持"不存在"。
   另外**同一时刻只能跑一个 TaoCode 实例**（WebView2 用户数据目录固定为 `%LOCALAPPDATA%\TaoCode`，
-  `native/main.cpp:1845` 的 `CreateCoreWebView2EnvironmentWithOptions(nullptr, profile…)`；实测第二个进程报
+  `native/main.cpp:1688` 的 `CreateCoreWebView2EnvironmentWithOptions(nullptr, profile…)`（订正 2026-10-06：旧写的 `:1845` 越界，本仓 `native/main.cpp` 实测 1842 行、那一调用在 1688；复算 `grep -n CreateCoreWebView2EnvironmentWithOptions native/main.cpp`）；实测第二个进程报
   "无法创建 WebView2 窗口"而退出）⇒ 做探针就是顶掉用户那一个，跑完立刻把干净的那份重新拉起来
   （`taskkill //IM TaoCode.exe //F` → 确认 `ls build/*.json` 无命中、`tasklist | grep lsp_fake_server` 为 0 → 重启 exe）。
 
@@ -2299,7 +2300,7 @@ B6 判决里 `[ ]` 那几类里能被本仓架构承接的三条，外加一条*
 `searchEverywhereResults` 多了一个作用域谓词实参，只筛 `project` / `symbols` 两类来源。
 
 **两处如实差异**：① 预定义作用域（`CustomScopesProvider`）本仓没有，候选里只有「项目」+用户自定义；
-② `canToggleEverywhere()`（`ScopeChooserAction.java:264-266`）判「项目」与「所有位置」是不是同一个集合 ——
+② `canToggleEverywhere()`（**订正 2026-10-06**：旧引的 `ScopeChooserAction.java:264-266` 指不到 —— 那个类实测 214 行、里面没有这个词。真坐标：接口 `platform/lang-api/src/com/intellij/ide/actions/searcheverywhere/SearchEverywhereToggleAction.java:7`，判据实现 `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/AbstractGotoSEContributor.kt:226`（`everywhereScope != projectScope`）与 `:250-251`，另一条 contributors `platform/lang-impl/src/com/intellij/find/impl/TextSearchContributor.kt:268`，消费点 `SearchEverywhereHeader.java:116`）判「项目」与「所有位置」是不是同一个集合 ——
 本仓没有库索引，两者是**同一个集合**，所以那格 Ctrl+Alt+P 切换按钮**不渲染**（判据写成了一个可检查的函数）。
 
 ### 三、预览开关（`PreviewAction`）
@@ -3122,7 +3123,7 @@ native RC 0 / 0 warning、ctest 36/36、模块尺寸门禁 5/5（App.vue 2720 �
 | `MainToolbarQuickActions`（B2 §C 第 18 条剩下的那项） | `PlatformActions.xml:1337-1345`：组里只有三个**子组引用** `MainToolbarQuickActions.General` / `.Run` / `.GeneralLast`（`popup="true"`）—— **内容不在这个文件里**。内容在 `intellij.platform.ide.impl.xml:1596-1601` 的三个 `toolbarQuickAction`：`BackForwardQuickAction`（后退/前进）、`BuildQuickAction`（构建）、`SaveAllQuickAction`（全部保存） | **不做**：这三条本仓顶栏/菜单里都已经各有一处（后退/前进箭头 `App.vue:2183-2184`、构建 `src/menus/buildMenu.ts` + `App.vue:1637`、全部保存 Ctrl+S），再做一个"…"只是把它们复制第二遍。判 `[ ]` 但理由改写成"内容已被别处覆盖" |
 | `TabInfo` 的 alert（闪烁提醒） | `TabInfo.kt:294-316`（`setAlertIcon` → `isAlertRequested`）+ `TabLabel.kt:662-682`（`maxInitialBlinkCount=5`、`maxReFireBlinkCount=7`，闪几次后常亮）+ **全树只有两个 setter**：`RunnerContentUi.java:595`（把 content 的图标抄给标签）与协作工具 `CodeReviewTabs.kt:47`；平台侧**没有任何"什么情况下该提醒"的触发点** | **不做**：机制在，触发者在平台里几乎不存在 —— 本仓若自己发明"哪个工具窗口什么时候闪"，那是发明不是移植。已在 B1 的 `TabInfo` 行注明 |
 | `ClosableByLeftArrow`（左箭头关弹层） | 实现者只有 `LookupActionsStep`（补全列表右侧"动作"那一步）与"有父弹层时"（`ListPopupImpl.java:428-429`）；F6 在 263 的 `$default.xml:627` 是 `Move` 重构，不是焦点循环 | **不做**：两者在本仓都没有对应形态（补全弹层是 CodeMirror 的、没有嵌套弹层；也没有 F6 焦点循环这条键位） |
-| `IdeFocusManager` 族（B2 §C 第 15 条） | 上游是通用焦点管理器；可见入口只有"工具窗口间焦点转移"。**⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（**10 个文件**，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**），`plugins/keymaps/`（10 目录 / 26 XML）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 维持 `[ ]`，理由改为"没有用户可见的入口键位"。**「本树无法核实」那条标注已撤销** —— 键位表是能引的；`$default.xml:279-281`/`:368-370`/`:627`/`:732-734`/`:846-851`/`:870-872`/`:885-887`/`:909-911` 均为逐行核对过的真坐标。动作系统那批据此把本该写「无法核实」的键位活**全做了** |
+| `IdeFocusManager` 族（B2 §C 第 15 条） | 上游是通用焦点管理器；可见入口只有"工具窗口间焦点转移"。**⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（**10 个文件**，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**），`plugins/keymaps/`（10 目录 / 26 个 XML，其中 **16 个是 scheme 表**、10 份是 `plugin.xml`）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 维持 `[ ]`，理由改为"没有用户可见的入口键位"。**「本树无法核实」那条标注已撤销** —— 键位表是能引的；`$default.xml:279-281`/`:368-370`/`:627`/`:732-734`/`:846-851`/`:870-872`/`:885-887`/`:909-911` 均为逐行核对过的真坐标。动作系统那批据此把本该写「无法核实」的键位活**全做了** |
 
 **顺带记一条给下一位的**：`F6` 在 2026.2 是 `Move`（移动重构）—— 不是焦点循环，别照旧印象写进判据。
 **（其行号依据 `$default.xml:627`，2026-10-05 独立验收逐行核实为真；早先"本树内无法核实"的括注是错的，已删。）**
@@ -3417,7 +3418,7 @@ before: if (x) {    after: if (x) {
 | 插入/覆盖模式 `COMPLEX_CHARS`（L2569） | **已落地，本批复核** | `TypedCharImpl.java:23` 定义集合、`:31-33` 两道守卫；唯一调用点 `TypedHandler.java:110` | 集合**内容与书写顺序**与上游 `Set.of('\n','\t','(',')','<','>','[',']','{','}','"','\'')` 逐字一致。**纠错**：原文写的 `TypedCharImpl.java:31-47` 指错了 —— 集合在 `:23`，守卫在 `:31-33` |
 | 覆盖模式里 CR/BEL 不覆盖 | **本批删掉** | `TypedCharImpl.java:31-33` 只有两道守卫，`TypedHandler.java` 全文也没有 `isISOControl` 之类的过滤 | 原来 `shouldOverwrite` 里有第三道 `code < 0x20 \|\| code === 0x7f` 的控制字符守卫 —— **上游没有，属无据发明**，本批删除（CM6 的 `inputHandler` 只在真键盘输入时触发，单字符粘贴走 `EditorView.paste` 的 `dispatch`，够不到这条路径，所以删除对真机行为是 no-op） |
 | `MainToolbarQuickActions`（L3065） | **维持不做** | `PlatformActions.xml:1337-1345` 只有三个**子组引用**（`.General`/`.Run`/`.GeneralLast`），内容在 `intellij.platform.ide.impl.xml:1596-1601` | **纠错**：原文引的 `1594-1601` 前两行是无关注释行（`projectService`/`updateSettingsProvider`），三个 `toolbarQuickAction` 实际是 `1596-1601`。三条内容本仓已有（`App.vue:2183-2184` 后退/前进、`src/menus/buildMenu.ts` 构建、Ctrl+S 全部保存） |
-| `IdeFocusManager` 族（L3068） | **维持 `[ ]`，理由改写** | **⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（10 个文件，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**，`KeymapPanel.java` 1138 行）、`plugins/keymaps/`（10 个插件目录 / 26 个 scheme XML）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move `:627`、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 「263 默认键位表里没有 F6 循环键」这条**现在可核实且为真**（`$default.xml:627` 就是 `Move`）；维持 `[ ]` 的理由只剩「没有用户可见的入口键位」这一条。**「本树无法核实」的旧标注已撤销** |
+| `IdeFocusManager` 族（L3068） | **维持 `[ ]`，理由改写** | **⚠️ 2026-10-05 两轮独立验收证伪了旧结论**：本树**有** `platform/platform-resources/src/keymaps/`（10 个文件，`$default.xml` **1308 行**）、`platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**，`KeymapPanel.java` 1138 行）、`plugins/keymaps/`（10 个插件目录 / **16 个 scheme XML**；26 是全部 XML 的条数，其中 10 份是各插件的 `META-INF/plugin.xml`，别混算 —— 复算 `find plugins/keymaps -type f -name "*.xml" -not -path "*META-INF*" | wc -l`）。`$default.xml` 里 8 处键位行号经逐行核实**全部命中**（F6=Move `:627`、F12=JumpToLastWindow、F8=StepOver、Ctrl+Shift+F12=HideAllWindows、Ctrl+Shift+Quote=MaximizeToolWindow…） | 「263 默认键位表里没有 F6 循环键」这条**现在可核实且为真**（`$default.xml:627` 就是 `Move`）；维持 `[ ]` 的理由只剩「没有用户可见的入口键位」这一条。**「本树无法核实」的旧标注已撤销** |
 | LSP「解析外部」（L1364 / L1379） | **不做，确认不冲突** | 落点在 native 侧（`buildTools.gradle` 的 `java.import.gradle.enabled` / `lsp_config.cpp`） | 与本批唯一的产品改动 `src/editorOverwrite.ts` 完全不相交，LSP 侧一行未动 |
 
 ### 判据

@@ -18,6 +18,15 @@ export interface ProjectTreeSortSettings {
   // 只有一个子目录的目录与那个子目录并成一行。上游默认 **false**
   // （`NodeOptions.java:41-43`），所以这里也是「缺字段 = 不压缩」。规则本体在 `src/projectTreeCompactDirs.ts`。
   compactDirectories?: boolean
+  // 「显示临时文件和控制台」（IDEA `ProjectView.ShowScratchesAndConsoles`，
+  // `platform/projectView/shared/resources/intellij.platform.projectView.xml:81-84`）：
+  // 关掉时树里那条合成的「临时文件与控制台」根整条不出现（上游 `ScratchTreeStructureProvider.java:199`
+  // 设置关着就不产出子节点）。上游默认 **true**（`ViewSettings.java:54-56` 与
+  // `ProjectViewSharedSettings.kt:28`，`ProjectViewState.kt:46` 取的就是这个默认档），
+  // 所以这里是「缺字段 = 显示」。
+  // 文案用英文原文 `ActionsBundle.properties:1483` "Show Scratches and Consoles" 的直译
+  // —— 本地化包（`plugins/localization-zh`）不在本地基准树里。
+  showScratchesAndConsoles?: boolean
 }
 
 // Adapted from JetBrains NaturalComparator / FileNameComparator (Apache-2.0),

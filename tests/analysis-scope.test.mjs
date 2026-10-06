@@ -224,3 +224,68 @@ test('设置 › 作用域页接上了「分析」那一节（命名作用域单
   assert.match(template, /包含测试代码/)
   assert.match(template, /role="radiogroup"/)
 })
+
+// ---------------------------------------------------------------- 标准（预定义）分析范围
+// 上游这一组不是项目设置里的表，而是代码级 GlobalSearchScope：
+//   · `Project Files`         —— ProjectFilesScope.java:19-31（contains = fileIndex.isInContent）
+//   · `Project Production Files` —— GlobalSearchScopesCore.java:152（isInSourceContent 且非测试）
+//   · `Project Test Files`       —— GlobalSearchScopesCore.java:188（TestSourcesFilter.isTestSources）
+// 序列化 id = ScopeIdMapper.kt:24-26，显示名过 ScopeIdMapperImpl.kt:20-21（本仓同一份映射在 src/scopeIdMapper.ts）。
+
+test('标准范围不需要项目设置里那张表就能判定（三档各收该收的）', () => {
+  setAnalysisScopeNamedScopes([])              // 用户表空着：标准档照样解得开（这正是"提供者"那一半缺口）
+  setAnalysisUiOption('analyzeTestSources', true)   // 显式设初值：上一条用例用过带 storage 的 setter，会把全局那一档留在 false
+  const files = { kind: 'named', include: [], exclude: [], namedScope: 'Project Files' }
+  const production = { kind: 'named', include: [], exclude: [], namedScope: 'Project Production Files' }
+  const tests = { kind: 'named', include: [], exclude: [], namedScope: 'Project Test Files' }
+  assert.equal(pathInAnalysisScope('src/a.ts', files), true)
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', files), true, '本仓工作区清单就是内容根里的文件')
+  assert.equal(pathInAnalysisScope('build/out.js', files), true)
+  assert.equal(pathInAnalysisScope('src/a.ts', production), true)
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', production), false, 'isTestSources 出局（:152 那个取反）')
+  assert.equal(pathInAnalysisScope('build/out.js', production), false, '生成目录不在源码根里')
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', tests), true)
+  assert.equal(pathInAnalysisScope('src/a.ts', tests), false)
+  // 反斜杠路径同样归一后再判（与 custom 档一条口径）。
+  assert.equal(pathInAnalysisScope('tests' + String.fromCharCode(92) + 'x.test.ts', tests), true)
+  // 认不出的名字仍然恒不在范围内（标准表不是"兜底全收"）。
+  assert.equal(pathInAnalysisScope('src/a.ts', { kind: 'named', include: [], exclude: [], namedScope: 'Nope' }), false)
+})
+
+test('用户作用域优先于同名的标准档（上游两张表各是各的来源）', () => {
+  setAnalysisScopeNamedScopes([{ name: 'Project Test Files', pattern: 'file:src//*' }])
+  const scope = { kind: 'named', include: [], exclude: [], namedScope: 'Project Test Files' }
+  assert.equal(pathInAnalysisScope('src/a.ts', scope), true, '用户那条 pattern 说了算')
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', scope), false, '标准档那套判定不参与（名字已被占用）')
+  setAnalysisScopeNamedScopes([])
+})
+
+test('标准档的显示名过 ScopeIdMapper：存档是 id、那句话是中文', () => {
+  const named = setAnalysisScopeNamed('Project Production Files')
+  assert.deepEqual(named, { kind: 'named', include: [], exclude: [], namedScope: 'Project Production Files' },
+    '存的是序列化 id 本身（ScopeIdMapper.kt:21 的注释：id = 英文显示名）')
+  assert.equal(scopeSummary(named), '命名作用域「项目生产文件」', '显示时才映射（ScopeIdMapperImpl.kt:20）')
+  // 旧存档里那句 namedScope 原样读回，不多不少键。
+  const map = new Map()
+  const storage = { getItem: key => (map.has(key) ? map.get(key) : null), setItem: (key, value) => { map.set(key, String(value)) } }
+  setAnalysisScopeNamed('Project Test Files', storage)
+  assert.equal(map.get(ANALYSIS_SCOPE_KEY), '{"kind":"named","include":[],"exclude":[],"namedScope":"Project Test Files"}')
+  assert.deepEqual(loadAnalysisScope(storage), { kind: 'named', include: [], exclude: [], namedScope: 'Project Test Files' })
+  // 关掉「包含测试代码」时，选了测试范围就是**全空** —— 上游 `getScope():218-222` 对选中的任何范围都套这一档。
+  const tests = { kind: 'named', include: [], exclude: [], namedScope: 'Project Test Files' }
+  setAnalysisUiOption('analyzeTestSources', false)
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', tests), false, '先过范围、再过测试源码这一档')
+  setAnalysisUiOption('analyzeTestSources', true)
+  assert.equal(pathInAnalysisScope('tests/x.test.ts', tests), true)
+  resetAnalysisScope()
+})
+
+test('作用域页把标准档也列进单选组（不是只在注释里提一句）', () => {
+  const page = source('src/components/ScopesSettingsPage.vue')
+  assert.match(page, /STANDARD_ANALYSIS_SCOPES/, '页面要拿到那张表')
+  assert.match(page, /isStandardAnalysisScope\(/, '选中标准档时不许报"作用域已不在项目里"')
+  const template = page.slice(page.indexOf('<template>'))
+  assert.match(template, /v-for="scope in STANDARD_ANALYSIS_SCOPES"/)
+  assert.match(template, /:value="scope\.id"/, '单选值 = 序列化 id（存档里存的就是它）')
+  assert.match(template, /\{\{ scope\.title \}\}/, '文案 = scopePresentableName 的结果，不在组件里另写一份')
+})

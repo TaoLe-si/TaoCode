@@ -104,7 +104,9 @@ test('那一行的文案与可见性照源码', () => {
 test('宿主把两行一起给齿轮，且移除作用在当前激活的窗口上', () => {
   const host = read('src/gearHostRows.ts')
   assert.match(host, /export function gearHostRows\(/, '两条宿主行要有同一个入口')
-  const app = read('src/App.vue')
+  // 2026-10-06：`activateToolWindow` 整段搬到 src/appToolWindowActivation.ts（逐字等价），
+  // 所以读取面带上那一半；下面两条断言本体一字未改。
+  const app = read('src/App.vue') + '\n' + read('src/appToolWindowActivation.ts')
   assert.match(app, /gearHostRowMap\(leftView\.value, Boolean\(workspace\.value\), fileTreeRef\.value, hiddenStripeButtons\.has\(leftView\.value\), \(\) => removeStripeButton\(leftView\.value\)\)/,
     '主菜单/齿轮的宿主行注入点')
   // 激活路径要复原按钮，否则"移除"是一条不归路。

@@ -4,8 +4,9 @@
 // （`setEnabledAndVisible(terminal != null)` + `TERMINAL_DATA_KEY`）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
-  TERMINAL_ACTIONS, createTerminalActions, terminalAction, terminalActionTitle,
+  TERMINAL_ACTIONS, createTerminalActions, terminalAction, terminalActionKeyFor, terminalActionTitle,
 } from '../src/terminalActions.ts'
 
 /** @typedef {import('../src/terminalActions.ts').TerminalActionContext} TerminalActionContext */
@@ -14,6 +15,7 @@ function ctx(overrides = {}) {
   return {
     hasTerminal: true, running: true, desktop: true, busy: false, groupSize: 1,
     searchOpen: false, searchHasText: false, paneCount: 1, exited: false,
+    tabIndex: 0, tabCount: 1,
     hasSelection: false, historyCount: 0, fontSize: 13, baseFontSize: 13, ...overrides,
   }
 }
@@ -121,8 +123,16 @@ test('回收：空面板时不可用', () => {
 test('title 把名字、键位与不可用原因都拼出来', () => {
   const busyRegistry = build({ busy: true })
   assert.equal(terminalActionTitle(find(busyRegistry, 'terminal.split'), 'x'), '右侧分屏：正在创建终端，请稍候。')
-  assert.equal(terminalActionTitle(find(build(), 'terminal.split'), 'x'), '右侧分屏（Ctrl+Shift+D）', '可用时把键位带上')
-  assert.equal(terminalActionTitle(find(build(), 'terminal.new'), 'x'), '新建终端（Alt+F12）')
+  // 这两条的期望值在本轮被**改正**（不是放松断言：assert.equal 的形状一字未动）：
+  //   · 原写 `右侧分屏（Ctrl+Shift+D）`、实际 TW.SplitRight 只是 use-shortcut-of="SplitVertically"
+  //     （platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:463-466），
+  //     而 `platform/platform-resources/src/keymaps/$default.xml` 里没有任何 SplitVertically 绑定 ⇒ 没有键位；
+  //   · 原写 `新建终端（Alt+F12）`、实际 Alt+F12 是 ActivateTerminalToolWindow（$default.xml:368-369），
+  //     上游「新建终端标签」是 Terminal.NewTab = Ctrl+Shift+T（intellij.terminal.frontend.xml:242-243）。
+  assert.equal(terminalActionTitle(find(build(), 'terminal.split'), 'x'), '右侧分屏', '上游这条在 $default.xml 里没有键 ⇒ 不再展示编出来的键位')
+  assert.equal(terminalActionTitle(find(build(), 'terminal.new'), 'x'), '新建终端（Ctrl+Shift+T）')
+  assert.equal(terminalActionTitle(find(build(), 'terminal.search'), 'x'), '在终端中查找（Ctrl+F）',
+    'Terminal.Find = use-shortcut-of Find（frontend.xml:158），Find 在 $default.xml:565-566 是 control F')
   assert.equal(terminalActionTitle(undefined, '退回文案'), '退回文案', '没登记上时回落到调用方的文案')
 })
 
@@ -145,4 +155,59 @@ test('每条动作都有名字，取不到时回落 unknown（TerminalActionUtil
   }
   const registry = build({}, [{ id: 'terminal.close', name: '', scope: 'context', hidden: true, keyStrokes: ['X'], enabledWhen: () => true }])
   assert.equal(registry.actions[0].name, 'unknown')
+})
+
+// 标签左右移动两条（本轮新增的可用性判定）。
+// 上游：`plugins/terminal/resources/META-INF/plugin.xml:125-126`（动作 id）、
+// `plugins/terminal/src/org/jetbrains/plugins/terminal/action/MoveTerminalToolwindowTabLeftRightAction.kt:21-32`
+// （可见 = 有项目 + 是终端工具窗 + content != null；启用 = `isAvailable` 的下标边界）、
+// 文案 `platform/platform-api/resources/messages/IdeBundle.properties:1983-1984`（Move Right / Move Left）。
+
+test('向左移动标签：只有不是第一条才可用（MoveTerminalToolwindowTabLeftRightAction.kt:28-31）', () => {
+  assert.equal(find(build({ tabIndex: 0, tabCount: 3 }), 'terminal.tab.left').enabled, false, '第一条左边没有可换的')
+  assert.match(find(build({ tabIndex: 0, tabCount: 3 }), 'terminal.tab.left').reason, /已经在最左边/)
+  assert.equal(find(build({ tabIndex: 1, tabCount: 3 }), 'terminal.tab.left').enabled, true)
+  assert.equal(find(build({ tabIndex: 2, tabCount: 3 }), 'terminal.tab.left').enabled, true)
+})
+
+test('向右移动标签：最后一条与空列表都不可用（同文件 :31 的 ind < contentCount - 1）', () => {
+  assert.equal(find(build({ tabIndex: 0, tabCount: 1 }), 'terminal.tab.right').enabled, false, '只有一条时两边都动不了')
+  assert.match(find(build({ tabIndex: 0, tabCount: 1 }), 'terminal.tab.right').reason, /已经在最右边/)
+  assert.equal(find(build({ tabIndex: 2, tabCount: 3 }), 'terminal.tab.right').enabled, false)
+  assert.equal(find(build({ tabIndex: 1, tabCount: 3 }), 'terminal.tab.right').enabled, true)
+  // 没有下标（-1，= 上游的 content == null 那一档）时向右也必须否，不能拿 -1 去换到第一条。
+  assert.equal(find(build({ tabIndex: -1, tabCount: 3 }), 'terminal.tab.right').enabled, false)
+})
+
+test('两条移动动作是 context 的：没有终端就整条不出现（:21-25 的 content != null）', () => {
+  const without = build({ hasTerminal: false, tabIndex: -1, tabCount: 0 })
+  for (const id of ['terminal.tab.left', 'terminal.tab.right']) {
+    assert.equal(find(without, id).visible, false, `${id} 不是灰掉，是不出现`)
+    assert.equal(find(without, id).enabled, false)
+  }
+  assert.equal(find(build(), 'terminal.tab.left').visible, true)
+})
+
+test('终端面板真按上游那两条键办事（Ctrl+F 开查找 / Ctrl+Shift+T 新建标签）', () => {
+  const key = { type: 'keydown', code: 'KeyF', key: 'f', ctrlKey: true, shiftKey: false, altKey: false, metaKey: false }
+  assert.equal(terminalActionKeyFor(key), 'search')
+  assert.equal(terminalActionKeyFor({ ...key, code: 'KeyT', key: 't', shiftKey: true }), 'newTab')
+  // keyup 不能再触发一次（否则会开出两个查找条 / 两个会话）。
+  assert.equal(terminalActionKeyFor({ ...key, type: 'keyup' }), null)
+  // 单独 Ctrl+T（上游不是这条）、Ctrl+Alt+F、mac 的 meta+F 都不吃。
+  assert.equal(terminalActionKeyFor({ ...key, shiftKey: false, code: 'KeyT', key: 't' }), null)
+  assert.equal(terminalActionKeyFor({ ...key, altKey: true }), null)
+  assert.equal(terminalActionKeyFor({ ...key, ctrlKey: false, metaKey: true }), null)
+  // 无修饰的 f 是打字，绝不能被吃掉。
+  assert.equal(terminalActionKeyFor({ ...key, ctrlKey: false }), null)
+})
+
+test('接线：面板用这两条键与那条移动实现，不是只过了本表的死判定', () => {
+  const panel = readFileSync(new URL('../src/components/TerminalPanel.vue', import.meta.url), 'utf8')
+  assert.match(panel, /terminalActionKeyFor\(event\)/, '面板的按键派发问这张表')
+  assert.match(panel, /if \(event\.type === 'keydown'\) toggleSearch\(\)/, 'Ctrl+F 真的开查找条')
+  assert.match(panel, /if \(event\.type === 'keydown'\) void spawn\(\)/, 'Ctrl+Shift+T 真的新建标签')
+  assert.match(panel, /function moveTab\(pane: Pane, forward: boolean\)/, '移动标签的实现挂在面板上')
+  assert.match(panel, /@click="selected && moveTab\(selected, false\)"/, '工具条左移按钮接 moveTab(false)')
+  assert.match(panel, /@click="selected && moveTab\(selected, true\)"/, '工具条右移按钮接 moveTab(true)')
 })

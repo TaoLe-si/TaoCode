@@ -11,12 +11,23 @@
 // 留空而不是不放 —— 「速度搜索」「调整工具窗口」「向左拉伸…」这几条没有图标，留空槽它们的字首才和上方
 // 带图标的行对齐（上游 ActionGroup 行一律有前导槽）。槽也让「显示菜单图标」关掉时由
 // `html[data-menu-icons='off']` 一起收起，与其它菜单面同一条路。
+import { computed } from 'vue'
 import { Check } from 'lucide-vue-next'
 import type { MenuRow } from '../menus/types'
+import { gearRowsForWindow } from '../menus/toolWindowGear.ts'
 import { iconSize } from '../uiIcons'
 
-const props = defineProps<{ rows: MenuRow[] }>()
+// `toolWindowId` = 这一组行当前挂在**哪个工具窗口**上。上游的齿轮组不是宿主统一算好再发两边的：
+// `InternalDecoratorImpl.kt:290` 给每个标题栏的是 `gearProducer = { toolWindow.createPopupGroup(true) }`，
+// 取的就是这个头部自己那一份 `ToolWindow`（`ToolWindowHeader.kt:68` 的构造参数），
+// 于是 `CloseAllAction.update`（`TabbedContentAction.java:145-149`）问的也是**这个窗口**的
+// `canCloseContents()`（`ContentManagerImpl.java:472-475` 的第一道闸）。本仓的行表由 `src/menuUi.ts`
+// 统一算 ⇒ 这一位要由调用方补：标题栏给的就是自己的 `id`，底部那一格要宿主给选中的内容 id。
+// 没给 = 答不出 ⇒ 行表原样（不替窗口猜一个值，判据 `tests/tool-window-gear-identity.test.mjs`）。
+const props = defineProps<{ rows: MenuRow[]; toolWindowId?: string }>()
 const emit = defineEmits<{ pick: [row: MenuRow] }>()
+
+const shownRows = computed(() => gearRowsForWindow(props.rows, props.toolWindowId))
 
 function titleOf(row: MenuRow): string {
   return typeof row.title === 'function' ? row.title() : row.title ?? row.id
@@ -24,7 +35,7 @@ function titleOf(row: MenuRow): string {
 </script>
 
 <template>
-  <template v-for="row in props.rows" :key="row.id">
+  <template v-for="row in shownRows" :key="row.id">
     <button type="button" class="menu-button tool-menu-item" role="menuitem"
             :disabled="row.enabled ? !row.enabled() : false" @click="emit('pick', row)">
       <span class="menu-item-icon"><Check v-if="row.checked" :size="iconSize.menu" aria-hidden="true" /></span><span class="menu-item-title">{{ titleOf(row) }}</span>

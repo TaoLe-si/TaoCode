@@ -40,3 +40,51 @@ export function largeFilePolicy(contentLength: number): LargeFilePolicy {
   const large = size >= LARGE_FILE_LIMIT
   return { large, notice: large ? LARGE_FILE_NOTICE : null, features: large ? REDUCED : FULL }
 }
+
+// ---------------------------------------------------------------- 大文件模式下的**动作**降级
+// 上游不是"关掉功能"了事，而是把动作处理器整个换掉：
+// `platform/lang-impl/src/com/intellij/largeFilesEditor/PlatformActionsReplacer.java:22`（类本身）
+// 在 `:34-54` 一次性登记，`:56-58` 的 `addDisablingEditorActionHandler(actionId)`
+// = `addEditorActionHandler(actionId, LfeEditorActionHandlerDisabled::new)`（`:57`），
+// 而 `LfeEditorActionHandlerDisabled` 的 `isEnabledInLfe()` 直接 `return false`
+// （`platform/lang-impl/src/com/intellij/largeFilesEditor/actions/LfeEditorActionHandlerDisabled.java:31-36`）。
+// 两条通道：`disableActionForLfe`（整条动作换成代理，`:72-74`）用于
+// `HighlightUsagesInFile`（`:37`）与 `GotoLine`（`:38`）；`addDisablingEditorActionHandler` 用于
+// 编辑器命令 `Replace`（`:48`）· `FindWordAtCaret`（`:49`）· `FindPrevWordAtCaret`（`:50`）·
+// `SelectAllOccurrences`（`:51`）· `SelectNextOccurrence`（`:52`）· `UnselectPreviousOccurrence`（`:53`）。
+// `Find`（`:47`）**不禁**，换成 `LfeEditorActionHandlerFind`（该类 `isEnabledInLfe()` 恒 true，
+// `platform/lang-impl/src/com/intellij/largeFilesEditor/actions/LfeEditorActionHandlerFind.java:26-32`）
+// —— 即"只搜不替换"那一档（替换那两条已经被 :48 禁掉）；`FindNext`/`FindPrevious` 同理换成
+// 页内搜索档（`:40-41`）。
+//
+// 本仓的 id 口径（逐条对着本仓的动作表取，不放上游的名字）：
+//   · `replace` / `find` / `find.wordAtCaret` / `find.prevWordAtCaret` / `occurrence.select` /
+//     `occurrence.next` / `occurrence.unselect` / `usage.highlight`
+//     —— `src/menus/editMenu.ts:83-96` 与 `:107` 的 `ctx.editable(<id>, …)`，
+//        命令表在 `src/editorCommands.ts:239-249`；
+//   · `navigate.gotoLine` —— `src/keymapBindings.ts:110-111`。
+export const LARGE_FILE_DISABLED_COMMANDS: readonly string[] = [
+  'replace', 'find.wordAtCaret', 'find.prevWordAtCaret',
+  'occurrence.select', 'occurrence.next', 'occurrence.unselect',
+  'usage.highlight', 'navigate.gotoLine',
+]
+
+export type LargeFileCommandGate = 'allowed' | 'blocked' | 'find-only'
+
+/**
+ * 某个动作在大文件模式（`heavy === true`）下的处置。`find-only` 只有 `find` 一条：
+ * 上游那条换成的是"能开、但没有替换区"的处理器（见上面 `:47` 与 `LfeEditorActionHandlerFind.java:26-32`），
+ * 本仓的等价要求 = 查找栏以非替换档打开、替换那一行不出现（宿主挂载点在 `src/components/CodeEditor.vue`
+ * 的 `openFindBar` 与 `<EditorFindBar>`，属接线请求）。
+ * 未知 id 一律 `allowed`：降级是**白名单式**的，不拿一张可能过期的表去关掉别人的动作。
+ */
+export function largeFileCommandGate(command: string, heavy: boolean): LargeFileCommandGate {
+  if (!heavy) return 'allowed'
+  if (command === 'find') return 'find-only'
+  return LARGE_FILE_DISABLED_COMMANDS.includes(command) ? 'blocked' : 'allowed'
+}
+
+/** 那条动作在大文件里到底能不能按（菜单行 `enabled` 与键位分发都用它）。 */
+export function largeFileCommandAllowed(command: string, heavy: boolean): boolean {
+  return largeFileCommandGate(command, heavy) !== 'blocked'
+}

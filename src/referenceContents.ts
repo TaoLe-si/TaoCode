@@ -7,8 +7,13 @@
 //
 // 模块级状态与 src/gradleEvents.ts 同一形状：这份内容由 bridge/编辑器动作/工具窗口三处共写，
 // 挂到 App.vue 上只会把那 2737 行再撑胖。
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import type { LspLocation } from './bridge.ts'
+// 用法树的分摊平、成员层与速度搜索过滤（判词 `lp/usage-view` 的分组那一半）。
+import {
+  allUsageGroupKeys, buildUsageTree, exportUsageTreeText, usageRowsForQuery,
+  type UsageMemberSymbol, type UsageTreeRow,
+} from './usageViewGrouping.ts'
 import { addToolContent, removeToolContent, togglePinned, toolContentsToCloseAll,
          toolContentsToCloseOthers, usagesPanelTitle, usagesTabName, type ToolContent } from './toolContents.ts'
 
@@ -40,8 +45,15 @@ export const USAGE_VIEW_OPTIONS_TITLE = '视图选项'
 export const USAGE_OPEN_IN_NEW_TAB_TITLE = '在新标签页中打开结果'
 export const USAGE_SORT_TITLE = '按字母顺序排列成员'
 
-function readStoredFlag(key: string): boolean {
-  try { return localStorage.getItem(key) === 'true' } catch { return false }
+function readStoredFlag(key: string, fallback = false): boolean {
+  // **缺键取 `fallback`**（旧存档不会因为多了一个键被判损坏）；存过的值只认真写的 'true'/'false'，
+  // 写坏了照样退回 `fallback`，不猜。
+  try {
+    const stored = localStorage.getItem(key)
+    if (stored === 'true') return true
+    if (stored === 'false') return false
+    return fallback
+  } catch { return fallback }
 }
 function persistFlag(key: string, value: boolean) {
   try { localStorage.setItem(key, String(value)) } catch { /* storage unavailable: session-only */ }
@@ -91,12 +103,150 @@ export const referenceTabs = computed(() => contents.value.map(content => ({
 })))
 export const hasReferences = computed(() => contents.value.length > 0)
 
+// ——— 用法树（判词 `lp/usage-view` 的「把分组树接进引用面板」那一半的**模块侧**）———
+//
+// 上游的这一棵树：`platform/usageView-impl/src/com/intellij/usages/impl/rules/`
+//   · 层级次序 = `UsageGroupingRulesDefaultRanks.java:26-32`（DIRECTORY_STRUCTURE=400 在
+//     FILE_STRUCTURE=500 之前），两档的呈现文本与折叠/计数规则、以及「根节点不可见」「默认展开」
+//     都逐条写在 `src/usageViewGrouping.ts` 的模块头；
+//   · 目录那一档的开关是 Find 窗口工具条上的 Group By 弹出组（`UsageViewImpl.java:1089-1098`）里的
+//     `GroupByDirectoryStructureAction`（`actions/GroupByDirectoryStructureAction.java:10-26`，
+//     文本 = `UsageViewBundle.properties:21` "Directory Structure"），
+//     状态存在 `UsageViewSettings.kt:102-103`，**默认 false**（`:26`）—— 本仓同档、同一个持久化口径；
+//   · 导出 = `UsageViewImpl.java:2260` 递出去的 `PlatformDataKeys.EXPORTER_TO_TEXT_FILE`
+//     （实现在 `usages/impl/ExporterToTextFile.java`），所以面板上那个「导出到文本文件」是真动作。
+//
+// 面板模板（App.vue，冻结）只需要一次 `v-for="row in referenceRows"` + 三个事件；见
+// `docs/wiring-requests-2026-10-06-navigation2.md` N-1。在此之前这里只是**规则 + 状态**，
+// 界面上仍是那张平表（`references`），不出现半接的控件。
+
+/** 齿轮/工具条上那一档的名字（`action.group.by.directory.structure` 直译）。 */
+export const USAGE_GROUP_BY_DIRECTORY_TITLE = '目录结构'
+
+/** 成员层那一档的名字（`action.group.by.file.structure` = "File Structure"，`UsageViewBundle.properties:20` 直译）。 */
+export const USAGE_GROUP_BY_FILE_STRUCTURE_TITLE = '文件结构'
+
+// 与上面两条视图选项同一个持久化口径：**缺键取默认**（旧磁盘上的存档不会被判损坏）。
+// 目录那一档默认 **false**（`UsageViewSettings.kt:26`）；成员层那一档默认 **true**
+// （`UsageViewSettings.kt:21` 的 `isGroupByFileStructure: Boolean = true`）—— 两档的默认值
+// 不是一条，别顺手抄成同一个。
+const GROUP_DIRECTORY_KEY = 'taocode.usagesGroupByDirectory'
+export const referencesGroupByDirectory = ref(readStoredFlag(GROUP_DIRECTORY_KEY, false))
+watch(referencesGroupByDirectory, value => persistFlag(GROUP_DIRECTORY_KEY, value))
+
+const GROUP_FILE_STRUCTURE_KEY = 'taocode.usagesGroupByFileStructure'
+export const referencesGroupByFileStructure = ref(readStoredFlag(GROUP_FILE_STRUCTURE_KEY, true))
+watch(referencesGroupByFileStructure, value => persistFlag(GROUP_FILE_STRUCTURE_KEY, value))
+
+/**
+ * 成员层（类 / 方法）的符号从哪儿来：上游是 PSI（`ClassGroupingRule.java:44-62`），本仓只有
+ * 宿主手里那份 LSP `documentSymbol`。所以这里留一个**注入点**而不是自己去要数据 ——
+ * 宿主在拿到某个文件的符号时把它交进来（接线见
+ * `docs/wiring-requests-2026-10-06-usage3.md` 的 R-1/R-2）。
+ * 没接上时 `usageSymbolsAvailable()` 为 false：树退回「文件 → 行」，齿轮里也**不给**
+ * 「文件结构」那一行（一个切了没反应的勾选项就是假控件）。
+ */
+const symbolProviderRef = shallowRef<((path: string) => readonly UsageMemberSymbol[] | undefined) | undefined>(undefined)
+export function provideUsageSymbols(provider?: ((path: string) => readonly UsageMemberSymbol[] | undefined) | null): void {
+  // 必须是**响应式**的一份：宿主可能在结果回来之后才把符号取到（LSP 是异步的），
+  // 用一个普通 `let` 时 `referenceUsageTree` 不会重算，那一层就永远画不出来。
+  symbolProviderRef.value = provider ?? undefined
+}
+export function usageSymbolsAvailable(): boolean {
+  return symbolProviderRef.value !== undefined
+}
+
+/**
+ * 面板的速度搜索串（`src/components/SpeedSearchBar.vue` 那一条输入框的值）。
+ * 语义差异写在 `src/usageViewGrouping.ts` 的 `filterUsageTree` 头上：上游那一串是**跳转**
+ * （`UsageViewImpl.java:978-983`），本仓这张列表是**过滤 + 按可见行重算计数**。
+ * 换一条内容 / 起一次新搜索时清空：这一串属于"正在看的这一份结果"，
+ * 让它漏到下一份结果上会莫名其妙（上游每条 Content 各一棵 model 树，
+ * `UsageViewContentManagerImpl.java:149-192`；**speed search 串本身在换 Content 时是否重置
+ * 无法核实** —— 参考树里没找到显式清串的调用，这一条按本仓的"一份内容一份状态"定）。
+ */
+export const referencesSpeedSearch = ref('')
+
+/**
+ * 折叠掉的组键，**按内容 id 分档**（上游每个 Content 带着自己那棵 model 树，折叠状态跟着它走；
+ * `UsageViewContentManagerImpl.java:149-192` 一条搜索一条内容）。
+ * 默认空 = 全展开（对应上游"模型重建后 expandTree(2)、根下一层一律展开"，
+ * `UsageViewImpl.java:1317-1319`/`:1293-1302`）。
+ */
+const collapsedUsageGroups = ref<Record<number, string[]>>({})
+
+function collapsedKeys(): string[] {
+  return collapsedUsageGroups.value[selectedId.value ?? -1] ?? []
+}
+
+/** 当前选中那条内容的分组树（规则全在 `src/usageViewGrouping.ts`）。 */
+export const referenceUsageTree = computed(() => buildUsageTree(references.value, '工作区', {
+  symbolProvider: symbolProviderRef.value,
+  groupByFileStructure: referencesGroupByFileStructure.value,
+}))
+
+/**
+ * 面板的行（深度优先、目录在前、带折叠态；搜索串非空时**只留可见行，组行计数按可见行算**）。
+ */
+export const referenceRows = computed<UsageTreeRow[]>(() => usageRowsForQuery(referenceUsageTree.value, referencesSpeedSearch.value, {
+  collapsed: new Set(collapsedKeys()),
+  showDirectories: referencesGroupByDirectory.value,
+}))
+
+export function toggleUsageGroup(key: string): void {
+  const id = selectedId.value ?? -1
+  const current = collapsedUsageGroups.value[id] ?? []
+  const at = current.indexOf(key)
+  collapsedUsageGroups.value = {
+    ...collapsedUsageGroups.value,
+    [id]: at >= 0 ? [...current.slice(0, at), ...current.slice(at + 1)] : [...current, key],
+  }
+}
+
+/**
+ * 全部折叠（上游 `collapseAllAction`，`UsageViewImpl.java:1082` → `:1338-1343` 的
+ * `TreeUtil.collapseAll(tree, keepSelectionLevel)` 再 `expandRow(0)` —— 收整棵树、只留根那一行展开，
+ * 本仓的"根"在树里不可见，所以收起全部组键、组行自己仍画着）。
+ */
+export function collapseAllUsageGroups(): void {
+  const id = selectedId.value ?? -1
+  collapsedUsageGroups.value = {
+    ...collapsedUsageGroups.value,
+    [id]: allUsageGroupKeys(referenceUsageTree.value, { showDirectories: referencesGroupByDirectory.value }),
+  }
+}
+
+/** 全部展开（上游 `expandAllAction`，`UsageViewImpl.java:1081`）。 */
+export function expandAllUsageGroups(): void {
+  const id = selectedId.value ?? -1
+  collapsedUsageGroups.value = { ...collapsedUsageGroups.value, [id]: [] }
+}
+
+/** 导出文本（树形，`ExporterToTextFile.java:31-71` 的形状）。 */
+export function exportReferencesText(header: string): string {
+  return exportUsageTreeText(referenceUsageTree.value, { header, showDirectories: referencesGroupByDirectory.value })
+}
+
+/** 一条内容被关掉/换工程时，把它那份折叠状态一起丢掉（不留垃圾键）。 */
+function forgetUsageGroups(ids: readonly number[]): void {
+  if (!ids.length) return
+  const next = { ...collapsedUsageGroups.value }
+  for (const id of ids) delete next[id]
+  collapsedUsageGroups.value = next
+}
+
+/** 换一份结果看时就清掉那一串（过滤串属于"正在看的这一份"，见 `referencesSpeedSearch` 的头注）。 */
+function forgetSpeedSearch(): void {
+  if (referencesSpeedSearch.value) referencesSpeedSearch.value = ''
+}
+
 /**
  * 开始一次搜索 = `addContent`：先占一条"正在搜索"的内容（上游 `:171-172` 就是靠这个标志
  * 不让一条还没跑完的结果被下一次搜索顶替掉）。`shortName` 上标签，`longName` 上面板标题。
  */
 export function startReferences(shortName: string, longName: string): ReferenceSearch {
   const id = ++sequence
+  forgetSpeedSearch()
   const added = addToolContent(contents.value, selectedId.value, id, {
     tabName: usagesTabName(shortName),
     panelTitle: usagesPanelTitle(longName, PROJECT_SCOPE),
@@ -134,11 +284,15 @@ export function failReferences(search: ReferenceSearch): void {
 }
 
 export function selectReferences(id: number): void {
-  if (contents.value.some(content => content.id === id)) selectedId.value = id
+  if (!contents.value.some(content => content.id === id)) return
+  if (selectedId.value !== id) forgetSpeedSearch()
+  selectedId.value = id
 }
 
 /** `ContentManager.removeContent(content, true)` + 选中邻居。 */
 export function closeReferences(id: number): void {
+  forgetUsageGroups([id])
+  forgetSpeedSearch()
   if (selectedId.value !== id) { contents.value = removeToolContent(contents.value, id); return }
   const index = contents.value.findIndex(content => content.id === id)
   const rest = removeToolContent(contents.value, id)
@@ -151,6 +305,8 @@ export function closeAllReferences(): number[] {
   const ids = toolContentsToCloseAll(contents.value)
   contents.value = []
   selectedId.value = null
+  forgetUsageGroups(ids)
+  forgetSpeedSearch()
   return ids
 }
 
@@ -158,6 +314,7 @@ export function closeOtherReferences(): number[] {
   const ids = toolContentsToCloseOthers(contents.value, selectedId.value)
   // 收的就是报出去的那几条 —— 反过来写（只留选中的）在选中为 null 时会把列表清空。
   contents.value = contents.value.filter(content => !ids.includes(content.id))
+  forgetUsageGroups(ids)
   return ids
 }
 
@@ -170,4 +327,6 @@ export function togglePinReferences(id: number = selectedId.value ?? -1): void {
 export function resetReferences(): void {
   contents.value = []
   selectedId.value = null
+  collapsedUsageGroups.value = {}
+  forgetSpeedSearch()
 }

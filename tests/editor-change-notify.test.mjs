@@ -45,7 +45,9 @@ test('撤销是带 changes 的事务：CodeMirror 的 history.pop（本仓依赖
 })
 
 test('宿主侧对重复通知幂等：最近更改位置按文件+行去重', () => {
-  const app = read('src/App.vue')
+  // 2026-10-06：两条最近位置环与 `rememberPlace` 整段搬到 src/appPlacesRing.ts（逐字等价），
+  // 读取面带上那一半；下面那条断言本体一字未改。
+  const app = read('src/App.vue') + '\n' + read('src/appPlacesRing.ts')
   const start = app.indexOf('function rememberPlace(place: Place) {')
   assert.ok(start >= 0, '找不到 rememberPlace')
   const body = app.slice(start, start + 600)

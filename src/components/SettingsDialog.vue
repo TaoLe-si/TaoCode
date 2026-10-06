@@ -31,6 +31,7 @@ import FileTypesPage from './FileTypesPage.vue'
 import CodeFoldingSettingsPage from './CodeFoldingSettingsPage.vue'
 import InlayHintsSettingsPage from './InlayHintsSettingsPage.vue'
 import EditorTabsSettingsPage from './EditorTabsSettingsPage.vue'
+import CodeVisionSettingsPage from './CodeVisionSettingsPage.vue'; import EditorSavePassesFields from './EditorSavePassesFields.vue'; import EditorEnterKeysFields from './EditorEnterKeysFields.vue' // 宿主上限 1182 行（tests/module-size.test.mjs），三个新页面/字段组同一行导入
 import ConsoleSettingsPage from './ConsoleSettingsPage.vue'; import TrustedLocationsSettingsPage from './TrustedLocationsSettingsPage.vue' // 宿主贴死 1356 行上限，两个页面导入同一行
 import DebuggerSettingsPage from './DebuggerSettingsPage.vue'
 import AudioCuesSettingsPage from './AudioCuesSettingsPage.vue'
@@ -732,6 +733,7 @@ defineExpose({ handleEscape })
             <p id="editor-font-hint" class="field-hint" :class="{ 'validation-error': !validEditor }">字体大小需为 {{ MIN_EDITOR_FONT_SIZE }}–{{ MAX_EDITOR_FONT_SIZE }} 之间的整数（IDEA `EditorFontsConstants`：下限 4，上限 registry `ide.editor.max.font.size` 默认 40）。</p>
             <label class="checkbox-row"><input v-model="editor.wordWrap" type="checkbox" aria-describedby="editor-wrap-hint" /><span>自动换行（软换行）</span></label>
             <p id="editor-wrap-hint" class="field-hint restore-hint">对应 IDEA 的 “Soft-wrap these files”，在 Editor › General —— EditorOptionsPanel.kt 引用 ApplicationBundle.properties:341 的 checkbox.use.soft.wraps.at.editor。</p>
+            <EditorSavePassesFields :settings="editor" :busy="busy" />
           </fieldset>
         </form>
 
@@ -776,6 +778,7 @@ defineExpose({ handleEscape })
               </select>
             </div>
             <p id="editor-reformat-on-paste-hint" class="field-hint">CodeInsightSettings.REFORMAT_ON_PASTE，默认「粘贴时逐行缩进」。有语言服务时把刚粘贴的那一段交给它重新缩进/格式化；没有语言服务时只按光标所在列给后续行补缩进（源码 PasteHandler.java:255-257 会把档位强制为整块缩进）。</p>
+            <EditorEnterKeysFields :settings="editor" :busy="busy" />
           </fieldset>
         </form>
 
@@ -801,6 +804,8 @@ defineExpose({ handleEscape })
         <section v-show="section === 'inlay.hints'" :id="`${id}-panel-inlay.hints`" class="settings-panel" data-page="inlay.hints" role="tabpanel" :aria-labelledby="`${id}-tab-inlay.hints`" :aria-busy="busy">
           <InlayHintsSettingsPage :settings="editor" :busy="busy" />
         </section>
+
+        <section v-show="section === 'code.vision'" :id="`${id}-panel-code.vision`" class="settings-panel" data-page="code.vision" role="tabpanel" :aria-labelledby="`${id}-tab-code.vision`" :aria-busy="busy"><CodeVisionSettingsPage :settings="editor" :busy="busy" /></section>
 
         <form
           v-show="section === 'preferences.sourceCode.indents'" :id="`${id}-panel-editor.codeStyle.indents`" :ref="registerEditorForm" class="settings-panel" data-page="preferences.sourceCode.indents"

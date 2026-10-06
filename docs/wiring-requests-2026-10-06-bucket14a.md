@@ -56,5 +56,6 @@
     `docs/wiring-requests-2026-10-06-bucket14.md`（那个文件从未被写出，上一轮代理被切断），
     本轮已把指针订正到本文件并留了痕。
   - 上游依据：`platform/lang-impl/src/com/intellij/refactoring/rename/RenameProcessor.java`（改名与引用改写同在一个
-    `CommandProcessor.executeCommand` 命令里）、`platform/ide-impl/src/com/intellij/openapi/command/impl/UndoManagerImpl.java`
+    `CommandProcessor.executeCommand` 命令里）、`platform/platform-impl/src/com/intellij/openapi/command/impl/UndoManagerImpl.java:43`
+    （43 = `public class UndoManagerImpl extends UndoManager implements Disposable`，397 行；**citefix 订正**：原写 `platform/ide-impl/...` 参考树里没有该模块路径）
     （同一命令组里的所有 `UndoableAction` 一起撤 —— 本仓缺的就是「引用改写」那一步）。

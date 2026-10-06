@@ -20,7 +20,8 @@
 //     空前缀恒真 ⇒ 空前缀也有候选，见 `MinusculeMatcher.kt:63-66`、`:72-76`「无片段即 start match」）。
 //   · 顺序：`computeVariants:283-306` —— 光标**之前**完整的词进 `words`、其余进 `afterWords`（`:338-343`）；
 //     `words` 反序去重再反序 ⇒ 每个词只留**末次出现**、按末次出现位置升序；`afterWords` 正序去重 ⇒
-//     每个词留**首次出现**、按首次出现升序；两档**拼接**。
+//     每个词留**首次出现**、按首次出现升序；两档**拼接**。两档用的是**两张**去重表
+//     （`:298` 的 `allWords.clear()`）⇒ 同一个词既在光标前又在光标后时会各进表一次。
 //   · 第一步给哪个：`:165-190` —— 向前取「起点之前最后一项」（即离光标最近的前一个词），
 //     前面一项都没有就取整表第一项；向后取「起点之后第一项」，没有就取整表第一项。
 //   · 之后每步：`:196-223` —— 向前往**表的前一位**走、向后往**后一位**走；走到表头/表尾就
@@ -184,10 +185,15 @@ function documentVariants(text: string, prefix: string, options: HippieVariantOp
     beforeUnique.unshift(variant)
   }
   // `:297-303`：afterWords 正序去重 ⇒ 留每个词的**首次**出现。
+  // ⚠ `:298` 的 `allWords.clear()` 是**真语义**：去重表在两档之间清空重来，所以同一个词
+  // 既在光标前出现又在光标后出现时**各进表一次**（上游的循环里确实有「同一个候选连着给两次」
+  // 这一步）。2026-10-06 复核发现这里原先与上一档共用一张去重表 ⇒ 跨档重复项被吃掉，
+  // 循环比上游少走一步。判据 `tests/cyclic-word-completion.test.mjs` 的跨档那条。
+  const seenAfter = new Set<string>()
   const afterUnique: Variant[] = []
   for (const variant of after) {
-    if (seenBefore.has(variant.word)) continue
-    seenBefore.add(variant.word)
+    if (seenAfter.has(variant.word)) continue
+    seenAfter.add(variant.word)
     afterUnique.push(variant)
   }
   return [...beforeUnique, ...afterUnique]

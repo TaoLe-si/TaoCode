@@ -12,8 +12,8 @@ import { iconSize } from '../uiIcons'
 import type { ProblemRow } from '../problems'
 import { severityClass, severityLabel } from '../problems'
 import {
-  filterProblems, focusRows, groupMuteKeys, groupProblems, sortProblems,
-  MUTABLE_GROUPINGS, PROBLEM_SEVERITIES, type ProblemGrouping,
+  filterProblems, focusRows, groupMuteKeys, groupProblems, groupTailOf, sortProblems,
+  MUTABLE_GROUPINGS, PROBLEM_SEVERITIES, problemCounts, type ProblemGrouping,
 } from '../problemsView'
 // 检查结果导出（IDEA `codeInspection/export` 的 `ExportToHTMLAction`）：报告的纯生成在
 // src/inspectionReport.ts，这里只负责选目录 + 落盘（走 app.writeExportFiles 的 .html 通道）。
@@ -47,6 +47,9 @@ import {
 // 检查项身份（(source, code, tags) → IDEA 的那个检查项）：行上的「未使用 / 已废弃」芯片、
 // 组头的停用键都从这里取，见 src/inspectionIdentity.ts。
 import { identityOfRow } from '../inspectionIdentity'
+// 一条问题的「相关位置」（LSP `Diagnostic.relatedInformation`）：折叠规则在 src/problemRelatedInformation.ts，
+// 宿主透传那一环已写进 docs/wiring-requests-2026-10-06-problems.md R1 —— 没数据时这一节不渲染。
+import { relatedLocationText, relatedLocationsOf, type RelatedLocation } from '../problemRelatedInformation.ts'
 // 配置档的工程级导入/导出（上游 `InspectionProjectProfileManager` 读 `.idea/inspectionProfiles/`，
 // 见 src/inspectionProfileIo.ts；桥那一层在 src/inspectionProfileHost.ts）。这一段补的是
 // `dm/inspections` 判词里「profile 的导入/导出（.xml）」那条缺：档不再只活在 localStorage 里。
@@ -72,19 +75,36 @@ import type { DocumentData, LspCodeAction, LspCodeActionResults, LspFormatResult
 import AnchoredMenu from './AnchoredMenu.vue'
 
 const props = defineProps<{ problems: ProblemRow[]; fixing: boolean; fixDisabled: boolean }>()
-const emit = defineEmits<{ reveal: [target: { path: string; line: number }]; fixAll: [] }>()
+/**
+ * `focusChange`：「只看某一组」的焦点态抛给宿主（状态栏）。
+ * 上游把工具窗口的标题态画在别处（`ProblemsViewIconUpdater.java`，注册于
+ * `platform/problemsView/ui/resources/intellij.platform.problemView.ui.xml:62`），
+ * 本仓的状态栏要显示「只看：〈组名〉」就得由面板把它抛出去 —— 焦点本身仍只活在会话内、不落存档
+ * （理由见下面 `focus` 的注释）。事件形状是 `{ grouping, key, label }`（`null` = 没有焦点）；
+ * 带 `grouping` 是因为同一个组键在不同分组档下含义不同（`src/problemsView.ts` 的 `groupKeyOf` 按档取键）。
+ */
+const emit = defineEmits<{
+  reveal: [target: { path: string; line: number }]
+  fixAll: []
+  focusChange: [focus: { grouping: ProblemGrouping; key: string; label: string } | null]
+}>()
 
 // 视图状态初值来自上次会话（上游 `ProblemsViewState` 的工作区文件持久化，见 src/problemsPanelState.ts）。
 const persisted = loadProblemsPanelState()
 const hiddenSeverities = ref<number[]>(persisted.hiddenSeverities)
+// 第三个排序开关（上游 `ProblemsViewState.kt:29` 默认 true，`ProblemsViewPanel.java:523-529` 与
+// 另两个一起递进比较器）：本仓用它排「按目录」分组的组序，规则在 `src/problemsView.ts` 的
+// `orderDirectoryGroups`（同层先子目录、后本层文件组）。
+const sortFoldersFirst = ref(persisted.sortFoldersFirst)
 const sortBySeverity = ref(persisted.sortBySeverity)
 const sortByName = ref(persisted.sortByName)
 const query = ref(persisted.query)
 const grouping = ref<ProblemGrouping>(persisted.grouping)
 const collapsedGroups = ref<string[]>(persisted.collapsedGroups)
-watch([hiddenSeverities, sortBySeverity, sortByName, query, grouping, collapsedGroups], () =>
+watch([hiddenSeverities, sortFoldersFirst, sortBySeverity, sortByName, query, grouping, collapsedGroups], () =>
   saveProblemsPanelState({
-    hiddenSeverities: hiddenSeverities.value, sortBySeverity: sortBySeverity.value,
+    hiddenSeverities: hiddenSeverities.value, sortFoldersFirst: sortFoldersFirst.value,
+    sortBySeverity: sortBySeverity.value,
     sortByName: sortByName.value, query: query.value, grouping: grouping.value,
     collapsedGroups: collapsedGroups.value,
   }))
@@ -103,6 +123,13 @@ const optionsOpen = ref(false)
  */
 const focus = ref<{ key: string; label: string } | null>(null)
 watch(grouping, () => { focus.value = null })
+// 焦点态抛给宿主：状态栏那条「只看：〈组名〉」的提示需要它（面板里本来就在场，
+// 但用户把面板滚到底/折起来时会误以为"问题变少了"）。上游把工具窗口的状态播报画在窗口外
+// （`ProblemsViewIconUpdater.java`，注册于 `platform/problemsView/ui/resources/intellij.platform.problemView.ui.xml:62`），
+// 本仓对应的地方是状态栏；挂载点在 `src/App.vue`（保留文件）⇒ 接线请求 R2。
+watch(focus, value => {
+  emit('focusChange', value ? { grouping: grouping.value, key: value.key, label: value.label } : null)
+}, { immediate: true })
 const severityEntries = computed(() => PROBLEM_SEVERITIES.map(severity => ({
   severity, label: severityLabel(severity), shown: !hiddenSeverities.value.includes(severity),
 })))
@@ -162,17 +189,33 @@ watch(() => props.problems, rows => reconcileLocalSuppressions(rows))
 // 先按严重度/文本过滤 → 再按排序开关排 → 最后套用「只看某一组」的焦点（三段的顺序与
 // 上游一致：过滤在建表时套（`ProblemsTreeModel` 用 `ProblemFilter` 谓词），排序在比较器里，
 // 分组只是把已经排好的问题挂到组节点下）。
+const sort = computed(() => ({
+  sortFoldersFirst: sortFoldersFirst.value,
+  sortBySeverity: sortBySeverity.value,
+  sortByName: sortByName.value,
+}))
 const rows = computed(() => focusRows(sortProblems(
   filterProblems(visibleProblems.value, { hidden: hiddenSeverities.value, query: query.value }),
-  { sortBySeverity: sortBySeverity.value, sortByName: sortByName.value }), grouping.value, focus.value?.key ?? null))
-const groups = computed(() => groupProblems(rows.value, grouping.value))
+  sort.value), grouping.value, focus.value?.key ?? null))
+const groups = computed(() => groupProblems(rows.value, grouping.value, sort.value))
 /** 有可折叠的组吗（不分组时组键为空串，展开/折叠是空操作 —— 按钮置灰而不是做假动作）。 */
 const hasGroups = computed(() => groups.value.some(group => group.key !== ''))
+/**
+ * 整张可见表的三格计数（`problemCounts` 的生产消费点之一）：面板标题行的提示气泡。
+ * 状态栏那一格也该读它，但 `src/App.vue` 是保留文件 ⇒ 接线请求见
+ * `docs/wiring-requests-2026-10-06-prob3.md` R1（那里还在就地 `filter(p => p.severity === 1)`）。
+ */
+const tableCounts = computed(() => problemCounts(rows.value))
+const tableCountsHint = computed(() =>
+  `错误 ${tableCounts.value.errors} · 警告 ${tableCounts.value.warnings} · 信息 ${tableCounts.value.infos}`)
 /** 折起来的组把 rows 清空（顺序稳定，折着就不渲染那些行）；count 始终是折叠前的条数。 */
 const visibleGroups = computed(() => groups.value.map(group => ({
   key: group.key, label: group.label, count: group.rows.length,
   // 停用键用**折叠前**的整组算（折起来的组没有 rows，但仍然要能停用这一项）。
   muteKeys: groupMute.value ? muteKeysFor(group) : [],
+  // 组头尾巴上的逐级计数（上游树节点尾巴那一串；规则、单级不补画的那条有意差异与判据
+  // 都在 `src/problemsView.ts` 的 `groupTailOf`）。
+  tail: groupTailOf(group.rows, grouping.value === 'severity'),
   rows: group.key && isCollapsed(group.key) ? [] : group.rows,
 })))
 function setFocus(group: { key: string; label: string }) {
@@ -218,12 +261,57 @@ const menuLoading = ref(false)
 const menuDoc = ref<DocumentData | null>(null)
 const menuOptions = ref<Array<{ option: SuppressOption; preview: string }>>([])
 const menuFixes = ref<MenuFix[]>([])
+/**
+ * 行菜单里的「相关位置」= LSP `Diagnostic.relatedInformation`（一条问题的其它相关位置）。
+ * 上游在 LSP 宿主侧**原样保留**这个字段（`platform/lsp-impl/src/impl/features/highlighting/LspDiagnosticAndLazyQuickFixes.kt:35-43`，
+ * 其中 `:42` 就是 `this.relatedInformation = diagnostic.relatedInformation`），面板因此列得出它们。
+ * 本仓的折叠规则（越界丢弃 / 去重 / 同文件与跨文件的排序）在 `src/problemRelatedInformation.ts`。
+ *
+ * 宿主那一环还没透传（`native/lsp_support.cpp` 的 `shape_diagnostics`、`src/bridge.ts` 的 `LspDiagnostic`），
+ * 所以现在是空数组 ⇒ 这一节一行都不渲染。**不是假控件**：有数据才出现，
+ * 接线请求（含可照抄实现）在 `docs/wiring-requests-2026-10-06-problems.md` R1。
+ */
+const menuRelated = computed<RelatedLocation[]>(() => {
+  const row = rowMenu.value?.row
+  return row ? relatedLocationsOf(row, row.related) : []
+})
+/** 点一条相关位置 = 跳到那个位置（与问题行本身的跳源同一条 `reveal` 通道，不另开一条）。 */
+function revealRelated(loc: RelatedLocation) {
+  emit('reveal', { path: loc.path, line: loc.line })
+}
 const menuLevel = computed<HighlightingLevel>(() => rowMenu.value ? highlightLevelForPath(rowMenu.value.row.path) : 'inspections')
 const actionNote = ref('')
 
 function closeRowMenu() { rowMenu.value = null }
 
-async function openRowMenu(row: ProblemRow, event: MouseEvent) {
+/**
+ * 面板里**当前聚焦的那一行** = 键盘用户的「选中」（行本身 `tabindex="0"`，Tab/方向键走位后聚焦即选中）。
+ * 上游的对应物是树的选中节点：`ProblemsViewPanel.java:381` `protected TreePath getSelectedPath() { return myTree.getSelectionModel().getSelectionPath(); }`，
+ * 动作从它取节点（`ProblemsViewPanel.java:393-399` `createActions(...)` 的 `getTreePathProblemNodes(path)`；
+ * `ShowProblemsViewQuickFixesAction.kt:34` `event.getData(SELECTED_ITEM) as? ProblemNode`）。
+ * 本仓没有树控件，聚焦就是选中的等价物；`openMenuForSelected()` 是给动作层的出口
+ * （键位/动作注册在保留文件里 ⇒ `docs/wiring-requests-2026-10-06-problems.md` R1-panel）。
+ */
+const selectedRow = ref<ProblemRow | null>(null)
+const selectedRowEl = ref<HTMLElement | null>(null)
+function rememberSelectedRow(row: ProblemRow, event: FocusEvent) {
+  selectedRow.value = row
+  const target = event.currentTarget
+  selectedRowEl.value = target instanceof HTMLElement ? target : null
+}
+function openMenuForSelected() {
+  const row = selectedRow.value
+  if (!row) return
+  // 菜单锚在选中行的左下角（鼠标打开时锚在点击点，同一外壳 AnchoredMenu 负责夹进视口）。
+  const rect = selectedRowEl.value?.getBoundingClientRect()
+  void openRowMenu(row, { clientX: rect ? Math.round(rect.left + 24) : 0,
+                          clientY: rect ? Math.round(rect.bottom) : 0 })
+}
+defineExpose({ openMenuForSelected })
+
+async function openRowMenu(row: ProblemRow, event: MouseEvent | { clientX: number; clientY: number }) {
+  // 鼠标打开菜单也算「选中这一行」（键盘路径走 `rememberSelectedRow`，两条路都更新同一个状态）。
+  selectedRow.value = row
   rowMenu.value = { row, x: event.clientX, y: event.clientY }
   menuNote.value = ''
   menuDoc.value = null
@@ -483,6 +571,7 @@ async function exportText() {
           <option value="source">按来源（检查器）</option>
           <option value="code">按诊断码（承接上游的 tool id）</option>
           <option value="inspection">按检查项（IDEA: Group by Inspection）</option>
+          <option value="severity">按严重级（IDEA: Group by Severity）</option>
         </select>
       </label>
       <!-- 「只看某一组」的在场标记（点组头上的按钮进入，这里退出）。 -->
@@ -494,7 +583,7 @@ async function exportText() {
         <Search :size="iconSize.inline" aria-hidden="true" />
         <input v-model="query" placeholder="过滤问题…" aria-label="过滤问题" spellcheck="false" />
       </label>
-      <span class="problems-count" aria-live="polite">{{ rows.length }} / {{ problems.length }}{{ ignoredCount ? `（已忽略 ${ignoredCount} 个文件）` : '' }}</span>
+      <span class="problems-count" aria-live="polite" :title="`按严重级：${tableCountsHint}`">{{ rows.length }} / {{ problems.length }}{{ ignoredCount ? `（已忽略 ${ignoredCount} 个文件）` : '' }}</span>
       <!-- 展开/折叠（上游工具栏的 `ExpandAll`/`CollapseAll`，ui.xml:105-106）。没有分组时两个都是空操作。 -->
       <button class="subtle-button" :disabled="!hasGroups" title="展开全部分组（IDEA: Expand All）" @click="expandAll">展开全部</button>
       <button class="subtle-button" :disabled="!hasGroups" title="折叠全部分组（IDEA: Collapse All）" @click="collapseAll(groups)">折叠全部</button>
@@ -522,6 +611,10 @@ async function exportText() {
         <button class="subtle-button" @click="optionsOpen = false">关闭</button>
       </div>
       <p class="problems-menu-title">排序</p>
+      <label class="problems-profile-toggle" title="同层的子目录排在本层文件那一组之前（IDEA: ProblemsView.SortFoldersFirst，ProblemsViewState.kt:29 默认开）">
+        <input type="checkbox" :checked="sortFoldersFirst" @change="sortFoldersFirst = ($event.target as HTMLInputElement).checked" />
+        <span>目录在前</span>
+      </label>
       <label class="problems-profile-toggle" title="严重度高的排前面（IDEA: ProblemsView.SortBySeverity）">
         <input type="checkbox" :checked="sortBySeverity" @change="sortBySeverity = ($event.target as HTMLInputElement).checked" />
         <span>按严重度</span>
@@ -649,13 +742,17 @@ async function exportText() {
             <span class="problems-group-caret"><ChevronDown v-if="group.rows.length" :size="iconSize.chip" aria-hidden="true" /><ChevronRight v-else :size="iconSize.chip" aria-hidden="true" /></span>
             <span class="problems-group-label">{{ group.label }}</span>
             <span class="problems-group-count">{{ group.count }}</span>
+            <!-- 组内混了多级别时的逐级计数（形状 = 上游树节点尾巴那一串，规则见
+                 src/problemsView.ts 的 problemTailCounts；ERROR 那格用已有的 `.sev-error`
+                 令牌上色，对应上游 `InspectionTreeTailRenderer.java:63-65` 的 TREE_RED/TREE_GRAY 两档）。 -->
+            <span v-for="entry in group.tail" :key="entry.id" class="problems-group-count" :class="entry.error ? 'sev-error' : undefined">{{ entry.text }}</span>
           </button>
           <button class="subtle-button problems-group-focus" :aria-pressed="focus?.key === group.key" :title="focus?.key === group.key ? `取消只看「${group.label}」` : `只看「${group.label}」这一组（其余暂时不显示，IDEA 的可见性谓词 ProblemFilter.kt:17-22）`" @click="setFocus(group)">
             <ListFilter :size="iconSize.chip" aria-hidden="true" />只看这一组
           </button>
           <button v-if="group.muteKeys.length" class="subtle-button problems-group-mute" :title="`停用检查项 ${group.label}（写进当前检查配置档，可在「检查配置…」恢复）${group.muteKeys.length > 1 ? `；这一组有 ${group.muteKeys.length} 个检查器身份，会逐个停用` : ''}`" @click="muteGroup(group)">停用此检查项</button>
         </div>
-        <div v-for="(p, index) in group.rows" :key="`${p.path}:${p.line}:${p.character}:${index}`" class="ref-item problem-row" role="button" tabindex="0" @click="emit('reveal', { path: p.path, line: p.line })" @keydown.enter.prevent="emit('reveal', { path: p.path, line: p.line })"><span class="problem-sev" :class="severityClass(p.severity)">{{ severityLabel(p.severity) }}</span><span class="ref-path" :title="p.path">{{ p.path }}</span><span class="ref-pos">{{ p.line + 1 }}:{{ p.character + 1 }}</span><span class="problem-msg">{{ p.message }}</span><span v-if="p.source" class="problem-src" :title="p.code ? `检查项 ${identityOfRow(p).displayName}` : `检查器 ${p.source}`">{{ p.source }}</span><span v-if="kindChip(p)" class="problem-kind">{{ kindChip(p) }}</span><span class="problem-actions"><button class="problem-ignore" title="行操作：抑制此检查 / 快速修复（带预览）/ 高亮级别 / 忽略 / 纯文本 / 复制描述" @click.stop="openRowMenu(p, $event)">操作<ChevronDown :size="iconSize.chip" aria-hidden="true" /></button></span></div>
+        <div v-for="(p, index) in group.rows" :key="`${p.path}:${p.line}:${p.character}:${index}`" class="ref-item problem-row" role="button" tabindex="0" @focusin="rememberSelectedRow(p, $event)" @click="emit('reveal', { path: p.path, line: p.line })" @keydown.enter.prevent="emit('reveal', { path: p.path, line: p.line })"><span class="problem-sev" :class="severityClass(p.severity)">{{ severityLabel(p.severity) }}</span><span class="ref-path" :title="p.path">{{ p.path }}</span><span class="ref-pos">{{ p.line + 1 }}:{{ p.character + 1 }}</span><span class="problem-msg">{{ p.message }}</span><span v-if="p.source" class="problem-src" :title="p.code ? `检查项 ${identityOfRow(p).displayName}` : `检查器 ${p.source}`">{{ p.source }}</span><span v-if="kindChip(p)" class="problem-kind">{{ kindChip(p) }}</span><span class="problem-actions"><button class="problem-ignore" title="行操作：抑制此检查 / 快速修复（带预览）/ 高亮级别 / 忽略 / 纯文本 / 复制描述" @click.stop="openRowMenu(p, $event)">操作<ChevronDown :size="iconSize.chip" aria-hidden="true" /></button></span></div>
       </template>
     </div>
     <!-- 行菜单（上游 ProblemsView 右键菜单的行动作）：背景层只负责点外面/Esc 关闭。 -->
@@ -664,6 +761,18 @@ async function exportText() {
         <p class="problems-menu-scope">{{ rowMenu.row.path }}:{{ rowMenu.row.line + 1 }} · {{ severityLabel(rowMenu.row.severity) }}</p>
         <p v-if="menuLoading" class="problems-menu-note">正在取快速修复…</p>
         <p v-if="menuNote" class="problems-menu-note">{{ menuNote }}</p>
+        <!-- 相关位置（LSP `Diagnostic.relatedInformation`）：一条问题带的其它位置，点一条跳过去
+             （走面板已有的 `reveal` 通道，与问题行本身的跳源同一条）。
+             这一节**只在有条目时出现**（宿主还没透传这个字段 ⇒ 现在恒空 ⇒ 一行都不渲染，
+             不是假控件；上游在 LSP 宿主侧是原样保留的，`LspDiagnosticAndLazyQuickFixes.kt:42`）。 -->
+        <template v-if="menuRelated.length">
+          <p class="problems-menu-title">相关位置（{{ menuRelated.length }}）</p>
+          <button v-for="(loc, li) in menuRelated" :key="`${loc.path}:${loc.line}:${loc.character}:${li}`"
+                  class="problems-menu-item" :title="`跳到第 ${loc.line + 1} 行（${loc.path}）`"
+                  @click="revealRelated(loc); closeRowMenu()">
+            <span>{{ relatedLocationText(loc) }}</span>
+          </button>
+        </template>
         <!-- 抑制条目与快速修复在上游是**同一个弹层**：问题视图的「Show Quick-Fixes」
              （`intellij.platform.problemView.ui.xml:100-103`，动作项 `ProblemsView.QuickFixes`）走
              `ShowProblemsViewQuickFixesAction.kt:78-92` 的 `IntentionListStep(…, IntentionSource.PROBLEMS_VIEW)`

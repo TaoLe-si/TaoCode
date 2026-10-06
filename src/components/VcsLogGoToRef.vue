@@ -1,26 +1,55 @@
 <script setup lang="ts">
 // 「转到哈希/分支/标记」—— 日志工具条右角的查找框（上游 `Vcs.Log.GoToRef`）。
-// 模型与判据在 `src/vcsLogGoToRef.ts`（上游 `GoToHashOrRefAction` + `GoToHashOrRefPopup`）。
+// 模型与判据在 `src/vcsLogGoToRef.ts`：动作与弹层 = `GoToHashOrRefAction` + `GoToHashOrRefPopup`，
+// 补全的两批 = `VcsRefCompletionProvider.java:26-38`（分支先出、标签这一半后台取回后追加）。
 import { computed, ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import type { GitFullCommit } from '../bridge'
 import { GO_TO_REF_DESCRIPTION, GO_TO_REF_PROMPT, GO_TO_REF_TITLE,
-  goToRefCandidates, goToRefMatches, looksLikeHash, notAHashMessage } from '../vcsLogGoToRef'
+  goToRefAccepts, goToRefCandidates, looksLikeHash, notAHashMessage, runRefCompletion } from '../vcsLogGoToRef'
 
-const props = defineProps<{ commits: readonly GitFullCommit[]; navigating?: boolean }>()
+const props = defineProps<{
+  commits: readonly GitFullCommit[]
+  navigating?: boolean
+  /**
+   * 两批候选的来源：分支 = 上游 `collectSync` 那一半、标签 = `collectAsync` 那一半。
+   * **宿主没给就退回"已加载这一页的引用"** —— 与本文件接这两个 prop 之前的行为逐字一致，
+   * 也不许在组件里自己发请求或编一份候选。
+   */
+  loadBranches?: () => Promise<readonly string[]>
+  loadTags?: () => Promise<readonly string[]>
+}>()
 const emit = defineEmits<{ goTo: [hash: string] }>()
 const open = ref(false)
 const text = ref('')
 /** 只在真的按了「转到」之后才判形状错 —— 找不到目标由 `navigate()` 的错误行报，不在这里猜。 */
 const problem = ref('')
-const candidates = computed(() => goToRefCandidates(props.commits))
-const matches = computed(() => goToRefMatches(candidates.value, text.value))
-// 候选集换了一批就丢掉已经选中的补全：那个引用可能已经不在已加载的这一页里了。
-watch(candidates, () => { if (matches.value.indexOf(text.value) !== 0) problem.value = '' })
+/** 已加载页上的引用：不等待的那一份，也是宿主没接两批来源时的唯一候选。 */
+const pageRefs = computed(() => goToRefCandidates(props.commits))
+/** 这一轮累积的全部候选（「转到」那一半按它判"这个名字认不认"，看的不是截过上限的那几条）。 */
+const known = ref<string[]>([])
+const matches = ref<string[]>([])
+// 取消令牌：改一个字、关一次弹层都把上一轮作废（上游 `ProgressManager.checkCanceled()` +
+// `future.cancel(true)`，`TwoStepCompletionProvider.java:44`/`:60-62`）—— 迟到的那一批不许盖到新的一轮上。
+let round = 0
+watch(pageRefs, refs => { known.value = [...new Set([...refs, ...known.value])] }, { immediate: true })
+async function refresh() {
+  const token = ++round
+  const isStale = () => token !== round
+  await runRefCompletion({
+    prefix: text.value, sync: known.value, isStale,
+    loadBranches: props.loadBranches, loadTags: props.loadTags,
+    emit: (found, all) => { if (isStale()) return; matches.value = found; if (problem.value && goToRefAccepts(all, text.value)) problem.value = '' },
+  })
+}
+// 每敲一个字重跑一轮（上游是补全结果集重算；本仓的来源是两次 await，所以要有上面那个令牌）。
+watch(text, () => { if (open.value) void refresh() })
+watch(open, value => { if (value) void refresh(); else round++ })
 function choose(value: string) {
   const target = value.trim()
   if (!target) return
+  round++
   open.value = false
   text.value = ''
   problem.value = ''
@@ -34,7 +63,7 @@ function choose(value: string) {
 function submit() {
   const target = text.value.trim()
   if (!target) return
-  if (!candidates.value.some(name => name.startsWith(target)) && !looksLikeHash(target)) {
+  if (!goToRefAccepts(known.value, target) && !looksLikeHash(target)) {
     problem.value = notAHashMessage(target)
     return
   }

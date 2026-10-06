@@ -81,7 +81,15 @@ test('a saved anchor stays reachable when the saved target order is missing or s
     gradle: { anchor: 'bottom', order: 1 },
   } }))
   const h = host()
-  assert.deepEqual(h.stripeOrder.value('right'), ['notifications', 'files'], 'order 0 在 1 之前')
+  // 原写 `['notifications','files']`（钉的是"order 0 在 1 之前"）—— **钉错了值**，留痕于此：
+  // `notifications` 的注册记录写了 EP `secondary="true"`（`intellij.platform.ide.impl.xml:1210-1212`，
+  // 本仓 `src/toolWindowMeta.ts:122-124`），它因此 `WindowInfo.isSplit = true`（`DesktopLayout.kt:46`），
+  // 而条纹比较器的**第一判据**就是这一位 —— 「side buttons in the end」
+  // （`AbstractDroppableStripe.kt:59-62`），只有两侧 `isSplit` 相同才比 `order`（`:68-70`）。
+  // ⇒ notifications 排在后半组（这里就是末尾），files 在前面那组。
+  // "同组内 order 0 在 order 1 之前"这一条判据没丢：它由下面那行底部侧条（todo 0 / gradle 1，
+  // 两边都不是 side tool ⇒ 同组比 rank）继续钉住。
+  assert.deepEqual(h.stripeOrder.value('right'), ['files', 'notifications'], 'side tool 排在末尾，rank 只在同组内比')
   // 记录里写过的按 `order` 排（它们就是用户排过的那些），没写过的按出厂默认接在后面
   // （bottom 的默认 = vcslog→search→todo→debug）。
   assert.deepEqual(h.stripeOrder.value('bottom'), ['todo', 'gradle', 'vcslog', 'search', 'debug'])

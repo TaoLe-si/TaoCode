@@ -1252,7 +1252,8 @@ Find 窗口的内容管理器里**每次搜索是一条 `Content`**，标签条�
 `src/components/SpeedSearchBar.vue`（**能真渲染出来核**，包括上游那个空提示
 `editorsearch.search.hint` = `Search`，`ApplicationBundle.properties:661`），
 接线在 `src/components/FileTree.vue`（Ctrl+F 开、输入即选、上下键走、Enter/Esc 收），
-齿轮那一行由 `src/speedSearchHost.ts` 供（`ToolWindowGearEntry.fromHost` —— 它不在菜单索引里，
+齿轮那一行由 `src/gearHostRows.ts` 供（**订正 2026-10-06**：旧写的 `src/speedSearchHost.ts` 已改名，那个文件现在不存在了；
+`ToolWindowGearEntry.fromHost` 的声明与消费在 `src/menus/toolWindowGear.ts`——字段 `:45`、速度搜索那一行 `:58`、按 `fromHost` 取宿主行 `:85`。它不在菜单索引里，
 上游 `PlatformActions.xml:146` 也只是**顶层引用**，所以本仓**没有**给它编一个菜单位置；
 一开始我把它错放进 Window 菜单，核对 group 归属后撤回）。
 
@@ -2871,7 +2872,8 @@ failed: Connection refused`（时间戳 00:21→00:25 仍在往下走）。导�
 
 | 原来写的 | 上游实际 | 依据 |
 | :-- | :-- | :-- |
-| `TW.ViewModeGroup`（Dock / Float / Window / Split） | 五个：`DockPinnedMode` / `DockUnpinnedMode` / `UndockMode` / `FloatMode` / `WindowMode`。**没有 Split** —— split 是 `ToolWindowMoveAction.Anchor.isSplit()` 那条正交的轴 | `intellij.platform.ide.actions.xml:479` 注册为 `ToolWindowViewModeAction$Group`（`popup="true"`）；成员 = `ViewMode.values()`：`ToolWindowViewModeAction.java:31-36`、`:170-177` |
+| `TW.ViewModeGroup`（Dock / Float / Window / Split） | 五个：`DockPinnedMode` / `DockUnpinnedMode` / `UndockMode` / `FloatMode` / `WindowMode`。**没有 Split** —— split 是 `ToolWindowMoveAction.Anchor.isSplit()` 那条正交的轴 | `platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:479` 注册为 `ToolWindowViewModeAction$Group`（`popup="true"`）
+（**订正 2026-10-06**：旧写的是 `intellij.platform.ide.actions.xml`，那个文件在 `platform/platform-api/resources/` 下、实测只有 114 行，`:479` 指不到 —— 差的就是文件名里那一段 `.impl`，行号纯属巧合相同）；成员 = `ViewMode.values()`：`ToolWindowViewModeAction.java:31-36`、`:170-177` |
 | 移动组「新 UI 一套 / 旧 UI 一套」（`:882` / `:885`） | 两个分支是**同一个类**。新 UI 的 `SquareStripeButton.createMoveGroup()` 就是 `return ToolWindowMoveAction.Group()` | `SquareStripeButton.kt:84`；`ToolWindowImpl.kt:881-886` |
 | 移动组只有 Left/Right/Bottom 三条 | New UI 下**有 6 条**：8 个 `Anchor` 里 `isAllowed` 滤掉 `TopLeft`/`TopRight`（无 `ToolWindowStripeExtension`），剩 6 条中 3 条是 `isSplit()` 变体。本仓那 3 条 = **非 split 子集** | `ToolWindowMoveAction.java:247-254`、`:89-91`、`:73-77` |
 | `ToggleContentUiTypeAction` 摊平显示"存疑" | **摊平是对的**，不必改成「视图选项」子菜单 | `ToggleToolbarAction.java:45-47`（组 = `OptionsGroup`）、`:213-225`+`:199`（只收**隐藏**工具条里的 `ToggleAction`）、`:55-67`（「显示工具条」2026.3 起是 no-op，"toolbars are always visible"）、`:183-185`（可见成员 >3 才开 popup ⇒ 剩 1 条就是内联） |

@@ -45,6 +45,15 @@ export interface TestTreeNode {
   location: string | null
   /** 还在跑的节点（`testStarted` 之后没结束）—— 对应上游 `ScrollToRunningTestAction` 的可见前提。 */
   running: boolean
+  /**
+   * 事件**到达**那一刻盖的开始时间戳（上游 `SMTestProxy.setStarted():456-457` 与
+   * `setSuiteStarted():474-477` 的 `myStartTime = System.currentTimeMillis()`）。
+   * null = 这一层没报过开始事件（隐式层级），于是也就没有 wall time（`JavaSMTRunnerTestTreeView.java:79-83`
+   * 要 `startTime != null && endTime != null && startTime < endTime` 才画）。
+   */
+  startTimeMillis: number | null
+  /** 结束那一刻的时间戳（`SMTestProxy.java:629-630`/`:645-646` 的 `myEndTime`），同上可为 null。 */
+  endTimeMillis: number | null
 }
 
 /** 聚合口径：先 failed，再 skipped，最后 passed（`Filter.DEFECTIVE_LEAF` 的同一优先级）。 */
@@ -76,7 +85,26 @@ export class TestTreeBuilder {
   /** 已开始的测试（`testStarted`）—— 结束前算「运行中」。 */
   private readonly started = new Set<string>()
   private readonly finished = new Set<string>()
+  /**
+   * 节点 id（`suite:<路径>` / `sm:<事件 id>`）→ 开始/结束**到达**时间戳。
+   * 上游也是这么来的：`SMTestProxy.setStarted()`（`:450-458`）与 `setSuiteStarted()`（`:474-477`）
+   * 在事件到达时 `System.currentTimeMillis()` 盖一次（已有值不覆盖，正是上面两处的 `if (myStartTime == null)`），
+   * 结束侧在 `:629-630`/`:645-646` 同样只盖第一次。
+   */
+  private readonly starts = new Map<string, number>()
+  private readonly ends = new Map<string, number>()
   private pending = ''
+  /** 事件到达时的「现在」，默认 `Date.now`（见下面的构造函数）。 */
+  private readonly now: () => number
+
+  /**
+   * `now` 是可注入的时钟（默认 `Date.now`）。上游直接用 `System.currentTimeMillis()`
+   * （`SMTestProxy.java:457`），本仓把这一处做成参数**只是为了让「运行中的实时时长」有判据**
+   * （不然测试要等真时间走）；生产消费方（`src/components/TestRunnerPanel.vue`）不传，就是 `Date.now`。
+   * 注意这里**不能**写成参数属性（构造参数上带 `private readonly`）—— Node 的 type-stripping
+   * 不支持参数属性，会让整个模块加载失败（`.tools/find-param-props.mjs` 就是拦这一条的）。
+   */
+  constructor(now: () => number = () => Date.now()) { this.now = now }
 
   /** 按输出块喂入（与 `TestResultFeed.feedChunk` 同一份块，块内残段同样留给下一块）。 */
   feed(chunk: string): void {
@@ -110,19 +138,41 @@ export class TestTreeBuilder {
         this.suitePaths.add(path)
         this.open.push(path)
         if (event.id) this.paths.set(event.id, path)
+        this.openNode(suiteNodeId(path))
       }
       return
     }
     if (event.kind === 'suiteFinished') {
       const path = event.id ? this.paths.get(event.id) : undefined
       const at = path === undefined ? this.open.lastIndexOf(event.name ?? '') : this.open.lastIndexOf(path)
+      const closed = path ?? (at >= 0 ? this.open[at] : undefined)
       if (at >= 0) this.open.splice(at, 1)
+      if (closed) {
+        const id = suiteNodeId(closed)
+        if (!this.ends.has(id)) this.ends.set(id, this.now())
+        // 上游 `SMTestProxy.setDuration():603-604` 还有一支「suite 有时长但没时间戳 ⇒ start = endTime - duration」，
+        // 它要求 finish 事件到达时那一层已经存在但**没报过 suiteStarted** —— 本仓的 suite 节点在只有
+        // `suiteFinished`、没有 `suiteStarted` 时根本定位不到路径（下面的 `closed` 取不到），所以那一支在本仓
+        // **没有可达入口**（不是省略功能，是协议的现实：本仓适配器成对报 suite 事件）。登记在批报告 §6。
+      }
       return
     }
     // 测试节点自己也进 `paths`（参数化用例的 parent 就是它）。
     if (event.id && event.name) { const path = this.pathOf(event); if (path) this.paths.set(event.id, path) }
-    if (event.kind === 'testStarted') { if (event.id) this.started.add(this.resultId(event.id)); return }
-    if (event.id) { this.started.delete(this.resultId(event.id)); this.finished.add(this.resultId(event.id)) }
+    if (event.kind === 'testStarted') {
+      if (event.id) { const id = this.resultId(event.id); this.started.add(id); this.openNode(id) }
+      return
+    }
+    if (event.id && event.kind !== 'testOutput') {
+      const id = this.resultId(event.id)
+      this.started.delete(id); this.finished.add(id)
+      if (!this.ends.has(id)) this.ends.set(id, this.now())
+    }
+  }
+
+  /** 开始戳只盖第一次（上游 `SMTestProxy.java:456-457`/`:475-477` 的 `if (myStartTime == null)`）。 */
+  private openNode(id: string): void {
+    if (!this.starts.has(id)) this.starts.set(id, this.now())
   }
 
   /**
@@ -149,7 +199,8 @@ export class TestTreeBuilder {
           node = { id, name: part, kind: 'suite', depth: prefix.split('.').length - 1, path: prefix,
                    parent: parent ? parent.id : null, children: [], outcome: null,
                    counts: { passed: 0, failed: 0, skipped: 0, total: 0 }, durationMs: 0,
-                   location: null, running: false }
+                   location: null, running: false,
+                   startTimeMillis: this.starts.get(id) ?? null, endTimeMillis: this.ends.get(id) ?? null }
           nodes.set(id, node)
           if (parent) parent.children.push(node)
           order.push(node)
@@ -176,6 +227,7 @@ export class TestTreeBuilder {
         durationMs: result.durationMs ?? 0,
         location: this.hints.get(id) ?? discoveredLocation(discovered.get(id)),
         running: this.started.has(id) && !this.finished.has(id),
+        startTimeMillis: this.starts.get(id) ?? null, endTimeMillis: this.ends.get(id) ?? null,
       }
       nodes.set(id, node)
       order.push(node)
@@ -233,6 +285,8 @@ export class TestTreeBuilder {
     this.hints.clear()
     this.started.clear()
     this.finished.clear()
+    this.starts.clear()
+    this.ends.clear()
     this.pending = ''
   }
 
@@ -303,4 +357,291 @@ export class TestTreeExpander {
   canExpand(nodes: readonly TestTreeNode[]): boolean { return TestTreeBuilder.hasTestSuites(nodes) }
   canCollapse(nodes: readonly TestTreeNode[]): boolean { return TestTreeBuilder.hasTestSuites(nodes) }
   clear(): void { this.expanded.clear() }
+}
+
+// --- 排序与行内统计（上游 `TestConsoleProperties` 的四个开关 + `createComparator`）----
+//
+// 上游依据（逐条自己开过文件，行号是声明行）：
+//   · `platform/testRunner/src/com/intellij/execution/testframework/TestConsoleProperties.java:45-48`
+//     —— 四个 `BooleanProperty` 与**默认值**：`sortTestsAlphabetically`=false、`sortTestsByDuration`=false、
+//     `sortTestsByDeclarationOrder`=false、`suitesAlwaysOnTop`=**true**；`:57` 的
+//     `showInlineStatistics`=**true**（行内耗时默认就显示）；
+//   · `platform/testRunner/src/com/intellij/execution/testframework/TestFrameworkRunningModel.java:41-78`
+//     —— `createComparator()`：先 `SORT_BY_DURATION && !isRunning()`（`:44`），
+//     再 `SORT_BY_DECLARATION_ORDER`（`:58`），否则 `SORT_ALPHABETICALLY ? AlphaComparator : null`（`:78`）；
+//     两个带 suite 判定的分支里都有 `!SUITES_ALWAYS_ON_TOP || t1.isLeaf() == t2.isLeaf()` 的门（`:51`、`:65`），
+//     即「suite 与 test 混排时不比较」；声明顺序取 PSI `textOffset`，**取不到的排到最后**（`:68-70`）；
+//   · `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/ui/SMTestRunnerResultsForm.java:310-312`
+//     —— 耗时排序在**这次跑完**（`myTestsRunning = false`）时才挂到树上，与上面的 `!isRunning()` 同一口径；
+//   · `platform/testRunner/src/com/intellij/execution/testframework/ToolbarPanel.java:82-114`
+//     —— 三个排序开关在 `sortGroup` 里，且 `setSelected` 打开一个就把另外两个 `primSet(false)`
+//     （`:84-95` 字母、`:98-110` 声明顺序、`:112-114` + 内部类 `SortByDurationAction` `:306-334` 耗时）；
+//     `:161-167` 的 `secondaryGroup`（gear，「Test Runner Settings」）里挂 `SHOW_INLINE_STATISTICS`；
+//   · `platform/editor-ui-api/src/com/intellij/ide/util/treeView/AlphaComparator.java:22-36`
+//     —— 字母序先按 `NodeDescriptor.getWeight()`，同权重再走 `FileNameComparator`（先忽略大小写、再按原名）；
+//   · `platform/smRunner/src/com/intellij/execution/testframework/sm/runner/ui/TestTreeRenderer.java:79-87`
+//     与 `SMTestProxy.java:527-553` —— 开着行内统计时把 `getDurationString()` 画在节点名右侧（灰色小字），
+//     文案是 `NlsMessages.formatDurationApproximateNarrow`（`platform/ide-core-impl/src/com/intellij/ide/nls/NlsMessages.java:110-115`：
+//     **最多两个时间单位**，单位名取自同文件 `:32` 的 `UNIT_KEYS = {ns, mcs, ms, sec, min, hr, day, week}`）。
+//
+// 与本仓的差异（如实登记）：
+//   · 上游的「声明顺序」用 PSI `textOffset`（要类解析），本仓只有 `location` 字符串 ⇒ 用
+//     **同一文件内按行号**、跨文件按路径再按行号，等价于「源码里的先后」；拿不到位置的排最后（照 `:68-70`）。
+//   · 上游字母序的第一判据是 descriptor `weight`，同一父节点下的兄弟权重相同 ⇒ 本仓只比较名字，
+//     结果与上游在同层内一致。
+//   · 上游 `suitesAlwaysOnTop` 是靠「混排不比较 + 建模顺序 suite 天然在前」实现；本仓的 `children`
+//     是按事件到达顺序追加的（suite 可能排在先出结果的 test 之后），所以把同一可见结果写成显式判据：
+//     开着置顶时 suite 在前。
+//   · **留痕（2026-10-06 第二批）**：本文件上一批在这里写过「没有做成 wall time（要 startTime/endTime）、
+//     也没做 root 节点的 overall/sum 提示」。实际：**这两条本轮都落了** —— 时间戳不需要改通道协议，
+//     上游 `SMTestProxy` 也是在**事件到达时**用 `System.currentTimeMillis()` 盖的（`:456-457`/`:475-477`/
+//     `:629-630`/`:645-646`），所以 `TestTreeBuilder` 自己盖即可（见下面「节点时长的呈现」一节与
+//     `testNodeDurationText`/`testNodeDurationTooltip`）。原写法之所以成立，是因为它把「协议里没有
+//     start/end 字段」当成了「拿不到 start/end」。
+//   · 排序开关是运行时状态，上游存 `TestConsoleProperties`（随运行配置存盘）；本仓与面板里既有的
+//     `trackRunning`/`scrollToSource` 同一档处理（不落盘），照本仓既有形状，不新建持久化键。
+//   · 上游 `AbstractTestProxy.getDuration()`（`:62-64`）可以没有时长（null ⇒ 不画）；本仓
+//     `TestTreeNode.durationMs` 是 number、没测到就记 0，所以**面板对 0 不显示**，
+//     免得把「没测到时长」报成「0 ms」（`testDurationText(0)` 本身仍返回 `0 ms`，与上游格式化一致）。
+
+/** 三个排序键（互斥）+ 置顶，默认值照 `TestConsoleProperties.java:45-48`。 */
+export interface TestTreeSortOptions {
+  sortAlphabetically: boolean
+  sortByDuration: boolean
+  sortByDeclarationOrder: boolean
+  suitesAlwaysOnTop: boolean
+}
+
+export const DEFAULT_TEST_TREE_SORT: TestTreeSortOptions = {
+  sortAlphabetically: false,
+  sortByDuration: false,
+  sortByDeclarationOrder: false,
+  suitesAlwaysOnTop: true,
+}
+
+export type TestTreeSortKey = 'alphabetically' | 'duration' | 'declaration'
+
+/** 开关文案（`ExecutionBundle.properties:144-152` 与 `TestRunnerBundle.properties:46-47`，本地化包不在本地树 ⇒ 英文原文直译）。 */
+export const SORTING_OPTIONS_GROUP_NAME = 'Sorting Options'
+export const SORT_ALPHABETICALLY_NAME = 'Sort Alphabetically'
+export const SORT_ALPHABETICALLY_DESCRIPTION = 'Sort tests or suites alphabetically'
+export const SORT_BY_DECLARATION_ORDER_NAME = 'Sort By Declaration Order'
+export const SORT_BY_DECLARATION_ORDER_DESCRIPTION = 'Sort tests or suites by declaration order'
+export const SORT_BY_DURATION_NAME = 'Sort By Duration'
+export const SORT_BY_DURATION_DESCRIPTION = 'Sort tests or suites by duration'
+export const SUITES_ALWAYS_ON_TOP_NAME = 'Suites Always on Top'
+export const SUITES_ALWAYS_ON_TOP_DESCRIPTION = 'Sort suites on top'
+export const SHOW_INLINE_STATISTICS_NAME = 'Show Inline Statistics'
+export const SHOW_INLINE_STATISTICS_DESCRIPTION = 'Show/hide the test duration in the tree'
+
+/** 打开一个排序键就把另外两个关掉（`ToolbarPanel.java:84-95/98-110/306-334` 的互斥）。 */
+export function withTestTreeSort(options: TestTreeSortOptions, key: TestTreeSortKey | null): TestTreeSortOptions {
+  return {
+    ...options,
+    sortAlphabetically: key === 'alphabetically',
+    sortByDuration: key === 'duration',
+    sortByDeclarationOrder: key === 'declaration',
+  }
+}
+
+/** `location`（`path:line`）→ 源码位置；解不出来就是 null（上游 `getTextOffset` 拿不到 PSI 的那一档）。 */
+function sourcePosition(node: TestTreeNode): { path: string; line: number } | null {
+  const location = node.location
+  if (!location) return null
+  const cut = location.lastIndexOf(':')
+  if (cut <= 0) return null
+  const line = Number(location.slice(cut + 1))
+  if (!Number.isFinite(line) || line <= 0) return null
+  return { path: location.slice(0, cut), line }
+}
+
+/** 同层混排时的置顶判据（`TestFrameworkRunningModel.java:51/65` 的 `SUITES_ALWAYS_ON_TOP` 门）。 */
+function suitesFirst(a: TestTreeNode, b: TestTreeNode, options: TestTreeSortOptions): number | null {
+  if (!options.suitesAlwaysOnTop || a.kind === b.kind) return null
+  return a.kind === 'suite' ? -1 : 1
+}
+
+/**
+ * 排序用的那一份时长（上游 `TestFrameworkRunningModel.java:52` 比的是
+ * `t2.getCustomizedDuration(properties)` —— `SMTestProxy.java:516-524` 转给
+ * `JavaAwareTestConsoleProperties.getCustomizedDuration():184-197`）：
+ * 叶子 ⇒ 自己的时长；suite 且开了 wall time（默认开，`JavaAwareTestConsoleProperties.java:55`）⇒ `end - start`；
+ * **两个时间戳缺一个就返回 null（=「没有时长」），不退回孩子之和**（同文件 `:193-195`）。
+ * null 在比较里是最小（`platform/util-rt/src/com/intellij/openapi/util/Comparing.java:155-160`）⇒ 降序时排最后。
+ */
+export function testNodeDurationMs(node: TestTreeNode): number | null {
+  if (node.kind !== 'suite') return node.durationMs
+  if (node.startTimeMillis !== null && node.endTimeMillis !== null && node.startTimeMillis < node.endTimeMillis)
+    return node.endTimeMillis - node.startTimeMillis
+  return null
+}
+
+/** `Comparing.compare(o1, o2)` 的等价物（null 最小；`:155-160`）。 */
+function compareNullableAsc(first: number | null, second: number | null): number {
+  if (first === second) return 0
+  if (first === null) return -1
+  if (second === null) return 1
+  return first < second ? -1 : first > second ? 1 : 0
+}
+
+/** 字母序：先忽略大小写，再按原名（`AlphaComparator.java:33` 的 `FileNameComparator` 两级判据）。 */
+export function compareTestNodesAlphabetically(a: TestTreeNode, b: TestTreeNode): number {
+  const lower = a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+  return lower !== 0 ? lower : a.name.localeCompare(b.name, 'en')
+}
+
+/**
+ * 当前开关下的兄弟比较器；三个排序都关着 ⇒ null（不排序 = 建模顺序）。
+ * 判定次序照 `TestFrameworkRunningModel.createComparator`（`:41-78`）：耗时 → 声明顺序 → 字母。
+ */
+export function testTreeComparator(
+  options: TestTreeSortOptions, isRunning: boolean,
+): ((a: TestTreeNode, b: TestTreeNode) => number) | null {
+  // 耗时只在**没在跑**时排（`:44` 的 `&& !isRunning()`；跑完那一刻才挂比较器，
+  // `SMTestRunnerResultsForm.java:310-312`），开着耗时但还在跑 ⇒ 落到下面的分支，与上游一致。
+  if (options.sortByDuration && !isRunning) {
+    return (a, b) => {
+      const onTop = suitesFirst(a, b, options)
+      if (onTop !== null) return onTop
+      // 上游是 `Comparing.compare(t2.getCustomizedDuration(p), t1.getCustomizedDuration(p))`（`:52`）
+      // ——**降序**、慢的在前，「没有时长」的那一档排最后（`Comparing.java:155-160` 把 null 当最小）。
+      // 比的是 customized duration（suite = wall time，见 `testNodeDurationMs`），不是孩子之和。
+      return compareNullableAsc(testNodeDurationMs(b), testNodeDurationMs(a))
+    }
+  }
+  if (options.sortByDeclarationOrder) {
+    return (a, b) => {
+      const onTop = suitesFirst(a, b, options)
+      if (onTop !== null) return onTop
+      const first = sourcePosition(a), second = sourcePosition(b)
+      if (!first && !second) return 0
+      if (!first) return 1   // 拿不到位置的排最后（`TestFrameworkRunningModel.java:69`）。
+      if (!second) return -1 // :70
+      if (first.path !== second.path) return first.path.localeCompare(second.path)
+      return first.line - second.line
+    }
+  }
+  if (options.sortAlphabetically) return compareTestNodesAlphabetically
+  return null
+}
+
+/**
+ * 按开关排好的一棵树（**递归到每一层的兄弟之间**，对应上游把比较器交给 tree builder、
+ * 每个父节点下都按它排）。没有比较器时原样返回，不动节点身份。
+ */
+export function sortTestTree(
+  nodes: readonly TestTreeNode[], options: TestTreeSortOptions, isRunning = false,
+): TestTreeNode[] {
+  const comparator = testTreeComparator(options, isRunning)
+  if (!comparator) return nodes as TestTreeNode[]
+  return nodes.map(node => {
+    const children = node.children.length ? sortTestTree(node.children, options, isRunning) : node.children
+    if (!children.length) return { ...node, children }
+    return { ...node, children: [...children].sort(comparator) }
+  })
+}
+
+/** 单位名取自 `NlsMessages.java:32` 的 `UNIT_KEYS`（narrow 档）。 */
+const DURATION_UNITS: Array<{ ms: number; label: string }> = [
+  { ms: 3_600_000, label: 'hr' },
+  { ms: 60_000, label: 'min' },
+  { ms: 1_000, label: 'sec' },
+  { ms: 1, label: 'ms' },
+]
+
+/**
+ * 行内统计的耗时文本（`TestTreeRenderer.java:79-87` + `SMTestProxy.java:546-549` 的
+ * `formatDurationApproximateNarrow`：**最多两个单位**）。没有时长（null/负数）就不显示，
+ * 0 也显示成 `0 ms`（上游 0 走同一格式化）。
+ */
+export function testDurationText(durationMs: number | null | undefined): string | null {
+  if (durationMs === null || durationMs === undefined || !(durationMs >= 0)) return null
+  const total = Math.floor(durationMs)
+  const parts: string[] = []
+  let rest = total
+  for (const unit of DURATION_UNITS) {
+    if (parts.length === 2) break
+    const value = Math.floor(rest / unit.ms)
+    if (value <= 0) continue
+    parts.push(`${value} ${unit.label}`)
+    rest -= value * unit.ms
+  }
+  return parts.length ? parts.join(' ') : '0 ms'
+}
+
+// --- 节点时长的**呈现**：wall time、运行中的实时时长、右侧 tooltip --------------------
+//
+// 上游依据（逐条自己开过文件，行号是声明行/命中行）：
+//   · `java/execution/impl/src/com/intellij/execution/testframework/JavaSMTRunnerTestTreeView.java:56-86`
+//     —— `TestTreeRenderer.getDurationText` 的 Java 覆盖：
+//     `:58-74` 在跑 ⇒ 从 `startTimeMillis`（suite 且没开 wall time 时取**第一个孩子**的开始，`:60-61`+`:88-110`）
+//     算已经跑了多久，**向下取整到整秒**、不足 1 秒不画（`:69-72`）；
+//     `:75-84` suite + 已结束 + 开了 wall time ⇒ 画 `endTime - startTime`；
+//     `:85` 其余（叶子、没时间戳的 suite）⇒ `SMTestProxy.getDurationString()`（同文件 `:546-549`，
+//     suite 那一档是**孩子时长之和** `getDuration()`/`calcSuiteDuration()`，`:489-511`）。
+//   · `java/execution/impl/src/com/intellij/execution/testframework/JavaAwareTestConsoleProperties.java:55`
+//     —— `USE_WALL_TIME = new BooleanProperty("useWallTime", true)`：**默认开**（同文件 `:177-178` 的注释
+//     「A suite reports the wall time (endTime - startTime) when USE_WALL_TIME is on」）。
+//     它的开关动作在 `:199-208` 的 `appendAdditionalActions` 里，且整组被 `Registry.is("java.test.enable.tree.live.time")`
+//     （`:202`）挡着 ⇒ **上游默认不给用户这一格**，本仓也就**不画**这个开关（铁律「不放假控件」），
+//     只把默认档 `true` 的行为落进 `testNodeDurationText`。
+//   · `java/execution/impl/src/com/intellij/execution/testframework/JavaSMTRunnerTestTreeView.java:117-150`
+//     —— 非叶子节点的 tooltip：`:133-137` 的门（叶子不画、`TestDurationStrategy != AUTOMATIC` 不画、
+//     两个时间戳缺一个或 `end <= start` 不画），`:139` 的 `getWidth()/2 < Math.abs(p.x)`
+//     （**只有行右半侧**才有 tooltip —— 本仓等价物就是行右侧那一格耗时 `<span>` 的 `title`），
+//     `:140-147` 两行正文取自 `java/openapi/resources/messages/JavaBundle.properties:2038`
+//     （`java.test.overall.time=Overall time: {0}`）与 `:2039`（`java.test.sum.time=Sum time: {0}`）。
+//   · `platform/ide-core-impl/src/com/intellij/ide/nls/NlsMessages.java:111-115` +
+//     `platform/ide-core/resources/messages/IdeCoreBundle.properties:170-172` —— 两处时长都走
+//     `formatDurationApproximateNarrow`（最多两个单位，`.short` 档单位名 `ms/sec/min/hr`）。
+
+/** tooltip 的两行正文（`JavaBundle.properties:2038`/`:2039` 的英文原文；本地化包不在本地树 ⇒ 不自造中文）。 */
+export const OVERALL_TIME_MESSAGE = 'Overall time: {0}'
+export const SUM_TIME_MESSAGE = 'Sum time: {0}'
+
+/** `{0}` 位的填充（上游 `JavaBundle.message(key, arg)` 的最小等价物，只这一处用）。 */
+function message(template: string, value: string): string { return template.replace('{0}', value) }
+
+/**
+ * 一行右侧的时长文本（`JavaSMTRunnerTestTreeView.java:56-86`）。`now` 是「现在」（上游 `:69` 的
+ * `System.currentTimeMillis()`；本仓由面板在新输出到达时重算，与上游「来事件才重画」同一口径）。
+ * 返回 null = 这一格不画（上游同样有四个不画的分支：`:66-68`、`:71`、`:75-81` 的条件、`:85`→`SMTestProxy.java:547-548` 的 null）。
+ */
+export function testNodeDurationText(node: TestTreeNode, now: number = Date.now()): string | null {
+  if (node.running) {
+    // 上游 `:58` 还有 `!isSubjectToHide(consoleProperties)` 这一门（`SMTestProxy.java:541-543`：
+    // 隐藏已通过测试时不画）。本仓被显示过滤器挡掉的节点**根本不进渲染**
+    // （`src/testResultFilter.ts` 的 `filterTestTree`），所以这一门天然成立。
+    if (node.startTimeMillis === null || node.startTimeMillis === 0) return null   // `:66-68`
+    const elapsed = Math.max(0, now - node.startTimeMillis)
+    const seconds = Math.floor(elapsed / 1000)
+    if (seconds === 0) return null                                                 // `:70-71`
+    return testDurationText(seconds * 1000)                                        // `:72-73`
+  }
+  // 已结束的 suite ⇒ wall time（`:75-84`；`USE_WALL_TIME` 默认 true，见 `JavaAwareTestConsoleProperties.java:55`）。
+  if (node.kind === 'suite' && node.startTimeMillis !== null && node.endTimeMillis !== null
+      && node.startTimeMillis < node.endTimeMillis)
+    return testDurationText(node.endTimeMillis - node.startTimeMillis)
+  // 叶子与没有时间戳的 suite ⇒ 自己的时长 / 孩子之和（`:85` + `SMTestProxy.java:489-511`、`:546-549`）。
+  // 本仓 `durationMs` 是 number，0 = 「没测到时长」⇒ 不画（与本文件 `:344-346` 既有的登记同一口径）。
+  return node.durationMs > 0 ? testDurationText(node.durationMs) : null
+}
+
+/**
+ * 行右侧那一格的 tooltip（`JavaSMTRunnerTestTreeView.java:117-150`）：非叶子 + 两个时间戳齐全且
+ * `end > start` 才给两行「Overall time / Sum time」，其余 null。
+ * 上游的 `TestDurationStrategy != AUTOMATIC` 那一门（`:133`）在本仓恒不成立 —— 本仓没有给运行配置
+ * 指定 MANUAL 时长档的通道（那是 `SMTRunnerConsoleProperties` 的 per-framework 配置面），所以全部按
+ * AUTOMATIC 处理，等价于上游默认形状。
+ */
+export function testNodeDurationTooltip(node: TestTreeNode): string | null {
+  if (node.kind !== 'suite' || !node.children.length) return null                 // `:133` 的 `test.isLeaf()`
+  if (node.startTimeMillis === null || node.endTimeMillis === null
+      || node.endTimeMillis <= node.startTimeMillis) return null                  // `:134-136`
+  const overall = testDurationText(node.endTimeMillis - node.startTimeMillis)
+  if (overall === null) return null
+  // `:141-147`：`getDuration()`（suite = 孩子时长之和）为 null 时只给一行。本仓 0 = 没测到 ⇒ 同样只给一行。
+  const sum = node.durationMs > 0 ? testDurationText(node.durationMs) : null
+  return sum === null ? message(OVERALL_TIME_MESSAGE, overall)
+                      : `${message(OVERALL_TIME_MESSAGE, overall)}\n${message(SUM_TIME_MESSAGE, sum)}`
 }

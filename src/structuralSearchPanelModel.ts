@@ -10,16 +10,21 @@
 //     + 替换定义指向真实变量（`checkDefinitions`，src/structuralSearchReplace.ts）
 //   · 跑 = 原生 `search.run`/`search.preview`（native/search.cpp），本文件只负责它**回来之后**的那一段
 //   · 收 = `dedupeMatches`（src/structuralSearchResults.ts，`DuplicateFilteringResultSink` 的等价物）
-//     + `filterHitsByModifiers`（跨度修饰符与匹配范围的命中后复核）
+//     + `filterHitsByModifiers`（跨度修饰符、匹配范围与列表变量「整段」的命中后复核）
 //
 // 为什么需要"命中后再复核"这一层：宿主只会按 `std::regex` 报"这一行有匹配"，
 // 而 `contains` / `within` 判的是**这一段之内**还有没有另一个结构，正则文法表达不了
-// （`native/search.cpp:250` 用的是 ECMAScript 文法，连环视都不支持）。
+// （`native/search.cpp:256` 用的是 ECMAScript 文法）；列表变量的「这一段是不是同一个列表的全部」
+// 判的是**这一段之外**同层还有一个逗号没有，那要算括号深度，而且宿主那一侧连后顾断言都编不出来
+// （实测 `(?<=…)`/`(?<!…)` 抛 `regex_error`，见 `src/structuralCodeBlock.ts` 头部）。
 // 所以本仓的等价物是：宿主给候选行 → 本文件在同一批行文本上用**同一份编译产物**复核。
 // 复核不上的那些（JS 与 std::regex 判定不一致）单独计数并明说，不混进"修饰符否决"。
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { compileStructuralPattern, compileStructuralReplacement, type StructuralPattern } from './structuralSearch.ts'
+// 替换串的先验校验 = 上游 `RegExReplacementBuilder.validate`（`platform/lang-impl/src/com/intellij/find/impl/RegExReplacementBuilder.java:76-78`），
+// 按下替换按钮时跑（`platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java:1548`）。
+import { captureGroupCount, validateReplacement } from './regexReplacement.ts'
 import {
   checkTemplateModifiers, compileSwitches, filterHitsByModifiers, matcherFlags, needsSpanCheck,
   scopeSummary, type TemplateScope,
@@ -49,6 +54,19 @@ export interface StructuralSearchModelInput {
   wholeWord?: Ref<boolean>
   /** 逐变量替换定义（上游 `ReplaceOptions` 的那张表，本仓的定义值是文本）。 */
   definitions?: Ref<ReplacementDefinition[]>
+  /**
+   * 面板的「正则表达式」档 = 上游 `FindModel.isRegularExpressions()`。它只决定一件事：
+   * **替换串要不要按 `$n` 模板校验**。上游那一整块校验（空匹配检查 + `RegExReplacementBuilder.validate`）
+   * 整块挂在 `getValidationInfo` 的这个分支里
+   * （`platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java:1520`，校验点 `:1547-1552`），
+   * 非正则档里替换串的 `$1` 是**字面文本**（`FindManagerBase.getStringToReplace:284-298` 只在正则档展开），
+   * 拿模板规则去校验它反而会把能用的替换串挡掉。宿主那一侧同一口径
+   * （`native/search.cpp` 的 `make_template_context`：非正则档直接返回不展开的上下文）。
+   *
+   * 结构化模式不靠这个入参：模板编译产物本来就是正则，面板那条通道以 `regex:true` 发出去
+   * （见 `SearchPanel.params()`），所以模型自己按「编译成功」判定同一档。
+   */
+  regexMode?: Ref<boolean>
 }
 
 export interface StructuralSearchModel {
@@ -60,6 +78,17 @@ export interface StructuralSearchModel {
   activeQuery: ComputedRef<string>
   /** 发给宿主的 replacement（模板模式 = `$N` 回填，定义文本已折进去）。 */
   activeReplacement: ComputedRef<string>
+  /**
+   * 按下替换时的那道「替换串本身畸形」门（'' = 放行），上游把它做成挂在**替换字段**上的
+   * `ValidationInfo`：`FindPopupPanel.java:1547-1552` 跑 `RegExReplacementBuilder.validate(pattern,
+   * getStringToReplace())`，抛 ⇒ `find.replace.invalid.replacement.string`
+   * （`platform/analysis-impl/resources/messages/FindBundle.properties:96`「Malformed replacement
+   * string: {0}」，宿主 `native/search.cpp` 的 `validate_replacement` 用的是同一句文案）。
+   * 两道前置门也照上游：`isRegularExpressions()`（`:1520`）与 `isReplaceState()`（`:1533`，
+   * 替换框为空时整块不走 ⇒ 空替换串一律放行，它是「删掉命中」而不是模板）。
+   * 查的是**真正发出去**的那串（结构化模式下已折成 `$N`），因为被宿主展开的就是它。
+   */
+  replaceGuard: ComputedRef<string>
   /** 「整个模板」那一档的匹配范围（上游 `within`，只允许写在整模板上）。 */
   scope: Ref<TemplateScope | null>
   /**
@@ -147,6 +176,37 @@ export function createStructuralSearchModel(input: StructuralSearchModelInput): 
     return 'error' in folded ? input.replacement.value : folded.replacement
   })
 
+  /**
+   * 发出去的 query 到底按不按正则解释 —— 上游 `model.isRegularExpressions()`（`FindPopupPanel.java:1520`）
+   * 在本仓的等价条件：面板的「正则」档开着，**或**结构化模板编译成功
+   * （编译产物就是正则，面板以 `regex:true` 发给宿主）。编不动时不算：那条路径上拒绝的是
+   * `error`（模板本身），再冒出一句"替换串畸形"会把用户引到错的那一半。
+   */
+  const isRegexChannel = computed(() => input.regexMode?.value === true || compiled.value !== null)
+
+  /**
+   * 当前 query 的捕获组数 = 上游 `pattern.matcher("").groupCount()`（`RegExReplacementBuilder.java:63-66`）。
+   * query 自己都编不出来时给 null：那是宿主在搜索阶段报的错（`find.invalid.regular.expression.error`，
+   * `FindPopupPanel.java:1529-1531`），这里不拿"组数 0"去误判替换串。
+   */
+  const patternGroups = computed<number | null>(() => {
+    const source = activeQuery.value
+    if (!source) return null
+    try { new RegExp(source) } catch { return null }
+    return captureGroupCount(source)
+  })
+
+  const replaceGuard = computed<string>(() => {
+    // 上游 `:1533` 的 `isReplaceState()`：替换框为空时那一整块校验都不走 —— 空替换串是「删掉命中」，不是模板。
+    const outgoing = activeReplacement.value
+    const groups = patternGroups.value
+    if (!outgoing || groups === null || !isRegexChannel.value) return ''
+    const bad = validateReplacement(outgoing, groups)
+    // 文案与宿主同一句（`native/search.cpp` 的 `validate_replacement` ⇒ `INVALID_REQUEST`），
+    // 面板只是**提前**在同一批规则上拒绝，不让半批文件先被改写。
+    return bad ? `替换字符串格式非法：${bad}` : ''
+  })
+
   const note = computed(() => {
     const parts: string[] = []
     // 先说挂着哪个**修饰符**（上游 `FilterPanel` 树顶那行的等价物：整模板档只列修饰符，
@@ -156,7 +216,7 @@ export function createStructuralSearchModel(input: StructuralSearchModelInput): 
       const scopeText = scopeSummary(scope.value)
       if (scopeText) parts.push(scopeText)
     }
-    if (dropped.value) parts.push(`${dropped.value} 处不满足修饰符/匹配范围，已剔除`)
+    if (dropped.value) parts.push(`${dropped.value} 处不满足修饰符/匹配范围/列表整段，已剔除`)
     if (unverified.value) parts.push(`${unverified.value} 处本仓复核不上（宿主与 JS 的正则文法差异），一并剔除`)
     const counts = pendingCounts.value
     if (counts) {
@@ -223,7 +283,7 @@ export function createStructuralSearchModel(input: StructuralSearchModelInput): 
   }
 
   return {
-    compiled, error, activeQuery, activeReplacement, scope, definitions, note,
+    compiled, error, activeQuery, activeReplacement, replaceGuard, scope, definitions, note,
     pending: computed(() => pendingCounts.value),
     refine, valuesOf,
   }

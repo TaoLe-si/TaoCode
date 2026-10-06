@@ -137,7 +137,9 @@
 |---|---|
 | **真实桌面运行** | ❌ **本会话一次都没跑过。** 所有像素/几何修正都只是**静态改的**，必须在真实窗口里核对后才算数 |
 | **`MERGED_WITH_MAIN_TOOLBAR` 档的真实形态** | ⚠️ **仍未从源码确证**（`ShowMode.kt`→`MenuFrameHeader.kt`→`CustomHeader.kt` 追不到定论）。**未改动**，标为待核实。注：2026-09-28 那批曾登记过结论，但本轮复核认为证据链不足 |
-| ~~上游树缺 `platform/keymaps` 目录 ⇒ INSERT/F6 等键位无法核实~~ | ❌ **这条是错的，已撤销。** 独立验收证伪：目录**存在**于 `platform/platform-resources/src/keymaps/`（10 个文件、`$default.xml` 1308 行）+ `platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（47 个文件，含 `KeymapPanel.java` 1138 行）。`$default.xml` 里 8 处行号逐行核实全中。动作系统那一批据此把本该写「无法核实」的键位活**全做了**（键位表 UI / 只看冲突 / 按下即录 / 冲突三选一 / 恢复出厂）。危害：这条假规约已生产了假的判词，见 `ui-parity-checklist.md:3125` 的旧版本（已同步修正） |
+| ~~上游树缺 `platform/keymaps` 目录 ⇒ INSERT/F6 等键位无法核实~~ | ❌ **这条是错的，已撤销。** 独立验收证伪：目录**存在**于 `platform/platform-resources/src/keymaps/`（10 个文件、`$default.xml` 1308 行）+ `platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`（**27 个文件**，含 `KeymapPanel.java` 1138 行）。
+   ⚠️ 这一格原先写「47 个文件」，是 playbook §1.6 已宣布改正过两次的老错数：**47 是 `Default for GNOME.xml` 的行数，不是任何文件数**
+   （复算 `ls platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui | wc -l` = 27；`wc -l 'platform/platform-resources/src/keymaps/Default for GNOME.xml'` = 47）。`$default.xml` 里 8 处行号逐行核实全中。动作系统那一批据此把本该写「无法核实」的键位活**全做了**（键位表 UI / 只看冲突 / 按下即录 / 冲突三选一 / 恢复出厂）。危害：这条假规约已生产了假的判词，见 `ui-parity-checklist.md:3125` 的旧版本（已同步修正） |
 | 运行仪表盘图标 | 上游是六边形+播放三角（`RunDashboardUiManagerImpl.java:145`），lucide-vue-next **无对应字形** ⇒ 保留 `SlidersHorizontal` 并在 `MainToolbar.vue:196-200` 登记为无法核实 |
 | LSP 单模块工程的真机行为 | 只到 `.classpath` 内容级判据；"关导入 → hover 外部类型"需要一次人工探针 |
 | 设置页 native 侧 | `settings_schema` 已由 native 代理**编译验证通过**（零 error 零 warning），但**未跑** `projects_test` |

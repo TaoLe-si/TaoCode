@@ -80,6 +80,10 @@ function taskRows(ctx: ExternalSystemActionContext): ExternalSystemActionRow[] {
   const rows: ExternalSystemActionRow[] = [
     { id: 'RunExternalSystemTaskAction', title: '运行', enabled: ctx.ready && !ctx.busy, ...(busyReason ?? offline ? { disabledReason: busyReason ?? offline } : {}) },
     { id: 'AssignRunConfigurationShortcutAction', title: '创建运行配置', enabled: ctx.ready, ...(offline ? { disabledReason: offline } : {}) },
+    // 任务编辑对话框（上游 `ExternalSystemEditTaskDialog`，入口 `ExternalSystemBeforeRunTaskProvider.java:59-60`
+    // 的 configureTask 直接开它；字段面 `ExternalSystemTaskSettingsControl.java:66-103`）。
+    // 标题直译 properties:134 `Edit {0} Task`；行的启用条件与「运行」同档（要能跑才谈得上编辑）。
+    { id: 'EditExternalSystemTaskAction', title: '编辑任务…', enabled: ctx.ready, ...(offline ? { disabledReason: offline } : {}) },
   ]
   if (ctx.taskName) rows.push(...activationRows(ctx, ctx.taskName, true))
   return rows

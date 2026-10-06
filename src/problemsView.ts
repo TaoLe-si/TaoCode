@@ -13,7 +13,9 @@
 import type { ProblemRow } from './problems.ts'
 // 高亮级别模型（`HighlightDisplayLevel` 的计数面）：哪些级别进"错误/警告"两格由级别对象定，
 // 不在计数处再写一遍 `severity === 1`（见 src/highlightLevels.ts）。
-import { levelForSeverity } from './highlightLevels.ts'
+// 「按严重级分组」那一档的**组键、组名与组序**也取自同一份级别表：级别对象只在这儿有一份，
+// 面板/计数/分派都从这里折，不再各写一遍严重度到名字的三元表达式。
+import { HIGHLIGHT_LEVELS, levelById, levelForSeverity, type HighlightLevelId } from './highlightLevels.ts'
 // 检查项身份（(source, code, tags) → 上游的 HighlightDisplayKey 那一格），见 src/inspectionIdentity.ts。
 import { NO_CHECKER_LABEL, identityOfRow } from './inspectionIdentity.ts'
 
@@ -30,10 +32,34 @@ import { NO_CHECKER_LABEL, identityOfRow } from './inspectionIdentity.ts'
  * `platform/problemsView/ui/src/com/intellij/analysis/problemsView/toolWindow/ProblemsViewGroupNode.kt:11-19`
  * （组节点的名字就是这个 group 字符串）。
  */
-export type ProblemGrouping = 'none' | 'file' | 'directory' | 'source' | 'code' | 'inspection'
+export type ProblemGrouping = 'none' | 'file' | 'directory' | 'source' | 'code' | 'inspection' | 'severity'
+
+// `severity` 是本轮补的一档 = 上游 Inspect Code Results 的「Group by Severity」开关
+// （`platform/lang-impl/src/com/intellij/analysis/AnalysisUIOptions.java:37` `GROUP_BY_SEVERITY = false` 默认关、
+//   `:70-93` `createGroupBySeverityAction`，文案 `inspection.action.group.by.severity=Group by Severity`
+//   在 `platform/analysis-api/resources/messages/InspectionsBundle.properties:98-100`；
+//   动作挂在工具栏 `platform/lang-impl/src/com/intellij/codeInspection/ui/InspectionResultsView.java:320,336`）。
+// 树那一侧的形状：根节点的直接子节点就是**一个严重级一个组节点**
+// （`platform/lang-impl/src/com/intellij/codeInspection/ui/InspectionTree.java:452-479`
+//   `groupedBySeverity ? myModel.createSeverityGroupNode(severityRegistrar, errorLevel, root) : root`，
+//   `createSeverityGroupNode` 在 `platform/lang-impl/src/com/intellij/codeInspection/ui/InspectionTreeModel.java:151-157`
+//   —— 按 level 去重，同一个级别只建一个节点），组节点的标题取
+//   `platform/lang-impl/src/com/intellij/codeInspection/ui/InspectionSeverityGroupNode.java:37-39`
+//   （`myLevel.getSeverity().getDisplayCapitalizedName()` = 那一级的**首字母大写显示名**，
+//    文案在 `platform/analysis-api/resources/messages/InspectionsBundle.properties:22,38,46,50`）；
+//   组与组之间的次序在 `platform/lang-impl/src/com/intellij/codeInspection/ui/InspectionResultsViewComparator.java:34-38`
+//   （两个都是级别组时 `-registrar.compare(severity1, severity2)` = **严重度降序**，级别组又排在其它节点之前）。
+// 本仓的落点：组键 = `src/highlightLevels.ts` 的级别 id，组名 = 该级的显示名，组序 = 级别 rank 升序
+// （rank 就是严重度降序，见那一份表的注释），与上面三条逐一对应。
+//
+// `sortFoldersFirst` 那一档**没有**承接（上游 `ProblemsViewState.kt:29` 默认 true +
+// `ProblemsViewNodeComparator.kt:21-24`）：那条规则只作用在**同层的两个 `FileNode`** 之间
+// （目录节点排在文件节点之前），本仓的树只有一层组头，同层没有"目录 vs 文件"的兄弟可言 ⇒
+// 它落在 `groupProblems` 的 `directory` 档（见下面 `orderDirectoryGroups`），不在分组档位里。
 
 /** 面板下拉里能选到的档（`src/problemsPanelState.ts` 的读档白名单与它一一对应）。 */
-export const PROBLEM_GROUPINGS: readonly ProblemGrouping[] = ['none', 'file', 'directory', 'source', 'code', 'inspection']
+export const PROBLEM_GROUPINGS: readonly ProblemGrouping[] =
+  ['none', 'file', 'directory', 'source', 'code', 'inspection', 'severity']
 
 /** LSP 严重度的四档（1 错误 / 2 警告 / 3 提示 / 4 信息），过滤器与清单按它枚举。 */
 export const PROBLEM_SEVERITIES: readonly number[] = [1, 2, 3, 4]
@@ -157,13 +183,21 @@ export function naturalCompare(a: string, b: string): number {
   return 0
 }
 
-/** 排序开关（上游 `ProblemsViewState.sortBySeverity`/`sortByName`，默认见 `ProblemsViewState.kt:30-31`）。 */
+/**
+ * 排序开关（上游 `ProblemsViewState.sortBySeverity`/`sortByName`，默认见 `ProblemsViewState.kt:30-31`；
+ * `sortFoldersFirst` 在同一份状态的 `:29`，上游默认 **true** ——
+ * `var sortFoldersFirst: Boolean by property(true)`，本仓照抄默认值）。
+ * 上游工具栏把这三个开关一起递给比较器
+ * （`ProblemsViewPanel.java:523-529` `new ProblemsViewNodeComparator(isNullableOrSelected(getSortFoldersFirst()), isNullableOrSelected(getSortBySeverity()), isNotNullAndSelected(getSortByName()))`），
+ * 本仓同一份三格也在 `sortProblems`/`groupProblems` 两个入口之间共用。
+ */
 export interface ProblemSort {
+  sortFoldersFirst: boolean
   sortBySeverity: boolean
   sortByName: boolean
 }
 
-export const DEFAULT_PROBLEM_SORT: ProblemSort = { sortBySeverity: true, sortByName: false }
+export const DEFAULT_PROBLEM_SORT: ProblemSort = { sortFoldersFirst: true, sortBySeverity: true, sortByName: false }
 
 /**
  * 位置比较。上游是 `ProblemsViewNodeComparator.comparePosition`（`:43-46`，先行后列），
@@ -215,6 +249,19 @@ function directoryOf(path: string): string {
 }
 
 /**
+ * 严重级键（`severity` 档）：那一行的**高亮级别 id**。
+ * 上游的组节点就是按 `HighlightDisplayLevel` 对象去重的
+ * （`InspectionTreeModel.java:151-157` 的 `getOrAdd(level, …)` —— 同一个 level 只建一个节点），
+ * 本仓用级别 id 当那把同样的键。
+ * 每一条诊断都折得出级别（`levelForSeverity` 对未知严重度回落到最弱一级，不返回空），
+ * 所以这一档**没有**「不进组」的那些行 —— 与 `code`/`inspection` 两档的形状不同，那是
+ * `HighlightingProblem.kt:87` 的 `?: return null`，这里没有对应的 null 分支。
+ */
+export function severityKeyOf(row: ProblemRow): string {
+  return levelForSeverity(row.severity).id
+}
+
+/**
  * 诊断码键：`ProblemRow.code`（`src/problems.ts` 把它从 `LspDiagnostic.code` 透传过来，
  * 本地检查则回落到检查器短名）。**没有码的行不进组** —— 上游在那一档就是把 `group == null`
  * 的问题直接挂在父节点下，不造一个组节点：
@@ -248,6 +295,7 @@ export function groupKeyOf(row: ProblemRow, grouping: ProblemGrouping): string {
     : grouping === 'source' ? sourceOf(row)
     : grouping === 'code' ? codeOf(row)
     : grouping === 'inspection' ? inspectionKeyOf(row)
+    : grouping === 'severity' ? severityKeyOf(row)
     : grouping === 'none' ? ''
     : directoryOf(row.path)
 }
@@ -280,9 +328,60 @@ const TOOL_ID_GROUPINGS: readonly ProblemGrouping[] = ['code', 'inspection']
 function groupLabel(grouping: ProblemGrouping, key: string, rows: readonly ProblemRow[]): string {
   const first = rows[0]
   if (!first) return key
+  if (grouping === 'severity') return levelById(key as HighlightLevelId).label
   if (grouping === 'inspection') return identityOfRow(first).displayName || key
   if (grouping === 'code') return first.code ? identityOfRow(first).displayName || key : key
   return key
+}
+
+/**
+ * 「目录排在文件之前」（上游第三个排序开关 `sortFoldersFirst`）在**本仓的一层组头**上怎么落地。
+ *
+ * 上游那条规则只比同层的两个 `FileNode`（`ProblemsViewNodeComparator.kt:21-24`：
+ * 两个都是文件节点时，`file.isDirectory` 的那个在前；随后一律 `naturalCompare(name)`，见 `:25`）。
+ * 本仓的树只有一层组，组键是「这一批问题所在的目录」，所以同层的兄弟关系要按**键的路径层级**还原：
+ * 目录 D 的直接子项 = D 自己的那一组（键 = D，装的是直接放在 D 里的文件）+ 所有以 D 为前缀的更深层组
+ * （子目录）。上游的展开顺序 = 先所有子目录（含它们的整棵子树），再 D 自己的文件组 —— 这就是本仓的
+ * 「DFS + 每层子目录先」，逐字对应上面那条比较器；关掉开关时退回纯自然序（`:25` 那一把）。
+ * 键 `.` 是本仓的根（`directoryOf` 给根级文件造的），等价于上游 root 那一层。
+ */
+export function orderDirectoryGroups(keys: readonly string[], foldersFirst: boolean): string[] {
+  if (!foldersFirst) return [...keys].sort((a, b) => naturalCompare(a, b))
+  const present = new Set(keys)
+  /** 键的父目录键（`src/a` → `src`，`src` → `.`，`.` → 空串 = 虚拟根）。 */
+  const parentOf = (key: string): string => {
+    const cut = key.lastIndexOf('/')
+    if (key === '.') return ''
+    return cut < 0 ? '.' : key.slice(0, cut)
+  }
+  const nameOf = (key: string): string => (key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key)
+  // 子目录关系只在**同一父级**内成立：父键 → 该父级下出现过的子目录键（保持自然序）。
+  const childDirs = new Map<string, string[]>()
+  for (const key of present) {
+    let current = key
+    // 将每个键沿路径上溯，把它登记到沿途每一层的子目录清单里
+    // （`src/a/b` 要同时是 `src/a` 与 `src` 的后代，中间层没有自己的组时也不断开）。
+    while (current !== '' && current !== '.') {
+      const parent = parentOf(current)
+      const list = childDirs.get(parent) ?? []
+      if (!list.includes(current)) list.push(current)
+      childDirs.set(parent, list)
+      current = parent
+    }
+  }
+  const ordered: string[] = []
+  const walk = (dir: string) => {
+    const children = (childDirs.get(dir) ?? []).sort((a, b) => naturalCompare(nameOf(a), nameOf(b)))
+    // 上游同层的顺序 = 先所有**子目录**（整棵子树），再本层自己的文件组（比较器 :21-24 + 树的 DFS）。
+    // 所以这里**不**在进子目录之前把子目录键端出来，子目录自己的那一组要等它的子树走完（下面那行）。
+    for (const child of children) walk(child)
+    if (dir !== '' && present.has(dir) && !ordered.includes(dir)) ordered.push(dir)
+  }
+  walk('.')
+  // 理论上走不到：`present` 里每个键都在某一层被登记过。留着是为了**不静默丢组**
+  // （丢一组 = 面板上少一批问题，那是看不见的错）。
+  for (const key of keys) if (!ordered.includes(key)) ordered.push(key)
+  return ordered
 }
 
 /**
@@ -290,8 +389,17 @@ function groupLabel(grouping: ProblemGrouping, key: string, rows: readonly Probl
  * （面板把排序开关的结果先算好再传进来，所以「按文件分组」不会把错误排到警告后面）。
  * 承接 `groupByToolId` 的两档（`code`/`inspection`）例外：按上游把未分组的问题排在组前、
  * 组之间按组名自然序，见 `TOOL_ID_GROUPINGS` 的注释。
+ * 另两条例外也照上游：
+ *  · `severity` 档 —— 组之间按**严重度降序**（级别 rank 升序），不是首次出现顺序
+ *    （`InspectionResultsViewComparator.java:34-38`）；
+ *  · `directory` 档 —— 受第三个排序开关 `sortFoldersFirst` 管，见 `orderDirectoryGroups`。
+ * 第三参可省：省的时侯用 `DEFAULT_PROBLEM_SORT.sortFoldersFirst`（上游默认 true）。
  */
-export function groupProblems(rows: readonly ProblemRow[], grouping: ProblemGrouping): ProblemGroup[] {
+export function groupProblems(
+  rows: readonly ProblemRow[],
+  grouping: ProblemGrouping,
+  sort: Pick<ProblemSort, 'sortFoldersFirst'> = DEFAULT_PROBLEM_SORT,
+): ProblemGroup[] {
   if (grouping === 'none') return [{ key: '', label: '', rows: [...rows] }]
   const byToolId = TOOL_ID_GROUPINGS.includes(grouping)
   const groups = new Map<string, ProblemRow[]>()
@@ -304,6 +412,15 @@ export function groupProblems(rows: readonly ProblemRow[], grouping: ProblemGrou
     else groups.set(key, [row])
   }
   const result = [...groups.entries()].map(([key, list]) => ({ key, label: groupLabel(grouping, key, list), rows: list }))
+  if (grouping === 'directory') {
+    const order = orderDirectoryGroups(result.map(group => group.key), sort.sortFoldersFirst)
+    const byKey = new Map(result.map(group => [group.key, group]))
+    return order.map(key => byKey.get(key) ?? { key, label: key, rows: [] })
+  }
+  if (grouping === 'severity') {
+    result.sort((a, b) => levelById(a.key as HighlightLevelId).rank - levelById(b.key as HighlightLevelId).rank)
+    return result
+  }
   if (!byToolId) return result
   result.sort((a, b) => naturalCompare(a.label, b.label))
   return ungrouped.length ? [{ key: '', label: '', rows: ungrouped }, ...result] : result
@@ -356,12 +473,119 @@ export function groupMuteKeys(group: { key: string; rows: readonly ProblemRow[] 
 
 /** 严重度计数（状态栏与面板标题同一套口径；级别归属见 `src/highlightLevels.ts`）。 */
 export function problemCounts(rows: readonly ProblemRow[]): { errors: number; warnings: number; infos: number } {
-  let errors = 0, warnings = 0, infos = 0
+  const at = new Map(levelCountsOf(rows).map(item => [item.id, item.count]))
+  const one = (id: HighlightLevelId) => at.get(id) ?? 0
+  // 三格口径不变（`src/highlightLevels.ts` 的 WEAK_WARNING/INFO 两档一起进「信息」格），
+  // 只是不再自己数一遍 —— 与逐级别计数同一份实现，两处不会漂。
+  return { errors: one('ERROR'), warnings: one('WARNING'), infos: one('WEAK_WARNING') + one('INFO') }
+}
+
+// —— 逐严重级的计数（上游树节点尾巴上那一串「3 errors 1 warning」）——
+//    上游依据（逐条）：
+//      · 每个节点带一组「级别 + 条数」：`InspectionTreeNode.java:81-99`
+//        （`getProblemLevels()` 缓存 + `visitProblemSeverities` 把子节点的 `LevelAndCount` 按级别
+//         `mergeInt(..., Math::addExact)` 累加进 `Object2IntMap<HighlightDisplayLevel>`）；
+//      · 尾巴文案：`InspectionTreeTailRenderer.java:34-67` ——
+//        级别种数 **超过** `MAX_LEVEL_TYPES = 5`（`:23`）时只报一个合计
+//        （`:56-59` 走 `inspection.problem.descriptor.count` =
+//         `platform/analysis-api/resources/messages/InspectionsBundle.properties:83`
+//         `{0, choice, 0#|1#(1 item)|2#({0,number,integer} items)}`：0 条 = 空串、1 条 = `(1 item)`、
+//         其余 = `(N items)`）；否则**逐级**各报一条
+//        （`:61-67` `levelAndCount.getLevel().getSeverity().getCountMessage(count)`）；
+//      · `getCountMessage` 的模板在 `platform/analysis-api/src/com/intellij/lang/annotation/HighlightSeverity.java:176-180`，
+//        四级文案逐字在 `platform/analysis-api/resources/messages/InspectionsBundle.properties:43,39,35,23`
+//        （`{0} {0, choice, 0#warnings|1#warning|2#warnings}` 等 —— **数量为 1 时用单数**）；
+//      · 颜色的那一档：`:63-65` —— ERROR 那一条只在**没有**按严重级分组时用红色（`TREE_RED`），
+//        分组时级别已经写在组名上了，就统一灰色（`TREE_GRAY`）。
+
+/** 一个级别在一组问题里的条数（上游 `LevelAndCount` 的等价物）。 */
+export interface ProblemLevelCount {
+  /**
+   * 级别 id（本仓四档在 `src/highlightLevels.ts`：ERROR/WARNING/WEAK_WARNING/INFO）。
+   * 类型开成 `string` 而不是那四档的字面联合，是为了让**逐级 → 合计**那条回落
+   * （上游 `InspectionTreeTailRenderer.java:56-59` 的 `MAX_LEVEL_TYPES`）能被判据喂到：
+   * 上游的级别表本身是可注册的（`SeverityRegistrar` 允许注册自定义严重度），
+   * 把这里钉成四档就等于宣称「那一支永远走不到」。
+   */
+  id: string
+  /** 级别的显示名（`src/highlightLevels.ts` 那一份，与本仓其它严重度文案同源）。 */
+  label: string
+  count: number
+}
+
+/**
+ * 逐级别计数：只产出**在场**的级别，顺序恒为 `HIGHLIGHT_LEVELS` 的顺序
+ * （ERROR → WARNING → WEAK_WARNING → INFO = 严重度降序，与上游
+ * `InspectionResultsViewComparator.java:34-38` 排级别组节点同一方向）。
+ * 空表产出空数组（上游的 `getProblemLevels()` 对没有问题的节点也是空数组，不造一个「0 errors」）。
+ */
+export function levelCountsOf(rows: readonly ProblemRow[]): ProblemLevelCount[] {
+  const counted = new Map<HighlightLevelId, number>()
   for (const row of rows) {
-    const level = levelForSeverity(row.severity).id
-    if (level === 'ERROR') ++errors
-    else if (level === 'WARNING') ++warnings
-    else ++infos
+    const id = levelForSeverity(row.severity).id
+    counted.set(id, (counted.get(id) ?? 0) + 1)
   }
-  return { errors, warnings, infos }
+  return HIGHLIGHT_LEVELS
+    .filter(level => (counted.get(level.id) ?? 0) > 0)
+    .map(level => ({ id: level.id, label: level.label, count: counted.get(level.id) ?? 0 }))
+}
+
+/** 上游 `InspectionTreeTailRenderer.MAX_LEVEL_TYPES`（`:23`）。 */
+export const MAX_TAIL_LEVEL_TYPES = 5
+
+/** 尾巴上的一格。 */
+export interface ProblemTailEntry {
+  /** 级别 id；合计那一格是 `'TOTAL'`（`inspection.problem.descriptor.count` 不分级别）。 */
+  id: string
+  text: string
+  /** 这一格是否用「错误红」画（上游只有 ERROR 那一格、且**没**按严重级分组时才是红，`:63-65`）。 */
+  error: boolean
+}
+
+/**
+ * 一条级别的计数文案。上游模板是 `{0} {severity name}`，且数量为 1 时用单数
+ * （`InspectionsBundle.properties:43` `{0} {0, choice, 0#warnings|1#warning|2#warnings}`，
+ * `HighlightSeverity.java:176-180` 取的就是这一串）。中文没有单复数变化，所以本仓的形态是
+ * 「名字 + 数字」——与本仓已有的那份同口径计数文案一致（`src/inspectionReport.ts` 的
+ * `错误 <b>3</b>`），数字与级别的对应关系仍然逐字照上游。
+ */
+export function levelCountText(count: number, label: string): string {
+  return `${label} ${count}`
+}
+
+/** 合计那一格（上游 `inspection.problem.descriptor.count`：0 条 = 空串）。 */
+export function itemsCountText(total: number): string {
+  return total <= 0 ? '' : total === 1 ? '(1 item)' : `(${total} items)`
+}
+
+/**
+ * 一组问题的尾巴计数。`groupedBySeverity` = 这一份表是不是**按严重级分组**在显示
+ * （上游那个开关 `AnalysisUIOptions.GROUP_BY_SEVERITY`，只影响 ERROR 那一格的颜色，`:63-65`）。
+ * 级别种数 > `MAX_TAIL_LEVEL_TYPES` 时只给一格合计（`:56-59`）。
+ * 本仓的级别表当前只有四档，所以合计那一格在现网走不到 —— 留出来是给自定义严重度
+ * （上游 `SeverityRegistrar` 允许注册新级别）与判据用的，不是在面板上摆的空控件。
+ */
+export function problemTailCounts(levels: readonly ProblemLevelCount[], groupedBySeverity: boolean): ProblemTailEntry[] {
+  const total = levels.reduce((sum, item) => sum + item.count, 0)
+  if (levels.length > MAX_TAIL_LEVEL_TYPES) {
+    const text = itemsCountText(total)
+    return text ? [{ id: 'TOTAL', text, error: false }] : []
+  }
+  return levels.map(item => ({
+    id: item.id,
+    text: levelCountText(item.count, item.label),
+    error: item.id === 'ERROR' && !groupedBySeverity,
+  }))
+}
+
+/**
+ * 面板组头实际画的那一串。与上游的一处**有意差异**（记在这，不假装一致）：
+ * 本仓的组头本来就带一个总条数（`group.count`），组内只有一级时再补一格「错误 3」就是同一个数的
+ * 第二遍 ⇒ 那种情况不画；混了两个及以上级别时才画逐级，那时它才是新信息。
+ * 按严重级分组时每组恒一级 ⇒ 这一节恒空，组名本身已经是那一级
+ * （组名 = 级别显示名，上游同一格是 `InspectionSeverityGroupNode.java:37-39`）。
+ */
+export function groupTailOf(rows: readonly ProblemRow[], groupedBySeverity: boolean): ProblemTailEntry[] {
+  const levels = levelCountsOf(rows)
+  return levels.length > 1 ? problemTailCounts(levels, groupedBySeverity) : []
 }

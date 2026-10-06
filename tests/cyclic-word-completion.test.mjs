@@ -35,6 +35,15 @@ test('候选顺序 = 光标前的词按末次出现升序、其余按首次出�
   assert.deepEqual(hippieVariants(text, 'al', { caret: 6 }), ['alpha'], '光标在 alphaX 里 ⇒ 整段跳过')
   // `:334`：长度必须**严格大于**前缀 ⇒ `al` 自己不进表。
   assert.deepEqual(hippieVariants('al alx', 'al', { caret: 0 }), ['alx'])
+  // `:298` 的 `allWords.clear()`：去重表在两档之间**清空重来** ⇒ 同一个词既在光标前、
+  // 又在光标后时**各进表一次**（跨档那一次重复是上游的真实候选，不是抖动）。
+  assert.deepEqual(hippieVariants('alpha x alpha', '', { caret: 7 }), ['alpha', 'alpha'],
+    '空前缀（光标前一个字符是空格，computeData:408-411）⇒ 两个 alpha 分别进 words / afterWords')
+  // 同一档内部仍只留一次（words 档留末次、afterWords 档留首次）。
+  assert.deepEqual(hippieVariants('alpha x alpha y alpha', 'al', { caret: 0 }), ['alpha'],
+    '全在光标之后 ⇒ afterWords 档自己去重')
+  assert.deepEqual(hippieVariants('al alpha x', 'al', { caret: 9 }), ['alpha'],
+    '全在光标之前 ⇒ words 档自己去重（`al` 因长度不严格大于前缀而不进表，`x` 含光标）')
 })
 
 test('候选按驼峰 isStartMatch，不是普通前缀（:146 的 new CamelHumpMatcher(prefix) + :336）', () => {

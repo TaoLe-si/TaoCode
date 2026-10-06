@@ -31,6 +31,13 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       key === 'backgroundImagePath' || key === 'backgroundImageOpacity' || key === 'backgroundImageFill' ||
       key === 'backgroundImageKeepRatio' || key === 'presentationMode' || key === 'presentationModeFontSize' ||
       key === 'showStatusBar' || key === 'rightMargin' ||
+      // 保存时的两条 pass（EditorSettingsExternalizable.java:73-74,142）+ 回车与引号的三个开关
+      // （CodeInsightSettings.java:130,132,140）+ Code Vision 的四把（CodeVisionSettings.kt:36,38-39,45,50）。
+      key === 'stripTrailingSpaces' || key === 'ensureNewLineAtEof' || key === 'keepTrailingSpacesOnCaretLine' ||
+      key === 'autoInsertPairQuote' || key === 'closeCommentOnEnter' || key === 'insertBraceOnEnter' ||
+      key === 'codeVisionEnabled' || key === 'codeVisionDisabledGroups' || key === 'codeVisionEnabledGroups' || key === 'codeVisionVisibleEntries' ||
+      // 快速文档两档（都是布尔；键名见 src/docHoverPolicy.ts 的 DOC_HOVER_SETTING_KEYS）。
+      key === 'showQuickDocOnMouseHover' || key === 'autoUpdateDocumentation' ||
       key === 'mainMenuDisplayMode' || key === 'differentiateProjects' || key === 'expandNodesWithSingleClick' || key === 'maximizeEditorOnTabDoubleClick' || key === 'pinnedTabsInSeparateRow'
     if (!accepted) return `无效设置：${key}`
     if (key === 'fontSize' ? !Number.isInteger(value) || Number(value) < MIN_EDITOR_FONT_SIZE || Number(value) > MAX_EDITOR_FONT_SIZE
@@ -51,6 +58,14 @@ export function previewSettingsError(key: string, value: unknown, languages: rea
       : key === 'reformatOnPaste' ? !['none', 'indentBlock', 'indentEachLine', 'reformatBlock'].includes(String(value))
       : key === 'breadcrumbsPlacement' ? !['top', 'bottom'].includes(String(value))
       : key === 'lineNumeration' ? !['absolute', 'relative', 'hybrid'].includes(String(value))
+      // 保存 pass 的三档（EditorSettingsExternalizable.java:216-218 的字面值）。
+      : key === 'stripTrailingSpaces' ? !['None', 'Changed', 'Whole'].includes(String(value))
+      // Code Vision 的可见条数：界 1..10 = 上游 spinner(1..10, 1)（CodeVisionGlobalSettingsProvider.kt:43）。
+      : key === 'codeVisionVisibleEntries' ? !Number.isInteger(value) || Number(value) < 1 || Number(value) > 10
+      // Code Vision 的两个组集合（CodeVisionSettings.kt:45/:50，只装与出厂相反的那一半）：
+      // 条目必须是本仓已知的组 id（src/codeLensSettings.ts:48-50 的 LspCodeVisionProvider / problems）。
+      : key === 'codeVisionDisabledGroups' || key === 'codeVisionEnabledGroups' ? !Array.isArray(value) || value.length > 8 ||
+        value.some(id => id !== 'LspCodeVisionProvider' && id !== 'problems')
       // 与原生 validate_language_flags 同一套规则：键必须是已知语言 id，值是布尔。
       : key === 'breadcrumbsLanguages' ? !value || typeof value !== 'object' || Array.isArray(value) ||
         Object.entries(value).some(([id, flag]) => !(languages as readonly string[]).includes(id) || typeof flag !== 'boolean')

@@ -2,9 +2,9 @@
 // 以及「分派器真的从这张表读」的机检（表与 `src/keymap.ts` 的动作映射不许漂移）。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import {
-  DEFAULT_SCHEME, KEY_BINDINGS, chordIdentity, findKeyBinding, keymapConflicts, keymapKeys,
+  DEFAULT_SCHEME, EDITOR_ACTIONS, KEY_BINDINGS, chordIdentity, findKeyBinding, keymapConflicts, keymapKeys,
   matchesKeyChord, parseChord, resolveKeymapSchemes,
 } from '../src/keymapBindings.ts'
 import { chordToOverrideText } from '../src/keymapEditor.ts'
@@ -121,4 +121,102 @@ test('只有 Alt 的键位档：不带 Ctrl 也要能命中，且同物理键的
   // 显示串与冲突表身份都不许给「不带 Ctrl」这一档拼出假前缀。
   assert.equal(chordToOverrideText(safeDelete.chord), 'Alt+Delete')
   assert.ok(chordIdentity(safeDelete.chord).startsWith('none|'))
+})
+
+// 编辑器一族（`EDITOR_ACTIONS`）：这六条的上游动作**没有全局键位** —— `$default.xml` 里查不到
+// （`EditorSortLines` 一族 + 克隆光标那对），或者那把人是在编辑器自己的 CodeMirror keymap 里按到的
+// （`EditorMatchBrace`）。它们因此不进 `KEY_BINDINGS`、只进动作注册表。这里把这一族的三处钉成一处：
+//   1. 键位表里查不到它们的显示串（按不下去的键绝不写进菜单，也不冒充上游）；
+//   2. `src/menus/editMenu.ts` 那一行的文案与键位栏逐字等于表里的 `label` 与 `key`
+//      （`key.source === 'none'` ⇒ 菜单那一格必须是空串）；
+//   3. `upstream`/`repo` 两档说「编辑器里按得到」⇒ `CodeEditor.vue` 的 keymap 必须真有那一行，
+//      而 `boundAt` 记的行号就是它所在的行（挪了行号也要红，不许留假坐标）。
+test('编辑器一族：上游没键位的不编键位，写了键位的必须真绑着（菜单文案与键位栏同源）', () => {
+  const menu = readFileSync(new URL('src/menus/editMenu.ts', root), 'utf8')
+  const editor = readFileSync(new URL('src/components/CodeEditor.vue', root), 'utf8').split('\n')
+  const editableRows = [...menu.matchAll(/ctx\.editable\('([^']+)', '([^']*)', '([^']*)'/g)]
+  assert.equal(new Set(EDITOR_ACTIONS.map(action => action.id)).size, EDITOR_ACTIONS.length, 'id 不许重复')
+  for (const action of EDITOR_ACTIONS) {
+    assert.equal(keymapKeys(action.id), '', `${action.id} 不该出现在全局键位表里（它没有全局键位）`)
+    assert.equal(KEY_BINDINGS.some(binding => binding.label === action.label), false,
+      `${action.id} 的文案已经在 KEY_BINDINGS 里了，两处会各写一份`)
+    assert.match(action.upstreamId, /^Editor/, `${action.id} 要钉的是上游的编辑器动作 id`)
+    assert.ok(action.keywords.includes(action.upstreamId), `${action.id} 的 keywords 要含上游 id（按上游 id 也搜得到）`)
+    const rows = editableRows.filter(row => row[1] === action.id)
+    assert.equal(rows.length, 1, `${action.id} 在编辑菜单里应当恰好一行，实际 ${rows.length} 行`)
+    assert.equal(rows[0][2], action.label, `${action.id} 的菜单文案与注册表文案漂移`)
+    assert.equal(rows[0][3], action.key.source === 'none' ? '' : action.key.display,
+      `${action.id} 的菜单键位栏必须与注册条目一致（none ⇒ 空串：上游没键位就不编）`)
+    assert.ok(action.key.upstream.includes('actions.xml:'), `${action.id} 要写上游的注册处行号`)
+    if (action.key.source === 'none') {
+      assert.ok(action.key.upstream.includes('无绑定'), `${action.id} 的 none 档要写明键位表里查不到`)
+      assert.ok(!editor.some(line => line.includes(`editingCommands['${action.command}']`) && /key: '/.test(line)),
+        `${action.id} 记的是 none，编辑器 keymap 里却还绑着这把键`)
+      continue
+    }
+    const [boundFile, boundLine] = action.key.boundAt.split(':')
+    assert.equal(boundFile, 'src/components/CodeEditor.vue', `${action.id} 的键位在编辑器 keymap 里`)
+    const line = editor[Number(boundLine) - 1] ?? ''
+    assert.ok(line.includes(`key: '${action.key.cm}'`), `${action.id} 的 ${action.key.cm} 不在 ${action.key.boundAt}`)
+    assert.ok(line.includes(`editingCommands['${action.command}']`), `${action.id} 在 ${action.key.boundAt} 绑的不是 ${action.command}`)
+    if (action.key.source === 'upstream') assert.match(action.key.upstream, /\$default\.xml:\d/)
+    else assert.ok(action.key.upstream.startsWith('本仓绑定'), `${action.id} 的键位是本仓给的，必须写明不许冒充上游`)
+  }
+})
+
+// 「键位表 = 分派表 = 菜单显示 = 动作注册表」里的**菜单**那一路：菜单凡是手写了 `keys` 的行，
+// 只要它的 id 在全局键位表里，那一格就必须逐字等于表里的 `display`。
+// 两边写法不同 = 文案漂移；菜单写了表里没有的串 = 屏幕上出现一个按下去没反应的假加速键
+// （表外的键位由上一条测试去核编辑器自己的 keymap，例：`brace.match` 的 `Ctrl Shift M` 在
+// `src/components/CodeEditor.vue:846`，不在 `KEY_BINDINGS`）。
+test('菜单手写的 keys 必须等于键位表里的 display（两处不许漂移）', () => {
+  const displays = new Map(KEY_BINDINGS.map(binding => [binding.id, binding.display]))
+  let checked = 0
+  for (const name of readdirSync(new URL('src/menus', root)).filter(file => file.endsWith('.ts'))) {
+    const source = readFileSync(new URL(`src/menus/${name}`, root), 'utf8')
+    // 行 id 的两种写法：`editable/semantic(首参 = id)` 的第 3 个实参，与对象字面量里的 `keys:`。
+    for (const match of source.matchAll(/(?:editable|semantic)\('([^']+)',\s*'([^']*)',\s*'([^']*)'/g)) {
+      if (!displays.has(match[1])) continue
+      checked += 1
+      assert.equal(match[3], displays.get(match[1]), `${name} 里 ${match[1]} 的键位栏与键位表不一致`)
+    }
+    // 对象字面量：`{ id: '…', …, keys: '…' }`。`[^{}]` 保证不会把上一行的 id 与下一行的 keys 配成一对。
+    for (const match of source.matchAll(/id: '([^']+)'[^{}]*?keys: '([^']*)'/gs)) {
+      if (!displays.has(match[1])) continue
+      checked += 1
+      assert.equal(match[2], displays.get(match[1]), `${name} 里 ${match[1]} 的键位栏与键位表不一致`)
+    }
+  }
+  assert.ok(checked >= 9, `机检面塌了：只核到 ${checked} 行（复制符号引用 / 全部保存 / 导航三条 / 重构四条都该在内）`)
+})
+
+// 2026-10-06 补的三条导航键位（`$default.xml:251-259`，桶 4b 的 W1 键位半边）：
+// 可用性谓词必须与菜单行的 `enabled` 同一套判据，`forbid` 必须挡得住同物理键的别家动作。
+test('导航三条新键位：可用性与菜单行 enabled 同源，且上游的精确匹配不许串味', () => {
+  const combos = []
+  for (const workspace of [false, true]) for (const editor of [false, true]) for (const lsp of [false, true]) combos.push({ workspace, editor, lsp })
+  const expected = {
+    // 菜单：`enabled: () => Boolean(ctx.active.value) && ctx.lspReady.value`（navigateMenu.ts:155）
+    'navigate.super': keyState => keyState.editor && keyState.lsp,
+    // 菜单：`Boolean(ctx.active.value) && Boolean(ctx.workspace.value)`（navigateMenu.ts:162 / :170）
+    'navigate.test': keyState => keyState.workspace && keyState.editor,
+    'navigate.related': keyState => keyState.workspace && keyState.editor,
+  }
+  for (const [id, predicate] of Object.entries(expected)) {
+    const binding = KEY_BINDINGS.find(item => item.id === id)
+    assert.ok(binding?.when, `${id} 要有可用性谓词（没有就总是一击即中）`)
+    for (const combo of combos) assert.equal(binding.when(combo), predicate(combo),
+      `${id} 在 ${JSON.stringify(combo)} 的可用性与菜单行不一致`)
+  }
+  // Ctrl+Shift+U = EditorToggleCase（`$default.xml:529-530`）、Ctrl+Alt+T = SurroundWith（`:915-916`）、
+  // Ctrl+Shift+Home = EditorTextStartWithSelection（`:562-563`）⇒ 多一个修饰键都不许命中新加的三条。
+  assert.equal(findKeyBinding(event('u', { ctrlKey: true, shiftKey: true }), state), null, 'Ctrl+Shift+U 该归切换大小写')
+  assert.equal(findKeyBinding(event('u', { ctrlKey: true, altKey: true }), state), null, 'Ctrl+Alt+U 没人绑')
+  assert.equal(findKeyBinding(event('t', { ctrlKey: true, altKey: true }), state), null, 'Ctrl+Alt+T 该归环绕方式')
+  assert.equal(findKeyBinding(event('t', { ctrlKey: true }), state), null, 'Ctrl+T（更新项目）在 if 链里，不在表里')
+  assert.equal(findKeyBinding(event('Home', { ctrlKey: true, shiftKey: true }), state), null, 'Ctrl+Shift+Home 是编辑器内动作')
+  assert.equal(findKeyBinding(event('Home', { altKey: true }), state), null, 'Alt+Home（ShowNavBar）在 if 链里，不带 Ctrl')
+  assert.equal(findKeyBinding(event('u', { ctrlKey: true }), state)?.id, 'navigate.super')
+  assert.equal(findKeyBinding(event('t', { ctrlKey: true, shiftKey: true }), state)?.id, 'navigate.test')
+  assert.equal(findKeyBinding(event('Home', { ctrlKey: true, altKey: true }), state)?.id, 'navigate.related')
 })

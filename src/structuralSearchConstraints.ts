@@ -320,8 +320,9 @@ function bounded(body: string, min: number, max: number): string {
 }
 
 /**
- * 贪婪列表的「整段」断言：吃完整段逗号列表之后，后面**不能**还跟着一个逗号项，
- * 开头也不许是某一段的**后半截**（否则 `$x{2}` 会在 `a, b, c` 里拿 `b, c` 当成"两项的列表"）。
+ * 贪婪列表的「整段」断言：吃完整段逗号列表之后，后面**不能**再是逗号项、也不能是
+ * 一项没写完的样子（后面接 `(` 说明最后一个标识符是被调用的函数名、接 `.` 说明后面还有成员访问）。
+ * 开头也不许是某一段的**后半截**（否则裸模板 `$x{2}` 会在 `a, b, c` 里拿 `b, c` 当成"两项的列表"）。
  *
  * 上游在语法树上把变量的项数定死成那一段同级节点：`doMatchSequentially` 用
  * `VARS_DELIM_FILTER` 把逗号这类分隔符**滤掉**（`SubstitutionHandler.java:318`，过滤器定义在
@@ -332,17 +333,46 @@ function bounded(body: string, min: number, max: number): string {
  * 就必须自己断言列表到此为止。语法树里没有「一段列表的后半截」这种东西，所以文本层
  * 两端都要各判一次。
  *
- * 非贪婪（`{n,m}?`）不加这两条：上游那一支本来就允许停在 minOccurs 再让后面的节点接着走
+ * 非贪婪（`{n,m}?`）不加这些：上游那一支本来就允许停在 minOccurs 再让后面的节点接着走
  * （`SubstitutionHandler.java:408-441` 的回退循环）。
  *
- * **已知落差（不在本文件解决）**：这两条断言是环视，JS 有（ES2018 起 `s`/`m` 之外也支持
- * lookbehind），而原生搜索走的是 `std::regex` 的 ECMAScript 文法
- * （`native/search.cpp:250` `std::regex::ECMAScript`）——**不实现环视**，带这两条的正则
- * 到了宿主会报 `INVALID_QUERY`（`native/search.cpp:254-256`）。要真正可用得给宿主换文法
- * 或在 `SearchPanel.vue` 侧加一道前端预筛，两者都不在本文件的名下。
+ * **两端能写进正则的只有前顾**：原生搜索通道用的是 `std::regex` 的 ECMAScript 文法
+ * （`native/search.cpp:256`），它**不实现后顾断言** —— 实测（本机 MSVC，`cl /std:c++20`）
+ * `(?=x)`、`(?!x)` 编译通过，`(?<=x)`、`(?<!x)` 抛 `regex_error(error_badrepeat)`。
+ * 上一版在这里写着 `(?<![A-Za-z0-9_$])(?<!,\s*)`，于是**任何**带贪婪列表变量的结构化模板
+ * 到了宿主都报 `INVALID_QUERY`（`native/search.cpp:261`），面板一条结果都拿不到。
+ * 现在正则这一侧只留宿主认得的形状：起点用 `\b`、终点用前顾（`runEnd`，它要知道模板在变量
+ * 后面写着什么）；剩下的两条搬到命中后的复核里，与 `contains`/`within` 同一层 ——
+ * 一条是"前一个分隔符是不是逗号"（要认词法：字符串与注释里的逗号不算，`$` 也算标识符字符），
+ * 一条是"这一段括号配不配得平"（要算深度）。判据本体在 `src/structuralCodeBlock.ts` 的
+ * `listRunStartsHere`/`listRunEndsHere`，挂在 `src/structuralSearchModifiers.ts` 的 `listRunVerdict`。
  */
-const RUN_START = '(?<![A-Za-z0-9_$])(?<!,\\s*)'
-const RUN_END = '(?!\\s*,)'
+const RUN_TAIL_CHARS = [',', '(', '.']
+
+/**
+ * 列表尾巴上不许剩下什么：`,`（列表没完）、`(`（最后一个标识符其实是被调用的函数名）、
+ * `.`（最后一项其实是成员访问的前半）。
+ *
+ * **模板自己写在变量后面的那个字符要排除掉**：`$x$.equals($y$)` 里点号是模板的下一个 token，
+ * 列表在它前面停下才是对的（上游同一条：模式的下一个节点接得住它）。
+ * 所以这一条只能由知道"变量后面还写着什么"的调用方给 —— `following` 就是模板里
+ * `$Var$` + 量词之后剩下的那一段原文。
+ */
+function runEnd(following: string): string {
+  const next = following.trimStart().charAt(0)
+  const banned = RUN_TAIL_CHARS.filter(ch => ch !== next).join('')
+  return banned ? `(?!\\s*[${banned}])` : ''
+}
+
+/**
+ * 列表的一项。上游一项是一个**完整的表达式节点**，所以 `g(b, c)`、`a[0]`、`{k: v}`
+ * 整体算一项；文本层的等价物 = 一个标识符后面可以跟**一层**括号组（`bounded()` 只给
+ * 列表变量用这一份，普通变量仍是一个裸标识符，见 `isPlainIdentifier`）。
+ * 两层以上嵌套（`g(h(1), 2)`）在这一档配不出来，那一条命中会被复核阶段否决而不是
+ * 被切成半截 —— 少报，不误报。
+ */
+const LIST_ITEM_TAIL = '(?:\\s*(?:\\([^()]*\\)|\\[[^\\]]*\\]|\\{[^{}]*\\}))?'
+
 
 /**
  * 变量名那一份的正则片段（还没加捕获组括号）：重复、名字正则、全词都作用在这里。
@@ -359,15 +389,20 @@ const RUN_END = '(?!\\s*,)'
  * 所以正确形状是「先断言此处不是 R，再吃掉一个标识符」；断言里那两端的边界也要跟着走，
  * 否则 `!regex(get.*)` 会在 `getUser` 中间找到 `etUser` 就当成命中。
  */
-function nameFragment(into: VariableConstraint): string {
+function nameFragment(into: VariableConstraint, following: string): string {
   const plain = into.wholeWordsOnly ? `\\b${CONSTRAINT_IDENTIFIER}\\b` : CONSTRAINT_IDENTIFIER
-  /** 重复次数 + 整段断言。只有**可能吃多于一项**（`maxOccurs > 1`）的列表才需要"整段"那两条断言：
-   *  只吃一项的变量在上游也是一个节点，模板后面跟的 `,` 之类照样对得上，断言反而会误杀
-   *  `f($x{1}, 2)` 这种合法模板。 */
+  /**
+   * 重复次数 + 整段断言。只有**可能吃多于一项**（`maxOccurs > 1`）的列表才需要"整段"那几条断言：
+   * 只吃一项的变量在上游也是一个节点，模板后面跟的 `,` 之类照样对得上，断言反而会误杀
+   * `f($x{1}, 2)` 这种合法模板。
+   * 起点那一条 = `\b`（宿主认得的最接近形状），列表项在这里才允许带一层括号组；
+   * 判得更准的那两条要算括号深度，在命中后的复核里，见 `runEnd` 上面那段。
+   */
   const counted = (item: string) => {
-    const body = bounded(item, into.minOccurs, into.maxOccurs)
+    const one = into.maxOccurs > 1 ? `${item}${LIST_ITEM_TAIL}` : item
+    const body = bounded(one, into.minOccurs, into.maxOccurs)
     if (!into.greedy) return `${body}?`
-    return into.maxOccurs > 1 ? `${RUN_START}${body}${RUN_END}` : body
+    return into.maxOccurs > 1 ? `\\b${body}${runEnd(following)}` : body
   }
   if (into.regexp === null) return counted(plain)
   const assertion = `(?:${into.regexp})(?![A-Za-z0-9_$])`
@@ -387,7 +422,11 @@ export function isPlainIdentifier(into: VariableConstraint): boolean {
  *
  * 非贪婪只加在"整段列表"的尾巴上（`?` 紧跟最大重复的那一段），与上游 `greedy=false`
  * 让匹配尽量少吃的意图一致。
+ *
+ * `following` = 模板里写在这个变量**后面**的那一段原文（`compileStructuralPattern` 传的
+ * 是 `$Var$` + 量词/条件之后剩下的全部）。贪婪列表要往尾巴上加一条"不许剩下分隔符"的前顾，
+ * 而模板自己写掉的那个字符不该算剩下 —— 那一档信息只有调用方有。
  */
-export function constraintCaptureGroup(into: VariableConstraint): string {
-  return `(${nameFragment(into)})`
+export function constraintCaptureGroup(into: VariableConstraint, following = ''): string {
+  return `(${nameFragment(into, following)})`
 }

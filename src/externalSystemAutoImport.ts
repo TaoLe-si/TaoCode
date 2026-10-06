@@ -481,3 +481,78 @@ export function runExtensionsSafely<E, R>(extensions: readonly E[], action: (ext
 
 /** `ExternalSystemUnlinkedProjectSettings.isEnabledAutoLink` 的默认值（上游实现默认 true）。 */
 export const AUTO_LINK_DEFAULT = true
+
+// ---------------------------------------------------------------- 自动重载的合并窗（esa/autoimport 缺项 ④）
+//
+// 上游不是「脏了就立刻重载」：`AutoImportProjectTracker.kt`（platform/external-system-impl/
+// src/com/intellij/openapi/externalSystem/autoimport/）把改动先攒进一条 `MergingUpdateQueue`
+// （`:89-96`，合并跨度 `mergingTimeSpan = 300.milliseconds`，`:549`），自动重载再晚一整段
+// `autoReloadDelay = 3.seconds`（`:551`）才跑 —— 具体延迟 = `smartProjectReloadDelay`
+// （各 aware 自报的延迟取最大，没有就用 3s 兜底，`:161-162`）折算成**跨度数**，
+// 并且扣掉已经在队里等的那一拍：`effectiveDispatchIterations = max(delay/span - 1, 1)`（`:163-166`）。
+// 用户显式点「同步更改」走 `scheduleProjectRefresh`（`:137-142`，priority 0，不等这个延迟；
+// `PriorityEatUpdate` `:171-196` 让显式刷新把待着的延迟重载整个吃掉）。
+
+/** `AutoImportProjectTracker.kt:549`：合并跨度 300ms。 */
+export const AUTO_RELOAD_MERGING_TIME_SPAN_MS = 300
+
+/** `AutoImportProjectTracker.kt:551`：默认自动重载延迟 3s（`smartProjectReloadDelay` 没人报时的兜底 `:161-162`）。 */
+export const AUTO_RELOAD_DELAY_MS = 3000
+
+/** `AutoImportProjectTracker.kt:163-166` 的折算：`max(round(delay/span) - 1, 1) * span`（3s → 2700ms）。 */
+export function effectiveReloadDelayMs(
+  delayMs: number = AUTO_RELOAD_DELAY_MS,
+  spanMs: number = AUTO_RELOAD_MERGING_TIME_SPAN_MS,
+): number {
+  const iterations = Math.max(Math.round(delayMs / spanMs) - 1, 1)
+  return iterations * spanMs
+}
+
+export interface AutoReloadWindow {
+  /** 记一条待重载；窗口没开就开一窗，开了就并进同一窗（返回 true = 这次是开窗的那一条）。 */
+  schedule(key: string): boolean
+  /** 显式刷新把待着的延迟重载吃掉（`PriorityEatUpdate` 的 0 档语义）；不传 key = 清全部。 */
+  eatPending(key?: string): void
+  /** 立刻放行（测试/紧急重同步用）；没有待项就不触发。 */
+  flushNow(): void
+  pending(): string[]
+  /** 换工程：待项与计时器全部作废（上一根窗不该打到新工程上）。 */
+  dispose(): void
+}
+
+/**
+ * `MergingUpdateQueue` + `scheduleDelayedProjectReload` 的 DOM 等价物：
+ * 首条改动开一窗（`effectiveReloadDelayMs()`），窗内的后续改动**合并**为同一次触发；
+ * `fire` 收到的是这一窗攒下的 key（构建目录）清单。计时器可注入（判据测试用假时钟）。
+ */
+export function createAutoReloadWindow(
+  fire: (keys: string[]) => void,
+  options: { delayMs?: number; startTimer?: (ms: number, run: () => void) => () => void } = {},
+): AutoReloadWindow {
+  const delayMs = options.delayMs ?? effectiveReloadDelayMs()
+  const startTimer = options.startTimer
+    ?? ((ms: number, run: () => void) => { const handle = setTimeout(run, ms); return () => clearTimeout(handle) })
+  let keys: string[] = []
+  let cancelTimer: (() => void) | null = null
+  function dispatch(): void {
+    cancelTimer = null
+    const batch = keys
+    keys = []
+    if (batch.length) fire(batch)
+  }
+  return {
+    schedule(key) {
+      const opened = cancelTimer === null
+      if (!keys.includes(key)) keys.push(key)
+      if (opened) cancelTimer = startTimer(delayMs, dispatch)
+      return opened
+    },
+    eatPending(key) {
+      if (key === undefined) { keys = [] } else { keys = keys.filter(item => item !== key) }
+      if (!keys.length && cancelTimer) { cancelTimer(); cancelTimer = null }
+    },
+    flushNow() { dispatch() },
+    pending: () => [...keys],
+    dispose() { if (cancelTimer) cancelTimer(); cancelTimer = null; keys = [] },
+  }
+}

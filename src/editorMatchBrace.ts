@@ -8,6 +8,19 @@
 //     都不在 ⇒ 从光标回到文件开头，找第一个在光标之前没被配上的左括号」；实现 `:40-51`（`doExecute`
 //     取 `getClosestTargetOffset` 的结果再 `moveCaret`），`:58-60` 先问 `BraceMatcher`、再问
 //     `CodeBlockSupportHandler`。
+//   · 第二问（`CodeBlockSupportHandler`）**在本仓的三种语言里恒为空**（2026-10-06 逐条核，别照着类名编）：
+//     `:60` 调的是 `platform/lang-impl/src/com/intellij/codeInsight/highlighting/CodeBlockSupportHandler.java:57-66`
+//     的 `findCodeBlockRange`，它按语言取扩展点（EP 声明
+//     `platform/lang-impl/resources/intellij.platform.lang.impl.xml:147`、`CodeBlockSupportHandler.java:33` 的
+//     `LanguageExtension`），整棵社区树里**只有 Python 注册过这一条**
+//     （`python/pluginResources/intellij.python.community.impl.xml:439` →
+//     `python/src/com/jetbrains/python/codeInsight/highlighting/PyControlFlowKeywordCodeBlockSupportHandler.kt:16-20`）；
+//     Java / C++ / TS / 纯文本都没有 ⇒ 返回 `EMPTY_RANGE`，`MatchBraceAction.java:61-63` 就原样返回第一问的结果
+//     ⇒ **本模块只做第一问就是与上游一致的**，没有少做。Python 那一档要给区间就得认
+//     `AbstractCodeBlockSupportHandler.java:79-83` 的 `getParentByTokenSet(element, getBlockElementTypes())`
+//     （Python 是按缩进的控制流块，
+//     `python/python-psi-impl/src/com/jetbrains/python/codeInsight/highlighting/PyControlFlowKeywordMatcher.kt:116` 也这么描述这条动作）
+//     ⇒ 没有 PSI 做不了，具体卡点登记在 `docs/batch-2026-10-06-editorinput.md` 的「做不到」。
 //   · 动作注册：`platform/lang-impl/resources/intellij.platform.lang.impl.actions.xml:23`
 //     （`<action id="EditorMatchBrace" class="…MatchBraceAction"/>`）。
 //   · 键位：`platform/platform-resources/src/keymaps/$default.xml:1146-1148`

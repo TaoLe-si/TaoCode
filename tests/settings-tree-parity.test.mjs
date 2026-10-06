@@ -35,7 +35,10 @@ test('editor 是分组的子页，不是顶层页（原先多插了一层 editor
   // `inlay.hints`（`intellij.platform.lang.impl.xml:935-941`
   // `<projectConfigurable provider="…InlaySettingsConfigurableProvider" id="inlay.hints" parentId="editor" …/>`），
   // 它挂的是 `editor` **分组**，所以在 IDEA 的树里它与「常规」同层而不是「常规」的子页。
-  const editorChildren = new Set(['Console', 'inlay.hints'])
+  // `code.vision` 是本仓单列的一页（上游把 Code Vision 当作 Inlay Hints 页里的一个**分组**，
+  // `ApplicationBundle.properties:725-726` 的 `settings.hints.new.group.code.vision`；
+  // 本仓设置树按页组织 ⇒ 挂在 `editor` 下与 `inlay.hints` 同层，见 `src/settingsTreeMeta.ts:125-128`）。
+  const editorChildren = new Set(['Console', 'inlay.hints', 'code.vision'])
   for (const child of SETTINGS_NODES.filter(node => node.parent === 'editor'))
     assert.ok(child.key.startsWith('editor.preferences.') || child.key.startsWith('editor.') || editorChildren.has(child.key),
       `editor 的子页应当是 IDEA 里挂在 editor 下的那些：${child.key}`)

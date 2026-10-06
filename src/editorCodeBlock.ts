@@ -34,6 +34,12 @@
 // 逐字符扫结构括号（字符串/注释里的不算，与 `src/enterHandlers.ts` 的 `structuralBraceCounts` 同一口径），
 // 按 `:140-174` 与 `:210-237` 的循环原样搬。识别不出块时返回 null ⇒ 命令不吞键。
 
+// 第 3 支之外，上游**还要**再问一次「结构支持」那一半并把两支合起来（`CodeBlockUtil.java:110` 与
+// `:178` 问的 `CodeBlockSupportHandler.findCodeBlockRange`）。合并规则（`:111-118`/`:179-186`）与
+// Python 那一份判据都在 `src/structuralCodeBlock.ts`（那份模块的 B 半，请求
+// `docs/wiring-requests-2026-10-06-search2.md` W-1' 就是让本文件来接线的）。
+import { findCodeBlockRange, mergeBlockEnd, mergeBlockStart } from './structuralCodeBlock.ts'
+
 const OPENERS = '([{'
 const CLOSERS = ')]}'
 
@@ -144,7 +150,24 @@ export function blockStartOffset(text: string, caret: number): number | null {
   return null
 }
 
-/** 光标要落到哪儿（null = 这里没有代码块，命令不吞键）。 */
-export function codeBlockTarget(text: string, caret: number, forward: boolean): number | null {
-  return forward ? blockEndOffset(text, caret) : blockStartOffset(text, caret)
+/**
+ * 光标要落到哪儿（null = 这里没有代码块，命令不吞键）。
+ *
+ * 上游把两支合起来：括号扫描（`calcBlockEndOffsetFromBraceMatcher`/`…StartOffsetFrom…`，本文件的
+ * `blockEndOffset`/`blockStartOffset`）与结构支持（`CodeBlockUtil.java:110`/`:178` 问的
+ * `CodeBlockSupportHandler.findCodeBlockRange`），块尾取 `Math.min`（`:118`）、块首取 `Math.max`（`:186`），
+ * 某一支没有时用另一支（`:111-113`/`:114-116`、`:179-181`/`:182-184`）。合并规则住在
+ * `src/structuralCodeBlock.ts` 的 `mergeBlockEnd`/`mergeBlockStart`，本函数只负责接线。
+ *
+ * `language` 是编辑器的语言档（本仓现成通道 = `src/editorMatchBrace.ts:51` 的 `editorLanguageId` facet）。
+ * 传空/不传 ⇒ 不问结构那半，结果与接线前**逐字一致**：本仓编辑器只认 Java/C++/TS/JSON/HTML/CSS
+ * （`src/editorLanguage.ts:15-21`），而这棵社区树里注册 `codeBlockSupportHandler` 的语言只有 Python
+ * （`python/pluginResources/intellij.python.community.impl.xml:439`）⇒ 上游对我们能打开的每种语言都返回
+ * `EMPTY_RANGE`，合并自动退化成「只用括号扫描」。**不是少做**，如实记着。
+ */
+export function codeBlockTarget(text: string, caret: number, forward: boolean, language = ''): number | null {
+  const structural = findCodeBlockRange(text, caret, language)
+  return forward
+    ? mergeBlockEnd(blockEndOffset(text, caret), structural)
+    : mergeBlockStart(blockStartOffset(text, caret), structural)
 }

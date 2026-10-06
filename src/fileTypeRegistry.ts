@@ -316,9 +316,17 @@ export class FileTypeManager {
   }
 
   /**
-   * 这个类型能不能被抢走关联（上游 `FileType.isReadOnly()`，`FileTypeConfigurable.java:397-405`
-   * 用它决定「错误框」还是「确认框」）。本仓的只读位是「认不出/二进制」那一档
-   * （上游 `NativeFileType`/`UserBinaryFileType` 是 `ReadOnlyFileType` 的那一族）。
+   * 这个类型能不能被抢走关联（上游 `FileType.isReadOnly()`：
+   * `platform/core-api/src/com/intellij/openapi/fileTypes/FileType.java:69-71` 是个 default false，
+   * 语义写在 `:65-68` —— 只读类型「不出现在 File Types 设置页、用户不能改它的关联」，
+   * `FileTypeConfigurable.java:393-398` 用它决定「错误框」还是「确认框」（`:399-404` 那一条才是
+   * 用户点「重新指派」才摘走关联）。
+   * **口径差异（如实记）**：上游整个 `openapi/fileTypes` 包里唯一覆盖它的是
+   * `platform/core-api/src/com/intellij/openapi/fileTypes/ex/FakeFileType.java:29`；
+   * 上游**没有** `ReadOnlyFileType` 这个类（已核实，两个目录都翻过），二进制那一族
+   * （`NativeFileType.java:48-51`、`UserBinaryFileType.java:16-19`）覆盖的是 `isBinary()` 不是它。
+   * 本仓把「二进制 / 认不出」当成不可抢的那一档，因为本仓没有「只读类型不进设置页」这条 ——
+   * 谁能出现在设置页由注册表自己决定（`bundled`/`core` 那两位）。
    */
   isReadOnlyType(descriptor: FileTypeDescriptor | null): boolean {
     if (!descriptor) return false
@@ -549,10 +557,16 @@ export class FileTypeManager {
   }
 
   /**
-   * 一次 hashbang 改判会撞到谁（`FileTypeConfigurable.checkHashBangConflict`，`:826-849`）：
-   * 遍历整张表，**子串重叠**（新串含旧串、或旧串含新串）即冲突，只返回第一个命中的；
-   * `exact` = 两边完全相同，`writable` = 持有方不是平台自带模式（上游还要 `!isReadOnly()`，
-   * 本仓 `binary`/`NATIVE` 那一档就是上游 `ReadOnlyFileType` 的对应位，一并排掉）。
+   * 一次 hashbang 改判会撞到谁（上游 `FileTypeConfigurable.checkHashBangConflict`，
+   * `platform/lang-impl/src/com/intellij/openapi/fileTypes/impl/FileTypeConfigurable.java:827-850`）：
+   * 遍历整张表，**子串重叠**（新串含旧串、或旧串含新串）即冲突，只返回第一个命中的（`:830`）；
+   * `exact` = 两边完全相同（`:832`），`writable` = `!fileType().isReadOnly() && !isStandardFileType(...)`
+   * （`:833`，`isStandardFileType` 在 `:822-824`）。上游还有第二个循环（`:837-848`）：内置的
+   * `HashBangFileTypeDetector` 标记一律 `writeable = false`（`:843`）—— 本仓把那一档并进
+   * `entry.standard`，同一条纪律。
+   * 注：上游 `FileType.isReadOnly()` 是 `FileType.java:69-71` 那条 default false，
+   * `openapi/fileTypes` 包里唯一的覆盖是 `ex/FakeFileType.java:29`；本仓的 `binary`/`NATIVE`
+   * 那一档是**本仓自己的**不可抢口径（上游没有 `ReadOnlyFileType` 这个类，别再照它写）。
    */
   checkHashBangConflict(pattern: string): HashBangConflict | null {
     const value = pattern.trim()

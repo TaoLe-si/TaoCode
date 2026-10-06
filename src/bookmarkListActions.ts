@@ -11,7 +11,7 @@
 import { computed, ref, type Ref } from 'vue'
 import { request } from './bridge.ts'
 import { errorMessage } from './errors.ts'
-import { addToListItem, createList, deleteList, listNameError, renameList, type BookmarkList } from './bookmarkLists.ts'
+import { addToListItem, createList, deleteList, firstListHolding, listsHolding, listNameError, removeFromFirstHolder, renameList, setDescriptionInList, panelSections, type BookmarkList } from './bookmarkLists.ts'
 import { isFileBookmark, type Bookmark } from './bookmarks.ts'
 import type { ProjectSettings, Workspace } from './bridge'
 
@@ -42,11 +42,22 @@ export function syncBookmarkLists(settings: ProjectSettings) {
   named.value = settings.bookmarkLists ?? []
 }
 
-/** 面板要的视图：命名列表在前、**默认列表最后**（IDEA 的树里默认列表带「默认」标记）。 */
-export const panelLists = computed(() => [
-  ...named.value.map(list => ({ name: list.name, isDefault: list.isDefault, entries: list.bookmarks })),
-  { name: deps?.workspace.value?.name ?? '默认', isDefault: true, entries: deps?.defaultEntries() ?? [] },
-])
+/**
+ * 面板要的视图：命名列表在前、**默认列表最后**（IDEA 的树里默认列表带「默认」标记）。
+ *
+ * 上游"只有一个默认列表"是硬约束：`Group.isDefault` 的 setter 会顺手清掉旧的那一个
+ * （`BookmarksManagerImpl.kt:529-534`），而本仓的默认列表恒等于历史字段 `bookmarks` 那一份
+ * （迁移规则见 `src/bookmarkLists.ts` 的 `listsFromLegacy`）。所以存档里若有一张**命名**列表
+ * 自带 `isDefault: true`（`normalizeBookmarkLists` 允许，见 `tests/bookmark-settings.test.mjs`），
+ * 面板上要把它当普通命名列表渲染（摘标记、**留条目**）—— 语义本体在 `panelSections`。
+ * 宿主另一处取数（`src/toolViewContext.ts`）现在是整张筛掉，那会让命名列表在面板里凭空消失，
+ * 已按这条口径写了接线请求（`docs/wiring-requests-2026-10-06-bm3.md` R-3）。
+ */
+export const panelLists = computed(() => panelSections(
+  named.value,
+  deps?.defaultEntries() ?? [],
+  deps?.workspace.value?.name ?? '默认',
+))
 
 /** 名字能不能用（上游 `GroupInputValidator`）：空/空白 = "还没输入"，重名给提示。 */
 export function listNameIssue(name: string, editing?: string): string {
@@ -105,6 +116,60 @@ export function removeFromNamedList(name: string, entry: Bookmark) {
   named.value = named.value.map(list => list === target
     ? { ...list, bookmarks: list.bookmarks.filter(item => !(item.path === entry.path && item.line === entry.line)) }
     : list)
+  persistLists()
+}
+
+/**
+ * 哪些**命名列表**持有这条书签，顺序就是面板的段序（命名列表在前）。
+ * 上游同一件事是 `BookmarksManagerImpl.getGroups(bookmark)`
+ * （`platform/bookmarks/src/com/intellij/ide/bookmark/BookmarksManagerImpl.kt:146-148`
+ * = `allGroups.filter(info.groups::contains)`，即"按列表登记顺序"）。
+ * 同一份对象（面板段里的那条）与"路径+行号相同"都算持有 —— 前者是面板传下来的原物，
+ * 后者照顾从书签表（默认列表）那一份进来的调用。
+ */
+export function namedListsHolding(entry: Bookmark): BookmarkList[] {
+  return listsHolding(named.value, entry)
+}
+
+/**
+ * 面板/标签菜单那一行的「移除书签」该不该落在命名列表上。
+ *
+ * 上游删的是**被点那一段所在列表**里的那一条（`ui/tree/BookmarkListProvider.kt:54-57`
+ * 的 `node.value?.let { node.bookmarkGroup?.remove(it) }`；`BookmarksManagerImpl.kt:230-238`
+ * 那条 `remove(bookmark)` 也只处理"恰好一张列表持有"，多张持有是上游自己留的 `//TODO:choose`）。
+ * 本仓的移除事件只带书签、不带列表名（`src/components/BookmarksPanel.vue` 的 `emit('remove', entry)`），
+ * 于是按段序取**第一个持有它的命名列表**（语义本体在 `src/bookmarkLists.ts` 的 `removeFromFirstHolder`）；
+ * 一张命名列表都不持有时返回 false，调用方（`bookmarkActions.dropBookmark`）再去动默认列表那张平铺表。
+ * 以前这里只动默认列表，"只存在于命名列表里"的书签点了 X 毫无反应。
+ */
+export function removeBookmarkFromNamedList(entry: Bookmark): boolean {
+  const next = removeFromFirstHolder(named.value, entry)
+  if (!next.removed) return false
+  named.value = next.lists
+  persistLists()
+  return true
+}
+
+/**
+ * 「编辑描述」要改的那一份书签 + 它所在列表的名字：先按 `getGroups(...).firstOrNull()` 的口径
+ * 找命名列表（上游 `actions/EditBookmarkAction.kt:27`），一张都不持有时返回 `undefined`
+ * （调用方回默认列表）。
+ * 描述是**每条列表各存一份**的（`BookmarksManagerImpl.kt:598-609` 的 `group.add(bookmark, type, description)`
+ * 把 description 记在 `InGroupInfo` 上，`setDescription:586-594` 也只写那一份），
+ * 所以改完必须落回**同一张列表**，不然界面上看到的是没变。
+ */
+export function bookmarkInFirstNamedList(entry: Bookmark): { name: string; entry: Bookmark } | undefined {
+  const holder = firstListHolding(named.value, entry)
+  if (holder === undefined) return undefined
+  const owned = holder.bookmarks.find(item => item === entry || (item.path === entry.path && item.line === entry.line))
+  return owned === undefined ? undefined : { name: holder.name, entry: owned }
+}
+
+/** 改掉某张命名列表里那条书签的描述（并落盘）；空串 = 清掉自定义描述，回到行原文。 */
+export function setNamedListBookmarkDescription(name: string, entry: Bookmark, description: string): void {
+  const target = named.value.find(list => list.name === name)
+  if (target === undefined) return
+  named.value = setDescriptionInList(named.value, target, entry, description)
   persistLists()
 }
 

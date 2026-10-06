@@ -39,9 +39,52 @@
 //     `use-shortcut-of` 编辑器那三条；`$default.xml` 没给编辑器字号动作配键
 //     ⇒ 这里登记成**没有键位的工具条动作**，键盘入口留给 Ctrl+滚轮那条真实存在的链路，
 //     见 `src/terminalFontSize.ts` 头部的 `JBTerminalPanel.java:381-390`）。
+//
+// 2026-10-06（term3 这一轮，ex/terminal-actions 的「可用性判定」补全 + 键位如实）：
+//   · 新增标签左右移动两条 `Terminal.MoveToolWindowTabLeft` / `Terminal.MoveToolWindowTabRight`
+//     （`plugins/terminal/resources/META-INF/plugin.xml:125-126`）。启用规则是
+//     `plugins/terminal/src/org/jetbrains/plugins/terminal/action/MoveTerminalToolwindowTabLeftRightAction.kt:21-32`
+//     —— 可见 = 有项目 + 是终端工具窗 + **选中了某个 content**；
+//     启用 = `isAvailable`：向左要求 `index > 0`（`:31`），向右要求 `index >= 0 && index < contentCount - 1`（`:31`）。
+//     文案取 `platform/platform-api/resources/messages/IdeBundle.properties:1983`（`Move Right`）与
+//     `:1984`（`Move Left`），本仓无中文包 ⇒ 英文原文直译（「向右移动标签」/「向左移动标签」）。
+//     `plugin.xml:125-126` 这两条**没有** `<keyboard-shortcut>`，`$default.xml` 里也没有它们的绑定
+//     ⇒ 登记成没有键位的条目（`JBTerminalSystemSettingsProviderBase.java:203-211` 只是把键位转给 jediterm）。
+//   · 三条键位如实（原先这张表里钉的是本仓/上游都没有的键）：
+//     `terminal.new` 原写 `Alt+F12`、实际 `Alt+F12` 是 `ActivateTerminalToolWindow`
+//     （`platform/platform-resources/src/keymaps/$default.xml:368-369`，本仓的实装在 `src/keymap.ts:338`），
+//     上游「新建一个终端标签」是 `Terminal.NewTab` = **Ctrl+Shift+T**
+//     （`plugins/terminal/frontend/resources/intellij.terminal.frontend.xml:242-243`）；
+//     `terminal.search` 原写 `Ctrl+Shift+F`、实际 `Terminal.Find` 是 `use-shortcut-of="Find"`
+//     （同文件 `:158`）而 `Find` 在 `$default.xml:565-566` 配的是 **Ctrl+F**；
+//     `terminal.split` 原写 `Ctrl+Shift+D`、实际 `TW.SplitRight` 只是 `use-shortcut-of="SplitVertically"`
+//     （`platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:463-466`），
+//     而 `SplitVertically` 在 `$default.xml` 里**没有任何键**（grep 无命中）⇒ 这条不再有键位。
+//     上面三个键本仓都由面板自己实现（`terminalActionKeyFor`），所以展示出来的键是真的按得动的；
+//     全局那一份要挂在 `src/keymap.ts`（保留文件）⇒ 写进 docs/wiring-requests-2026-10-06-term3.md。
 
 import { canGotoTerminalPane, canTerminalSplit, canUnsplitTerminalPane, TERMINAL_SPLIT_LABELS } from './terminalSplits.ts'
 import { terminalFontSizeReason } from './terminalFontSize.ts'
+
+/** 一条键位按下后该走哪个终端动作（`terminalActionKeyFor` 的结果）。 */
+export type TerminalActionKey = 'search' | 'newTab'
+
+/**
+ * 终端窗口里按下的键该被面板吃掉哪两条。
+ *
+ * 上游这两条都是**终端自己的**快捷键（由 jediterm 的 `TerminalActionWrapper`/keymap 派发，
+ * `TerminalActionWrapper.kt:27-30` 把 `presentation.keyStrokes` 直接转成 `CustomShortcutSet`）：
+ *   · `Terminal.Find` = `use-shortcut-of="Find"`（`intellij.terminal.frontend.xml:158`），
+ *     `Find` 在 `$default.xml:565-566` 是 `control F` ⇒ **Ctrl+F 开查找条**；
+ *   · `Terminal.NewTab` = `control shift T`（`intellij.terminal.frontend.xml:242-243`）⇒ **Ctrl+Shift+T 新建标签**。
+ * 只认 keydown：keyup 再触发一次会开出两个查找条/两个会话。
+ */
+export function terminalActionKeyFor(event: { type: string; code?: string; key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }): TerminalActionKey | null {
+  if (event.type !== 'keydown') return null
+  if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'f') return 'search'
+  if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && (event.code === 'KeyT' || event.key.toLowerCase() === 't')) return 'newTab'
+  return null
+}
 
 /** 终端动作的数据上下文（上游 `TERMINAL_DATA_KEY` 那一层）。 */
 export interface TerminalActionContext {
@@ -71,6 +114,10 @@ export interface TerminalActionContext {
   paneCount: number
   /** 选中的窗格是否已退出（退出的会话才显示重启）。 */
   exited: boolean
+  /** 选中的标签在整排标签里的下标（`MoveTerminalToolwindowTabLeftRightAction.kt:30` 的 `getIndexOfContent`）。 */
+  tabIndex: number
+  /** 标签总数（同文件 `:31` 的 `manager.contentCount`）。 */
+  tabCount: number
 }
 
 /** `{ enabled, reason }`（`terminalSplits` / `terminalFontSize` 的返回）折成登记表的判定形状。 */
@@ -98,6 +145,8 @@ export type TerminalActionId =
   | 'terminal.select.all'
   | 'terminal.clear.buffer'
   | 'terminal.rename'
+  | 'terminal.tab.left'
+  | 'terminal.tab.right'
   | 'terminal.search'
   | 'terminal.search.next'
   | 'terminal.search.previous'
@@ -129,14 +178,17 @@ export const TERMINAL_ACTIONS: readonly TerminalActionDefinition[] = [
     id: 'terminal.new',
     name: '新建终端',
     scope: 'global',
-    keyStrokes: ['Alt+F12'],
+    // 上游 Terminal.NewTab 的键（intellij.terminal.frontend.xml:242-243）；Alt+F12 是
+    // ActivateTerminalToolWindow（$default.xml:368-369），那一档在 src/keymap.ts:338，不在这条动作上。
+    keyStrokes: ['Ctrl+Shift+T'],
     enabledWhen: context => (context.desktop ? (context.busy ? { enabled: false, reason: '正在创建终端，请稍候。' } : true) : desktopOnly),
   },
   {
     id: 'terminal.split',
     name: TERMINAL_SPLIT_LABELS.right,
     scope: 'context',
-    keyStrokes: ['Ctrl+Shift+D'],
+    // TW.SplitRight 只是 use-shortcut-of="SplitVertically"（intellij.platform.ide.impl.actions.xml:463-466），
+    // 而 $default.xml 里没有 SplitVertically 的任何绑定 ⇒ 这条不写键位（原先钉的 Ctrl+Shift+D 上游与本仓都不存在）。
     hint: '上游 TW.SplitRight 没有窗格数上限（TerminalToolWindowManager.java:431-434）。',
     enabledWhen: context => gate(canTerminalSplit('right', {
       desktop: context.desktop, busy: context.busy, count: context.groupSize,
@@ -227,10 +279,29 @@ export const TERMINAL_ACTIONS: readonly TerminalActionDefinition[] = [
     enabledWhen: context => (context.busy ? { enabled: false, reason: '正在创建终端，请稍候。' } : true),
   },
   {
+    id: 'terminal.tab.left',
+    name: '向左移动标签',
+    scope: 'context',
+    hint: '上游 Terminal.MoveToolWindowTabLeft（plugin.xml:125）；启用 = getIndexOfContent > 0'
+      + '（MoveTerminalToolwindowTabLeftRightAction.kt:28-32）。plugin.xml:125-126 与 $default.xml 都没有给它配键。',
+    // MoveTerminalToolwindowTabLeftRightAction.kt:31 —— `moveLeft` 时 `ind > 0`。
+    enabledWhen: context => (context.tabIndex > 0 ? true : { enabled: false, reason: '这个标签已经在最左边，左边没有标签可换。' }),
+  },
+  {
+    id: 'terminal.tab.right',
+    name: '向右移动标签',
+    scope: 'context',
+    hint: '上游 Terminal.MoveToolWindowTabRight（plugin.xml:126）；启用 = ind < contentCount - 1（同文件 :31）。',
+    enabledWhen: context => (context.tabIndex >= 0 && context.tabIndex < context.tabCount - 1
+      ? true : { enabled: false, reason: '这个标签已经在最右边，右边没有标签可换。' }),
+  },
+  {
     id: 'terminal.search',
     name: '在终端中查找',
     scope: 'context',
-    keyStrokes: ['Ctrl+Shift+F'],
+    // Terminal.Find 是 use-shortcut-of="Find"（intellij.terminal.frontend.xml:158），
+    // Find 在 $default.xml:565-566 配的是 control F ⇒ 面板按 Ctrl+F 开查找条。
+    keyStrokes: ['Ctrl+F'],
     enabledWhen: () => true,
   },
   {

@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
-  enabledRanges, extractFormatterTag, filterFormatEdits, formatterTagOfLine, hasFormatterTags, offsetAt,
+  enabledFormatRanges, enabledRanges, extractFormatterTag, filterFormatEdits, formatterTagOfLine, hasFormatterTags,
+  lineColumnAt, mergeFormatParts, offsetAt,
 } from '../src/formatterTags.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -92,4 +93,103 @@ test('semanticActions 的 runFormatting 真的走了这条过滤（不是只加�
   assert.match(source, /const edits = filterFormatEdits\(base, file\.textEdits\)/)
   assert.match(source, /applyTextEdits\(base, edits\)/)
   assert.match(source, /@formatter:off/)
+  // 请求侧的切分同样得真的在生产链路上（只加模块不接线 = 死代码）。
+  assert.match(source, /import \{ enabledFormatRanges, mergeFormatParts \} from '\.\/formatterTags\.ts'/)
+  assert.match(source, /const subRanges: LspRange\[\] = range && before !== undefined \? enabledFormatRanges\(before, range\) : \[\]/,
+    '选区格式化要先把区间按禁用段切开来')
+  assert.match(source, /const result = await requestFormatting\(path, range, subRanges, indent\)/)
+  assert.match(source, /if \(range && before !== undefined && !subRanges\.length\)/, '整段禁用时一条请求都不发')
+  assert.match(source, /await send\(subRanges\[0\]!\)/, '只切出一段时也只请求那一段（不是整个原区间）')
+  assert.match(source, /return mergeFormatParts\(parts\)/)
 })
+
+// ------------------------------------------------------------------ 请求侧的区间切分
+// 上游依据：`CodeFormatterFacade.setDisabledRanges`（`CodeFormatterFacade.java:232-235`，
+// `:109`/`:197` 调用）把「整文件减去启用段」记成禁用区间，`InitialInfoBuilder.java:334` 对禁用区间
+// 内的空白跳过处理 ⇒ 跨 `@formatter:off` 的选区**能排的那半照样排**。本仓没有本地格式化模型，
+// 同一件事落在请求侧：区间切段、每段各发一次 `rangeFormatting`。
+
+const tags = ['a = 1', '// @formatter:off', 'b   =   2', '// @formatter:on', 'c = 3', ''].join('\n')
+
+test('lineColumnAt 是 offsetAt 的反向换算（含越界钳制与 CRLF）', () => {
+  const text = 'ab\ncde\nf'
+  for (const offset of [0, 1, 2, 3, 5, 6, 8, text.length]) {
+    const point = lineColumnAt(text, offset)
+    assert.equal(offsetAt(text, point.line, point.character), offset, `偏移 ${offset} 要能原样回来`)
+  }
+  assert.deepEqual(lineColumnAt(text, -7), { line: 0, character: 0 })
+  assert.deepEqual(lineColumnAt(text, 99), { line: 2, character: 1 })
+  // CRLF：`\r` 归前一行的内容，所以第二行的行首偏移是 4（`a b \r \n`），不是 3。
+  const crlf = 'ab\r\ncd\r\n'
+  assert.deepEqual(lineColumnAt(crlf, 4), { line: 1, character: 0 })
+  assert.deepEqual(lineColumnAt(crlf, 5), { line: 1, character: 1 })
+})
+
+test('enabledFormatRanges：文件里没有标记 ⇒ 原样返回那一个区间（调用方走单次请求的旧路径）', () => {
+  const plain = 'a = 1\nb = 2\n'
+  const range = { start: { line: 0, character: 0 }, end: { line: 1, character: 6 } }
+  assert.deepEqual(enabledFormatRanges(plain, range), [range])
+  const custom = { start: { line: 0, character: 2 }, end: { line: 3, character: 1 } }
+  assert.deepEqual(enabledFormatRanges(plain, custom, { onTag: 'fmt on', offTag: 'fmt off' }), [custom])
+})
+
+test('enabledFormatRanges：跨 off/on 的选区切成两段，端点落在标记行的行首', () => {
+  const range = { start: { line: 0, character: 0 }, end: { line: 4, character: 5 } }
+  assert.deepEqual(enabledFormatRanges(tags, range), [
+    { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } },   // 到 `// @formatter:off` 那行的行首为止
+    { start: { line: 3, character: 0 }, end: { line: 4, character: 5 } },   // 从 `// @formatter:on` 那行起恢复
+  ])
+})
+
+test('enabledFormatRanges：整段都在禁用区里 ⇒ 空数组（一条请求都不发）', () => {
+  assert.deepEqual(enabledFormatRanges(tags, { start: { line: 1, character: 0 }, end: { line: 3, character: 0 } }), [])
+  assert.deepEqual(enabledFormatRanges(tags, { start: { line: 2, character: 1 }, end: { line: 2, character: 6 } }), [])
+})
+
+test('enabledFormatRanges：起点落在禁用区里 ⇒ 只给恢复之后那一段', () => {
+  assert.deepEqual(enabledFormatRanges(tags, { start: { line: 2, character: 2 }, end: { line: 4, character: 5 } }),
+    [{ start: { line: 3, character: 0 }, end: { line: 4, character: 5 } }])
+  // 未闭合的 off：禁到**请求区间的末尾**为止，所以只给出标记行之前的那一段。
+  const unclosed = ['a', '// @formatter:off', 'b', ''].join('\n')
+  assert.deepEqual(enabledFormatRanges(unclosed, { start: { line: 0, character: 0 }, end: { line: 2, character: 1 } }),
+    [{ start: { line: 0, character: 0 }, end: { line: 1, character: 0 } }])
+  // 请求区间本身就短（末尾在 off 之前）⇒ 端点按区间夹住，不会被推到下一行去。
+  assert.deepEqual(enabledFormatRanges(unclosed, { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }),
+    [{ start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }])
+})
+
+test('mergeFormatParts：按文件归并、相同编辑只留一条、重叠的后到条目丢掉并计数', () => {
+  const head = { available: true, edits: [{ path: 'a.ts', textEdits: [{ text: 'X', startLine: 0, startChar: 0, endLine: 0, endChar: 1 }] }] }
+  const same = { available: true, edits: [{ path: 'a.ts', textEdits: [{ text: 'X', startLine: 0, startChar: 0, endLine: 0, endChar: 1 }] }] }
+  const tail = { available: true, edits: [
+    { path: 'a.ts', textEdits: [{ text: 'Y', startLine: 4, startChar: 0, endLine: 4, endChar: 1 }] },
+    { path: 'b.ts', textEdits: [{ text: 'Z', startLine: 1, startChar: 2, endLine: 1, endChar: 3 }] },
+  ] }
+  const merged = mergeFormatParts([head, same, tail])
+  assert.equal(merged.available, true)
+  assert.equal(merged.dropped, 1, '完全相同的那条被去掉')
+  assert.deepEqual(merged.edits, [
+    { path: 'a.ts', textEdits: [
+      { text: 'X', startLine: 0, startChar: 0, endLine: 0, endChar: 1 },
+      { text: 'Y', startLine: 4, startChar: 0, endLine: 4, endChar: 1 },
+    ] },
+    { path: 'b.ts', textEdits: [{ text: 'Z', startLine: 1, startChar: 2, endLine: 1, endChar: 3 }] },
+  ])
+  // 端部相接（[0,1) 与 [1,2)）不是重叠，两条都留。
+  const adjacent = mergeFormatParts([head, { available: true, edits: [{ path: 'a.ts', textEdits: [
+    { text: 'W', startLine: 0, startChar: 1, endLine: 0, endChar: 2 }] }] }])
+  assert.equal(adjacent.edits[0].textEdits.length, 2)
+  assert.equal(adjacent.dropped, 0)
+  // 真重叠：后到的那条丢掉（服务器越界给出交叠编辑时，倒序套用会写坏文本）。
+  const overlap = mergeFormatParts([head, { available: true, edits: [{ path: 'a.ts', textEdits: [
+    { text: 'V', startLine: 0, startChar: 0, endLine: 0, endChar: 3 }] }] }])
+  assert.deepEqual(overlap.edits[0].textEdits, [{ text: 'X', startLine: 0, startChar: 0, endLine: 0, endChar: 1 }])
+  assert.equal(overlap.dropped, 1)
+})
+
+test('mergeFormatParts：全都不可用 ⇒ available 假、编辑空（调用方按「无需格式化」处理）', () => {
+  const merged = mergeFormatParts([{ available: false }, { available: false, edits: [{ path: 'a.ts', textEdits: [] }] }])
+  assert.deepEqual(merged, { available: false, edits: [], dropped: 0 })
+  assert.deepEqual(mergeFormatParts([]), { available: false, edits: [], dropped: 0 })
+})
+

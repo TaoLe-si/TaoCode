@@ -87,7 +87,9 @@ test('every configurable widget gets a "show <name>" row', () => {
     assert.match(row.title, new RegExp(`^${SHOW_WIDGET_LABEL} `), `标题要照 label.show.status.bar.widget：${row.title}`)
     assert.match(row.id, /^statusBar\.widget\./)
   }
-  assert.ok(rows.some(row => row.title === `${SHOW_WIDGET_LABEL} 光标位置`))
+  // 名字取上游 bundle（`status.bar.position.widget.name`，中文包「行:列号」；本仓旧值「光标位置」
+  // 是自造说法，2026-10-06 桶 statusbar 订正，见 `src/statusWidgets.ts` 的表头证据）。
+  assert.ok(rows.some(row => row.title === `${SHOW_WIDGET_LABEL} 行:列号`))
 })
 
 // 不可配置的组件（上游 `FatalErrorWidgetFactory.isConfigurable = false`）不该出现在这一批里。

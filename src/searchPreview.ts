@@ -109,3 +109,23 @@ export function previewSegments(line: string, query: string, options: SearchOpti
   if (at < line.length) out.push({ text: line.slice(at), hit: false })
   return out
 }
+
+/**
+ * 结果列表里那一行的切分：与 `previewSegments` 同一件事（把一行切成普通段/命中段，界面给后一段
+ * 加底色），区别是**区间不重新匹配** —— 宿主已经把这一处的行列与长度报回来了
+ * （`src/bridge.ts:184` 的 `SearchMatch`；`native/search.cpp` 里 `column` = 行内码点下标 + 1、
+ * `length` = 命中的码点数），这里只按那两个数夹取切分，于是结果表里的高亮与宿主真正替换的那一处
+ * 严格一致（自己再匹配一遍会出现"表里标的和要替换的不是同一段"）。
+ *
+ * `column` 缺省（0/越界）时按行首算，`length` 为 0 时命中段是空串 —— 与搬出组件之前那份逐字同形。
+ */
+export function resultLineParts(line: string, column: number, length: number): PreviewSegment[] {
+  const text = line ?? ''
+  const start = Math.min(Math.max(0, (column || 1) - 1), text.length)
+  const end = Math.min(Math.max(start, start + Math.max(0, length || 0)), text.length)
+  const list: PreviewSegment[] = []
+  if (start > 0) list.push({ text: text.slice(0, start), hit: false })
+  list.push({ text: text.slice(start, end), hit: true })
+  if (end < text.length) list.push({ text: text.slice(end), hit: false })
+  return list
+}

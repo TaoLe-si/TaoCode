@@ -448,6 +448,7 @@ Json to_json(const std::vector<Plugin>& plugins) {
                                   {"fieldName", entry.field_name}});
         Json value{{"id", plugin.id}, {"name", plugin.name}, {"version", plugin.version},
                    {"description", plugin.description}, {"category", plugin.category},
+                   {"vendor", plugin.vendor},
                    {"path", plugin.path}, {"enabled", plugin.enabled},
                    {"depends", plugin.depends}, {"optionalDepends", plugin.optional_depends},
                    {"missingDependencies", plugin.missing_dependencies},
@@ -487,6 +488,9 @@ std::vector<Plugin> list(const fs::path& directory) {
             plugin.version = text_or(document, "version", 40);
             plugin.description = text_or(document, "description", 400);
             plugin.category = text_or(document, "category", 40);
+            // 厂商：上游 `<vendor>` 元素（`PluginXmlConst.kt:36`）。长度上限取名称那一档（120），
+            // 因为它和 `name` 一样是**给人读的一行字**，不是标识符；超长与没写同义（前端不渲染那一行）。
+            plugin.vendor = text_or(document, "vendor", 120);
             if (plugin.name.empty()) plugin.name = plugin.id;
             plugin.depends = read_dependencies(document, "depends", plugin.id);
             plugin.optional_depends = read_dependencies(document, "optionalDepends", plugin.id);

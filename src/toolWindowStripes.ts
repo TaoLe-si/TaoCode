@@ -22,7 +22,9 @@ import { popupHasFocusWithin } from './popupStack.ts'
 // （output/run/problems/references/hierarchy/terminal）**不在出厂锚点表里**，
 // 但上游它们各自就是工具窗口、一样有 `WindowInfo`（见下面 `extraContentIds` 那条注释），
 // 所以从项目布局里读到就要登记，否则门面的 `getToolWindow('output')` 只在"开着"的那一刻答得出。
-import { installToolWindowManager, registerToolWindowId, resetRegisteredToolWindowIds } from './toolWindowManager.ts'
+import { installToolWindowManager, registerToolWindowId, resetRegisteredToolWindowIds, toolWindowSplitDefault } from './toolWindowManager.ts'
+// 条纹的「后半组」（`AbstractDroppableStripe.kt:57-72` 的比较器 + `StripeButtonSeparator` 那条分隔件）。
+import { splitStripeButtonsLast } from './toolStripeSplit.ts'
 import { applyViewMode, shouldHideOnFocusLoss, viewModeOf, type ViewMode, type WindowTypeState } from './toolWindowViewMode.ts'
 // 侧条按钮的挂/摘配对契约 + 分栏比例的哨兵（上游 `ToolWindowEntry` / `ToolWindowPaneState`）。
 import { attachStripeButton, detachStripeButton } from './toolWindowPaneState.ts'
@@ -82,6 +84,14 @@ export interface ToolWindowStripesDeps {
    * （2026.2 的 `ResizeStripeManager.Companion.isShowNames()`）。可选 —— 不传就是名称关。
    */
   showNames?: { readonly value: boolean }
+  /**
+   * 常驻的**激活栈**（IDEA `ActiveStack.java:21-25` 那份"编辑区拿到焦点也不清"的持久栈，
+   * 宿主 `App.vue` 的 `activeToolWindows`）。门面的 `lastActiveToolWindowId`
+   * （`ToolWindowManager.kt:132`）读的就是它。
+   * 可选 —— 宿主没给时门面答 `null`（上游同样是"栈空 = 什么都别做"，`JumpToLastWindowAction.java:32-44`
+   * 那时把动作自己灰掉），不替宿主猜一个窗口。
+   */
+  activeStack?: { readonly value: readonly string[] }
 }
 
 export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
@@ -333,6 +343,11 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
       if (info.type !== undefined || info.autoHide !== undefined)
         windowTypes[id] = { type: toolWindowTypeOf(info), autoHide: autoHideOf(info) }
     }
+    // 后半组那一位同样躺在 `<window_info>` 上（上游 `side_tool`）：先清空，只认显式写过的布尔值，
+    // 没写过的回到注册表初值（EP `secondary`）。
+    for (const key of Object.keys(windowSplit)) delete windowSplit[key]
+    for (const [id, info] of Object.entries(layout.windows ?? {}))
+      if (typeof info.split === 'boolean') windowSplit[id] = info.split
     restoreFloatingBounds(layout)
   }
   /** 锚点可能已保存而目标顺序缺失（旧版移动只写锚点）；每一侧都补齐自己的窗口。 */
@@ -445,6 +460,8 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
         showStripeButton: !hiddenStripeButtons.has(id),
         contentUiType: contentUiTypes[id],
         visible: visibleIds.value.includes(id),
+        // 后半组那一位只在**用户拖过**（与注册表初值不同）时写（`WindowInfoImpl` 的默认值谓词同一条规矩）。
+        split: splitPatch(id),
         ...windowTypePatch(id),
       }
     }
@@ -535,7 +552,45 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     hiddenStripeButtons.delete(id)
     saveHiddenStripeButtons()
   }
-  const stripeOrder = computed(() => (side: Anchor) => toolOrder.value[side].filter(id => (toolAnchors[id] ?? 'left') === side && !hiddenStripeButtons.has(id)))
+  // 门面本体那份查询：`isSplit` 现在有了真来源（下面 `windowSplit` 那张表 + 注册表初值），
+  // 不再是只有 EP 那一位（原写「布局存过则优先」但没有存的地方，见报告 §6-2 的留痕）。
+  /**
+   * `WindowInfo.isSplit`（`WindowInfoImpl.kt:91-92`，XML 属性名 `side_tool`）里**用户拖出来的那一部分**。
+   * 存档没写过的窗口回到注册表初值 —— EP 的 `secondary` → `sideTool`（`DesktopLayout.kt:46`），
+   * 读法就是门面那条 `toolWindowSplitDefault`。
+   * 它是"条纹上的后半组"那一条分组规则的开关（`AbstractDroppableStripe.kt:57-72`）。
+   */
+  const windowSplit = reactive<Record<string, boolean>>({})
+  function isSplitOf(id: ToolWindowId): boolean {
+    const stored = windowSplit[id]
+    return stored === undefined ? toolWindowSplitDefault(id) ?? false : stored
+  }
+  /**
+   * 落点改变后半组身份（上游 `finishDrop` → `setSideToolAndAnchor(..., isSplit)`，
+   * `AbstractDroppableStripe.kt:250-256`）。值没变返回 false 且不写盘。
+   */
+  function setSideTool(id: ToolWindowId, split: boolean): boolean {
+    if (isSplitOf(id) === split) return false
+    windowSplit[id] = split
+    saveLayout()
+    return true
+  }
+  /**
+   * 存档只写**与注册表初值不同**的那一档（同 `windowTypePatch` 的纪律：
+   * `WindowInfoImpl.kt:91-92` 的默认值是 false，`side_tool` 只在为 true 时才出现在 `<window_info>` 上）。
+   * 旧存档没有这一栏 ⇒ 读出来是 `undefined` = 回到 EP 初值，不参与"布局损坏"判定。
+   */
+  function splitPatch(id: ToolWindowId): boolean | undefined {
+    const stored = windowSplit[id]
+    return stored === undefined || stored === (toolWindowSplitDefault(id) ?? false) ? undefined : stored
+  }
+  const stripeOrder = computed(() => (side: Anchor) => {
+    const ids = toolOrder.value[side].filter(id => (toolAnchors[id] ?? 'left') === side && !hiddenStripeButtons.has(id))
+    // 「side buttons in the end」（`AbstractDroppableStripe.kt:59-62`）：同一条侧条里后半组排在前面那组之后。
+    // 底部那一排不套 —— 它是内容标签（`TabbedPaneContentUI`），不是 `StripeV2(BOTTOM)` 那条方形按钮条纹；
+    // 上游同处的反向序那一支（`:63-67`）也因此不参与。理由写在 `src/toolStripeSplit.ts` 文件头。
+    return side === 'bottom' ? ids : splitStripeButtonsLast(ids, isSplitOf)
+  })
 
   // --- 侧条宽度（IDEA `ResizeStripeManager`）-----------------------------------------------------
   // 上游把两侧的宽度存在 `UISettings.toolWindowLeftSideCustomWidth` / `…RightSideCustomWidth` 里
@@ -723,6 +778,9 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     floatingBoundsOf: floatingBoundsOfId,
     toolDisabled: id => toolDisabled(id as ToolWindowId),
     setViewMode,
+    // `WindowInfo.isSplit` 的真来源（上面那张 `windowSplit` + 注册表初值）—— 门面那条
+    // 「布局存过则优先，否则退回 EP `secondary`」的判据到这里才真的有两档。
+    isSplit: id => isSplitOf(id as ToolWindowId),
     // `isEditorComponentActive`（`ToolWindowManager.kt:112-115`）上游问的是**焦点主人**
     //（`ToolWindowManagerState.kt:52-55` 的 `getParentOfType(EditorsSplitters, focusOwner) != null`），
     // 与"有没有窗口开着"无关。本仓的同一问法就是那张 dock 选择器表（`src/toolWindowDocks.ts`）：
@@ -730,9 +788,14 @@ export function createToolWindowStripes(deps: ToolWindowStripesDeps) {
     // 门面退回它原来那条保守近似，不假装答得出。
     editorComponentActive: () => (typeof document === 'undefined' ? undefined
       : dockOf(document.activeElement) === 'editor'),
+    // `lastActiveToolWindowId`（`ToolWindowManager.kt:132`）的那一份真相住在宿主（激活的 push/hide
+    // 都发生在宿主的 `recordActiveToolWindow` 里，`appToolWindowActivation.ts:57-66`），
+    // 所以这里只做转发：宿主给了 `activeStack` 才接，没给就不接（门面答 null，不自己记第二份账）。
+    activationStack: deps.activeStack ? () => deps.activeStack?.value ?? [] : undefined,
   })
 
   return { toolAnchors, activeAnchor, setToolAnchor, saveToolAnchors, toolOrder, saveToolOrder, stripeOrder, hiddenStripeButtons,
+           isSplitOf, setSideTool,
            removeStripeButton, restoreStripeButton, toolDisabled, bottomAnchoredIds, activationTarget, anchorOf,
            stripeWidths, stripeWidth, setStripeWidth, applyShowNamesWidths, moreButtonSide, moveMoreButtonTo, moreButtonRows,
            moreButtonAvailable, moreButtonVisible, contentUiType, setContentUiType, explicitContentUiTypes,

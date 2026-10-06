@@ -11,6 +11,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { compileStructuralPattern } from '../src/structuralSearch.ts'
 import { UNLIMITED } from '../src/structuralSearchConstraints.ts'
+// 列表变量的「同一个列表」复核（宿主那侧的 std::regex 编不出后顾断言，只能在这一层判）：
+// 判据在 src/structuralCodeBlock.ts，接线在 src/structuralSearchModifiers.ts 的 verdictForHit。
+import { execWithSpans, listRunVerdict } from '../src/structuralSearchModifiers.ts'
 
 const ok = template => {
   const compiled = compileStructuralPattern(template)
@@ -22,7 +25,26 @@ const bad = template => {
   assert.ok('error' in compiled, `${template} 该编译失败却编出来了：${(compiled).regex}`)
   return compiled.error
 }
-const run = (template, flags = '') => new RegExp(ok(template).regex, flags)
+/**
+ * 「这个模板在这一行上成不成立」= 两道，与面板走的完全是同一条链：
+ *   ① 编译产物那条正则（发给宿主的 `query`）能配上；
+ *   ② 贪婪列表变量过一遍「整段」复核（`verdictForHit` 里的 `listRunVerdict`）。
+ * 第二道从前写在正则里（`(?<!…)` 后顾断言），宿主编不动 ⇒ 带列表变量的模板整体报废，
+ * 现在搬到复核层，所以"成不成立"这个问题要两道都问一遍才等价于面板的行为。
+ */
+const listed = (template, text, flags = '') => {
+  const pattern = ok(template)
+  const found = new RegExp(pattern.regex, flags).exec(text)
+  if (!found) return null
+  const spans = execWithSpans(pattern.regex, pattern.variables, text, flags)
+  if (!spans) return null
+  return listRunVerdict(pattern, text, spans).ok ? found : null
+}
+const run = (template, flags = '') => ({
+  source: new RegExp(ok(template).regex, flags).source,
+  test: text => listed(template, text, flags) !== null,
+  exec: text => listed(template, text, flags),
+})
 
 test('没写约束时正则与旧实现逐字一致（不因为接了约束就改动既有行为）', () => {
   // 这三条是 `tests/structural-search.test.mjs` 里已有的锚点，逐字重复一遍当回归护栏。

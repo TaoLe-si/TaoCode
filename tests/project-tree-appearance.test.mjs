@@ -1,11 +1,15 @@
-// 项目视图齿轮「外观」那一组的两条用户可见行为：**可编辑的文件嵌套规则**（上游
-// `ProjectView.FileNesting` = `ConfigureFilesNestingAction`）与**压缩目录**
-// （上游 `ProjectView.CompactDirectories`）。判据 = 上游坐标 + 本仓的真实渲染结果。
+// 项目视图齿轮「外观」那一组的三条用户可见行为：**可编辑的文件嵌套规则**（上游
+// `ProjectView.FileNesting` = `ConfigureFilesNestingAction`）、**压缩目录**
+// （上游 `ProjectView.CompactDirectories`）与**显示临时文件和控制台**
+// （上游 `ProjectView.ShowScratchesAndConsoles`，`intellij.platform.projectView.xml:81-84`）。
+// 判据 = 上游坐标 + 本仓的真实渲染结果。
 //
-// 上游坐标（细节推导都写在 `src/projectTreeCompactDirs.ts` / `src/projectTreeState.ts` 的模块头）：
+// 上游坐标（细节推导都写在 `src/projectTreeCompactDirs.ts` / `src/projectTreeState.ts` /
+// `src/projectViewBehavior.ts` 的模块头）：
 //   · `platform/projectView/shared/resources/intellij.platform.projectView.xml:56-105`（Appearance 组）
 //     与 `:106-130`（Sort 组）—— Appearance 组在 Sort 组之前；
-//   · `:98-99` `ProjectView.CompactDirectories`、`:101-102` `ProjectView.FileNesting`；
+//   · `:81-84` `ProjectView.ShowScratchesAndConsoles`（默认开：`ViewSettings.java:54-56`）、
+//     `:98-99` `ProjectView.CompactDirectories`、`:101-102` `ProjectView.FileNesting`；
 //   · 压缩规则 `platform/lang-impl/src/com/intellij/ide/scopeView/ScopeViewTreeModel.java:595-608`
 //     （只有一个子目录就往下并）+ `:657-661`（`getSingleDirectory`）+ `:789-792`（名字用 `/` 连）；
 //   · 默认档 `platform/editor-ui-api/src/com/intellij/ide/util/treeView/NodeOptions.java:41-43`（false）；
@@ -16,6 +20,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { MAX_COMPACT_CHAIN, compactChainOf, compactListing, compactName, singleDirectoryChild } from '../src/projectTreeCompactDirs.ts'
 import { createProjectTreeModel } from '../src/projectTreeModel.ts'
+import { DEFAULT_NESTING_RULES } from '../src/projectTreeNesting.ts'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const directory = (path, name = path.split('/').at(-1)) => ({ path, name, kind: 'directory' })
@@ -167,7 +172,7 @@ test('compactDirectories 存进项目视图设置：默认关，旧存档缺这�
   assert.deepEqual(host.nesting.rules, [{ parent: 'a.ts', children: ['b.ts'] }])
 })
 
-test('齿轮里的两格：文件嵌套… 与 压缩目录，且 Appearance 组排在 Sort 组之前', () => {
+test('齿轮里的三格：显示临时文件和控制台 / 压缩目录 / 文件嵌套…，且按 XML 的成员次序', () => {
   const settings = read('../src/components/ProjectViewSortSettings.vue')
   const appearance = settings.indexOf('aria-label="外观"')
   const sort = settings.indexOf('aria-label="排序"')
@@ -180,6 +185,60 @@ test('齿轮里的两格：文件嵌套… 与 压缩目录，且 Appearance 组
   assert.match(settings, /projectTreeHostFor\(props\.settings\)/, '取不到宿主就不给这一格')
   assert.match(settings, /v-if="host && nestingOpen"/)
   assert.match(settings, /host\?\.updateNesting\(patch\)/, '对话框的 apply 直接落到宿主那份设置')
+  // 组内成员次序照 `intellij.platform.projectView.xml`：ShowScratchesAndConsoles（:81-84）
+  // → CompactDirectories（:98-99）→ FileNesting（:101-102），两处 <separator/>（:100、:103）。
+  // 三个标签的**渲染顺序**才是判据（注释里也出现这些字），所以只在模板那一段里比。
+  const template = settings.slice(settings.indexOf('<template>'))
+  const scratches = template.indexOf('显示临时文件和控制台')
+  const compact = template.indexOf('压缩目录')
+  const nesting = template.indexOf('文件嵌套…')
+  assert.ok(scratches >= 0 && compact >= 0 && nesting >= 0, '三格都真在模板里渲染')
+  assert.ok(scratches < compact && compact < nesting, '组内次序 = 上游 XML 的行序')
+  assert.match(settings, /:aria-checked="showScratches"[^>]*showScratchesAndConsoles: !showScratches/,
+    '点它是翻这一格，不是翻别的设置')
+  const appearanceBlock = settings.slice(appearance, sort)
+  assert.equal(appearanceBlock.split('role="separator"').length - 1, 2, '上游在 dirs 块与 nesting 块之间各有一道分隔线')
+})
+
+test('显示临时文件和控制台：默认开、存进项目视图设置、旧存档缺键不判损坏', async () => {
+  const store = new Map()
+  globalThis.localStorage = {
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, value) },
+    removeItem: key => { store.delete(key) },
+  }
+  const { DEFAULT_PROJECT_TREE_SETTINGS, getProjectTreeState } = await import('../src/projectTreeState.ts')
+  // 上游默认档：`ViewSettings.java:54-56` / `ProjectViewSharedSettings.kt:28` 都是 true。
+  assert.equal(DEFAULT_PROJECT_TREE_SETTINGS.showScratchesAndConsoles, true)
+  const host = getProjectTreeState('D:/scratches')
+  assert.equal(host.state.showScratchesAndConsoles, true)
+  host.update({ showScratchesAndConsoles: false })
+  assert.equal(host.state.showScratchesAndConsoles, false)
+  assert.match(store.get('taocode.projectView.v1:' + encodeURIComponent('D:/scratches')),
+    /"showScratchesAndConsoles":false/)
+  host.update({ showScratchesAndConsoles: true })
+  assert.match(store.get('taocode.projectView.v1:' + encodeURIComponent('D:/scratches')),
+    /"showScratchesAndConsoles":true/)
+  // 旧存档（这一键从没写过）⇒ 读回来是默认的「显示」，不是坏档。
+  store.set('taocode.projectView.v1:' + encodeURIComponent('D:/old-scratches'),
+    JSON.stringify({ sortKey: 'BY_TYPE', compactDirectories: true }))
+  const old = getProjectTreeState('D:/old-scratches')
+  assert.equal(old.state.showScratchesAndConsoles, true, '缺键补默认')
+  assert.equal(old.state.sortKey, 'BY_TYPE', '同存档里已有的键照旧生效')
+  assert.equal(old.state.compactDirectories, true)
+  // 坏值（不是布尔）当没写，仍旧是默认档。
+  store.set('taocode.projectView.v1:' + encodeURIComponent('D:/bad-scratches'),
+    JSON.stringify({ showScratchesAndConsoles: 'yes' }))
+  assert.equal(getProjectTreeState('D:/bad-scratches').state.showScratchesAndConsoles, true)
+})
+
+test('这一格真的落到树里：FileTree 用它过滤合成根，改设置整树重建', () => {
+  const tree = read('../src/components/FileTree.vue')
+  assert.match(tree, /import \{ treeClickOpensFile, treeOpenUsesPreviewTab, visibleSyntheticNodes, type ProjectViewBehavior \} from '\.\.\/projectViewBehavior'/)
+  assert.match(tree, /const syntheticRows = \(\) => visibleSyntheticNodes\(props\.synthetic \?\? \[\], sharedSortSettings\.value\.showScratchesAndConsoles\)/)
+  assert.match(tree, /synthetic: syntheticRows,/, '模型拿到的必须是过滤后的那一份')
+  assert.match(tree, /sharedSortSettings\.value\.showScratchesAndConsoles \?\? true,\n\s*treeHost\.value\.nesting\.enabled/,
+    '这一格翻动要进那条「设置变更 ⇒ 整树重建」的 watch（上游 ProjectViewImpl.java:392-400 的 updatePanes(true)）')
 })
 
 test('编辑嵌套规则真的落回模型：设置页 → 宿主 → FileTree → 模型', () => {
@@ -214,4 +273,80 @@ test('压缩目录的链在取那一层列表时就算好，行不会先显示�
   assert.match(model, /const listing = await fetch\(current, token\)/, '链自己只用 fetch，不用 load ⇒ 不会把整棵树预取')
   assert.match(model, /seen\.add\(raw\.path\)\s*\n\s*seen\.add\(entry\.path\)/, '刷新后合并行的展开态不能被 revalidate 误删')
   assert.match(model, /compacted\.clear\(\)/)
+})
+
+// 「递归展开 / 全部展开」开的是**任何有子行的行**，不是只开目录：
+//   · 上游动作只经 `TreeExpander`：`ExpandRecursivelyAction.kt:29-31`（`expander.expandSelected()`）
+//     与 `ProjectViewExpandAllAction.kt:17-22`（`expander.expandAll()`）；
+//   · 实现里没有任何「是目录」的条件：`DefaultTreeExpander.kt:21-36` → `TreeUtil.java:1084`
+//     （`promiseExpand(tree, depth, path -> depth < MAX || isIncludedInExpandAll(path))`）；
+//   · 豁免由节点自己说：`AbstractTreeNode.java:138-140` 默认 `true`，
+//     项目视图里唯一让开的是外部库那一条（`ExternalLibrariesNode.java:61-64`）；
+//   · 带嵌套子文件的**文件行**就是一个有孩子的节点：`NestingTreeNode.java:43-51`
+//     （`getChildrenImpl()` = 嵌套子文件 + 自己的），`isAlwaysShowPlus()` 恒 true（`:21-24`）。
+// 「递归展开」这个按钮在本仓是活的（`src/components/ToolWindowView.vue:208`）。
+test('规则表落盘形态照上游：一个父一条、(父,子) 去重、父升序（ProjectViewFileNestingService.java:102-103,149-158）', async () => {
+  const store = new Map()
+  globalThis.localStorage = {
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, value) },
+    removeItem: key => { store.delete(key) },
+  }
+  const { getProjectTreeState } = await import('../src/projectTreeState.ts')
+  const host = getProjectTreeState('D:/nest')
+  // 设置页交来的是一张「一父一条」也可能被拆平成多条同父规则的表（`nestingRulesOf` 就是一条一对），
+  // 上游存的那份是 `SortedList(comparing(parentFileSuffix))` + 按 (父,子) 去重（`NestingRule.equals`）。
+  host.updateNesting({ rules: [
+    { parent: '*.ts', children: ['*.js'] },
+    { parent: '*.ts', children: ['*.css', '*.js', ''] },
+    { parent: 'package.json', children: ['package.json', 'yarn.lock'] },
+  ] })
+  assert.deepEqual(host.nesting.rules, [
+    { parent: '*.ts', children: ['*.css', '*.js'] },
+    { parent: 'package.json', children: ['yarn.lock'] },
+  ], '同父合并成一条、子按 `父 空格 子` 的次序、空后缀与父子相等的丢掉')
+  const saved = JSON.parse(store.get('taocode.projectView.v1:' + encodeURIComponent('D:/nest')))
+  assert.deepEqual(saved.nestingRules, host.nesting.rules, '存档里的那份就是这个形状')
+  // 回读同样规范化：手改过的 ui.lnf.xml 式坏行（重复、同父拆平）不该把默认表挤掉。
+  store.set('taocode.projectView.v1:' + encodeURIComponent('D:/back'), JSON.stringify({
+    useFileNestingRules: true,
+    nestingRules: [{ parent: 'a.ts', children: ['b.js'] }, { parent: 'a.ts', children: ['b.js', 'c.css'] }],
+  }))
+  assert.deepEqual(getProjectTreeState('D:/back').nesting.rules, [{ parent: 'a.ts', children: ['b.js', 'c.css'] }])
+  // 坏行按没写处理（回落到默认表），不许按字段数量判整档损坏。
+  store.set('taocode.projectView.v1:' + encodeURIComponent('D:/bad'), JSON.stringify({ nestingRules: [{ parent: 'a.ts', children: 'b.js' }] }))
+  assert.deepEqual(getProjectTreeState('D:/bad').nesting.rules, DEFAULT_NESTING_RULES)
+})
+
+test('递归展开与全部展开也开「文件嵌套」的父行（不是只开目录）', async () => {
+  const entries = [directory('src'), file('main.ts'), file('main.js'), file('main.css')]
+  const settings = { sortKey: 'BY_NAME', foldersAlwaysOnTop: true, autoscrollToSource: false,
+    autoscrollFromSource: false, openInPreviewTab: false }
+  const model = createProjectTreeModel({
+    entries: () => entries, synthetic: () => [], depth: () => 0, projectName: () => 'demo',
+    sortSettings: () => settings, nestingRules: () => [{ parent: '*.ts', children: ['*.js', '*.css'] }],
+    error: message => { throw new Error(message) },
+  })
+  model.children.set('src', [file('src/app.ts')])
+  // 没有选中 ⇒ 递归展开什么都不开（上游 `canExpandSelected` 也要有选中，`DefaultTreeExpander.kt:42`）。
+  await model.expandRecursively()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name), ['demo', 'src', 'main.ts'])
+  model.select('main.ts')
+  assert.equal(model.canExpandRecursively(), true, '选中的是「有嵌套子行的文件行」⇒ 这一格该可用')
+  await model.expandRecursively()
+  assert.deepEqual(model.rows.value.map(row => row.entry.name),
+    ['demo', 'src', 'main.ts', 'main.css', 'main.js'], '父行是文件时也把它名下的嵌套子行开出来')
+  // 全部展开同理：嵌套父行不是目录，但一样要被开（另起一个模型，不依赖上面那一次展开）。
+  const bulk = createProjectTreeModel({
+    entries: () => entries, synthetic: () => [], depth: () => 0, projectName: () => 'demo',
+    sortSettings: () => settings, nestingRules: () => [{ parent: '*.ts', children: ['*.js', '*.css'] }],
+    error: message => { throw new Error(message) },
+  })
+  bulk.children.set('src', [file('src/app.ts')])
+  await bulk.expandAll()
+  assert.deepEqual(bulk.rows.value.map(row => row.entry.name),
+    ['demo', 'src', 'app.ts', 'main.ts', 'main.css', 'main.js'])
+  const source = read('../src/projectTreeModel.ts')
+  assert.match(source, /if \(entry\.kind !== 'directory'\) \{[\s\S]*?hasNested\(entry\.path\)/,
+    '批量展开的目录判据必须在文件行这一支也让位给「有嵌套子行」')
 })

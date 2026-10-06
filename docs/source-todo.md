@@ -8,7 +8,11 @@
 
 ## 0. 我自己的机械核对（结论：干净）
 
-- [x] **Method 联合 ↔ 原生分派**：107 ↔ 107，双向差集为空。
+- [x] **Method 联合 ↔ 原生分派**：**107 ↔ 107 已过期**（写它的时候确实对得上）。
+  `src/bridge.ts` 的 `export type Method` 本轮实测 **170** 个成员（复算：
+  `node -e "const s=require('fs').readFileSync('src/bridge.ts','utf8');const i=s.indexOf('export type Method');console.log(new Set(s.slice(i,i+9000).match(/'[^']+'/g)).size)"`）。
+  ⚠️ **「双向差集为空」这半句本轮无法核实**，别当现行结论：原生侧不是一种统一写法（粗 grep `'"[a-z]+\.[A-Za-z.]+"' native/*.cpp` 只能捞到一小部分，
+  还有一批走 `if (method == ...)` 之外的分派表），要判这条得按 `native/*.cpp` 的路由表逐个枚举。
 - [x] **事件名**：原生发出 12 类事件，前端全部有分支（其中 `lsp.edited` / `term.opened` / `fs.watchStopped` 原是死事件，已接上）。
 - [x] **43 个 EditorSettings 键五处一致**：接口 / 默认值 / 前端白名单 / 原生默认值 / 原生 known_keys，缺项均为 0；`bracketMatching` 曾是装饰性设置，已接上。
 
@@ -26,7 +30,7 @@
 - [x] **`SettingsDialog` deep watch 覆盖用户输入**（`SettingsDialog.vue`）：已改为非 deep 且表单脏时跳过。
 - [x] **`ProjectStructurePane`「还原」是假控件**（`ProjectStructurePane.vue`）：`type="reset"` 只重置 DOM，不动 Vue refs。已改 `type="button"` + `@click="resetForm"` 真回填。
 - [x] **`DebugPanel` 与运行配置两套 program/cwd**（`DebugPanel.vue`、`App.vue`、`bridge.ts`、`projects.cpp`）：已改为单一来源——`RunConfig.adapter` 新字段 + 面板只读展示当前运行配置。
-- [x] **`configChooser` 幽灵 UI**（`App.vue`）：`aria-expanded="configChooser !== null"` 有状态但**没有任何 `v-if` 渲染它**，点 ▾ 无反应。**已修（第二十五批）**：`App.vue:4152-4166` 新增真实弹层（配置列表 + ↑↓/Enter/Esc + 遮罩关闭），▾ 按钮的 `aria-expanded` 现在对应一个实际渲染的元素。
+- [x] **`configChooser` 幽灵 UI**（`App.vue`）：`aria-expanded="configChooser !== null"` 有状态但**没有任何 `v-if` 渲染它**，点 ▾ 无反应。**已修（第二十五批）**：真实弹层在 `src/App.vue` 的 `config-chooser` 块（配置列表 + ↑↓/Enter/Esc + 遮罩关闭）：**订正 2026-10-06**：旧写的 `App.vue:4152-4166` 是**假坐标** —— 那比整个文件长近 1400 行，实测本轮 2719 行；弹层的行为是真的，位置复算 `grep -n config-chooser src/App.vue`，本轮 = `:2060` 的 `v-if` 起、到 `:2074` 的遮罩收尾。之所以故意不写成一个能机械核对的完整形状：`App.vue` 正被并行批次按分钟改动，任何写死的行号都会在下一次提交后变成新的假坐标。▾ 按钮的 `aria-expanded` 现在对应一个实际渲染的元素。
 
 ## 3. 一般（假位置 / 假控件 / 假逻辑 / 死代码）
 

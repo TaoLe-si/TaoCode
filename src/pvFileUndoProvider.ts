@@ -20,7 +20,7 @@
 // 磁盘读写全部走注入的 `FileIo`：桌面端传 `hostFileIo`（真宿主），判据测试传内存实现，
 // 于是「删掉再撤销」这条链能被真的跑一遍（见 `tests/pv-file-undo.test.mjs`）。
 import { request, type Entry } from './bridge.ts'
-import type { CommandInput, CommandProcessor, CommandStep } from './pvCommandProcessor.ts'
+import type { CommandInput, CommandProcessor, CommandStep, UndoResult } from './pvCommandProcessor.ts'
 
 /** 一个文件的恢复快照（`file.read` 的那几个键，回写时逐个送回）。 */
 export interface FileSnapshot {
@@ -196,17 +196,30 @@ export function recordFileCommand(
 /**
  * 撤销/重做菜单行（`$Undo` / `$Redo`，`PlatformActions.xml:447-448`，
  * 键位 `Ctrl+Z` / `Ctrl+Shift+Z`，`$default.xml:232-235` / `:685-688`）。
- * 归属菜单（编辑菜单）不在本 lane，所以这里只出行模型，由持有 `editMenu.ts` 的一侧装配。
+ * 归属菜单（编辑菜单）不在本 lane —— `src/menus/editMenu.ts:30,35` 那两行现在走的是编辑器文本撤销
+ * （CodeMirror 自己的历史），要把它换成这一对就需要一处宿主改动，所以这里出行模型 +
+ * 一个 `onSettled` 回调（撤完必须刷目录树：上游撤完文件操作发 VFS 事件，窗格按
+ * `platform/platform-api/src/com/intellij/ui/treeStructure/ProjectViewUpdateCause.kt:49-52`
+ * 的 VFS_CREATE / VFS_COPY / VFS_MOVE / VFS_DELETE 重建那一支）。
+ * 接线代码与逐条理由见 `docs/wiring-requests-2026-10-06-projecttree.md` 的 W2'。
  */
-export function commandMenuRows(processor: CommandProcessor, scope: () => readonly string[]) {
+export function commandMenuRows(
+  processor: CommandProcessor, scope: () => readonly string[],
+  onSettled?: (result: UndoResult) => void,
+) {
+  const perform = (kind: 'undo' | 'redo') => async () => {
+    const result = await processor[kind](scope())
+    if (onSettled) onSettled(result)
+    return result
+  }
   return [
     {
       id: '$Undo', title: () => processor.menuText('undo', scope()), keys: 'Ctrl+Z',
-      enabled: () => processor.canUndo(scope()), run: () => processor.undo(scope()),
+      enabled: () => processor.canUndo(scope()), run: perform('undo'),
     },
     {
       id: '$Redo', title: () => processor.menuText('redo', scope()), keys: 'Ctrl+Shift+Z',
-      enabled: () => processor.canRedo(scope()), run: () => processor.redo(scope()),
+      enabled: () => processor.canRedo(scope()), run: perform('redo'),
     },
   ]
 }

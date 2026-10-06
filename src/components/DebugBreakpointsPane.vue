@@ -8,7 +8,7 @@
 // 依赖断点（`XDependentBreakpointManager.java:112` `setMasterBreakpoint` / `:141` `clearMasterBreakpoint`）。
 // 纯规则在 `src/debugBreakpointExtras.ts`（可单测）；**下发给 DAP 只有一个口**：`src/dbgBreakpointUpdate.ts`
 // （合并同一文件的多次改动 + 全量重发，见其文件头）。本组件只算状态与画界面。
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { PenLine, Trash2, Volume2, VolumeX, X } from 'lucide-vue-next'
 import { dapBreakpoints, dapState } from '../bridge'
 import {
@@ -16,10 +16,10 @@ import {
   propertiesForRef, saveBreakpointExtras, setBreakpointProperties, shouldAutoUnmute, temporaryHit,
   type BreakpointDependencies, type BreakpointPropertiesState,
 } from '../debugBreakpointExtras'
-// 断点下发口：属性并入、按依赖/勾选过滤、同文件合并、全量重发，全在 `src/dbgBreakpointUpdate.ts`。
+// 断点下发口：属性并入、按依赖/勾选过滤、同文件合并（上游那道 300ms 窗）、全量重发，全在 `src/dbgBreakpointUpdate.ts`。
 import {
-  breakpointFileSend, breakpointSendPlan, breakpointUpdater, resendAllFromRoot,
-  type BreakpointSendRules, type BreakpointPoint,
+  breakpointFileSend, breakpointSendPlan, breakpointUpdater, provideBreakpointSendRules, resendAllFromRoot,
+  type BreakpointQueueOptions, type BreakpointSendRules, type BreakpointPoint,
 } from '../dbgBreakpointUpdate'
 // 逐断点的「组 / 谁被停用」共享状态（上游树上的复选框 = setEnabled）：对话框写、这里读。
 import {
@@ -113,26 +113,37 @@ const refOf = (path: string, line: number) => breakpointRef(path, line)
 function sendRules(): BreakpointSendRules {
   return { properties: properties.value, dependencies: dependencies.value, enabledDependents: enabledDependents.value, muted: muted.value }
 }
+// 登记给下发口：本组件是仓里唯一持有属性表/依赖表/已启用依赖/静音这四位的组件，登记之后
+// 别的写点（「查看断点…」对话框、App.vue 的装订线 —— 后者见接线请求 docs/wiring-requests-2026-10-06-dap.md 的 D1）
+// 不必自己再拿一份前端状态，发的就是同一份口径 —— 否则「被依赖挡住的那条」会在装订线随手一下之后
+// 被重新发给适配器（两套口径分叉）。面板重挂时这里会覆盖成新的那份闭包。
+provideBreakpointSendRules(() => sendRules())
+// 卸载就撤销登记：留下的会是**已销毁组件**的那份状态，别的写点会照着旧口径发。
+onBeforeUnmount(() => { provideBreakpointSendRules(null) })
 /**
  * 发一份断点给适配器 —— 只有**一个**出口：`breakpointUpdater.queue`
  * （`src/dbgBreakpointUpdate.ts`，上游 `JavaBreakpointHandler.java:31-44` 的 register/unregister
  *  + `FrontendXLineBreakpointVisualizationManager.kt:291-315` 的合并队列）。
  * 静音时只发空数组、**不碰**册子；依赖未启用的那条先不发，但册子里仍留着，否则取消依赖后找不回来。
+ * `options.now` = 上游 `updateBreakpointNow`（`:291-294`）那一档「不等 300ms」：装订线/加/删这类
+ * 用户就在那一下点的动作要立刻发；逐字符进来的（条件、命中次数、日志、依赖）与停在断点时的一串规则走合并窗。
  */
-async function syncBreakAt(path: string, points: BreakpointPoint[]) {
+async function syncBreakAt(path: string, points: BreakpointPoint[], options: BreakpointQueueOptions = {}) {
   error.value = ''
   const item = breakpointFileSend(path, points, sendRules())
-  const round = await breakpointUpdater.queue(item)
+  const round = await breakpointUpdater.queue(item, options)
   if (round.error) { error.value = round.error; return }
+  // 这一份载荷被后来的改动合并掉了 ⇒ 那轮的 verifiedLines 不是它的，拿别人的结果判自己会误报。
+  if (!round.applied) return
   const result = round.result
   if (!result || result.deferred || !item.send.length) return
   if (result.verifiedLines.length !== item.send.length) error.value = '部分断点未被调试器验证。'
   const note = result.messages?.[0]
   if (note) error.value = `第 ${note.line} 行断点：${note.message}`
 }
-async function syncBreak(points: BreakpointPoint[]) {
+async function syncBreak(points: BreakpointPoint[], options: BreakpointQueueOptions = {}) {
   if (!props.activePath) return
-  await syncBreakAt(props.activePath, points)
+  await syncBreakAt(props.activePath, points, options)
 }
 function addBreakpoint() {
   const line = newBreak.value
@@ -143,13 +154,13 @@ function addBreakpoint() {
   // 见 src/breakpointGroups.ts 文件头；默认格本身在「查看断点…」里设）。
   const group = defaultGroupName()
   if (group) { assignBreakpointsToGroup([ref], group); saveGroupState(storage, props.root ?? '') }
-  void syncBreak([...activeBreaks.value, { line }])
+  void syncBreak([...activeBreaks.value, { line }], { now: true })
   newBreak.value = null
 }
 /** 移除一个断点（受「移除前确认」设置门控，上游 `isConfirmBreakpointRemoval`）。 */
 function removeBreakpoint(line: number) {
   if (props.confirmRemoval && !window.confirm(`移除第 ${line} 行的断点？`)) return
-  void syncBreak(activeBreaks.value.filter(point => point.line !== line))
+  void syncBreak(activeBreaks.value.filter(point => point.line !== line), { now: true })
 }
 // IDEA edits breakpoint properties from the gutter popup; the panel is the equivalent here.
 // `undefined` 从字段里删掉（DAP 里缺字段 = 没有该属性），空串同样按删除处理。
@@ -261,7 +272,7 @@ async function removeAllBreakpoints() {
   if (!paths.length) return
   if (props.confirmRemoval && !window.confirm(`移除全部 ${paths.length} 个文件的断点？`)) return
   error.value = ''
-  const rounds = await Promise.all(paths.map(path => breakpointUpdater.queue(breakpointFileSend(path, [], { ...sendRules(), muted: false }))))
+  const rounds = await Promise.all(paths.map(path => breakpointUpdater.queue(breakpointFileSend(path, [], { ...sendRules(), muted: false }), { now: true })))
   const failed = rounds.map(round => round.error).filter(Boolean)
   if (failed.length) error.value = failed[0] ?? ''
   temporary.value = []; enabledDependents.value = []
@@ -272,7 +283,7 @@ async function toggleMute() {
   const next = !muted.value
   muted.value = next
   const plan = breakpointSendPlan(dapBreakpoints, { ...sendRules(), muted: next })
-  const rounds = await Promise.all(plan.map(item => breakpointUpdater.queue(item)))
+  const rounds = await Promise.all(plan.map(item => breakpointUpdater.queue(item, { now: true })))
   const failed = rounds.map(round => round.error).filter(Boolean)
   if (failed.length) error.value = failed[0] ?? ''
 }

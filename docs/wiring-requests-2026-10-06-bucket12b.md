@@ -39,7 +39,7 @@
   ① 在 `App.vue:1076` 那侧加一个 `@update:groups` 处理，把 `src/breakpointGroups.ts` 的组模型接上；或
   ② 授权我在自己名下新建 `src/dbgBreakpointGroups.vue`（`Debug*.vue` 前缀在我名下）+ 一个 emit 面，宿主只挂一行。
 - **为什么需要**：判词里 `dbg/breakpoints` 缺① 的唯一卡点就是**写入口在保留文件**；分组规则、按组启停的判据都能完全落在我名下文件里（按文件分组 + 异常断点分组已经做完了）。
-- **上游依据**：`platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/XBreakpointGroup.java`、`platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointManagerImpl.java`（组的存取与按组启停）、`platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/breakpoints/XBreakpointsPanel.kt`（组节点在断点树里的渲染）。
+- **上游依据**：`platform/xdebugger-api/src/com/intellij/xdebugger/breakpoints/ui/XBreakpointGroup.java:10`（10 = `public abstract class XBreakpointGroup implements Comparable<XBreakpointGroup>`，42 行；**citefix 订正**：原写 `…/breakpoints/XBreakpointGroup.java`，参考树里该类在 `breakpoints/ui/` 包）、`platform/xdebugger-impl/src/com/intellij/xdebugger/impl/breakpoints/XBreakpointManagerImpl.java`（组的存取与按组启停）；~~`platform/xdebugger-impl/ui/src/com/intellij/xdebugger/impl/ui/breakpoints/XBreakpointsPanel.kt`~~ —— 原写的这一条**参考树里没有**（全树 `find -name "XBreakpointsPanel.kt"` = 0 命中，也没有 `xdebugger-impl/ui/` 那层模块），故「组节点在断点树里的渲染」**无法核实**，需要该结论时请另行取证（不在本请求的落点范围内，本仓 `src/breakpoint*.ts` 的分组渲染另有判据）。
 
 ## W3 · `scripts/verdict_table.py` 的 `FAMILIES` 表 —— 六条判词需要订正（生成物不能手改）
 

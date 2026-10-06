@@ -15,7 +15,7 @@
 // 本仓没有 `JBPopupFactory` 的模态/钉住/阴影那套，标题行用 `.choose-target-title` 那一档样式。
 import { EditorSelection } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { Extension } from '@codemirror/state'
+import type { Extension, TransactionSpec } from '@codemirror/state'
 import { nextCustomRegion, regionEntries, regionIndent, type CustomRegion } from './customFoldingRegions.ts'
 
 // 两条文案都取随 IDE 发货的中文包（`plugins/localization-zh/lib/localization-zh.jar` 的
@@ -27,6 +27,22 @@ import { nextCustomRegion, regionEntries, regionIndent, type CustomRegion } from
 // 上游英文原文见 `platform/platform-api/resources/messages/IdeBundle.properties:1063/1066`。
 export const GOTO_CUSTOM_REGION_TITLE = '转到自定义折叠'
 export const NO_CUSTOM_REGIONS_IN_FILE = '当前文件中没有自定义的折叠'
+
+/**
+ * 跳到某个区域的 dispatch 规格 —— 上游 `CustomFoldingRegionsPopup.java:80-88` 的四步：
+ *   ① 落点是**元素**（开始标记那一行）的起始偏移，且要 `offset >= 0 && offset < textLength`
+ *      才动（`:82` 的那道界闸，越界就什么都不做）；
+ *   ② `removeSecondaryCarets()`（`:83`）与 ④ `removeSelection()`（`:86`）在本仓由
+ *      「整份替换选区」的 `EditorSelection.cursor(from)` 一次做到（CodeMirror 的
+ *      `selection` 规格就是把全部 range 换成这一条）；
+ *   ③ `scrollToCaret(ScrollType.CENTER)`（`:85`）= `EditorView.scrollIntoView(…, { y: 'center' })`。
+ *      本仓原来只给了「滚进可见区就行」那一档（CodeMirror 的 **nearest**：本来就看得见就一动不动），
+ *      滚动位置与上游不同：从列表里挑一条时上游总把那条带到视口中间。
+ */
+export function regionNavigateSpec(region: CustomRegion, textLength: number): TransactionSpec | null {
+  if (region.from < 0 || region.from >= textLength) return null
+  return { selection: EditorSelection.cursor(region.from), effects: EditorView.scrollIntoView(region.from, { y: 'center' }) }
+}
 
 export interface CustomRegionsPopupController {
   extension: Extension
@@ -51,7 +67,9 @@ export function createCustomRegionsPopup(getView: () => EditorView | undefined):
     const view = getView()
     close()
     if (!view) return
-    view.dispatch({ selection: EditorSelection.cursor(region.from), scrollIntoView: true })
+    const spec = regionNavigateSpec(region, view.state.doc.length)
+    if (!spec) return
+    view.dispatch(spec)
     view.focus()
   }
 

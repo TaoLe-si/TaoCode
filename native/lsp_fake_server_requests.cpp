@@ -118,7 +118,16 @@ void handle_request(const Flags& flags, const std::string& method, const Json& p
             write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", ranges}});
         } else if (method == "textDocument/hover") {
             const auto contents = saw_source_paths ? std::string("hover with Java settings") : std::string("hover from fake");
-            write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"contents", {{"kind", "markdown"}, {"value", contents}}}}}});
+            // 区间按请求位置回一段（从光标起 5 个字符，像真服务器那样把符号的范围交给宿主：
+            // `platform/lsp-impl/src/impl/LspRequestExecutor.kt:220` 读的就是这个 `hover.range`）。
+            const Json point = params.contains("position") && params.at("position").is_object()
+                                   ? params.at("position") : Json::object();
+            const auto hover_line = point.contains("line") ? point.at("line").get<int>() : 0;
+            const auto hover_char = point.contains("character") ? point.at("character").get<int>() : 0;
+            write_message({{"jsonrpc", "2.0"}, {"id", id}, {"result", {
+                {"contents", {{"kind", "markdown"}, {"value", contents}}},
+                {"range", {{"start", {{"line", hover_line}, {"character", hover_char}}},
+                          {"end", {{"line", hover_line}, {"character", hover_char + 5}}}}}}}});
         } else if (method == "textDocument/completion") {
             // Items derived from the synchronised document: the identifier being
             // typed at the requested position filters a canned dictionary, and

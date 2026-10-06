@@ -21,6 +21,39 @@ export interface LspCache {
   clearCache(): void
 }
 
+// ── 缓存的**批量生命周期**（`cache/LspCache.kt:5-8` 那句 "caches that participate in bulk
+// lifecycle operations" 的执行面）───────────────────────────────────────────────
+// 上游每个客户端对象带一份注册表（`LspClientImpl.kt:106` 的
+// `private val highlightingCacheRegistry = LspHighlightingCacheRegistry(this)`），
+// 注册表里 `allCaches.forEach { it.clearCache() }`（`LspHighlightingCacheRegistry.kt:46-48`）；
+// 客户端换掉/重启就等于整族缓存一起没了。本仓的缓存散在前端各模块（结构视图按文件缓存、
+// 高亮快照缓存），所以构造时**自登记**，由 `clearAllLspCaches()` 做那一次整批作废。
+// 两个生产触发点：
+//   · 语言服务重启/换工程 —— `src/lsSessionHost.ts` 的 `resetLspSession()`
+//     （生产写入方是 `src/lspCompletionStartup.ts` 那条「服务器没响应就重启」的恢复链）；
+//   · 服务器自己发 `workspace/…/refresh` 说「你手里那份过期了」——
+//     `LspServerNotificationsHandlerImpl.kt:341-368` 答 null，`LspClientImpl.kt:223-265`
+//     清对应的缓存并重取；本仓的分派在 `src/lspProgress.ts`。
+// 与上游的差异（如实）：上游按**单个缓存**清（例如只清 `semanticTokensCache`），这里一次清整族。
+// 多出来的代价只是「下一次读重新请求一次」，既不会留下旧结果，也不会漏掉新结果。
+const registeredCaches = new Set<LspCache>()
+
+/** 登记一份参与批量作废的缓存（两个缓存类的构造函数自己调）。 */
+export function registerLspCache(cache: LspCache): void {
+  registeredCaches.add(cache)
+}
+
+/** 当前登记着几份（判据与排查用）。 */
+export function lspCacheCount(): number {
+  return registeredCaches.size
+}
+
+/** 整批作废，返回作废了几份缓存。 */
+export function clearAllLspCaches(): number {
+  for (const cache of registeredCaches) cache.clearCache()
+  return registeredCaches.size
+}
+
 export type CacheStamp = string | number
 
 interface Slot<K, V> {
@@ -44,6 +77,8 @@ export class LspPerFileCache<K, V> implements LspCache {
               options: { matches?: (storedKey: K, storedValue: V, queriedKey: K) => boolean } = {}) {
     this.stampOf = stampOf
     this.matches = options.matches ?? ((stored, _value, queried) => stored === queried)
+    // 参与批量作废（见上面那段注册表注释）。
+    registerLspCache(this)
   }
 
   /** 只读命中（不触发计算）：文件 + stamp + matches 三条都成立才返回值。 */
@@ -123,6 +158,8 @@ export class LspSingleSlotCache<K, V> implements LspCache {
               options: { matches?: (storedKey: K, storedValue: V, queriedKey: K) => boolean } = {}) {
     this.stampOf = stampOf
     this.matches = options.matches ?? ((stored, _value, queried) => stored === queried)
+    // 参与批量作废（见上面那段注册表注释）。
+    registerLspCache(this)
   }
 
   getOrCompute(key: K, compute: () => V | null | Promise<V | null>): Promise<V | null> {

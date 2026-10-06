@@ -16,7 +16,14 @@ export const surroundTemplates: SurroundTemplate[] = [
   { title: 'if / else', keywords: 'if else branch 条件 分支', prefix: 'if () {', suffix: '} else {\n\n}', block: true },
   { title: 'for 索引循环', keywords: 'for loop index 循环', prefix: 'for (let i = 0; i < ; i++) {', suffix: '}', block: true },
   { title: 'while 循环', keywords: 'while loop 循环', prefix: 'while () {', suffix: '}', block: true },
+  // `do { … } while ()` 与 `try { … } catch { … } finally { … }`：上游 `Surround With` 那一张表里的
+  // 两项（`java/java-impl/src/com/intellij/codeInsight/generation/surroundWith/JavaStatementsSurroundDescriptor.java:26-40`
+  // —— `JavaWithDoWhileSurrounder`(:30) 与 `JavaWithTryCatchFinallySurrounder`(:35)）。
+  // 同一张表里剩下的 `synchronized`(:36) 与 `Runnable`(:37) 是 Java 专有构造，本仓的编辑器档
+  // （TS/JS/Python…）没有对应写法 ⇒ 不列（列了点下去就是坏代码）。
+  { title: 'do / while 循环', keywords: 'do while loop repeat 循环 至少一次', prefix: 'do {', suffix: '} while ()', block: true },
   { title: 'try / catch', keywords: 'try catch exception 异常 捕获', prefix: 'try {', suffix: '} catch (error) {\n\n}', block: true },
+  { title: 'try / catch / finally', keywords: 'try catch finally exception 异常 捕获 兜底', prefix: 'try {', suffix: '} catch (error) {\n\n} finally {\n\n}', block: true },
   { title: 'try / finally', keywords: 'try finally cleanup 清理 兜底', prefix: 'try {', suffix: '} finally {\n\n}', block: true },
   { title: '代码块 { }', keywords: 'block braces scope 代码块 作用域', prefix: '{', suffix: '}', block: true },
   { title: '文档注释 /* */', keywords: 'comment block doc 注释', prefix: '/*', suffix: '*/', block: true },
@@ -62,7 +69,12 @@ export function wrapSelection(template: SurroundTemplate, body: string, indent: 
   }
   const inner = reindent(body, indent, unit)
   const text = indent + template.prefix + '\n' + inner + '\n' + indent + template.suffix
-  const parens = template.prefix.indexOf('()')
-  const caret = parens >= 0 ? indent.length + parens + 1 : indent.length + template.prefix.length + 1 + inner.length
-  return { text, caret }
+  const afterBody = indent.length + template.prefix.length + 1 + inner.length
+  // 要填条件的 `()` 在前缀里（`if (|) {`）就落在那儿；只出现在后缀里
+  // （`do { … } while (|)`）也一样 —— 同一条理由：光标停在下一步要敲的字上。
+  const inPrefix = template.prefix.indexOf('()')
+  if (inPrefix >= 0) return { text, caret: indent.length + inPrefix + 1 }
+  const inSuffix = template.suffix.indexOf('()')
+  if (inSuffix >= 0) return { text, caret: afterBody + 1 + indent.length + inSuffix + 1 }
+  return { text, caret: afterBody }
 }

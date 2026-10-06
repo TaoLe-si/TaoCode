@@ -11,9 +11,9 @@
 // 依赖之所以有 104 个，是因为它是"按键 → 动作"的总线，动作本身都在各自的域里；这里只做判定。
 import { dapState, dapStep, isDesktop, runState, type RunConfig, type RunStartParams, type Workspace } from './bridge.ts'
 import { MAXIMIZE_SHORTCUT_CODE } from './toolWindowHeader.ts'
-import { findKeyBinding } from './keymapBindings.ts'
+import { EDITOR_ACTIONS, findKeyBinding } from './keymapBindings.ts'
 import { effectiveKeyBindings } from './keymapEditor.ts'
-import { ACTIONS, registerKeymapActions } from './actionRegistry.ts'
+import { ACTIONS, registerEditorActions, registerKeymapActions } from './actionRegistry.ts'
 import { recordKeyEvent } from './macroHost.ts'
 import { presentShortcut } from './presentationAssistant.ts'
 import type { Tab } from './editorTab'
@@ -103,6 +103,22 @@ export interface KeymapContext {
   /** `CopyPaths`（Ctrl+Shift+C）：把当前文件的绝对路径复制到剪贴板。 */
   copyPaths: () => void
   openCodeActions: (payload: any, onlyFixes?: boolean) => unknown
+  /**
+   * 编辑器命令的执行入口 = 宿主 `src/App.vue:1405` 的 `runEditor(name)`（把命令名交给当前
+   * CodeEditor 实例）。**可选**：宿主没给时 `EDITOR_ACTIONS` 那六条一条都不注册 ——
+   * 注册一个跑不动的动作就是「假控件」，宁可不注册。接线请求见
+   * `docs/wiring-requests-2026-10-06-keymap.md` R1。
+   */
+  runEditor?: (name: string) => unknown
+  /**
+   * 转到父方法 / 转到测试 / 相关符号（`navigate.super|test|related`，`$default.xml:251-259`）。
+   * 宿主 `src/App.vue:1219` 已经从 `createLspNavigation` 拿到这三个函数（`:1499` 也喂给了导航菜单），
+   * 只差没塞进 `createKeymap` —— 接线请求见 `docs/wiring-requests-2026-10-06-keymap.md` R2。
+   * **可选**：没给的时候这三条不注册（见下面 `unwired`），按键原样放行，不留假动作。
+   */
+  gotoSuper?: () => unknown
+  gotoTest?: () => unknown
+  gotoRelated?: () => unknown
   openConfigChooser: () => void
   openGeneratePopup: () => unknown
   openGoLine: () => void
@@ -162,7 +178,8 @@ export function createKeymap(ctx: KeymapContext) {
           openSymbol, openWorkspace, pickMnemonic, rerunLast, resolveConflictKeep, restoreCurrentToolLayout,
           runContextConfiguration, runSelectedConfig, runToCursor, save, saveAll, openSelectIn, showNavBar, selectNextTab,
           selectPreviousTab, showBlame, showOutput, showQuickDoc, showView, startBuild, stopRun, stretchToolWindow,
-          toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject, openRunAnything } = ctx
+          toggleBookmark, toggleBreakpointAt, toggleMaximizeEditor, updateProject, openRunAnything, runEditor,
+          gotoSuper, gotoTest, gotoRelated } = ctx
   // IDEA 的 Keymap 没有"双击 Shift"这条绑定，它是 SearchEverywhere 的默认手势；宿主原先用
   // 一个模块级 `let lastShiftAt` 记上一次 Shift 的时间戳，随函数一起搬进来。
   // RunAnything 的双击 Ctrl 走同一机制（`$default.xml:7-9` 的 gesture shortcut）。
@@ -368,6 +385,11 @@ function onKey(event: KeyboardEvent) {
     'navigate.recentLocations': () => openRecentPlaces(),
     'navigate.recentFiles': () => openRecentFiles(),
     'navigate.gotoLine': () => openGoLine(),
+    // 这三把键的处理器由宿主的 `createLspNavigation` 给（`src/App.vue:1219` 已解构，见 `KeymapContext` 那三条
+    // 可选字段）。没给的时候 `unwired` 会让这一格在**注册**那一步被跳过 ⇒ `ACTIONS.has` 为假 ⇒ 按键原样放行。
+    'navigate.super': () => void (gotoSuper?.()),
+    'navigate.test': () => void (gotoTest?.()),
+    'navigate.related': () => void (gotoRelated?.()),
     'refactor.changeSignature': () => openChangeSignature(),
     'refactor.safeDelete': () => void openSafeDelete(),
     'refactor.extractVariable': () => extractVariable(),
@@ -379,7 +401,8 @@ function onKey(event: KeyboardEvent) {
     'edit.copyReference': () => { void copyReference() },
     'edit.copyPath': () => copyPaths(),
   }
-  // 这 25 条动作同时注册进**动作注册表**（`src/actionRegistry.ts`）：id → 标题/可用性谓词/处理器。
+  // `KEY_BINDINGS` 的每一个 id 同时注册进**动作注册表**（`src/actionRegistry.ts`）：
+  // id → 标题/可用性谓词/处理器（条数由 `tests/keymap-bindings.test.mjs` 的 1:1 门核，注释里不写数字）。
   // 可用性谓词读的是与 `findKeyBinding` 同一组实时状态；`ACTIONS.run` 在执行前再复核一次
   // （上游 keymap 同样不会触发 `update()` 关掉的动作）。菜单/插件入口按 id 查得到这些动作。
   //
@@ -387,9 +410,21 @@ function onKey(event: KeyboardEvent) {
   // 用户方案叠在出厂 `BundledKeymapBean` 之上）。分派与「演示助手」显示的快捷键都读同一份，
   // 所以改键**立刻**改变实际行为，不是只改菜单文案。
   const bindings = effectiveKeyBindings()
-  registerKeymapActions(bindings, binding => tailActions[binding.id], () => ({
+  // 宿主没把 `gotoSuper`/`gotoTest`/`gotoRelated` 塞进 ctx 时，这三条**不参与注册**：
+  // `registerKeymapActions` 见 `handlerOf` 返回 undefined 就跳过 ⇒ `ACTIONS.has` 为假 ⇒ 命中键位也原样放行。
+  // 少了这一层就会出现「键位表写着 Ctrl+Shift+T、按下去只吞键不干活」的假动作（本仓铁律）。
+  const unwired = new Set([gotoSuper ? '' : 'navigate.super', gotoTest ? '' : 'navigate.test',
+    gotoRelated ? '' : 'navigate.related'])
+  registerKeymapActions(bindings, binding => (unwired.has(binding.id) ? undefined : tailActions[binding.id]), () => ({
     workspace: !!workspace.value, editor: !!active.value, lsp: lspReady.value,
   }))
+  // 编辑器一族（排序行 / 反串行 / 删除重复行 / 克隆光标上·下 / 配对括号）：这六条的上游动作
+  // `EditorSortLines`/`EditorReverseLines`/`EditorUniqueLines`/`EditorCloneCaretAbove|Below`/`EditorMatchBrace`
+  // 要么在 `$default.xml` 里**没有默认键位**（前三与克隆那对），要么那把键是在编辑器的 CodeMirror keymap
+  // 里按到的（`EditorMatchBrace` = Ctrl+Shift+M，`$default.xml:1146-1148`）⇒ 都不进 `KEY_BINDINGS`
+  // （进了就是一条永远按不到的绑定 + 一个空转处理器），只进注册表，id 与菜单行、`editingCommands` 同名。
+  // 宿主没传 `runEditor` 时整条注册都跳过：拿不到执行入口就不注册，而不是注册一个点了没反应的假动作。
+  if (runEditor) registerEditorActions(EDITOR_ACTIONS, name => runEditor(name), () => !!active.value)
   const binding = findKeyBinding(event, { workspace: !!workspace.value, editor: !!active.value, lsp: lspReady.value }, bindings)
   if (binding && ACTIONS.has(binding.id)) {
     event.preventDefault()

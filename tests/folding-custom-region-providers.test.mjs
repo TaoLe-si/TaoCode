@@ -81,6 +81,18 @@ test('占位文字：两个 provider 的取法与同一个 `...` 空值分支', 
   assert.equal(placeholderOf(commentMarkerBody('// 与 region 无关')), '...', '不是标记 → 没有占位可取')
   // 结束标记不产占位：上游只对开始标记问 provider（`CustomFoldingBuilder.java:131-136`）。
   assert.equal(placeholderOf(commentMarkerBody('//</region>')), '...')
+  // **正则不匹配 ≠ 捕获为空**：Java 的 `replaceFirst` 不匹配时原样返回入参
+  // （`NetBeansCustomFoldingProvider.java:25-26`）⇒ 没有 `desc` 属性时占位就是整段元素文本。
+  assert.equal(placeholderOf(commentMarkerBody('//<editor-fold>')), '<editor-fold>',
+    '没给元素文本时退回剥过前缀的正文（本仓的旧调用形状），同样是「原样返回入参」那一档')
+  assert.equal(placeholderOf(commentMarkerBody('//<editor-fold>'), '//<editor-fold>'), '//<editor-fold>')
+  assert.equal(placeholderOf(commentMarkerBody('//<editor-fold desc="">'), '//<editor-fold desc="">'), '...',
+    '正则**匹配**但捕获为空才是 `...` 那一档（`:26` 的 isEmpty 分支）')
+  // `defaultstate="collapsed"` 不影响占位：那条正则里没有 desc ⇒ 回吐整段文本（与上游同）。
+  assert.equal(placeholderOf(commentMarkerBody('//<editor-fold defaultstate="collapsed">'),
+    '//<editor-fold defaultstate="collapsed">'), '//<editor-fold defaultstate="collapsed">')
+  assert.equal(placeholderOf(commentMarkerBody('#region 说明'), '#region 说明'), '说明',
+    'VS 那一支的正则总能匹配 ⇒ 第二实参用不上（`:24`）')
 })
 
 test('defaultstate="collapsed" 单独认：全局开关关着也默认折', () => {

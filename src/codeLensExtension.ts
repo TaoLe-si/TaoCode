@@ -16,6 +16,7 @@
 
 import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { watch } from 'vue'
 import { anchoredLenses, codeLensCommand, codeLensRefreshDelay, codeLensTooltip, groupAnchoredLenses, parseCodeLensTitle,
          type AnchoredLens, type CodeLensAnchorRow, type CodeLensRefreshPolicy, type CodeLensResult, type CodeLensTitleIcon, type CodeLensTrigger } from './codeLens.ts'
 // 本地 Code Vision 提供者通道（`src/codeVisionProviders.ts`）：上游把内置的那一组
@@ -28,10 +29,12 @@ import { anchorCodeVisionEntries, mergeCodeVisionEntries, type CodeVisionEntry, 
 // `import type` 不产生运行时依赖，所以这个文件在 node 直跑测试里仍然不需要 `cvLocalVision.ts`。
 import type { CodeVisionLocalChannel } from './cvLocalVision.ts'
 // 按 provider 的开关与右键隐藏（`src/codeLensSettings.ts`，上游 `CodeVisionSettings` +
-// `ProjectCodeVisionModelImpl.handleLensExtraAction` 那两条）：渲染这一侧只问两个判据，
-// 表本身不在这个文件里。
-import { codeVisionContextActions, codeVisionGroupId, codeVisionGroupName, LSP_CODE_VISION_GROUP_ID,
-         shouldShowCodeVisionEntry, handleCodeVisionExtraAction, CODE_VISION_POPUP_MAX_ROWS } from './codeLensSettings.ts'
+// `ProjectCodeVisionModelImpl.handleLensExtraAction` 那两条）：渲染这一侧只问它三件事
+// —— 这条归哪一组（`codeVisionGroupId`）、那一组画不画（`shouldShowCodeVisionEntry`，上游两层闸
+// `CodeVisionSettings.kt:55-60` + `:96-101`）、每个锚点画几条（`codeVisionVisibleEntryLimit`，
+// 上游 `CodeVisionSettings.kt:38-39` → `CodeVisionListData.kt:45-57`）。表本身不在这个文件里。
+import { codeVisionContextActions, codeVisionGroupId, codeVisionGroupName, codeVisionSettings, codeVisionVisibleEntryLimit,
+         LSP_CODE_VISION_GROUP_ID, shouldShowCodeVisionEntry, handleCodeVisionExtraAction, CODE_VISION_POPUP_MAX_ROWS } from './codeLensSettings.ts'
 // 按文件的 lens 快照（`src/codeLensCache.ts`，上游 `LspCodeLensCache` + `LspHighlightingCache`）：
 // 编辑期间把旧的条目**留着**并跟着文档挪，而不是整行消失等新数据。
 import { createCodeLensCache } from './codeLensCache.ts'
@@ -129,11 +132,12 @@ function openCodeVisionMenu(x: number, y: number, actions: { id: string; label: 
 /**
  * 右键某一组 Code Vision → 上面那个菜单（`onContext` 的实现，上游
  * `ProjectCodeVisionModelImpl.handleLensRightClick` `:45-48`）。两条动作直接写
- * `codeLensSettings` 的那份设置，渲染通道下一次建装饰集时生效（`buildDecorations`）。
+ * `codeLensSettings` 的那份设置，并把「设置变了」这件事交给 `onGateApplied`：
+ * 渲染通道拿它立刻重建装饰集（`buildDecorations`），所以点了就少那一组，不用等下一次刷新。
  */
-function openCodeVisionContext(groupId: string, x: number, y: number): void {
+function openCodeVisionContext(groupId: string, x: number, y: number, onGateApplied: () => void): void {
   openCodeVisionMenu(x, y, codeVisionContextActions(codeVisionGroupName(groupId)),
-    id => { handleCodeVisionExtraAction(id, groupId) })
+    id => { if (handleCodeVisionExtraAction(id, groupId)) onGateApplied() })
 }
 
 class CodeLensWidget extends WidgetType {
@@ -229,19 +233,43 @@ class CodeLensRowWidget extends WidgetType {
 
 export const setCodeLens = StateEffect.define<readonly AnchoredLens[]>()
 const onCodeLensCommand = StateEffect.define<null>()   // 占位，保持 effect 类型集中
+// 齿轮/右键改了 Code Vision 的设置表 ⇒ 立刻按新闸重画（上游靠
+// `CodeVisionSettings.listener.providerAvailabilityChanged` / `globalEnabledChanged`
+// （`CodeVisionSettings.kt:120` / `:59`）通知模型重算，本仓没有后台收集线程，就在编辑器这一拍走一遍）。
+const codeVisionGateChanged = StateEffect.define<null>()
 
-function buildDecorations(state: EditorState, lenses: readonly AnchoredLens[], onCommand: (command: string, args?: unknown[]) => void): DecorationSet {
+/**
+ * 把一份 lens 列表变成「每锚点一行」的块装饰。
+ *
+ * 先过闸再归并：上游的组闸在**收集**时就跳过整个 provider
+ * （`CodeVisionHost.kt:348-350` `for (provider in providers) { if (!settings.isProviderEnabled(provider.groupId)) continue`），
+ * 总闸关掉时整族不收集（`CodeVisionHost.kt:341` 的 `isEnabledWithRegistry`，读的是
+ * `CodeVisionSettings.kt:55-56` 的 `codeVisionEnabled`）。所以这里不是「画出来再藏」：
+ * 关掉的组一条都不会进装饰集，`groupAnchoredLenses` 的上限与 `hidden` 计数也因此只数可见的那几条。
+ *
+ * 第二层（每个锚点最多几条）吃的是**设置表里那一个数**，不是常量：
+ * `CodeVisionListData.kt:46` 的 `projectModel.maxVisibleLensCount[anchor]` 由
+ * `CodeVisionHost.kt:287-288` 从 `CodeVisionSettings.getAnchorLimit(...)`（`CodeVisionSettings.kt:140-147`）灌进来，
+ * 出厂 5（`:38-39`）。截断的形状与上游逐字一致 —— 上游 `subList(0, minOf(count, size))`
+ * （`CodeVisionListData.kt:55-56`）= 保留前缀、不改序，本仓是 `src/codeLens.ts:165` 的 `slice(0, cap)`。
+ * 顺序仍然是**闸在前、上限在后**：反过来会让被关掉的族白占那 5 个槽位。
+ */
+function buildDecorations(state: EditorState, lenses: readonly AnchoredLens[], onCommand: (command: string, args?: unknown[]) => void,
+                          onGateChange: () => void): DecorationSet {
   if (!lenses.length) return Decoration.none
+  const visible = lenses.filter(lens => shouldShowCodeVisionEntry(codeVisionGroupId(lens.item)))
+  if (!visible.length) return Decoration.none
   const decorations: ReturnType<Decoration['range']>[] = []
   // 同锚点的条目合成一行（见 `CodeLensRowWidget`）；`groupAnchoredLenses` 已按位置稳定排序。
   // 行号越界就跳过（服务端算的时候文档可能已经变了）。
-  for (const row of groupAnchoredLenses(lenses)) {
+  const onContext = (groupId: string, x: number, y: number) => { openCodeVisionContext(groupId, x, y, onGateChange) }
+  for (const row of groupAnchoredLenses(visible, codeVisionVisibleEntryLimit())) {
     if (row.line >= state.doc.lines) continue
     const line = state.doc.line(row.line + 1)
     // `block: true` 是 CodeMirror 里唯一能表达"行**上方**"的方式（行内 widget 会挤在代码中间，
     // 那是 inlay hint 的位置，不是 Code Vision 的位置）。
     decorations.push(Decoration.widget({
-      widget: new CodeLensRowWidget(row, onCommand, openCodeVisionContext), block: true, side: -1,
+      widget: new CodeLensRowWidget(row, onCommand, onContext), block: true, side: -1,
     }).range(line.from))
   }
   return Decoration.set(decorations, true)
@@ -311,13 +339,30 @@ function readLocalEntries(deps: CodeLensDeps): readonly CodeVisionEntry[] {
 }
 
 export function createCodeLens(deps: CodeLensDeps): CodeLensController {
+  // 最近一次送进渲染通道的条目（已过 `anchoredLenses` / 合流，未过闸）。
+  // 留着它是因为闸变了要拿同一批条目**原地重画**：上游的监听器触发的也只是「重新收集」，
+  // 不是「重新问服务器」（`CodeVisionSettings.kt:120` → `LensInvalidateSignal`）。
+  let lastLenses: readonly AnchoredLens[] = []
+  const applyGateChange = () => { deps.view()?.dispatch({ effects: codeVisionGateChanged.of(null) }) }
+  // 设置表里任何一格变了（总闸 / 某一组 / 每锚点条数）都要按新档重画。上游是三个监听器做同一件事：
+  // `CodeVisionSettings.kt:59` 的 `globalEnabledChanged`、`:120` 的 `providerAvailabilityChanged`、
+  // `CodeVisionHost.kt:298-300` 的 `visibleMetricsAboveDeclarationCount.advise { invalidateProviderSignal.fire(...) }`
+  // —— 都是「按新设置重新走一遍已有的条目」，不是「重新问服务器」。本仓没有后台收集线程，
+  // 等价物就是在本编辑器里重跑一次 `buildDecorations`（`codeVisionGateChanged` 那条 effect）。
+  // 没有这一拍，设置页改了数字要等下一次刷新才见效（右键那条另有同步的 `onGateApplied`，见上面）。
+  const stopSettingsWatch = watch(codeVisionSettings, applyGateChange)
   const field = StateField.define<DecorationSet>({
     create: () => Decoration.none,
     update(_decorations, transaction) {
       // 行号依赖精确位置，内容一变整份作废（和语义着色/文档链接同理）。
       if (transaction.docChanged) return Decoration.none
-      for (const effect of transaction.effects)
-        if (effect.is(setCodeLens)) return buildDecorations(transaction.state, effect.value, deps.onCommand)
+      for (const effect of transaction.effects) {
+        if (effect.is(setCodeLens)) {
+          lastLenses = effect.value
+          return buildDecorations(transaction.state, lastLenses, deps.onCommand, applyGateChange)
+        }
+        if (effect.is(codeVisionGateChanged)) return buildDecorations(transaction.state, lastLenses, deps.onCommand, applyGateChange)
+      }
       return _decorations
     },
     provide: f => EditorView.decorations.from(f),
@@ -395,6 +440,6 @@ export function createCodeLens(deps: CodeLensDeps): CodeLensController {
       if (timer !== undefined) { clearTimeout(timer); timer = undefined }
       deps.view()?.dispatch({ effects: setCodeLens.of([]) })
     },
-    dispose() { if (timer !== undefined) clearTimeout(timer) },
+    dispose() { stopSettingsWatch(); if (timer !== undefined) clearTimeout(timer) },
   }
 }

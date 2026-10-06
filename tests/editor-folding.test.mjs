@@ -7,11 +7,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { codeFolding, foldedRanges, foldable } from '@codemirror/language'
+import { codeFolding, foldEffect, foldedRanges, foldable } from '@codemirror/language'
 import { keymap, runScopeHandlers } from '@codemirror/view'
 import { javascript } from '@codemirror/lang-javascript'
 import { EditorState } from '@codemirror/state'
-import { blockAt, commentRanges, depthOf, docCommentRanges, enclosingAreas, foldingRanges, innermostAt, isDocCommentLine,
+import { blockAt, blockFoldPlan, blockRanges, commentRanges, depthOf, docCommentRanges, enclosingAreas, foldingRanges,
+  innermostAt, isDocCommentLine,
   levelPlan, lspFoldService, nestedWithin,
   rootAtLine, setFoldingRanges, areaStartingAtLine, areasContaining, collapseTarget, expandTarget, toggleTarget,
   recursiveScope } from '../src/editorFolding.ts'
@@ -181,6 +182,123 @@ test('切换：起始行那条优先，否则光标处最内层（ExpandCollapse
   assert.equal(toggleTarget(areas, [], 50, 20, 39), B)
   assert.equal(toggleTarget(areas, [], 50, 45, 46), C)
   assert.equal(toggleTarget(areas, [], 1000, 1000, 1010), null)
+})
+
+// ── 折叠代码块：沿块往外爬那一套（`CollapseBlockHandlerImpl.invoke:19-76`） ────────────────
+// `areas` 按**最内层在前**给（生产里是 `areasContaining(blocks, pos)`，与上游沿 `findParentBlock`
+// 往外爬的顺序一致，见 `FoldingUtil.getFoldRegionsAtOffset:56` 的 BY_START_OFFSET 降序）。
+const insideC = { from: 30, to: 60, auto: false }     // 跨过 C 起点的一条手工折痕
+const acrossB = { from: 50, to: 250, auto: false }    // 跨过 B **尾端**的那条（B.from 在它外面、B.to 在它里面）
+const endsAtBStart = { from: 5, to: 20, auto: false }    // 尾端正好**搭**在 B 起点上的一条（containsStrict 两端都不含）
+
+test('折叠代码块：折光标处最内层那块，并把光标放到它末尾（:44-47、:55-63、:75）', () => {
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50), { from: C.from, to: C.to, caret: C.to, collapse: true })
+  // 光标压在块的起止那一列上**也算**这一块：`range.containsOffset(offset)` 含端点
+  //（`CollapseBlockHandlerImpl.java:36` + `TextRange.java:121-123`）。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], C.to), { from: C.from, to: C.to, caret: C.to, collapse: true })
+  // 光标落在 B 与 C 之间（C 外面）⇒ C 不含光标，跳过它折 B（`:36-39` 那一支的 continue）。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 150), { from: B.from, to: B.to, caret: B.to, collapse: true })
+})
+
+test('折叠代码块：那块已经折着就往外爬一层（:48-52 记 previous、:44 折已有的展开区域）', () => {
+  // C 折着 ⇒ 折父块 B（上游 C 是"已折的区域"、B 是"展开着的区域" ⇒ `setExpanded(false)` 落在 B 上）。
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C)], 50), { from: B.from, to: B.to, caret: B.to, collapse: true })
+  // C 与 B 都折着 ⇒ 折 A。
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), bounds(B)], 50),
+    { from: A.from, to: A.to, caret: A.to, collapse: true })
+})
+
+test('折叠代码块：爬到顶全是折着的就只挪光标，不再叠一条（:66-73 的 previous 那一支）', () => {
+  const plan = blockFoldPlan([C, B, A], [bounds(C), bounds(B), bounds(A)], 50)
+  assert.deepEqual(plan, { from: A.from, to: A.to, caret: A.to, collapse: false },
+    '上游这一段 `previous.setExpanded(false)` 对已折着的是空操作，可见效果只有 :75 的 moveToOffset')
+  // 一条都不含光标 ⇒ 没目标（上游 :30 `element == null` 就 return）。
+  assert.equal(blockFoldPlan([C, B, A], [bounds(A)], 1000), null)
+})
+
+test('折叠代码块：有折痕跨过这块的边界就不许新建（:54 intersectsRegion + :64 break）', () => {
+  // `FoldRegionsCache.java:268-275`：某条区域严格含住两端**之一**就算搭界。
+  assert.deepEqual(blockFoldPlan([C, B, A], [], 50).from, C.from, '没有那条手工折痕时折 C')
+  assert.equal(blockFoldPlan([C, B, A], [insideC], 50), null, 'C 的起点被跨住 ⇒ 停，且前面没记 previous')
+  // C 自己已经折着（不需要新建，也就谈不上搭界）⇒ 往外一层；B 的**尾**被跨住 ⇒ 停在这里，
+  // 落到 :66-73 那一支：不折，只把光标放到记下的那条 previous（= C）末尾。
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), acrossB], 50),
+    { from: C.from, to: C.to, caret: C.to, collapse: false })
+  // 跨界的那条只搭着 B 的起点一端（`containsStrict` 两端都不含）⇒ 不算搭界，B 可以折。
+  assert.deepEqual(blockFoldPlan([C, B, A], [bounds(C), endsAtBStart], 50),
+    { from: B.from, to: B.to, caret: B.to, collapse: true })
+})
+
+test('blockRanges：注释 / imports / region 那一三族不算"代码块"（CollapseBlockAction 找的是语言块）', () => {
+  const kinds = [
+    { startLine: 0, endLine: 5 },
+    { startLine: 1, endLine: 3, kind: 'comment' },
+    { startLine: 6, endLine: 8, kind: 'imports' },
+    { startLine: 9, endLine: 12, kind: 'region' },
+  ]
+  assert.deepEqual(blockRanges(kinds), [kinds[0]])
+  assert.equal(blockAt(kinds, 2), kinds[0], '行 2 上只有那条不带 kind 的块')
+  assert.equal(blockAt(kinds, 7), null, 'imports 区间不是代码块')
+})
+
+// 端到端：命令层确实按上面那套走，并且**真的把光标挪了**（判据看的是最后那份 state）。
+const BLOCK_DOC = ['function outer() {', '  function inner() {', '    return 1', '  }', '  return 2', '}'].join('\n')
+const BLOCK_RANGES = [{ startLine: 0, endLine: 5 }, { startLine: 1, endLine: 3 }]
+
+const blockState = (caret, folded, withRanges = BLOCK_RANGES) => {
+  const placed = EditorState.create({ doc: BLOCK_DOC, selection: { anchor: caret },
+    extensions: [codeFolding(), foldingRanges, lspFoldService] })
+    .update({ effects: setFoldingRanges.of(withRanges) })
+  return folded.length ? placed.update({ effects: folded.map(bounds => foldEffect.of(bounds)) }).state : placed.state
+}
+const blockSpans = state => {
+  const out = []
+  for (const iterator = foldedRanges(state).iter(); iterator.value; iterator.next()) out.push([iterator.from, iterator.to])
+  return out
+}
+/** 跑一次 fold.block，返回（新状态, 命令返回值）。view.state 要是**活的**：命令折完还会另发一笔挪光标。 */
+const pressBlock = state => {
+  let next = state
+  const view = { get state() { return next }, dispatch: spec => { next = next.update(spec).state } }
+  const done = editingCommands['fold.block'](view)
+  return { next, done }
+}
+
+test('fold.block 端到端：折最内层那块，光标落到它末尾（CollapseBlockHandlerImpl:44-47、:75）', () => {
+  const doc = EditorState.create({ doc: BLOCK_DOC }).doc
+  const inner = { from: doc.line(2).from, to: doc.line(4).to }       // 服务端给的那块（第 2–4 行）
+  const caretIn = doc.line(3).from + 2                                // 光标在第 3 行（return 1）里
+  const { next, done } = pressBlock(blockState(caretIn, []))
+  assert.equal(done, true)
+  assert.deepEqual(blockSpans(next), [[inner.from, inner.to]], '折的是最内层那一块')
+  assert.equal(next.selection.main.head, inner.to, '光标落到这块的末尾（上游 :46 的 existing.getEndOffset()）')
+})
+
+test('fold.block 端到端：再按一次往外折一层；第三次只挪光标', () => {
+  const doc = EditorState.create({ doc: BLOCK_DOC }).doc
+  const inner = { from: doc.line(2).from, to: doc.line(4).to }
+  const outer = { from: doc.line(1).from, to: doc.line(6).to }
+  const caretIn = doc.line(3).from + 2
+  const first = pressBlock(blockState(caretIn, [])).next
+  const second = pressBlock(first).next
+  assert.deepEqual(blockSpans(second), [[outer.from, outer.to], [inner.from, inner.to]],
+    '第一层折完再按 ⇒ 外层也折上（上游 :48-52 记 previous、:44 折展开着的父块）')
+  assert.equal(second.selection.main.head, outer.to, '光标跟着落到外层的末尾')
+  const third = pressBlock(second)
+  assert.equal(third.done, true, '三条全折着仍然做事（挪光标）')
+  assert.deepEqual(blockSpans(third.next), blockSpans(second), '不许叠第四条折痕')
+  assert.equal(third.next.selection.main.head, outer.to, '光标停在外层末尾（:72 的 previous.getEndOffset()）')
+})
+
+test('折叠代码块的退路仍然走语法树（没接语言服务的文件）', () => {
+  const folding = read('src/editorFolding.ts')
+  // 服务端一条区间都没给时，候选链 = 光标行那块 + 祖先链（`enclosingAreas`），
+  // 而且这条链现在**整条**参与往外爬（旧版只取最内层那一条）。
+  assert.match(folding, /syntaxArea\(view\.state, pos\) \?\? enclosingAreas\(view\.state, pos\)\[0\]/,
+    '光标行那块优先，摸不到才用祖先链的第一条')
+  assert.match(folding, /for \(const area of enclosingAreas\(view\.state, pos\)\)/, '祖先链整条都是候选')
+  assert.match(folding, /const plan = blockFoldPlan\(areasContaining\(blocks, pos\), foldedBounds\(view\.state\), pos\)/,
+    '目标与光标落点由 blockFoldPlan 定')
 })
 
 test('递归：根 + 套在里面的全部；收起时根已折着就换成光标处展开的那条（BaseFoldingHandler:61-76）', () => {

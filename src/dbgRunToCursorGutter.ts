@@ -28,6 +28,7 @@ import { Decoration, EditorView } from '@codemirror/view'
 import { RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state'
 import { dapCapability, dapConsole, dapGoto, dapGotoTargets, dapState } from './bridge.ts'
 import { debuggerExtras } from './debugSettingsStore.ts'
+import { breakpointUpdater } from './dbgBreakpointUpdate.ts'
 
 /** 上游动作文案（`ActionsBundle.actionText("RunToCursor")`，`:479`）；本仓中文口径与 App.vue 一致。 */
 export const RUN_TO_CURSOR_HINT = '运行到光标处'
@@ -99,6 +100,9 @@ export async function runToCursorAtLine(path: string, line: number): Promise<str
     const result = await dapGotoTargets(path, line, 0)
     const target = result.targets[0]
     if (!target) return `${RUN_TO_CURSOR_HINT}：第 ${line} 行没有可停的位置。`
+    // `goto` 就是「恢复执行」⇒ 先把合并窗里的断点改动冲干净（同 DebugPanel 的继续/单步/反向/重启三处），
+    // 否则刚改的条件会排在这次 goto 之后才到适配器。
+    await breakpointUpdater.flush()
     await dapGoto(dapState.threadId, target.id)
     return `${RUN_TO_CURSOR_HINT}：第 ${line} 行（目标 ${target.label}）。`
   }

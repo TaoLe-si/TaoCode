@@ -81,3 +81,22 @@ export function filterStickySymbols<T extends { kind: number; name: string; star
 ): T[] {
   return symbols.filter(symbol => stickySymbolAccepted(symbol, language))
 }
+
+/**
+ * 这一语言的粘性行还显示吗 —— 上游 `EditorSettingsExternalizable.areStickyLinesShownFor:520-526`：
+ * 表里**没记**的语言一律显示（`if (visible == null) return true`，注释原文
+ * "enabled for all languages by default"），只有显式记成 false 的那一项才关。
+ * 语言还没定（`undefined`）时同「没记」处理 —— 全局那条 `showStickyLines` 才是总闸。
+ *
+ * 写这一项的入口上游有两处：弹层动作 `actions/StickyLinesDisableForLangAction.kt:24-29`
+ * （`setStickyLinesShownFor(language.id, false)`）与设置页的语言复选框
+ * （`configurable/StickyLinesConfigurableUI.kt:52-62`）；两者都要一个新的持久化键
+ * （`PropNames.PROP_SHOW_STICKY_LINES_PER_LANGUAGE = "showStickyLinesPerLanguage"`，
+ * `EditorSettingsExternalizable.java:1232`）—— 本仓的设置键表在冻结文件里 ⇒ 交接线请求。
+ */
+export function stickyLinesShownForLanguage(
+  shownPerLanguage: Record<string, boolean> | undefined, language: string | undefined,
+): boolean {
+  if (!shownPerLanguage || language === undefined) return true
+  return shownPerLanguage[language] ?? true
+}

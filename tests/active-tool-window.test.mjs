@@ -114,7 +114,9 @@ test('F12 is JumpToLastWindow, Ctrl+F12 is FileStructure, Ctrl+Shift+F12 is Hide
 // window. `showView`/`showOutput` are the two shared helpers; nothing may set `leftView` or
 // `bottomTab` directly on an activation path.
 test('the activation paths are recorded through the shared helpers', () => {
-  const app = readFileSync('src/App.vue', 'utf8')
+  // 2026-10-06：`showView` 整段搬到 src/appDockPlacement.ts（逐字等价，注入的回调沿用同名
+  // `recordActiveToolWindow`），读取面带上那一半；下面三条断言本体一字未改。
+  const app = readFileSync('src/App.vue', 'utf8') + '\n' + readFileSync('src/appDockPlacement.ts', 'utf8')
   for (const call of ['recordActiveToolWindow(view)', 'recordActiveToolWindow(tab)'])
     assert.ok(app.includes(call), `${call} is missing: an activation would not be recorded`)
   // The bottom tab buttons and the status-bar Problems widget go through showOutput.

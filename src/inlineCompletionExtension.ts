@@ -12,6 +12,7 @@ import { Prec, StateEffect, StateField, type EditorState, type Extension, type T
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from '@codemirror/view'
 import { advanceSuggestionOnTyping, inlineAcceptSpan, inlineGhostText, inlinePartialAcceptLength, shouldDismissInlineSuggestion, truncateSuggestion,
          type InlineCompletionItem, type InlinePartialAcceptMode } from './inlineCompletion.ts'
+import { hideInlineCompletionTooltip, inlineTooltipEntries, isInlineTooltipProvoker, toggleInlineCompletionTooltip } from './inlineCompletionTooltip.ts'
 
 /** 当前光标处待接受的建议。`span` 是**接受时要替换的区间**。 */
 export interface InlineSuggestion {
@@ -61,12 +62,22 @@ class GhostTextWidget extends WidgetType {
   readonly text: string
   constructor(text: string) { super(); this.text = text }
   eq(other: GhostTextWidget) { return other.text === this.text }
-  toDOM() {
+  toDOM(view: EditorView) {
     const span = document.createElement('span')
     span.className = 'cm-inline-suggestion'
     span.textContent = this.text
     // 屏幕阅读器不该念出这段"还没被接受"的文本（IDEA 的 ghost text 也不进无障碍树）。
     span.setAttribute('aria-hidden', 'true')
+    // 右键 ⇄ 悬浮操作条（上游 `InlineCompletionTooltipProvokerMouseListener.kt:11-25`：只认 BUTTON3
+    // （`:40`）、点必须在正在显示的幽灵文本范围内（`:44-49`，绑在这个元素上就是天然满足）、
+    // `:17` 的 `event.consume()` ⇒ 这里 preventDefault + stopPropagation，不再弹编辑器自己的右键菜单）。
+    // 浮层内容与键位都来自本文件的真实绑定表（`inlineTooltipEntries`），不放没有后端的动作。
+    span.addEventListener('contextmenu', event => {
+      if (!isInlineTooltipProvoker(event.button, true, event.defaultPrevented)) return
+      event.preventDefault()
+      event.stopPropagation()
+      toggleInlineCompletionTooltip(view, span.getBoundingClientRect(), inlineTooltipEntries(inlineCompletionBindings))
+    })
     return span
   }
   ignoreEvent() { return true }
@@ -107,6 +118,7 @@ export function acceptInlineSuggestion(editor: EditorView): boolean {
     selection: { anchor: from + suggestion.insertText.length },
     effects: setInlineSuggestion.of(null),
   })
+  hideInlineCompletionTooltip(editor)      // 上游：文本一变就收（HIDE_BY_TEXT_CHANGE，`InlineCompletionTooltip.kt:76-78`）
   return true
 }
 
@@ -119,6 +131,7 @@ export function dismissInlineSuggestion(editor: EditorView): boolean {
   const hasSuggestion = editor.state.field(inlineSuggestionField, false) !== null
   if (!shouldDismissInlineSuggestion(hasSuggestion, completionStatus(editor.state) === 'active')) return false
   editor.dispatch({ effects: setInlineSuggestion.of(null) })
+  hideInlineCompletionTooltip(editor)
   return true
 }
 
@@ -145,6 +158,7 @@ export function acceptInlineSuggestionPartially(editor: EditorView, mode: Inline
     effects: setInlineSuggestion.of(remaining),
     userEvent: 'input.inlineCompletion.partialAccept',
   })
+  hideInlineCompletionTooltip(editor)
   return true
 }
 
@@ -156,10 +170,10 @@ export function acceptInlineSuggestionPartially(editor: EditorView, mode: Inline
  * 绑定表单独导出，判据（`tests/inline-completion-dismiss.test.mjs`）直接驱动它。
  */
 export const inlineCompletionBindings = [
-  { key: 'Tab', preventDefault: false, run: acceptInlineSuggestion },
-  { key: 'Escape', preventDefault: false, run: dismissInlineSuggestion },
-  { key: 'Ctrl-ArrowRight', preventDefault: false, run: (editor: EditorView) => acceptInlineSuggestionPartially(editor, 'word') },
-  { key: 'End', preventDefault: false, run: (editor: EditorView) => acceptInlineSuggestionPartially(editor, 'line') },
+  { key: 'Tab', role: 'accept' as const, preventDefault: false, run: acceptInlineSuggestion },
+  { key: 'Escape', role: 'dismiss' as const, preventDefault: false, run: dismissInlineSuggestion },
+  { key: 'Ctrl-ArrowRight', role: 'accept-word' as const, preventDefault: false, run: (editor: EditorView) => acceptInlineSuggestionPartially(editor, 'word') },
+  { key: 'End', role: 'accept-line' as const, preventDefault: false, run: (editor: EditorView) => acceptInlineSuggestionPartially(editor, 'line') },
 ]
 export const inlineCompletionKeymap = Prec.highest(keymap.of(inlineCompletionBindings))
 

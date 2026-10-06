@@ -206,6 +206,14 @@ int main() {
         check(wait_for(done), "hover never replied");
         check(failure.is_null() && payload.at("available") == true && payload.at("contents") == "hover from fake",
               "hover unchanged");
+        // 服务器给的 `Hover.range` 必须**原样**上来（`LspRequestExecutor.kt:220`），
+        // 前端 `src/docHoverContent.ts` 的 `hoverRangeFromPayload` 靠它做区间命中
+        // （`HoverResultCache.kt:12` 的 `textRange.contains(queriedOffset)`）。
+        check(payload.contains("range")
+                  && payload.at("range").at("start").at("line") == 0
+                  && payload.at("range").at("start").at("character") == 6
+                  && payload.at("range").at("end").at("character") == 11,
+              "hover range not passed through");
         done = false;
         session.request("definition", kDoc, 1, 0, reply);
         check(wait_for(done), "definition never replied");

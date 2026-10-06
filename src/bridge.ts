@@ -351,10 +351,10 @@ export function handleHostEvent(data: Reply | undefined): boolean {
     case 'run.started':
       return handleRunStarted(data)
     case 'run.output': {
-      // Bytes, not text: a build prints in the console code page and a chunk boundary
-      // can fall inside a multi-byte character, so decoding is streamed and flushed
-      // when the last step of the run exits.
-      const text = typeof data.dataB64 === 'string' ? decodeRunChunk(data.dataB64)
+      // Bytes, not text: a chunk boundary can fall inside a multi-byte character, so decoding is streamed.
+      // 解码**按实例**分（上游一条 descriptor 一个 ConsoleView：RunContentManagerImpl.kt:308-312）——
+      // 交错输出时不带 id 会把甲的残段拼到乙的下一块前面（内容跑错标签 + 乱码）。
+      const text = typeof data.dataB64 === 'string' ? decodeRunChunk(data.dataB64, typeof data.instance === 'number' ? data.instance : undefined)
         : typeof data.chunk === 'string' ? data.chunk : null
       if (text === null) return false
       if (text) handleRunOutput(data.instance, text)
@@ -364,7 +364,7 @@ export function handleHostEvent(data: Reply | undefined): boolean {
       if (typeof data.code !== 'number') return false
       // A chained run ("Before launch" steps) emits one exit per step; the console
       // stays in the running state until the last step has reported.
-      const tail = flushRunDecoder()
+      const tail = flushRunDecoder(typeof data.instance === 'number' ? data.instance : undefined)
       if (tail) handleRunOutput(data.instance, tail)
       return handleRunExit(data)
     }

@@ -34,8 +34,8 @@ import {
 } from 'lucide-vue-next'
 import {
   favoriteShortcuts, isNodeSelectable, newFolderPlan, nodeSelectableReason, recentShortcuts,
-  resolveTypedName, visibleChooserRows,
-  type ChooserListing, type ChooserNode, type ChooserRow, type ChooserViewMode,
+  resolveTypedName, shortcutNavigation, visibleChooserRows,
+  type ChooserShortcut, type ChooserListing, type ChooserNode, type ChooserRow, type ChooserViewMode,
 } from '../fileChooserModel'
 import { withShowHiddenFiles, type FileChooserDescriptor } from '../fileChooserDescriptor'
 import { request } from '../bridge'
@@ -107,6 +107,21 @@ function collapse(path: string) {
 async function openDirectory(path: string) {
   currentPath.value = path
   await expand(path)
+}
+
+/**
+ * 快捷条（左侧「最近 / 收藏」）那一行的落点。目录就是进那一层；**文件不能当目录列**
+ * —— 上游点它是在树里选中这个文件（`ex/FileChooserDialogImpl.java:178-183` 的
+ * `restoreSelection` → `selectInTree(new VirtualFile[]{file}, ...)`），规则在
+ * `shortcutNavigation`（`src/fileChooserModel.ts`）。
+ */
+async function openShortcut(shortcut: ChooserShortcut) {
+  const target = shortcutNavigation(shortcut)
+  currentPath.value = target.path
+  if (!target.select) { await expand(target.path); return }
+  // 懒加载的树：祖先没列过就没有那一行 ⇒ 从工作区根往下逐层展开（`expand` 自带去重）。
+  for (const ancestor of target.expand) await expand(ancestor)
+  picking.value = target.select
 }
 
 /** 要画的那些行（规则与懒加载折算都在 `visibleChooserRows`）。 */
@@ -285,7 +300,7 @@ void nextTick(() => nameRef.value?.focus())
             <h3>最近</h3>
             <ul>
               <li v-for="row in shortcuts.recent" :key="`recent-${row.path}`">
-                <button type="button" class="chooser-shortcut" @click="openDirectory(row.path)">
+                <button type="button" class="chooser-shortcut" @click="openShortcut(row)">
                   <FileText :size="iconSize.menu" aria-hidden="true" /> {{ row.label }}
                 </button>
               </li>
@@ -295,7 +310,7 @@ void nextTick(() => nameRef.value?.focus())
             <h3>收藏</h3>
             <ul>
               <li v-for="row in shortcuts.favorites" :key="`fav-${row.path}`">
-                <button type="button" class="chooser-shortcut" @click="openDirectory(row.path)">
+                <button type="button" class="chooser-shortcut" @click="openShortcut(row)">
                   <Folder :size="iconSize.menu" aria-hidden="true" /> {{ row.label }}
                 </button>
               </li>

@@ -26,6 +26,15 @@
 //   · 「替换预览」= 对**一行文本**跑同一份编译产物（`compileStructuralPattern` 的正则），
 //     取回每个变量的捕获值，再按定义表展开 —— 与原生 `search.preview` 那条通道同一条口径，
 //     区别只是这条能表达"变量换成固定文本"，那条只能表达 `$N` 回填。
+//   · 「整份文件一次替换」= `structuralReplacementPlan` + `applyStructuralReplacements`
+//     （桶 9 派单点名的 matcher 纯函数半区：模板解析 → 匹配 → 替换文本生成）。
+//     上游那三步是 `Replacer.java:125-131`（`CollectingMatchResultSink` 收全部命中，逐条建
+//     `ReplacementInfo`）、`ReplacementBuilder.java:132-163`（`process` 逐处展开，参数位按
+//     `getStartIndex` **逆序**插，`:140-141`）、`Replacer.java:180-211`（`doReplaceAll` 逐处写回，
+//     写回前查 PSI 元素还有效吗，`:219-221`）。命中互不重叠这一条来自
+//     `impl/matcher/handlers/TopLevelMatchingHandler.java:22-34`：匹配成功且没开递归档时**不**往
+//     子节点里钻 ⇒ 一次命中吃掉整个节点。本仓的推进规则与逆序写回都按这几条搬，差异写在
+//     `applyStructuralReplacements` 的函数头上（上游正序+重解析，本仓逆序+一次算完）。
 //
 // **不做**（三条，逐条对应上游能力，本仓没有落点，面板上不画开关）：
 //   · `ReplaceOptions` 的「Reformat」「Use static imports」「Shorten FQN」三位
@@ -41,6 +50,7 @@ import { compileStructuralPattern, compileStructuralReplacement, replacementVari
 import type { StructuralPattern } from './structuralSearch.ts'
 import { createReplacement } from './regexReplacement.ts'
 import { execWithSpans } from './structuralSearchModifiers.ts'
+import type { MatchSpans } from './structuralSearchModifiers.ts'
 
 /** 一个替换变量的定义（上游 `ReplacementVariableDefinition` + 其基类的 name/脚本位）。 */
 export interface ReplacementDefinition {
@@ -142,6 +152,42 @@ export function expandStructuralReplacement(
   return createReplacement(built.template, groups)
 }
 
+/**
+ * 一次扫描：`text` 里**全部**互不重叠的命中（按文档顺序）。
+ *
+ * 上游一次搜索收集的是「全部命中」而不是「第一处」：`Replacer.java:125-131` 用
+ * `CollectingMatchResultSink` 把 `matcher.testFindMatches(sink)` 跑出来的每个 `MatchResult`
+ * 各建一条 `ReplacementInfo`。命中与命中**不许重叠**：`TopLevelMatchingHandler.java:22-34`
+ * 只在「没匹配上」或用户开了递归档（`matchContext.getOptions().isRecursiveSearch()`）时才往
+ * 子节点里钻 ⇒ 一次命中吃掉整个节点，下一处从它后面开始。
+ *
+ * 本仓的等价推进：下一处从上一处的 `whole.end` 起找。零宽命中（模板里全是 `{0,}` 那类可选变量时
+ * 编得出来）往前挪一格再找 —— 上游的匹配对象是一个完整 PSI 节点，永远吃不掉「零个字符」，
+ * 这一档是本仓自己给自己加的保险，不是照抄上游。
+ *
+ * 引擎配不出区间时（宿主 `std::regex` 是 ECMAScript 文法、`native/search.cpp:256`，与 JS 有差）
+ * 一律**停在已经拿到的那些**，不猜下一处在哪：宁可少算，也不多改。
+ */
+function hitsWithin(pattern: StructuralPattern, text: string, flags = '', from = 0): MatchSpans[] {
+  const out: MatchSpans[] = []
+  let cursor = Math.max(0, Math.min(from, text.length))
+  for (;;) {
+    const spans = execWithSpans(pattern.regex, pattern.variables, text, flags, cursor)
+    if (!spans) return out
+    out.push(spans)
+    const width = spans.whole.end - spans.whole.start
+    cursor = width > 0 ? spans.whole.end : spans.whole.start + 1
+    // 零宽命中落在文末时 `+1` 会越界，而 `execWithSpans` 把起点 clamp 回长度 ⇒ 同一位置会被反复
+    // 取到、这里就死循环。越界一律收工（上游不会遇到这一档：一次匹配吃掉的是一个完整节点）。
+    if (cursor > text.length) return out
+  }
+}
+
+/** 一次命中 → 变量捕获值数组（下标 = 变量首次出现顺序，与 `pattern.variables` 同序）。 */
+function valuesOfSpans(pattern: StructuralPattern, spans: MatchSpans): string[] {
+  return pattern.variables.map(name => spans.variables[name]?.text ?? '')
+}
+
 export interface ReplacementPreview {
   /** 命中的那一段原文（上游 `MatchResult.getMatchImage()`，`MatchResult.java:15`）。 */
   before: string
@@ -157,6 +203,13 @@ export interface ReplacementPreview {
  * 一行文本上的替换预览（上游 `Replacer.testReplace`（`Replacer.java:78-92`）的文本层等价物：
  * 给定原文、搜索模板、替换模板，算出替换后的文本，**不碰文档**）。
  *
+ * `at` = 这一处命中在行内的起始列（宿主给的列号，0 基，与 `src/structuralSearchModifiers.ts`
+ * 的 `verdictForHit` 同一个起点口径，见那个函数 `:416-417` 的注释）。
+ * **为什么要有这个参数**：复核那一步早就按列号取命中（`verdictForHit` → `execWithSpans(…, from)`），
+ * 而预览原先固定从 0 起 —— 一行里有两处命中时，第二条结果行的预览显示的是**第一条**的前后文本，
+ * 于是「N 处将替换」与内联预览说的不是同一段字。取不到正好压在 `at` 上的命中时退回行内第一处
+ * （老调用方传 0 的结果与改之前逐字一致）。
+ *
  * 复核不上（JS 正则在那一行配不出区间）时返回 null —— 不编一个 after 出来。
  */
 export function previewStructuralReplacement(
@@ -165,15 +218,14 @@ export function previewStructuralReplacement(
   replacement: string,
   definitions: ReadonlyMap<string, string> = new Map(),
   flags = '',
+  at = 0,
 ): ReplacementPreview | null {
-  const spans = execWithSpans(pattern.regex, pattern.variables, text, flags)
+  const hits = hitsWithin(pattern, text, flags)
+  const spans = hits.find(hit => hit.whole.start === at) ?? hits[0]
   if (!spans) return null
   const values: Record<string, string> = {}
-  const list = pattern.variables.map(name => {
-    const value = spans.variables[name]?.text ?? ''
-    values[name] = value
-    return value
-  })
+  const list = valuesOfSpans(pattern, spans)
+  pattern.variables.forEach((name, index) => { values[name] = list[index] ?? '' })
   const after = expandStructuralReplacement(replacement, pattern.variables, list, definitions, spans.whole.text)
   return { before: spans.whole.text, after, values, removes: after === '' }
 }
@@ -190,12 +242,86 @@ export function previewMany(
   let unchanged = 0
   let unverifiable = 0
   for (const row of rows) {
-    const preview = previewStructuralReplacement(pattern, row.text, replacement, definitions, flags)
+    // 列号一路传下去：这一行的这一处，不是这一行的第一处（与 `verdictForHit` 的起点同一档）。
+    const preview = previewStructuralReplacement(pattern, row.text, replacement, definitions, flags, row.column)
     if (!preview) { unverifiable++; continue }
     if (preview.before === preview.after) unchanged++
     previews.set(`${row.path}:${row.line}:${row.column}`, preview)
   }
   return { previews, unchanged, unverifiable }
+}
+
+/**
+ * 一处命中的替换编辑（上游 `ReplacementInfo`（`plugin/replace/ReplacementInfo.java`）在文本层的等价物：
+ * 一个区间 + 要写进去的新文本）。`values` 带着，是为了面板展开那一行时能报「这一段是 $x$ 的哪段文本」。
+ */
+export interface StructuralReplacementEdit {
+  from: number
+  to: number
+  /** 展开后的新文本；空串 = 删掉这一段（`Replacer.java:71` 的「空文本什么都不插」）。 */
+  text: string
+  /** 命中的那一段原文。 */
+  before: string
+  values: Record<string, string>
+}
+
+export interface StructuralReplacementPlan {
+  /** **真的会改**的那些命中：文档顺序、互不重叠。 */
+  edits: StructuralReplacementEdit[]
+  /** 替换前后一样的命中数（定义把变量写回原文）——上游照样会走一遍替换，本仓不把它算进 edits。 */
+  unchanged: number
+  /** 被复核判掉的命中数（`accept` 返回 false）。 */
+  skipped: number
+}
+
+/**
+ * 整份文本（一个文件）的结构化替换计划：模板编译产物 → 全部命中 → 逐处生成替换文本。
+ * 上游那条链是 `Replacer.java:125-131`（收集命中）+ `ReplacementBuilder.java:132-163`（逐处展开）
+ * + `Replacer.java:180-211`（逐处写回）；本仓把三步合成一个纯函数，输入输出都能单测。
+ *
+ * `accept` = 逐处复核（`src/structuralSearchModifiers.ts` 的 `verdictForHit` 那一层：`contains` /
+ * `within` / 列表整段）。**不传 = 不复核**，与接线前的原生 `search.replace` 通道同一档行为 ——
+ * 那条通道是宿主拿 `std::regex` 全文件替换的，本仓的复核只发生在结果列表那一侧
+ * （`filterHitsByModifiers`），所以「替换全部」与「列出来的命中」本来就不是同一批；
+ * 把 `accept` 传进来才是把这两批对齐的那一步，挂载点见 `docs/wiring-requests-2026-10-06-search3.md` R-2。
+ */
+export function structuralReplacementPlan(
+  pattern: StructuralPattern,
+  text: string,
+  replacement: string,
+  definitions: ReadonlyMap<string, string> = new Map(),
+  flags = '',
+  accept?: (spans: MatchSpans) => boolean,
+): StructuralReplacementPlan {
+  const edits: StructuralReplacementEdit[] = []
+  let unchanged = 0
+  let skipped = 0
+  for (const spans of hitsWithin(pattern, text, flags)) {
+    if (accept && !accept(spans)) { skipped++; continue }
+    const list = valuesOfSpans(pattern, spans)
+    const generated = expandStructuralReplacement(replacement, pattern.variables, list, definitions, spans.whole.text)
+    if (generated === spans.whole.text) { unchanged++; continue }
+    const values: Record<string, string> = {}
+    pattern.variables.forEach((name, index) => { values[name] = list[index] ?? '' })
+    edits.push({ from: spans.whole.start, to: spans.whole.end, text: generated, before: spans.whole.text, values })
+  }
+  return { edits, unchanged, skipped }
+}
+
+/**
+ * 按计划写回：从**后往前**拼（上游 `ReplacementBuilder.java:140-141` 把每个参数位按 `getStartIndex`
+ * 逆序排好再插，理由一样——前面的替换会把后面的下标挪掉）。
+ *
+ * 与上游的落差如实登记：上游是**正序**逐处写回（`Replacer.java:185-207`），因为它每写一处都会重新
+ * 解析 PSI，失效的命中当场跳过（`Replacer.java:219-221` 的 `element == null || !isValid()`）；
+ * 本仓没有语法树可以重解析，所以「一次算全部 + 逆序拼接」是唯一能让下标保持成立的写法，
+ * 代价是**同一次替换里后面那些命中之前的文本若被外部改掉，这里不会察觉**（调用方要在文档事务里用）。
+ */
+export function applyStructuralReplacements(text: string, edits: readonly StructuralReplacementEdit[]): string {
+  let out = text
+  const sorted = [...edits].sort((a, b) => b.from - a.from)
+  for (const edit of sorted) out = out.slice(0, edit.from) + edit.text + out.slice(edit.to)
+  return out
 }
 
 /**

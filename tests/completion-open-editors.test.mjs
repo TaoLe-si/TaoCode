@@ -28,7 +28,12 @@ test('登记表按打开顺序给出，且能注销', () => {
   assert.equal(openEditorCount(), 0)
 })
 
-test('「除我以外」按当前正文认自己，只摘第一条命中的；正文为空的条目当死句柄清掉', () => {
+test('「除我以外」按当前正文认自己，只摘第一条命中的；取不到正文的条目跳过但**保留登记**', () => {
+  // 上游那条循环只读 `getAllEditors()`（`HippieWordCompletionHandler.java:271-278`），
+  // 不会从这张表里摘掉任何编辑器；摘掉只有关标签那一条路（宿主在 `src/App.vue:187` 调 unregisterOpenEditor）。
+  // 原断言写的是"死句柄被当场摘掉"，理由是"生产者只有补全查询、没有关标签的时机" ——
+  // 那个前提随接线请求 W2（宿主登记）落地已不成立：宿主只在挂载那一刻登记一次（`src/App.vue:183`），
+  // 当场摘掉就再也回不来，跨文档那一档会永久少一个来源。⇒ 本轮改为"跳过但保留"。
   clearOpenEditors()
   registerOpenEditor('a.ts', () => 'same words')
   registerOpenEditor('b.ts', () => 'same words')
@@ -36,7 +41,9 @@ test('「除我以外」按当前正文认自己，只摘第一条命中的；�
   registerOpenEditor('d.ts', () => { throw new Error('句柄已失效') })
   const others = otherOpenEditorTexts('same words')
   assert.deepEqual(others.map(item => item.path), ['b.ts'], '第二条同内容的仍是"别的文档"；空正文与抛错的被跳过')
-  assert.deepEqual(openEditorPaths(), ['a.ts', 'b.ts'], '死句柄被当场摘掉（生产者只有补全查询这一个装配点，没有关标签的时机）')
+  assert.deepEqual(openEditorPaths(), ['a.ts', 'b.ts', 'c.ts', 'd.ts'],
+    '登记面不动：空正文可能是空文件，暂时取不到正文的可能是还没挂载完的标签')
+  assert.equal(otherOpenEditorTexts('same words').length, others.length, '同一次调用不该改变后续结果（幂等）')
   clearOpenEditors()
 })
 

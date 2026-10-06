@@ -27,6 +27,21 @@ import { localDiagnostics } from './junitInspections.ts'
 // 高亮级别模型（上游 `HighlightDisplayLevel` 一族，见 src/highlightLevels.ts）：严重度文案、
 // 样式类与 CodeMirror severity 是同一份，问题面板/状态栏/编辑器标记不再各写三元表达式。
 import { severityClass, severityLabel } from './highlightLevels.ts'
+// LSP `Diagnostic.relatedInformation`（一条问题的其它相关位置）的折叠面，见
+// src/problemRelatedInformation.ts 的文件头 —— 上游 `LspDiagnosticAndLazyQuickFixes.kt:42`
+// 原样保留这个字段，本仓同样只做「带出来 + 面板列出」，呈现的排序/去重/越界丢弃都在那边。
+import type { RelatedLocationInput } from './problemRelatedInformation.ts'
+
+/**
+ * 宿主透传的关联位置：两种线上形态都认 —— `relatedInformation`（LSP 原样；接线请求 R1 给的可照抄实现
+ * 就是把这一条数组带出来）与 `related`（宿主已经折成行坐标的那一种）。
+ * 认不出来（不是数组）就整体不写这一格，面板据此不渲染那一节，不画假位置。
+ */
+function relatedFrom(item: object): RelatedLocationInput[] | undefined {
+  const raw = (item as { relatedInformation?: unknown; related?: unknown }).relatedInformation
+    ?? (item as { related?: unknown }).related
+  return Array.isArray(raw) ? raw as RelatedLocationInput[] : undefined
+}
 
 /** 一行问题：文件 + 位置 + 严重度 + 消息（IDEA `ProblemDescriptor` 的最小字段集）。 */
 export interface ProblemRow {
@@ -52,6 +67,18 @@ export interface ProblemRow {
    * 编辑器那一层的同一份判定在 `src/annotatorHighlights.ts` 的 `diagnosticKind`。
    */
   tags?: number[]
+  /**
+   * LSP `Diagnostic.relatedInformation` —— 「同一处错误的其它相关位置」。
+   * 上游的对应面是 LSP 宿主把它**原样保留**进诊断数据（`LspDiagnosticAndLazyQuickFixes.kt:42`），
+   * 面板因此列得出相关位置；本仓的折叠规则（越界丢弃 / 去重 / 排序 / 跨文件带路径）在
+   * `src/problemRelatedInformation.ts`。
+   *
+   * 宿主侧还**没有**把这个字段透传出来（`native/lsp_support.cpp` 的 `shape_diagnostics` 只到
+   * `code`/`tags`，`src/bridge.ts` 的 `LspDiagnostic` 也没有它），所以这里恒为 undefined ⇒
+   * 面板的「相关位置」一节一行都不渲染（没数据不渲染，不是假控件）。
+   * 透传的可照抄实现已写进 `docs/wiring-requests-2026-10-06-problems.md` R1，接上后本文件零改动即生效。
+   */
+  related?: RelatedLocationInput[]
 }
 
 /**
@@ -71,10 +98,13 @@ export const allProblems = computed<ProblemRow[]>(() => {
       // 门控按「检查项身份」的候选键逐级查（诊断码 > 检查器），见 src/inspectionProfile.ts。
       const severity = applyInspectionProfile(item.source ?? '', item.severity, item.code, item.tags)
       if (severity === null) continue
+      // 关联位置原样带出来（宿主没透传时 undefined ⇒ 面板不渲染那一节）；本地检查通道没有这一格，
+      // 它按消息模板产诊断，给不出「另一个位置」，所以不编造。
+      const related = relatedFrom(item)
       result.push({ path, line: item.line, character: item.character, severity,
                     message: item.message, source: item.source ?? '',
                     code: item.code === undefined || item.code === null ? undefined : String(item.code),
-                    tags: item.tags })
+                    tags: item.tags, ...(related ? { related } : {}) })
     }
   }
   for (const [path, items] of localDiagnostics) {

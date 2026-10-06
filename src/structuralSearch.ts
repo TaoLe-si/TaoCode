@@ -178,7 +178,9 @@ export function compileStructuralPattern(template: string, options?: StructuralC
       // `contains` 不进正则（它判的是"捕获段里还要含子模板"，见 structuralSearchModifiers.ts），
       // 所以只有真的改变了**形状**的约束才换用 constraintCaptureGroup，其余保持旧的那一条正则。
       const shape = (parsed.constrained || wholeWords) && !isPlainIdentifier(parsed.constraint)
-      parts.push({ regex: shape ? constraintCaptureGroup(parsed.constraint) : `(${IDENTIFIER})`, ...wordy })
+      // `template.slice(parsed.index)` = 写在这个变量后面的那一段原文：列表变量的"整段"前顾
+      // 要知道模板自己消费掉了哪个字符（`$x$.equals($y$)` 里那个点），只有这里有这个信息。
+      parts.push({ regex: shape ? constraintCaptureGroup(parsed.constraint, template.slice(parsed.index)) : `(${IDENTIFIER})`, ...wordy })
       VAR.lastIndex = parsed.index
     } else {
       if (parsed.constrained) {

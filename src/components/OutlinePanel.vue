@@ -3,14 +3,16 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { FolderTree, ArrowDownAZ, Rows3, ListTree, Group, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, LocateFixed, ArrowDownToLine } from 'lucide-vue-next'
 import type { LspDocumentSymbol } from '../bridge'
 import { arrange, caretSymbolInTree, treeOf } from '../outlineView'
-import { shouldRevealInEditor } from '../structureFollow'
+import { caretCharacterInSymbolBasis, shouldRevealInEditor } from '../structureFollow'
 import { iconSize } from '../uiIcons'
 
 const props = defineProps<{
   path: string
   symbols: LspDocumentSymbol[]
   available: boolean
-  /** 编辑器光标位置（`ctx.todoSource` 那一份）：只有开了「跟随编辑器」才用。 */
+  /** 编辑器光标位置（`ctx.todoSource` 那一份）：只有开了「跟随编辑器」才用。
+   *  行/列都是**编辑器口径（1 基）**，与 `TodoPanel` 吃的是同一份；符号区间是 LSP 的 0 基，
+   *  用的那一侧负责换算（见下面的 watch）。 */
   source?: { path: string; line: number; character?: number } | null
 }>()
 const emit = defineEmits<{ jump: [position: { line: number; character: number }] }>()
@@ -67,10 +69,12 @@ function revealSource(symbol: LspDocumentSymbol) {
 
 // 反方向：编辑器光标动 → 树里选中包住光标的符号，并把它的折叠祖先展开、滚进视野
 // （`StructureViewComponent.java:819-835` 的光标监听 + `:655` 的 scrollToSelectedElement）。
+// 入参口径：`ctx.todoSource` 给的是**编辑器**那一套（行/列都 1 基，`CodeEditor.vue:1022`），
+// 符号区间是 LSP 的 0 基 ⇒ 这里换算，不换算的话整条跟随差一行。
 watch(() => autoscrollFromSource.value && props.source && props.source.path === props.path
   ? `${props.source.line}:${props.source.character ?? 0}` : '', key => {
   if (!key || !props.source) return
-  const match = caretSymbolInTree(tree.value, props.source.line, props.source.character ?? 0)
+  const match = caretSymbolInTree(tree.value, props.source.line - 1, caretCharacterInSymbolBasis(props.source.character))
   if (!match) return
   selectedKey.value = match.key
   if (collapsed.value.size) {
@@ -110,9 +114,9 @@ const label = (symbol: LspDocumentSymbol) => `${KIND[symbol.kind] ?? '符号'} �
       <button class="outline-tool" :class="{ on: groupByKind }" :title="groupByKind ? '按种类分组' : '按文档顺序（不分组）'" aria-label="按种类分组" :aria-pressed="groupByKind" @click="groupByKind = !groupByKind"><Group :size="iconSize.menu" /></button>
       <button class="outline-tool" :class="{ on: sortByVisibility }" :title="sortByVisibility ? '按可见性排序（公开在前）' : '不按可见性排序'" aria-label="按可见性排序" :aria-pressed="sortByVisibility" @click="sortByVisibility = !sortByVisibility"><Lock :size="iconSize.menu" /></button>
       <button class="outline-tool" :class="{ on: autoscrollToSource }" :title="autoscrollToSource ? '选中符号后跳到源码（开）' : '选中符号后不跳源码（关，双击才跳）'" aria-label="选中符号后跳到源码" :aria-pressed="autoscrollToSource" @click="autoscrollToSource = !autoscrollToSource"><ArrowDownToLine :size="iconSize.menu" /></button>
-      <!-- 反向跟随要有编辑器光标才能成立。挂载点（`src/components/ToolWindowView.vue:172`）
-           现在只传 path/symbols/available，`source` 是 undefined ⇒ 整格不渲染，
-           等接线请求 W1（同一份 `ctx.todoSource`，`TodoPanel` 已经吃这一份）落地后自动出现。
+      <!-- 反向跟随要有编辑器光标才能成立。挂载点（`src/components/ToolWindowView.vue:170`）传的是
+           `:source="ctx.todoSource"`（接线请求 W1，2026-10-06 已落），而 `ctx.todoSource` 在
+           **没有打开的文件**时是 null（`src/App.vue:215`）⇒ 那时整格仍不渲染。
            「不放假控件」：不做画出来点了没反应的开关。 -->
       <button v-if="source" class="outline-tool" :class="{ on: autoscrollFromSource }" :title="autoscrollFromSource ? '跟随编辑器光标（开）' : '跟随编辑器光标（关）'" aria-label="跟随编辑器光标" :aria-pressed="autoscrollFromSource" @click="autoscrollFromSource = !autoscrollFromSource"><LocateFixed :size="iconSize.menu" /></button>
       <button class="outline-tool" title="全部展开" aria-label="全部展开" @click="expandAll"><ChevronsUpDown :size="iconSize.menu" /></button>

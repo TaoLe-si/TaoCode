@@ -13,8 +13,8 @@
 import { computed, ref } from 'vue'
 import { Bell, BellOff, MoreHorizontal, Search } from 'lucide-vue-next'
 import {
-  EVENT_LOG_CLEAR_ALL_LABEL, EVENT_LOG_MORE_TITLE, doNotAskIdOf, eventLogRowMenu, eventLogSections,
-  type EventLogEntry, type EventLogMenuItem,
+  EVENT_LOG_CLEAR_ALL_LABEL, EVENT_LOG_EMPTY_LINES, EVENT_LOG_MORE_TITLE, doNotAskIdOf, eventLogRowMenu,
+  eventLogSections, type EventLogEntry, type EventLogMenuItem, showsNoticeEmptyText,
 } from '../notificationEventLog'
 import {
   DO_NOT_ASK_EMPTY, DO_NOT_ASK_LIST_ACCESSIBLE_NAME, DO_NOT_ASK_LIST_TITLE,
@@ -44,6 +44,15 @@ const openMenu = ref<number | null>(null)
 // 上游 `NotificationsPanel` 有两个 `NotificationGroupComponent`（`:538-613`），空段不画
 // （`isEmpty()` + `NullableComponent`）；搜索是 `matchQuery:1347-1364` 的子串匹配。
 const sections = computed(() => eventLogSections(props.entries, query.value))
+/**
+ * 「搜不到」这件事上游是**当场画在搜索框上**的：`doSearch()` 里
+ * `searchField.textEditor.background = if (result) background else LightColors.RED`
+ * （`NotificationsPanel.kt:461`）—— 空结果不只让列表变空，那一句"你搜的东西不在这里"
+ * 要用底色说清楚。`query` 为空时上游直接 `clearSearch()`（`:447-451`），所以只有**有字且零命中**
+ * 才染红。本仓没有 `LightColors.RED` 那种裸色，走 `tokens.css:261` 的 `--error-bg`（同一语义：
+ * 底色报警），因为 `--error` 在亮档是深红、直接铺底会让输入的文字看不清。
+ */
+const searchHasNoMatch = computed(() => query.value.trim() !== '' && sections.value.length === 0)
 
 function toggleMenu(id: number) { openMenu.value = openMenu.value === id ? null : id }
 
@@ -147,9 +156,12 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
     <div class="panel-heading">
       <span><Bell :size="iconSize.control" />通知</span>
       <div class="heading-actions">
-        <label class="eventlog-search">
+        <!-- 搜不到时把报警底色画在框上（`doSearch()` 的 `else LightColors.RED`，`:461`）；
+             Esc = `cancelSearch()`（那个输入框的 `preprocessEventForTextField`，`:198-201`）。 -->
+        <label class="eventlog-search" :class="{ 'no-match': searchHasNoMatch }">
           <Search :size="iconSize.dense" aria-hidden="true" />
-          <input v-model="query" aria-label="搜索通知" placeholder="搜索通知…" spellcheck="false" />
+          <input v-model="query" aria-label="搜索通知" placeholder="搜索通知…" spellcheck="false"
+                 @keydown.esc.stop="query = ''" />
         </label>
         <!-- 「不再询问通知」那张清单：上游在通知设置页，本仓落在这里（同一份数据的同一个视图）。 -->
         <button class="icon-button eventlog-suppressed-toggle" :aria-expanded="suppressedOpen"
@@ -213,7 +225,12 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
           </span>
         </div>
       </template>
-      <p v-if="!sections.length" class="eventlog-empty">{{ query.trim() ? '没有匹配的通知。' : '没有通知。' }}</p>
+      <!-- 空态那两句是上游 `Container.emptyText` 的原文（`EVENT_LOG_EMPTY_LINES`）；
+           搜索进行中不给占位（`startSearch()` 的 `clearEmptyState()`，`:437`），
+           那时"搜不到"由上面那条红底报警说。 -->
+      <p v-if="showsNoticeEmptyText(entries, query)" class="eventlog-empty">
+        <span v-for="(line, index) in EVENT_LOG_EMPTY_LINES" :key="index" class="eventlog-empty-line">{{ line }}</span>
+      </p>
     </div>
   </div>
 </template>
@@ -221,6 +238,8 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
 <style scoped>
 .event-log { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .eventlog-search { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); height: 22px; background: var(--elevated); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--muted); }
+/* 零命中那一句"你搜的东西不在这里"用底色说清楚（上游把 textEditor 的底色换成红，`NotificationsPanel.kt:461`）。 */
+.eventlog-search.no-match { background: var(--error-bg); border-color: var(--error); }
 .eventlog-search > svg { flex-shrink: 0; }
 .eventlog-search input { min-width: 0; width: 132px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 11px; outline: none; }
 .eventlog-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-2); }
@@ -244,6 +263,8 @@ function markSuppressed(id: string | undefined, message: string, forProject: boo
 .eventlog-menu { min-width: 180px; }
 .eventlog-menu-sep { height: 1px; margin: var(--space-1) 0; background: var(--line-strong); }
 .eventlog-empty { padding: var(--space-4) var(--space-3); color: var(--muted); font-size: 11px; line-height: 1.7; }
+/* 上游那两句是 `appendLine` 的两行（`NotificationsPanel.kt:265-267`），各占一行。 */
+.eventlog-empty-line { display: block; }
 /* 「不再询问通知」那段（上游是设置页里的 JBList + ToolbarDecorator，只给移除一个动作）。 */
 .eventlog-suppressed { border-bottom: 1px solid var(--line-strong); padding-bottom: var(--space-1); }
 .eventlog-suppressed-toggle { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; }

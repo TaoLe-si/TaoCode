@@ -78,7 +78,9 @@ test('expire 只收那一条；收光了通知中心自己关', () => {
   api.expireNotice(older.id)
   assert.deepEqual(api.noticeLog.value.map(item => item.message), ['第二条'])
   assert.equal(noticeLevel(api.noticeLog.value), 'error', '芯片的变色跟着剩下那条，不能被收掉的那条带跑')
-  assert.match(noticeTitle(api.noticeLog.value), /最近 1 条/)
+  // 提示文字是上游那两句（`IdeNotificationArea.java:105-107`，中文包「N 通知挂起」），
+  // 这里要钉的是"**条数跟着剩下那条走**"，形状随 2026-10-06 的文案订正一起换成仍精确的整句匹配。
+  assert.match(noticeTitle(api.noticeLog.value), /^1 通知挂起$/, '收掉一条后提示里的条数要跟着变')
   api.noticeOpen.value = true
   api.expireNotice(newest.id)
   assert.equal(api.noticeOpen.value, false, '最后一条被收走时弹层没有内容可展示，要自己关')
@@ -108,8 +110,16 @@ test('Gradle 失败那条通知自带「重新同步 / 打开构建脚本 / 构�
   for (const label of ['重新同步', '打开构建脚本', '构建工具设置']) {
     assert.ok(gradleHost.includes(`label: '${label}'`), `失败通知少了「${label}」这个动作`)
   }
-  assert.match(gradleHost, /notifyFailure\(job\.directory, job\.kind === 'sync' \? 'Gradle 同步' : '依赖加载', error\)/, '同步失败要真的发出去')
-  assert.match(gradleHost, /job\.kind === 'dependencies' \? '依赖加载' : undefined/, '依赖那条命令的失败同样会经过同一个出口')
+  // 2026-10-06 复核订正（与 `tests/progress-notices.test.mjs` 同一处）：桶 15 给 `kind === 'task'`
+  // 也补了结论，磁盘上是一条**三档**的三元链（`src/gradleHost.ts:519-521`）。这两条断言原来钉的是
+  // 两档那一版 ⇒ 钉的形状过时了，不是意图变了：意图仍然是「每一条命令的失败都经过 notifyFailure
+  // 这个出口、都带自己的中文标签」。改成仍精确的整句匹配，不放松成 includes。
+  assert.match(gradleHost,
+    /notifyFailure\(job\.directory, job\.kind === 'sync' \? 'Gradle 同步' : job\.kind === 'dependencies' \? '依赖加载' : '任务运行', error\)/,
+    '同步/依赖/任务运行三条命令的失败都要发出去，且各带自己的标签')
+  assert.match(gradleHost,
+    /job\.kind === 'dependencies' \? '依赖加载' : job\.kind === 'task' \? '任务运行' : undefined/,
+    '进度行的结论也要按同一条链给标签')
   // 本仓没有本地文档，就不放「Learn more」那类按钮：凭空发明的链接比没有按钮更糟。
   assert.equal(/了解更多|help\.jetbrains|https?:\/\/[a-z]/i.test(gradleHost), false, '不许出现凭空造的帮助链接')
 })

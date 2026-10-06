@@ -59,6 +59,26 @@ test('没有行注释时用块注释那一对（:275-289 的 fallback）', () =>
 test('两种注释都没有 ⇒ 不动手（:52-56 的 Commenter 门槛）；空选区同样（:51）', () => {
   assert.equal(surroundWithRegion('x\n', 0, 1, region, NONE), null)
   assert.equal(surroundWithRegion('x\n', 0, 0, region, JAVA), null)
+  // 选区里没有任何实际元素 ⇒ 不动手：上游 `:56-61` 把首尾的空白元素各挪一个兄弟，
+  // 挪完首尾是同一个空白 token 就返回空数组。本仓这条路径由 `snapToLines` 的
+  // `end <= snappedFrom`（空白一路剥到底后正好贴在行尾）挡住 —— 本轮加的「整段都是空白」显式判据
+  // 实测不可达、已删，留这条断言钉住**行为**（不是钉住某一行代码）。
+  assert.equal(surroundWithRegion('a\n \n \nb', 2, 6, region, JAVA), null)
+  assert.equal(surroundWithRegion('a\nb\nc', 2, 3, region, JAVA).text, 'a\n//<region Description>\nb\n//</region>\nc')
+})
+
+// 三个 provider 各包围一次：生成出来的标记要能被**同一张表**认回一个区域
+// （`getSurrounders()` 的每一项都来自 `CustomFoldingProvider.getAllProviders()`，
+// 而折叠侧 `CustomFoldingBuilder.java:164-187` 问的是同一批 provider）⇒ 生成与识别不许分家。
+test('三种 provider 的包围都能被折叠识别认回，且占位就是被选中的 Description', () => {
+  for (const item of customFoldingSurrounders()) {
+    const result = surroundWithRegion('one();\ntwo();', 0, 13, item.provider, JAVA)
+    assert.ok(result, `${item.title} 该能包围`)
+    const regions = regionEntries(result.text)
+    assert.equal(regions.length, 1, `${item.title} 只该配出一个区域（异族不互收）`)
+    assert.equal(regions[0].label, 'Description', item.title)
+    assert.equal(result.text.slice(result.selection.from, result.selection.to), 'Description', item.title)
+  }
 })
 
 test('包围出来的标记正是折叠识别认的那一族（与 src/editorFolding.ts 同一处规则）', () => {

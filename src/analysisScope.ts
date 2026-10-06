@@ -14,6 +14,10 @@
 //     存的是**序列化 id**（作用域名），显示时才过 `src/scopeIdMapper.ts` —— 这正是判词里
 //     「`ScopeIdMapper` 的 scope→id 映射（本仓直接存模式文本）」那一条缺口的落点；
 //     上游同名机制见 `AnalysisUIOptions.java:43` 的 `CUSTOM_SCOPE_NAME`。
+//     这一档还承接**标准范围**（`STANDARD_ANALYSIS_SCOPES`：项目文件 / 项目生产文件 / 项目测试文件，
+//     上游是代码级 `GlobalSearchScope`，见 `ProjectFilesScope.java:19-31` 与
+//     `GlobalSearchScopesCore.java:152/188`）—— 判词里「没有那 11 个预定义标准 id 的提供者」那一半
+//     的本仓提供者，取「可判定的三档」，其余八档的理由写在那张表的注释里。
 //   命名作用域表由消费方注入（`setAnalysisScopeNamedScopes`，设置页读到 `ProjectSettings.scopes` 后喂进来）：
 //   本模块是同步求值，不能自己去发请求。注入的同时会把这张表缓存到 `taocode.analysisNamedScopes`，
 //   模块初始化时同步读回 —— 否则"重启后还没进过设置页"的那段时间里 `named` 档会一个文件都不命中。
@@ -32,6 +36,7 @@ import { ref } from 'vue'
 import { globToRegExp } from './analysisIgnore.ts'
 import { compileScopeText, scopeMatches, scopeLookup, type ScopeContext } from './scopes.ts'
 import { classifyFile } from './packageDepsView.ts'
+import { PROJECT_FILES_SCOPE_ID, PROJECT_PRODUCTION_FILES_SCOPE_ID, PROJECT_TEST_FILES_SCOPE_ID, scopePresentableName } from './scopeIdMapper.ts'
 
 export const ANALYSIS_SCOPE_KEY = 'taocode.analysisScope'
 /** `AnalysisUIOptions` 那一族开关的存档键（上游 `@Storage(PRODUCT_WORKSPACE_FILE)`，`:29`）。 */
@@ -60,6 +65,53 @@ export interface AnalysisScope {
 }
 
 export const PROJECT_SCOPE: AnalysisScope = { kind: 'project', include: [], exclude: [] }
+
+/**
+ * **预定义（标准）分析范围** —— 判词里 `ScopeIdMapper` 那一行缺的"那 11 个预定义 id 的提供者"这一半。
+ *
+ * 上游这一组不是 glob 文本，而是代码写的 `GlobalSearchScope`：
+ *   · `Project Files` —— `platform/analysis-api/src/com/intellij/psi/search/scope/ProjectFilesScope.java:19-31`，
+ *     `contains` = `fileIndex.isInContent(file)`（另含 scratches，本仓没有）。
+ *   · `Project Production Files` —— `platform/analysis-api/src/com/intellij/psi/search/GlobalSearchScopesCore.java:152`
+ *     （`isInSourceContent(file) && !TestSourcesFilter.isTestSources(...)`），显示名 `:177` → `:405-406`。
+ *   · `Project Test Files` —— 同文件 `:188`（`TestSourcesFilter.isTestSources`），显示名 `:208` → `:409-410`。
+ * 序列化 id 是稳定英文串（`platform/ide-core/src/com/intellij/ide/util/scopeChooser/ScopeIdMapper.kt:24-26`），
+ * 显示时才过映射（`platform/lang-impl/src/com/intellij/ide/util/scopeChooser/ScopeIdMapperImpl.kt:20-21`、`:34-35`）
+ * —— 本仓用 `src/scopeIdMapper.ts` 的同一份映射，所以存进 `namedScope` 的也是 id。
+ *
+ * 没列进来的标准档都有明确理由（列出来永远是空集 = 假控件）：
+ *   · `Project and Libraries` / `All Places` —— 本仓没有库/外部文件参与检查；
+ *   · `Scratches and Consoles` —— 本仓没有 scratches；
+ *   · `Open Files` / `Current File` / `Recently Viewed Files` / `Recently Changed Files` ——
+ *     要编辑器/历史状态（`PredefinedSearchScopeProviderImpl`），这些状态在宿主那一侧，
+ *     本模块同步求值拿不到 ⇒ 已提接线请求（给了挂点就能加）。
+ * 「测试」这一档与 `ANALYZE_TEST_SOURCES` 是两个维度，别混：上游 `BaseAnalysisActionDialog.getScope():218-222`
+ * 对**选中的任何范围**都会再套一次 `scope.setIncludeTestSource(...)` ⇒ 本仓 `pathInAnalysisScope`
+ * 也是"先过范围、再过测试源码这一档"，所以选了 `Project Test Files` 又关掉「包含测试代码」时
+ * 结果为空是**上游行为**，不是 bug。
+ */
+export interface StandardAnalysisScope {
+  /** 稳定序列化 id（存档里存的就是它）。 */
+  id: string
+  /** 界面文案（`scopePresentableName` 的结果，逐条对得上中文包）。 */
+  title: string
+  /** 这一档收哪些文件（路径按 `/` 归一后判定）。 */
+  contains: (normalizedPath: string) => boolean
+}
+
+export const STANDARD_ANALYSIS_SCOPES: readonly StandardAnalysisScope[] = [
+  // 本仓的工作区清单就是内容根里的文件 ⇒ `isInContent` 恒真（ProjectFilesScope.java:25-28）。
+  { id: PROJECT_FILES_SCOPE_ID, title: scopePresentableName(PROJECT_FILES_SCOPE_ID), contains: () => true },
+  // 生产文件 = 内容里、非测试、非生成物（GlobalSearchScopesCore.java:152；生成目录在本仓不算源码根）。
+  { id: PROJECT_PRODUCTION_FILES_SCOPE_ID, title: scopePresentableName(PROJECT_PRODUCTION_FILES_SCOPE_ID), contains: path => classifyFile(path) === 'source' },
+  // 测试文件（GlobalSearchScopesCore.java:188）。
+  { id: PROJECT_TEST_FILES_SCOPE_ID, title: scopePresentableName(PROJECT_TEST_FILES_SCOPE_ID), contains: path => classifyFile(path) === 'test' },
+]
+
+/** 这个名字是不是一个本仓认识的标准范围（不需要项目设置里那条命名作用域）。 */
+export function isStandardAnalysisScope(name: string): boolean {
+  return STANDARD_ANALYSIS_SCOPES.some(entry => entry.id === name)
+}
 
 /**
  * `AnalysisUIOptions` 的六个可持久化项（默认值逐条照 `AnalysisUIOptions.java:35-40`：
@@ -308,11 +360,17 @@ function namedScopeContains(name: string, path: string): boolean {
   if (!name) return false
   const normalized = path.replace(/\\/g, '/')
   const entry = namedScopeTable.value.find(scope => scope.name === name)
-  if (!entry) return false
-  const compiled = compileScopeText(entry.pattern)
-  if (compiled.error) return false
-  const context: ScopeContext = { lookup: scopeLookup(namedScopeTable.value) }
-  return scopeMatches(compiled.set, normalized, false, context)
+  if (entry !== undefined) {
+    const compiled = compileScopeText(entry.pattern)
+    if (compiled.error) return false
+    const context: ScopeContext = { lookup: scopeLookup(namedScopeTable.value) }
+    return scopeMatches(compiled.set, normalized, false, context)
+  }
+  // 项目设置里没有这个名字 ⇒ 试标准范围那一组（`STANDARD_ANALYSIS_SCOPES`，上游 GlobalSearchScopesCore
+  // 的那几个代码级 scope）。用户作用域**优先**：上游 `ProjectScopeService` 里用户表与标准档是两条来源，
+  // 用户真把某档起名成 `Project Test Files` 时用的就是他自己那条。
+  const standard = STANDARD_ANALYSIS_SCOPES.find(scope => scope.id === name)
+  return standard !== undefined && standard.contains(normalized)
 }
 
 /** 「分析测试源码」关掉了就把测试文件挡在范围外（`AnalysisUIOptions.java:39` 默认 true ⇒ 默认不挡）。 */
@@ -338,7 +396,10 @@ export function filterByAnalysisScope<T>(
 
 /** 范围的一句话描述（回执与 UI 共用）。 */
 export function scopeSummary(scope: AnalysisScope = analysisScope.value): string {
-  if (scope.kind === 'named') return `命名作用域「${scope.namedScope ?? ''}」`
+  // 存档里存的是序列化 id（`ScopeIdMapper.kt:21` 的注释：id 等于英文显示名），**显示**时才过映射
+  // （`ScopeIdMapperImpl.kt:16-28`）—— 本仓同一个函数：不在映射表里的名字原样返回（`:27` 的 `else -> scopeId`），
+  // 所以用户作用域那句话不变，标准范围那三档会显示成中文。
+  if (scope.kind === 'named') return `命名作用域「${scopePresentableName(scope.namedScope ?? '')}」`
   if (scope.kind !== 'custom') return testSourcesSuffix('全部项目')
   const parts: string[] = []
   if (scope.include.length) parts.push(`包含 ${scope.include.join('、')}`)

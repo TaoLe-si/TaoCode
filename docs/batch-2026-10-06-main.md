@@ -323,3 +323,77 @@ module-size 绿（`CodeEditor.vue` 我接线涨到 1156 ⇒ 把装配搬进 `sma
 **本轮状态**：全量 `npm test` **4826/4826**、`ctest` **37/37**、`vue-tsc` **0 错**，
 死模块基线 21 → 8，引用门 + 锚点快照（1606 条）绿，产物 `build/` 与 `build-validation/` 已同步（同一 md5）。
 本地检查点提交 **dfbda4e 未推送** —— 等你早上审批再 `git push`。
+
+---
+
+# §10 白屏根因与真机取证（2026-10-06 10:30–11:20，主代理实测）
+
+## 10.1 用户报「打开是白屏什么都不显示」——已定位并修好
+
+真机取证链：`TAOCODE_DEBUG_PORT=9333` 起 `build/TaoCode.exe` → 新工具 `.tools/webview-console.mjs`（纯 node，零依赖，走 CDP）→
+**先挂事件再刷新**才拿得到首屏异常（第一次 `--no-reload` 取证拿到 `exceptions: []` 是假绿：CDP 是页面加载之后才连上的）。
+
+实测到的三条事实（原始值）：
+- `#app` 的 `innerHTML` 恰好是 `<!---->`（7 字符）、`elementCount` 11、CSS 3105 条规则已加载、
+  `window.chrome.webview.postMessage` 在 ⇒ **不是崩在资源加载，是 setup 抛错后 Vue 只留下占位注释节点**。
+- 异常原文（第一处）：`ReferenceError: Cannot access 'Vl' before initialization at get hierRoot`。
+- native 日志（`%LOCALAPPDATA%\TaoCode\log\taocode.log`）里**一条 JS 错误都不会有** ⇒ 白屏不能靠宿主日志查。
+
+根因是同一个机制的两次发作：`watch(source, …)` 在**注册那一刻**就求值一次源（不是 `immediate` 才会），
+而 `src/App.vue` 用 `{ get value() { return 后面才声明的 ref } }` 这种惰性 shim 把「更晚声明的状态」递给先装配的工厂。
+惰性本身没错，错在**有 eager 的读**：
+
+1. `src/App.vue:418` 的 `watch(bottomTabOptions, …)` → `src/toolWindowActions.ts:114` 的
+   `bottomTabAvailable` → `ctx.hierRoot`，而 `hierRoot` 到 `:1324` 才声明 ⇒ TDZ。
+   修法：把这一条 `watch` 移到 `createHierarchyView` 之后（`src/App.vue` 现 :1336 一带，带 4 行原因注释）。
+2. `createToolWindowStripes` 的 `gradleAvailable: { get value() { return gradleAvailable.value } }`（原 :280），
+   真值到 `:1828` 才存在；`bottomAnchoredIds`/`moreButtonRows` 那两条 `filter` 在更早的 `watch` 注册时被求值 ⇒ TDZ。
+   修法：改成一个**真 ref** `gradleAvailability`（`src/App.vue:279`），装配完成后
+   `watch(gradleAvailable, …, { immediate: true })` 同步（`:1833`）。「还没装配」的正确取值就是「不可用」。
+
+`lspReady` 那一档仍走惰性 shim：实测它的读发生在 `:673` 之后，所以没炸；不动它（不动 = 不制造新风险）。
+
+## 10.2 修完的真机复验（同一工具，原始数字）
+
+- 欢迎页：`appChildElementCount` 0 → **2**、`elementCount` 11 → **144**、`exceptions` **[]**、`consoleTail` **[]**。
+- 真鼠标点「ui-parity-proj」→ 出「不受信任的项目」框（取消 / 以安全模式打开 / 信任并打开）→ 点「信任并打开」→
+  外壳齐全：`topbar` true、`.menubar .menu-button` **12**、CodeMirror 编辑器 **1**（恢复上次会话的 CMakeLists.txt）、
+  文件树带「外部库」、底部 dock（操作输出 160 / 运行 / 问题 0 / 终端 / VCS 日志 / 搜索 / 调试）、状态栏、通知气球。
+  截图：`build/mount-smoke.png`、`build/open-project.png`。
+- 冒烟已固化成门禁形态：`node .tools/webview-console.mjs --port 9333 --expect-mount` —— 首屏没挂起来或抛异常 ⇒ 退出码 1。
+  这条**只能主代理跑**（要起真 exe），已列进收工清单，不进 `npm test`。
+
+## 10.3 顺带发现并处理的两件事
+
+- `.tools/ui-parity-proj/CMakeLists.txt` 磁盘内容被某轮的 shell 命令写坏成
+  `ck-aecho Ack-aecho Acmake_minimum_required(...)`（编辑器忠实显示磁盘 ⇒ 一度像渲染 bug）。已按 4 行原样修回。
+- `src/lspServerMessages.ts` 里留着一段**变异测试注入**没撤回：`if (message.severity <= 4) {  // REVFIX-5`
+  （应为 `<= 2`，判据「Error/Warning 才弹」因此红）。已改回并复绿 26/26；全仓 `REVFIX|TEMP 反向验证|INJECT|MUTATION` 复扫干净。
+
+## 10.4 本轮主代理落的接线（全部先打开现码核对，再落）
+
+| 请求 | 落点 | 实测 |
+|---|---|---|
+| keymap R1 `runEditor` | `src/App.vue` createKeymap 实参 | `tests/keymap-bindings.test.mjs` **11/11** |
+| keymap R2 `gotoSuper/gotoTest/gotoRelated`（菜单写着加速键、分派表没有 = 空头支票） | 同上 | 同上（含「导航三条新键位」那条） |
+| setkeys K-1 保存两条 pass | **核对后判定：早已落**（`src/App.vue:1083-1094` 已是 `runActionsOnSave → transformOnSave → file.write`） | 不重做 |
+| dap D1 装订线走唯一下发口 | `src/App.vue:1038` → `breakpointUpdater.queueFile(path, next, { now: true })`，去掉裸 `dapSetBreakpoints` | `tests/dbg-breakpoint-update.test.mjs` **28/28**，并把「装订线不再裸发」写成该测试里的精确断言 |
+| toolwindow2 W-TW2-1 常驻激活栈交给门面 | `src/App.vue` `activeStack: { get value() { return activeToolWindows.value } }` | `tests/tool-window-manager.test.mjs` + `tool-stripe-split` **28/28** |
+| toolwindow2 W-TW2-2 拖过分隔件 = side tool | `createToolStripeDrag` 补 `stripeIds/isSplit/setSideTool`（`stripeOrder` 的入参是 `Anchor` 不是 `ToolWindowId` —— 请求里那行照抄会编译不过，已按真实签名落） | 同上 |
+| runinst R1 解码按实例 | `src/bridge.ts` `run.output`/`run.exit` 带上 `data.instance` | `tests/run-instance-rows.test.mjs` 24/24（两条源码锚点按新形状改精确，未删断言） |
+| search3 R-1 语言档 facet 挂载（`editorLanguageId` 此前零生产写入 ⇒ 代码块「结构支持」半区永远拿空语言档） | `src/components/CodeEditor.vue` `loadLanguage` 的 compartment | `tests/editor-code-block.test.mjs` **17/17**；CodeEditor.vue 仍 1146/1147 |
+| 修 `src/refactorPreview.ts:207` 类型错（usage 域把 `buildUsageTree` 泛型化后 `ReturnType` 取到 4 档并集） | `decorate(node: UsageTreeNode<'directory' \| 'file'>)` | `npx vue-tsc -b --force` **0 错**（全仓） |
+
+## 10.5 需要拍板的两条（我没自作主张）
+
+1. **exec2 R2**（`GeneralSettingsState` 加 `runActivateToolWindow`/`runFocusToolWindow` 两键）：
+   `src/runStartupFocus.ts` 已经自带 `taocode.runStartupFocus` 存档与读写口，再加进 generalSettings 就是**两份账**
+   （本仓为这类事出过事故）。要么以 generalSettings 为真源、把模块那份改成读它，要么维持模块那份、设置页直接绑它。
+   我选了「先不定就不动」，因此 R3（`takeFocus` 的宿主动作）也一起等这条。
+2. **welcome2 R6**：左栏「收藏」那一栏上游没有。要么删（本仓「死代码直接删」），要么按上游另找出处。
+
+## 10.6 三条 lane 撞到 150 次调用上限（代码落了、报告没写）
+
+`lsp-server-messages`、`commit-partial`、`editor-actions-enter`。我逐个体检：
+`vue-tsc` 0 错；`tests/commit-checks` / `editor-actions` / `lsp-server-messages` 合跑 **72 项 71 绿**，
+唯一那条红就是 §10.3 那个没撤回的注入。三条 lane 的域现在都是绿的，缺的是**报告与判词升档**，不是功能。

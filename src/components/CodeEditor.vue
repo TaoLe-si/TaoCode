@@ -86,7 +86,7 @@ import { commentStyleFor, commentStyleFromState } from '../commentToggle'
 import { largeFilePolicyForText, utf8ByteLength } from '../largeFileBytes'
 import { dismissLargeFileNotice, isLargeFileNoticeDismissed, largeFileNoticeText } from '../largeFileNotice'
 // 按扩展名选语法高亮的动态 import 表拆在 src/editorLanguage.ts。
-import { editorLanguageExtension } from '../editorLanguage'
+import { editorLanguageExtension } from '../editorLanguage'; import { editorLanguageIdExtension } from '../editorMatchBrace'
 
 const props = defineProps<{ content: string; path: string; language?: string; theme: Theme; active: boolean; settings: EditorSettings; templates: TemplateSettings; pluginTemplates?: PluginTemplateSource[]; lspEnabled: boolean; readOnly?: boolean; reveal?: { path: string; line: number } | null; breakpoints?: DapBreakpoint[]; debugLine?: number; bookmarks?: number[]; gutterIcons?: GutterIcon[]; blame?: BlameAnnotation[] }>()
 const emit = defineEmits<{
@@ -483,7 +483,7 @@ async function loadLanguage(path: string) {
   try {
     // 语言表在 src/editorLanguage.ts（「关联文件类型」覆盖 / 扩展名启发式都在那儿）。
     const extension = await editorLanguageExtension(path, props.language)
-    if (props.path === path) view?.dispatch({ effects: language.reconfigure(extension) })
+    if (props.path === path) view?.dispatch({ effects: language.reconfigure([extension, editorLanguageIdExtension(props.language)]) })  // 语言档 facet 与语法扩展同一条链：`<>` 配对档与代码块「结构支持」那半都读它（src/editorMatchBrace.ts:51）
   } catch { emit('error', `无法加载 ${path} 的语法高亮，文本编辑仍可用。`) }
 }
 /**

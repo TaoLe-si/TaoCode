@@ -14,8 +14,21 @@
 // **明确不做**（上游有、本子集没有）：
 //   · `try … catch … finally` 与 `do … while` 的整链拆解 —— 去掉头会产生孤立子句，所以直接拒绝；
 //   · lambda / 匿名类（`() -> { … })`：块后面还挂着 `)`，文本层去掉括号会把表达式拆坏，拒绝；
-//   · `UnwrapDescriptor` 的多候选选择弹层与语言专属 Unwrapper；PSI 合法性校验。
+//   · `UnwrapDescriptor` 的语言专属 Unwrapper（lambda / 泛型参数 / 括号表达式这些层拆不了）；
+//     PSI 合法性校验。
 // 拒绝的情形返回 null，命令层据此返回 false（按键落回浏览器默认行为，不吞键）。
+//
+// 2026-10-06（桶 1 / A6）：多候选的 **chooser 形状与判据**落在本文件末尾一节
+// （`UNWRAP_CHOOSER_TITLE` / `unwrapChooserItems()` / `unwrapChooserNeeded()` /
+// `createUnwrapApplyCommand()`）。弹层本体与键位挂载在 `src/editorCommands.ts` 与
+// `src/components/CodeEditor.vue`（都不在本片可改面）⇒ 交出接线请求
+// `docs/wiring-requests-2026-10-06-format.md` W2。
+// 两处如实差异：① 上游**只要有一条候选也弹层**（`UnwrapHandler.java:80-91` +
+// `UnwrapDescriptorBase.java:67-69`），本仓现状是直接拆最内层；② 上游的行文本是
+// `unwrap.if=Unwrap 'if...'` 这一族（`CodeInsightBundle.properties:53-61`，逐条由
+// `JavaIfUnwrapper.java:28`、`JavaBracesUnwrapper.java:18` 等取键），本仓的
+// 「拆掉 if 包裹」是上一轮定的既有口径、被 `tests/unwrap-candidates.test.mjs:22` 钉住，
+// 本片不放松那条断言 ⇒ 只登记差异，不改标签。
 import type { Command } from '@codemirror/view'
 
 export interface UnwrapEdit {
@@ -184,4 +197,73 @@ export function findUnwrapCandidates(text: string, from: number, to: number, ind
 export function findUnwrapEdit(text: string, from: number, to: number, indentWidth: number): UnwrapEdit | null {
   const candidates = findUnwrapCandidates(text, from, to, indentWidth)
   return candidates.length ? candidates[0].edit : null
+}
+
+/* ── 多候选的 chooser：候选形状与判据（桶 1 / A6 的模块侧）────────────────────── */
+
+/**
+ * 弹层标题。上游 `UnwrapHandler.java:101` 取 `CodeInsightBundle.message("unwrap.popup.title")`
+ * （`platform/lang-api/resources/messages/CodeInsightBundle.properties:52`
+ * = `Choose the statement to unwrap/remove`）；中文包不在本地树 ⇒ 按英文原文直译，助记符按本仓惯例去掉。
+ */
+export const UNWRAP_CHOOSER_TITLE = '选择要拆掉/移除的语句'
+
+/**
+ * 弹层里的一行（上游 `UnwrapHandler.showPopup` 的 `MyItem(name, index)`，`:125`）：
+ * `index` 是候选在原列表里的下标（`:107` 的 `setItemChosenCallback` 就按下标找回动作本体），
+ * `from`/`to` 是这一层覆盖的区间 —— 上游选中时用 `ScopeHighlighter` 高亮那一层的作用域
+ * （`:108` 的 `setItemSelectedCallback`），本仓把区间交给宿主去选/画。
+ */
+export interface UnwrapChooserItem {
+  index: number
+  label: string
+  keyword: string
+  from: number
+  to: number
+}
+
+/** 候选 → 弹层行（次序不变：最内层在前，与上游 `UnwrapDescriptorBase.collectUnwrappers` 由内向外走父链同向）。 */
+export function unwrapChooserItems(candidates: readonly UnwrapCandidate[]): UnwrapChooserItem[] {
+  return candidates.map((candidate, index) => ({
+    index, label: candidate.label, keyword: candidate.keyword, from: candidate.edit.from, to: candidate.edit.to,
+  }))
+}
+
+/**
+ * 要不要弹层。上游 `UnwrapHandler.java:80-91`：列表**非空就弹**（`showOptionsDialog()` 恒真，
+ * `UnwrapDescriptorBase.java:67-69`；只有单元测试模式才直接 `options.get(0).perform()`），
+ * 空列表才什么都不做。
+ * ⚠ 本仓现状是「只有一条时直接拆最内层」（`src/editorCommands.ts:233` 挂的 `unwrapCommand`），
+ * 与上游不同 —— 改不改由宿主那条线决定，见 `docs/wiring-requests-2026-10-06-format.md` W2。
+ */
+export function unwrapChooserNeeded(candidates: readonly UnwrapCandidate[]): boolean {
+  return candidates.length > 0
+}
+
+/**
+ * 这一条编辑在当前文本上还站得住吗：区间末尾仍是那对花括号（拆完的 `insert` 不含闭括号）。
+ * 上游拿的是活的 `PsiElement`（`:107` 选中后现场 `unwrap`），本仓没有 PSI，弹层期间文档
+ * 若被别处改动，偏移就会指到别的地方 ⇒ 落笔前按偏移回验一次，站不住就当没这条命令。
+ */
+export function unwrapEditIntact(text: string, edit: UnwrapEdit): boolean {
+  if (edit.from < 0 || edit.to > text.length || edit.to <= edit.from) return false
+  return text.slice(Math.max(0, edit.to - 2), edit.to).includes('}')
+}
+
+/**
+ * 应用**选中的那一条**候选（上游 `MyUnwrapAction.perform()`，`UnwrapHandler.java:153-171`）。
+ * 位移、光标与 `userEvent` 与 `createUnwrapCommand()` 走同一条 dispatch，
+ * 区别只是编辑由 chooser 决定而不是默认的最内层。
+ */
+export function createUnwrapApplyCommand(edit: UnwrapEdit): Command {
+  return view => {
+    if (!unwrapEditIntact(view.state.doc.toString(), edit)) return false
+    view.dispatch({
+      changes: { from: edit.from, to: edit.to, insert: edit.insert },
+      selection: { anchor: edit.from + edit.insert.length },
+      scrollIntoView: true,
+      userEvent: 'delete.unwrap',
+    })
+    return true
+  }
 }

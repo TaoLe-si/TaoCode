@@ -16,7 +16,7 @@ import {
   toEditorConfigText,
 } from '../src/codeStyleSettings.ts'
 import { detectIndentOptions, IndentUsageStatistics, lineIndentInfos } from '../src/indentDetection.ts'
-import { processLineCommentAddSpace } from '../src/postFormatProcessors.ts'
+import { canInsertSpaceInLineComment, processLineCommentAddSpace } from '../src/postFormatProcessors.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = name => readFileSync(join(here, '..', 'src', name), 'utf8')
@@ -280,6 +280,40 @@ test('processLineCommentAddSpace：只处理落在待重排区间内的位置（
   const text = '//甲\nbody\n//乙'
   const result = processLineCommentAddSpace(text, { start: 0, end: text.length - 1 }, settings)
   assert.equal(result.text, '// 甲\nbody\n//乙')
+})
+
+// `LanguageCodeStyleProvider.canInsertSpaceInLineComment`（`:77-81`，社区树里没有任何语言覆写它 ⇒
+// 默认实现就是上游用户可见的行为）。旧实现把它当「本仓没有 ⇒ 恒真」，于是
+// `// 已有空格` 被补成两个空格、`//----` 分节线被拆开 —— 下面三条钉的是那个钩子本身。
+test('canInsertSpaceInLineComment：空白内容与首字符非字母数字都不加（LanguageCodeStyleProvider.java:77-81）', () => {
+  assert.equal(canInsertSpaceInLineComment(''), false)           // takeUnless { commentText.length == it } 的那一档
+  assert.equal(canInsertSpaceInLineComment('   '), false)        // isBlank() → false（:78）
+  assert.equal(canInsertSpaceInLineComment('\t注释'), false)     // 首字符是制表符 → 不是字母数字（:79）
+  assert.equal(canInsertSpaceInLineComment(' foo'), false)       // 已有空格 ⇒ 上游不再补第二个
+  assert.equal(canInsertSpaceInLineComment('---- 分节'), false)  // 分隔线不动
+  assert.equal(canInsertSpaceInLineComment('/* 嵌套 */'), false)
+})
+
+test('canInsertSpaceInLineComment：字母 / 数字 / 中日韩文字开头才加（:79 的 isLetterOrDigit）', () => {
+  assert.equal(canInsertSpaceInLineComment('TODO 后面补空格'), true)
+  assert.equal(canInsertSpaceInLineComment('1 号用例'), true)
+  assert.equal(canInsertSpaceInLineComment('注释'), true)        // CJK 是 \p{L}
+  assert.equal(canInsertSpaceInLineComment('Ωmega'), true)       // 非 ASCII 字母也算
+})
+
+test('processLineCommentAddSpace：钩子挡住的那些一行都不补（旧「恒真」写法会补出两个空格）', () => {
+  const settings = { lineCommentAddSpaceOnReformat: true, lineCommentPrefixes: ['//', '#'] }
+  const text = '// 已经有了\n//---- 分节 ----\n//\n//\n  \n//TODO 补\n'
+  const result = processLineCommentAddSpace(text, { start: 0, end: text.length }, settings)
+  assert.equal(result.text, '// 已经有了\n//---- 分节 ----\n//\n//\n  \n// TODO 补\n')
+  assert.equal(result.inserted, 1, '只有字母开头的那一条该补空格')
+})
+
+test('接线：补空格的判定走 canInsertSpaceInLineComment，不是无条件插', () => {
+  const source = read('postFormatProcessors.ts')
+  assert.match(source, /export function canInsertSpaceInLineComment\(/, '钩子的等价物得是导出的（判据直接引它）')
+  assert.match(source, /if \(!canInsertSpaceInLineComment\(rest\.slice\(prefix\.length\)\)\) continue/,
+    '收集偏移时必须逐条问过这个钩子（上游 :79-81 的 if）')
 })
 
 // ------------------------------------------------------------------ 导出 .editorconfig

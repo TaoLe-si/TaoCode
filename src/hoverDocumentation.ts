@@ -13,8 +13,14 @@
 // 存进去的条目带 hover 的**文本区间**时，同符号内移动光标就命中（上游 `HoverResultCache.kt:11-12`
 // 的 `matches = storedValue.textRange.contains(queriedOffset)`）。区间本身由服务器给
 // （`LspRequestExecutor.kt:213-221` 把 `hover.range` 映射到宿主文档），服务器没给时上游退化成
-// **零长区间**（`TextRangeAndMarkupContent.kt:14-20`：`else TextRange(offset, offset)`），
-// 于是只有同一位置命中 —— 本仓一致（`native/lsp_session.cpp` 目前不透传 range，见接线请求）。
+// **零长区间**（`TextRangeAndMarkupContent.kt:14-19`：`else TextRange(offset, offset)`），
+// 于是只有同一位置命中。
+// 留痕（2026-10-06 复核 R5）：这里原写「`native/lsp_session.cpp` 目前不透传 range，见接线请求」——
+// 实际 native **已经透传**（`native/lsp_session.cpp:166-171` 把 `result["range"]` 原样带出，
+// fake server 在 `native/lsp_fake_server_requests.cpp:120-130` 回一条区间，
+// `native/lsp_coding_test.cpp:209-216` 钉住往返），TS 侧消费点 `src/docHoverContent.ts` 的
+// `hoverRangeFromPayload` 也已接上并有判据。所以上面那句「服务器没给时退化」现在只剩
+// 「服务器真的没给」这一种触发路径。
 // 描述渲染成 HTML 需要弹层宿主（`src/App.vue` 本批冻结），所以这里只给纯文本形态。
 
 /** 上游 `LeadingCodeFence`：开头代码围栏的语言、代码与其余描述。 */

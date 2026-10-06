@@ -15,17 +15,26 @@
 import { ensureSyntaxTree, foldable, foldedRanges, foldEffect, foldNodeProp, foldService, syntaxTree, unfoldEffect } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import type { EditorState } from '@codemirror/state'
-import { StateEffect, StateField } from '@codemirror/state'
+import { EditorSelection, StateEffect, StateField } from '@codemirror/state'
 import type { Command, EditorView } from '@codemirror/view'
 import { caretInsideRange, signatureAt as signatureOf } from './editorFoldingState.ts'
 import { collapsedByDefaultMarker, commentMarkerBody, markerKindOf } from './customFoldingProviders.ts'
+// 另起一条 import（不并进上面那条）：`tests/folding-custom-region-providers.test.mjs` 的锚点
+// 钉的是那一条的原样文本。这里要的是**配对时比 provider** 的那两个符号（见 `localRegionFolds`）。
+import { matchingStartIndex, type RegionMarker } from './customFoldingProviders.ts'
+// 第三条（同样不并进上面两条：那两条的原样文本是 `tests/folding-custom-region-providers.test.mjs:113`
+// 的锚点）。这里要的是「折起来以后显示什么文字」那一份规则，见文件末尾的 `foldPlaceholderFor`。
+import { placeholderOf } from './customFoldingProviders.ts'
 
 /**
  * LSP `textDocument/foldingRange` 的一条（0 基行号，`kind` 见 LSP 规范：comment / imports / region）。
  * `collapseByDefault` 只有本地 region 标记会带：开始标记写着 `defaultstate="collapsed"`
  * （`NetBeansCustomFoldingProvider.java:46-48`），全局开关关着也要默认折起。
+ * `collapsedText` 是服务端给的「折起来以后显示什么」（LSP 3.17 的 `FoldingRange.collapsedText`），
+ * 上游把它原样带到 descriptor 上（`LspFoldingBuilder.kt:51` 的 `info.highlightingInfo.collapsedText`），
+ * 没有这条时才用默认的三点占位（`UpdateFoldRegionsOperation.java:162` 的 `placeholder == null ? "..." : placeholder`）。
  */
-export interface LspFold { startLine: number; endLine: number; kind?: string; collapseByDefault?: boolean }
+export interface LspFold { startLine: number; endLine: number; kind?: string; collapseByDefault?: boolean; collapsedText?: string }
 
 /** 服务端给的折叠区间（`CodeEditor.vue` 请求回来后就装进这个 field）。 */
 export const setFoldingRanges = StateEffect.define<readonly LspFold[]>()
@@ -78,17 +87,24 @@ export function regionMarker(line: string): 'start' | 'end' | null {
  * 扫全文的 region 标记，配对成折叠区间（0 基行号，`kind: 'region'`，`endLine` 是**结束标记那一行**，
  * 折起来只看得见开始标记 —— 与 IDEA 的自定义折叠区域同形）。
  * 支持嵌套（配对按栈）；**未闭合的开始标记不产生区域** —— 一个手误不该让整个文件从那一行折到底。
+ * 配对还要**同族**（开始与结束标记得是同一个 provider 的一对，见 `src/customFoldingProviders.ts`
+ * 的 `markersPair`）：`//<region>` 不会被 `//endregion` 关掉，`#region` 也不会被 `//</region>` 关掉。
  */
 export function localRegionFolds(text: string): LspFold[] {
-  const stack: number[] = []
+  // 栈里存「行号 + 认下这行的 provider」；异族的结束标记不算收尾（上游那一份 provider 也认不出它）。
+  const stack: { line: number; marker: RegionMarker }[] = []
   const out: LspFold[] = []
   const lines = text.split(/\r?\n/)
   for (let index = 0; index < lines.length; index++) {
     const body = regionMarkerBody(lines[index])
     const marker = markerKindOf(body)
-    if (marker?.kind === 'start') stack.push(index)
-    else if (marker?.kind === 'end' && stack.length) {
-      const start = stack.pop() as number
+    if (!marker) continue
+    if (marker.kind === 'start') stack.push({ line: index, marker })
+    else {
+      const at = matchingStartIndex(stack.map(entry => entry.marker), marker)
+      if (at < 0) continue
+      // 压在它上面的异族开始标记没配到收尾 ⇒ 不产生区域（`CustomFoldingBuilder.java:82-91` 同果）。
+      const start = stack.splice(at)[0]!.line
       if (index > start) {
         // 只在真带 `defaultstate="collapsed"` 时才加这个字段：区间表处处与别的来源比形状。
         out.push(collapsedByDefaultMarker(regionMarkerBody(lines[start]))
@@ -154,13 +170,15 @@ export function nestedWithin(ranges: readonly LspFold[], outer: LspFold): LspFol
 }
 
 /**
- * 「折叠代码块」用的那一条：`kind` 不是 `comment` / `imports` / `region` 的最内层区间
- * （上游 `CollapseBlockAction` 找的是 PSI 里的代码块/花括号；服务端把语言块标成不带 kind 的区间）。
+ * 「折叠代码块」看的那一族区间：`kind` 不是 `comment` / `imports` / `region`
+ * （上游 `CollapseBlockAction` 找的是**语言块**，`CollapseBlockHandlerImpl.java:31-34` 沿 PSI 的块往上爬）。
  */
+export function blockRanges(ranges: readonly LspFold[]): LspFold[] {
+  return ranges.filter(range => range.kind !== 'comment' && range.kind !== 'imports' && range.kind !== 'region')
+}
+
 export function blockAt(ranges: readonly LspFold[], line: number): LspFold | null {
-  const candidates = ranges.filter(range =>
-    range.kind !== 'comment' && range.kind !== 'imports' && range.kind !== 'region')
-  return innermostAt(candidates, line)
+  return innermostAt(blockRanges(ranges), line)
 }
 
 /** 注释区间（`kind === 'comment'`）—— 上游整个 comment 家族的第一层过滤。 */
@@ -293,6 +311,37 @@ export function recursiveScope(areas: readonly FoldArea[], folded: readonly Boun
     root = areasContaining(areas, pos).find(area => isCollapsedIn(folded, area) !== collapse) ?? null
   }
   return root ? areas.filter(area => covers(root!, area)) : []
+}
+
+/**
+ * 「折叠代码块」（`CollapseBlock`）那一步的计划 —— 上游 `CollapseBlockHandlerImpl.invoke:19-76` 的等价物。
+ * `areas` 是**从最内层往外**排好的块候选（本仓用 `areasContaining`，它按起点降序，
+ * 与上游沿 `findParentBlock` 往外爬的顺序一致），`folded` 是当前折着的区间。
+ *   · 不含光标的块跳过（`:36-39` 的 `range.containsOffset(offset)` —— 它**含端点**，
+ *     `TextRange.java:121-123` 的 `myStartOffset <= offset && offset <= myEndOffset`，
+ *     光标压在块的起止那一列上也算这一块）；
+ *   · 这一块已经折着 ⇒ 记住它，接着往外爬（`:48-52`，上游 `previous = existing`）；
+ *   · 有折着的区间**跨过**这一块的某个端点 ⇒ 停（`:54` 的 `model.intersectsRegion` + `:64` 的 `break`；
+ *     它的实现是 `FoldRegionsCache.java:268-275`：某条区域严格含住两端之一、不含住另一端）；
+ *   · 否则折这一块（`:44-47` 折已有的展开区域与 `:55-58` 新建一条，在本仓都是同一步 `foldEffect`），
+ *     光标落到它的**末尾**（`:46` 的 `existing.getEndOffset()`；`:62` 那句
+ *     `block.getTextRange().getEndOffset() < offset ? start : end` 比的是 PSI 块的整块范围与
+ *     `getFoldingRange(block)` 这两个对象，本仓只有一个区间 ⇒ 那一支不可达，按规约 §3 不写）；
+ *   · 爬到顶只剩一条"已经折着"的 ⇒ **不再折**，只把光标挪到它末尾（`:66-73`，
+ *     `previous.setExpanded(false)` 对已折着的是空操作，可见效果就是 `:75` 的那次 `moveToOffset`）。
+ * `collapse: false` 那一档就是最后这条：做事了（光标动了），但没有折痕变化。
+ */
+export interface BlockFoldPlan extends Bounds { caret: number; collapse: boolean }
+
+export function blockFoldPlan(areas: readonly FoldArea[], folded: readonly Bounds[], pos: number): BlockFoldPlan | null {
+  let previous: FoldArea | null = null
+  for (const area of areas) {
+    if (area.from > pos || pos > area.to) continue
+    if (isCollapsedIn(folded, area)) { previous = area; continue }
+    if (folded.some(bounds => containsStrict(bounds, area.from) !== containsStrict(bounds, area.to))) break
+    return { from: area.from, to: area.to, caret: area.to, collapse: true }
+  }
+  return previous ? { from: previous.from, to: previous.to, caret: previous.to, collapse: false } : null
 }
 
 // ── 命令（都返回 boolean：false = 这一下没做事） ─────────────────────────────────────
@@ -485,16 +534,35 @@ export const toggleFoldAtCaret: Command = view => {
     || applyAreas(view, targets.filter(area => isCollapsedIn(folded, area)), false)
 }
 
-/** 折叠代码块（`CollapseBlock`）：不带 comment/imports/region 的最内层区间。 */
+/**
+ * 折叠代码块（`CollapseBlock`，`CollapseBlockAction.java:16-57` + `CollapseBlockHandlerImpl.java:19-76`）：
+ * 候选 = 服务端给的"语言块"那一族区间（没有服务端区间时用语法树顶上），沿**最内层→外层**爬，
+ * 目标与光标落点见 `blockFoldPlan`（本仓原来是"折一条就完事、光标不动"，那一版少了上游的
+ * 光标落点 `:75` 与"这块已经折着就只挪光标"那一段 `:66-73`）。
+ */
 export const foldBlockAtCaret: Command = view => {
-  const ranges = rangesOf(view.state)
   const pos = view.state.selection.main.head
-  const target = blockAt(ranges, caretLine(view.state))
-  if (target) return applyRanges(view, [target], true)
-  // 没接语言服务（服务端不给区间）时用语法树顶上：光标行起头的那块，或者**光标套在里面的**最内层块
-  // （祖先链上带的 `foldNodeProp` 都是花括号块，注释不在链上，所以不用再挑 kind）。
-  const candidate = syntaxArea(view.state, pos) ?? enclosingAreas(view.state, pos)[0] ?? null
-  return candidate ? applyAreas(view, [candidate], true) : false
+  const blocks: FoldArea[] = []
+  for (const range of blockRanges(rangesOf(view.state))) {
+    const offsets = offsetsOf(view.state, range)
+    if (offsets) blocks.push({ ...offsets, auto: true, kind: range.kind })
+  }
+  if (!blocks.length) {
+    // 没接语言服务（服务端不给区间）时整条候选链都来自语法树：光标行起头的那块，加上
+    // **光标套在里面的**祖先链（祖先链上带的 `foldNodeProp` 都是花括号块，注释不在链上，所以不用再挑 kind）。
+    const head = syntaxArea(view.state, pos) ?? enclosingAreas(view.state, pos)[0] ?? null
+    if (head && !blocks.some(area => area.from === head.from && area.to === head.to)) blocks.push(head)
+    for (const area of enclosingAreas(view.state, pos)) {
+      if (!blocks.some(existing => existing.from === area.from && existing.to === area.to)) blocks.push(area)
+    }
+  }
+  const plan = blockFoldPlan(areasContaining(blocks, pos), foldedBounds(view.state), pos)
+  if (!plan) return false
+  if (plan.collapse && !applyAreas(view, [plan], true)) return false
+  // 上游折完把光标放到这块的末尾（`:75` 的 `moveToOffset(targetCaretOffset[0])`）；
+  // 落在折痕的**边界**上，CodeMirror 不会把它顺手解掉（实测见 `collapseSelectionAfterOverlapConfirm` 的注释）。
+  if (plan.caret !== pos) view.dispatch({ selection: EditorSelection.cursor(plan.caret) })
+  return true
 }
 
 /**
@@ -650,6 +718,43 @@ export function foldSelectionOutcome(view: EditorView): FoldSelectionOutcome {
   return applyAreas(view, [{ from: selection.from, to: end }], true) ? 'collapsed' : 'nothing'
 }
 
+/**
+ * 重叠确认框按「确定」之后要做的那一步（`CollapseSelectionHandler.java:59-71`）。
+ * 上游 `:49-58` 弹一个默认按钮是「取消」的确认框（本仓没有编辑器内模态宿主 ⇒ 默认路径就是取消，
+ * `foldSelectionOutcome` 的 `overlapping` 那一档），用户点了「确定」才走这里：
+ *   · `:59-65` 移除**跨过选区任一边界**的那些区间 —— 两个析取式：左边界被跨过（起点在选区前、
+ *     终点落在选区里）与右边界被跨过（起点落在选区里、终点在选区后）；只搭边界的不动；
+ *   · `:66-71` 再把选区本身折起来（占位文字 `ourPlaceHolderText = "..."`，`:22`），
+ *     光标落到 `min(start + "...".length(), textLength)`（`:68-70`）。
+ * 「移除」在 CodeMirror 里就是 `unfoldEffect`（本仓没有可独立删除的区域对象，展开 = 这条区间不再存在）。
+ * 返回 `foldSelectionOutcome` 同一套档位，宿主据此决定要不要再提示一句。
+ */
+export function collapseSelectionAfterOverlapConfirm(view: EditorView): FoldSelectionOutcome {
+  const { state } = view
+  const selection = state.selection.main
+  if (selection.from >= selection.to) return 'nothing'
+  let end = selection.to
+  if (state.doc.sliceString(end - 1, end) === '\n') end--
+  // 上游 `:59-65` 是两个析取式（跨过左边界 / 跨过右边界）。本仓只留第一条，因为第二条在这里不可达：
+  // 「跨过右边界」意味着选区头（`end`）落在那条区间**里面**，而 CodeMirror 的 foldState 在设选区
+  // 那一刻就把「光标落在里面」的折叠解掉了（实测判据 = `tests/folding-selection-overlap.test.mjs`
+  // 最后两条）⇒ 走到这一步时那种区间已经不存在。留着是一条永不命中的分支 ⇒ 按规约 §3 不写死代码。
+  const straddling = foldedBounds(state).filter(bounds =>
+    bounds.from < selection.from && bounds.to > selection.from && bounds.to < end)
+  const effects = straddling.map(bounds => unfoldEffect.of(bounds))
+  if (end > selection.from) effects.push(foldEffect.of({ from: selection.from, to: end }))
+  if (!effects.length) return 'nothing'
+  view.dispatch({
+    effects,
+    // 上游把光标放到「占位文字之后」（`:68-70` 的 `min(start + ourPlaceHolderText.length(), textLength)`）。
+    // CodeMirror 的 foldState 在**同一笔事务**里会把「光标落在里面」的那条折叠当场解掉
+    // （实测：同一条 foldEffect，光标停在区间内 ⇒ `foldedRanges` 为空；停在边界上 ⇒ 留住），
+    // 所以本仓的等价落点是这条折痕的**起点**（看得见的第一行 = 那段占位文字所在的位置）。
+    selection: EditorSelection.cursor(selection.from),
+  })
+  return 'collapsed'
+}
+
 /** 收起/展开文档注释（`Collapse/ExpandDocCommentsAction`）：只动**文档**注释，普通注释不碰（上游口径见 isDocCommentLine）。 */
 export const foldDocComments: Command = view => applyRanges(view, docCommentRanges(lineTexts(view.state), rangesOf(view.state)), true)
 export const unfoldDocComments: Command = view => applyRanges(view, docCommentRanges(lineTexts(view.state), rangesOf(view.state)), false)
@@ -685,4 +790,76 @@ export function expandAllToLevel(level: number): Command {
 export const toggleFoldSelection: Command = view => {
   const outcome = foldSelectionOutcome(view)
   return outcome === 'removed' || outcome === 'collapsed' || outcome === 'toggled'
+}
+
+// ── 导航落点：先把它所在的那块打开 ────────────────────────────────────────────────────
+//
+// 上游 `UpdateFoldRegionsOperation.java:143` 每一轮重算都要问一次
+// `OpenFileDescriptor.getRangeToUnfoldOnNavigation(myEditor)`，命中就展开：
+// `shouldExpandNewRegion:243-249` 的 `ApplyDefaultStateMode.EXCEPT_CARET_REGION`（这一档由
+// `FoldingUpdate.java:155` 在「这次重算来自一次导航」时给出）先判
+// `rangeToUnfoldOnNavigation.intersects(range)` ⇒ 相交的区间一律返回「展开」，**哪怕它本该按默认折着**。
+// 用户可见的那件事：转到用法 / 转到行 / 栈帧跳进一段折起来的代码时，IDEA 先把那块打开，
+// 而不是把光标放进折痕里（光标落在 `...` 上、看不见自己要改的那一行）。
+// `TextRange.intersects` **含端点**（`TextRange.java:237-238` 的 `Math.max(myStartOffset, startOffset)
+// <= Math.min(myEndOffset, endOffset)`；不含端点的那一个叫 `intersectsStrict`，`:241-243`）⇒
+// 光标正好压在折痕边界上（空行那一行的行首 = 下面那块的起点）也要把这块打开，只搭一个端点**算**相交。
+
+/**
+ * 展开与这一段相交的折痕（上游 `shouldExpandNewRegion:245-247` 与 `OpenFileDescriptor.unfoldCurrentLine:208`
+ * 用的都是 `range.intersects(region)` —— 含端点，见上面那段）；没有可展开的就返回 false。
+ * 只把反向的段（`to < from`）当"没有这一段"：`to === from` 是空行上的导航落点，上游照样算相交。
+ */
+export function unfoldIntersecting(view: EditorView, from: number, to: number): boolean {
+  if (to < from) return false
+  const hit = foldedBounds(view.state).filter(bounds => Math.max(bounds.from, from) <= Math.min(bounds.to, to))
+  return applyAreas(view, hit, false)
+}
+
+/**
+ * 「跳进来以后别再把这块折上」那一段的区间（上游 `OpenFileDescriptor.getRangeToUnfoldOnNavigation:215-221`
+ * 就是**光标那一整行**：`getLineStartOffset(line)` → `getLineEndOffset(line)`；
+ * `:205-212` 的展开循环用的正是它 —— 把与这一行**相交**（`TextRange.intersects`，含端点）的折着区间一律打开）。
+ * 给第二个实参时按调用方的段算（`OpenFileDescriptor` 的 navigationRange 本身就是一段的场合，
+ * 例如从用法列表跳到 `foo(...)` 的那几个字符）。
+ */
+export function navigationRange(state: EditorState, offset: number, to?: number): { from: number; to: number } {
+  const clamped = Math.max(0, Math.min(offset, state.doc.length))
+  if (to !== undefined && to > clamped) return { from: clamped, to: Math.min(to, state.doc.length) }
+  const line = state.doc.lineAt(clamped)
+  return { from: line.from, to: line.to }
+}
+
+// ── 折起来以后显示的那段文字（占位符） ────────────────────────────────────────────────
+//
+// 上游每条折叠区域都带一段 placeholder，折痕处显示它：
+//   · 默认是**三个点**（`UpdateFoldRegionsOperation.java:162` 的 `placeholder == null ? "..." : placeholder`），
+//     不是 CodeMirror 那个单字符省略号 `…`（`@codemirror/language` 的 `FoldConfig.placeholderText` 默认值）；
+//   · LSP 服务端给的 `collapsedText` 优先（`LspFoldingBuilder.kt:51` 把它交给 descriptor）；
+//   · 自定义折叠区域那段是 provider 的 `getPlaceholderText`（`CustomFoldingBuilder.java:102-111`），
+//     正则与「取不到就回吐整段注释」的规则在 `src/customFoldingProviders.ts` 那张表里
+//     —— 弹层列表（`src/customFoldingRegions.ts`）与折痕用的是同一份，不会出现两种文字。
+// 渲染钩子在 `codeFolding({ placeholderDOM, preparePlaceholder })`，而 `codeFolding()` 现在是
+// `basicSetup` 带进来的（`src/components/CodeEditor.vue:937`）⇒ 宿主那一句是接线请求（W-7）：
+// 本模块先把「这一段该显示什么」算出来，`foldPlaceholderFor` 正是 `preparePlaceholder` 要的那份值。
+
+/** 上游的默认占位文字：三个点（`UpdateFoldRegionsOperation.java:162`）。 */
+export const FOLD_PLACEHOLDER_TEXT = '...'
+
+/**
+ * 这条折痕该显示的文字，三条来源按上游优先级：服务端 `collapsedText` →
+ * region 开始标记的 provider 说明 → 三点。认不出区间（语法树折的那块）时也是三点
+ * —— 上游对没有 descriptor 的折叠同样只有默认占位。
+ */
+export function foldPlaceholderFor(state: EditorState, range: { from: number; to: number }): string {
+  if (!state.doc.length) return FOLD_PLACEHOLDER_TEXT
+  for (const fold of rangesOf(state)) {
+    const bounds = offsetsOf(state, fold)
+    if (!bounds || bounds.from !== range.from) continue
+    if (typeof fold.collapsedText === 'string' && fold.collapsedText !== '') return fold.collapsedText
+    if (fold.kind !== 'region') return FOLD_PLACEHOLDER_TEXT
+    const lineText = state.doc.lineAt(Math.min(bounds.from, state.doc.length - 1)).text
+    return placeholderOf(regionMarkerBody(lineText), lineText.trim())
+  }
+  return FOLD_PLACEHOLDER_TEXT
 }

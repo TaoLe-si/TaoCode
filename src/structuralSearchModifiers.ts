@@ -42,6 +42,9 @@
 
 import { compileStructuralPattern, type StructuralPattern } from './structuralSearch.ts'
 import type { VariableConstraint } from './structuralSearchConstraints.ts'
+// 列表变量的「同一个列表」判据（要算括号深度，宿主那侧的 std::regex 表达不了）：
+// 判据本体在 src/structuralCodeBlock.ts，与代码块导航共用同一份文本结构扫描。
+import { listRunEndsHere, listRunStartsHere } from './structuralCodeBlock.ts'
 
 /** 档位：变量档（写在 `$x$[...]` 后缀上）/ 整模板档（写在「整个模板」那一行）。 */
 export type ModifierLevel = 'variable' | 'template'
@@ -357,15 +360,58 @@ export interface ModifierVerdict {
   unverified?: boolean
 }
 
-/** 这一档命中要不要做跨度复核（没有任何跨度修饰符时不必，省一次正则）。 */
+/** 这一档命中要不要做跨度复核（没有任何跨度修饰符与列表变量时不必，省一次正则）。 */
 export function needsSpanCheck(pattern: StructuralPattern, scope: TemplateScope | null): boolean {
   if (scope) return true
+  if (hasListVariable(pattern)) return true
   for (const constraint of pattern.constraints.values()) if (constraint.contains) return true
   return false
 }
 
 /**
- * 逐条命中复核：先按每个变量的 `contains`（变量档），再按整模板的 `within`（匹配范围档）。
+ * 模板里有没有**贪婪的列表变量**（`$Args{0,}$`、`$x$+`、`$x$*` 这一类 maxOccurs 不限或大于 1
+ * 且没写尾部 `?` 的）。它们的「这一段是不是同一个列表」这条判据要算括号深度，
+ * 宿主的 `std::regex` 表达不出来（后顾断言编不动，见 `src/structuralCodeBlock.ts` 头部那段实测），
+ * 所以由本文件在命中后复核 —— 与 `contains`/`within` 同一层、同一份编译产物、同一个起点。
+ */
+export function hasListVariable(pattern: StructuralPattern): boolean {
+  for (const constraint of pattern.constraints.values()) {
+    if (constraint.maxOccurs > 1 && constraint.greedy) return true
+  }
+  return false
+}
+
+/** 列表变量的「整段」复核结果。 */
+export type ListRunVerdict = { ok: true } | { ok: false; variable: string; reason: string }
+
+/**
+ * 逐个列表变量复核「这一段就是它所在列表的全部」。
+ *
+ * 判据本体在 `src/structuralCodeBlock.ts`（`listRunStartsHere` / `listRunEndsHere`，
+ * 上游对应 `SubstitutionHandler.java:318` + `:45-56` 的「同一个父节点下的连续兄弟节点」）。
+ * 非贪婪列表（`$x{2,3}?`）不参与：上游那一支允许先停在 minOccurs、把剩下的交给模板后面的节点
+ * （`SubstitutionHandler.java:408-441`），本仓的模板后面通常什么都没有，硬要"收全"会把合法命中也剔掉，
+ * 所以那一条只在编译产物里留前顾断言（`RUN_END`），不在这里加戏。
+ */
+export function listRunVerdict(pattern: StructuralPattern, text: string, spans: MatchSpans): ListRunVerdict {
+  for (const name of pattern.variables) {
+    const constraint = pattern.constraints.get(name)
+    if (!constraint || constraint.maxOccurs <= 1 || !constraint.greedy) continue
+    const segment = spans.variables[name]
+    if (!segment) continue
+    if (!listRunStartsHere(text, segment.start)) {
+      return { ok: false, variable: name, reason: `\`$${name}$\` 拿到的是它所在列表的**后半截**（往前同层还有一个逗号没吃进来），已剔除。` }
+    }
+    if (!listRunEndsHere(text, segment.start, segment.end)) {
+      return { ok: false, variable: name, reason: `\`$${name}$\` 这一段没收全（括号没配平，或最后一项后面还要往下接），已剔除。` }
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * 逐条命中复核：先按每个列表变量的「同一个列表」（形状本身），再按每个变量的 `contains`（变量档），
+ * 最后按整模板的 `within`（匹配范围档）。
  *
  * 求值用的正则与宿主那次扫描**同一份编译产物**（`pattern.regex`），起点用宿主给的列号
  * （`column` 是 0 基；不是 0 基时由调用方换算），所以判定与替换看到的是同一段文本。
@@ -379,6 +425,10 @@ export function verdictForHit(
 ): ModifierVerdict {
   const spans = execWithSpans(pattern.regex, pattern.variables, hit.text, flags, from)
   if (!spans) return { keep: false, unverified: true, reason: '本仓的 JS 复核在那一行配不上这段命中（宿主与 JS 的正则文法差异），已剔除而不是当作通过。' }
+  // 先判「这一段是不是同一个列表的全部」：它否掉的是**捕获形状本身**，形状都不对时
+  // 再拿这段文本去比 contains/within 是在错误的那一段上做判断，说出来的理由会误导人。
+  const listRun = listRunVerdict(pattern, hit.text, spans)
+  if (!listRun.ok) return { keep: false, reason: listRun.reason }
   const values: Record<string, string | null> = {}
   for (const [name, span] of Object.entries(spans.variables)) values[name] = span?.text ?? null
   for (const name of pattern.variables) {

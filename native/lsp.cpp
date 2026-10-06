@@ -148,6 +148,38 @@ std::map<std::string, DocumentEdit> collect_document_edits(const Json& edit) {
     return documents;
 }
 
+// 服务器**主动**发来的、不在「我们发过请求」的配对里的方法，本客户端怎么认、怎么答。
+// 上游逐条（`platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt`）：
+//   · `:396-404` `logMessage` —— 写进语言服务日志（`LanguageServiceLogger`/Services 控制台），
+//     只有 Error/Warning 才另外弹一条通知；通知与日志是两种处置，所以前端要分得清这两条。
+//   · `:385-390` `showMessage` —— 日志 + 通知，都只带消息本身。
+//   · `:377-383` `showMessageRequest` —— logInfo 里连 `actions` 的标题一起写（`msg: a, b`），
+//     通知带按钮，返回值是用户点的那一项（没点就 null）。
+//   · `:341-368` 五条 `workspace/…/refresh` —— 每条都 `completedFuture(null)`（协议的返回类型是 void），
+//     并让对应的缓存作废/重取（`LspClientImpl.kt:223-265`、`LspHighlightingCacheRegistry.kt:46-56`）。
+//     `refreshInlineValues`（`:368`）在上游就是**什么也不做**只答 null，这里一并列进来。
+//   · `workspace/documentContent/refresh` 不在这张表里：那是动态文档内容
+//     （`:369-375` 的 `dynamicFiles.refreshContent`），本仓没有那一层 ⇒ 照旧答 MethodNotFound，
+//     与「声明与实发一致」那条纪律同口径（不为做不到的事回一个"支持"）。
+bool is_refresh_request(const std::string& method) {
+    static constexpr std::string_view names[] = {
+        "workspace/semanticTokens/refresh", "workspace/codeLens/refresh", "workspace/inlayHint/refresh",
+        "workspace/diagnostic/refresh", "workspace/inlineValue/refresh",
+    };
+    for (const auto name : names) {
+        if (method == name) return true;
+    }
+    return false;
+}
+
+// 参数是 LSP 原本的形状（`{type,message}` / `{message,actions}` / refresh 的无参），
+// 只补一个 `method` 键，让同一条出口的另一头分得清这是哪一种（宿主 `lsp_host_bootstrap.cpp` 原样转给界面）。
+Json tag_server_message(Json params, std::string_view method) {
+    if (!params.is_object()) params = Json::object();
+    params["method"] = std::string(method);
+    return params;
+}
+
 }  // namespace
 
 void MessageReader::feed(std::string_view bytes) { buffer_.append(bytes); }
@@ -487,8 +519,19 @@ void Client::receive(const Json& message) {
             std::lock_guard lock(mutex_);
             handler = server_message_;
         }
+        // `window/logMessage`：服务器的日志行。上游把它写进「语言服务」日志、只有 Error/Warning
+        // 才另外弹通知（`LspServerNotificationsHandlerImpl.kt:396-404`），所以这条**必须**与
+        // `window/showMessage` 分得开 —— 一起丢掉就等于 jdt.ls 的自述整条看不见。
+        else if (name == "window/logMessage") {
+            std::lock_guard lock(mutex_);
+            handler = server_message_;
+        }
         if (!handler) return;
-        handler(message.contains("params") ? message.at("params") : Json(nullptr));
+        // 交给同一条出口的这几条都带一个 `method`：参数形状一样（`{type,message}`），
+        // 但界面要按上游的两种处置分开（showMessage 必弹 / logMessage 只进日志）。
+        Json payload = message.contains("params") ? message.at("params") : Json(nullptr);
+        if (name == "window/showMessage" || name == "window/logMessage") payload = tag_server_message(std::move(payload), name);
+        handler(std::move(payload));
         return;
     }
     if (is_server_request(message)) {
@@ -526,6 +569,26 @@ void Client::receive(const Json& message) {
         }
         else if (method == "workspace/applyEdit")
             answer_apply_edit(id, message.value("params", Json(nullptr)));
+        // 服务器主动要求「你手里那份结果过期了」（`workspace/…/refresh`，协议返回 void）与
+        // 「问用户一句话」（`window/showMessageRequest`，返回 MessageActionItem 或 null）。
+        // 上游逐条：`LspServerNotificationsHandlerImpl.kt:341-368`（refresh 一族全部
+        // `completedFuture(null)`，并让对应缓存作废重取：`LspClientImpl.kt:223-265`）、
+        // `:377-383`（showMessageRequest 先把消息与 `actions` 的标题写进日志，再弹带按钮的通知）。
+        // 本仓同样先交给同一条 `server_message_` 出口（带 `method`，前端的处置见
+        // `src/lspProgress.ts`：refresh ⇒ 清掉前端那一族缓存，下一次读自然重取），再按协议答回包：
+        //   · refresh 答 null = 收到了；
+        //   · showMessageRequest 答 null = 用户没有点任何一项（协议允许 `MessageActionItem | null`，
+        //     上游把气球关掉也是这个值）。通知面现在只显示消息本身、还没有那一排按钮，
+        //     按钮那半写在 docs/wiring-requests-2026-10-06-lsp.md 里要接线。
+        else if (method == "window/showMessageRequest" || is_refresh_request(method)) {
+            Notify sink;
+            {
+                std::lock_guard lock(mutex_);
+                sink = server_message_;
+            }
+            if (sink) sink(tag_server_message(message.value("params", Json(nullptr)), method));
+            respond(id, Json(nullptr), Json(nullptr));
+        }
         else
             respond(id, Json(nullptr), Json{{"code", -32601}, {"message", "Method not found"}});
     }

@@ -3,7 +3,7 @@
 #include "git_log.hpp"
 #include "git_clone.hpp"
 #include "history.hpp"
-#include "time_format.hpp"
+// `time_format.hpp` 跟着「提交历史 / 追溯」一族走了（`blame` 的 author-time 格式化），2026-10-06 搬进 native/git_log.cpp。
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -15,12 +15,10 @@
 
 #include <array>
 #include <atomic>
-#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <iterator>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -256,21 +254,33 @@ std::vector<std::wstring> range_args(const fs::path& repo, const std::string& ba
     return {L"HEAD", checked_ref(repo, base)};
 }
 
+// A path spec is user-controlled and lands on git's command line after "--", so it
+// only has to stay inside the repository: no traversal, no newline, no option.
+std::wstring checked_path(const std::string& path) {
+    if (path.empty() || path.size() > 512 || path.front() == '-' ||
+        path.find('\n') != std::string::npos || path.find('\r') != std::string::npos ||
+        path.find("..") != std::string::npos)
+        throw WorkspaceError("INVALID_REQUEST", "文件路径不合法。");
+    return utf8_to_wide(path);
+}
+
 }  // namespace detail
 
 // 上面这一块原来就是匿名命名空间；2026-10-05 拆出「工作树 + 子模块」一族（native/git_worktree.cpp）
 // 之后改成 detail，因为那一族要拿到**同一份** run()（job object 与看门狗不能复制到第二个 TU）。
-// 其中跨 TU 用的那几个（Result / run / require_ok / utf8_to_wide / split_lines / utf8_path）声明在
-// native/git_detail.hpp。下面这排 using 让本文件与拆出去的那个 TU 里的调用保持原样，
+// 其中跨 TU 用的那几个（Result / run / require_ok / utf8_to_wide / split_lines / utf8_path，
+// 加上 2026-10-06 拆「提交历史 / 追溯」一族时补的 trim / checked_ref / checked_path / parse_records）
+// 声明在 native/git_detail.hpp。下面这排 using 让本文件与拆出去的那两个 TU 里的调用保持原样，
 // 不必改成 detail::xxx(...)。
 using detail::checked_new_name;
+using detail::checked_path;
 using detail::checked_ref;
 using detail::kill_current;
 using detail::max_output;
+using detail::parse_records;
 using detail::range_args;
 using detail::require_ok;
 using detail::run;
-using detail::split_lines;
 using detail::trim;
 using detail::utf8_path;
 using detail::utf8_to_wide;
@@ -436,24 +446,40 @@ std::wstring format_author(const std::string& name, const std::string& email) {
 }  // namespace
 
 void commit(const fs::path& repo, const std::string& message, bool amend, bool signoff,
-            const std::string& author_name, const std::string& author_email) {
+             const std::string& author_name, const std::string& author_email,
+             const std::vector<std::string>& paths) {
     // IDEA's CommitAuthorComponent: the author override is per commit, not per repository.
     const bool override_author = !trim(author_name).empty() || !trim(author_email).empty();
-    if (amend) {
-        // IDEA's "Amend": re-write the last commit. An empty message keeps the original.
-        std::vector<std::wstring> arguments{L"commit", L"--amend"};
-        if (signoff) arguments.push_back(L"--signoff");
-        if (override_author) arguments.push_back(L"--author=" + format_author(author_name, author_email));
-        if (message.empty()) arguments.push_back(L"--no-edit");
-        else { arguments.push_back(L"-m"); arguments.push_back(utf8_to_wide(message)); }
-        require_ok(run(repo, arguments), "修改上次提交");
-        return;
+    // 「提交文件…」（`CommonCheckinFilesAction.kt:26-78` → `CheckinActionUtil.kt:100-160` 的
+    // `pathsToCommit` → `workflowHandler.setCommitState(...)`：**只有被选中的那些变更进这次提交**）。
+    // 本仓的提交面是 git index，所以"只提交这些路径"落到 `git commit --only -- <paths>`：
+    // `--only` 让 git 用**工作区内容**构造这一次提交，index 里其它已暂存的文件不参与、也不被清掉。
+    // 未跟踪的文件 git 不认 pathspec（实测 `error: pathspec 'c.txt' did not match any file(s)
+    // known to git`），而上游那一支把未跟踪文件当"新文件"一起纳入（`getIncludedChanges` 含
+    // untracked）⇒ 先只对这些路径各 `git add -- <path>`（不碰其它暂存项），再 `--only` 提交。
+    const bool scoped = !paths.empty();
+    if (paths.size() > 500) throw WorkspaceError("INVALID_REQUEST", "一次最多提交 500 个所选文件。");
+    std::vector<std::wstring> specs;
+    specs.reserve(paths.size());
+    for (const auto& path : paths) specs.push_back(checked_path(path));
+    if (scoped) {
+        std::vector<std::wstring> add{L"add", L"--"};
+        add.insert(add.end(), specs.begin(), specs.end());
+        require_ok(run(repo, add), "暂存所选文件");
     }
-    if (message.empty()) throw WorkspaceError("INVALID_REQUEST", "提交信息不能为空。");
-    std::vector<std::wstring> arguments{L"commit", L"-m", utf8_to_wide(message)};
+    std::vector<std::wstring> arguments{L"commit"};
+    if (amend) arguments.push_back(L"--amend");
+    if (scoped) arguments.push_back(L"--only");
     if (signoff) arguments.push_back(L"--signoff");
     if (override_author) arguments.push_back(L"--author=" + format_author(author_name, author_email));
-    require_ok(run(repo, arguments), "提交");
+    if (message.empty()) {
+        // IDEA's "Amend": re-write the last commit. An empty message keeps the original;
+        // 普通提交的信息为空是**请求不合法**（保持原判据：INVALID_REQUEST，而不是让 git 报错）。
+        if (!amend) throw WorkspaceError("INVALID_REQUEST", "提交信息不能为空。");
+        arguments.push_back(L"--no-edit");
+    } else { arguments.push_back(L"-m"); arguments.push_back(utf8_to_wide(message)); }
+    if (scoped) { arguments.push_back(L"--"); arguments.insert(arguments.end(), specs.begin(), specs.end()); }
+    require_ok(run(repo, arguments), amend ? "修改上次提交" : "提交");
 }
 
 Json user(const fs::path& repo) {
@@ -472,7 +498,7 @@ void checkout(const fs::path& repo, const std::string& branch) {
     require_ok(run(repo, {L"checkout", checked_ref(repo, branch)}), "切换分支");
 }
 
-namespace {
+namespace detail {
 // Split a single record on the 0x1F unit separator git was asked to emit.
 std::vector<std::string> split_unit(const std::string& line) {
     std::vector<std::string> fields;
@@ -498,46 +524,14 @@ Json parse_records(const std::string& output) {
     }
     return records;
 }
-}  // namespace
+}  // namespace detail
 
-Json log(const fs::path& repo, const std::string& path, int limit) {
-    const int count = limit <= 0 ? 50 : (limit > 500 ? 500 : limit);
-    std::vector<std::wstring> args = {L"log", L"--date=iso-strict", L"--pretty=%H\x1f%h\x1f%an\x1f%ad\x1f%s", L"-n", utf8_to_wide(std::to_string(count))};
-    if (!path.empty()) { args.push_back(L"--"); args.push_back(utf8_to_wide(path)); }
-    const auto result = run(repo, args);
-    require_ok(result, "读取历史");
-    Json commits = Json::array();
-    for (const auto& record : parse_records(result.out)) {
-        if (record.size() < 5) continue;
-        commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]}, {"date", record[3]}, {"subject", record[4]}});
-    }
-    return {{"commits", std::move(commits)}};
-}
-
-Json authors(const fs::path& repo) {
-    // IDEA's registry holds the users the log index has seen (VcsUserRegistryImpl.kt:84-92),
-    // so every reachable commit counts, not just the ones on HEAD.
-    const auto result = run(repo, {L"log", L"--all", L"--pretty=%an\x1f%ae"});
-    // A repository without commits has no log; `git log` errors there, and GitUserRegistry
-    // swallows the same failure (GitUserRegistry.java:60-68 -> LOG.warn + null).
-    if (result.code != 0) return {{"authors", Json::array()}};
-    Json list = Json::array();
-    std::set<std::string> seen;
-    for (const auto& record : parse_records(result.out)) {
-        if (record.size() < 2) continue;
-        const auto name = trim(record[0].get<std::string>());
-        const auto email = trim(record[1].get<std::string>());
-        if (name.empty() && email.empty()) continue;
-        // Two users are equal when name and e-mail match, and createUser stores the e-mail
-        // lower-cased (VcsUserImpl.kt:9, VcsUserUtil.java:91-93).
-        std::string folded_email = email;
-        for (char& character : folded_email) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-        if (!seen.insert(name + "\x1f" + folded_email).second) continue;
-        // VcsUserUtil.getString: the name, else the e-mail, else "Name <email>".
-        list.push_back(name.empty() ? email : (email.empty() ? name : name + " <" + email + ">"));
-    }
-    return {{"authors", std::move(list)}};
-}
+// `log` / `authors`（`git log`）与 `blame` / `file_history` / `show_commit`
+// （`git blame` / `git log --follow` / `git show`）这一族 2026-10-06 整段搬进了
+// native/git_log.cpp —— 它们只做「把提交历史与追溯的只读视图整形出来」这一件事，
+// 与留在本文件的工作区/暂存/分支/标签/远端动作不共一个职责域。搬动时**实现一个字没改**；
+// 它们要的 run / require_ok / trim / checked_ref / checked_path / split_lines /
+// utf8_to_wide / parse_records 仍只有本文件这一份实现，声明见 native/git_detail.hpp。
 
 std::string log_command(const fs::path& repo, const std::vector<std::string>& arguments) {
     std::vector<std::wstring> args;
@@ -600,62 +594,6 @@ Json ahead_behind(const fs::path& repo) {
     const long behind = tab == std::string::npos ? 0 : std::stol(counts.substr(0, tab));
     const long ahead = tab == std::string::npos ? 0 : std::stol(counts.substr(tab + 1));
     return {{"available", true}, {"ahead", ahead}, {"behind", behind}};
-}
-
-// --line-porcelain repeats every field per annotated line, so a single forward
-// scan yields a {line, hash, author, content} record for each source line.
-// The annotation column also needs the commit date / mail / summary (IDEA's
-// `FileAnnotation.getDate()` / `getAuthor()` / tooltip), so those are captured too.
-Json blame(const fs::path& repo, const std::string& path) {
-    if (path.empty()) throw WorkspaceError("INVALID_REQUEST", "追溯需要一个文件路径。");
-    const auto result = run(repo, {L"blame", L"--line-porcelain", L"--", utf8_to_wide(path)});
-    require_ok(result, "读取追溯");
-    Json lines = Json::array();
-    std::string hash;
-    std::string author;
-    std::string mail;
-    std::string date;
-    std::string summary;
-    int final_line = 0;
-    std::size_t start = 0;
-    while (start <= result.out.size()) {
-        auto newline = result.out.find('\n', start);
-        if (newline == std::string::npos) newline = result.out.size();
-        const auto line = result.out.substr(start, newline - start);
-        if (newline == result.out.size()) { start = result.out.size() + 1; }  // final line, no trailing newline
-        else start = newline + 1;
-        if (line.empty()) continue;
-        if (line[0] == '\t') {
-            lines.push_back({{"line", final_line}, {"hash", hash.size() >= 8 ? hash.substr(0, 8) : hash},
-                {"author", author}, {"email", mail}, {"date", date}, {"summary", summary}, {"content", line.substr(1)}});
-            continue;
-        }
-        const bool header = line.size() >= 41 && std::isxdigit(static_cast<unsigned char>(line[0])) &&
-                            std::isxdigit(static_cast<unsigned char>(line[39])) && line[40] == ' ';
-        if (header) {
-            hash = line.substr(0, 40);
-            std::istringstream stream(line);
-            std::string token;
-            int origin = 0, final_ = 0, count = 0;
-            if (stream >> token >> origin >> final_ >> count) final_line = final_;
-            continue;
-        }
-        if (line.rfind("author ", 0) == 0) { author = line.substr(7); continue; }
-        if (line.rfind("author-mail ", 0) == 0) {
-            // porcelain wraps the address in angle brackets: <someone@example.com>
-            std::string value = line.substr(12);
-            if (value.size() >= 2 && value.front() == '<' && value.back() == '>') value = value.substr(1, value.size() - 2);
-            mail = value;
-            continue;
-        }
-        if (line.rfind("author-time ", 0) == 0) {
-            // `author-time` 是 epoch 秒；注解列显示的是日期（IDEA 的注解列给的就是日期）。
-            try { date = format_local_time(std::stoll(line.substr(12)), "%Y-%m-%d", 16); } catch (...) { date.clear(); }
-            continue;
-        }
-        if (line.rfind("summary ", 0) == 0) { summary = line.substr(8); continue; }
-    }
-    return {{"lines", std::move(lines)}};
 }
 
 void fetch(const fs::path& repo) { require_ok(run(repo, {L"fetch", L"--all", L"--prune"}), "获取"); }
@@ -820,91 +758,8 @@ std::string utf8_path(const fs::path& path) {
 
 }  // namespace detail
 
-namespace {
-
-// Same 0x1F-separated record format log() asks git for.
-std::vector<std::string> split_fields(const std::string& line) {
-    std::vector<std::string> fields;
-    std::size_t position = 0;
-    for (;;) {
-        const auto separator = line.find('\x1f', position);
-        if (separator == std::string::npos) { fields.push_back(line.substr(position)); break; }
-        fields.push_back(line.substr(position, separator - position));
-        position = separator + 1;
-    }
-    return fields;
-}
-
-// A path spec is user-controlled and lands on git's command line after "--", so it
-// only has to stay inside the repository: no traversal, no newline, no option.
-std::wstring checked_path(const std::string& path) {
-    if (path.empty() || path.size() > 512 || path.front() == '-' ||
-        path.find('\n') != std::string::npos || path.find('\r') != std::string::npos ||
-        path.find("..") != std::string::npos)
-        throw WorkspaceError("INVALID_REQUEST", "文件路径不合法。");
-    return utf8_to_wide(path);
-}
-
-}  // namespace
-
-Json file_history(const fs::path& repo, const std::string& path, int limit) {
-    const int count = limit <= 0 ? 100 : (limit > 500 ? 500 : limit);
-    const auto target = checked_path(path);
-    // --follow keeps the log going across renames; --name-status reports what the
-    // commit did to the file so the UI can mark the rename commits.
-    std::vector<std::wstring> args = {L"log", L"--follow", L"--date=iso-strict", L"--name-status",
-        L"--pretty=%H\x1f%h\x1f%an\x1f%ad\x1f%s", L"-n", utf8_to_wide(std::to_string(count)), L"--", target};
-    const auto result = run(repo, args);
-    require_ok(result, "读取文件历史");
-    Json commits = Json::array();
-    std::string pending;
-    std::vector<std::string> pending_paths;
-    for (const auto& line : split_lines(result.out)) {
-        if (line.find('\x1f') != std::string::npos) {
-            if (!pending.empty()) {
-                const auto record = split_fields(pending);
-                if (record.size() >= 5)
-                    commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]},
-                                       {"date", record[3]}, {"subject", record[4]},
-                                       {"paths", pending_paths}});
-            }
-            pending = line;
-            pending_paths.clear();
-            continue;
-        }
-        if (line.empty()) continue;
-        // "M\tpath", "R100\told\tnew", "A\tpath"…
-        const auto tab = line.find('\t');
-        if (tab == std::string::npos) continue;
-        const std::string status = line.substr(0, tab);
-        const std::string rest = line.substr(tab + 1);
-        if (status.rfind('R', 0) == 0 || status.rfind('C', 0) == 0) {
-            const auto second = rest.find('\t');
-            if (second != std::string::npos)
-                pending_paths.push_back(rest.substr(second + 1) + " (← " + rest.substr(0, second) + ")");
-            else pending_paths.push_back(rest);
-        } else pending_paths.push_back(rest);
-    }
-    if (!pending.empty()) {
-        const auto record = split_fields(pending);
-        if (record.size() >= 5)
-            commits.push_back({{"hash", record[0]}, {"shortHash", record[1]}, {"author", record[2]},
-                               {"date", record[3]}, {"subject", record[4]}, {"paths", pending_paths}});
-    }
-    return {{"path", path}, {"commits", std::move(commits)}};
-}
-
-Json show_commit(const fs::path& repo, const std::string& revision) {
-    if (revision.empty()) throw WorkspaceError("INVALID_REQUEST", "请指定提交。");
-    const auto rev = checked_ref(repo, revision);
-    std::vector<std::wstring> args = {L"show", L"--format=", L"--no-color", L"--date=iso-strict",
-                                      L"-m", L"--first-parent", rev};
-    const auto result = run(repo, args);
-    require_ok(result, "读取提交内容");
-    const std::string patch = result.out;
-    return {{"revision", revision}, {"patch", patch}, {"sides", history::diff_sides_from_unified(patch)}};
-}
-
+// `file_history`（`git log --follow --name-status`）与 `show_commit`（`git show`）连同它们
+// 文件局部的 `split_fields` 一起，2026-10-06 搬进了 native/git_log.cpp 的「提交历史 / 追溯」一族。
 
 void revert(const fs::path& repo, const std::string& path) {
     if (path.empty()) throw WorkspaceError("INVALID_REQUEST", "要回滚的文件不能为空。");

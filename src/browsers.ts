@@ -339,3 +339,80 @@ export function predefinedBrowsers(os: HostOs): ConfigurableWebBrowser[] {
   ]
 }
 
+// ── 「用指定浏览器打开」的那一条宿主通道（pf/browsers ①②③ 缺的最后一环）──────────
+//
+// 本仓宿主目前只有一条 URL 出口（`shell.openUrl` → `native/workspace.cpp` 的 `open_external`
+// = 系统默认浏览器），所以这张表选完没地方去。规则侧缺的就是「把选出来的那一行折算成
+// 一次真正的启动请求」，落点在这里；通道本身（`shell.openUrlWithBrowser` + 那两个设置键）
+// 是保留文件（`native/main.cpp` / `native/browser_launch.cpp` / `CMakeLists.txt` /
+// `src/bridge.ts` / `native/settings_schema.cpp`），写在 `docs/wiring-requests-2026-10-06-welcome.md` 里。
+//
+// 上游的折算就是 `platform/platform-api/src/com/intellij/ide/BrowserUtil.java:92-133` 的
+// `getOpenBrowserCommand(browserPathOrName, url, parameters, newWindowIfPossible)`：
+//   · 路径**是个真文件**时（`:124-130`，走不到 `:101` 那个 `Files.isRegularFile` 分支）
+//     → `[browserPath, ...parameters, url]`；
+//   · 路径不是真文件时 macOS 退成 `[open, -a, 名字, (url), --args, ...]`（`:102-114`）、
+//     Windows 退成 `[cmd, /c, start, "", 名字, ...parameters, url]`（`:115-121`）；
+//   · 参数来自 `browser.specificSettings?.additionalParameters`
+//     （`platform/platform-api/src/com/intellij/ide/browsers/BrowserLauncherAppless.kt:220`），
+//     URL 先 `trim()`（`:96`）；
+//   · 路径是空的就根本不启动，报错走 `showError`（`:214-218`）。
+
+/** 一次「用指定浏览器打开」的宿主请求体（`shell.openUrlWithBrowser` 的 `{ path, args }`）。 */
+export interface BrowserLaunchPayload {
+  /** 可执行文件路径（已归一成系统无关分隔符；宿主自己转回系统分隔符）。 */
+  path: string
+  /** 参数：先 `additionalParameters`，最后一条是 URL（`BrowserUtil.java:126-128` 的次序）。 */
+  args: string[]
+}
+
+/**
+ * 选出来的那一行 + 一条 URL → 启动载荷。
+ * 两个如实的边界：① 本仓 TS 侧没有 `stat`，判不出「路径是不是真文件」，所以只给
+ * `:124-130` 那一条主形（宿主拿到 `path` 后自己判存在性，不存在就按上游 `:214-218` 报错，
+ * 不要悄悄退回系统默认浏览器）；② 上游的 `environmentVariables`（`BrowserLauncherAppless.kt:221`）
+ * 本仓的桥载荷里没有那一格 ⇒ 不带，登记为做不到（不假装环境变量生效了）。
+ */
+export function browserLaunchPayload(
+  browser: ConfigurableWebBrowser | null | undefined, url: string,
+): BrowserLaunchPayload | { error: string } {
+  const path = normalizeBrowserPath(browser?.path ?? null)
+  if (!path) return { error: `没有可用的浏览器路径：${browser?.name ?? '未选择'}。` }
+  const trimmed = url.trim()
+  const extra = (browser?.specificSettings?.additionalParameters ?? [])
+    .map(parameter => parameter.trim())
+    .filter(Boolean)
+  return { path, args: trimmed ? [...extra, trimmed] : extra }
+}
+
+// ── 那两个新设置键的读盘口径（`browserList` / `defaultBrowserPolicy`）────────────────
+//
+// 规约：新增持久化键必须给**旧存档缺键**补默认，且不许按字段数量判损坏。
+// 默认值照上游：`WebBrowserManager` 的表初始为空（内置那几行由 `predefinedBrowsers` 现给，
+// 不落盘），策略默认 `system`（`DefaultBrowserPolicy.java:18-19` 的 `FIRST` 是显式选项，
+// 上游 `BrowserLauncherImpl.kt:54-57` 只在 `FIRST` 时才用表里第一个）。
+
+/** 缺键 / 坏形状一律退化成默认值，绝不因为「表里少一个键」把用户挡在设置页外。 */
+export function normalizeBrowserSettings(raw: unknown): { browserList: ConfigurableWebBrowser[]; defaultBrowserPolicy: DefaultBrowserPolicy } {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const list = Array.isArray(source.browserList) ? source.browserList : []
+  const browsers: ConfigurableWebBrowser[] = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    if (typeof row.name !== 'string' || !row.name) continue
+    const family = BROWSER_FAMILIES.includes(row.family as BrowserFamily) ? row.family as BrowserFamily : null
+    if (!family) continue
+    browsers.push({
+      id: typeof row.id === 'string' ? row.id : undefined,
+      name: row.name,
+      family,
+      path: row.path === null || row.path === undefined ? null : normalizeBrowserPath(String(row.path)),
+      active: row.active !== false,
+    })
+  }
+  const policy = source.defaultBrowserPolicy === 'first' || source.defaultBrowserPolicy === 'alternative'
+    ? source.defaultBrowserPolicy : 'system'
+  return { browserList: browsers, defaultBrowserPolicy: policy }
+}
+

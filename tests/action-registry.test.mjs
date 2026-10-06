@@ -8,8 +8,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { ACTIONS, ActionRegistry, actionRow, registerKeymapActions } from '../src/actionRegistry.ts'
-import { KEY_BINDINGS, keymapConflictReport, keymapConflicts } from '../src/keymapBindings.ts'
+import { ACTIONS, ActionRegistry, actionRow, registerEditorActions, registerKeymapActions } from '../src/actionRegistry.ts'
+import { EDITOR_ACTIONS, KEY_BINDINGS, keymapConflictReport, keymapConflicts, keymapKeys } from '../src/keymapBindings.ts'
 import { createBuildMenuRows } from '../src/menus/buildMenu.ts'
 import { LOCAL_HISTORY_ACTION_ID, localHistoryMenuRow } from '../src/menus/localHistory.ts'
 
@@ -163,4 +163,32 @@ test('接线：keymap.ts 经注册表分派、帮助菜单有冲突检查入口�
   assert.match(readFileSync('src/menus/buildMenu.ts', 'utf8'), /actionRow\('build\.project'/)
   assert.match(readFileSync('src/menus/localHistory.ts', 'utf8'), /actionRow\(LOCAL_HISTORY_ACTION_ID\)/)
   assert.match(readFileSync('src/actionRegistry.ts', 'utf8'), /anActionListener|actionEvents/)
+})
+
+// 编辑器一族（`EDITOR_ACTIONS` 那六条）：上游 `$default.xml` 没有它们的键位（或那把键在编辑器的
+// CodeMirror keymap 里），所以它们不进键位表、只进注册表 —— 注册了 `ACTIONS.has('line.sort')` 才为真，
+// 插件命令与命令补全才按 id 认得它们；「查找操作」那边不会出双行（`menuUi.ts:246` 按 id 去重、菜单行优先）。
+test('编辑器一族注册进动作注册表：不凭空长加速键，run 走宿主的 runEditor', () => {
+  const called = []
+  registerEditorActions(EDITOR_ACTIONS, name => called.push(name), () => true)
+  for (const action of EDITOR_ACTIONS) {
+    const present = ACTIONS.present(action.id)
+    assert.ok(present, `${action.id} 没注册进动作注册表`)
+    assert.equal(present.title, action.label, '标题与键位侧的注册条目同源（菜单行同一个 id 同一份文案）')
+    assert.equal(present.enabled, true)
+    assert.equal(keymapKeys(action.id), '', '注册表这一侧也不许凭空长出加速键')
+    assert.equal(ACTIONS.run(action.id), true)
+    assert.deepEqual(called.splice(0), [action.command], `${action.id} 的 run 必须只调 runEditor('${action.command}')`)
+  }
+  // 没有编辑器 ⇒ 与菜单行的 `enabled: hasEditor` 同口径置灰，`run()` 拒绝执行（上游 keymap 同样
+  // 不会触发 `update()` 关掉的动作）。
+  registerEditorActions(EDITOR_ACTIONS, name => called.push(name), () => false)
+  assert.equal(ACTIONS.present('line.sort').enabled, false)
+  assert.equal(ACTIONS.run('line.sort'), false)
+  assert.deepEqual(called, [])
+  // 接线面：分派器真的注册它们，而且**只在宿主给了 runEditor 之后**才注册（拿不到执行入口就不注册，
+  // 而不是注册一个点了没反应的假动作）。
+  const keymap = readFileSync('src/keymap.ts', 'utf8')
+  assert.match(keymap, /runEditor\?: \(name: string\) => unknown/)
+  assert.match(keymap, /if \(runEditor\) registerEditorActions\(EDITOR_ACTIONS, name => runEditor\(name\), \(\) => !!active\.value\)/)
 })

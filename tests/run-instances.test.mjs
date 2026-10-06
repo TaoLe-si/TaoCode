@@ -11,14 +11,20 @@ import { fileURLToPath } from 'node:url'
 import {
   activeRunInstance,
   beginRun,
+  closeRunView,
   endRun,
   focusRunInstance,
   handleRunExit,
   handleRunOutput,
   handleRunStarted,
+  markRunInstanceStopping,
+  runInstanceDisplayName,
   runInstanceList,
   runInstances,
   runOutput,
+  runningListEnabled,
+  runningListRows,
+  RUNNING_LIST_LABELS,
   runState,
 } from '../src/runInstances.ts'
 import * as bridge from '../src/bridge.ts'
@@ -186,3 +192,85 @@ test('运行控制台按实例开标签（IDEA 的 Run 工具窗口）', () => {
   assert.match(app, /<RunConsole ref="runLog"/, 'App 要用它替换原来的 .run-log')
   assert.ok(!app.includes('class="run-log"'), '内联的控制台标记已经搬走')
 })
+
+// ── 「正在运行」清单（上游 `ShowLiveRunConfigurations` → `ShowRunningListAction`） ──────────────
+// 上游依据：`platform/execution-impl/src/com/intellij/execution/actions/ShowRunningListAction.java:131-174`
+// （只列在跑的 descriptor、`getDisplayName()` 当行名、`:150-152` terminating 时换 KillProcess 图标、
+// `:162-165` 空态那一句、`:166-171` 底部提示、`:182-190` 没有任何在跑实例时整条动作不可用），
+// 点击是 `:110-111` 的 `toFrontRunContent`（只切换视图，不停止也不新建）。
+
+test('清单只列还在跑的实例，按起跑顺序给名（ShowRunningListAction.java:136-158）', () => {
+  reset()
+  handleRunStarted({ instance: 4, label: '服务端' })
+  handleRunStarted({ instance: 2, label: '' })
+  handleRunStarted({ instance: 9, label: '构建' })
+  handleRunExit({ instance: 9, code: 0 })
+  const rows = runningListRows(2)
+  assert.deepEqual(rows.map(row => row.id), [2, 4], '已结束的那条不在清单里（getRunningDescriptors 只给在跑的）')
+  assert.deepEqual(rows.map(row => row.name), ['运行 1', '服务端'], '无名按起跑顺序、有名用名（descriptor.getDisplayName()）')
+  assert.deepEqual(rows.map(row => row.icon), ['run', 'run'])
+  assert.deepEqual(rows.map(row => row.active), [true, false])
+})
+
+test('发出停止请求后那一格换成"正在结束"的图标（:150-152）', () => {
+  reset()
+  handleRunStarted({ instance: 6, label: '长驻服务' })
+  assert.equal(runningListRows()[0].icon, 'run')
+  markRunInstanceStopping(6)
+  assert.equal(runningListRows()[0].icon, 'kill', '上游那里是 isProcessTerminating() + canKillProcess() 才换图标')
+  // 退出事件到了就整条摘掉（宿主一定补一条 aborted 的 run.exit，见 native/run_host.cpp:306-310）。
+  handleRunExit({ instance: 6, code: -1, aborted: true })
+  assert.deepEqual(runningListRows(), [])
+})
+
+test('关闭视图但进程还在结束途中：标签没了，清单里还有（:137 的那一份表才是事实来源）', () => {
+  reset()
+  handleRunStarted({ instance: 8, label: '窗口' })
+  closeRunView(8)
+  assert.deepEqual(runInstanceList().map(row => row.id), [], '标签条按既有规则不再列它')
+  assert.deepEqual(runningListRows().map(row => row.id), [8], '清单看的是"还在不在跑"')
+  assert.equal(runningListRows()[0].icon, 'kill')
+})
+
+test('没有任何实例在跑时整条动作不可用（:182-190）', () => {
+  reset()
+  assert.deepEqual(runningListRows(), [])
+  assert.equal(runningListEnabled(runningListRows()), false)
+  handleRunStarted({ instance: 1, label: '甲' })
+  assert.equal(runningListEnabled(runningListRows()), true)
+  handleRunExit({ instance: 1, code: 0 })
+  assert.equal(runningListEnabled(runningListRows()), false)
+})
+
+test('三句文案 + 动作文案都指得到上游那条 key', () => {
+  const source = read('src/runInstances.ts')
+  assert.match(source, /ExecutionBundle\.properties:44-46/)
+  assert.match(source, /ActionsBundle\.properties:945-946/)
+  assert.equal(RUNNING_LIST_LABELS.title, '正在运行')
+  assert.equal(RUNNING_LIST_LABELS.empty, '没有可显示的')
+  assert.equal(RUNNING_LIST_LABELS.hint, '点击切换过去')
+  assert.equal(RUNNING_LIST_LABELS.action, '显示正在运行清单')
+})
+
+test('显示名与标签条同一个规则（runInstanceDisplayName）', () => {
+  assert.equal(runInstanceDisplayName({ label: '甲' }, 0), '甲')
+  assert.equal(runInstanceDisplayName({ label: '' }, 2), '运行 3')
+})
+
+test('消费链：控制台真的把清单接上了（点击只切视图）', () => {
+  const console_ = read('src/components/RunConsole.vue')
+  assert.match(console_, /runningListRows\(props\.active \|\| null\)/)
+  assert.match(console_, /runningListEnabled\(runningRows\.value\)/)
+  assert.match(console_, /function pickRunningRow\(id: number\) \{\n\s*emit\('select', id\)/, '点击 = 上游 toFrontRunContent，只切换')
+  assert.match(console_, /@click="pickRunningRow\(row\.id\)"/)
+  assert.match(console_, /runInstanceDisplayName\(instance, index\)/, '标签标题与清单同一个规则')
+  // 标签上的 × 仍然只做「停 + 摘标签」那两步（上面第 181 行那条既有断言钉着），
+  // 清单里那条之所以立刻变成 kill 图标，走的是 `closed` 这一档，不是额外的一次停止标记。
+  assert.doesNotMatch(console_, /function closeView\(id: number\) \{[\s\S]{0,60}markRunInstanceStopping/,
+    'closeView 不额外记 stopping：closed 已经代表同一件事')
+  const app = read('src/App.vue')
+  assert.match(app, /@select="focusRunInstance"/, '宿主那边 select 早就接的是 focusRunInstance')
+  const actions = read('src/runActions.ts')
+  assert.match(actions, /if \(instance\) markRunInstanceStopping\(instance\)/, '工具条的停止同样要记')
+})
+

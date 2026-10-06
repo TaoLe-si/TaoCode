@@ -7,7 +7,10 @@ import { iconSize } from '../uiIcons'
 // 分块发布（上游 `SearchResults` 的 chunk 流）：累积与认领在 src/searchStream.ts。
 import { beginSearchStream, endSearchStream, searchStream } from '../searchStream'
 // 结果预览面板（上游 FindPopupPanel 里的 UsagePreviewPanel）：窗口计算与文案在 src/searchPreview.ts。
-import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewSegments, previewWindow } from '../searchPreview'
+// `resultLineParts` 是结果列表那一行的行内切分（区间取自宿主报的 column/length，不重新匹配）。
+import { PREVIEW_DEBOUNCE_MS, PREVIEW_SELECT_HINT, PREVIEW_TITLE, PREVIEW_UNAVAILABLE, previewHeader, previewLines, previewSegments, previewWindow, resultLineParts as lineParts } from '../searchPreview'
+// 替换没做完时的交代语（纯判定，见 src/searchReplaceOutcome.ts）。
+import { incompleteNote } from '../searchReplaceOutcome.ts'
 // 结果右键菜单（上游 `FindInFiles.Results.ContextMenu` → 「复制路径/引用…」那一组）。
 import { COPY_REFERENCE_GROUP, FIND_COPY_ACTIONS, findResultClipboardText, type FindCopyActionId, type FindResultTarget } from '../copyPathActions'
 // 结果面板键盘选择（上游 `FindPopupPanel.java:830,842-856` 的 ScrollingUtil 与 F3 两条）。
@@ -54,7 +57,6 @@ watch(() => props.root, async root => {
 // just rewrote, so the shell re-reads them and an open buffer stops showing old text.
 const emit = defineEmits<{ open: [payload: { path: string; line: number }]; replaced: [payload: { paths: string[] }] }>()
 
-interface Part { text: string; hit: boolean }
 interface Group { path: string; matches: SearchPreviewMatch[]; start: number; pending: number }
 
 const query = ref('')
@@ -232,7 +234,7 @@ const busy = computed(() => running.value || replacing.value)
 // 结构化模板的编译/校验/替换串折叠/命中复核全部在 src/structuralSearchPanelModel.ts。
 // 编译失败就**不搜**（宁可报错，也不把 `$x$` 当成字面文本发出去 —— 那会让用户以为"没有匹配"）。
 // 逐变量替换定义那张表由模型持有（`structuralModel.definitions`），编辑面在 StructuralSearchFilters。
-const structuralModel = createStructuralSearchModel({ enabled: structural, template: query, replacement, caseSensitive, wholeWord })
+const structuralModel = createStructuralSearchModel({ enabled: structural, template: query, replacement, caseSensitive, wholeWord, regexMode: regex })
 const structuralError = computed(() => structuralModel.error.value)
 const activeQuery = computed(() => structuralModel.activeQuery.value)
 const activeReplacement = computed(() => structuralModel.activeReplacement.value)
@@ -363,8 +365,23 @@ async function cancelSearch() {
   try { await request('search.cancel') }
   catch (caught) { error.value = errorText(caught) }
 }
+/**
+ * 替换前的那道门 = 上游挂在**替换字段**上的 ValidationInfo（`FindPopupPanel.java:1547-1552`：
+ * `RegExReplacementBuilder.validate(pattern, getStringToReplace())` 抛 ⇒ 动作不执行）。
+ * 规则都在模型里（`src/structuralSearchPanelModel.ts` 的 `replaceGuard`），这里只负责"挡住 + 说一句"；
+ * 宿主那一侧还有同一趟校验兜底（`native/search.cpp` 的 `validate_replacement`），
+ * 先在这里拒是为了不让半批文件先被改写。
+ */
+function blockedByReplaceGuard(): boolean {
+  const guard = structuralModel.replaceGuard.value
+  if (!guard) return false
+  error.value = guard
+  return true
+}
 async function replaceOccurrences(list: SearchPreviewMatch[]) {
   if (!list.length || !canSearch.value || busy.value) return
+  // 替换串在这个查询下畸形 ⇒ 一处都不动（模板本身的语法错由 `canSearch` 那一头挡）。
+  if (blockedByReplaceGuard()) return
   rememberRecent('replace', replacement.value)
   const token = ++replaceToken
   const keys = new Set(list.map(keyOf))
@@ -393,19 +410,9 @@ async function replaceOccurrences(list: SearchPreviewMatch[]) {
   finally { if (token === replaceToken) replacing.value = false }
 }
 function replaceSelected() { void replaceOccurrences(matches.value.filter(pending)) }
-// A replace the walk could not finish is not a success. `skippedFiles` is the number
+// A replace the walk could not finish is not a success: `skippedFiles` is the number
 // of ticked files the 100k-file ceiling cut off before they were ever read, so the
-// old "已替换 N 处" line alone would have been a lie.
-function incompleteNote(result: SearchReplaceResult): string {
-  const skipped = Math.max(0, Math.trunc(result.skippedFiles ?? 0))
-  const undecodable = Math.max(0, Math.trunc(result.skippedNonUtf8 ?? 0))
-  const reasons: string[] = []
-  if (skipped > 0) reasons.push(`有 ${skipped} 个勾选的文件因扫描上限未被处理`)
-  else if (result.truncated === true) reasons.push('扫描被截断，可能还有未列出的匹配')
-  if (undecodable > 0) reasons.push(`${undecodable} 个文件的编码无法识别，未参与搜索/替换`)
-  if (!reasons.length) return ''
-  return `⚠ 替换不完整：${reasons.join('；')}。请检查相关文件后重做。`
-}
+// old "已替换 N 处" line alone would have been a lie. 判定在 src/searchReplaceOutcome.ts。
 function replaceFile(group: Group) { void replaceOccurrences(group.matches.filter(pending)) }
 function replaceOne(match: SearchPreviewMatch) { void replaceOccurrences([match]) }
 function skipOne(match: SearchPreviewMatch) { const key = keyOf(match); skipped.add(key); selected.delete(key) }
@@ -419,6 +426,7 @@ function toggle(match: SearchPreviewMatch) {
 // workspace, including ones a truncated result never showed, so it needs a confirm.
 async function replaceAllOnDisk() {
   if (!canSearch.value || busy.value) return
+  if (blockedByReplaceGuard()) return
   rememberRecent('replace', replacement.value)
   // 选了范围时，原生 `search.replace` 的 include 只能写一个列表，表达不了
   // 「作用域 ∩ 文件掩码」。与其冒着改写范围外文件的风险，不如明确只替换本次
@@ -586,16 +594,6 @@ function onFieldKeydown(event: KeyboardEvent, kind: 'find' | 'replace') {
   if (event.key === 'Escape' && historyOpen.value) { historyOpen.value = null; return }
   if (event.key === 'F3') { event.preventDefault(); stepResults(event.shiftKey ? 'FindPrevious' : 'FindNext') }
 }
-function parts(match: SearchPreviewMatch): Part[] {
-  const line = match.preview ?? ''
-  const start = Math.min(Math.max(0, (match.column || 1) - 1), line.length)
-  const end = Math.min(Math.max(start, start + Math.max(0, match.length || 0)), line.length)
-  const list: Part[] = []
-  if (start > 0) list.push({ text: line.slice(0, start), hit: false })
-  list.push({ text: line.slice(start, end), hit: true })
-  if (end < line.length) list.push({ text: line.slice(end), hit: false })
-  return list
-}
 
 watch(() => props.active, active => {
   if (!active) return
@@ -688,7 +686,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
     <p v-if="!isDesktop" class="fs-warn">浏览器预览不能全局搜索，请在桌面端使用。</p>
     <p v-else-if="!root" class="fs-warn">尚未打开项目。</p>
     <!-- 结构化模板的语法说明：只说这个子集真的支持什么，不做 PSI 那套（见 src/structuralSearch.ts 头部）。 -->
-    <p v-if="structural" class="fs-note">结构化模板：<code>$x$</code> 匹配一个标识符（字母/数字/_/$），同名 <code>$x$</code> 必须匹配同一段文本；替换串里的 <code>$x$</code> 会带回捕获。列表变量写量词（<code>$x$+</code> / <code>$x${0,}</code>，按逗号分隔）——上游的 <code>$Args$</code> 就是"0 到不限次"那一条约束，不是另一种模型。</p>
+    <p v-if="structural" class="fs-note">结构化模板：<code>$x$</code> 匹配一个标识符（字母/数字/_/$），同名 <code>$x$</code> 必须匹配同一段文本；替换串里的 <code>$x$</code> 会带回捕获。列表变量写量词（<code>$x$+</code> / <code>$x${0,}</code>，按逗号分隔，一项可以是一层括号的调用如 <code>g(b, c)</code>；嵌得更深的那一段本仓不报，也不会报半截）——上游的 <code>$Args$</code> 就是"0 到不限次"那一条约束，不是另一种模型。</p>
     <!-- 修饰符面板（上游 `plugin/ui/filters/FilterPanel`+`FilterTable` 的文本层等价物）：
          模板编不动时不画（错误已经摆在下一行，别再叠一层能改却改不出结果的控件）。 -->
     <StructuralSearchFilters v-if="structural && !structuralError" :template="query" :scope="structuralModel.scope.value" :definitions="structuralModel.definitions.value" :replaceable="Boolean(replacement)" @update:template="query = $event" @update:scope="structuralModel.scope.value = $event" @update:definitions="structuralModel.definitions.value = $event" />
@@ -736,7 +734,7 @@ watch(() => props.root, () => { if (searched.value || matches.value.length) clea
                 <input class="fs-check" type="checkbox" :checked="pending(match)" :disabled="busy" :aria-label="`替换 ${group.path} 第 ${match.line} 行第 ${match.column} 列`" @change="toggle(match)" />
                 <button class="fs-match-line" :title="`${group.path}:${match.line}:${match.column}`" @click="openMatch(match, group.start + index)">
                   <span class="fs-pos">{{ match.line }}:{{ match.column }}</span>
-                  <span class="fs-line"><span v-for="(part, partIndex) in parts(match)" :key="partIndex" :class="{ 'fs-hit': part.hit }">{{ part.text }}</span></span>
+                  <span class="fs-line"><span v-for="(part, partIndex) in lineParts(match.preview, match.column, match.length)" :key="partIndex" :class="{ 'fs-hit': part.hit }">{{ part.text }}</span></span>
                 </button>
                 <div class="fs-match-actions">
                   <button class="fs-mini" :disabled="busy" title="替换这一处" @click="replaceOne(match)">替换</button>

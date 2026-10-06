@@ -72,7 +72,18 @@ test('面板接线：三类编辑入口 + 全清 + 静音 + 三条停机规则�
   // 12c：**过期断言**（不是回归）—— 原来钉的是面板里的 `catch (caught) { error.value = … }`；
   // 断点下发收进唯一出口后，异常在 `dbgBreakpointUpdate.ts` 的队列里兜住，面板仍必须把它写进同一行错误位。
   assert.match(pane, /if \(round\.error\) \{ error\.value = round\.error; return \}/, '下发失败照样上屏（只是换了兜住的地方）')
-  assert.match(pane, /await breakpointUpdater\.queue\(item\)/, '面板的下发只走 `src/dbgBreakpointUpdate.ts` 这一个口')
+  // 12c 之后本桶（dap）又给队列入口加了第二参数（`{ now: true }` = 上游 `updateBreakpointNow` 那一档「不等 300ms」，
+  // `FrontendXLineBreakpointVisualizationManager.kt:290-294`）⇒ 这条锚点重指新形状，**判据一字未减**：
+  // 面板的下发仍然只走 `src/dbgBreakpointUpdate.ts` 这一个口（精确匹配，没有降级成 includes）。
+  assert.match(pane, /await breakpointUpdater\.queue\(item, options\)/, '面板的下发只走 `src/dbgBreakpointUpdate.ts` 这一个口')
+  assert.match(pane, /void syncBreak\(\[\.\.\.activeBreaks\.value, \{ line \}\], \{ now: true \}\)/,
+    '新建断点没走「不等窗」那一档（上游 :290 的注释点名 create new breakpoint 不能等）')
+  assert.match(pane, /void syncBreak\(activeBreaks\.value\.filter\(point => point\.line !== line\), \{ now: true \}\)/,
+    '移除断点同样不等窗')
+  assert.match(pane, /if \(!round\.applied\) return/,
+    '载荷被后来的改动合并掉时不许拿别人的 verifiedLines 判自己那份（否则误报「部分未验证」）')
+  assert.match(pane, /void syncBreak\(activeBreaks\.value\.map\(point =>/,
+    '改条件/命中次数/日志走合并窗（逐字符进来的抖动 ⇒ 连续改动只发一次）')
   assert.match(pane, /breakpointSendPlan\(dapBreakpoints, \{ \.\.\.sendRules\(\), muted: next \}\)/, '静音/取消静音 = 全量重发那份计划')
   assert.match(pane, /allBreakpointFiles\(dapBreakpoints\)/, '全清列的是规则层给的那份文件清单')
   const panel = readFileSync('src/components/DebugPanel.vue', 'utf8')

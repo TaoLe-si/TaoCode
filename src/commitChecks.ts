@@ -389,3 +389,116 @@ export function checksProgressPopup(progress: ChecksProgress, open: boolean): Ch
 export function indexingWarningVisible(analyzing: boolean, checksBusy: boolean): boolean {
   return analyzing && !checksBusy
 }
+
+/**
+ * 「提交文件…」的**请求形状**（R1 的前端那一半）。
+ *
+ * 上游：`platform/vcs-impl/src/com/intellij/openapi/vcs/actions/commit/CommonCheckinFilesAction.kt:26-78`
+ * 把选中的路径交给 `CheckinActionUtil.kt:100-160` 的 `pathsToCommit(...)` —— 它先把重复项并掉、
+ * 再把"这一批变更"设成唯一的提交范围（`workflowHandler.setCommitState(...)` ⇒ `getIncludedChanges()`
+ * 只含这些路径）。本仓的等价物就是把这批路径原样送给宿主的新 `paths` 入参，
+ * 落点 `native/git.cpp` 的 `commit(..., paths)` → `git commit --only -- <paths>`。
+ *
+ * 三条口径：
+ *  · **空 = 不带这个键**：今天的 `git.commit` 请求体一个字都不变（宿主没接这条通道之前，
+ *    带上 `paths` 也只会被忽略 ⇒ 宁可不发）；
+ *  · 去空白、去重、保序（`pathsToCommit` 的集合语义）；
+ *  · 上限 500 条与 native 的 `paths.size() > 500` 一致，超了在这里就拒掉。
+ *
+ * 2026-10-06（commit2）把"校验非法 paths"这一半补上，四条口径都有上游出处：
+ *  · **单条路径的合法性**＝把 native 那道闸在前端先跑一遍：`native/git.cpp:259-265` 的
+ *    `checked_path()` 拒空串、>512 字符、以 `-` 开头、含 CR/LF、含 `..`，抛 `INVALID_REQUEST`
+ *    （在前端先拒 = 少一次往返、错误也落在"提交文件…"那一步，而不是等 git 撞死）；
+ *  · **目录与其子项同时选中 ⇒ 不并掉**：`DescindingFilesFilter.java:27-69` 会把后代路径滤掉，
+ *    但 `:36-39` 一上来就先问 `AbstractVcs#allowsNestedRoots`，而 git 那一支答 **true**
+ *    （`plugins/git4idea/backend/src/GitVcs.java:260-263`）⇒ 上游对 git 仓库是一个路径都不并；
+ *    本仓只接 git，所以这里也**不许**做祖先折叠（上一版的注释把这一步当成"集合语义"，实际不是）；
+ *  · **被忽略（noisy）的被选项 ⇒ 拒绝**：`actions/commit/CommonCheckinFilesAction.kt:74-78`
+ *    的 `isActionEnabled` 要求 `status != FileStatus.IGNORED` —— 面板默认连列都不列它们
+ *    （`ChangesView.ShowIgnored`），多选把它们夹进来时不能真的进这次提交；
+ *  · **未跟踪的被选项 ⇒ 明确纳入**（不是拒绝）：`CheckinActionUtil.kt:104-105` 把
+ *    `UNVERSIONED_FILE_PATHS_DATA_KEY` 与 `CHANGES` 各取一份，同文件 `:159-167` 的
+ *    `getIncludedChanges()` 把未版本管理的那些 `concat` 进"这次包含的变更"
+ *    ⇒ 路径照原样发出去，由 native 先 `git add -- <path>`（`native/git.cpp:465-469`）再 `--only` 提交。
+ *  后两条要吃"本仓当前的变更列表"（`changes`）：宿主没给这一份时**不做**这两档判断，
+ *  请求形状与本批之前逐字一致（不放假校验，也不误拒）。
+ */
+export interface CommitRequestInput {
+  message: string
+  amend: boolean
+  signoff: boolean
+  author: string
+  authorEmail: string
+  /** 被选中的那些路径（仓库相对）。空/未给 = 提交整个暂存区，与历史行为逐字一致。 */
+  paths?: readonly string[]
+  /**
+   * 本仓当前的变更列表（`git.status` 的那一份，结构上就是 `GitChange`）。
+   * 给了才做「被忽略的被选项拒绝」「陌生路径拒绝」这两档；不给 = 本批之前的形状。
+   */
+  changes?: readonly CommitScopeRow[]
+}
+
+/** 变更列表里"提交范围校验"要用的那三件事（与 `GitChange` / `CommitChecksFileRow` 结构相容）。 */
+export interface CommitScopeRow {
+  path: string
+  untracked: boolean
+  /** 「显示忽略的文件」开着时才列出来的那些 —— 上游 `FileStatus.IGNORED`。 */
+  ignored?: boolean
+}
+
+export const MAX_COMMIT_PATHS = 500
+
+/** native `checked_path()` 里那个长度上限（`native/git.cpp:260`，同一道闸同一个数）。 */
+export const MAX_COMMIT_PATH_LENGTH = 512
+
+/** 单条路径过 native 那道闸：返回不合法的原因，合法时返回 `null`。 */
+function commitPathProblem(path: string): string | null {
+  if (path.length > MAX_COMMIT_PATH_LENGTH) return '路径过长'
+  if (path.startsWith('-')) return '路径不能以 - 开头'
+  if (path.includes('\n') || path.includes('\r')) return '路径不能含换行'
+  if (path.includes('..')) return '路径不能含 ..'
+  return null
+}
+
+/**
+ * 被选路径 → 这次提交的 pathspec（`commitRequestParams` 的那一步，不单独导出：
+ * 请求体只有一条生成路径，别让"校验过的"和"没校验的"两种形状在界面上并存）。
+ * 三条口径（详见 `commitRequestParams` 的注释）：非法的单条路径就地拒、被忽略的被选项拒、
+ * 未跟踪的被选项**留**。选中目录（`src`）算得中它下面的那些变更（`src/a.ts`）。
+ */
+function commitPathsToSubmit(paths: readonly string[] | undefined,
+                             changes?: readonly CommitScopeRow[]): string[] {
+  const selected = [...new Set((paths ?? []).map(path => path.trim()).filter(Boolean))]
+  if (selected.length > MAX_COMMIT_PATHS) {
+    throw new Error(`一次最多提交 ${MAX_COMMIT_PATHS} 个所选文件。`)
+  }
+  const illegal = selected.filter(path => commitPathProblem(path) !== null)
+  if (illegal.length) {
+    const reasons = illegal.map(path => `${path}（${commitPathProblem(path)}）`).join('、')
+    throw new Error(`提交路径不合法：${reasons}`)
+  }
+  if (!changes) return selected
+  const rejected: string[] = []
+  for (const path of selected) {
+    const exact = changes.find(row => row.path === path)
+    if (exact?.ignored) { rejected.push(`${path}（被忽略的文件不参与提交）`); continue }
+    // 选中目录：它下面的变更行才算"被这次提交包含"；一行都对不上 = 上游那条 `status == NOT_CHANGED`，
+    // 那个动作对这种路径直接不启用（`CommonCheckinFilesAction.kt:74-78`）。
+    const under = path + '/'
+    if (!exact && !changes.some(row => row.path.startsWith(under))) {
+      rejected.push(`${path}（没有可提交的变更）`)
+    }
+  }
+  if (rejected.length) throw new Error(`这次提交不包含：${rejected.join('、')}`)
+  return selected
+}
+
+export function commitRequestParams(input: CommitRequestInput): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    message: input.message, amend: input.amend, signoff: input.signoff,
+    author: input.author, authorEmail: input.authorEmail,
+  }
+  const paths = commitPathsToSubmit(input.paths, input.changes)
+  if (paths.length) params.paths = paths
+  return params
+}

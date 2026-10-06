@@ -145,7 +145,9 @@ export function createProjectTreeModel(options: {
     return rows.value.filter(row => selection.has(row.entry.path)).map(row => row.entry)
   }
   function canExpandRecursively() {
-    return getSelectedEntries().some(entry => entry.kind === 'directory')
+    // 上游 `DefaultTreeExpander.kt:42` 的 `canExpandSelected` 只看「有没有选中」。本仓多守一条
+    // 「这一行开得出东西」，但不再把它限制成目录 —— 「文件嵌套」的父行是文件，照样开得出子行。
+    return getSelectedEntries().some(entry => entry.kind === 'directory' || hasNested(entry.path))
   }
   async function focus(path: string, token = epoch, revision = selectionRevision) {
     await nextTick()
@@ -238,8 +240,27 @@ export function createProjectTreeModel(options: {
     expanded.clear()
     if (path !== undefined) { select(path); void focus(path) }
   }
+  /**
+   * 批量展开（`expandAll` / `expandRecursively`）共用的一趟递归。开的是**任何有子行的行**，
+   * 不是只开目录：上游那两个动作都只经 `TreeExpander`
+   * （`platform/lang-impl/src/com/intellij/ide/projectView/actions/ExpandRecursivelyAction.kt:29-31`
+   * 与 `.../ProjectViewExpandAllAction.kt:17-22`）→ `DefaultTreeExpander.kt:21-36`
+   * → `TreeUtil.java:1084`，条件只有「节点自己豁免不」（`AbstractTreeNode.java:138-140` 默认 true，
+   * 项目视图里让开的是外部库那一条 `ExternalLibrariesNode.java:61-64`，见下面 `expandAll` 的注释）。
+   * 目录之外还有「文件嵌套」的父行：它是文件，名下却挂着子行
+   * （`platform/lang-impl/src/com/intellij/ide/projectView/impl/nodes/NestingTreeNode.java:43-51`，
+   * `getChildrenImpl()` = 嵌套子文件 + 自己的），所以这一支也得开。
+   */
   async function visit(entry: Entry, token: number, seen: Set<string>) {
-    if (!valid(token) || entry.kind !== 'directory' || seen.has(entry.path)) return
+    if (!valid(token) || seen.has(entry.path)) return
+    if (entry.kind !== 'directory') {
+      if (!hasNested(entry.path)) return
+      seen.add(entry.path)
+      // 与 `toggle()` 那条一样：文件行的子项来自同一份同级列表，不需要向宿主取。
+      expanded.add(entry.path)
+      for (const child of nestedChildren(entry.path)) await visit(child, token, seen)
+      return
+    }
     seen.add(entry.path)
     const entries = await expand(entry, token)
     if (!entries || !valid(token)) return
@@ -257,7 +278,7 @@ export function createProjectTreeModel(options: {
     const entries = path !== undefined ? rows.value.filter(row => row.entry.path === path).map(row => row.entry) : getSelectedEntries()
     const token = epoch
     const seen = new Set<string>()
-    for (const entry of entries) if (entry.kind === 'directory') await visit(entry, token, seen)
+    for (const entry of entries) await visit(entry, token, seen)
   }
   function isAncestor(entry: Entry, path: string): boolean {
     if (entry.path === '' && hasProjectRoot()) return !path.startsWith('\u0000') && options.entries().some(child => child.path === path || isAncestor(child, path))

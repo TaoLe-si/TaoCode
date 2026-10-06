@@ -23,6 +23,11 @@ import { afterBuildPhase, runActivatedAfterBuild, type ActivatedTaskStep } from 
 import { expandKnownToolMacros, unknownToolMacros } from './toolMacros.ts'
 import { readClipboardText } from './clipboard.ts'
 import { attachInputHistory, createCommandHistory } from './consoleInputHistory.ts'
+// `markRunInstanceStopping` 不在 `src/bridge.ts` 的再导出清单里（那份文件是保留文件），
+// 所以这里直接引真身 —— 与桥接层引的是同一个模块实例，状态不会分家。
+import { markRunInstanceStopping } from './runInstances.ts'
+// 「启动运行实例时打开/聚焦运行面板」的判定（纯函数，判据 tests/run-startup-focus.test.mjs）。
+import { decideRunStartupFocus, readRunStartupFocus } from './runStartupFocus.ts'
 import { hasMainMethod, javaExecutable, javaRunArgs, javaRunCommand, mainClassFor } from './javaRun.ts'
 import type { GradleDetection } from './gradle.ts'
 import { parseRunArguments } from './runConfigTree.ts'; import { runCompound } from './runCompound.ts'
@@ -190,7 +195,20 @@ async function startRun(config: RunConfig = currentRunConfig()) {
   if (!config.command.trim() && !config.program?.trim()) { notify('请输入要运行的命令或可执行程序。', true); return }
   if (!await saveAll()) { notify('请先保存修改再运行。', true); return }
   if (workspace.value?.root !== root) return
-  showOutput('run')
+  // 「启动时打开运行面板」= 上游运行配置的那两个开关（`RunnerAndConfigurationSettingsImpl.kt:108-109` 默认
+  // activate=true / focus=false，`ExecutionManagerImpl.kt:290-293` 合成 descriptor 的
+  // `isActivateToolWindowWhenAdded`，`RunContentManagerImpl.kt:439-441` 为假就根本不碰面板）。
+  // 判定本身在 `src/runStartupFocus.ts`（纯函数）；这里的 `existingView` 按 `:98` 的 label 规则
+  // （`params.label = label || config.name`）找同名配置还没被关掉的那一格。
+  // 四个输出里本文件只有一件可做的事（打开面板）：`takeFocus` 要调 App.vue 的
+  // `focusToolWindowContent`、`selectView`/`createNewTab` 的标签动作在宿主与实例层 ⇒
+  // 见 docs/wiring-requests-2026-10-06-exec2.md W1。默认值是 true ⇒ 接线前后行为逐字相同。
+  const sameName = runInstanceList().find(instance => instance.label === config.name)
+  const startup = decideRunStartupFocus({
+    ...readRunStartupFocus(),
+    existingView: sameName ? { running: sameName.running, selected: sameName.id === activeRunInstance.value } : null,
+  })
+  if (startup.activateToolWindow) showOutput('run')
   // 「Before launch」的整条链现在由**宿主**跑（native/run_host.cpp）：前端只把 beforeLaunch 一起发过去，
   // 这样链是**一个实例**、退出一致、并且每个实例有自己的链状态（原来前端逐条跑，多实例会互相踩）。
   //
@@ -471,7 +489,12 @@ async function runExternalTool(command: string, name: string, cwd?: string) {
 }
 // 停止**当前实例**（IDEA 的 Stop 按钮作用在选中的那个 Content 上）；没有选中就停全部。
 async function stopRun() {
-  try { await request('run.stop', activeRunInstance.value ? { instance: activeRunInstance.value } : {}) }
+  const instance = activeRunInstance.value
+  // 请求一发出就把这一格标成「正在结束」：上游读的是 `ProcessHandler.isProcessTerminating()`
+  // 这个内存字段（`StopProcessAction.java:68-76`），本仓宿主只在进程结束时才回事件
+  // ⇒ 「正在运行」清单的那个 kill 图标只能由发请求的这一侧记（见 src/runInstances.ts）。
+  if (instance) markRunInstanceStopping(instance)
+  try { await request('run.stop', instance ? { instance } : {}) }
   catch (error) { notify(errorMessage(error), true) }
 }
 // IDEA 主工具栏的 Debug / Stop（MainToolbar 的 Run 工具组）。dapState 由原生推送；

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, CircleCheck, CircleX, Eye, FileCode2, FileDown, FileInput, FlaskConical,
-         FolderTree, LocateFixed, Minus, Play, RefreshCw, RotateCcw, Search, Tags } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, CircleCheck, CircleX, Clock, Eye, FileCode2, FileDown, FileInput, FlaskConical,
+         FolderTree, FolderUp, ListOrdered, LocateFixed, Minus, Play, RefreshCw, RotateCcw, Search, Tags, Timer, ArrowDownAZ } from 'lucide-vue-next'
 import { iconSize } from '../uiIcons'
 import { beginRun, isDesktop, request, runOutput, runState, type Entry } from '../bridge'
 import { discover, rerunCommand, type DiscoveredTest, type TestFramework, type TestResult } from '../testRunner'
 import { TestResultFeed, type AssertionView } from '../assertionView'
-import { TestTreeBuilder, TestTreeExpander, type TestTreeNode } from '../testTree'
+import { DEFAULT_TEST_TREE_SORT, SHOW_INLINE_STATISTICS_DESCRIPTION, SHOW_INLINE_STATISTICS_NAME, SORT_ALPHABETICALLY_DESCRIPTION,
+         SORT_ALPHABETICALLY_NAME, SORT_BY_DECLARATION_ORDER_DESCRIPTION, SORT_BY_DECLARATION_ORDER_NAME, SORT_BY_DURATION_DESCRIPTION,
+         SORT_BY_DURATION_NAME, SUITES_ALWAYS_ON_TOP_DESCRIPTION, SUITES_ALWAYS_ON_TOP_NAME, sortTestTree,
+         testNodeDurationText, testNodeDurationTooltip,
+         withTestTreeSort, TestTreeBuilder, TestTreeExpander, type TestTreeSortKey, type TestTreeSortOptions, type TestTreeNode } from '../testTree'
 import { NEXT_FAILED_TEST_NAME, PREVIOUS_FAILED_TEST_NAME, autoScrollTarget, nextFailedTest, occurrenceInfo, previousFailedTest,
          NAVIGATE_WITH_SINGLE_CLICK_DESCRIPTION, NAVIGATE_WITH_SINGLE_CLICK_NAME, SCROLL_TO_RUNNING_TEST_DESCRIPTION,
          SCROLL_TO_RUNNING_TEST_NAME, TRACK_RUNNING_TEST_DESCRIPTION, TRACK_RUNNING_TEST_NAME, runningTestNode } from '../testNavigation'
@@ -25,7 +29,8 @@ import { formatTestEvent } from '../testEventChannel'
 import { isAncestor, relativePath } from '../vcsFileUtil'
 
 // IDEA 的测试工具窗口（`platform/testRunner`）：发现出来的测试树、运行 / 重跑失败、
-// 按 suite 折叠的结果树、上一个 / 下一个失败、导出结果 XML、改动后自动重跑。
+// 按 suite 折叠的结果树、树排序（字母 / 声明顺序 / 耗时）与行内耗时统计、
+// 上一个 / 下一个失败、导出结果 XML、改动后自动重跑。
 // 每一块的落点与上游对照写在各模块头（src/testTree.ts、src/testNavigation.ts、
 // src/testResultsXml.ts、src/autoTest.ts、src/junitPatterns.ts、src/junitFilters…）。
 const props = defineProps<{ activePath: string; fileText: string; root: string; ready: boolean }>()
@@ -224,7 +229,30 @@ const tree = computed<TestTreeNode[]>(() => {
 // （`JavaTestFrameworkRunnableState.java:322` 把 `HIDE_PASSED_TESTS` 设成 false，
 //   `TestConsoleProperties.java:51` 的 `HIDE_IGNORED_TEST` 本来默认就是 false）。
 const displayFilter = ref<TestDisplayFilter>({ ...DEFAULT_DISPLAY_FILTER })
-const shownTree = computed(() => filterTestTree(tree.value, displayFilter.value))
+// 排序与行内统计（上游 `TestConsoleProperties.java:45-48/57` 的四个开关 + `:57` 的默认显示时长）：
+// 三个排序键互斥（`ToolbarPanel.java:84-95/98-110/306-334`），耗时排序只在没在跑时生效
+// （`TestFrameworkRunningModel.java:44`、`SMTestRunnerResultsForm.java:310-312`）。
+const sortOptions = ref<TestTreeSortOptions>({ ...DEFAULT_TEST_TREE_SORT })
+const showInlineStatistics = ref(true)
+// 「现在」只在新输出到达时重算（`feedVersion` 是喂入计数）—— 上游的运行中时长也是**画的那一刻**
+// 减开始时间戳（`JavaSMTRunnerTestTreeView.java:69` 的 `System.currentTimeMillis()`），
+// 而重画由事件驱动（同文件 `:35-46` 的属性监听里 `redrawStatusLabel()`），本仓没有定时器。
+const renderNow = computed(() => { void feedVersion.value; return Date.now() })
+/** 行右侧那一格的文本与 tooltip（wall time / 运行中实时时长 / 孩子之和，见 `src/testTree.ts` 的呈现一节）。 */
+const durationOf = (node: TestTreeNode) => testNodeDurationText(node, renderNow.value)
+// 模块侧的 null 是上游的 `@Nullable`（不画这一格）；DOM 侧 `title` 只认 undefined ⇒ 在组件边界换掉。
+const durationHint = (node: TestTreeNode) => testNodeDurationTooltip(node) ?? undefined
+const sortedTree = computed(() => sortTestTree(tree.value, sortOptions.value, running.value))
+/** 三个排序键各自对应的开关名（互斥由 `withTestTreeSort` 保证）。 */
+const SORT_FLAG_OF: Record<TestTreeSortKey, keyof TestTreeSortOptions> = {
+  alphabetically: 'sortAlphabetically',
+  duration: 'sortByDuration',
+  declaration: 'sortByDeclarationOrder',
+}
+function chooseSort(key: TestTreeSortKey): void {
+  sortOptions.value = withTestTreeSort(sortOptions.value, sortOptions.value[SORT_FLAG_OF[key]] ? null : key)
+}
+const shownTree = computed(() => filterTestTree(sortedTree.value, displayFilter.value))
 const expandable = computed(() => expander.canExpand(shownTree.value))
 /** 还没跑过的已发现测试也进列表（上游的「没有结果的测试」在树上只是没有状态）。 */
 const pendingTests = computed(() => visibleTests.value.filter(row => !results.value.has(row.id)))
@@ -250,12 +278,13 @@ const sourceOf = (node: TestTreeNode) => {
 }
 
 // --- 失败导航（上游 FailedTestsNavigator）------------------------------------
+// 走的是**看得见**的那棵树（排过序、滤过的），与上游 navigator 在展示模型上数「第 N 个」一致。
 function stepFailure(direction: 1 | -1) {
-  const target = direction === 1 ? nextFailedTest(tree.value, selectedNodeId.value) : previousFailedTest(tree.value, selectedNodeId.value)
+  const target = direction === 1 ? nextFailedTest(shownTree.value, selectedNodeId.value) : previousFailedTest(shownTree.value, selectedNodeId.value)
   if (!target) { note.value = '没有更多失败的测试。'; return }
   note.value = `${direction === 1 ? NEXT_FAILED_TEST_NAME : PREVIOUS_FAILED_TEST_NAME}：第 ${target.number} / ${target.count} 个`
   selectedFailureId.value = target.id
-  const node = flatten(tree.value).find(item => item.id === target.id)
+  const node = flatten(shownTree.value).find(item => item.id === target.id)
   if (node) for (const ancestor of ancestorsOf(node)) expander.toggle(ancestor.id)
 }
 function flatten(nodes: readonly TestTreeNode[]): TestTreeNode[] {
@@ -265,7 +294,7 @@ function flatten(nodes: readonly TestTreeNode[]): TestTreeNode[] {
 }
 function ancestorsOf(node: TestTreeNode): TestTreeNode[] {
   const out: TestTreeNode[] = []
-  for (const candidate of flatten(tree.value)) if (node.path.startsWith(`${candidate.path}.`)) out.push(candidate)
+  for (const candidate of flatten(shownTree.value)) if (node.path.startsWith(`${candidate.path}.`)) out.push(candidate)
   return out.sort((a, b) => a.depth - b.depth)
 }
 function jump(node: TestTreeNode) {
@@ -439,11 +468,26 @@ watch(() => props.activePath, () => refreshFile())
         :title="`${SHOW_PASSED_NAME}：${SHOW_PASSED_DESCRIPTION}`" :aria-label="SHOW_PASSED_NAME" @click="displayFilter = toggleDisplayFilter(displayFilter, 'showPassed')"><CircleCheck :size="iconSize.control" /></button>
       <button class="icon-button" :class="{ active: displayFilter.showIgnored }" :aria-pressed="displayFilter.showIgnored"
         :title="`${SHOW_IGNORED_NAME}：${SHOW_IGNORED_DESCRIPTION}`" :aria-label="SHOW_IGNORED_NAME" @click="displayFilter = toggleDisplayFilter(displayFilter, 'showIgnored')"><Minus :size="iconSize.control" /></button>
+      <!-- 排序（上游 ToolbarPanel.java:82-114 的 sortGroup：字母 / 声明顺序 / 耗时 三选一 + 套件置顶）。
+           上游新 UI 把这组收进「Sorting Options」弹层（ExecutionBundle.properties:144），本面板沿用自己的
+           平铺开关形状（与既有的显示过滤器、跟踪开关同一排）。 -->
+      <button class="icon-button" :class="{ active: sortOptions.sortAlphabetically }" :aria-pressed="sortOptions.sortAlphabetically"
+        :title="`${SORT_ALPHABETICALLY_NAME}：${SORT_ALPHABETICALLY_DESCRIPTION}`" :aria-label="SORT_ALPHABETICALLY_NAME" @click="chooseSort('alphabetically')"><ArrowDownAZ :size="iconSize.control" /></button>
+      <button class="icon-button" :class="{ active: sortOptions.sortByDeclarationOrder }" :aria-pressed="sortOptions.sortByDeclarationOrder"
+        :title="`${SORT_BY_DECLARATION_ORDER_NAME}：${SORT_BY_DECLARATION_ORDER_DESCRIPTION}`" :aria-label="SORT_BY_DECLARATION_ORDER_NAME" @click="chooseSort('declaration')"><ListOrdered :size="iconSize.control" /></button>
+      <button class="icon-button" :class="{ active: sortOptions.sortByDuration }" :aria-pressed="sortOptions.sortByDuration"
+        :title="`${SORT_BY_DURATION_NAME}：${SORT_BY_DURATION_DESCRIPTION}`" :aria-label="SORT_BY_DURATION_NAME" @click="chooseSort('duration')"><Timer :size="iconSize.control" /></button>
+      <button class="icon-button" :class="{ active: sortOptions.suitesAlwaysOnTop }" :aria-pressed="sortOptions.suitesAlwaysOnTop"
+        :title="`${SUITES_ALWAYS_ON_TOP_NAME}：${SUITES_ALWAYS_ON_TOP_DESCRIPTION}`" :aria-label="SUITES_ALWAYS_ON_TOP_NAME"
+        @click="sortOptions = { ...sortOptions, suitesAlwaysOnTop: !sortOptions.suitesAlwaysOnTop }"><FolderUp :size="iconSize.control" /></button>
       <!-- 跟随运行中的测试（上游 ToolbarPanel.java:162-164 的 Track Running Test /
            ScrollToTestSourceAction.java:28-29 的 Navigate with Single Click，
            以及开着跟踪时才可见的 ScrollToRunningTestAction）。 -->
       <button class="icon-button" :class="{ active: trackRunning }" :aria-pressed="trackRunning"
         :title="`${TRACK_RUNNING_TEST_NAME}：${TRACK_RUNNING_TEST_DESCRIPTION}`" :aria-label="TRACK_RUNNING_TEST_NAME" @click="trackRunning = !trackRunning"><Eye :size="iconSize.control" /></button>
+      <!-- 行内统计：节点名右侧的耗时（上游 ToolbarPanel.java:165-167 的 SHOW_INLINE_STATISTICS，默认开）。 -->
+      <button class="icon-button" :class="{ active: showInlineStatistics }" :aria-pressed="showInlineStatistics"
+        :title="`${SHOW_INLINE_STATISTICS_NAME}：${SHOW_INLINE_STATISTICS_DESCRIPTION}`" :aria-label="SHOW_INLINE_STATISTICS_NAME" @click="showInlineStatistics = !showInlineStatistics"><Clock :size="iconSize.control" /></button>
       <button class="icon-button" :class="{ active: scrollToSource }" :aria-pressed="scrollToSource"
         :title="`${NAVIGATE_WITH_SINGLE_CLICK_NAME}：${NAVIGATE_WITH_SINGLE_CLICK_DESCRIPTION}`" :aria-label="NAVIGATE_WITH_SINGLE_CLICK_NAME" @click="scrollToSource = !scrollToSource"><FileCode2 :size="iconSize.control" /></button>
       <button v-if="trackRunning" class="icon-button" :disabled="!runningNode"
@@ -495,6 +539,12 @@ watch(() => props.activePath, () => refreshFile())
           <input v-else type="checkbox" :checked="selected.has(node.id)" :aria-label="`选择 ${node.name}`" @change="toggle(node.id)" />
           <button class="testrun-name" :title="sourceOf(node)?.path ? `${sourceOf(node)!.path}:${sourceOf(node)!.line}` : node.path" @click="selectNode(node)">{{ node.name }}</button>
           <span v-if="node.kind === 'suite'" class="testrun-meta">{{ node.counts.passed }}/{{ node.counts.total }}</span>
+          <!-- 行内统计（上游 TestTreeRenderer.java:79-87 把 getDurationString 画在名字右侧）。
+               文本与 tooltip 走 src/testTree.ts 的呈现档：跑完的 suite 画 wall time、还在跑的画已到整秒的
+               实时时长、其余画自己的时长/孩子之和（JavaSMTRunnerTestTreeView.java:56-86）；
+               「Overall time / Sum time」两行只有行右半侧才有（同文件 :133-147 ⇒ 本仓挂在右侧那一格的 title 上）。
+               本仓的 durationMs 是 number（没有时长就是 0），0 不显示 —— 免得报一个假的「0 ms」。 -->
+          <span v-if="showInlineStatistics && durationOf(node)" class="testrun-meta" :title="durationHint(node)">{{ durationOf(node) }}</span>
           <span v-if="node.running" class="testrun-meta">运行中</span>
           <span class="testrun-outcome" :class="node.outcome"><CircleCheck v-if="node.outcome === 'passed'" :size="iconSize.menu" aria-hidden="true" /><CircleX v-else-if="node.outcome === 'failed'" :size="iconSize.menu" aria-hidden="true" /><Minus v-else-if="node.outcome === 'skipped'" :size="iconSize.menu" aria-hidden="true" /></span>
         </div>
@@ -504,7 +554,7 @@ watch(() => props.activePath, () => refreshFile())
       </template>
       <div v-for="row in pendingTests" :key="row.id" class="testrun-row" role="treeitem" :style="{ paddingLeft: '4px' }">
         <input type="checkbox" :checked="selected.has(row.id)" :aria-label="`选择 ${row.name}`" @change="toggle(row.id)" />
-        <button class="testrun-name" :title="`${row.path}:${row.line}`" @click="jump({ ...row, kind: 'test', depth: 0, path: row.name, parent: null, children: [], outcome: null, counts: { passed: 0, failed: 0, skipped: 0, total: 0 }, durationMs: 0, location: `${row.path}:${row.line}`, running: false })">{{ row.name }}</button>
+        <button class="testrun-name" :title="`${row.path}:${row.line}`" @click="jump({ ...row, kind: 'test', depth: 0, path: row.name, parent: null, children: [], outcome: null, counts: { passed: 0, failed: 0, skipped: 0, total: 0 }, durationMs: 0, location: `${row.path}:${row.line}`, running: false, startTimeMillis: null, endTimeMillis: null })">{{ row.name }}</button>
         <span class="testrun-meta">{{ row.framework }}</span>
         <span class="testrun-outcome"></span>
       </div>

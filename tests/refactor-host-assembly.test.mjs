@@ -13,6 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRefactorHost } from '../src/refactorHostAssembly.ts'
+import { safeDeletePromptFromFiles } from '../src/safeDelete.ts'
 
 /** 最小宿主假象：所有落盘/预览/通知都记进 calls，便于逐条比对。 */
 function host(files, options = {}) {
@@ -145,4 +146,41 @@ test('安全删除：没有引用也没有字面出现时不弹框，直接交�
   await wired.openSafeDelete(clean)
   assert.equal(wired.safeDeleteState.value, null, '一笔用法都没有 ⇒ 上游也是直接删')
   assert.deepEqual(calls, [['delete', 'src/demo/Clean.java']])
+})
+
+// A5 的树侧那一半（`src/treeActions.ts` 的 `beginDelete` → `warnBeforeDelete`，桶 14 名下、本片只读）：
+// 账在树那边用 `safeDeletePromptFromFiles()` 算，三选一对话框与「仍然删除」仍由本装配层承接 ——
+// 上游只有一张 `UnsafeUsagesDialog`（重构菜单 SafeDelete = `LangActions.xml:388`，树右键 Delete 与
+// `Delete` 键是同一个动作），两个入口各画一份对话框就是分叉。挂点见
+// `docs/wiring-requests-2026-10-06-refactor.md` R1。
+test('安全删除：外部算好的账用同一张三选一对话框（showSafeDelete 的对外契约）', async () => {
+  const widget = { path: 'src/demo/Widget.java', content: 'class Widget {\n}\n', line: 1, column: 8 }
+  const { host: wired, calls } = host([widget], { language: 'java' })
+  const prompt = safeDeletePromptFromFiles('Widget.java', [], [{ path: 'src/demo/Runner.java', text: '// Widget 还在用\n' }])
+  assert.equal(prompt.blocked, true, '注释里有字面出现 ⇒ 要弹框')
+  wired.showSafeDelete(prompt, widget.path, { line: 0, character: 6 })
+  const state = wired.safeDeleteState.value
+  // `ref()` 会把对象包成响应式代理，所以按**内容**比（`prompt` 本体与它逐字段一致 = 没有重算一遍）。
+  assert.equal(state.prompt.blocked, true)
+  assert.equal(state.prompt.title, prompt.title)
+  assert.deepEqual(state.prompt.details, prompt.details)
+  assert.deepEqual(state.prompt.usages, prompt.usages)
+  assert.equal(state.path, widget.path)
+  assert.deepEqual(calls, [], '立状态本身不该有任何副作用')
+  wired.safeDeleteChoose('viewUsages')
+  assert.equal(wired.safeDeleteState.value, null)
+  assert.deepEqual(calls.splice(0), [['usages', widget.path, 0, 6]], '「查看用法」把位置交回引用窗口')
+  // 「仍然删除」才动文件。
+  wired.showSafeDelete(prompt, widget.path, null)
+  wired.safeDeleteChoose('deleteAnyway')
+  assert.deepEqual(calls.splice(0), [['delete', widget.path]])
+  // 「取消」：对话框收掉，什么都不删。
+  wired.showSafeDelete(prompt, widget.path, null)
+  wired.safeDeleteChoose('cancel')
+  assert.equal(wired.safeDeleteState.value, null)
+  assert.deepEqual(calls, [])
+  // 只有注释/字符串里的字面出现时没有可跳转的代码位置 ⇒ 说清为什么跳不了（不静默）。
+  wired.showSafeDelete(prompt, widget.path, null)
+  wired.safeDeleteChoose('viewUsages')
+  assert.deepEqual(calls, [['notify', '这次没有可跳转的代码引用位置（注释/字符串里的字面出现不进引用窗口）。', true]])
 })

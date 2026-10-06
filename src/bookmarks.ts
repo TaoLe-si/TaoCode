@@ -185,12 +185,28 @@ export function placeBookmark(list: readonly Bookmark[], path: string, line: num
 }
 
 /**
- * 可用的助记键，顺序照 `BookmarkType.values()`：先 0-9（数字盘，`$default.xml` 174-197 给了
- * Ctrl+0..9 的跳转键），再 A-Z（**默认键位表里没有全局键** —— 只有书签树内的裸键
- * `extensions.kt:126-135` 与 `Bookmarks.Goto` 菜单里的「转到书签 {0}」行）。
+ * 可用的助记键，顺序照 `Bookmarks.Goto` 那个组里动作的**列出顺序**
+ * （`platform/bookmarks/resources/intellij.platform.bookmarks.xml:82-117`：先 `GotoBookmark0`…`GotoBookmark9`，
+ * 再 `GotoBookmarkA`…`GotoBookmarkZ`）—— 菜单里那 36 行「转到书签 {0}」就按它排。
+ * 注意与**枚举顺序**不同（见下面 `BOOKMARK_TYPE_ORDER`）。
  */
 export const BOOKMARK_MNEMONICS: readonly string[] = [
   ...'0123456789', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+]
+
+/**
+ * `BookmarkType` 的**枚举顺序**（`platform/lang-api/src/com/intellij/ide/bookmark/BookmarkType.kt:19-31`：
+ * `DIGIT_1`…`DIGIT_9`、`DIGIT_0`、`LETTER_A`…`LETTER_Z`、`DEFAULT`）——
+ * 上游凡"遍历所有助记键"的地方走的都是这个顺序：
+ *   · `ShowTypeBookmarksAction.kt:39` 的 `BookmarkType.values().mapNotNull { getBookmark(it) }`（「转到助记符…」那棵树），
+ *   · `BookmarkTypeChooser.kt:171-173` 与 `:181-183` 的两块网格（`values().filter { isDigit() }` /
+ *     `filter { isLetter() }`，栏内保持枚举序）。
+ * 所以**数字栏里 `1..9` 在前、`0` 在最后**，与上面那份菜单序不是同一个东西；两处都用同一个数组会必错一处。
+ * `DEFAULT`（无助记键）不进这张表 —— 上游那两个消费者都跳过它（`:39` 的 `getBookmark(DEFAULT)`
+ * 走 `findInfo` 的 `BookmarkType.DEFAULT -> null` 那一支，`BookmarksManagerImpl.kt:163-166`）。
+ */
+export const BOOKMARK_TYPE_ORDER: readonly string[] = [
+  ...'1234567890', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
 ]
 
 /** 是不是一个合法的助记键（单个 0-9 / A-Z 字符，大小写归一到大写）。 */
@@ -206,14 +222,58 @@ export function bookmarkOwner(list: readonly Bookmark[], mnemonic: string): Book
   return list.find(entry => entry.mnemonic === mnemonic)
 }
 
-/** The next/previous bookmark in document order, wrapping around the project. */
+/**
+ * 项目级的「下一个 / 上一个书签」（上游 `GotoNextBookmark` / `GotoPreviousBookmark`）。
+ *
+ * **只走行书签**：上游那两个动作的显示名就叫 "Next Line Bookmark" / "Previous Line Bookmark"
+ * （`platform/platform-resources-en/src/messages/ActionsBundle.properties:1333-1334`），
+ * 实现里那句 `filterIsInstance<LineBookmark>()` 在
+ * `platform/bookmarks/src/com/intellij/ide/bookmark/actions/NextBookmarkService.kt:47`，
+ * 比的就是"排序后拿下一个"的那张表 —— **文件书签不在这个循环里**（它的跳转走助记键或面板点击，
+ * `BookmarkOccurrence.kt:18` 的 `nextFileBookmark()` 是另一条路）。
+ * 循环顺序 = 路径字典序 + 行号升序（同文件 `:59-64` 的 `compare`），走完一圈回绕：
+ * 上游的回绕开关是注册表 `ide.bookmark.occurrence.cyclic.iteration.allowed`，**默认 false**
+ * （`BookmarkOccurrence.kt:57-58`，走到头就 `isEnabled = false`）。本仓保留回绕是既有判据
+ * （`tests/bookmarks.test.mjs` 那两条 `wraps`），改动它要主代理点头，本轮只把这条差异写明。
+ */
 export function nextBookmark(list: readonly Bookmark[], path: string, line: number, reverse: boolean): Bookmark | undefined {
-  const all = sortedBookmarks(list)
+  const all = sortedBookmarks(list.filter(entry => entry.line !== undefined))
   if (!all.length) return undefined
   const cursor = { path, line }
   const later = all.filter(entry => compare(entry, cursor) > 0)
   const earlier = all.filter(entry => compare(entry, cursor) < 0)
   return reverse ? (earlier[earlier.length - 1] ?? all[all.length - 1]) : (later[0] ?? all[0])
+}
+
+/**
+ * 编辑器内的「下一个 / 上一个行书签」（上游 `GotoNextBookmarkInEditor` / `GotoPreviousBookmarkInEditor`，
+ * `platform/bookmarks/resources/intellij.platform.bookmarks.xml:74-79`；
+ * 显示名 "Next Line Bookmark in Editor" / "Previous Line Bookmark in Editor"，
+ * `platform/platform-resources-en/src/messages/ActionsBundle.properties:1335-1336`；
+ * **默认键位表里没有这两个动作** —— 别给它们编快捷键）。
+ *
+ * 本体在 `platform/bookmarks/src/com/intellij/ide/bookmark/actions/NextBookmarkInEditor.kt:32-59`，
+ * 与项目级那一条的三个差别都照搬：
+ *   ① 只看**当前文件**的行书签（`:36` 的 `it.file == file` + 只收 `LineBookmark`）；
+ *   ② 前进按行号升序取第一条 `line > 光标行`、后退按降序取第一条 `line < 光标行`（`:39-52`），
+ *      **光标正好停在书签行上不算**（比较是严格大于/小于）；
+ *   ③ 到头了默认**不回绕**（`:53-56` 那一段在 `BookmarkOccurrence.cyclic` 里，而它默认 false，
+ *      `BookmarkOccurrence.kt:57-58`）；回绕时绕回来的那一条若正好是光标行也不动（`:55`）。
+ * 找不到就返回 `undefined` —— 上游据此把动作置灰（`isEnabledForCaret`，`:22`）。
+ *
+ * 行号口径：本仓 `Bookmark.line` 与传进来的 `line` 都是 1 基（上游两个都是 0 基，同一条比较式）。
+ */
+export function nextLineBookmarkInFile(list: readonly Bookmark[], path: string, line: number, reverse: boolean,
+                                       cyclic = false): Bookmark | undefined {
+  const own = list
+    .filter(entry => entry.path === path && entry.line !== undefined)
+    .sort((a, b) => (reverse ? (b.line as number) - (a.line as number) : (a.line as number) - (b.line as number)))
+  for (const entry of own) {
+    const at = entry.line as number
+    if (reverse ? at < line : at > line) return entry
+  }
+  const wrap = own[0]
+  return cyclic && wrap !== undefined && wrap.line !== line ? wrap : undefined
 }
 
 export function removeBookmark(list: readonly Bookmark[], entry: Bookmark): Bookmark[] {
@@ -241,11 +301,40 @@ export function bookmarkSpeedSearchText(entry: Bookmark): string {
  */
 export const bookmarkRemovable = (): boolean => true
 
-/** 文件书签的开关（右键项目树/编辑器标签那一下）。 */
-export function toggleFileBookmark(list: readonly Bookmark[], path: string, description?: string): Bookmark[] {
+/**
+ * 编辑器标签/项目树右键那一下带来的**选区文本** → 自定义描述。
+ *
+ * 上游 `ToggleBookmarkAction.addSingleBookmark:78-81`：
+ * ```kotlin
+ * val selectedText = event.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText
+ * if (!selectedText.isNullOrBlank()) manager.getGroups(bookmark).forEach { it.setDescription(bookmark, selectedText) }
+ * ```
+ * 两个要点照搬：① **空白与没有选区都不设**（`isNullOrBlank()`）；② 设的是**原文**，不 trim
+ * （trim 只发生在"取描述来显示"那一步，见 `bookmarkDescription`）。
+ * 与「行原文锚 `text`」是两个字段：锚每次编辑都对账，描述是放书签那一刻写一次的快照。
+ */
+export function bookmarkSelectionDescription(selectedText?: string | null): string | undefined {
+  return selectedText !== undefined && selectedText !== null && selectedText.trim() !== '' ? selectedText : undefined
+}
+
+/**
+ * 文件书签的开关（右键项目树 / **编辑器标签**那一下）。
+ *
+ * 上游 `EDITOR_TAB_POPUP` 那一支（`platform/bookmarks/src/com/intellij/ide/bookmark/actions/extensions.kt:57-61`）：
+ * 标签页右键时上下文里**没有** `LOGICAL_LINE_AT_CURSOR` 可用，所以按的是"文件"这一档 ——
+ * `place == ActionPlaces.EDITOR_TAB_POPUP || window?.id == PROJECT_VIEW` ⇒ `manager.createBookmark(file)`，
+ * 拿到一条没有行号的 `FileBookmark`；随后 `ToggleBookmarkAction.actionPerformed` →
+ * `addSingleBookmark`（`:72-82`）= `manager.toggle(bookmark, type)`（已存在就整条删掉、不存在就加）
+ * ＋ 非空白选区成为描述。`update`（`:54-58`）在右键菜单里给的是「添加书签」/「删除书签」两种标题
+ * （`bookmark.add.action.text` / `bookmark.delete.action.text`），对应本仓的 `fileBookmarkLabel`。
+ *
+ * @param selectedText 该标签编辑器里当前选中的文本（上游 `CommonDataKeys.EDITOR` 的 `selectedText`）；
+ *                     空白/未提供 ⇒ 不设描述（只在**新增**那一支用到它，取消时整条删掉）。
+ */
+export function toggleFileBookmark(list: readonly Bookmark[], path: string, selectedText?: string | null): Bookmark[] {
   const existing = list.find(entry => entry.path === path && entry.line === undefined)
   if (existing !== undefined) return list.filter(entry => entry !== existing)
-  return placeBookmark(list, path, undefined, undefined, undefined, description)
+  return placeBookmark(list, path, undefined, undefined, undefined, bookmarkSelectionDescription(selectedText))
 }
 
 /**
@@ -272,15 +361,21 @@ export function reconcileBookmarks(
     // 文件书签没有行号，内容变更与它无关（上游 documentChanged 只动行书签）。
     if (entry.path !== path || entry.line === undefined) { kept.push(entry); continue }
     const text = textAt(entry.line)
-    if (text === undefined) nextDropped.push({ ...entry, text: entry.text ?? '' })
+    // 丢掉时**原样**记下：上游那份文本是变更前从文档里实读的（`beforeDocumentChange:439-443`），
+    // 不会是"没有锚"；本仓的 `text` 可能缺（历史状态），缺就让它缺着 —— 补一个空串会造出下面的假放回。
+    if (text === undefined) nextDropped.push({ ...entry })
     else kept.push({ ...entry, text })
   }
   for (const entry of dropped) {
     // 文件书签（没有行号）不进"放回"这一支：它们从来不会因为行号越界被丢掉。
     if (entry.path !== path || entry.line === undefined) { nextDropped.push(entry); continue }
-    // 空原文也认：上游那一句就是 `bookmarkedText.equals(lineContent)`（`:536`），没有"非空才算"的条件 ——
+    // **没有锚就永远不放回**：上游比的是"删除前那一行的原文"（`moveToDeleted:530-538` 存的就是
+    // `beforeDocumentChange` 那份 `BookmarkInfo.text`，`:506` 的 `bookmarkedText.equals(lineContent)`），
+    // 本仓若把缺锚当成空串，书签就会在任意一个**空行**重新出现（空行 == 空串），那是假放回。
+    if (entry.text === undefined) { nextDropped.push(entry); continue }
+    // 空原文也认：上游那一句就是 `bookmarkedText.equals(lineContent)`（`:506`），没有"非空才算"的条件 ——
     // 空行上的书签删掉再撤销时，正是靠 '' == '' 放回去的。
-    const matches = (line: number) => entry.text !== undefined && textAt(line) === entry.text
+    const matches = (line: number) => textAt(line) === entry.text
     if (matches(entry.line)) kept.push({ ...entry, text: entry.text })
     else if (matches(entry.line - 2)) kept.push({ ...entry, line: entry.line - 2, text: entry.text })
     else nextDropped.push(entry)

@@ -130,15 +130,34 @@ export function caretSymbolInTree(
   return walkCaret(tree, line, character, false) ?? walkCaret(tree, line, 0, true)
 }
 
-function walkCaret(nodes: readonly OutlineNode[], line: number, character: number, lineOnly: boolean,
-                   trail: string[] = []): CaretSymbolMatch | null {
-  let best: CaretSymbolMatch | null = null
+/**
+ * 同一层兄弟里挑「光标那一层的符号」。起点按行放宽后（`symbolContains`），`int a; int b;`
+ * 这种两个符号同起同止的行里，两个都算「包住」光标。上游按**偏移量**取光标底下的元素
+ * （`StructureViewComponent.java:655-661` 的 `scrollToSelectedElement` → 光标 offset 的 PSI 元素），
+ * 本仓同一口径：**光标左边最近开始的那个**（`startChar` 最大且不超过光标列）赢；
+ * 没有一个从光标左边开始（光标停在缩进/关键字上）时取**文档序第一个**。
+ * 原实现（2026-10-06 前）是「后面的兄弟覆盖前面的」，光标在 `a` 上也会选中 `b`，判据
+ * `tests/outline-caret-source.test.mjs`「同一行两个符号时选光标包住的那一个」。
+ */
+function pickCaretCandidate(
+  nodes: readonly OutlineNode[], line: number, character: number, lineOnly: boolean,
+): OutlineNode | null {
+  let first: OutlineNode | null = null
+  let anchored: OutlineNode | null = null
   for (const node of nodes) {
     const own = lineOnly ? symbolLineContains(node.symbol, line) : symbolContains(node.symbol, line, character)
     if (!own) continue
-    const key = outlineKey(node.symbol)
-    const child = walkCaret(node.children, line, character, lineOnly, [...trail, key])
-    best = child ?? { key, ancestors: [...trail], lineOnly }
+    if (!first) first = node
+    if (node.symbol.startChar <= character && (!anchored || node.symbol.startChar > anchored.symbol.startChar)) anchored = node
   }
-  return best
+  return anchored ?? first
+}
+
+function walkCaret(nodes: readonly OutlineNode[], line: number, character: number, lineOnly: boolean,
+                   trail: string[] = []): CaretSymbolMatch | null {
+  const node = pickCaretCandidate(nodes, line, character, lineOnly)
+  if (!node) return null
+  const key = outlineKey(node.symbol)
+  const child = walkCaret(node.children, line, character, lineOnly, [...trail, key])
+  return child ?? { key, ancestors: [...trail], lineOnly }
 }

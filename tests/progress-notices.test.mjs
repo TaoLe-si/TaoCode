@@ -77,7 +77,12 @@ test('接线：谁在什么时候写这一行', () => {
   assert.match(host, /gradleRunningNoticeOf\(/, '命令一起来就有一行（不要等第一批输出 —— 网络卡住的那 75 秒里正是最需要看见的时刻）')
   assert.match(host, /watch\(\(\) => gradleSync\.output\.length/, '输出每来一批刷一次')
   assert.match(host, /gradleFinishedNoticeOf\(error, Math\.max\(0, Math\.round/, '同步结束把那一行收成结论')
-  assert.match(host, /job\.kind === 'dependencies' \? '依赖加载' : undefined/, '依赖那条命令也要收成结论')
+  // 2026-10-06 复核订正：这里原来钉的是 `job.kind === 'dependencies' ? '依赖加载' : undefined`，
+  // 但磁盘上那条三元链已经长成三档（桶 15 给 `kind === 'task'` 也补了结论，
+  // `src/gradleHost.ts:520-521`）。**意图不变**（"依赖那条命令也要收成结论"），只是把钉住的
+  // 形状改成当前真实的整条链 —— 不放松成 `includes`，仍是一条精确 match。
+  assert.match(host, /job\.kind === 'dependencies' \? '依赖加载' : job\.kind === 'task' \? '任务运行' : undefined/,
+    '依赖与任务运行那两条命令也要收成结论')
   assert.match(read('src/App.vue'), /isDesktop, workspace, projectSettings, notify, notifyProgress,/,
     '宿主要把 notifyProgress 注进 Gradle 的状态域')
   assert.match(read('src/notifications.ts'), /wireLspProgressNotices\(notifyProgress\)/,

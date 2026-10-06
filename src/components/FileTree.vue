@@ -7,7 +7,7 @@ import { lspDiagnostics, type Entry } from '../bridge'
 import { createProjectTreeModel, type ProjectTreeRow, type SyntheticNode } from '../projectTreeModel'
 import type { ProjectTreeSortSettings } from '../projectTreeSort'
 import { decorationClass, decorationOf, decorationTitle, severityCounts, type TreeDecoration } from '../projectTreeDecorations'
-import { treeClickOpensFile, treeOpenUsesPreviewTab, type ProjectViewBehavior } from '../projectViewBehavior'
+import { treeClickOpensFile, treeOpenUsesPreviewTab, visibleSyntheticNodes, type ProjectViewBehavior } from '../projectViewBehavior'
 import { getCommandProcessor } from '../pvCommandProcessor.ts'
 import { reportText } from '../pvFileUndoProvider.ts'
 import { firstSpeedSearchHit, lastSpeedSearchHit, nextSpeedSearchHit, speedSearchKeyAction, speedSearchStepForKey } from '../speedSearch'
@@ -33,9 +33,15 @@ const sharedSortSettings = computed(() => props.sortSettings ?? getProjectTreeSt
 // 上游也是同一份 `ProjectViewState`（`ProjectViewState.kt:36` compactDirectories、`:49` useFileNestingRules），
 // 设置改了要整树重建（`ConfigureFilesNestingAction.kt:58` 的 `updateFromRoot(true, SETTINGS)`）。
 const treeHost = computed(() => getProjectTreeState(props.workspaceKey ?? ''))
+/**
+ * 「显示临时文件和控制台」（`ProjectView.ShowScratchesAndConsoles`）：这一格只管合成根里
+ * scratches 那一条，外部库那一条不受它影响（上游 Project 窗格把库内容硬写成永远显示：
+ * `ProjectViewPane.java:143-145`）。规则本体在 `src/projectViewBehavior.ts`。
+ */
+const syntheticRows = () => visibleSyntheticNodes(props.synthetic ?? [], sharedSortSettings.value.showScratchesAndConsoles)
 const model = createProjectTreeModel({
   entries: () => props.entries,
-  synthetic: () => props.synthetic ?? [],
+  synthetic: syntheticRows,
   depth: () => props.depth ?? 0,
   projectName: () => props.projectName,
   sortSettings: () => sharedSortSettings.value,
@@ -48,7 +54,9 @@ const model = createProjectTreeModel({
 const { rows, expanded, selected, selection, loading, tabStop } = model
 watch(() => props.workspaceKey, () => model.reset(), { flush: 'sync' })
 watch(() => [props.entries, props.synthetic], () => { void model.refresh() }, { flush: 'pre' })
-watch(() => [sharedSortSettings.value.compactDirectories ?? false, treeHost.value.nesting.enabled, treeHost.value.nesting.rules],
+watch(() => [sharedSortSettings.value.compactDirectories ?? false,
+  sharedSortSettings.value.showScratchesAndConsoles ?? true,
+  treeHost.value.nesting.enabled, treeHost.value.nesting.rules],
   () => { void model.refresh() }, { flush: 'pre' })
 onBeforeUnmount(model.dispose)
 const step = () => (props.compactIndents ? 11 : 15)
@@ -136,12 +144,18 @@ function doubleClick(entry: Entry) {
  * 本仓的范围 = 树里当前选中的那些路径；没有选中时按空范围问（只有跨文件的全局组可撤，
  * 与 `CommandMerger.isUndoAvailable` 的同一判据）。
  * 被拒绝时把上游那份报告原文交出去（`emit('error')`），成功时什么都不弹（上游也不弹）。
+ * 成功之后**必须让树重看一遍磁盘**：上游撤完 copy/move/delete 会发出 VFS 事件，
+ * 窗格按 `ProjectViewUpdateCause.kt:49-52` 那四个成因（VFS_CREATE / VFS_COPY / VFS_MOVE / VFS_DELETE）
+ * 重建那一支；本仓没有事件总线，`model.refresh()` 就是同一件事的等价物
+ * （清掉目录缓存重新取，被撤掉的那一行立刻消失）。宿主菜单那条路已经在成功后刷树
+ * （`src/explorerActions.ts` 的 `undoOrRedoFileOperation` ⇒ `refreshTree()`），这里补齐的是树内按键那一半。
  */
 function undoRedoFileOperation(kind: 'undo' | 'redo') {
   const processor = getCommandProcessor(props.workspaceKey ?? '')
   const scope = [...selection]
   void processor[kind](scope).then(result => {
     if (!result.ok && result.report) emit('error', reportText(result.report))
+    else if (result.ok) void model.refresh()
   })
 }
 function onRowKeydown(entry: Entry, event: KeyboardEvent) {

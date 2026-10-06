@@ -29,7 +29,11 @@
 //   · `clearSideStack` / `getToolWindowManagerListeners`（`ToolWindowManagerEx.kt:44`、`:26-24` 的
 //     `getLayout`/`setLayout`）留在原判词的"还差"里：前者依附 auto-hide 的侧栈对象（本仓一个 dock
 //     同时只装一个窗口，没有栈可清），后者的 `DesktopLayout` 权重模型即上面那条差异。
-import { DEFAULT_TOOL_ORDER, type ToolWindowAnchor } from './toolWindowMeta.ts'
+import { DEFAULT_TOOL_ORDER, toolActiveOnStart, toolCanCloseContents, toolSecondary, toolWindowRegistration,
+        type ToolWindowAnchor, type ToolWindowId } from './toolWindowMeta.ts'
+// 常驻栈的"从栈顶往下找第一个还可用的"那一步已经有实现并且有判据（`src/activeToolWindow.ts:43-49`，
+// 上游 `ToolWindowManagerImpl.kt:746-753`），门面只复用它的纯函数，不再写第二份遍历。
+import { lastActiveId } from './activeToolWindow.ts'
 import type { ToolWindowContentUiType } from './toolWindowContentUi.ts'
 import type { ToolWindowType, ViewMode } from './toolWindowViewMode.ts'
 import type { Rect } from './popupPosition.ts'
@@ -99,7 +103,9 @@ export interface ToolWindowManagerSource {
   setViewMode: (id: string, mode: ViewMode) => boolean
   /** `WindowInfo.isMaximized`：宿主的那一份（`App.vue` 的 `maximizedToolWindow`）。 */
   maximizedId?: () => string | null
-  /** `WindowInfo.isSplit`：本仓的"窗口内再分栏"能力（尚未落地 ⇒ 恒 false，见报告）。 */
+  /** `WindowInfo.isSplit`：布局里存过这一位就用它（上游用户可以拖出来另一档，
+   *  `AbstractDroppableStripe.kt:254-255` 的 `setSideToolAndAnchor`）；没存过就退回注册表的初值
+   *  （EP `secondary` → `sideTool` → `DesktopLayout.kt:46`）。 */
   isSplit?: (id: string) => boolean
   /**
    * `ToolWindowManager.isEditorComponentActive`（`ToolWindowManager.kt:112-115`）的**真判据**：
@@ -111,6 +117,17 @@ export interface ToolWindowManagerSource {
    * 是**保守**的近似（不是同一条判据，登记在此）。给 `undefined` = 这一档宿主答不出来（Node/SSR 没 DOM）。
    */
   editorComponentActive?: () => boolean | undefined
+  /**
+   * `ToolWindowManager.lastActiveToolWindowId`（`ToolWindowManager.kt:132`）的来源：
+   * 上游那份**持久**激活栈（`ActiveStack.java:21-25`，编辑区拿到焦点不清、隐藏也不清，
+   * 只有注销窗口才真删，`ToolWindowManagerImpl.kt:1217`）。
+   * 栈本身住在宿主（push 的唯一写入点是宿主的 `recordActiveToolWindow`，
+   * 见 `src/appToolWindowActivation.ts:57-66` 那个注入回调），门面只**读**它并按可用性筛
+   * （上游 `:749-753` 的 `getLastActiveToolWindows()` 就是 `filter { it.isAvailable }`）。
+   * 没给 = 宿主还没把这一位接进来 ⇒ `lastActiveToolWindowId()` 答 `null`，不自己记账
+   * （两份真相正是原判词 §6-1 拦着不让做的事）。
+   */
+  activationStack?: () => readonly string[]
 }
 
 export interface ToolWindowManager {
@@ -124,10 +141,25 @@ export interface ToolWindowManager {
   toolWindowIdSet: () => Set<string>
   /** `ToolWindowManager.kt:127`：此刻占着那一格的窗口（侧栏 + 底部各一格，取最近激活的那条）。 */
   activeToolWindowId: () => string | null
+  /**
+   * `ToolWindowManager.kt:132`：**上一个激活过的**窗口（F12「转到上一个工具窗口」的目标）。
+   * 与 `activeToolWindowId` 的区别就是上游那两个 getter 的区别：这一位读的是常驻栈，
+   * 窗口被收掉也还留在栈里（`ToolWindowManagerImpl.kt:712-718` 的 `setHiddenState` 走
+   * `activeStack.remove(entry, false)`，`false` = 不动持久栈；只有注销窗口才真删，`:1217`），
+   * 所以要**从栈顶往下找第一个还可用的**（`ToolWindowManagerImpl.kt:746-753`），
+   * 栈空或全不可用答 `null`（= 上游把动作灰掉，`JumpToLastWindowAction.java:32-44`）。
+   */
+  lastActiveToolWindowId: () => string | null
   /** `ToolWindowManagerEx.kt:50`：某一条侧条上的窗口 id（顺序即侧条顺序）。 */
   getIdsOn: (anchor: ToolWindowAnchor) => string[]
   /** `ToolWindowManagerEx.kt:19`：只列**可用**的窗口（不可用的不渲染，假控件禁令）。 */
   toolWindows: () => ToolWindowInfo[]
+  /**
+   * `ToolWindow.canCloseContents()`（`ToolWindowImpl.kt:647`）的按 id 查询：
+   * 注册表里那条 EP 记录的 `canCloseContents`（`ToolWindowEP.java:81-82`）。
+   * `null` = 这个 id 在本仓没有注册记录（底部那几格固定内容）⇒ 调用方沿用"有几条内容"那条既有判据。
+   */
+  canCloseContents: (id: string) => boolean | null
   /** `ToolWindowManager.kt:115` 的 `isEditorComponentActive`：焦点主人不在 dock 里就是编辑器 active（判据由宿主给，见 `editorComponentActive`）。 */
   isEditorComponentActive: () => boolean
   /** `ToolWindowManager.kt:144` 的 `invokeLater`：排到本帧命令队列尾部（微任务）。 */
@@ -175,6 +207,38 @@ function knownIds(): string[] {
   return out
 }
 
+/**
+ * 注册表那三条 EP 布尔位的按 id 读法（`toolWindowMeta.ts` 的派生表）。
+ * **没有这条注册记录的 id**（底部那几格固定内容 output/run/problems/… 在本仓没有 `<toolWindow>` 注册，
+ * 上游它们是各自注册过的工具窗口）答 `undefined` = "门面答不出这一位"，
+ * 而不是替它们编一个默认值 —— 调用方据此退回自己那条既有判据。
+ */
+function registrationFlag(table: Record<ToolWindowId, boolean>, id: string): boolean | undefined {
+  return toolWindowRegistration(id) ? table[id as ToolWindowId] : undefined
+}
+
+/** `WindowInfo.isSplit` 的注册表来源：EP `secondary` → `sideTool` → `DesktopLayout.kt:46`。 */
+export function toolWindowSplitDefault(id: string): boolean | undefined {
+  return registrationFlag(toolSecondary, id)
+}
+
+/**
+ * `ToolWindow.canCloseContents()`（`ToolWindowImpl.kt:647`，值来自 `RegisterToolWindowTaskData.canCloseContent`
+ * 即 EP 的 `canCloseContents`，`ToolWindowSetInitializer.kt:369`）。
+ * 上游用它的那几条：`ContentManagerImpl.java:139-141` 与 `:473`（Close All 的第一道闸）、
+ * `ContentTabLabel.java:170`（标签上的关闭按钮 = `content.isCloseable() && window.canCloseContents()`）、
+ * `CloseActiveTabAction.java:25/46`、`ToolWindowCloseOtherTabsAction.kt:25`、`TabbedContentAction.java:87/114`。
+ * `null` = 这个 id 在本仓没有注册记录 ⇒ 调用方沿用"有几条内容"那条既有判据，不替它猜。
+ */
+export function canCloseContents(id: string): boolean | null {
+  return registrationFlag(toolCanCloseContents, id) ?? null
+}
+
+/** `WindowInfo.isActiveOnStart` 的注册表来源：EP `doNotActivateOnStart` 取反（`WindowInfoImpl.kt:165-170`）。 */
+export function toolWindowActiveOnStart(id: string): boolean | undefined {
+  return registrationFlag(toolActiveOnStart, id)
+}
+
 /** `WindowInfo` 的装配点：所有字段都从 source 现读，不做任何本地缓存。 */
 export function assembleWindowInfo(id: string, source: ToolWindowManagerSource,
                             maximizedId: string | null = source.maximizedId?.() ?? null): ToolWindowInfo {
@@ -192,11 +256,13 @@ export function assembleWindowInfo(id: string, source: ToolWindowManagerSource,
     anchor,
     floatingBounds: source.floatingBoundsOf(id),
     isMaximized: maximizedId === id,
-    isSplit: source.isSplit?.(id) === true,
+    isSplit: source.isSplit?.(id) ?? toolWindowSplitDefault(id) ?? false,
     type: typeState.type,
-    // `WindowInfoImpl.kt` 的 `isActiveOnStart` 出厂为真；本仓没有"启动即亮"的通道，
-    // 这一位回答的是"出厂该不该在这一侧占着那一格"，与锚点同源。
-    isActiveOnStart: anchor !== 'bottom' || source.visibleIds().includes(id),
+    // `WindowInfoImpl.kt:165-170` 的 `canActivateOnStart`：EP 没写 `doNotActivateOnStart` 才允许启动即亮。
+    // 那一档之后上游还要看"是不是窗口型/浮层且应用在前台"（`ToolWindowManagerImpl.kt:1172-1174`），
+    // 本仓的 dock 一格同时只装一个窗口，所以**近似**成"这一侧能不能占着那一格"：
+    // 底部那一格没有启动即亮的通道（除非它本来就开着）。EP 那一位现在是真源，近似只剩这一句。
+    isActiveOnStart: toolWindowActiveOnStart(id) !== false && (anchor !== 'bottom' || source.visibleIds().includes(id)),
     isAutoHide: typeState.autoHide,
     // `WindowInfo.isDocked`（`:38`）在上游就是 type == DOCKED 的派生位。
     isDocked: typeState.type === 'docked',
@@ -230,11 +296,24 @@ export function toolWindowManager(): ToolWindowManager {
       return visible.length ? visible[visible.length - 1]! : null
     },
     getIdsOn: anchor => (source ? [...source.idsOn(anchor)] : []),
+    lastActiveToolWindowId() {
+      // 上游读的是 `activeStack` 那份持久栈（`ToolWindowManagerImpl.kt:746-747`），本仓那一份住在宿主
+      //（唯一的 push 点是宿主的 `recordActiveToolWindow`），所以**宿主没接这一位时答 null**，
+      // 门面不自己记账 —— 两处真相就是原判词 §6-1 拦着的事。
+      const stack = source?.activationStack?.()
+      if (!stack || !stack.length) return null
+      // 栈顶往下第一个**仍可用**的（`:749-753` 的 `filter { it.isAvailable }`），可用性的判据
+      // 与 `ToolWindowInfo.isAvailable` 同一位（`!toolDisabled`）。
+      return lastActiveId(stack, id => !(source ? source.toolDisabled(id) : true)) ?? null
+    },
     toolWindows() {
       if (!source) return []
       // 不可用的窗口不列（假控件禁令）：上游 `ToolWindow.isAvailable` 为假时侧条按钮都不画。
       return knownIds().map(id => assembleWindowInfo(id, source)).filter(info => info.isAvailable)
     },
+    // 这一位读的是注册表而不是窗口状态（EP 声明在装配期就定了，不随项目变），
+    // 所以门面没装状态时也答得出来 —— 与上面那些"现读 source"的字段是两类查询。
+    canCloseContents,
     isEditorComponentActive() {
       // 上游问焦点主人（`ToolWindowManagerState.kt:52-55`），本仓由宿主经 `editorComponentActive`
       // 给同一判据（`dockOf(document.activeElement) === 'editor'`，见 `src/toolWindowStripes.ts`）。

@@ -126,3 +126,101 @@ test('宿主登记表：没注册时 requestBreakpointsDialog 返回 false，注
   assert.equal(requestBreakpointsDialog(), false)
   setBreakpointsDialogOpener(null)
 })
+
+// —— 具名逻辑断点组的**写入口**（桶 12 遗留 W2 的弹层侧，本桶 dap 补）——————————————
+// 上游：`BreakpointsDialog.java:317-348` 的右键菜单里「Move to Group」子菜单 =
+//   `<无组>`(`:332`) + 现有组名 distinct+sorted(`:336-341`) + 分隔线 + `Create New…`(`:338`)；
+//   执行体 `:542-557` 循环的是 `getSelectedBreakpoints(true)`，而 `traverse = true` 那一支
+//   （`BreakpointItemsTreeController.java:187-194`）对选中节点做**先深遍历子树**
+//   ⇒ 选中「组节点」改组 = 组里每条断点一起 `setGroup`。
+// 上游**没有**组的改名/删除（组只是断点上的字符串：`XBreakpointGroup.java:10-42` 只有名字/比较/展开态/图标，
+// `XBreakpointCustomGroup.java:16-38` 多一个 `isDefault`）⇒ 本仓不另造假控件。
+const groups = await import('../src/breakpointGroups.ts')
+
+test('组状态解析：旧存档缺键 / 坏 JSON / 空串一律补成空状态，不许按字段数量判损坏', () => {
+  const empty = { members: {}, disabled: [], defaultGroup: null }
+  assert.deepEqual(groups.parseGroupState(null), empty)
+  assert.deepEqual(groups.parseGroupState('不是 JSON'), empty)
+  assert.deepEqual(groups.parseGroupState('{}'), empty, '只有对象没有键 ⇒ 补默认（历史上这样把用户锁在项目外过）')
+  assert.deepEqual(groups.parseGroupState('[]'), empty)
+  assert.deepEqual(groups.parseGroupState('{"members":{"a:1":"组一","b:2":"  ","c:3":7},"disabled":["d:4","","d:4"]}'),
+    { members: { 'a:1': '组一' }, disabled: ['d:4'], defaultGroup: null }, '空组名/空 ref/非字符串丢掉，disabled 去重保序')
+  assert.deepEqual(groups.parseGroupState('{"members":{"a:1":"组一"},"defaultGroup":"  "}'),
+    { members: { 'a:1': '组一' }, disabled: [], defaultGroup: null }, '空白默认组 = 没有默认组')
+})
+
+test('按项目根分桶存：读写来回一致，存储坏了只剩会话内状态（不抛）', () => {
+  const store = new Map()
+  const fake = { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value) }
+  groups.assignBreakpointsToGroup(['src/a.cpp:1'], '组一')
+  groups.setDefaultBreakpointGroup('组一')
+  try {
+    groups.saveGroupState(fake, 'D:/proj')
+    assert.ok(store.has(groups.groupStateKey('D:/proj')), '落盘键带项目根')
+    assert.deepEqual(JSON.parse(store.get(groups.groupStateKey('D:/proj')) ?? '{}'),
+      { members: { 'src/a.cpp:1': '组一' }, disabled: [], defaultGroup: '组一' }, '落的是当前这份状态（不多不少）')
+    assert.deepEqual(groups.loadGroupState(fake, 'D:/proj').members['src/a.cpp:1'], '组一')
+    assert.equal(groups.loadGroupState(fake, 'D:/other').defaultGroup, null, '换项目根读不到上一份')
+    const broken = { getItem: () => { throw new Error('存储坏了') }, setItem: () => { throw new Error('写不进去') } }
+    assert.deepEqual(groups.loadGroupState(broken, 'D:/proj').disabled, [], '读坏了给空状态')
+    groups.saveGroupState(broken, 'D:/proj')
+  } finally {
+    groups.assignBreakpointsToGroup(['src/a.cpp:1'], null)
+    groups.setDefaultBreakpointGroup(null)
+  }
+})
+
+test('整组搬迁（moveGroupContents）：组里每条一起改组，源组随之消失', () => {
+  const refs = ['src/a.cpp:1', 'src/a.cpp:2', 'src/b.cpp:9', 'src/c.cpp:3']
+  groups.assignBreakpointsToGroup(['src/a.cpp:1', 'src/a.cpp:2', 'src/b.cpp:9'], '甲')
+  groups.assignBreakpointsToGroup(['src/c.cpp:3'], '乙')
+  try {
+    assert.deepEqual(groups.groupMembers(refs, '甲'), ['src/a.cpp:1', 'src/a.cpp:2', 'src/b.cpp:9'])
+    assert.deepEqual(groups.moveGroupContents(refs, '甲', '甲'), [], '同名 = 一条都不动（不白白发一轮）')
+    const moved = groups.moveGroupContents(refs, '甲', '乙')
+    assert.deepEqual(moved, ['src/a.cpp:1', 'src/a.cpp:2', 'src/b.cpp:9'], '返回真正变了的 ref（调用方据此落盘）')
+    assert.deepEqual(groups.groupNames(refs), ['乙'], '源组没有成员了就不再是个组（上游同样：组名从断点上取）')
+    assert.deepEqual(groups.groupMembers(refs, '乙'), refs, '先深遍历子树 ⇒ 组里全部落到目标组')
+    assert.deepEqual(groups.moveGroupContents(refs, '不存在的组', '乙'), [])
+  } finally {
+    groups.assignBreakpointsToGroup(refs, null)
+  }
+})
+
+test('整组移到 <无组>（上游子菜单第一项 MoveToGroupAction(null)）：组清空、逐条那一格不受影响', () => {
+  const refs = ['src/a.cpp:1', 'src/a.cpp:2']
+  groups.assignBreakpointsToGroup(refs, '甲')
+  try {
+    assert.deepEqual(groups.moveGroupContents(refs, '甲', null), refs)
+    assert.deepEqual(groups.groupNames(refs), [])
+    assert.equal(groups.groupNameOf('src/a.cpp:1'), null)
+  } finally {
+    groups.assignBreakpointsToGroup(refs, null)
+  }
+})
+
+test('搬迁目标清单 = 上游那份 distinct+sorted 去掉它自己（码元序，不用 localeCompare）', () => {
+  const refs = ['src/a.cpp:1', 'src/a.cpp:2', 'src/a.cpp:3']
+  groups.assignBreakpointsToGroup(['src/a.cpp:1'], 'b 组')
+  groups.assignBreakpointsToGroup(['src/a.cpp:2'], 'a 组')
+  groups.assignBreakpointsToGroup(['src/a.cpp:3'], 'a 组')
+  try {
+    assert.deepEqual(groups.groupNames(refs), ['a 组', 'b 组'])
+    assert.deepEqual(groups.groupMoveTargets(refs, 'a 组'), ['b 组'])
+    assert.deepEqual(groups.groupMoveTargets(refs, '没这个名字'), ['a 组', 'b 组'])
+  } finally {
+    groups.assignBreakpointsToGroup(refs, null)
+  }
+})
+
+test('写入口接线：组节点那一格真的在弹层里，且没有上游没有的「改名/删除组」', () => {
+  const view = readFileSync('src/components/BreakpointsDialog.vue', 'utf8')
+  assert.match(view, /function moveWholeGroup\(node: BreakpointGroupNode, value: string\)/, '整组搬迁的入口没接上')
+  assert.match(view, /moveGroupContents\(allRefs\.value, node\.name, target \|\| null\)/, '没走规则层')
+  assert.match(view, /@change="moveWholeGroup\(row\.node,/, '组头那一格没接上 change')
+  assert.match(view, /:aria-label="`把组 \$\{row\.node\.name\} 整体移至`"/, '纯图标/无名的下拉必须有 aria-label')
+  assert.match(view, /<option :value="NO_GROUP">&lt;无组&gt;<\/option>/, '上游子菜单第一项是 <无组>')
+  assert.match(view, /groupMoveTargetsOf\(row\.node\.name\)/, '目标清单没走规则层')
+  assert.match(view, /<option :value="NEW_GROUP">新建…<\/option>/, '「新建…」是子菜单最后一项（上游 :338 在分隔线之后）')
+  assert.doesNotMatch(view, /重命名组|删除组|renameGroup|removeGroup/, '上游没有这两个动作 ⇒ 不许造出来的假控件')
+})

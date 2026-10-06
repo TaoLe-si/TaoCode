@@ -2,7 +2,7 @@
 // Case, plus the single map the keymap AND the 编辑 menu both read from, so a menu
 // entry can never point at something the keyboard does not do.
 import {
-  addCursorAbove, addCursorBelow, copyLineDown, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp,
+  copyLineDown, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp,
   redo, selectAll, undo,
 } from '@codemirror/commands'
 import { expandAllToLevel, expandCaretToLevel, foldAllCommand, foldAtCaret, foldBlockAtCaret, foldDocComments,
@@ -39,10 +39,21 @@ import { codeBlockTarget } from './editorCodeBlock.ts'
 import { fillParagraphCommand } from './editorFillParagraph.ts'
 // 移动到配对的括号（上游 `EditorMatchBrace` = `MatchBraceAction`，Ctrl+Shift+M，
 // `intellij.platform.lang.impl.actions.xml:23` + `$default.xml:1146-1148`）：规则在 src/editorMatchBrace.ts。
-import { matchBraceCommand } from './editorMatchBrace.ts'
+// `editorLanguageId` 同一个文件里的语言档 facet：代码块导航的「结构支持」那一半按它问语言
+// （上游那一侧读的是 PSI 叶子自己的 `getLanguage()`，`CodeBlockSupportHandler.java:62`，本仓的等价通道
+// 就是这个 facet；读法与 `src/editorMatchBrace.ts:190` 同一处）。
+import { editorLanguageId, matchBraceCommand } from './editorMatchBrace.ts'
 // 用自定义折叠标记包围选区（上游 `CustomFoldingSurroundDescriptor`）：
 // provider 表在 src/customFoldingProviders.ts，落地形状在 src/customFoldingSurround.ts。
 import { customFoldingSurrounder, surroundWithRegion } from './customFoldingSurround.ts'
+// 排序行 / 删除重复行 / 反串行（上游 `EditorSortLines`/`EditorUniqueLines`/`EditorReverseLines`，
+// 三条共用 `AbstractPermuteLinesHandler` 那一段取行→写回的骨架）：规则在 src/editorLineOps.ts。
+import { reverseLinesCommand, sortLinesCommand, uniqueLinesCommand } from './editorLineOps.ts'
+// 克隆光标上/下（上游 `EditorCloneCaretAbove`/`EditorCloneCaretBelow`）：规则在 src/editorCaretClone.ts。
+// 换掉 CodeMirror 自带的 `addCursorAbove`/`addCursorBelow` —— 那两条在「按反方向再按一次」时继续往外长，
+// 上游 `CloneCaretActionHandler.java:76-81` 是收回最外圈；且它要真 EditorView（`view.moveVertically`），
+// 纯函数版能在测试里跑。命令名 `cursor.above`/`cursor.below` 不变 ⇒ 冻结的键位表不用动。
+import { cloneCaretAboveCommand, cloneCaretBelowCommand } from './editorCaretClone.ts'
 
 // StateCommand only needs {state, dispatch}, which an EditorView satisfies.
 const fromState = (command: StateCommand): Command => view => command(view)
@@ -165,7 +176,7 @@ const codeBlockCommand = (forward: boolean, select: boolean): Command => view =>
   const text = state.doc.toString()
   let moved = false
   const ranges = state.selection.ranges.map(range => {
-    const target = codeBlockTarget(text, range.head, forward)
+    const target = codeBlockTarget(text, range.head, forward, state.facet(editorLanguageId) ?? '')
     if (target === null || target < 0 || target > text.length) return range
     moved = true
     return select ? EditorSelection.range(range.head, target) : EditorSelection.cursor(target)
@@ -207,6 +218,10 @@ export const editingCommands: Record<string, Command> = {
   undo, redo, selectAll,
   'line.duplicate': copyLineDown, 'line.delete': deleteLine, 'line.moveUp': moveLineUp, 'line.moveDown': moveLineDown,
   'line.join': joinLinesCommand, 'case.toggle': toggleCaseCommand,
+  // 排序行 / 删除重复行 / 反串行（上游 `EditorSortLines`/`EditorUniqueLines`/`EditorReverseLines`）。
+  // EditSmartGroup 里 Sort(:495) → Reverse(:496) 紧跟 FillParagraph(:494)；Unique 上游没有菜单行
+  // （只在动作组 :240），本仓给它一行才有消费点，见 src/menus/editMenu.ts 的注释。
+  'line.sort': sortLinesCommand, 'line.reverse': reverseLinesCommand, 'line.unique': uniqueLinesCommand,
   // 填充段落（上游 `EditSmartGroup` 里紧跟 `EditorJoinLines`/`EditorDuplicate` 的那一条，
   // `PlatformActions.xml:494`；`$default.xml` 没有它的键位 ⇒ 只有菜单/Find Action 到得了）。
   'paragraph.fill': fillParagraphCommand,
@@ -219,7 +234,9 @@ export const editingCommands: Record<string, Command> = {
   'statement.complete': completeStatementCommand,
   // Unwrap/Remove（Ctrl+Shift+Delete，$default.xml:917-920）：去掉最内层的 if/for/… 包裹。
   unwrap: unwrapCommand,
-  'cursor.above': addCursorAbove, 'cursor.below': addCursorBelow, 'occurrence.select': selectMatches,
+  // 克隆光标上/下（上游 `EditorCloneCaretAbove`/`EditorCloneCaretBelow`）：名字沿用仓里既有的两条，
+  // 实现在 src/editorCaretClone.ts（语义按 CloneCaretActionHandler 的层级逻辑，不是 CodeMirror 那两条）。
+  'cursor.above': cloneCaretAboveCommand, 'cursor.below': cloneCaretBelowCommand, 'occurrence.select': selectMatches,
   // 扩展选区（含块注释智能选择器）。菜单行同名，见 src/menus/editMenu.ts。
   'selection.extend': extendSelectionCommand(true), 'selection.extendLeft': extendSelectionCommand(false),
   // 移动到配对的括号（上游 `EditorMatchBrace`，`$default.xml:1146-1148` 的 Ctrl+Shift+M）。
