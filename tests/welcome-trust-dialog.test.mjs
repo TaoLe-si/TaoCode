@@ -110,8 +110,10 @@ test('App.vue 那两行还没接；会话级那份已并进模块真源（R4 落
   const host = read('../src/App.vue')
   const mount = host.split('\n').find(line => line.includes('<TrustedProjectDialog'))
   assert.ok(mount, '信任框仍挂在宿主上')
-  assert.ok(!mount.includes('canTrustAll'), 'trust-all 的宿主那一行 = 接线请求 W3，未落')
-  assert.ok(!host.includes('resolveLink'), '链接那一句的宿主挂点 = 接线请求 W2，未落')
+  assert.ok(mount.includes(':can-trust-all="trustCanTrustAll"'), 'trust-all 那一格由宿主递给弹层（W3 已落）')
+  assert.ok(mount.includes(':config-dir="trustConfigDir"'), '配置目录也一并递下去（「始终信任此来源」落父目录要用它）')
+  assert.ok(host.includes('mode="link"') && host.includes('@resolve-link="resolveLinkPrompt"'),
+    '链接那一句的第二档模态挂在宿主上（W2 已落）⇒ 门禁的问句真的能弹')
   // 原写「会话级那一档还在宿主自己的 ref 里（两处 = 接线请求 W3b）」——那是钉**未接线**形状的门禁。
   // 2026-10-06 trust4 落 R4：宿主自留的 `sessionTrust` ref 删掉，读写都走 trustedProjects 的那一份，
   // 所以这里按正向钉（细则判据 tests/trusted-session-single-source.test.mjs）。

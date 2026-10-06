@@ -86,3 +86,113 @@
 文案 `ActionsBundle.properties:125-126`，与排序行无关；本仓早已由
 `editingCommands['occurrence.select']`（CodeMirror 的 `selectMatches`）+
 `src/menus/editMenu.ts:85`、`:166` 承担，无需接线。
+
+---
+
+# 收尾（2026-10-06 caretops2）—— 本文件这三条的现状与**只剩 R3 第 4 处**
+
+判词全表与本批数字在 `docs/batch-2026-10-06-caretops2.md`。
+
+## R1 = 已闭环（不是我落的，登记现场）
+
+处置按本文件 §R1 的**选项 2** 由 keymap2 那批落完：
+`src/components/CodeEditor.vue:865-871`（两行绑定已摘，只剩说明注释）、
+`src/keymapBindings.ts:235-238`（两条从 `repo` 降到 `source: 'none'`）、
+`src/menus/editMenu.ts:195-196`（键位栏空串）、
+`tests/editor-caret-clone.test.mjs:129-138`（断言按上游改成反向钉子）。
+上游依据我本批重开核过：`platform/platform-resources/src/keymaps/$default.xml:879-884` 把
+`control alt shift UP/DOWN` 给了 `ResizeToolWindowUp`/`ResizeToolWindowDown`；
+`EditorCloneCaretAbove/Below` 在 `platform/platform-resources/src/keymaps/` 的出厂档里**零命中**
+（只有 `Sublime Text.xml:280/:284`、`Sublime Text (Mac OS X).xml:309/:312` 与
+`plugins/keymaps/vscode-keymap/resources/keymaps/VSCode.xml:130/:134` 给过）。**本文件这条请求可以关掉。**
+
+## R2 = 已闭环（按本仓口径）
+
+`src/keymapBindings.ts:228-241` 的 `EDITOR_ACTIONS` 六条都带 `upstreamId`，`keywords` 内含上游 id；
+注册走 `src/keymap.ts:427` → `src/actionRegistry.ts:166-180`（`registerEditorActions`）。
+判据 `tests/keymap-bindings.test.mjs:143-144` 钉的就是「`upstreamId` 以 `Editor` 开头 + `keywords` 必含它」，
+⇒ 「查找操作」按 `EditorSortLines` 搜得到。**没有**把 `EditorSortLines` 做成第二个 id（本仓注册表按 id 唯一，
+做了就是两条入口指向同一命令 ⇒ 面板双行），R2 原写「可选」，现状即合格。
+
+## R3-收尾（**要你落的一处**：`Shift+Alt+G` 的键位注册；四处里前三处本批已落）
+
+本批已落（模块/菜单侧，无需你动）：
+
+- `src/editorCaretPerLine.ts`（新建 104 行，执行体）
+- `src/editorCommands.ts:59`（import）+ `:246`（`'caret.perLine': addCaretPerSelectedLineCommand,`）
+- `src/menus/editMenu.ts:121`（菜单行，紧跟「全选」`:109`，位置对齐上游
+  `platform/platform-impl/resources/idea/PlatformActions.xml:485-487`；键位栏**留空**等你这一步）
+- `tests/editor-caret-per-line.test.mjs`（8 条判据，含一条「键位没注册就不许写加速键」的门禁）
+
+### 第 4 步（保留文件）· `src/keymapBindings.ts` 的 `EDITOR_ACTIONS` 加第七条
+
+形状照本文件 §R1/R2 里已有的 `brace.match` 那条（`source: 'upstream'` + `cm` + `boundAt`）。
+建议插在 `{ id: 'brace.match', … }` 之后、数组收尾前：
+
+```ts
+  { id: 'caret.perLine', upstreamId: 'EditorAddCaretPerSelectedLine', label: '在所选各行末尾添加光标',
+    keywords: 'add carets to ends of selected lines 多光标 行尾 EditorAddCaretPerSelectedLine',
+    command: 'caret.perLine', key: { source: 'upstream', display: 'Shift Alt G', cm: 'Shift-Alt-G',
+      boundAt: 'src/components/CodeEditor.vue:<你那一行的真实行号>',
+      upstream: '键位 platform/platform-resources/src/keymaps/$default.xml:155-157 = shift alt G；注册 platform/platform-impl/resources/intellij.platform.ide.impl.actions.xml:358；菜单 platform/platform-impl/resources/idea/PlatformActions.xml:485-487；文案 platform/platform-resources-en/src/messages/ActionsBundle.properties:130（该 id 没有 .description）；实现 platform/platform-impl/src/com/intellij/openapi/editor/actions/AddCaretPerSelectedLineAction.java:22-54' } },
+```
+
+`Shift-Alt-G` 在本仓**没人占**（`grep -n "Alt-G\|Shift Alt G" src/keymapBindings.ts src/keymap.ts src/components/CodeEditor.vue`
+本批实跑零命中），`tests/keymap-bindings.test.mjs:17` 的 `keymapConflicts(KEY_BINDINGS)` 不受影响（这条进的是
+`EDITOR_ACTIONS`，不进 `KEY_BINDINGS`）。
+
+### 第 5 步 · `src/components/CodeEditor.vue` 的编辑器 keymap 加一行
+
+挂在克隆光标那族注释块（`:865-871`）之后、`Alt-j`（现 `:872`）之前，逐字：
+
+```ts
+          // AddCaretPerSelectedLine = Shift+Alt+G（$default.xml:155-157；实现
+          // AddCaretPerSelectedLineAction.java:22-54）。命令只走这里与菜单行，没有别的入口。
+          { key: 'Shift-Alt-G', preventDefault: true, run: editingCommands['caret.perLine']! },
+```
+
+然后把上面 `boundAt` 的 `<你那一行的真实行号>` 填成那一行（`tests/keymap-bindings.test.mjs:157-160`
+会核「`boundAt` 那一行必须真有 `key: '<cm>'`」，**行号漂了就会红**，这是刻意的）。
+
+### 第 6 步 · 两处「键位还没注册」的临时钉子要同步翻（**不是放松断言，是钉错了当下状态**）
+
+1. `src/menus/editMenu.ts:121`（当前逐字）
+
+```ts
+    ctx.editable('caret.perLine', '在所选各行末尾添加光标', '', 'add carets to ends of selected lines 多光标 行尾 EditorAddCaretPerSelectedLine'),
+```
+
+改成（只把第 3 个实参 `''` 换成 `'Shift Alt G'`）：
+
+```ts
+    ctx.editable('caret.perLine', '在所选各行末尾添加光标', 'Shift Alt G', 'add carets to ends of selected lines 多光标 行尾 EditorAddCaretPerSelectedLine'),
+```
+
+改完记得把 `src/menus/editMenu.ts:110-120` 那段注释里「键位栏**留空**」的说明一起改掉（它写的是当下状态）。
+
+2. `tests/editor-caret-per-line.test.mjs:91`（当前逐字）
+
+```ts
+  assert.equal(row[2], '', '键位注册（keymapBindings/CodeEditor 都是保留文件）没落地之前，这一行不许写 Shift Alt G')
+```
+
+改成（同一条判据的另一半，键位落地后必须成立；`tests/keymap-bindings.test.mjs:147-148` 已经在要求
+「菜单键位栏 == 注册条目的 `key.display`」，两边同向，不会互相打脸）：
+
+```ts
+  assert.equal(row[2], 'Shift Alt G', '键位已注册 ⇒ 菜单键位栏必须等于注册条目的 display（上游 $default.xml:155-157）')
+```
+
+3. 文案性计数（不改行为，顺手即可）：`src/keymap.ts:108`、`:421`、`tests/keymap-bindings.test.mjs:126`、
+`tests/action-registry.test.mjs:168` 都写着「那六条」，加了第七条就是「那七条」。
+
+### 做不到 / 不要照着做
+
+- 上游超限会弹 balloon（`AddCaretPerSelectedLineAction.java:33-36` 调 `EditorUtil.notifyMaxCarets`）：
+  本仓没有编辑器内 balloon 通道 ⇒ `src/editorCaretPerLine.ts` 头部第 2 条差别已经写明「整条不动作且静默」，
+  **不要**为它编一条提示文案或新控件。
+- 上游 `:44-48` 那个「先把原光标挪开再 addCaret」不需要照搬（IDEA 在同点已有光标时拒绝新增，
+  `platform/editor-ui-api/src/com/intellij/openapi/editor/CaretModel.java:236-241`；CodeMirror 没这条限制，
+  本仓改成撞点去重，见 `src/editorCaretPerLine.ts:70-74`）。
+- 别再给 `line.sort` / `line.reverse` / `line.unique` / `cursor.above` / `cursor.below` 补键位
+  （本文件开头与 §R1 已经核过：出厂 `$default.xml` 里没有它们）。

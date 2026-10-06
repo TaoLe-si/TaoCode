@@ -56,7 +56,13 @@
 **A. 归我（保留文件 / 全局门禁），现在就做**
 - ✅ `.gitignore` 补 `build-sym/`（7548 个文件）、`build-symvs/`（502 个）与 `tsc.txt` / `ms.txt` / `rv.txt` / `debug-tmp.mjs`：未跟踪条数 **8857 → 695**（真实源码）。共 **1.37 GB** 产物此前会污染任何一次 `git add -A`。
 - ⏳ 死模块门禁实测**是红的**：14 个新增零生产消费方模块。归属：`searchEverywhere{Filters,Tabs,Text,TopHit,Balancer}` + `structuralSearch{Filters,Results}` → 桶 9 系（9a/9b 补）；`navChooseByNameFilter`/`navWorkspaceSymbolCache` → 桶 4；`popupStack` → 桶 8；`refactorSignature` → 桶 1；`completionCamelHump` → 桶 2；`terminalTitle` → 桶 10；`testLocator` → 桶 11（都在跑，交付时逐一验消费方）。另有 5 个「✔ 已接上可以更新基线」（`aboutInfo`/`codeVisionProviders`/`statusBarLifecycle`/`lsFeaturesWidget`/`lsSessionDocuments`）⇒ **基线该更新**，但要等全绿再一次性做，别在跑的过程中改基线掩盖新问题。
-- ⏳ 动效那 1 条红（4 处 `:hover` 缺底规则 `transition`）：`DebugInspectWindow.vue`（桶 12）/`EventLogPanel.vue`（桶 6）/`RefactorPreviewDialog.vue`（桶 1）/`style.css`（我）—— 等各桶收工一起做，免撞文件。
+- ✅ 动效那 1 条红（4 处 `:hover` 缺底规则 `transition`）：`DebugInspectWindow.vue`（桶 12）/`EventLogPanel.vue`（桶 6）/`RefactorPreviewDialog.vue`（桶 1）/`style.css`（我）
+  **订正（12:20 audit2 实测）**：这条名单已过期 —— 接手时 `tests/ui-motion.test.mjs` 就是 **11/11 全绿、hover 那条 0 offending**；
+  四处里 `RefactorPreviewDialog.vue:145` 底规则本就有过渡、`style.css:1311` 我已修、另两处由 `style.css:54` 的全局 button 过渡覆盖。
+  真缺的只有一处且已补：`src/components/DependencyAnalyzerDialog.vue:134` 的 `.analyzer-list li` ⇒ 底规则加
+  `transition: background-color var(--dur-1) var(--ease)`（走令牌，没自加动效、没用全局选择器）。
+  ⚠ 该门有**三处 `continue` 盲区**（`tests/ui-motion.test.mjs:269/:51/:262`）：注入「分组底规则 + 注释污染」形状后门仍绿，
+  宽扫能抓到 2 条 —— 反向验证明细在 `docs/batch-2026-10-06-audit2.md`。—— 等各桶收工一起做，免撞文件。
 
 **B. 归各桶名下文件，等它们交付后我改（现在动会撞车）**
 - ✅ **已修（主代理，2026-10-06）**「假无法核实」`src/jarRun.ts`：我**独立复核了验收员的说法**（他自己猜的路径 `java/execution/impl/...` 是错的，正确落点是
@@ -433,3 +439,22 @@ C1b：`native/git_test.cpp` 补两条显式判据 —— 500 条上限（此前�
 根因指向部分提交那一批 `--only` 改动打破了夹具的顺序假设（`a.txt` 未暂存修改被留在树上，而收尾那次
 空 `paths` 的 `git commit` 只提交暂存区）。dfbda4e 时这套是 37/37 ⇒ 属回归。已派专轮（禁放松 `rest.empty()`、
 按根因修、并把 C1b 两条判据加回去）。C1 的 `paths` 透传保留不动。
+
+## 10.10 待收口的两条（我离场时仍在途，早上要看的就是这两行）
+
+1. `src/components/CodeEditor.vue` 被在途代理顶到 **1151 行 > 上限 1147** ⇒ module-size 门现在红 1。
+   派单里已要求该域「净增 ≤ 0（先拆后加）」；若收工时仍红，就把一块逻辑（候选：`editorQuoteFaces` 三格那族状态）
+   搬进 `src/editor*.ts` 并配判据，**不许抬上限**。
+2. `git_status_vcs` 的原生红（§10.9）与 b8/b9 判决簿计数红（§10.7）各有专轮在跑。
+
+## 10.11 LSP 服务器消息：通道原来是死的（lspmsg 修复轮，已修）
+
+`src/lspServerMessages.ts` 的队列 `lspServerMessages` 原来是**普通数组**，而唯一消费方挂的是
+`watch(() => lspServerMessages.length, …)`（`src/progressNotices.ts:110`）⇒ push 不登记依赖、watcher 一次也没醒，
+服务器消息全堆在队列里静默消失（通知面不显示、`logLspServerMessage` 也不执行）。已改 `reactive`，
+判据三条（只有一份队列 / 必须 reactive / 端到端真跑 `wireLspProgressNotices` 数通知条数）。
+**连带排队的 R1a（我未落，避免与在途 status3 轮抢 `progressNotices.ts`）**：消息真会弹之后，
+logMessage 的 Error/Warning 落进 `lsp:message:`（BALLOON）组，而上游那一组是 no balloon
+（`LspServerNotificationsHandlerImpl.kt:467`）⇒ 每条服务器错误日志多一个气球。
+R1a/R1b/R2/R8/R9 都在 `docs/wiring-requests-2026-10-06-lspmsg.md`，等 status3 收工后一起落。
+另：`src/progressPanel.ts.bak` 是别的路留下的备份残留，未删（不是我的文件），登记在此。

@@ -5,6 +5,22 @@
 
 ---
 
+## 0. 第二轮复核（shell2 收尾 · 逐条判定，全部自己重开文件核过）
+
+| 条 | 判定 | 现树证据 | 处置 |
+|---|---|---|---|
+| W-1 A2 本机级三键 | **仍缺**（三处一处没动） | `src/settingsModel.ts` 的 `GeneralSettingsState` 里仍是裸 `defaultProjectDirectory`、`defaultGeneralSettings` 没有 `useDefaultBrowser`/`browserPath`；`native/settings_schema.hpp` 的 `GENERAL_SETTING_KEYS` 首行仍只有 `defaultProjectDirectory, reopenLastProject, …`；`native/settings_schema.cpp` 的默认值与 `validate_general_patch` 都没这两键；`native/settings_transfer.cpp:41-49` 的 `exportable()` 仍整段带 `general` | 下面 §W-1 的三段可照抄代码**行号仍然成立**（我逐条重数过：接口 `:111-112`、默认值 `:182-184`、键表 `settings_schema.hpp:103-107`、默认值实现 `settings_schema.cpp:140`、校验 `:190-192`），原样有效；`src/generalSettingsLocal.ts` 仍挂在 `.tools/orphan-baseline.txt:25`（理由「缺 settingsModel.ts 三个键」），同批落地后要顺手从基线里摘掉 |
+| W-2 治理两条 | **已闭环** | ①：`scripts/verdict_table.py`、`docs/inventory/verdict-platform_rest.md`、`docs/inventory/verdict-find-diff.md` 现在 `git ls-files` 全部命中（跟踪中）；②：本篇 §W-2 第 2 条自己已把 bucket7b A5.2 的前提订正成「已纳入跟踪、可关闭」 | 本篇 §W-2 保留作留痕，**不再需要主代理动手** |
+| W-3 折叠域 tsc 错 | **前提变了 ⇒ 本桶侧闭环** | 本轮 `npx vue-tsc -b --force` 里 **`src/customFoldingProviders.ts` 那条 TS1002 早已不在**（全树数字随别的批在途波动：中途实测 4 错（`RunConsole.vue`）→ 0 错 → 30 错 → 5 错，全部不在本域与折叠域文件）| 折叠域无需再派；**注意**：§W-3 里「收工实况见 batch-shell §3」那份数字已过期 |
+| W-4 ① 全局消息宿主 | **仍缺** | `src/messageDialog.ts` 的生产消费方仍只有 `src/components/TrustedProjectDialog.vue`（且是**不带 `.ts` 扩展名**的 import）；`src/App.vue` 里没有任何消息门面宿主 | 维持登记，等 App.vue 属主 |
+| W-4 ⑤ 步骤式列表弹层 | **前提变了** | 原句「`src/popupSteps.ts` 那几个导出仍是**零生产消费方**」已不成立：`src/components/ContentComboLabel.vue` 引了 `listStepRows`/`initialRowIndex`（并按同一规则用到 `isClosableOnExecute`、`shouldBeShowing`），`src/popupAnchor.ts` 引了 `showOptionsPoint` | 残余缺口收窄成：**`isFinalStepValue` / `listSeparator` / `nextSelectableRow` / `chosenOutcome` / `autoSelectionFired` 这五个导出仍是 src 内零消费方**（只有 `tests/popup-steps.test.mjs` 引），要接的是桶 8 那三个弹层宿主。§W-4 原文按此收窄理解 |
+
+本轮（shell2）在 **filetypes 模块侧**自己闭环的三条（不动保留文件、不占上面的请求）：忽略清单的遮蔽闸、
+默认表与上游逐字一致的门禁 + 「等于默认表就不持久化」、通配关联表同长时 `?` 先于 `*` 的排序修正。
+详见 `docs/batch-2026-10-06-shell2.md` 与 `docs/wiring-requests-2026-10-06-filetypes.md` §0。
+
+---
+
 ## W-1（给主代理 · 保留文件独占者）—— A2 本机级设置（`RoamingType.DISABLED`）三处必须同批
 
 **这是从 `docs/wiring-requests-2026-10-06-bucket7b.md` 的 A2 接手、并把模块侧做完后剩下的「保留文件那一行」。**

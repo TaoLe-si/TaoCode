@@ -39,63 +39,84 @@
   代价是菜单上那三格加速键继续是空头支票。
 - 判据：`tests/keymap-bindings.test.mjs` 的「导航三条新键位…」（可用性真值表 + 上游精确匹配的串味检查）。
 
-## R3 · 把 Ctrl+Alt+Shift+↑/↓ 让回上游的主人（`EditorCloneCaretAbove/Below` 的摘键请求）
+## R3 · 把 Ctrl+Alt+Shift+↑/↓ 让回上游的主人（`EditorCloneCaretAbove/Below` 的摘键请求）——**已落**（keymap2，2026-10-06）
 
-- 判决（本 lane 定了，口径 = caretops 那份请求里的**处置 2**）：这对键属工具窗口调整大小，不属克隆光标。
-  它提的 R1 事实我另开 `$default.xml` 复核过，全部成立（不是照抄它的结论）：
-  - `$default.xml:879-881` = `ResizeToolWindowUp` 的 `control alt shift UP`、`:882-884` = `ResizeToolWindowDown`
-    的 `control alt shift DOWN`；
-  - `EditorCloneCaretAbove`/`EditorCloneCaretBelow` 在 `$default.xml` 里**零命中**（我把整个
-    `platform/platform-resources/src/keymaps/` 十张表 grep 了一遍），只有
-    `keymaps/Sublime Text.xml:280`/`:284` 给过 `control alt UP`/`DOWN`（另一档
-    `Sublime Text (Mac OS X).xml:309`/`:312`）；
-  - 本仓的全局分派表已经按上游做了：`src/keymap.ts:305-310` 把 Ctrl+Alt+Shift+方向键给
-    `stretchToolWindow`（= `ResizeToolWindowLeft/Right/Up/Down`），这一条**不动**。
-- 要接什么（caretops / 编辑器 lane）：删掉 `src/components/CodeEditor.vue:865-866` 那两行
-  （`Ctrl-Alt-Shift-Up`/`Ctrl-Alt-Shift-Down` → `editingCommands['cursor.above']`/`['cursor.below']`），
-  并把 `src/menus/editMenu.ts:178-179` 的第三个实参从 `'Ctrl Alt Shift ↑'`/`'↓'` 改成 `''`。
-  命令实现本身**留着**（菜单行与「查找操作」照旧可达，上游也是只有动作没有键）。
-- 我这边跟着改（这两条在我文件里，摘完键再改才不会红）：`src/keymapBindings.ts:225-230` 的
-  `cursor.above`/`cursor.below` 从 `{ source: 'repo', display: … }` 降到 `{ source: 'none' }`。
-  现在登记成 `repo` 档是**如实描述现状**（本仓编辑器 keymap 真绑着，`boundAt` 给的是 `CodeEditor.vue:865`/`:866`），
-  不是给它发上游牌照 —— 两档的 `upstream` 串里都写明了「上游 $default.xml 没有这个动作的键位」与撞车对象。
-- 判据：`tests/keymap-bindings.test.mjs` 的「编辑器一族…」。摘完键后那条 `none` 分支会自动去核
-  「编辑器 keymap 里不许再绑着这把键」，所以漏删会红。
+- 判决复核（keymap2 另开一遍上游，不是照抄本文原判词）：
+  - `platform/platform-resources/src/keymaps/$default.xml:879-881` = `ResizeToolWindowUp` 的
+    `control alt shift UP`、`:882-884` = `ResizeToolWindowDown` 的 `control alt shift DOWN`；
+  - `EditorCloneCaretAbove`/`EditorCloneCaretBelow` 在 `$default.xml` **零命中**（对
+    `platform/platform-resources/src/keymaps/` 十张表整目录 grep 过）；仅有的两处绑定都在**别的方案**里：
+    `platform/platform-resources/src/keymaps/Sublime Text.xml:280`/`:284` = `control alt UP`/`DOWN`，
+    插件方案 `plugins/keymaps/vscode-keymap/resources/keymaps/VSCode.xml:130-136` =
+    `ctrl alt up` + `shift ctrl alt up`（`VSCode.xml:1` 写 `parent="$default"`，即它是默认表的**派生方案**，不是出厂默认）；
+  - **代码里也不声明键位**：`platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretAbove.java:8-11`
+    只是 `new EditorAction(new CloneCaretActionHandler(true))`（无 `registerCustomShortcutSet`），
+    `platform/platform-impl/src/com/intellij/openapi/editor/actions/CloneCaretActionHandler.java:24` 起是纯 handler；
+    `platform/ide-core/src/com/intellij/openapi/actionSystem/IdeActions.java:67-68` 只有 id 常量；
+    `platform/editor-ui-api/` 整个目录 grep `CloneCaret` **零命中** ⇒ 这一族的键位只可能来自键位表，
+    而默认表没给 —— 「上游给没给这族键」= **没给**。
+  - 本仓的全局分派表早已按上游做了：`src/keymap.ts:305-310` 把 Ctrl+Alt+Shift+方向键给
+    `stretchToolWindow`（= `ResizeToolWindowLeft/Right/Up/Down`），这一条**不动**；
+    且 `src/App.vue:1918` 是 `window.addEventListener('keydown', onKey, true)`（**捕获阶段**），
+    编辑器聚焦时那两行 CodeMirror 键位与全局那一条**同时吃到一次按键**（上游只有 resize 一个行为）。
+- 落掉的改动（摘键，不留「与上游不同键位的假一致」）：
+  `src/components/CodeEditor.vue` 删掉 `Ctrl-Alt-Shift-Up`/`Ctrl-Alt-Shift-Down` 两行绑定；
+  `src/menus/editMenu.ts` 两行的第三个实参（键位栏）改成 `''`，keywords 顺手补上游 id（菜单行在
+  `menuUi.ts:246` 的按 id 去重里**优先**，补了才按 `EditorCloneCaretAbove` 搜得到）；
+  `src/keymapBindings.ts` 的 `cursor.above`/`cursor.below` 从 `repo` 档降到 `none` 档。
+- 命令实现与菜单行都留着（上游也是只有动作没有键）：`src/editorCaretClone.ts`、`src/editorCommands.ts` 的
+  `cursor.above`/`cursor.below` 一字未动。
+- 判据：`tests/keymap-bindings.test.mjs` 新增「克隆光标那对不占工具窗口调整大小的键（R3 摘键后的真值表）」；
+  `tests/editor-caret-clone.test.mjs` 里原写 `assert.match` 的那两行（钉着「编辑器 keymap 里有这两把键」）
+  按上游改成 `assert.doesNotMatch` + 命令表/菜单行的正向钉子 —— 留痕见 `docs/batch-2026-10-06-keymap2.md` §1/§4。
 
-## R4 · 问题面板选中行的 Alt+Enter（桶 2 · 2b2 的 R1：判定 = 现在不注册，缺两件前置）
+## R4 · 问题面板选中行的 Alt+Enter（桶 2 · 2b2 的 R1）——**仍未注册**；两件前置只到了一件
 
 - 上游核对（自己开的文件，不是照抄判词）：
   `platform/problemsView/ui/resources/intellij.platform.problemView.ui.xml:100-103` 的
   `ProblemsView.QuickFixes` 写的是 **`use-shortcut-of="ShowIntentionActions"`**，
-  而 `ShowIntentionActions` 的键在 `$default.xml:480-482` = `alt ENTER` —— 2b2 那份请求的键位结论成立。
-- 但**同一把键本仓已经给编辑器用了**：`src/components/CodeEditor.vue:781` 把 `Alt-Enter` 绑到
-  `emitSemantic('codeAction')`，菜单行是 `src/menus/codeMenu.ts` 的 `codeAction`（`keys: 'Alt Enter'`）。
-  上游这本来就是**同一个动作**（`KeymapPanel.isShortcutConflictAction` 第 3 条排除：`use-shortcut-of`
-  指向别人 = 其实同一个动作，见 `src/keymapBindings.ts:308-320` 的注释），
-  ⇒ 正确形态不是「再加一条 Alt+Enter 的键位」，而是**面板自己认领这把键**。
-- 缺的两件前置（都不在本 lane）：
-  1. `src/components/ProblemsPanel.vue` 现在**没有**任何 `defineExpose`（`:226` 的 `openRowMenu(row, event)`
-     是组件内部函数，行上的入口在 `:658`），2b2 自己说下一轮加 `openMenuForSelected()`；
-  2. 宿主得知道「此刻焦点在问题面板」才能把 Alt+Enter 分给面板而不是编辑器 —— `src/App.vue` 的
-     `createKeymap` 那一路只有 `workspace/editor/lsp` 三面状态（`src/keymapBindings.ts:26-30`），
-     没有面板焦点位。
-- 因此本轮**没有**把它写进 `KEY_BINDINGS`：写进去就是一条命中后只 `preventDefault` 不干事的假绑定，
-  而且 `tests/keymap-bindings.test.mjs:106` 的「动作映射与表一一对应」会立刻要求我在 `tailActions` 里
-  配一个空转处理器 —— 那正是本仓铁律要避免的形状。
-- 前置齐了之后的照抄配方（给我或下一轮）：
-  `KeyBindingState` 加 `problems?: boolean`，条目形如
+  而 `ShowIntentionActions` 的键在 `$default.xml:480-482` = `alt ENTER` ⇒ 键位结论成立。
+- 同一把键本仓已给编辑器：`src/components/CodeEditor.vue` 的 `Alt-Enter` → `emitSemantic('codeAction')`，
+  菜单行 `src/menus/codeMenu.ts` 的 `codeAction`（`keys: 'Alt Enter'`）。上游这本来就是**同一个动作**
+  （`KeymapPanel.isShortcutConflictAction` 第 3 条排除，见 `src/keymapBindings.ts` 的注释）
+  ⇒ 正确形态是**面板自己认领这把键**，不是再加一条 Alt+Enter。
+- 前置逐条重核（本轮**打开代码看的**，原文档那句「现在没有任何 defineExpose」已过时）：
+  1. **已到位**：`src/components/ProblemsPanel.vue` 有 `function openMenuForSelected()` 与
+     `defineExpose({ openMenuForSelected })`（现落在 `:302-310` 一带），聚焦行即选中的等价物
+     （`rememberSelectedRow`，行上 `@focusin`）—— 2b2 说「下一轮加」的那件事已经加了。
+  2. **仍缺**：宿主不知道「此刻焦点在问题面板」。证据三处：
+     `src/keymapBindings.ts:26-30` 的 `KeyBindingState` 只有 `workspace/editor/lsp` 三面；
+     `src/keymap.ts:418-419` 与 `:426` 喂给 `registerKeymapActions`/`findKeyBinding` 的就是那三个字段；
+     `src/App.vue:2238` 渲染 `<ProblemsPanel …>` **没有模板 ref** ⇒ 全仓没有任何地方拿得到那个出口，
+     `openMenuForSelected()` 现在是**只有判据读它、没有调用者**的暴露（消费链路缺宿主那一环）。
+- 因此本轮**没有**把它写进 `KEY_BINDINGS`：缺②就写不出 `when`，写进去是一条命中后只 `preventDefault`
+  不干事的假绑定，而 `tests/keymap-bindings.test.mjs` 的「动作映射与表一一对应」会立刻要求
+  `tailActions` 配一个空转处理器 —— 正是本仓铁律要避免的形状。
+- 已钉住的红线（新判据）：`tests/keymap-bindings.test.mjs` 的
+  「问题面板的 Alt+Enter：两件前置只到了一件，缺焦点位就不进表（R4 判定）」—— 它同时钉
+  ①面板出口在位、②`App.vue` 仍无 `<ProblemsPanel … ref=`、③表里 Alt+Enter 零主人、
+  ④每条 `when` 只许读 `KeyBindingState` 真有的字段（读到表外字段得到 `undefined` = 永远按不到的死绑定）。
+- **要主代理接的线**（`src/App.vue` 归 appvue，本轮禁改）：给 `<ProblemsPanel>` 加模板 ref +
+  一个「面板焦点位」（`focusin` 落到 `ref<boolean>`，Esc/编辑器聚焦时清），再把两者塞进
+  `createKeymap({ …, problemsPanel, problemsFocused })`；`src/keymap.ts` 侧我这边随时能接
+  （`KeyBindingState` 加 `problems?: boolean`、`tailActions` 加 `'problems.view.quickFixes'`，
+  键位条目照下面这条抄）：
   `{ id: 'problems.view.quickFixes', label: '操作（选中问题）', display: 'Alt Enter', scope: 'tool-window',
      chord: { key: 'Enter', alt: true, forbid: ['ctrl', 'shift'] }, when: s => s.problems === true,
-     upstream: '$default.xml:480-482 ShowIntentionActions（面板侧 use-shortcut-of 见 problemView.ui.xml:100-103）' }`，
-  并把 `App.vue` 的焦点位与 `ProblemsPanel` 的出口一并接上；三条都到位再落键位表，判据才不会红。
+     upstream: '$default.xml:480-482 ShowIntentionActions（面板侧 use-shortcut-of 见 problemView.ui.xml:100-103）' }`
+  —— 三条（App.vue 的 ref、焦点位、`createKeymap` 实参）都到位之后再落表，同时把上面那条判据里的②翻成正向断言。
 
-## R5 · 两条陈旧计数注释（非功能，`src/menuUi.ts` 无主/不在我派单里）
+## R5 · 陈旧计数注释 ——**已订正**（keymap2）
 
-- `src/menuUi.ts:85` 写「`keymapBindings.ts` 的 **25** 个动作 id 里有 **21** 个在 `src/menus/*` 找不到对应行」：
-  本轮之后是 **30** 条、其中 9 条有同 id 菜单行 ⇒ 应改成「30 个里有 21 个」（21 那个数恰好还成立：
-  `navigate.super`/`navigate.related` 有行、`navigate.test` 也有行，另 9 条一一对上）。
-- `src/searchEverywhereHost.ts:80` 的「那 21 个」同口径，不用改。
-- 我没动这两处：`menuUi.ts` 不在我的四个授权文件里，注释也不被任何判据读。
+- `src/menuUi.ts:85`：原写「`keymapBindings.ts` 的 **25** 个动作 id 里有 **21** 个在 `src/menus/*` 找不到对应行」；
+  本轮自己数过：`KEY_BINDINGS` 共 **30** 条，其中 **9** 条在 `src/menus/*` 有同 id 行
+  （`file.saveAll`、`navigate.super/test/related`、`refactor.changeSignature/safeDelete/extractVariable/inline`、
+  `edit.copyReference`），**21** 条没有 ⇒ 改成「30 个里有 21 个」（21 那个数恰好还成立）。
+  同一段里 `keymap.ts:384` 这个锚点也漂了（`registerKeymapActions` 现在在 `src/keymap.ts:418`），一并订正。
+- `src/searchEverywhereHost.ts:80` 的「那 **21** 个」经同一只表复核 = 21，**仍然成立**，不改。
+- 这两个数现在由 `tests/keymap-bindings.test.mjs` 的「menuUi 与 searchEverywhereHost 的计数注释与键位表同步」
+  **现算**比对（正则抠注释里的数字与表实际条数比），以后再进表就不会再漂。
+
 
 ## 判据（本轮新增/改动，全部只加不减）
 

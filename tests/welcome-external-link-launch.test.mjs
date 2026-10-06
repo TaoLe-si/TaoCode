@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import {
-  externalLinkGateInstalled, installExternalLinkGate, openExternalUrl,
+  externalLinkGateInstalled, installExternalLinkGate, linkDialogIsMounted, markLinkDialogMounted, openExternalUrl,
 } from '../src/externalLinkLauncher.ts'
 import { createWorkspaceLifecycle } from '../src/workspaceLifecycle.ts'
 import { replaceSessionTrust } from '../src/trustedProjects.ts'
@@ -66,7 +66,10 @@ function transport() {
   return { opened, open: url => { opened.push(url); return Promise.resolve() } }
 }
 
-test.beforeEach(() => { replaceSessionTrust([]) })
+// 默认当作「宿主已经把 `mode="link"` 那颗框挂进模板」：真实应用里 W1 第 4 条落了就是这个状态，
+// 组件的 `onMounted` 会报给 `markLinkDialogMounted`（`src/components/TrustedProjectDialog.vue:50-55`）。
+// 「还没挂框」那一档单独一条用例（最后第二条），别让它把默认档带偏。
+test.beforeEach(() => { replaceSessionTrust([]); markLinkDialogMounted(true) })
 
 test('装了门禁：未信任项目里点链接先问那一句，答「打开」开了但清单一个字不写', async () => {
   const { lc, writes } = makeLifecycle()
@@ -91,8 +94,10 @@ test('答「信任项目并打开」：先写清单（记项目根）再开', as
   lc.resolveLinkPrompt('trust')
   assert.equal(await pending, 'opened')
   assert.deepEqual(car.opened, ['https://example.org/doc'])
-  assert.deepEqual(writes.map(setting => setting.trustedPaths), [[{ path: 'd:/work/p', trusted: true }]],
-    '只有答 Trust 才动清单（:84 那一路才有 setProjectTrusted）')
+  assert.ok(writes.length > 0, '答 Trust 才把清单送进 settings.general.update（:84 那一路才有 setProjectTrusted）')
+  for (const setting of writes)
+    assert.deepEqual(setting.trustedPaths, [{ path: 'd:/work/p', trusted: true }],
+      '只记项目根这一条：没勾 trust-all 不记父目录')
 })
 
 test('答「取消」：不开也不写（:85）', async () => {
@@ -151,10 +156,12 @@ test('五条 URL 出口收成一个调用：不在保留文件里那三处已经
     assert.match(source, /openExternalUrl\(/, `${file}：走那一条出口`)
     assert.doesNotMatch(source, /request\('shell\.openUrl', \{ url(?:s)? \}\)/, `${file}：不再自己直连宿主`)
   }
-  // 剩下的两处就在保留文件 src/App.vue 里（文档链接、导出 HTML 后打开浏览器）⇒ 接线请求 welcome3 的 W1。
+  // 宿主那两处也已改走同一个出口（接线请求 welcome3 的 W1 已落）⇒ 五条出口现在零处直连。
   const host = read('../src/App.vue')
-  assert.equal((host.match(/request\('shell\.openUrl'/g) ?? []).length, 2,
-    'App.vue 那两处是宿主唯一还欠的行数')
+  assert.equal((host.match(/request\('shell\.openUrl'/g) ?? []).length, 0,
+    'App.vue 不再自己直连 shell.openUrl：五条 URL 出口只剩 `openExternalUrl` 一个调用点')
+  assert.equal((host.match(/openExternalUrl\(/g) ?? []).length, 2,
+    '宿主里 openExternalUrl 恰好两个调用点：文档链接的 external 分支 + 导出 HTML 后打开浏览器（解构那一行不带括号，不计）')
 })
 
 test('R3：确认框的第三个回值一路接到落库（勾了才多落父目录）', () => {
@@ -169,7 +176,12 @@ test('R3：确认框的第三个回值一路接到落库（勾了才多落父目
   assert.match(lifecycle,
     /function resolveTrustPrompt\(choice: TrustChoice, remember: boolean, trustAll: boolean\)/,
     '宿主 @resolve 的三个参数都吃下了')
-  assert.match(lifecycle, /T1/, 'return 表露出 trustEntries/saveTrustedPaths（T1）')
+  assert.match(lifecycle,
+    /function resolveTrustPrompt\(choice: TrustChoice, remember: boolean, trustAll: boolean\)/,
+    '宿主 @resolve 的三个参数都吃下了')
+  assert.match(lifecycle,
+    /trustPrompt, resolveTrustPrompt, projectTrustBlock, trustEntries, saveTrustedPaths,/,
+    'return 表把 trustEntries/saveTrustedPaths 露给宿主（trust4 的 T1：R2 那三条出口的前置）')
 })
 
 test('R3：配置目录里的项目不给 trust-all 那一格（可用性的判据在生命周期里）', () => {
@@ -182,6 +194,19 @@ test('R3：配置目录里的项目不给 trust-all 那一格（可用性的判�
   assert.equal(lc.trustCanTrustAll.value, false, '项目就在配置目录里 ⇒ 这一项根本不提供（TrustedProjects.kt:103-107）')
   lc.trustConfigDir.value = null
   assert.equal(lc.trustCanTrustAll.value, false, '配置目录丢了就退回「不给」')
+})
+
+test('宿主还没挂 mode="link" 那颗框时不卡住：按「打开」放行并说一句为什么没弹', async () => {
+  markLinkDialogMounted(false)
+  const { lc, writes, notices } = makeLifecycle()
+  const car = transport()
+  assert.equal(linkDialogIsMounted(), false)
+  assert.equal(await openExternalUrl('https://example.org/doc', car.open), 'opened',
+    '不能因为弹框没挂就把链接吞掉（接线前的行为就是直接开）')
+  assert.deepEqual(car.opened, ['https://example.org/doc'])
+  assert.equal(lc.linkPrompt.value, null, '没人渲染的那一句要自己收掉，不留 pending')
+  assert.match(notices.at(-1).message, /没有挂进界面/, '看得见「这一句没问」而不是静默')
+  assert.deepEqual(writes, [], '放行也不写清单（答的是 Open，:83）')
 })
 
 test('R5：指定浏览器那条通道要么两侧都在，要么一侧都没有（半条就是假通道）', () => {

@@ -169,3 +169,59 @@ const {
 `test('设置页没有渲染还没有消费链路的格子（不放假控件）')` —— 键与格子都落地后，
 把它改成断言 `SettingsDialog.vue` 里那三格各自 `v-model` 到同名设置字段，且 `settingsModel.ts` 里三个字段都在。
 **不要顺手删掉这条。**
+
+---
+
+# 收尾（2026-10-06 caretops2）—— 这份请求**已全部落地**，只剩两条观察项
+
+逐条判词与数字在 `docs/batch-2026-10-06-caretops2.md`。
+
+## ① / ② / ③ 的现状（本批逐条开文件核过）
+
+| 步骤 | 判定 | 现场（文件:行号） |
+|---|---|---|
+| ①.1 解构加名字 | 已落 | `src/App.vue:1138` |
+| ①.2 `runActionsOnSave` → `transformOnSave` → `file.write` + `savePassNote` | 已落 | `src/App.vue:1101-1115`（出口在 `src/editorFileOps.ts:262`/`:268`） |
+| ①.3 本地历史回滚保持绕过 | 已落（正确地没接） | `src/App.vue:1060-1075` `revertHistory`：`history.content` 直接 `file.write` |
+| ②.1 `settingsModel.ts` 三字段 + 默认 | 已落 | `src/settingsModel.ts:410-414`（类型）、`:223`（默认 `'Changed'` / `false` / `true`） |
+| ②.2 `native/settings_schema.hpp` 白名单 | 已落 | `native/settings_schema.hpp:89-91`（就在 `formatOnSave` 那一组之后，注释指消费方） |
+| ②.3 `native/settings_schema.cpp` 默认值 + 续注释 | 已落 | `native/settings_schema.cpp:405-410`（含「不落 `REMOVE_TRAILING_BLANK_LINES`」的自陈） |
+| ②.4 `src/bridge.ts` | **前提变了** | `src/bridge.ts` 里没有逐键白名单：editor 设置整份发 `settings.update`（`src/App.vue:668`），域校验在宿主 `native/settings_editor_keys.hpp:48-55` |
+| ③ 三格控件 + 真值喂进 pass + 判据翻向 | 已落 | `src/components/EditorSavePassesFields.vue:43/:52/:54`、`src/components/SettingsDialog.vue:34`（import）+ `:736`（挂载）、`src/editorFileOps.ts:242-246`（三个真值）、`tests/save-transforms.test.mjs:382-405`（已按本文要求改成反向判据，**没删**） |
+
+## 本批补上的一处真缺口（这条请求文档里没写全，行为面按上游修）
+
+`keepTrailingSpacesOnCaretLine` 原先**只**管末行换行那一段（`ensureNewLineAtEnd` 里
+`:90` 的 `isKeepTrailingSpacesOnCaretLine() && hasCaretIn(start, end)`），**没管**清行尾那一段 ⇒
+关掉那一格，光标行照样不被清（设置是假的）。上游这两段共用同一个开关，走的是
+「传不传光标」：`platform/platform-impl/src/com/intellij/openapi/editor/impl/TrailingSpacesStripper.java:70`
+（第三个实参 `options.isKeepTrailingSpacesOnCaretLine()`）→ `:209`（形参 `skipCaretLines`）→
+`:229`（`skipCaretLines ? caretOffsets : null`）。
+
+- 本仓修法：`src/editorSaveTransforms.ts:504-507` ⇒
+  `caretOffsets: input.options.keepTrailingSpacesOnCaretLine ? input.caretOffsets : undefined`
+- 判据：`tests/save-transforms.test.mjs:231-246`（两档各钉正文/`strippedLines`/`deferredLines`）
+  + `:266-309`（端到端链：**设置页 → `settings.update` → 宿主白名单/两侧默认值 → `editorFileOps` 真值 →
+  执行体真的按它分叉**，五段任缺一段就红）
+- 反向验证：`editorSaveTransforms.ts:507` 退回原写法 ⇒ 1 条红；`editorFileOps.ts:245` 写死 `true` ⇒ 1 条红；
+  两处均已撤回并复绿（`grep MUTATION-TEMP src tests docs` 零命中）。
+
+`App.vue` 那侧**不需要**跟着改：`savePassNote` 里「N 行被光标挡着未清」本来就是读 `deferredLines`，
+关掉那一格时它自然变成 0，不用动保留文件。
+
+## 留给你的两条观察项（都不是「照抄就能落」，先要定夺）
+
+1. **②.4 的越界语义**：`native/settings_editor_keys.hpp:50-54` 对 `stripTrailingSpaces` 越界是
+   `fail("INVALID_SETTINGS", …)` ⇒ 整份 editor 补丁被拒（`src/App.vue:668` 拿不到回写）。
+   本文件 ②.4 原写「越界按上游一样**剪掉这一条**而不是整份作废」。要改成单条剪枝得动
+   `native/settings_editor_keys.hpp` + 可能 `src/bridge.ts`（都不在我面）⇒ **请你定夺**：
+   保持「整份拒」（现状，用户能立刻看到错误）还是改「剪掉这一条 + 其余照存」。
+2. **`removeTrailingBlankLines` 仍不落**：上游 `TrailingSpacesStripper.java:76-78`（调用点）+
+   `:112-131`（`removeTrailngBlankLines`，上游原文就拼错）有执行体、`EditorSettingsExternalizable.java:75` 默认 false。
+   本仓现状是**只有契约字段**（`src/editorSaveTransforms.ts:117-118` + `:143-144`，判据
+   `tests/save-transforms.test.mjs:256-264` 钉着「没有执行体」）。三样必须同批：执行体 + 键（`settingsModel.ts`
+   + `settings_schema.hpp`/`.cpp`）+ 设置页格子；只落执行体 = `options.removeTrailingBlankLines` 恒 false 的不可达代码。
+3. **多光标档判不了**：上游按 `getAllCarets()` 收集所有编辑器的所有光标
+   （`TrailingSpacesStripper.java:213-226`），本仓 `src/editorFileOps.ts:249` 只能取
+   `EditorHandle.getCursor()` 一条（接口 `src/editorTab.ts:21`）。要接先得给 `EditorHandle` 加
+   「读全部光标」的出口（实现方在 `src/components/CodeEditor.vue`）⇒ 我没有假造。

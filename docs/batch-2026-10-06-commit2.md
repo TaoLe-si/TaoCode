@@ -9,8 +9,11 @@
 本收尾批做的事：**逐条重新核实**（代码、测试、上游坐标三方各开一遍）、补两处引用坐标修正、
 做三轮反向验证、跑全套门禁并把数字记在这里。派单给的坐标与既有注释**都当未经核实**处理。
 
-真实文件名（派单里写的 `src/partialCommit*` / `src/commitPaths*` 在本仓不存在，grep 确认后对应落点是）：
+> 工作区是 12 路共享的：写这份报告期间主代理又提交了一次（HEAD 从 `11a736e` 进到 `7220a76`），
+> 把本域那两处注释修正与这两份文档的当时版本一起带走了 ⇒ `git status` 现在只显示后续增量。
+> 下面所有"前/后"数字都是**工作区实跑**的结果，不是按某个 commit 推算的。
 
+真实文件名（派单里写的 `src/partialCommit*` / `src/commitPaths*` 在本仓不存在，grep 确认后对应落点是）：
 | 派单的说法 | 实际落点 |
 |---|---|
 | `src/commitChecks*.ts` | `src/commitCheck.ts`、`src/commitChecks.ts`、`src/commitChecksResult.ts`、`src/sourceControlCommitChecks.ts`（出口全在这四个文件，面板在 `src/components/SourceControl.vue`） |
@@ -77,11 +80,11 @@
 | `native/git.hpp` | 172 | 180 | `commit(..., paths = {})` 尾参 |
 | `native/git.cpp` | 936 | 791 | `commit(..., paths)`：500 上限 / `checked_path` / 先 `add` 后 `--only`（同批还有别的族按行拆去 `native/git_log.cpp`，故总数下降） |
 | `native/git_test.cpp` | 533 | 579 | R1-c 与非法路径的 ctest 用例 |
-| `docs/wiring-requests-2026-10-06-commit2.md` | 0 | 本批重写为 205 行 | C1 / C1b / C2 / C3 四段可照抄 |
-| `docs/batch-2026-10-06-commit2.md` | 0 | 本文件 | 就是这份 |
+| `docs/wiring-requests-2026-10-06-commit2.md` | 0 | 245 | C1 / C1b / C1 验收取证表 / C2 / C3 五段可照抄（本收尾批补 C1b 与取证表，并复核 C1/C3 的全部行号） |
+| `docs/batch-2026-10-06-commit2.md` | 0 | 161 | 就是这份（收工实跑时的 `wc -l`） |
 
-本收尾批自己动过的只有三个文件，且全是注释：`src/commitChecksResult.ts`（6 行改动）、
-`src/sourceControlCommitChecks.ts`（3 行）、这两处都是"引用坐标 + 留痕"，`git diff` 里没有任何语义改动。
+本收尾批自己动过的源码只有两个文件，且全是注释：`src/commitChecksResult.ts`（6 行改动）、
+`src/sourceControlCommitChecks.ts`（3 行），两处都是"引用坐标 + 留痕"，`git diff` 里没有任何语义改动。
 反向验证的三处临时注入已全部撤回（见 §4 的 grep 结果）。
 
 ---
@@ -95,12 +98,13 @@
 | `node --test tests/commit-checks.test.mjs tests/commit-checks-result.test.mjs` | 22 + 23 = **45 tests / 45 pass / 0 fail** | 45 / 45 / 0 |
 | `node --test tests/commit-checks.test.mjs tests/commit-checks-result.test.mjs tests/commit-check.test.mjs`（提交检查三件） | 54 / 54 / 0 | **54 / 54 / 0**（注入撤回后复跑，同一数字） |
 | 提交域其余测试全跑（`commit-author` `commit-check` `commit-checks-progress` `commit-checks-result` `commit-checks-tooltip` `commit-checks` `commit-legend` `commit-message-history` `commit-message-inspection` `commit-notification` `commit-options`，11 个文件） | **131 tests / 131 pass / 0 fail**（324ms） | 131 / 131 / 0 |
-| `npx vue-tsc -b --force` | **0 错**（无输出，exit 0） | **0 错**（无输出，exit 0） |
+| `npx vue-tsc -b --force` | **0 错**（无输出，exit 0） | 收工实跑 **2 错，且都不在本域**：`src/runConfigurationSchema.ts`（run-config 那片并行 lane 正在接 `jarRun.ts`，同一时刻 `find-orphan-modules` 报「本轮清掉 1 ✔ `src/jarRun.ts`」可以交叉印证）。`grep -i commit` 过滤错误清单 ⇒ **0 条**，本域四个模块与面板都干净。那两条是**语义**错（`Types of property 'id' are incompatible` / TS7053）而不是语法错 ⇒ 不会中断整棵树的语义检查（规约 §4.3 那一坑），所以"本域 0 错"这个结论成立。本批自己的两次改动（纯注释）不影响类型 |
 | `node --test tests/module-size.test.mjs` | 5 / 5 / 0 | 5 / 5 / 0（本域四个模块 91/504/179/355 行，全在 ts 900 之下） |
 | `node .tools/find-param-props.mjs` | 共 0 处参数属性 | 0 |
 | `node .tools/find-ts-in-mjs.mjs` | 干净：`tests/*.mjs` 全部纯 JS | 干净 |
 | `node .tools/find-missing-ext.mjs` | 扫描 1303 个文件（src + tests），干净 | 干净 |
-| `node .tools/find-orphan-modules.mjs --gate` | 零生产消费方 9（含合法例外 `src/main.ts`）· 已登记孤儿 8 / 基线 8 · **新增 0** · 清掉 0 ⇒ 绿 | 同一数字 ⇒ 绿（清单里**没有**本域任何一个文件） |
+| `node .tools/find-orphan-modules.mjs --gate` | 零生产消费方 9（含合法例外 `src/main.ts`）· 已登记孤儿 8 / 基线 8 · **新增 0** · 清掉 0 ⇒ 绿 | 门禁仍然**绿**、本域仍然**零新增零消费方**；数字变成「已登记孤儿 7 / 基线 8 · 新增 0 · **本轮清掉 1 ✔ `src/jarRun.ts`**」—— 那是 run-config 那片刚把 `jarRun.ts` 接上（与 §3 的 tsc 红同源），不是本批所为。清单里**没有**本域任何一个文件 |
+| `node --test tests/vcs-file-util.test.mjs`（提交域相邻的 VCS 工具面） | 9 / 9 / 0 | 9 / 9 / 0 |
 | `node --test tests/source-citations.test.mjs tests/source-citation-anchors.test.mjs` | 11 tests / **10 pass / 1 fail**（红的是 `moved :: src/components/DebugConsolePane.vue \| platform/execution-impl/src/com/intellij/execution/actions/PauseOutputAction.java \| 19-19` —— 快照里有这条引用而那片面板里已指不到它，属 run/debug 面，与本域无关） | 11 tests / **11 pass / 0 fail**。**这条转绿不是本批做的**：并行 lane 在 11:47 改回 `src/components/DebugConsolePane.vue`、11:53 重算了 `docs/inventory/citation-anchors.json`（保留文件，本批一个字节没动）。本批的影响只是新增两份文档里的引用，实跑确认仍然全绿 |
 | native ctest | 未跑（本批没动 `native/` 一个字节；`native/git.cpp`/`git_test.cpp` 的东西是 HEAD 里既有的 ⇒ 既有 ctest 37/37 的口径不变） | 同左。⇒ 接线请求 C1/C1b 落地后**必须**由主代理重跑 `npm run test:native` 并看日志里的 `tests passed` 那行 |
 
@@ -129,7 +133,7 @@
 
 ## 5. 零消费方自查
 
-- `node .tools/find-orphan-modules.mjs --gate`：孤儿清单是 `src/agent.ts`、`src/components/ColorSchemeSettingsPage.vue`、`src/dragAndDropTargets.ts`、`src/generalSettingsLocal.ts`、`src/ideShellCreateTarget.ts`、`src/jarRun.ts`、`src/runAnythingContext.ts`、`src/scratchHistory.ts`（+ 合法例外 `src/main.ts`）—— **本域四个文件一个都不在其中**。
+- `node .tools/find-orphan-modules.mjs --gate`（收工实跑）：孤儿清单是 `src/agent.ts`、`src/components/ColorSchemeSettingsPage.vue`、`src/dragAndDropTargets.ts`、`src/generalSettingsLocal.ts`、`src/ideShellCreateTarget.ts`、`src/runAnythingContext.ts`、`src/scratchHistory.ts`（+ 合法例外 `src/main.ts`；基线里原有的 `src/jarRun.ts` 在收工实跑时被 run-config 那片接上，门禁报「本轮清掉 1」）—— **本域四个文件一个都不在其中**。
 - 逐条确认生产消费链路：`src/commitChecks.ts` ← `src/sourceControlCommitChecks.ts:13-16` 与 `src/components/SourceControl.vue`（`commitRequestParams` 是面板唯一发提交的那一处，`tests/commit-checks.test.mjs:219-220` 钉住"只有一个 `request('git.commit'` 调用点"）；`src/commitChecksResult.ts` ← `src/sourceControlCommitChecks.ts:17-21`；`src/commitCheck.ts` ← 同上 `:12`；`src/sourceControlCommitChecks.ts` ← `src/components/SourceControl.vue:462` 的 `createCommitChecks({...})`。
 - **要说清的半接线状态**（不是死模块，但生产侧暂时没人喂）：`CommitChecksDeps.documentRevisions`（`src/sourceControlCommitChecks.ts:72`）与 `commitScope`（`:79`）这两个**可选**入参，面板今天还没传（`src/components/SourceControl.vue` 是他人面，改动写在请求里）。
   它们不构成假控件：界面上**没有**任何一行依赖它们才出现（`tests/commit-checks.test.mjs:223` 反向钉住"不许有点了没反应的『提交文件…』按钮"），不传时指纹与空判的形状与本批之前**逐字一致**（`tests/commit-checks-result.test.mjs:255-265`、`tests/commit-check.test.mjs:64-78`）。文件头与字段注释都写明了为什么接不上、以及对应的请求编号。

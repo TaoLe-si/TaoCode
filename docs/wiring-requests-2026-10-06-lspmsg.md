@@ -9,6 +9,43 @@
 > lsp4j 的 `LanguageClient` 接口本体**不在本机树里**（`libraries/lsp4j/` 只有 jar 声明），所以坐标取上游唯一实现它的类。
 > 行号按 2026-10-06 10:40 复读；`src/App.vue`/`src/progressNotices.ts` 正被别的域并行改着，落地前请再数一次行号（我只对**内容**负责）。
 
+## 收尾那一轮（同日）复读与状态变化 —— 落地前请先看这一段
+
+1. **行号复读**：本轮（`lspmsg` 收尾）把上面每一条的目标行重新打开数过。仍然成立的：
+   `src/progressNotices.ts:113-118`（R1a 的那段 `notifyProgress({…})`，逐字未变）、
+   `src/progressNotices.ts:111-122`（R2 的插入点）、`src/notificationGroups.ts:164-170`（R1b 那张表，`lsp:log:` 在 :166）、
+   `native/lsp.cpp:177-181`（`tag_server_message`）、`:501-535`（通知分支）与 `:529`（`if (!handler) return;`）、
+   `:541-543`（register/unregisterCapability 收下不记账）、`:583-590`（showMessageRequest + refresh 那两支）、
+   `:592-593`（-32601 兜底）、`native/lsp_host_bootstrap.cpp:89`（`set_server_message` 的 lambda 起）、`:271`（window 段只有 workDoneProgress）、
+   `:280`（`workspaceFolders` 的声明）、`:255/:262/:265/:279`（四处 `dynamicRegistration: true`）。
+   **数错的三处（原写 X、实际 Y，已按实际改掉）**：
+   R3 第 3 条的 payload 从「:89-105」改成「:89-104，其中 `Json payload{…}` 字面量在 :96-99」；
+   R4 的 folders 真值从「:126-135」改成「:118-135（`Json folders = Json::array();` 在 :118，写进 initialize 的那一行在 :135）」；
+   R7 的触发点从「native/main.cpp:945-957」改成「:943-957（`case "project.settings.update"_h` 在 :927，`params.contains("java") || params.contains("buildTools")` 在 :943，`lsp->set_configuration` 在 :956）」
+   —— 都在本仓文件里，打开就能核。
+2. **R1a 的优先级变了（重要）**：本域收尾时实测 `src/lspServerMessages.ts` 的队列 `lspServerMessages` 是**普通数组**，
+   而唯一消费方挂的是 `watch(() => lspServerMessages.length, …)`（`src/progressNotices.ts:110`）—— 普通数组的 `push` 不登记响应式依赖
+   ⇒ 那个 watcher 一次也没醒过，所有服务器消息堆在队列里静默消失（通知面一行不显示、`:112` 那句 `logLspServerMessage` 也不执行）。
+   本轮已把它改成 `reactive`（在我名下那个文件里，`src/lspServerMessages.ts:250`；判据：`tests/lsp-server-messages.test.mjs:284`、`:302`）。
+   ⇒ **R1a 之前是「补齐分级」，现在是「收住多弹的气球」**：消息真的会弹了，而 logMessage 的 Error/Warning 落进的是
+   `lsp:message:`（BALLOON），上游那一组是「no balloon, only write to the Notifications tool window」
+   （`LspServerNotificationsHandlerImpl.kt:467`）⇒ 每来一条服务器错误日志就多一个气球。请与 R1a 一起排，别只落队列那一半。
+3. **上游坐标本轮复核**（本机树逐条打开，`grep -n` 定行，不按 sed 区间估）：`LspServerNotificationsHandlerImpl.kt` 共 478 行，
+   `:341-368` 是**五条**标准 refresh（`:341` semanticTokens、`:348` codeLenses、`:353` inlayHints、`:360` inlineValues、`:362` diagnostics）；
+   同文件 `:369-374` 还有**第六条** `refreshTextDocumentContent`（IntelliJ 扩展，本仓不做，理由见下面「我做不了/不做」第 6 条）
+   —— **本域上一轮写的 `:341-371` 是数错的（`:371` 落在第六条体内），本轮已在 `src/lspServerMessages.ts` 的头注与
+   `tests/lsp-server-messages.test.mjs` 的头注里改成 `:341-368` 并留了痕**。
+   其余：`:255` createProgress、`:257-328` notifyProgress（`Begin` 在 :266、`Report` 的 `?:` 两支在 :315-322、`End` 在 :323-326、
+   `toFraction` 的 `coerceIn` 在 :263 —— 这几条本轮重数，原引正确，未改）、`:330-334` 是 `cancelAllProgress` 的注释、函数本体 `:335-339`
+   （`src/lspProgress.ts:164` 原写 `:331-339`，本轮改成 `:335-339`）、`:377-382` showMessageRequest、`:385-390` showMessage、
+   `:393-404` logMessage、`:407-414` logTrace、`:418` `getNotificationType`、`:424-456` doNotify（`:448-449` `notification.expire();
+   result.complete(actionItem)`、**`:454` `.notify(project)`**）、`:461/:467/:473` 三个组各自的「Default behavior」注释、
+   `:464/:470/:476` 三个组 id、`:184` `telemetryEvent(...) {}`；
+   `Lsp4jClient.kt` 共 134 行（`:47/:50` register/unregister、`:59` showMessage、`:62` showMessageRequest、`:68` logMessage、
+   `:83` logTrace、`:86-99` 五条 refresh、`:101-102` 第六条、`:42-43` `@ApiStatus.OverrideOnly open class Lsp4jClient`）；
+   `LspClientCapabilities.kt:246-249` window 段。**本报告与本轮改动涉及的引用行号全部落在这些范围内**；
+   `progressNotices.ts:10`/`:54` 里那两条 `:257-328`/`:331-339` 不在我名下，`[331-339]` 那条请按上面改成 `:335-339`（见 R9）。
+
 ---
 
 ## R1a · 消息窗口按队列条目自带的 `displayId` 归组（一条改动，把分级兑现到界面上）
@@ -189,6 +226,60 @@
 - **判据**：模块侧「refresh 整批作废」那条已钉住作废动作本身；接线那条请落在改的那一侧（1 或 2）配一条
   「设置推完 ⇒ 缓存计数归零」，别让这条只活在注释里。
 
+## R8 · 「有没有人接」这件事在界面上说不出：丢弃计数与注册表返回值目前没有生产读者
+
+- **现状（本轮实测，不是推测）**：`src/lspServerMessages.ts` 的 `droppedLspServerMessages`（`:279`）、
+  `lspServerMessageHandlerMethods`（`:271`）、`resetLspServerMessageDrops`（`:283`）三个出口**只被
+  `tests/lsp-server-messages.test.mjs` 读**；`registerDefaultLspServerMessageHandlers()`（`:380`）在 `:388` 被自己调用、
+  **返回值就地丢弃**，读它的也只有判据（`tests/lsp-server-messages.test.mjs:62`）。
+- **判定（如实，别当成"假通道"）**：消息通道本身**不是假的** —— 链条是
+  `native/lsp.cpp:533`/`:583-590` → `src/bridge.ts:393` → `src/lspProgress.ts:146` → `src/lspServerMessages.ts:395`
+  →（八条处置之一）→ 队列 `:250` → `src/progressNotices.ts:110` → `notifyProgress`，八条处置都被 `handleLspServerMessageEvent` 真实消费；
+  本轮修的正是最后一环（队列不是 reactive ⇒ watcher 从不醒）。**缺的只是把「N 条服务器消息没人接」说出来那张嘴。**
+- **两条终局，任选一条（本域名下没有能承载它的那个界面，所以不动手）**：
+  1. **给一个真读者（推荐）**：状态栏「语言服务」面板的条目模型 `src/lsFeaturesWidget.ts:98-118`（`LspWidgetItem`，
+     它已经有 `isError` 与 `showErrorOutput` 两档）。上游的做法就是「这台客户端有问题 ⇒ 界面说出来」：
+     `platform/lang-api/src/com/intellij/platform/lang/lsWidget/LanguageServiceWidgetItem.kt:53-80`
+     （`isError` 叠成错误标记、`runningState` 叠成存活徽章）。最小可照抄的形状（接口加一个字段，条目标签加一句）：
+     ```ts
+     /** `lspServerMessageDrops`（`src/lspServerMessages.ts:276`）里这台服务器被丢了几条。 */
+     droppedMessages: number
+     ```
+     渲染那侧（`src/components/`，不在我名下）**只在建条目时 `droppedMessages > 0` 才出这一行**（= 「不放假控件」：0 就不出现）。
+  2. **或按死代码删**：把 `registerDefaultLspServerMessageHandlers` 的返回类型降成 `void`，同时把
+     `tests/lsp-server-messages.test.mjs:62` 改成先调用、再断言条数：
+     ```js
+     registerDefaultLspServerMessageHandlers()
+     assert.equal(lspServerMessageHandlerMethods().length, 8)
+     ```
+     —— 幂等那条断言强度**不变**（§3 不许放松，这条只是不再留一个没人读的返回值）。
+- **判据**：走 1 的那半请配一条「有被丢弃的服务器消息 ⇒ 面板条目里有这一句；没有 ⇒ 不出现」；
+  走 2 的那半由 `tests/lsp-server-messages.test.mjs` 现有的 15 条覆盖即可（本轮已实测全绿）。
+
+## R9 · 拆分留下的两处痕迹：旧 import 路径 + 五处过时注释指针
+
+- **旧 import 路径（功能没问题，但它是"转出表"存在的唯一理由）**：`src/progressNotices.ts:21` 仍从 `./lspProgress.ts` 取
+  `lspServerMessages`。实测两条路径拿到的是**同一个对象**（判据 `tests/lsp-server-messages.test.mjs:265`），
+  所以**没有第二份队列要收敛**；要收敛的只是别名。可照抄（与 R1a 同一次改动最省）：
+  ```ts
+  // old（src/progressNotices.ts:21，逐字）
+  import { lspProgressInterrupted, lspProgressTasks, lspServerMessages, runningLspTasks } from './lspProgress.ts'
+  // new
+  import { lspProgressInterrupted, lspProgressTasks, runningLspTasks } from './lspProgress.ts'
+  import { lspServerMessages } from './lspServerMessages.ts'
+  ```
+  落完之后 `src/lspProgress.ts:27-30` 那块转出里，除了 `lspServerMessages` 本来就没有别的 `src/` 读者
+  （`LSP_REFRESH_METHODS`/`lspActionTitles`/`lspMessageRouteOf`/`type LspMessageRoute`/`type LspServerMessage`
+  只被 `tests/lsp-progress.test.mjs:23-25` 读）⇒ 把那两个读者的 import 一起改到新模块后，**那块转出可以整段删**（我名下，随时可做，
+  前提就是这条：断言体一字不动，只改锚点）。本轮没删是因为删了会断 `progressNotices.ts:21` 那一条编译。
+- **五处注释还在说「消息/refresh 的分派在 `src/lspProgress.ts`」**（拆分后实际在 `src/lspServerMessages.ts`）：
+  `src/lspPerFileCache.ts:36`、`src/lspHighlightingCache.ts:173`、`src/workspaceInspection.ts:51`、
+  `src/semanticHighlighting.ts:215`、`native/lsp.cpp:578`（那句「前端的处置见 `src/lspProgress.ts`」）。
+  都在别人名下，一行字的事；不改的代价是下一个人按注释去进度模块找分派表，找不到。
+- **顺带两条同族的小订正（本轮重数得到的，都不在我名下，列出来就行）**：
+  `src/progressNotices.ts:54` 引的 `:331-339` 应为 `:335-339`（`:330-334` 是函数上方的注释，函数体在 `:335-339`）；
+  `native/lsp.cpp:162` 引的 `:369-375` 中 `:375` 是空行（函数体到 `:374`）。
+
 ---
 
 ## 我做不了 / 不做的（写清楚，别当成漏项）
@@ -205,3 +296,10 @@
 5. **`window/progress`（jdt.ls 私有、非标准）**：LSP 没定义、上游 `Lsp4jClient` 里也没有这一支 ⇒
    无法核实上游怎么做，本仓不做；但它现在**会被丢弃计数抓到**（宿主若转发出来而没人接，
    `lspServerMessageDrops` 会记一条并写一行日志）—— 这就是这轮要的可观察性。
+6. **第六条 refresh（`refreshTextDocumentContent`）不接**（收尾这轮新登记）：上游
+   `platform/lsp-impl/src/impl/LspServerNotificationsHandlerImpl.kt:369-374` 把它转给
+   `lspClient.dynamicFiles.refreshContent(params.uri)`（`:371`），本仓没有「服务器代管虚拟文件」那一层
+   （`native/lsp.cpp:162` 的注释就是同一判定：照旧答 `MethodNotFound`），声明侧也没有对应能力
+   （`grep -rn "textDocumentContent\|dynamicFiles" native/ src/` 只命中 `native/lsp.cpp:162` 那一行注释）
+   ⇒ 声明与实发一致，**不算缺陷**，接上就是假控件。上一轮文件头写的「五条 refresh」因此**没有少做**，
+   只是当时没把第六条显式判成 `[-]`（本轮在报告里补了那一行）。

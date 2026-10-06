@@ -48,11 +48,11 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 
 规模分布也值得记一笔：本域 2551 类里，`openapi/editor/**` 占 970（编辑器与文档的核心）、`codeInsight/template/**` 382（实时模板 / 后缀模板 / Emmet）、`application/options/**` 340（设置页）、`codeInsight/daemon/**` 659 与 `codeInsight/folding/**` 69（继承既有判决）、`codeInsight/hint/**` 81、`psi/impl/search/**` 62。用户可见行为集中在 **`openapi/editor/actions`（173 条编辑器动作）** 与 **设置页那一族**，而 `openapi/editor/impl/view`、`impl/marker`、`ex/util`、`zombie` 这些是 JVM 内部实现，本仓由 CodeMirror 与浏览器排版整体承担 —— 这正是 §D 三个大桶的来由。
 
-## A. 已移植（`[x]`，全表 43 类）
+## A. 已移植（`[x]`，全表 50 类）
 
-这一档要求「本仓有真实实现，且这条行为对用户来说看不出差别」。**每一行都指到磁盘上存在的本仓文件**，门禁逐条核（`tests/b8-verdict.test.mjs`）。继承来的 659 条 daemon 类里只有 1 条判 `[x]`（`HighlightingSettingsPerFile`，判据在 `docs/inventory/daemon_verdict_table.md`）。
+这一档要求「本仓有真实实现，且这条行为对用户来说看不出差别」。**每一行都指到磁盘上存在的本仓文件**，门禁逐条核（`tests/b8-verdict.test.mjs`）。继承来的 659 条 daemon 类里只有 1 条判 `[x]`（`HighlightingSettingsPerFile`，判据在 `docs/inventory/daemon_verdict_table.md`）；继承来的折叠那 69 条里判 `[x]` 的是 **10** 条，与 `docs/inventory/verdict-folding.md` §G 逐条同档（2026-10-06 fold3 lane 把其中 7 条 `[~]` → `[x]`，本表 §G 的 10 条镜像行同批跟上，小节标题的「全表」计数也在这一批从 43 改成 50 —— 原写 43/1044、实际 50/1037，漏同步的是标题不是判词）。
 
-> 下表列的是**上一批的 34 条**代表行；verdict-depth 本轮（§E-11）又按行为把 **9 条**提到 `[x]`（`StickyLine`、`StickyLinesShowToggleAction`、`CreateRectangularSelectionAction`、`NextWordAction`/`PreviousWordAction`/`NextWordWithSelectionAction`/`PreviousWordWithSelectionAction`、`CloneCaretAbove`/`CloneCaretBelow`），逐条依据与「原写 X、实际 Y」在 §G 对应行里，本表不重复铺行（头部与 §G 的四档数字已由 `tests/b12-verdict.test.mjs` 对齐核过）。
+> 下表列的是**上一批的 34 条**代表行；verdict-depth 本轮（§E-11）又按行为把 **9 条**提到 `[x]`（`StickyLine`、`StickyLinesShowToggleAction`、`CreateRectangularSelectionAction`、`NextWordAction`/`PreviousWordAction`/`NextWordWithSelectionAction`/`PreviousWordWithSelectionAction`、`CloneCaretAbove`/`CloneCaretBelow`），逐条依据与「原写 X、实际 Y」在 §G 对应行里，本表不重复铺行（头部与 §G 的四档数字已由 `tests/b12-verdict.test.mjs` 对齐核过）。2026-10-06 fold3 lane 再随 `docs/inventory/verdict-folding.md` 同档带上 **7 条**（`BaseFoldingHandler`、`CollapseAllRegionsAction`、`ExpandAllRegionsAction`、`UpdateFoldRegionsOperation`、`CodeFoldingManager`、`CodeFoldingManagerImpl`、`DocumentFoldingInfo`），同样只在 §G 铺行 —— 于是「下表 34 条代表行 + §E-11 的 9 条 + fold3 的 7 条 = 全表 50 条」，这条加法由 `tests/b8-verdict.test.mjs` 逐条核（小节标题的「全表 N 类」要与 §G 逐档实数分别相等）。
 
 | 类 | 上游源码 | 本仓落点与依据 |
 |---|---|---|
@@ -91,7 +91,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 | `ToggleShowWhitespacesAction` | `platform/platform-impl/src/com/intellij/openapi/editor/actions/ToggleShowWhitespacesAction.java` | `src/editorWhitespace.ts`（空格画点、制表符画箭头，替换字符不挤动文本）+ `src/menus/viewMenu.ts` |
 | `UnselectPreviousOccurrenceAction` | `platform/lang-impl/src/com/intellij/openapi/editor/actions/UnselectPreviousOccurrenceAction.java` | `src/editorCommands.ts` 的 unselectPreviousOccurrenceCommand（摘掉最后加进来的那条，剩一条时不动作），注释里逐条引 RemoveOccurrenceAction.java:14 |
 
-## B. 部分移植（`[~]`，全表 1044 类）
+## B. 部分移植（`[~]`，全表 1037 类）
 
 > 本批把原判 `[-]` 的接口/契约/值对象类按行为改判，净落进这一档 **158** 条（其余落进 §C）。第三趟把「按族给的落点」逐条换成**核实过的概念落点**（坐标换算只在 `src/components/CodeEditor.vue`、换行档只在 `src/editorTheme.ts`、可变区间只在 `src/editorDiagnosticMarkers.ts` 等），核实不到承载者的降回 `[ ]`；每行都写了「核实依据：」那半句。
 > 下面这张族表的**每族计数是改判前的分布**，权威数字是 §G 逐条统计与头部那句和数。
@@ -261,7 +261,7 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 ## F. 门控（`tests/b12-verdict.test.mjs`，与 `tests/b8-verdict.test.mjs` 同域并行）
 
 1. **覆盖面**：§G 的行集 == `docs/inventory/editor.txt` 的 2551 条（名字与路径都对得上，且每条恰好出现一次）。
-2. **四档自洽**：`[x]`+`[~]`+`[ ]`+`[-]` == 2551，且头部那句「四档合计 34 + 1035 + 210 + 1272 = 2551」同步。
+2. **四档自洽**：`[x]`+`[~]`+`[ ]`+`[-]` == 2551，且头部那句「四档合计 50 + 1037 + 225 + 1239 = 2551」与 §A–§D 四张小节标题的「全表 N 类」都要逐档同步（`tests/b8-verdict.test.mjs` 把标题也逐字核了 —— 2026-10-06 b89 复核补：原来「§A 标题要跟着改」只写在断言消息里、没有任何门禁核过，于是 fold3 那批漏同步成了 43/1044）。
 3. **引证落地**：每条 `[x]`/`[~]` 行的理由里必须至少有一个反引号包住的 `src/` 或 `native/` 路径，且该文件在磁盘上存在；被检查的引用总数有下限（防空转）。
 4. **`[-]` 必须有理由**：每条 `[-]` 行的理由非空且包含具体机制（不接受空串或"不适用"三字）。
 5. **测试源码 / 生成物一律 `[-]`**：按扫描件的 `/tests/`、`testSources`、`/gen/`、`/resources/` 与测试类命名核对。
@@ -2830,4 +2830,4 @@ ELF/MagicCore 第二套文档内核、RD 通道、语言侧生成物、集中消
 
 <!-- 四档合计 50 + 1037 + 225 + 1239 = 2551（2026-10-06 fold3 lane 把 folding 那 7 条与 verdict-folding.md 对齐后） -->
 
-> **§G 当前已判 2551 行**（`docs/inventory/editor.txt` 的 2551 类一一对齐；表尾计数由 `tests/b12-verdict.test.mjs` 逐条核对，不预先写死）。B12 本批修订：**196** 条 `[-]` 的实际依据是「这个类是接口/抽象类/契约/值对象」而非「类本体是 Swing 控件」，已按行为改判（`[-]`→`[~]` **158** 条、`[-]`→`[ ]` **38** 条）；**24** 条「同上/理由过短」就地展开；**75** 条按族给的落点逐条换成 grep 核实过的概念落点，核实不到承载者的 4 条降回 `[ ]`。三趟的逐行痕迹都写在各自的理由正文里（「本批撤销」「第二趟撤销」「第三趟核实落点」），门禁是 `tests/b12-verdict.test.mjs`（9 条）与 `tests/b8-verdict.test.mjs`（5 条，同一张表的旧门禁，钉数已同步）。
+> **§G 当前已判 2551 行**（`docs/inventory/editor.txt` 的 2551 类一一对齐；表尾计数由 `tests/b12-verdict.test.mjs` 逐条核对，不预先写死）。B12 本批修订：**196** 条 `[-]` 的实际依据是「这个类是接口/抽象类/契约/值对象」而非「类本体是 Swing 控件」，已按行为改判（`[-]`→`[~]` **158** 条、`[-]`→`[ ]` **38** 条）；**24** 条「同上/理由过短」就地展开；**75** 条按族给的落点逐条换成 grep 核实过的概念落点，核实不到承载者的 4 条降回 `[ ]`。三趟的逐行痕迹都写在各自的理由正文里（「本批撤销」「第二趟撤销」「第三趟核实落点」），门禁是 `tests/b12-verdict.test.mjs`（9 条）与 `tests/b8-verdict.test.mjs`（5 条，同一张表的旧门禁，钉数已同步 —— b89 复核实数：`[x]` 50、`[~]` 1037、`[ ]` 225、`[-]` 1239；旧门禁当时仍钉着 B12 之前的 34 + 1035 + 210 + 1272，而文档头部与 §G 已经是新数，且 b89 起 §A–§D 小节标题的「全表 N 类」也进了门禁）。

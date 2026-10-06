@@ -227,6 +227,13 @@ vcs2 W2 要的是**一个全局计数**（`editorEpoch`）；R2 这一批改问�
 **为什么不能只接一半**：`documentRevisions` 是 C2 里那个可选 prop，不接就恒为 `undefined` ⇒ 模块里交 `[]`，
 指纹形状与今天逐字相同（这是刻意的"没接不改行为"，不是假控件：界面上没有任何一行依赖它）。
 
+**坐标复核（2026-10-06 收尾批，逐条打开确认在位）**：`src/App.vue:511` 就是 `const historyEpoch = ref(0)`；
+`:866` 那一行确实带着 `historyEpoch,` 与 `dirtyPaths: () => allTabs.value.filter(tab => tab.dirty)…`；
+`:2147` 的 `<CodeEditor …>` 上就是 `@change="onEditorChange(tab)"`（该行极长，改的时候只动这一小段）；
+`src/toolViewContext.ts:34` = `historyEpoch: any`、`:87` = 解构那一长串、`:114` = `historyEpoch: historyEpoch.value,`；
+`src/components/ToolWindowView.vue:37` = `historyEpoch: number`、`:173` = 那一整行 `<SourceControl v-else-if="view === 'git'" …>`
+（今天它连 `editorEpoch` 都没传，所以 C2 的两个新 prop 与 W2 那一档要一起补，别只补一半）。
+
 ---
 
 ## 备注：vcs2 W1 / W2 与本批的关系

@@ -1008,7 +1008,7 @@ async function openDocumentLink(link: DocumentLink) {
   if (action.kind === 'none') { notify(describeLink(link), true); return }
   if (action.kind === 'external') {
     if (!isDesktop) { notify(`浏览器预览里不能打开外部链接：${action.url}`); return }
-    try { await request('shell.openUrl', { url: action.url }) }
+    try { await openExternalUrl(action.url) }
     catch (error) { notify(errorMessage(error), true) }
     return
   }
@@ -1433,7 +1433,7 @@ const { dialogOpen: exportDialogOpen, openExportDialog, closeExportDialog, expor
       return handle ? { lines: handle.exportStyledLines(), selection: handle.selectionText() } : null
     },
     theme: () => readExportThemeTokens(getComputedStyle(document.documentElement), editorSettings.value.fontSize),
-    openExternal: url => { void request('shell.openUrl', { url }) },
+    openExternal: url => { void openExternalUrl(url) },
     // 「浏览…」先走应用内对话框（上游 FileChooserDialog 的等价物，src/fileChooserHostState.ts）；
     // 用户点工作区外条目时那一层自己转交宿主原生对话框。
     pickDirectory: (title, initial) => chooseDirectory(withTitle(singleDirDescriptor(), title), initial),
@@ -1901,7 +1901,8 @@ const {
   refreshAppState, refreshRecent, bootstrap, confirmLeave, answerLeave, activateWorkspace,
   syntheticNodes, refreshSyntheticNodes, openWorkspace, closeWorkspace, forgetProject, forgetProjects,
   defaultProjectParent, beginProject, browseParent, submitProject, cancelProject,
-  trustPrompt, resolveTrustPrompt, projectTrustBlock,
+  trustPrompt, resolveTrustPrompt, projectTrustBlock, trustEntries, saveTrustedPaths,
+  trustConfigDir, trustCanTrustAll, linkPrompt, resolveLinkPrompt, openExternalUrl,
 } = createWorkspaceLifecycle({
   notify, isDesktop, recentProjects, editorSettings, generalSettings, gitAvailable, defaultParent, appError,
   loading, pluginList, busy, working, leavePrompt, allTabs, save, resetLsp, resetHierarchy, workspace,
@@ -2643,7 +2644,8 @@ onBeforeUnmount(() => {
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="代码操作" @keydown="trapFocus"><div class="palette-scope">代码操作 / 快速修复 · {{ actionPrompt.path }}</div><div class="palette-results"><button v-for="(action, index) in codeActions" :key="`${action.title}:${index}`" :class="{ highlighted: index === 0 }" @click="applyCodeAction(action)"><Sparkles :size="iconSize.toolbar" /><span>{{ action.title }}</span><span v-if="action.kind" class="small-muted">{{ action.kind }}</span><span v-if="action.command" class="small-muted">由语言服务执行</span><span v-else-if="!action.edits.length" class="small-muted">需解析</span></button></div></section>
     </div>
     <!-- 未信任项目的确认框（IDEA `TrustedProjectsDialog`）：信任 / 安全模式 / 取消，判定与文案在 src/trustedProjects.ts。 -->
-    <TrustedProjectDialog v-if="trustPrompt" :root="trustPrompt.root" :name="trustPrompt.name" @resolve="resolveTrustPrompt" />
+    <TrustedProjectDialog v-if="trustPrompt" :root="trustPrompt.root" :name="trustPrompt.name" :can-trust-all="trustCanTrustAll" :config-dir="trustConfigDir" @resolve="resolveTrustPrompt" />
+    <TrustedProjectDialog v-if="linkPrompt" mode="link" :root="linkPrompt.root" :name="linkPrompt.name" :url="linkPrompt.url" @resolve-link="resolveLinkPrompt" />
     <!-- 退出确认：IDEA 的 ConfirmExitDialog（确认 + “不再询问”写回 GeneralSettings.confirmExit） -->
     <div v-if="exitPrompt" class="modal-backdrop" @click.self="resolveExit(false)">
       <section class="help-dialog exit-dialog" role="alertdialog" aria-modal="true" aria-label="退出 TaoCode" @keydown="trapFocus">
