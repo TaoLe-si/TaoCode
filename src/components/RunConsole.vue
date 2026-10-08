@@ -209,21 +209,13 @@ interface DisplayLine {
   exception: JavaExceptionInfo | null
   frame: boolean
   foldedFrames?: number
-  foldedStartIndex?: number
 }
 
-/** 配置启用时默认折叠；可点单个占位帧展开该段，「栈帧」按钮展开/折叠全部。 */
+/** 栈帧展开按钮（Tao 控制台内的展开）：配置启用时默认折叠，点「栈帧」展开全部。 */
 const stackExpanded = ref(false)
-const expandedStackSegments = ref<ReadonlySet<number>>(new Set())
-watch(() => props.active, () => { expandedStackSegments.value = new Set() })
 const displayLines = computed<DisplayLine[]>(() => {
   const keep = Math.max(0, props.foldJavaStackTraceGreaterThan)
-  const folded = foldJavaStackFrames(
-    props.lines.map(line => ({ ...line, text: line.text })),
-    stackExpanded.value || !props.foldJavaStackTrace,
-    keep,
-    expandedStackSegments.value,
-  )
+  const folded = foldJavaStackFrames(props.lines.map(line => ({ ...line, text: line.text })), stackExpanded.value || !props.foldJavaStackTrace, keep)
   const palette = consolePalette.value
   return folded.map(line => {
     const isFoldPlaceholder = line.foldedFrames !== undefined
@@ -253,19 +245,9 @@ const displayLines = computed<DisplayLine[]>(() => {
       exception: isFoldPlaceholder ? null : classifyJavaException(text),
       frame: !isFoldPlaceholder && parseStackFrame(text) !== null,
       ...(line.foldedFrames !== undefined ? { foldedFrames: line.foldedFrames } : {}),
-      ...(line.foldedStartIndex !== undefined ? { foldedStartIndex: line.foldedStartIndex } : {}),
     }
   })
 })
-
-function expandStackSegment(startIndex: number) {
-  expandedStackSegments.value = new Set([...expandedStackSegments.value, startIndex])
-}
-
-function toggleStackExpansion() {
-  if (stackExpanded.value) expandedStackSegments.value = new Set()
-  stackExpanded.value = !stackExpanded.value
-}
 
 function jumpLink(link: RunHyperlink) {
   emit('jump', { path: link.path, line: link.line, column: link.column })
@@ -571,7 +553,7 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
         {{ consolePaused ? '继续' : '暂停' }}
       </button>
       <!-- 栈帧折叠开关（Java 栈折叠；见 src/exceptionFilter.ts 的 foldJavaStackFrames） -->
-      <button v-if="foldJavaStackTrace" type="button" class="run-action" :aria-expanded="stackExpanded" :aria-label="stackExpanded ? '折叠栈帧' : '展开栈帧'" :title="stackExpanded ? '折叠连续栈帧' : '展开全部栈帧'" @click="toggleStackExpansion">栈帧</button>
+      <button v-if="foldJavaStackTrace" type="button" class="run-action" :aria-expanded="stackExpanded" :aria-label="stackExpanded ? '折叠栈帧' : '展开栈帧'" :title="stackExpanded ? '折叠连续栈帧' : '展开全部栈帧'" @click="stackExpanded = !stackExpanded">栈帧</button>
       <!-- 滚动到末尾（上游 ScrollToTheEndToolbarAction：ConsoleViewImpl.kt:1360-1361/:1367；类本体
            ScrollToTheEndToolbarAction.java:17-39，普通 AnAction 非 ToggleAction；文案键 ActionsBundle.properties:205
            `Scroll to End`）。一次点击把输出滚到末尾并重新贴底。呈现差异如实登记：上游是图标（Scroll_down），
@@ -662,7 +644,7 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
         <span v-if="processNote" class="run-process-note" role="status">{{ processNote }}</span>
       </template>
     </div>
-    <p v-if="consolePaused" class="run-paused-hint" role="status">输出已暂停：视图冻结（缓冲继续累积，继续时补齐）。</p>
+    <p v-if="consolePaused" class="run-paused-hint" role="status">输出已暂停。</p>
     <!-- 覆盖率报告（上游 execution/coverage 的读报告半边）：展示面整个在 CoverageReportPane.vue
          （四档聚合 + 三格式分发）。运行结束的那一刻由上面的 watch 喊它 load()，也可手动重读。 -->
     <CoverageReportPane v-if="activeRecord" ref="coveragePane" :instance="activeRecord.id" :ready="isDesktop" />
@@ -686,7 +668,6 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
           <template v-else-if="line.chunks.length">
             <span v-for="(chunk, chunkIndex) in line.chunks" :key="chunkIndex" :style="consoleAnsiCss(chunk.style, consolePalette)">{{ chunk.text }}</span>
           </template>
-          <button v-else-if="line.foldedStartIndex !== undefined" type="button" class="run-fold-placeholder" @click.stop="expandStackSegment(line.foldedStartIndex)">{{ line.text }}</button>
           <span v-else>{{ line.text }}</span>
           <!-- 异常分类徽标（上游 ExceptionInfo 一族）：NPE/越界/转换… + JEP 358 提示 -->
           <span v-if="line.exception" class="run-exception-badge" :title="[line.exception.className, line.exception.message, line.exception.hint].filter(Boolean).join(' — ')">{{ describeExceptionKind(line.exception.kind) }}</span>
@@ -794,7 +775,6 @@ watch([() => props.active, () => displayLines.value.length], async ([active, cou
 .run-issue-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
 .run-fold-count { margin-left: var(--space-2); color: var(--muted); font-size: 10px; }
 .run-fold-frames { color: var(--muted); }
-.run-fold-placeholder { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .run-exception-badge { margin-left: var(--space-2); padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--hover); color: var(--error); font-size: 10px; }
 .run-exception-hint { margin-left: var(--space-2); color: var(--muted); font-size: 10px; }
 .run-line-copy { margin-left: var(--space-2); border: 0; padding: 0 2px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }

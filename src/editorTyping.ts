@@ -54,7 +54,7 @@
 // 于是**哪些引号参与配对由语言决定**，不再是 CodeMirror 那个固定集合。
 //
 // 另一半（`insertedText`，文件末尾）是宏录制用的文本提取，与本模块的引号规则无关，保持原样。
-import { EditorSelection, Prec } from '@codemirror/state'
+import { EditorSelection, EditorState, Prec } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import type { EditorView, ViewUpdate } from '@codemirror/view'
@@ -66,20 +66,60 @@ import { isJavaLikeQuoteLanguage, pairInsertionSuppressed } from './quoteHandler
 // 第三方按 id 挂的字符输入 / 退格委托在这里被真实分派（bundled 的 passthrough 委托不改变既有行为）。
 import {
   dispatchBackspaceAfter, dispatchBackspaceBefore, dispatchTypedHandler, fileTypeOfLanguage, notifyTypingStarted,
-  type BackspaceInput, type TypedCharInput,
+  typedHandlerDelegates, type BackspaceInput, type TypedCharInput, type TypedHandlerDelegateContribution,
 } from './editorActionExtensionPoints.ts'
 // 选区去引号过滤（`com.intellij.selectionUnquotingFilter`）：第三方按 id 挂的过滤器在这里
 // 被真实问到（bundled 恒不跳过 ⇒ 既有「用引号包住选区」的行为逐字不变）。
 import { shouldSkipQuoteReplacement } from './editorActionExtraExtensionPoints.ts'
 
 /** 把 CodeMirror 的一次按键整形成扩展点要的输入（`TypedCharInput` / `BackspaceInput`）。 */
-function typedInputOf(view: EditorView, ch: string, language: string | undefined): TypedCharInput {
+function typedInputOf(view: EditorView, ch: string, language: string | undefined, path = ''): TypedCharInput {
   const head = view.state.selection.main.head
   const line = view.state.doc.lineAt(head)
   return {
-    path: '', language: language ?? 'other', fileType: fileTypeOfLanguage(language),
+    path, language: language ?? 'other', fileType: fileTypeOfLanguage(language),
     text: view.state.doc.toString(), line: line.number - 1, character: head - line.from, char: ch,
   }
+}
+
+/**
+ * 与 `typedInputOf` 同一份整形，但直接吃 `EditorState` + 绝对偏移 —— 消费方只有 state
+ *（不持有 view）时用；例如 `src/lspCompletion.ts` 的 `context.state` 那一层。
+ */
+export function typedInputAt(state: EditorState, pos: number, ch: string, language: string | undefined, path = ''): TypedCharInput {
+  const head = pos
+  const line = state.doc.lineAt(head)
+  return {
+    path, language: language ?? 'other', fileType: fileTypeOfLanguage(language),
+    text: state.doc.toString(), line: line.number - 1, character: head - line.from, char: ch,
+  }
+}
+
+/**
+ * 「敲入 `ch` 之后」的那份输入：上游 `TypedQuoteImpl.handleQuote` 是先 `typeChar(ch)` 再问
+ * `beforeClosingQuoteInserted`（`:104-108` 多字符引号那一支 / `:117-118` 单引号那一支），
+ * 所以委托看到的正文里**已经有那个开引号**、光标在它后面。
+ * `TypedCharInput.char` 放的是**收尾引号串** —— 上游这一问的第一个参数就是它
+ *（`beforeClosingQuoteInserted(closingQuote, …)`，见 `editorActionExtensionPoints.ts` 的字段注释）。
+ * 只有真注册了实现这一问的委托时才构造（`doc.toString()` 是 O(n)）。
+ */
+function typedInputAfterChar(view: EditorView, ch: string, closingQuote: string, language: string | undefined): TypedCharInput {
+  const state = view.state
+  const head = state.selection.main.head
+  const line = state.doc.lineAt(head)
+  const text = state.doc.toString()
+  return {
+    path: '', language: language ?? 'other', fileType: fileTypeOfLanguage(language),
+    text: text.slice(0, head) + ch + text.slice(head),
+    line: line.number - 1, character: head - line.from + ch.length, char: closingQuote,
+  }
+}
+
+/** 有委托实现了这一问吗？没有就整段不构造输入（整形正文是 O(n)）。 */
+function hasTypedFace(
+  language: string | undefined, face: keyof TypedHandlerDelegateContribution,
+): boolean {
+  return typedHandlerDelegates(language ?? 'other').some(delegate => typeof delegate[face] === 'function')
 }
 
 /** 一门语言的引号：`single` 参与「插一对 / 跳过收尾 / 包住选区」，`multi` 是多字符引号（不参与配对插入）。 */
@@ -210,6 +250,13 @@ export function quotedChars(): string[] {
  * `beforeCharTyped` 交给 EP 委托（任一支返回 `STOP` 就整键接管、返回 true），走完本仓逻辑后
  * 再把 `charTyped` 交给 EP 委托。bundled 的委托是 passthrough（`CONTINUE`）⇒ 既有行为逐字不变；
  * 第三方按 id 挂的委托能在这里被真实分派。
+ *
+ * **2026-10-08 lane lp-editor 补**：`TypedHandler.doExecute` 里另外两问也接上了 —— 有选区时先问
+ * `beforeSelectionRemoved`（`:184-186`），补收尾引号之前问 `beforeClosingQuoteInserted`
+ *（`:104-108`/`:117-118`），两问都在 `handleQuoteKey` 里。`checkAutoPopup` 那一问在
+ * `src/lspCompletion.ts`（它是"打字即弹"那一档的闸）。仍没有派发点的是
+ * `beforeClosingParenInserted`（本仓的圆括号插入由 CodeMirror `closeBrackets` 的 inputHandler
+ * 做，不经过本模块）与 `isImmediatePaintingEnabled`（绘制档，本仓没有立即绘制这一层）。
  */
 export function runQuoteKey(
   view: EditorView, ch: string,
@@ -237,6 +284,15 @@ function handleQuoteKey(
   // SURROUND_SELECTION_ON_QUOTE_TYPED），本仓没有那一格设置 ⇒ `wrap` 不受这里影响。
   const pairQuote = autoInsertPairQuote()
   const selection = view.state.selection.main
+  // 「有选区时先问 `beforeSelectionRemoved`」：`TypedHandler.doExecute:184-186` 在删掉选区
+  // **之前**问，任一委托返回 STOP（上游 `handled == true`）就整键交给它 —— 上游此时直接
+  // `return`：既不删选区、也不插入、更不配对（连 `beforeCharTyped` 都不问）。本仓只有引号键
+  // 走得到这条路（别的字符由 CodeMirror 的 inputHandler 处理，见模块头那条「表里没有的语言
+  // 一律返回 false」）；委托实现为空时逐字保持既有行为。
+  if (!selection.empty && hasTypedFace(language, 'beforeSelectionRemoved')
+      && dispatchTypedHandler(typedInputOf(view, ch, language), 'beforeSelectionRemoved') === 'STOP') {
+    return true
+  }
   // 多字符引号那一档先问（Java 文本块 `"""`）：跳过收尾 face = `JavaQuoteHandler.java:58-63`，
   // 「刚敲完开 face 补配对」= `:104-108` + `:111-128`，插 `"\n\"\"\""` 与光标停位 = `:134-149`。
   if (selection.empty && pairQuote) {
@@ -247,6 +303,18 @@ function handleQuoteKey(
         return true
       }
       if (faceStep === 'open') {
+        // 补收尾 face 之前问一次 `beforeClosingQuoteInserted`（`TypedQuoteImpl.java:104-108`，
+        // 上游把**收尾引号串**当第一个参数传进去）：委托接管（STOP）⇒ 本体只落下敲进来的那个
+        // 开引号（上游此刻正文里也正是「一个开 face、没有收尾」）。
+        if (hasTypedFace(language, 'beforeClosingQuoteInserted')
+            && dispatchTypedHandler(typedInputAfterChar(view, ch, face, language), 'beforeClosingQuoteInserted') === 'STOP') {
+          view.dispatch({
+            changes: { from: selection.head, insert: ch },
+            selection: EditorSelection.cursor(selection.head + ch.length),
+            userEvent: 'input',
+          })
+          return true
+        }
         view.dispatch({
           changes: { from: selection.head, insert: ch + faceInsertion(face) },
           selection: EditorSelection.cursor(selection.head + 1 + FACE_CARET_ADVANCE),
@@ -305,6 +373,18 @@ function handleQuoteKey(
     view.dispatch({
       changes: { from: selection.from, to: selection.to, insert: `${ch}${text}${ch}` },
       selection: { anchor: selection.from + 1, head: selection.to + 1 },
+      userEvent: 'input',
+    })
+    return true
+  }
+  // 单引号那一支补配对之前的那一问（`TypedQuoteImpl.java:117-118`，第一个参数是
+  // `String.valueOf(quote)` = 收尾引号串本身）：委托接管 ⇒ 只落开引号，不补收尾
+  //（上游 `handled == true` 时那个 `document.insertString(offset, quoteString)` 不执行）。
+  if (hasTypedFace(language, 'beforeClosingQuoteInserted')
+      && dispatchTypedHandler(typedInputAfterChar(view, ch, ch, language), 'beforeClosingQuoteInserted') === 'STOP') {
+    view.dispatch({
+      changes: { from: selection.head, insert: ch },
+      selection: EditorSelection.cursor(selection.head + ch.length),
       userEvent: 'input',
     })
     return true

@@ -25,6 +25,11 @@ import { compileStructuralPattern, compileStructuralReplacement, type Structural
 // 替换串的先验校验 = 上游 `RegExReplacementBuilder.validate`（`platform/lang-impl/src/com/intellij/find/impl/RegExReplacementBuilder.java:76-78`），
 // 按下替换按钮时跑（`platform/lang-impl/src/com/intellij/find/impl/FindPopupPanel.java:1548`）。
 import { captureGroupCount, validateReplacement } from './regexReplacement.ts'
+// 模板合法性（词法级）—— 上游 `PatternCompiler.compile` 在**语法树那一侧**抛 `MalformedPatternException`
+// （`platform/structuralsearch/source/.../impl/matcher/compiler/PatternCompiler.java:75-81,137`）；
+// 本仓没有 PSI，只能代理成词法层（括号配对/引号/块注释），对应上游同样会报错的那一档。
+// 接线顺序：先合语法/词法（这一条）→ 语义修饰符 → 替换串，与上游"先 parse 再 bind"一致。
+import { checkTemplateValidity } from './structuralSearchValidity.ts'
 import {
   checkTemplateModifiers, compileSwitches, filterHitsByModifiers, matcherFlags, needsSpanCheck,
   scopeSummary, type TemplateScope,
@@ -144,6 +149,8 @@ export function createStructuralSearchModel(input: StructuralSearchModelInput): 
   const flags = computed(() => matcherFlags(switches.value))
   /** 唯一的编译入口：模板 + 开关 ⇒ 产物。两处（compiled 与 error）必须走同一个口径。 */
   function compileTemplate(): StructuralPattern | { error: string } {
+    const validity = checkTemplateValidity(input.template.value)
+    if (!validity.ok) return { error: validity.error }
     return compileStructuralPattern(input.template.value, compileSwitches(switches.value))
   }
 

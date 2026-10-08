@@ -47,6 +47,9 @@ export type AnnotationKind =
   | 'hyperlink'        // CodeInsightColors.INACTIVE_HYPERLINK_ATTRIBUTES（LspHighlightingApplier.kt:236）
   | 'error'            // HighlightInfoType.ERROR
   | 'warning'          // HighlightInfoType.WARNING
+  // CodeInsightColors.TODO_DEFAULT_ATTRIBUTES（`TodoHighlightVisitor.java:91-93` 产出的那一条；
+  // 出厂 `DefaultColorSchemesManager.xml:1045-1049` = FOREGROUND 0073bf + FONT_TYPE 2/3 斜体）
+  | 'todo'
 
 /**
  * 声明成 **type 而不是 interface**：`src/highlightPasses.ts` 的 `HighlightLayerItem` 是
@@ -63,6 +66,12 @@ export type Annotation = {
   kind: AnnotationKind
   /** 悬停/说明文案（上游 `HighlightInfo.descriptionAndTooltip`）。 */
   description?: string
+  /**
+   * 这一条自带的文字颜色（`#RRGGBB`）。上游的等价物是注解器从色板取的那一档
+   * （`TodoPattern.getColor()` → `TodoAttributes`）；本仓只有 TODO 这一族有**逐模式**的颜色
+   * （模式表自带 `color` 列），其余注解器一律落主题 class。给了就按它上色。
+   */
+  color?: string
   /** 点一下要做什么（`WebReference.navigate` / `OpenFileDescriptor` 那条链路）。 */
   target?: string
   /** 产出这条注解的注解器 id（上游 `HighlightInfo.fromAnnotation` 的第一个参数就是注解器类）。 */

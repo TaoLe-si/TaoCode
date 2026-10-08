@@ -26,6 +26,9 @@ import type { AgentChatMessage, AgentApprovalRequest } from '../agentSession'
 import { parseAgentMessage, type AgentMessageSegment } from '../agentMessages'
 import type { AgentEditSummary } from '../agentEdits'
 import { AGENT_SESSION_LIMIT, createAgentSessionStore, setSessionModelSelection, type AgentSessionModelSelection } from '../agentSessions'
+// 正文草稿的持久化在 `src/agentComposerDrafts.ts`（独立键空间，scope = 会话 id / `__draft__`；
+// 与上游 `composerDraftStore.ts` 同口径）。模型选择那一格仍归会话库（`agentSessions.ts`）。
+import { AGENT_DRAFT_SCOPE_ROOT, createAgentComposerDraftStore } from '../agentComposerDrafts.ts'
 import { AGENT_COMMANDS, matchAgentCommands, parseAgentCommand } from '../agentCommands'
 import { effectiveKeysOf, onOverridesChanged } from '../keymapEditor.ts'
 // 斜杠/@ 面板的**交互规则**在 `src/agentPromptMenu.ts`、**面板侧状态**在 `src/agentPanelPromptMenu.ts`；
@@ -33,6 +36,7 @@ import { effectiveKeysOf, onOverridesChanged } from '../keymapEditor.ts'
 import { ACTION_MENU_FOOTER_TRIGGERS, MENU_PANEL_METRICS, actionMenuSelectTarget, type PromptMenuSuggestion } from '../agentPromptMenu.ts'
 import { createAgentPanelPromptMenu } from '../agentPanelPromptMenu.ts'
 import { COMPOSER_ELEMENTS, COMPOSER_EMPTY_STATES, COMPOSER_INPUT, COMPOSER_TEXTS, TOOLBAR_ROWS } from '../agentComposerLayout.ts'
+import { createAgentComposerGreeting } from '../agentComposerGreeting.ts'
 import {
   MANAGE_MODELS_LABEL, MODEL_TRIGGER_FALLBACK_LABEL,
   buildAgentModelSelectGroups, decodeCustomModelValue, resolveModelSelectTriggerDisplay,
@@ -116,90 +120,21 @@ function resizeComposerInput() {
   input.style.overflowY = naturalHeight > 160 ? 'auto' : 'hidden'
 }
 watch(draft, async () => {
+  // 每改一次正文就写进当前 scope（上游 `updateComposerContent` 每次都 `persistV4ComposerDraft`）。
+  // scope 在回调里现取：切会话是同步改 activeId 的，`flush: 'post'` 时读到的已是新 scope。
+  drafts.write(draftScopeId(), draft.value)
   await nextTick()
   resizeComposerInput()
 }, { flush: 'post' })
 /** COMPOSER_ELEMENTS 的 labelKey → 文案（工具条按钮 title/aria-label 的单一来源）。 */
 const toolbarText = new Map(COMPOSER_ELEMENTS.map(element => [element.id, element.labelKey ? (composerText(element.labelKey) ?? '') : '']))
 const draftGreetingState = COMPOSER_EMPTY_STATES.find(state => state.id === 'draftGreeting')
-/** 问候语按时段分流 —— `ConversationDraftEmptyState.tsx:29-35`；无项目时用 office 键。 */
-const greetingDate = ref(new Date())
-const greetingText = computed(() => {
-  if (!props.projectRoot) return composerText('chat.empty.greeting.office') ?? ''
-  const hour = greetingDate.value.getHours()
-  const key = (hour >= 5 && hour < 9) ? 'chat.empty.greeting.morningEarly'
-    : (hour >= 9 && hour < 12) ? 'chat.empty.greeting.morning'
-      : (hour >= 12 && hour < 14) ? 'chat.empty.greeting.noon'
-        : (hour >= 14 && hour < 18) ? 'chat.empty.greeting.afternoon'
-          : (hour >= 18 && hour < 23) ? 'chat.empty.greeting.evening' : 'chat.empty.greeting.lateNight'
-  return composerText(key) ?? ''
-})
-const greetingFontSize = ref(30)
-const greetingContainer = ref<HTMLParagraphElement>()
-const greetingMeasurement = ref<HTMLSpanElement>()
-let greetingTimer: number | undefined
-let greetingFrame: number | null = null
-let greetingObserver: ResizeObserver | undefined
-let greetingResizeFallback = false
+// 问候语（时段文案 + 贴合字号）整块在 `src/agentComposerGreeting.ts`：面板只搬四个绑定，
+// 并在挂载/卸载时各调一次 start/stop（原来是这里的 ref + 定时器 + ResizeObserver）。
+const greeting = createAgentComposerGreeting({ projectRoot: () => props.projectRoot, copy: composerText })
+const { text: greetingText, fontSize: greetingFontSize, container: greetingContainer, measurement: greetingMeasurement } = greeting
 let composerInputObserver: ResizeObserver | undefined
 let composerInputWidth = 0
-function nextGreetingDelay(date: Date): number {
-  const boundary = [5, 9, 12, 14, 18, 23].map(hour => {
-    const candidate = new Date(date)
-    candidate.setHours(hour, 0, 0, 0)
-    return candidate
-  }).find(candidate => candidate.getTime() > date.getTime())
-  if (boundary) return Math.max(1, boundary.getTime() - date.getTime())
-  const tomorrow = new Date(date)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  tomorrow.setHours(5, 0, 0, 0)
-  return Math.max(1, tomorrow.getTime() - date.getTime())
-}
-function scheduleGreetingUpdate() {
-  window.clearTimeout(greetingTimer)
-  greetingTimer = window.setTimeout(() => {
-    greetingDate.value = new Date()
-    scheduleGreetingUpdate()
-  }, nextGreetingDelay(greetingDate.value))
-}
-function measureGreeting() {
-  greetingFrame = null
-  const container = greetingContainer.value
-  const measurement = greetingMeasurement.value
-  if (!container || !measurement) return
-  const style = window.getComputedStyle(container)
-  const available = Math.max(0, container.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))
-  const natural = measurement.getBoundingClientRect().width
-  greetingFontSize.value = !Number.isFinite(available) || !Number.isFinite(natural) || available <= 0 || natural <= 0 || available >= natural
-    ? 30
-    : Math.max(20, Math.min(30, Math.floor(30 * available / natural)))
-}
-function scheduleGreetingMeasure() {
-  if (greetingFrame !== null) return
-  greetingFrame = window.requestAnimationFrame(measureGreeting)
-}
-watch([greetingContainer, greetingMeasurement, greetingText], async () => {
-  await nextTick()
-  const container = greetingContainer.value
-  const measurement = greetingMeasurement.value
-  greetingObserver?.disconnect()
-  if (greetingResizeFallback) window.removeEventListener('resize', scheduleGreetingMeasure)
-  greetingResizeFallback = false
-  if (greetingFrame !== null) window.cancelAnimationFrame(greetingFrame)
-  if (streamingScrollFrame !== null) window.cancelAnimationFrame(streamingScrollFrame)
-  greetingFrame = null
-  if (!container || !measurement) return
-  measureGreeting()
-  if (typeof ResizeObserver !== 'undefined') {
-    greetingObserver ??= new ResizeObserver(scheduleGreetingMeasure)
-    greetingObserver.observe(container)
-    greetingObserver.observe(measurement)
-  } else {
-    window.addEventListener('resize', scheduleGreetingMeasure)
-    greetingResizeFallback = true
-  }
-}, { flush: 'post', immediate: true })
-watch(() => props.projectRoot, () => { greetingDate.value = new Date() })
 
 // ── 工具条 · 模型选择（`src/agentModelSelection.ts`；顺序见 V4ComposerToolbar.tsx:1023-1073）──
 // 仅显示设置页维护且已启用的供应商模型。
@@ -292,7 +227,7 @@ watch(() => props.host, (host, _previous, onCleanup) => {
 // ── 工具条快捷键（`toolbarShortcuts.ts:27-40,115-133`）─────────────────────────────
 // 点面板外关弹层（上游 DropdownMenu 的 onPointerDownOutside）。
 onMounted(() => {
-  scheduleGreetingUpdate()
+  greeting.start()
   resizeComposerInput()
   if (composerInput.value && typeof ResizeObserver !== 'undefined') {
     composerInputObserver = new ResizeObserver(entries => {
@@ -309,11 +244,8 @@ onMounted(() => {
   window.addEventListener('keydown', onPanelKeydown, true)
 })
 onBeforeUnmount(() => {
-  window.clearTimeout(greetingTimer)
-  greetingObserver?.disconnect()
+  greeting.stop()
   composerInputObserver?.disconnect()
-  if (greetingResizeFallback) window.removeEventListener('resize', scheduleGreetingMeasure)
-  if (greetingFrame !== null) window.cancelAnimationFrame(greetingFrame)
   detachToolbarFit?.()
   detachOutside?.()
   detachKeymapOverrides?.()
@@ -414,10 +346,12 @@ async function send() {
   const text = draft.value.trim()
   if (!text) return
   const token = ++sendToken
-  busy.value = true
-  streamingReply.value = ''
+  // 发出去的是**这个** scope 的草稿：中途换过会话就不许清当前输入框（上游 `updateComposerDraft`
+  // 的 scope 守卫），但那一场的草稿还是要清掉 —— 只清已发送会话这一条。
+  const sentScope = draftScopeId()
+  busy.value = true; streamingReply.value = ''
   try {
-    if (runCommand(text)) { draft.value = ''; resetPromptMenu(); return }
+    if (runCommand(text)) { clearSentDraft(sentScope); resetPromptMenu(); return }
     const { results } = await host.send(text, delta => {
       if (token !== sendToken) return
       streamingReply.value += delta
@@ -427,7 +361,7 @@ async function send() {
     if (token !== sendToken) return
     streamingReply.value = ''
     lastResults.value = results
-    draft.value = ''
+    clearSentDraft(sentScope)
     persistSession()
     bump()
     for (const result of results) { if (!result.ok) emit('notify', result.detail, true) }
@@ -441,6 +375,11 @@ async function send() {
   }
 }
 function stopGeneration() { props.host?.cancel(); sendToken += 1; streamingReply.value = ''; busy.value = false; bump() }
+/** 发完只清这一个 scope 的正文（上游 `updateComposerContent({ text: "" })`）；换过会话就不动输入框。 */
+function clearSentDraft(scopeId: string) {
+  drafts.write(scopeId, '')
+  if (scopeId === draftScopeId()) draft.value = ''
+}
 async function doAll() {
   const host = props.host
   if (!host) return
@@ -463,7 +402,13 @@ function revealEdit(id: number) { if (props.host?.revealEdit(id)) bump() }
 const stateLabel: Record<AgentEditSummary['state'], string> = { pending: '待决', applied: '已保留', reverted: '已撤回' }
 // ── 会话库（`src/agentSessions.ts`）────────────────────────────────────────────────
 let sessions = createAgentSessionStore(undefined, undefined, props.projectRoot)
+let drafts = createAgentComposerDraftStore(undefined, props.projectRoot)
 if (!sessions.activeId()) draftSelection.value = sessions.draftSessionModelSelection()
+/** 当前正文草稿的 scope：绑了会话用会话 id，没绑用 `__draft__`（上游 `composerDraftStore.ts` 的 scope 口径）。 */
+function draftScopeId(): string { return sessions.activeId() ?? AGENT_DRAFT_SCOPE_ROOT }
+/** 把某个 scope 的正文装回输入框（切会话/换工作区时；程序化改正文要顺手收掉斜杠/@ 面板）。 */
+function restoreDraftText(scopeId: string) { draft.value = drafts.read(scopeId); resetPromptMenu() }
+draft.value = drafts.read(draftScopeId())
 function sessionSummaries() { revision.value; return sessions.summaries() }
 const activeSessionId = computed(() => { revision.value; return sessions.activeId() })
 const activeSessionName = computed(() => sessionSummaries().find(item => item.id === activeSessionId.value)?.name ?? '当前会话')
@@ -478,6 +423,8 @@ function persistHostSession(host: AgentHost | null, createIfMissing = true) {
   const id = activeId ?? sessions.create().id
   sessions.saveModelSelection(id, draftSelection.value)
   sessions.saveDraftModelSelection(null)
+  // 草稿作用域的正文随第一场会话升格（上游 `promoteComposerDraft`：先写目标、再清来源）。
+  if (!activeId) drafts.write(AGENT_DRAFT_SCOPE_ROOT, '')
   sessions.saveTranscript(id, host.session().transcript())
   revision.value += 1
 }
@@ -487,6 +434,7 @@ function openSession(id: string) {
   persistSession(false)
   if (!sessions.open(id)) return
   draftSelection.value = sessions.sessionModelSelection(id)
+  restoreDraftText(id)
   props.host?.session().restore(sessions.activeEntries())
   closePops()
   bump()
@@ -498,6 +446,7 @@ function createSession(name?: string) {
   draftSelection.value = selectedBeforeCreate
   if (selectedBeforeCreate) sessions.saveModelSelection(created.id, selectedBeforeCreate)
   sessions.saveDraftModelSelection(null)
+  restoreDraftText(created.id)
   props.host?.session().clear()
   closePops()
   bump()
@@ -507,6 +456,7 @@ function removeSession(id: string) {
   if (!sessions.remove(id)) return
   const nextActiveId = sessions.activeId()
   draftSelection.value = nextActiveId ? sessions.sessionModelSelection(nextActiveId) : sessions.draftSessionModelSelection()
+  restoreDraftText(nextActiveId ?? AGENT_DRAFT_SCOPE_ROOT)
   props.host?.session().restore(sessions.activeEntries())
   closePops()
   bump()
@@ -518,6 +468,7 @@ function renameSession(id: string, name: string) {
 watch(() => [props.projectRoot, props.host] as const, ([projectRoot, host], [previousRoot, previousHost]) => {
   if (previousHost && (previousRoot !== projectRoot || previousHost !== host)) persistHostSession(previousHost, false)
   if (previousRoot !== projectRoot) sessions = createAgentSessionStore(undefined, undefined, projectRoot)
+  restoreDraftText(sessions.activeId() ?? AGENT_DRAFT_SCOPE_ROOT)
   if (!host) return
   const id = sessions.activeId()
   if (id) {

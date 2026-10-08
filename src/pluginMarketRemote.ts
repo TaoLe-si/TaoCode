@@ -10,10 +10,11 @@
 //
 // 取数走哪里：桌面端走**宿主** `http.get`（`src/remoteFileHost.ts` 的 `fetchRemoteRaw` →
 // `native/http_client.cpp` 的 WinHTTP）。理由与远程只读文档同一条（见 `src/remoteFileHost.ts`
-// 文件头）：WebView2 里前端 `fetch("https://…")` 会被本仓自己的 CSP 拦掉，而宿主 Win32 进程
-// 没有这个限制。本轮同时把 `index.html` 的 `connect-src` 放宽到**市场那一个主机**
-// （`https://plugins.jetbrains.com`，见该文件的注释），所以**浏览器预览**档也能直连取数 ——
-// 两档共用同一个 `fetch` 注入点。
+// 文件头）：WebView2 里前端 `fetch("https://…")` 会被本仓的 CSP 拦掉，而宿主 Win32 进程
+// 没有这个限制。`index.html` 的 CSP 本轮也被放宽到**市场那一个主机**
+// （`connect-src 'self' … https://plugins.jetbrains.com`），所以浏览器预览档**可以**注入一个
+// 直连取数器（同一个 `deps.fetch` 注入点）—— 但缺省实现是 `fetchRemoteRaw`（宿主通道），
+// 预览档下 bridge 会如实拒绝 `http.get`，面板显示那句原因（不偷偷假装取到了）。
 //
 // 与上游的如实差异（写在这里而不是假装做到）：
 //   · 上游 `MarketplaceRequests.searchPlugins` 打的是 JetBrains 的**搜索 API**（多参数、分页、
@@ -22,7 +23,9 @@
 //   · **远程安装**没有落点：`plugin.install` 收的是工作区相对路径（native 从工作区根拼绝对路径），
 //     远程包要先下载到工作区再装 —— 下载通道 + `PluginSignatureVerifier` 的密码学验签
 //     （本仓只有判定层 `src/pluginSignature.ts`）都缺，所以本文件只做**清单取数 + 展示**，
-//     安装一律走本地仓库那一档，不画点不动的「安装」按钮（由 UI lane 按 `installable:false` 决定）。
+//     安装一律走本地仓库那一档。接线在 `src/components/PluginMarketPanel.vue`（远程仓库输入行 +
+//     只读条目徽章）：可安装判定在 `src/pluginMarketSources.ts` 的 `installable`，
+//     远程条目的安装按钮**禁用并写明原因**（`REMOTE_INSTALL_BLOCKED`），不是点不动的假按钮。
 //
 // 判据：`tests/plugin-market-remote.test.mjs`（注入假 fetch，不发网络请求）。
 
@@ -38,6 +41,29 @@ export const REMOTE_MANIFEST_NAME = 'repository.json'
 
 /** 远程安装（下载 + 验签）本仓还没有落点 —— 如实登记，UI 据此不画安装按钮。 */
 export const REMOTE_INSTALL_AVAILABLE = false
+
+/**
+ * 一次远程取数怎么了（宿主 `http.get` 的两种答复都要认）：
+ *   · `available:false` → 传输/协议失败，宿主自己的 reason 优先（`remoteFailureReason`）；
+ *   · `available:true` + `status >= 400` → 那是**服务器**的答复，正文多半不是清单
+ *     （实测 `/api/search/plugins` 不给 `build` 时返回 400 + `{"statusCode":400,"message":"No build specified"}`），
+ *     直接送去解析只会得到"清单解析失败"这种答错问题的提示 —— 这里按状态码说人话。
+ * 401/403 那一格如实写清楚缺的是什么：本仓没有凭据存储（`docs/settings-parity.md:61` 的
+ * passwordSafe 判定不做），宿主的 `http.get` 也不转发请求头（`native/main.cpp` 的 http.get
+ * 只收 url/limit/timeoutMs；`http.post` 才有 headers），所以私库/要登录的市场接口取不到 ——
+ * 界面显示这句原因，而不是画一个填了也没用的凭据输入框。
+ */
+export function marketplaceFetchFailure(result: RemoteFetchResult | null | undefined, url: string, what = '仓库'): string {
+  if (!result || !result.available) return remoteFailureReason(result, url)
+  const status = Number(result.status)
+  if (Number.isFinite(status) && status >= 400) {
+    if (status === 401 || status === 403)
+      return `${what}返回 ${status}：这里要凭据/授权，而本仓没有凭据存储、http.get 也不转发请求头 ⇒ 取不到。`
+    return `${what}返回 ${status}。`
+  }
+  if (typeof result.content !== 'string') return `${what}没给正文。`
+  return ''
+}
 
 /**
  * 从一个仓库地址（http/https）拼出清单 URL。
@@ -101,9 +127,8 @@ export async function loadRemoteMarketplace(repository: string, deps: RemoteMark
   } catch (caught) {
     return { available: false, url, plugins: [], errors: [], reason: caught instanceof Error ? caught.message : String(caught) }
   }
-  if (!result || !result.available || typeof result.content !== 'string') {
-    return { available: false, url, plugins: [], errors: [], reason: remoteFailureReason(result, url) }
-  }
+  const failure = marketplaceFetchFailure(result, url)
+  if (failure) return { available: false, url, plugins: [], errors: [], reason: failure }
   const parsed = parseMarketplaceCatalog(result.content, JETBRAINS_MARKETPLACE_HOST)
   if (!parsed.catalog) {
     return { available: false, url, plugins: [], errors: parsed.errors, reason: parsed.errors[0] ?? '清单解析失败。' }

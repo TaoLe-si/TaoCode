@@ -202,11 +202,16 @@ function defaultStorage(): AgentSessionStorage | null {
   }
 }
 
-function storageKeyForProject(projectRoot?: string): string {
+/**
+ * 工作区存储键：`<baseKey>`（没有工作区）或 `<baseKey>.project.<encodeURIComponent(规范化根路径)>`。
+ * 导出给 `src/agentComposerDrafts.ts` 复用 —— 草稿与会话库必须是同一套工作区键口径
+ * （键空间本身各自独立，照上游 composerDraftStore 的独立前缀）。
+ */
+export function storageKeyForProject(baseKey: string, projectRoot?: string): string {
   const root = projectRoot?.trim().replace(/\\/g, '/') ?? ''
   const normalized = root.replace(/\/+$/u, '') || (root.startsWith('/') ? '/' : '')
-  if (!normalized) return AGENT_SESSIONS_STORAGE_KEY
-  return `${AGENT_SESSIONS_STORAGE_KEY}.project.${encodeURIComponent(normalized)}`
+  if (!normalized) return baseKey
+  return `${baseKey}.project.${encodeURIComponent(normalized)}`
 }
 
 function isIso(value: unknown): value is string {
@@ -367,7 +372,7 @@ function copyRecord(record: AgentSessionRecord): AgentSessionRecord {
 export function createAgentSessionStore(storage?: AgentSessionStorage | null, now?: () => Date, projectRoot?: string): AgentSessionStore {
   const clock = now ?? (() => new Date())
   const backing = storage === undefined ? defaultStorage() : storage
-  const storageKey = storageKeyForProject(projectRoot)
+  const storageKey = storageKeyForProject(AGENT_SESSIONS_STORAGE_KEY, projectRoot)
   let library: PersistedLibrary = { ...EMPTY }
   let seq = 0
 

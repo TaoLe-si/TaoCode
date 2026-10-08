@@ -539,7 +539,7 @@ export function applyRunInstanceSnapshot(rows: readonly unknown[]): number {
   let claimed = 0
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue
-    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown; exitCode?: unknown; aborted?: unknown; stopping?: unknown }
+    const row = raw as { id?: unknown; pid?: unknown; children?: unknown; tree?: unknown; ports?: unknown; exitCode?: unknown; aborted?: unknown }
     if (typeof row.id !== 'number') continue
     const target = runInstances.get(row.id)
     if (!target) continue
@@ -560,11 +560,6 @@ export function applyRunInstanceSnapshot(rows: readonly unknown[]): number {
     // `exitCode` 为 `null` 表示宿主那边还在跑 ⇒ 不写（不能把"还没结束"当成"退出码 0"）。
     if (target.exit === null && typeof row.exitCode === 'number' && Number.isFinite(row.exitCode)) target.exit = Math.trunc(row.exitCode)
     if (row.aborted === true) target.aborted = true
-    // 「已请求优雅停止、进程还在跑」= 上游 `ProcessHandler.isProcessTerminating()` 的同一格。
-    // 宿主快照带 `stopping`（`native/run_host.cpp` 的 `stop_requested`）⇒ 重取清单/刷新页面后
-    // 那一格仍然是「正在结束」，不必等用户再按一次才显示。**只置位不清位**（与 `aborted` 同口径）：
-    // 真的结束了由 `run.exit` 把 running/stopping 一起收掉（同文件 handleRunExit）。
-    if (row.stopping === true) target.stopping = true
     claimed++
   }
   return claimed

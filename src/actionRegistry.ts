@@ -39,8 +39,11 @@ export interface ActionDescriptor {
   keywords?: string
   /**
    * 图标名（lucide 图标名口径，须取自 `src/uiIcons.ts` 的阶梯）。
-   * 数据侧已落到 `MenuRow.icon`（`actionRow()` 转发）；**渲染层未接** —— `src/menuUi.ts` 的行模板
-   * 没有图标位（它不在本 lane 的文件清单里），所以这一栏目前只到数据不通到像素。
+   * 数据侧已落到 `MenuRow.icon`（`actionRow()` 转发）；**渲染层**：主菜单模板已接
+   * （`src/App.vue:94` import `menuRowIcon`，`:2088`/`:2095`/`:2100` 三处
+   * `<component :is="menuRowIcon(row.icon)">`，表在 `src/menuRowIcons.ts:41`），
+   * 但「查找操作」面板的行模板（`src/menuUi.ts`）**没有**图标位 —— 同一个动作在两处的显示不同，
+   * 这一栏在那边只到数据不通到像素（2026-10-08 订正：原注释整条写成「渲染层未接」，与 App.vue 实况不符）。
    */
   icon?: string
   /** `AnAction.update` 的可用性：false 时菜单置灰、`run()` 拒绝执行。缺省 = 总是可用。 */

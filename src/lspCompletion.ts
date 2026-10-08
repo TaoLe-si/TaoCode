@@ -21,6 +21,11 @@ import { completionConfidences, errorFixCommandProviders, shouldPreselectFirstSu
 // `com.intellij.platform.backend.documentation.lookupElementTargetProvider` 的消费端：
 // 候选文档面板先问登记表（见下面 `info` 回调里的注释）。
 import { documentationTargetForLookupElement, lookupElementDocumentationTargetProviders } from './documentationTargetExtensionPoints.ts'
+// `com.intellij.typedHandler` 的 `checkAutoPopup` 消费端（`TypedHandler.java:169-173`）：
+// 自动弹出之前问一次委托，实现这一问的委托在这一层被真实问到。
+import { typedHandlerDelegates, dispatchTypedHandler } from './editorActionExtensionPoints.ts'
+import { typedInputAt } from './editorTyping.ts'
+import { languageFor } from './templates.ts'
 
 interface CompletionDeps {
   enabled: () => boolean
@@ -35,6 +40,24 @@ type RawItem = { insertText?: string; insertTextFormat?: number; additionalTextE
 type WireRange = { start: { line: number; character: number }; end: { line: number; character: number } }
 type ResolvedItem = LspCompletionItemResolveResult & { raw?: RawItem }
 type Change = { from: number; to: number; insert: string }
+
+/**
+ * 自动弹出之前的那一问（`TypedHandler.java:169-173` 的 `fireCheckAutoPopup`）：**有委托接管
+ * 就整个不弹**。输入整形与"有没有人实现"的零开销闸都在这里，`createLspCompletion` 的返回函数
+ * 只在自动档（`!context.explicit`）调它。
+ *
+ * 导出是为了判据能端到端驱动它（真 `EditorState` + 真注册表），而不是另抄一份调用形状：
+ * `tests/editor-typed-handler-faces.test.mjs` 按 EP id 挂一个 `checkAutoPopup` 委托，
+ * 断言这里会变真、注销后又变回假。敲进来的那个字符取 `pos - 1`：CodeMirror 的自动档正是
+ * 「用户敲了字」之后才来问源（`@codemirror/autocomplete` `dist/index.js:956` 的
+ * `typing && conf.activateOnTyping ? Activate|Typing`），与上游「每次字符输入问一次」同一条路。
+ */
+export function autoPopupHandedToDelegate(state: EditorState, pos: number, path: string): boolean {
+  const language = languageFor(path)
+  if (!typedHandlerDelegates(language).some(delegate => typeof delegate.checkAutoPopup === 'function')) return false
+  const char = state.sliceDoc(Math.max(0, pos - 1), pos)
+  return dispatchTypedHandler(typedInputAt(state, pos, char, language, path), 'checkAutoPopup') === 'STOP'
+}
 
 function offset(state: EditorState, line: number, character: number): number {
   if (!Number.isInteger(line) || !Number.isInteger(character) || line < 0 || line >= state.doc.lines || character < 0)
@@ -212,6 +235,14 @@ export function createLspCompletion(deps: CompletionDeps) {
     // 的 `otherOpenEditorTexts` 那一次跳过它、但**不**把它从表里摘掉（上游只读 `getAllEditors()`）。
     if (path) registerOpenEditor(path, () => deps.view()?.state.sliceDoc() ?? '')
     if (!deps.enabled()) return null
+    // `com.intellij.typedHandler` 的 `checkAutoPopup`（`TypedHandler.java:169-173`）：**自动弹出**
+    // 之前先问一次委托，任一返回 `STOP`（上游 `fireCheckAutoPopup` 的 `handled == true`）就整个不弹
+    // —— 上游此时既不 `autoPopupCompletion` 也不 `autoPopupParameterInfo`（后者在本仓没有自动
+    // 弹出通道：参数提示只有 Ctrl+P 显式那一条，所以这里没有对应的一档要压）。
+    // 显式调用（Ctrl+Space / Ctrl+Shift+Space，`context.explicit`）不经过这一问：上游那条路走
+    // `CompletionPhase`，不经过 TypedHandler（`CompletionAutoPopupHandler.java:43-49` 只管自动档）。
+    // 没有委托实现这一问时零开销：先看有没有人实现，再构造 O(n) 的正文（与下面自信度那一格同一条纪律）。
+    if (!context.explicit && autoPopupHandedToDelegate(context.state, context.pos, path)) return null
     // `com.intellij.completion.confidence`：自动弹出入口问一次自信度。**没有贡献时不构造上下文**
     // （`doc.toString()` 对超大文档不便宜）⇒ 第三方没挂时零开销、行为不变。
     const language = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : ''

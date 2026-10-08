@@ -17,12 +17,16 @@
 //
 // 本仓的**源**是工作区里的本地仓库目录（默认 `.taocode/plugins`）：清单 `repository.json` 用
 // 宿主既有的 `file.read` 读（宿主只接受工作区相对路径），包用既有 `plugin.install` 装（把工作区
-// 根与相对路径拼成绝对路径）。**远程仓库没有落点**，原因如实写在这里而不是在代码里假装：
-//   1. `index.html` 的 CSP 是 `connect-src 'self' ws://127.0.0.1:5173` —— WebView2 里
-//      `fetch("https://…")` 会被 CSP 直接拦掉（WebView2 本身能联网，挡它的是本仓自己的 CSP）；
-//   2. 宿主 `Method` 清单（`src/bridge.ts:101`、`native/main.cpp` 的 switch）里没有任何网络通道；
-//   3. 放宽 CSP 是安全决策，且远程清单还要配套签名校验（`PluginSignatureVerifier.kt`），
-//      本批不做 —— 所以「插件仓库/搜索/下载/评分」里的**远程**部分仍登记为缺口。
+// 根与相对路径拼成绝对路径）。**远程仓库的清单**另有取数通道（`src/pluginMarketRemote.ts` 走宿主
+// `http.get`；`index.html` 的 CSP 也放开了市场主机：`connect-src 'self' … https://plugins.jetbrains.com`），
+// 但远程那一档仍有三处没落点，如实写在这里而不是在代码里假装：
+//   1. 上游 `MarketplaceRequests.searchPlugins` 打的是 JetBrains 的搜索 API（多参数、分页、
+//      返回 `PluginUiModel` 数组），本仓取的是仓库清单 JSON（与本地同一格式）—— 形状转换没有落点；
+//   2. 下载 / 分块续传（`PluginChunkDataSource.kt`、`MarketplacePluginDownloadService.kt`）没有落点：
+//      `plugin.install` 只收工作区里的包，远程包要先下载进工作区，而 `http.get` 只取正文文本；
+//   3. 远程清单还要配套签名校验（`PluginSignatureVerifier.kt`），本仓只落了判定层
+//      `src/pluginSignature.ts`（没有证书链/吊销列表/取 CRL 的网络）—— 所以「插件仓库/搜索/下载/评分」
+//      里的**远程取数+只读展示**已落地，**远程安装**仍登记为缺口。
 //
 // 这个模块只有纯函数 + 依赖注入的加载/安装流程（不 import bridge、不持状态），所以能单独测
 // （`tests/plugin-market.test.mjs`）；RPC 调用在 `src/components/PluginMarketPanel.vue` 里接。

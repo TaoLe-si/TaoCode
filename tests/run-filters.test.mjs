@@ -89,13 +89,6 @@ test('Java 栈帧折叠：保留阈值内帧并将其余帧合并到占位行；
   assert.equal(folded[3].foldedFrames, 3, '占位行记录阈值之后折叠的 3 行')
   assert.equal(folded[2].foldedFrames, undefined)
   assert.equal(foldJavaStackFrames(lines, true).length, 6, '展开时一行不少')
-  const expandedSegment = foldJavaStackFrames(lines, false, 2, new Set([3]))
-  assert.deepEqual(expandedSegment.map(line => line.text), lines.map(line => line.text), '展开单个占位段只恢复该段原始帧')
-
-  const twoStacks = [...lines, ...lines]
-  const firstSegmentOnly = foldJavaStackFrames(twoStacks, false, 2, new Set([3]))
-  assert.equal(firstSegmentOnly[3]?.foldedStartIndex, undefined, '第一个折叠段已展开')
-  assert.equal(firstSegmentOnly[9]?.foldedStartIndex, 9, '第二个折叠段仍可独立展开')
 
   // 阈值内的栈帧不折叠。
   const short = foldJavaStackFrames(lines.slice(0, 3), false)
@@ -123,8 +116,6 @@ test('接线：runIssues 收集全部链接、RunConsole 渲染片段与异常�
   const console = read('src/components/RunConsole.vue')
   assert.match(console, /classifyJavaException\(text\)/)
   assert.match(console, /foldJavaStackFrames\(/)
-  assert.match(console, /expandedStackSegments\.value/)
-  assert.match(console, /@click\.stop="expandStackSegment\(line\.foldedStartIndex\)"/)
   assert.match(console, /splitRunLine\(text, links\)/)
   assert.match(console, /describeExceptionKind\(line\.exception\.kind\)/)
   // 暂停输出那颗钮的标签随暂停态翻转。读的是 `consolePaused`（`runOutputPausedState()`：

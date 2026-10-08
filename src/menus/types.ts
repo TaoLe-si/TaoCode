@@ -19,9 +19,11 @@ export interface MenuRow {
   /**
    * 图标名（lucide 图标名口径，对应上游 `Presentation.getIcon()` 的槽位）。
    *
-   * 数据侧已通：`src/actionRegistry.ts` 的 `ActionDescriptor.icon` 由 `actionRow()` 落到这里。
-   * **渲染层还没接** —— `src/menuUi.ts` 的行模板里没有图标位（它不在本 lane 的文件清单里），
-   * 所以填了也暂时看不见；图标名取值必须来自 `src/uiIcons.ts` 的阶梯，不许在菜单里写死尺寸。
+   * 数据侧：`src/actionRegistry.ts` 的 `ActionDescriptor.icon` 由 `actionRow()` 落到这里。
+   * 渲染侧：**主菜单**已接（`src/App.vue:94` import `menuRowIcon`，`:2088`/`:2095`/`:2100` 三处
+   * `<component :is="menuRowIcon(row.icon)">`），但「查找操作」面板的行模板（`src/menuUi.ts`）
+   * 没有图标位（2026-10-08 订正：原注释整条写成「渲染层还没接」，与 App.vue 实况不符）。
+   * 图标名取值必须来自 `src/uiIcons.ts` 的阶梯，不许在菜单里写死尺寸。
    */
   icon?: string
   section?: string

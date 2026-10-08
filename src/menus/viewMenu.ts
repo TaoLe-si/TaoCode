@@ -18,6 +18,12 @@ function toolWindowGroupOrder(): ToolWindowId[] {
 }
 import { defaultEditorSettings } from '../settingsModel.ts'
 import { stepEditorFontSize } from '../editorFontSize.ts'
+// 主菜单模式那一组（`ChangeMainMenuModeActionGroup`）的可见性要判平台 —— 复用演示助手那一套
+// `navigator` 探测（`src/presentationAssistant.ts:67-70`），不新写第二份平台判定。
+import { detectPresentationPlatform } from '../presentationAssistant.ts'
+// `UIToggleActions` 的第一项 `TogglePresentationAssistantAction`：开关本体在演示助手模块里，
+// 这里只做菜单入口（勾选态 = 模块内的活状态，不是本文件另存一份）。
+import { presentationAssistantEnabled, togglePresentationAssistant } from '../presentationAssistant.ts'
 
 export interface ViewMenuContext {
   changeSplitOrientation: any
@@ -133,12 +139,37 @@ export interface ViewMenuContext {
       { id: 'view.zenMode', title: () => `${ctx.zenMode.value ? '退出' : '进入'} Zen Mode`, keywords: 'zen fullscreen immersive 禅模式 一切隐藏', checked: () => ctx.zenMode.value, run: () => ctx.toggleZenMode() },
       { id: 'view.compactMode', title: '紧凑模式', keywords: 'compact mode density 紧凑 密度', checked: () => ctx.editorSettings.value.compactMode, run: () => void ctx.saveSettingsPatch({ compactMode: !ctx.editorSettings.value.compactMode }) },
       { id: 'view.ruleAppearance', rule: true },
-      // 分隔线下面是 IDEA 的第二个内联组 `UIToggleActions`（PlatformActions.xml:536-546）。
+      // 分隔线下面是 IDEA 的第二个内联组 `UIToggleActions`（PlatformActions.xml:536-547）。
       // 本仓有真实消费者的两条：`ViewStatusBar`（`ViewStatusBarAction.java`：勾选态 =
       // `UISettings.showStatusBar`，消费者是状态栏 footer）与 `ViewToolButtons`（显示/隐藏
-      // 工具窗口条，落点 `editorSettings.showToolWindowBars`，消费方 `src/toolWindowStripes.ts`）。
+      // 工具窗口条，落点 `editorSettings.showToolWindowBars`，消费方
+      // `src/appearanceActions.ts:235-237` 写 `html[data-tool-stripes]` + `src/style.css:43` 那道样式闸
+      // —— 2026-10-08 订正：这里原写 `src/toolWindowStripes.ts`，那个键在那边零命中）。
       { id: 'view.statusBar', title: '状态栏', keywords: 'status bar toggle hide show 状态栏', checked: () => ctx.editorSettings.value.showStatusBar, run: () => void ctx.saveSettingsPatch({ showStatusBar: !ctx.editorSettings.value.showStatusBar }) },
       { id: 'view.toolButtons', title: '工具窗口条', keywords: 'tool window bars buttons stripe 工具窗口条 侧栏按钮', checked: () => ctx.editorSettings.value.showToolWindowBars, run: () => void ctx.saveSettingsPatch({ showToolWindowBars: !ctx.editorSettings.value.showToolWindowBars }) },
+      // `UIToggleActions` 的**第一项**是 `TogglePresentationAssistantAction`（PlatformActions.xml:538，
+      // 本树里对它的唯一引用）。同一个动作本仓在帮助菜单也有一行（`help.presentationAssistant`，
+      // 见 `src/menus/helpMenu.ts:70` 的说明）—— 上游一个动作可以挂在多个组里（本仓先例：
+      // Window 菜单与 View 菜单同列 `ActivateToolWindowActions`，见本文件 :71-73），两行同一个消费者：
+      // `src/presentationAssistant.ts` 的 `togglePresentationAssistant()` / `presentationAssistantEnabled()`。
+      { id: 'view.presentationAssistant', title: '演示助手（按下快捷键时提示）', keywords: 'presentation assistant shortcut keymap hint 演示助手 快捷键 提示 浮层', checked: () => presentationAssistantEnabled(), run: () => { togglePresentationAssistant() } },
+      // `ChangeMainMenuModeActionGroup`（`ChangeMainMenuModeActionGroup.kt:24-48`）：子项 = 每个
+      // `MainMenuDisplayMode` 一项的 `ToggleAction`，`isSelected` 比当前档、`setSelected` 只在
+      // `state == true` 时写入（点已选中的那项什么都不做 = 单选语义，见 `:50-52`）。文案 = 各档的
+      // `description`（`MainMenuDisplayMode.kt:14-16` → `CoreBundle.properties:157-159`，中文取值与
+      // 设置页 `src/components/SettingsAppearanceSection.vue:112-114` 同一份）。
+      // 可见性 `:38-40` 是「新 UI 且非 macOS」：本仓就是新 UI（菜单模式/merged 溢出都在），
+      // macOS 那半边用 `detectPresentationPlatform()` 判 —— 但本仓**没有整行隐藏的机制**
+      // （`MenuRow` 只有 `enabled`，见 `./types.ts`），所以按 macOS 时**整组不生成**（等价于 invisible，
+      // 不是灰着）。`ViewMainMenuAction.update()`（`ViewMainMenuAction.java:33-38`）恰好相反 ——
+      // 它只在**旧** UI 可见，本仓新 UI 下整个动作不适用，故不生成（如实不渲染，不是漏抄）。
+      // 上游那两条 `KeepPopupOnPerform.IfRequested`（`ChangeMainMenuModeActionGroup.kt:26`）在本仓
+      // **没有宿主字段**：`MenuRow` 无 keepPopup，点了就收起弹层 —— 记在报告里，不假装支持。
+      ...(detectPresentationPlatform() === 'mac' ? [] : ([
+        { id: 'view.mainMenuMode.hamburger', title: '隐藏在汉堡按钮下方', keywords: 'main menu under hamburger button 主菜单 汉堡 隐藏', checked: () => ctx.editorSettings.value.mainMenuDisplayMode === 'hamburger', run: () => { if (ctx.editorSettings.value.mainMenuDisplayMode !== 'hamburger') void ctx.saveSettingsPatch({ mainMenuDisplayMode: 'hamburger' }) } },
+        { id: 'view.mainMenuMode.merged', title: '与主工具栏合并', keywords: 'main menu merge main toolbar 主菜单 合并 工具栏', checked: () => ctx.editorSettings.value.mainMenuDisplayMode === 'merged', run: () => { if (ctx.editorSettings.value.mainMenuDisplayMode !== 'merged') void ctx.saveSettingsPatch({ mainMenuDisplayMode: 'merged' }) } },
+        { id: 'view.mainMenuMode.separate', title: '显示在主工具栏上方', keywords: 'main menu separate toolbar 主菜单 独立 工具栏上方', checked: () => ctx.editorSettings.value.mainMenuDisplayMode === 'separate', run: () => { if (ctx.editorSettings.value.mainMenuDisplayMode !== 'separate') void ctx.saveSettingsPatch({ mainMenuDisplayMode: 'separate' }) } },
+      ] as MenuRow[])),
       // IDEA 的 ToggleFullScreenGroup 里还有 ToggleDistractionFreeMode 与 ToggleFullScreen：
       // 前者与 ToggleZenMode 在 TaoCode 里是同一件事（Zen 就是免打扰），不重复放两行；
       // 后者要先给宿主加全屏通道（Win32 窗口态 / Fullscreen API），本轮不做，登记在审计文档里。

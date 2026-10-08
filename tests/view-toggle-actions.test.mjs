@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 import { createViewMenuRows } from '../src/menus/viewMenu.ts'
 import { defaultEditorSettings } from '../src/settingsModel.ts'
+import { presentationAssistantEnabled } from '../src/presentationAssistant.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = relative => readFileSync(join(root, relative), 'utf8')
@@ -65,5 +66,27 @@ test('ViewToolButtons：勾选态跟 showToolWindowBars 走，点一下取反', 
 
 test('两个设置都有真实消费者（不是死开关）', () => {
   assert.match(read('src/App.vue'), /editorSettings\.showStatusBar[\s\S]{0,80}statusbar/, 'showStatusBar 控制状态栏渲染')
-  assert.match(read('src/toolWindowStripes.ts'), /showToolWindowBars|showNames/, 'showToolWindowBars 控制工具窗口条')
+  // 2026-10-08 订正：原断言写的 `src/toolWindowStripes.ts` 里 `showToolWindowBars|showNames` ——
+  // 那个文件里**没有** `showToolWindowBars`（命中的是另一个设置 `showToolWindowNames`），
+  // 所以那条判据永远绿。按判决书 2026-10-06 的实况改成真正的消费者：`appearanceActions` 写
+  // `html[data-tool-stripes]`、`style.css` 那道样式闸。
+  assert.match(read('src/appearanceActions.ts'), /showToolWindowBars[\s\S]{0,200}dataset\.toolStripes/,
+    'showToolWindowBars 的消费者是 appearanceActions（写 data-tool-stripes）')
+  assert.ok(read('src/style.css').includes("html[data-tool-stripes='off']"), 'style.css 要有条纹关闭的样式闸')
+  assert.ok(!read('src/toolWindowStripes.ts').includes('showToolWindowBars'),
+    'toolWindowStripes.ts 管的是条纹注册表/可见集合，不是这个设置键（订正后的实况）')
+})
+
+test('TogglePresentationAssistantAction：UIToggleActions 的第一项也有一行，同一个开关本体', () => {
+  const { ctx } = makeContext()
+  const rows = createViewMenuRows(ctx)
+  const row = findRow(rows, 'view.presentationAssistant')
+  assert.ok(row, 'View › 外观 里要有演示助手一行（PlatformActions.xml:538）')
+  const before = presentationAssistantEnabled()
+  assert.equal(row.checked(), before, '勾选态 = 模块里的活状态，不是菜单另存一份')
+  row.run()
+  assert.equal(row.checked(), !before, '点一下要真的翻转模块状态')
+  assert.equal(presentationAssistantEnabled(), !before)
+  row.run()
+  assert.equal(row.checked(), before, '再点一下翻回来（幂等一轮，测试不留副作用）')
 })

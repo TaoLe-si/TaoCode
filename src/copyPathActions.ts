@@ -5,8 +5,11 @@
 //     `<add-to-group group-id="CutCopyPasteGroup" anchor="after" relative-to-action="CopyPaths"/>`
 //     —— 即插在 `CopyPaths` 之后（本仓的 `CopyPaths` 按源码**不渲染菜单行**，见 `src/menus/editMenu.ts`
 //     的说明，所以这一组在编辑菜单里紧跟在「复制」之后）；
-//   · 编辑器标签右键：`:1280` 同样加进 `EditorTabPopupMenu`（本仓标签右键是手写模板且 App.vue 贴着行数上限，
-//     目前只有一条「复制路径」，**缺口已记进判决书**）；
+//   · 编辑器标签右键：`:1280` 同样加进 `EditorTabPopupMenu`（本仓标签右键整组已渲染：
+//     `src/components/TabContextMenu.vue:142` 的组标题「复制路径/引用…」+ `:144` 的四项
+//     （= `FIND_COPY_ACTIONS`）+ `:145` 的「来自源根的路径」那一条按当前标签现算）；
+//     2026-10-08 订正：原注释写「目前只有一条『复制路径』，缺口已记进判决书」——标签右键
+//     早已是整组（含源根那一条），判决书那条待办不成立；
 //   · 查找结果右键：`:1330-1332` 的 `FindInFiles.Results.ContextMenu` 里只有这一条引用（第一百零六批已落）。
 //
 // 而 `CopyReferencePopupGroup`（`:1266-1281`，`popup="true"`）里是：

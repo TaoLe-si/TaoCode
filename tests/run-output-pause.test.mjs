@@ -60,7 +60,10 @@ test('接线：RunConsole 的暂停/继续按钮走 runInstances 的同一状态
   // 无插件时该表达式恒等于 `runOutputPaused`，行为与接线前一致。
   assert.match(console, /const consolePaused = computed\(\(\) => runOutputPausedState\(\)\)/)
   assert.match(console, /consolePaused \? '继续输出' : '暂停输出'/)
-  assert.match(console, /输出已暂停：视图冻结/)
+  // 暂停提示只留一句状态：上游只有动作名（`ExecutionBundle` 的
+  // `run.configuration.pause.output.action.name`，`PauseOutputAction.java:21`），**没有**这句提示的原文；
+  // 2026-10-08 交接件明确要求「未经上游确认的文案不许保留」，所以括号里的实现解释已删。
+  assert.match(console, /输出已暂停。/)
   const instances = read('src/runInstances.ts')
   assert.match(instances, /export const runOutputPaused = ref\(false\)/)
   assert.match(instances, /if \(runOutputPaused\.value\) return/)

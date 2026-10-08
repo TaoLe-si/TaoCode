@@ -4,13 +4,14 @@
 // 这里只做：读仓库（工作区本地目录）、画列表、把「安装/更新」落到既有 `plugin.*` 通道。
 //
 // 数据来源如实写在界面上：本地清单 `repository.json` 走 `file.read`（工作区相对），包走
-// `plugin.install`（工作区根拼绝对路径）；**远程仓库的清单**走宿主 `http.get`
-// （`src/pluginMarketRemote.ts` → `native/http_client.cpp` 的 WinHTTP，`index.html` 的 CSP 也
-// 为市场主机放开了 `connect-src`），取到的是只读条目 —— **远程安装仍没有落点**（要先把包下载进
-// 工作区，且缺 `PluginSignatureVerifier.kt` 那套验签），所以远程条目的安装按钮一律禁用并写明原因，
-// 而不是"在线搜索"那种点不动的假入口。两档来源的合并与可安装判定见 `src/pluginMarketSources.ts`。
+// `plugin.install`（工作区根拼绝对路径）；**远程仓库的清单**与**在线搜索**走宿主 `http.get`
+// （`src/pluginMarketRemote.ts` / `src/pluginMarketSearch.ts` → `native/http_client.cpp` 的 WinHTTP，
+// `index.html` 的 CSP 也为市场主机放开了 `connect-src`），取到的是只读条目 —— **远程安装仍没有落点**
+// （要先把包下载进工作区，且缺 `PluginSignatureVerifier.kt` 那套验签），所以远程条目的安装按钮
+// 一律禁用并写明原因，而不是画一个点不动的假按钮。两档来源的合并与可安装判定见
+// `src/pluginMarketSources.ts`。
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { Blocks, Download, Loader2, PackageSearch, RefreshCw, Search, Star, X } from 'lucide-vue-next'
+import { Blocks, Download, Globe, Loader2, PackageSearch, RefreshCw, Search, Star, X } from 'lucide-vue-next'
 import { isDesktop, request, type PluginList } from '../bridge'
 import type { AppState } from '../settingsModel'
 import type { PluginInfo } from '../pluginGroups'
@@ -177,7 +178,7 @@ const visible = computed(() => {
   // 相关度 = 清单顺序；其余按选项排（`/sortBy:` 已在 effectiveSort 里覆盖下拉框）。
   return sortMarketplaceEntries(filtered, effectiveSort.value)
 })
-const updateCount = computed(() => catalog.value.filter(entry => marketplaceEntryStatus(entry, props.plugins).state === 'update').length)
+const updateCount = computed(() => installableCatalog.value.filter(entry => marketplaceEntryStatus(entry, props.plugins).state === 'update').length)
 const sourceLabel = computed(() => {
   const result = loadResult.value
   if (!result) return ''
@@ -192,7 +193,7 @@ const sourceLabel = computed(() => {
 const deferredNote = computed(() => {
   const words = search.value.deferred
   if (!words.length) return ''
-  return `${words.join('、')} 取的是远程仓库的分组字段，本地仓库没有这一层。`
+  return `${words.join('、')} 取的是远程 marketplace 的分组字段，两个来源的仓库清单里都没有这一层。`
 })
 
 // ── 搜索框的属性词建议浮层 ──────────────────────────────────────────────────────
@@ -271,8 +272,29 @@ function statusLabel(entry: MarketplacePlugin): string {
 }
 
 function canInstall(entry: MarketplacePlugin): boolean {
+  // `installableIds`：远程条目一律装不了（`plugin.install` 只收工作区里的包，见 `pluginMarketSources.ts`）。
   return isDesktop && Boolean(workspaceRoot.value) && !installing.value && !props.busy
+    && installableIds.value.has(entry.id)
     && statusOf(entry).state !== 'incompatible' && statusOf(entry).state !== 'installed'
+}
+
+/** 按钮上的字：远程条目如实写「不可安装」（不画成可点的「安装」）。 */
+function installLabel(entry: MarketplacePlugin): string {
+  if (isRemoteEntry(entry)) return '不可安装'
+  const state = statusOf(entry).state
+  if (state === 'update') return '更新'
+  if (state === 'installed') return '已安装'
+  if (state === 'incompatible') return '不可安装'
+  return '安装'
+}
+
+/** 按钮为什么不可点：远程条目给的是下载 + 验签那一格的原因，不是"尚未完成"。 */
+function installTitle(entry: MarketplacePlugin): string {
+  if (isRemoteEntry(entry)) return REMOTE_INSTALL_BLOCKED
+  const state = statusOf(entry).state
+  if (state === 'installed') return '已经安装'
+  if (state === 'incompatible') return '已安装但清单读不出来 / 依赖不满足，先在已安装页处理'
+  return `从 ${entry.file} 安装`
 }
 
 function formatDate(value: number | undefined): string {
@@ -308,7 +330,8 @@ function lastCheckMs(): number {
 async function runUpdateCheck() {
   const statuses: PluginUpdateStatus[] = []
   const result = await runPluginUpdateCheck(props.plugins, {
-    available: async id => catalog.value.find(entry => entry.id === id)?.version,
+    // 取数器 = 能真的装得了的那一份清单（本地仓库）；远程条目只读，不该用它发"有更新"的通知。
+    available: async id => installableCatalog.value.find(entry => entry.id === id)?.version,
     lastCheckMs: lastCheckMs(),
     nowMs: Date.now(),
     // 上游 `UpdateSettings.isPluginsCheckNeeded` 在本仓没有独立开关；本地仓库读取不花网络，
@@ -338,7 +361,8 @@ async function refresh() {
       readText: relative => request<{ content: string }>('file.read', { path: relative }).then(doc => doc.content),
       listFiles: () => request<{ files: string[] }>('workspace.files').then(result => result.files),
     }, root.value)
-    emit('catalog', loadResult.value.entries)
+    // 上报的只有**装得了**的条目（本地仓库那一份）：远程条目只读，不进 `/outdated` 与更新检查。
+    emit('catalog', installableCatalog.value)
     if (!workspaceRoot.value) failure.value = '市场清单来自工作区里的仓库目录：先打开一个包含该目录的工作区。'
     else if (loadResult.value.source === 'none') failure.value = `在 ${root.value} 下没有找到 ${MARKETPLACE_MANIFEST} 或插件包。`
     // 仓库读出来了才跑更新检查（上游 `pluginUsed()` 是插件页被使用时触发；取数器就是这份清单）。
@@ -352,7 +376,43 @@ async function refresh() {
   }
 }
 
+/**
+ * 取远程仓库的清单（上游 `MarketplaceRequests.searchPlugins` 的**取数**那一半；搜索 API 的形状
+ * 转换与本仓的仓库清单不同形，见 `src/pluginMarketRemote.ts` 文件头）。
+ * 只读：条目的 `file` 是绝对 URL（链接可点开对照），安装仍走工作区仓库那一档。
+ * 取不到**不抛**：`loadRemoteMarketplace` 回 `available:false` + 原因，这里照样显示一句人话。
+ */
+async function loadRemote() {
+  const repository = remoteRepo.value.trim()
+  try { localStorage.setItem(REMOTE_REPO_KEY, repository) } catch { /* 存储不可用就只留会话内 */ }
+  if (!repository) { remoteResult.value = null; return }
+  remoteBusy.value = true
+  note.value = ''
+  failure.value = ''
+  try {
+    const result = await loadRemoteMarketplace(repository)
+    remoteResult.value = result.available ? result : null
+    if (!result.available) {
+      failure.value = `远程仓库取不到：${result.reason}`
+    } else {
+      const bad = result.errors.length ? `（${result.errors.length} 条读不出来）` : ''
+      note.value = `远程仓库读出 ${result.plugins.length} 个条目${bad}；远程条目只读，装包仍走工作区仓库。`
+    }
+  } catch (error) {
+    remoteResult.value = null
+    failure.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    remoteBusy.value = false
+  }
+}
+
 async function install(entry: MarketplacePlugin) {
+  // 硬闸：远程条目的 `file` 是 URL，交给 `plugin.install` 只会让 native 去工作区里找一个不存在的
+  // 路径。按钮本来就是禁用的，这里再挡一次（按钮状态是界面，闸门是代码）。
+  if (!installableIds.value.has(entry.id)) {
+    failure.value = isRemoteEntry(entry) ? REMOTE_INSTALL_BLOCKED : `这条不在工作区仓库里：${entry.id}`
+    return
+  }
   installing.value = entry.id
   note.value = ''
   failure.value = ''
@@ -408,9 +468,23 @@ onMounted(() => { void refresh() })
         <RefreshCw :size="iconSize.menu" aria-hidden="true" />{{ loading ? '读取中…' : '刷新' }}
       </button>
     </div>
+    <!-- 远程仓库那一档：清单走宿主 `http.get`（`src/pluginMarketRemote.ts`）。只读 —— 下载 + 验签
+         没有落点，所以这里没有"在线安装"；条目的包地址是可点开的绝对 URL。 -->
+    <div class="market-bar">
+      <label class="market-root">
+        <Globe :size="iconSize.control" aria-hidden="true" />
+        <input v-model="remoteRepo" type="text" spellcheck="false" placeholder="远程仓库地址（http/https，清单默认取 repository.json）"
+               aria-label="远程仓库地址" @keydown.enter="loadRemote" />
+      </label>
+      <button type="button" class="subtle-button" :disabled="remoteBusy || !remoteRepo.trim()" @click="loadRemote">
+        <Loader2 v-if="remoteBusy" :size="iconSize.menu" class="spin" aria-hidden="true" />
+        <RefreshCw v-else :size="iconSize.menu" aria-hidden="true" />{{ remoteBusy ? '取清单…' : '取远程清单' }}
+      </button>
+    </div>
     <p class="market-source">
-      <template v-if="sourceLabel">{{ sourceLabel }} · {{ catalog.length }} 个条目<span v-if="updateCount"> · {{ updateCount }} 个可更新</span></template>
-      <template v-else-if="!loading">远程插件仓库需要网络通道（宿主没有，WebView 的 CSP 也拦了跨源请求），这里读的是工作区内的本地仓库。</template>
+      <template v-if="catalog.length">{{ originSummary }}{{ sourceLabel ? ` · ${sourceLabel}` : '' }}<span v-if="updateCount"> · {{ updateCount }} 个可更新</span></template>
+      <template v-else-if="sourceLabel && !loading">{{ sourceLabel }}：没有条目。</template>
+      <template v-else-if="!loading && !remoteBusy">本地来源是工作区里的仓库目录（`repository.json`，或目录里的 zip/jar）；远程来源是上面填的仓库地址的清单，只读。</template>
     </p>
 
     <div class="market-toolbar">
@@ -468,6 +542,8 @@ onMounted(() => { void refresh() })
             <p class="market-desc">{{ entry.description || '没有描述。' }}</p>
             <p class="market-meta">
               <span>{{ marketplaceEntryCategory(entry) }}</span>
+              <!-- 来源徽章：远程条目标"远程·只读"并带原因 title（装不了 = `REMOTE_INSTALL_BLOCKED`）。 -->
+              <span v-if="isRemoteEntry(entry)" class="market-badge" :title="REMOTE_INSTALL_BLOCKED">{{ MARKETPLACE_ORIGIN_LABELS.remote }} · 只读</span>
               <!-- 厂商点进去 = `/vendor:` 过滤（上游详情面板的厂商链接：
                    `newui/PluginDetailsPageComponent.kt:1336`，含空格时按上游加引号）。 -->
               <button v-if="entry.vendor" type="button" class="market-link" :title="`只看厂商 ${entry.vendor} 的插件`"
@@ -486,11 +562,11 @@ onMounted(() => { void refresh() })
             </p>
           </div>
           <button type="button" class="subtle-button market-install" :disabled="!canInstall(entry)"
-                  :title="statusOf(entry).state === 'installed' ? '已经安装' : (statusOf(entry).state === 'incompatible' ? '已安装但清单读不出来 / 依赖不满足，先在已安装页处理' : `从 ${entry.file} 安装`)"
+                  :title="installTitle(entry)"
                   @click="install(entry)">
             <Loader2 v-if="installing === entry.id" :size="iconSize.menu" class="spin" aria-hidden="true" />
             <Download v-else :size="iconSize.menu" aria-hidden="true" />
-            {{ statusOf(entry).state === 'update' ? '更新' : statusOf(entry).state === 'installed' ? '已安装' : statusOf(entry).state === 'incompatible' ? '不可安装' : '安装' }}
+            {{ installLabel(entry) }}
           </button>
         </article>
       </li>
